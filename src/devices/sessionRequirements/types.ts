@@ -1,3 +1,5 @@
+import type { DeviceProfileSelector } from "../../models/ManufacturerProfileIds";
+
 export type IosArchetype = "phone" | "tablet" | "duo";
 export type AndroidArchetype = "phone" | "tablet";
 
@@ -65,6 +67,11 @@ export interface AndroidSessionDeviceRequirement {
   platform: "android";
   hardware: AndroidHardwareSelector;
   os: OsSelector;
+  /**
+   * An OEM manufacturer profile applied to the session's device after readiness (#14058). A
+   * simulated effect, not a firmware guarantee: it never selects or matches pool hardware.
+   */
+  deviceProfile?: DeviceProfileSelector;
 }
 
 /**

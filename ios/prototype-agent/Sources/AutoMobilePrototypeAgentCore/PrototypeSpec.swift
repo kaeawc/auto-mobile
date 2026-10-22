@@ -170,6 +170,7 @@ struct PrototypeSpec: Decodable {
         try PrototypeRequestValidator.validate(raw, state: menuState)
         try PrototypeLimits.guardRepeatPathCells(raw, data: data)
         try PrototypeMenus.validateAuthoredText(raw)
+        try PrototypeLoadingStates.validate(raw)
         try PrototypeRepeat.validateEmitContexts(raw, data: data)
         try PrototypeLimits.guardSubstitutedText(raw, data: data)
         let resolved = PrototypeDataResolver.resolveRoot(raw, data: data)
@@ -307,11 +308,6 @@ struct Placement: Decodable {
     let offset: Offset?
 }
 
-struct Offset: Decodable {
-    let x: Double
-    let y: Double
-}
-
 enum Dimension: Decodable, Equatable {
     case fill
     case wrap
@@ -330,13 +326,6 @@ enum Dimension: Decodable, Equatable {
             self = try .points(container.decode(Fixed.self).points)
         }
     }
-}
-
-struct Padding: Decodable {
-    let top: Double?
-    let bottom: Double?
-    let start: Double?
-    let end: Double?
 }
 
 /// Fixed columns or adaptive equal-width slots. Positivity is enforced by the host;
@@ -454,6 +443,8 @@ struct Style: Decodable {
     let overflow: String?
     /// A Material 3 type role (`titleLarge`...) supplying size, weight, line height and spacing.
     let textStyle: String?
+    /// A box, row, column or card placeholder whose background a highlight sweeps (#14207).
+    let shimmer: Bool?
 
     /// Android's `mergedOver`: properties set on `prototype` win, unset ones keep this style's value.
     /// A present property replaces the base value as a whole (`padding` and `border` included).
@@ -492,7 +483,8 @@ struct Style: Decodable {
             textDecoration: prototype.textDecoration ?? textDecoration,
             fontStyle: prototype.fontStyle ?? fontStyle,
             overflow: prototype.overflow ?? overflow,
-            textStyle: prototype.textStyle ?? textStyle
+            textStyle: prototype.textStyle ?? textStyle,
+            shimmer: prototype.shimmer ?? shimmer
         )
     }
 
@@ -849,6 +841,11 @@ final class PrototypeNode: Decodable {
     let multiline: Bool?
     let minLines: Int?
     let maxLength: Int?
+    /// `chart` series, fixed y axis, x label mode and goal line (#14209), read through `/data`.
+    let chartSeries: [PrototypeChartSeries]?
+    let yRange: PrototypeChartRange?
+    let xLabels: String?
+    let goal: Double?
 
     /// Gesture-only nodes have the same touch target and accessibility semantics as tap nodes.
     var isInteractive: Bool {
@@ -868,7 +865,8 @@ final class PrototypeNode: Decodable {
              linkify,
              activeKey, trailingActions, onSubmit, pageSpacing, peek, pageSize, indicator, itemWidth, itemSpacing,
              dismissOnSwipe, supportingText, keyboardType, secure, multiline, minLines, maxLength, trailingIcon,
-             imeAction
+             imeAction, yRange, xLabels, goal
+        case chartSeries = "series"
     }
 
     init(from decoder: Decoder) throws {
@@ -962,6 +960,10 @@ final class PrototypeNode: Decodable {
         maxLength = try container.decodeIfPresent(Int.self, forKey: .maxLength)
         trailingIcon = try container.decodeIfPresent(PrototypeAppBarAction.self, forKey: .trailingIcon)
         imeAction = try container.decodeIfPresent(String.self, forKey: .imeAction)
+        chartSeries = try container.decodeIfPresent([PrototypeChartSeries].self, forKey: .chartSeries)
+        yRange = try container.decodeIfPresent(PrototypeChartRange.self, forKey: .yRange)
+        xLabels = try container.decodeIfPresent(String.self, forKey: .xLabels)
+        goal = try container.decodeIfPresent(Double.self, forKey: .goal)
     }
 
     /// Android's `resolvePrototypeStyle`: every `styleWhen` entry whose condition holds is merged over

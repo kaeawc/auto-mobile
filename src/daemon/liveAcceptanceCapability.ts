@@ -68,19 +68,6 @@ export function createDaemonLiveAcceptanceCapability(
     .digest("base64url");
 }
 
-export function daemonLiveAcceptanceCapabilityMatches(
-  startupSecret: string | undefined,
-  identity: DaemonGenerationIdentity,
-  capability: unknown,
-): boolean {
-  return daemonLiveAcceptanceScopedCapabilityMatches(
-    startupSecret,
-    identity,
-    undefined,
-    capability,
-  );
-}
-
 /**
  * A live-acceptance operation can additionally bind authority to an immutable
  * request scope (for example one persisted session and its signed control set).

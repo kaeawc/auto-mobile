@@ -630,12 +630,20 @@ export function valuesEqual(
 
 export function looksLikeMissingIosDefault(error: unknown): boolean {
   const message = errorMessage(error).trim();
+  const stderr =
+    typeof error === "object" &&
+    error !== null &&
+    "stderr" in error &&
+    typeof error.stderr === "string"
+      ? error.stderr.trim()
+      : "";
   return [
     /The domain\/default pair of \([^)]+\) does not exist\.?$/i,
     /Domain [^\n]+ does not exist\.?$/i,
     /Domain [^\n]+ not found\.?$/i,
     /Domain [^\n]+ does not contain (?:a value for )?[^\n]+\.?$/i,
-  ].some((pattern) => pattern.test(message));
+    /Could not find key '[^'\n]+' in domain '[^'\n]+'\.?(?:\s+Defaults have not been changed\.?)?$/i,
+  ].some((pattern) => pattern.test(message) || pattern.test(stderr));
 }
 
 /** `get_app_container` output that means the app is not installed, so a retry cannot help. */

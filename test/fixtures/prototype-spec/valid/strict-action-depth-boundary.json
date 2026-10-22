@@ -1,0 +1,35 @@
+{
+  "id": "strict",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "spacer",
+    "onTap": [
+      {
+        "type": "request",
+        "url": "https://example.com/",
+        "onSuccess": [
+          {
+            "type": "request",
+            "url": "https://example.com/",
+            "onSuccess": [
+              {
+                "type": "request",
+                "url": "https://example.com/",
+                "onSuccess": [
+                  {
+                    "type": "request",
+                    "url": "https://example.com/"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -23,9 +23,18 @@ import {
 } from "./OemPersonas";
 import { defaultPersonaRestoreRegistry, type PersonaRestoreRegistry } from "./PersonaRestore";
 
-/** Sets the AutoMobile IME's keyboard behaviour profile, as `keyboard setProfile`. */
+/**
+ * Sets and restores the AutoMobile IME's keyboard behaviour profile, as `keyboard
+ * setProfile`, whose write-once record of the profile before the first change it
+ * shares (#14705).
+ */
 export interface PersonaKeyboardExecutor {
-  set(profile: string, signal?: AbortSignal): Promise<{ previousProfileId?: string }>;
+  /** Set `profile`; the owning session's release restores the profile recorded before. */
+  set(profile: string, owner?: string, signal?: AbortSignal): Promise<unknown>;
+  /** The profile reset would restore, while the record still holds one. */
+  pending(): string | undefined;
+  /** Put the recorded profile back and forget it. */
+  reset(signal?: AbortSignal): Promise<unknown>;
 }
 
 /** `killProfile` apply and reset for one package. */
@@ -52,12 +61,13 @@ export interface PersonaFacetExecutors {
 export interface PersonaDependencies {
   executors: PersonaFacetExecutors;
   registry?: PersonaRestoreRegistry;
-  /** The daemon session applying, whose release restores the kill and display facets. */
+  /** The daemon session applying, whose release restores the keyboard, kill and display facets. */
   owner?: string;
   signal?: AbortSignal;
 }
 
-export type PersonaFacetStatus = "applied" | "partial" | "unsupported" | "failed";
+/** `deferred`: not applied yet because it needs input the caller does not have, such as an app. */
+export type PersonaFacetStatus = "applied" | "partial" | "unsupported" | "failed" | "deferred";
 
 export interface PersonaFacetResult {
   facet: PersonaFacet;
@@ -133,7 +143,9 @@ function facetValue(persona: OemPersona, facet: PersonaFacet): string | DisplayP
 function evidenceFor(persona: OemPersona, facet: PersonaFacet): PersonaEvidence {
   const evidence = persona.evidence[facet];
   if (!evidence) {
-    throw new ActionableError(`Persona ${persona.id} has no evidence for its ${facet} facet.`);
+    throw new ActionableError(
+      `Manufacturer profile ${persona.id} has no evidence for its ${facet} facet.`,
+    );
   }
   return evidence;
 }
@@ -169,6 +181,7 @@ interface ApplyContext {
   device: BootedDevice;
   persona: OemPersona;
   appId?: string;
+  deferKill?: boolean;
   deps: PersonaDependencies;
   registry: PersonaRestoreRegistry;
 }
@@ -182,13 +195,17 @@ async function runFacet(
   throwIfAborted(deps.signal);
   switch (facet) {
     case "keyboard": {
-      const result = await deps.executors.keyboard.set(persona.keyboardProfileId, deps.signal);
-      registry.recordApply(device.deviceId, persona.id, {
-        keyboardProfileBefore: result.previousProfileId,
-      });
+      await deps.executors.keyboard.set(persona.keyboardProfileId, deps.owner, deps.signal);
+      registry.recordApply(device.deviceId, persona.id, { keyboard: true });
       return { status: "applied", detail: `keyboard profile ${persona.keyboardProfileId}` };
     }
     case "kill": {
+      if (context.deferKill && !context.appId) {
+        return {
+          status: "deferred",
+          detail: `kill profile ${persona.killProfile} needs the app it targets; apply it with killProfile once known`,
+        };
+      }
       const appId = context.appId as string;
       const profile = persona.killProfile as KillProfileId;
       // Recorded before the write so an apply interrupted midway is still reset.
@@ -216,7 +233,8 @@ async function runFacet(
 }
 
 function outcomeOf(facets: readonly PersonaFacetResult[]): PersonaOutcome {
-  if (facets.every((facet) => facet.status === "applied")) {
+  // A deferred facet is reported on its own; it neither completes nor degrades the apply.
+  if (facets.every((facet) => facet.status === "applied" || facet.status === "deferred")) {
     return "applied";
   }
   return facets.some((facet) => facet.status === "applied" || facet.status === "partial")
@@ -286,7 +304,12 @@ async function runFacets(context: ApplyContext): Promise<PersonaFacetResult[]> {
 export async function applyPersona(
   device: BootedDevice,
   personaId: OemPersonaId,
-  options: { appId?: string; requires?: readonly NonEmulatableCapability[] },
+  options: {
+    appId?: string;
+    requires?: readonly NonEmulatableCapability[];
+    /** Report the kill facet as `deferred` instead of refusing when no `appId` is given. */
+    deferKill?: boolean;
+  },
   deps: PersonaDependencies,
 ): Promise<ApplyPersonaResult | RoutePersonaResult> {
   const persona = OEM_PERSONAS[personaId];
@@ -294,9 +317,9 @@ export async function applyPersona(
   if (route) {
     return route;
   }
-  if (persona.killProfile && !options.appId) {
+  if (persona.killProfile && !options.appId && !options.deferKill) {
     throw new ActionableError(
-      `persona ${persona.id} sets kill profile ${persona.killProfile}; apply needs appId.`,
+      `manufacturer profile ${persona.id} sets kill profile ${persona.killProfile}; apply needs appId.`,
     );
   }
   const registry = deps.registry ?? defaultPersonaRestoreRegistry;
@@ -306,15 +329,22 @@ export async function applyPersona(
     // Personas replace one another: facets the new persona does not set must not linger.
     await resetPersona(device, {}, deps);
   }
-  const facets = await runFacets({ device, persona, appId: options.appId, deps, registry });
+  const facets = await runFacets({
+    device,
+    persona,
+    appId: options.appId,
+    deferKill: options.deferKill,
+    deps,
+    registry,
+  });
   if (!facets.some((facet) => facet.status === "applied" || facet.status === "partial")) {
     throw new ActionableError(
-      `persona ${persona.id} changed nothing on ${device.deviceId}: ${describeFacets(facets)}`,
+      `manufacturer profile ${persona.id} changed nothing on ${device.deviceId}: ${describeFacets(facets)}`,
     );
   }
   const status = outcomeOf(facets);
   return {
-    message: `Applied persona ${persona.id} v${persona.version} to ${device.deviceId} (${status}): ${describeFacets(facets)}`,
+    message: `Applied manufacturer profile ${persona.id} v${persona.version} to ${device.deviceId} (${status}): ${describeFacets(facets)}`,
     deviceId: device.deviceId,
     action: "apply",
     catalogVersion: OEM_PERSONA_CATALOG_VERSION,
@@ -329,6 +359,31 @@ export async function applyPersona(
 interface ResetStepOutcome {
   status: PersonaOutcome;
   detail: string;
+}
+
+/** The keyboard reset step, when the shared keyboard record still holds a profile to restore. */
+function keyboardResetSteps(
+  device: BootedDevice,
+  deps: PersonaDependencies,
+  registry: PersonaRestoreRegistry,
+): { facet: PersonaFacet; run: () => Promise<ResetStepOutcome> }[] {
+  const keyboardBefore = deps.executors.keyboard.pending();
+  if (keyboardBefore === undefined) {
+    // Nothing is left in the keyboard record: session release already restored it, or
+    // nothing changed it.
+    registry.forgetKeyboard(device.deviceId);
+    return [];
+  }
+  return [
+    {
+      facet: "keyboard",
+      run: async () => {
+        await deps.executors.keyboard.reset(deps.signal);
+        registry.forgetKeyboard(device.deviceId);
+        return { status: "applied", detail: `keyboard profile ${keyboardBefore}` };
+      },
+    },
+  ];
 }
 
 /** Reset steps in reverse apply order: display, each recorded kill package, then keyboard. */
@@ -353,7 +408,6 @@ function resetSteps(
       ...(appId ? [appId] : []),
     ]),
   ];
-  const keyboardBefore = recorded?.keyboardProfileBefore;
   return [
     {
       facet: "display",
@@ -370,18 +424,7 @@ function resetSteps(
         return { status: result.status, detail: result.message };
       },
     })),
-    ...(keyboardBefore !== undefined
-      ? [
-          {
-            facet: "keyboard" as const,
-            run: async () => {
-              await deps.executors.keyboard.set(keyboardBefore, deps.signal);
-              registry.forgetKeyboard(device.deviceId);
-              return { status: "applied" as const, detail: `keyboard profile ${keyboardBefore}` };
-            },
-          },
-        ]
-      : []),
+    ...keyboardResetSteps(device, deps, registry),
   ];
 }
 
@@ -390,8 +433,10 @@ function resetSteps(
  * facet (the display record is device-wide, so direct `displayProfile` changes
  * too), the kill facet of every package a persona applied to that still has a
  * change recorded (plus `appId`, with the device-wide battery and Doze state),
- * then the keyboard profile recorded before the first persona. Every step runs;
- * a step the device refuses stays recorded and the reset is an error.
+ * then the keyboard profile recorded before the first change (shared with
+ * `keyboard setProfile`, #14705). A facet session release already restored is
+ * no longer recorded, so reset does not write it twice. Every step runs; a step
+ * the device refuses stays recorded and the reset is an error.
  */
 export async function resetPersona(
   device: BootedDevice,
@@ -413,10 +458,12 @@ export async function resetPersona(
   }
   registry.clearIfRestored(device.deviceId);
   if (failures.length > 0) {
-    throw new ActionableError(`persona reset on ${device.deviceId} failed: ${failures.join("; ")}`);
+    throw new ActionableError(
+      `manufacturer profile reset on ${device.deviceId} failed: ${failures.join("; ")}`,
+    );
   }
   return {
-    message: `Reset ${personaId ? `persona ${personaId}` : "personas"} on ${device.deviceId}: ${describeFacets(facets)}`,
+    message: `Reset ${personaId ? `manufacturer profile ${personaId}` : "manufacturer profiles"} on ${device.deviceId}: ${describeFacets(facets)}`,
     deviceId: device.deviceId,
     action: "reset",
     ...(personaId ? { personaId } : {}),

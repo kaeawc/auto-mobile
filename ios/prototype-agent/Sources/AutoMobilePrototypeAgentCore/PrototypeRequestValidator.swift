@@ -180,6 +180,10 @@ enum PrototypeRequestValidator {
             if name.isEmpty || (isHeader && headerName?.firstMatch(in: name, range: range) == nil) {
                 throw fail(entryPath, isHeader ? "Invalid header name" : "Invalid query name")
             }
+            let literal = fields[name]?.stringValue ?? fields[name]?.objectFields?["value"]?.stringValue
+            if isHeader, let literal, literal.unicodeScalars.contains(where: { $0.value == 13 || $0.value == 10 }) {
+                throw fail(entryPath, "CR/LF in header value")
+            }
             switch fields[name] {
             case let .string(text)?:
                 if text.utf16.count > PrototypeLimits.maxRequestEntryLength {

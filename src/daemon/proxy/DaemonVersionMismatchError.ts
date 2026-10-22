@@ -8,6 +8,7 @@ export type VersionMismatchReason =
   | "cooldown"
   | "daemonNewer"
   | "nonNumeric"
+  | "staleClient"
   | "restartMismatch";
 
 function daemonRestartCommand(clientVersion: string, clientBuild?: BuildIdentity): string {
@@ -45,16 +46,19 @@ export class DaemonVersionMismatchError extends DaemonUnavailableError {
     const restartCommand = daemonRestartCommand(params.clientVersion, params.clientBuild);
     const unresolvedClientVersion =
       installableVersion.trim() === "" || installableVersion === "unknown";
-    const retryGuidance = unresolvedClientVersion
-      ? " The client package version could not be resolved. Reinstall or repair the AutoMobile client package, then relaunch this MCP client. Restarting the daemon cannot repair missing client version metadata."
-      : params.retryAfterMs !== undefined
-        ? ` Retry after ${params.retryAfterMs}ms or restart the daemon from this client's build: ${restartCommand}`
-        : ` Restart the daemon from this client's build: ${restartCommand}`;
+    const retryGuidance =
+      params.reason === "staleClient"
+        ? " Restarting the daemon cannot reconcile this mismatch because the daemon already runs this checkout's current version. Relaunch this MCP client so it loads the current checkout."
+        : unresolvedClientVersion
+          ? " The client package version could not be resolved. Reinstall or repair the AutoMobile client package, then relaunch this MCP client. Restarting the daemon cannot repair missing client version metadata."
+          : params.retryAfterMs !== undefined
+            ? ` Retry after ${params.retryAfterMs}ms or restart the daemon from this client's build: ${restartCommand}`
+            : ` Restart the daemon from this client's build: ${restartCommand}`;
     const sameRelease =
       releaseVersion(params.daemonVersion) === releaseVersion(params.clientVersion) &&
       params.daemonVersion !== params.clientVersion;
     const mismatchMessage =
-      sameRelease && params.clientBuild && params.daemonBuild
+      params.reason !== "staleClient" && sameRelease && params.clientBuild && params.daemonBuild
         ? `AutoMobile daemon build mismatch: daemon build ${describeBuildIdentity(params.daemonBuild)} != ` +
           `client build ${describeBuildIdentity(params.clientBuild)} (${params.detail}).${retryGuidance}`
         : `AutoMobile daemon version mismatch: daemon=${params.daemonVersion}, client=${params.clientVersion} ` +

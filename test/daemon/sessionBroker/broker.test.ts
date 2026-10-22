@@ -314,6 +314,54 @@ describe("session-only broker lifecycle", () => {
     expect(devices.destroyed).toHaveLength(1);
   });
 
+  test.each([true, false])(
+    "dead predecessor release converges without another drain (destroy=%s)",
+    async (canDestroy) => {
+      const uuid = await ready("interrupted-release");
+      await options.store.beginRelease(uuid, OWNER);
+      const resource = devices.sessions.get(uuid)!;
+      // Model a restart after the native session drain, while reset is still outstanding.
+      await registry.releaseExecution(
+        { scopeKey: resource.scopeKey, bindingIndex: resource.allocationIndex },
+        uuid,
+      );
+      ownerLive = false;
+      devices.canDestroy = canDestroy;
+      const owner = { ...OWNER, pid: 202, daemonId: "successor" };
+      const successor = new SessionBroker({ ...options, owner });
+      try {
+        if (!canDestroy) {
+          await successor.recoverReceipts();
+          expect(await options.store.getRequest("interrupted-release")).toMatchObject({
+            state: "releasing",
+            owner,
+          });
+          expect(await options.store.getResource(resource.resourceId)).toMatchObject({
+            state: "destroying",
+          });
+          expect(await successor.release(uuid)).toMatchObject({ outcome: "cleanup_pending" });
+          expect(devices.released).toEqual([]);
+          devices.canDestroy = true;
+        }
+        await successor.recover();
+        expect(await options.store.getRequest("interrupted-release")).toMatchObject({
+          state: "released",
+          owner,
+        });
+        expect(await successor.status("interrupted-release")).toMatchObject({
+          outcome: "released",
+          cleanupPending: false,
+        });
+        expect(await successor.status("interrupted-release")).not.toHaveProperty("failure");
+        expect(devices.destroyed).toEqual([resource.resourceId]);
+        expect(devices.released).toEqual([]);
+        expect(devices.resetResources).toEqual([]);
+      } finally {
+        await successor.close();
+      }
+    },
+  );
+
   test("dead process ownership is recovered regardless of session disposition", async () => {
     await ready("dead-owner");
     ownerLive = false;
@@ -888,7 +936,12 @@ describe("session-only broker lifecycle", () => {
     expect(await pending).toMatchObject({
       outcome: "failed",
       cleanupPending: false,
-      failure: { code: "cancelled", retryable: true },
+      failure: {
+        code: "session_broker_stopping",
+        retryable: true,
+        retryAfterMs: 5_000,
+        retryRequires: "new_request_id",
+      },
     });
     await close;
     expect(devices.sessions.size).toBe(0);

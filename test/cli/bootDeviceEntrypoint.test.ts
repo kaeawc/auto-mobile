@@ -111,6 +111,30 @@ function invocationGuardViolations(startupSource: string, stdioSource: string): 
   return check.violations;
 }
 
+/** Usage- or error-only `--cli doctor` calls are answered before the server bootstrap (#14533). */
+function cliDispatchViolations(startupSource: string): string[] {
+  const sf = parseSource(startupSource);
+  const run = functionBody(sf, "runStartup");
+  const skipped = functionBody(sf, "runSkippedBootstrapCliCommand");
+  if (!run || !skipped) {
+    return ["missing runStartup() or runSkippedBootstrapCliCommand()"];
+  }
+  const check = new OrderCheck();
+  const guard = check.require(
+    "bootstrap-skipping CLI guard",
+    ifStatements(skipped, "!args.cliMode || !modules.cliCommandSkipsServerBootstrap(args.cliArgs)"),
+  );
+  const dispatch = check.require("CLI dispatch", callsTo(skipped, "runCliMode"));
+  const skippedCall = check.require(
+    "CLI dispatch call",
+    ifStatements(run, "await runSkippedBootstrapCliCommand(args, modules)"),
+  );
+  const bootstrapCall = check.require("server bootstrap call", callsTo(run, "bootstrapServer"));
+  check.before("bootstrap-skipping CLI guard", guard, "CLI dispatch", dispatch);
+  check.before("CLI dispatch call", skippedCall, "server bootstrap call", bootstrapCall);
+  return check.violations;
+}
+
 test("the entrypoint runs early entrypoints, then loads the server, then starts up", () => {
   expect(mainOrderViolations(entrypoint)).toEqual([]);
 });
@@ -167,5 +191,18 @@ test("the invocation guard fails when the rejection no longer exits", () => {
   expect(mutated).not.toBe(runStartup);
   expect(invocationGuardViolations(mutated, stdioServer)).toContain(
     "missing process.exit(1) in the invalidInvocation guard",
+  );
+});
+
+test("usage- or error-only doctor calls dispatch before the server bootstrap", () => {
+  expect(cliDispatchViolations(runStartup)).toEqual([]);
+});
+
+test("the CLI dispatch guard fails when the bootstrap moves ahead of the doctor dispatch", () => {
+  const run = functionBody(parseSource(runStartup), "runStartup")!;
+  const dispatch = ifStatements(run, "await runSkippedBootstrapCliCommand(args, modules)")[0]!;
+  const bootstrap = callsTo(run, "bootstrapServer")[0]!.parent;
+  expect(cliDispatchViolations(swapNodes(runStartup, dispatch, bootstrap))).toContain(
+    "CLI dispatch call must come before server bootstrap call",
   );
 });

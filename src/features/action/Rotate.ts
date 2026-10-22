@@ -423,6 +423,8 @@ export class Rotate extends BaseVisualChange {
       // Rotation animations are incorrectly detected as unstable by gfxinfo.
       skipUiStability: true,
     };
+    // The call's own user_rotation write, kept so the end-of-call check can undo it (#14955).
+    const written: { settings?: RotationCallSettings } = {};
     const result: RotateResult = await this.observedInteraction(
       // The read-auto-rotate -> disable -> rotate -> restore-auto-rotate
       // sequence below must run atomically per device: interleaving it with
@@ -442,7 +444,7 @@ export class Rotate extends BaseVisualChange {
         }
         try {
           const mutation = (slot?: RotationRestoreSlot) =>
-            this.performAndroidRotation(orientation, perf, lockOrientation, signal, slot);
+            this.performAndroidRotation(orientation, perf, lockOrientation, signal, slot, written);
           const result = this.options.sessionRotation
             ? await this.options.sessionRotation(mutation)
             : await mutation();
@@ -458,7 +460,12 @@ export class Rotate extends BaseVisualChange {
       },
       observationOptions,
     );
-    return this.confirmAndroidOrientationAtReturn({ result, orientation, signal });
+    return this.confirmAndroidOrientationAtReturn({
+      result,
+      orientation,
+      signal,
+      settings: written.settings,
+    });
   }
 
   private async readRotationAtReturn(options: { signal?: AbortSignal }): Promise<number | null> {
@@ -483,8 +490,9 @@ export class Rotate extends BaseVisualChange {
     result: RotateResult;
     orientation: "portrait" | "landscape";
     signal?: AbortSignal;
+    settings?: RotationCallSettings;
   }): Promise<RotateResult> {
-    const { result, orientation, signal } = options;
+    const { result, orientation, signal, settings } = options;
     if (!result.success || result.currentOrientation !== orientation) {
       return result;
     }
@@ -513,7 +521,25 @@ export class Rotate extends BaseVisualChange {
         ? `The device ${confirmed} and then returned to ${actual} because automatic rotation is on.`
         : `The device left the requested ${orientation} orientation after the call confirmed it.`;
     const error = `${cause} The device is in ${actual} at the time the call returned. Pass lockOrientation: true, or use a device session, to keep the requested orientation.`;
-    return { ...result, success: false, currentOrientation: actual, error, message: error };
+    // The sensor undid the rotation, so the user_rotation this call wrote would only flip the
+    // screen the next time rotation is locked (#14955): put the prior value back.
+    const rollbackWarning =
+      settings?.started && actual !== "unknown"
+        ? await this.store.rollbackUserRotation({
+            previous: settings.previousUserRotation,
+            written: settings.writtenUserRotation,
+            signal,
+          })
+        : undefined;
+    const warning = [result.warning, rollbackWarning].filter(Boolean).join(" ") || undefined;
+    return {
+      ...result,
+      success: false,
+      currentOrientation: actual,
+      error,
+      message: error,
+      ...(warning ? { warning } : {}),
+    };
   }
 
   private async captureSessionRotationOriginals(options: {
@@ -639,6 +665,7 @@ export class Rotate extends BaseVisualChange {
     lockOrientation: boolean | undefined,
     signal?: AbortSignal,
     slot?: RotationRestoreSlot,
+    written?: { settings?: RotationCallSettings },
   ): Promise<RotateResult> {
     throwIfAborted(signal);
     // Read the natural axes first so the requested value and every orientation read agree.
@@ -650,6 +677,9 @@ export class Rotate extends BaseVisualChange {
     );
 
     const settings = this.rotationCallSettings(autoRotateState, slot, signal);
+    if (written) {
+      written.settings = settings;
+    }
     const plan = this.outcomes.resolveAutoRotatePlan(
       autoRotateState,
       lockOrientation,

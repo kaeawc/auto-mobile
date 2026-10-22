@@ -68,7 +68,7 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, PendingMutat
     "journaled",
   ),
   ...pendingTools(
-    ["persona", "statusBar"],
+    ["manufacturerProfile", "statusBar"],
     "Pending device-appearance intent and prior-value adapters (#14359); unavailable journal coverage limits best-effort reverts but does not gate tool actions or unconditional keep-booted cleaning.",
   ),
   ...pendingTools(

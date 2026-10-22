@@ -17,6 +17,10 @@ import type { PrototypeTransport } from "../features/prototype/PrototypeTranspor
 import type { PrototypeResult } from "../features/observe/android/ctrlProxyProtocol";
 import { MAX_PROTOTYPE_SPEC_BYTES, type PrototypeSpec } from "../features/prototype/prototypeSpec";
 import { validatePrototypeSpec } from "../features/prototype/prototypeValidation";
+import {
+  prototypeAccessibilityOutput,
+  type PrototypeAccessibilityFinding,
+} from "../features/prototype/prototypeAccessibilityLint";
 import type { ShownSpecJson } from "../features/prototype/PrototypeShownSpecs";
 
 export interface PrototypePatchQueue {
@@ -67,6 +71,8 @@ export interface PrototypePatchOutput {
   revision?: number;
   conflict?: PrototypePatchConflict;
   warning?: string;
+  accessibilityFindings?: PrototypeAccessibilityFinding[];
+  accessibilityFindingsTotal?: number;
 }
 const failure = (error: string): PrototypePatchOutput => ({ success: false, error });
 
@@ -179,7 +185,10 @@ async function finishPatch(
     deps.store.recordPatchedData(deviceId, args.id, applied.validated.data);
   }
   deps.retire(result);
-  return successfulPatchOutput(fields.revision, committed, args.id);
+  return {
+    ...successfulPatchOutput(fields.revision, committed, args.id),
+    ...prototypeAccessibilityOutput(applied.spec),
+  };
 }
 
 /** The patched spec, unless the patch is invalid or would overwrite device `/data` writes. */

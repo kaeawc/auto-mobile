@@ -1,3 +1,4 @@
+import { prototypeAccessibilityOutput } from "../../features/prototype/prototypeAccessibilityLint";
 import { z } from "zod/v4";
 import { createDeviceHierarchyCapture } from "../../features/observe/DeviceHierarchyCapture";
 import { type DeviceWindowCacheInvalidator } from "../../features/observe/DeviceWindowCacheInvalidator";
@@ -295,7 +296,7 @@ async function performMutation(
       lastResult,
       ...(stage.uploaded.length > 0 ? { uploadedAssets: stage.uploaded } : {}),
       ...anchorsOutput(resolved),
-      ...platformNotesOutput(sendArgs, device, prototypeTarget, result.success),
+      ...showAdviceOutput(sendArgs, device, prototypeTarget, result.success),
       ...visibility,
       ...reversing.output(reverseReport, result.success),
       ...missingAssetsOutput(result, [warning, placed.warning, visibilityWarning], legacy),
@@ -312,6 +313,19 @@ async function performMutation(
     endShownSpec(store, ordering);
     settleGeneration(ordering);
   }
+}
+
+/** Advisory platform notes and accessibility findings for a successful show. */
+function showAdviceOutput(
+  args: z.infer<typeof prototypeSchema>,
+  device: BootedDevice,
+  target: PrototypeTarget,
+  success: boolean,
+): Pick<PrototypeOutput, "platformNotes" | "accessibilityFindings" | "accessibilityFindingsTotal"> {
+  return {
+    ...platformNotesOutput(args, device, target, success),
+    ...(args.action === "show" && success ? prototypeAccessibilityOutput(args.spec) : {}),
+  };
 }
 
 /** Notes describe the expanded, anchor-resolved spec actually sent to the device. */

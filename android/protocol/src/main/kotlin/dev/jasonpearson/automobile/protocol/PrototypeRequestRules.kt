@@ -7,6 +7,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeValidationPaths.text
 import dev.jasonpearson.automobile.protocol.PrototypeValidationValues.isValidLiteral
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
 
 internal object PrototypeRequestRules {
@@ -95,23 +96,11 @@ internal object PrototypeRequestRules {
     val seenHeaders = HashSet<String>()
     for ((name, value) in (entries as? JsonObject).orEmpty()) {
       val entryPath = keyPath("$at.$field", name)
-      if (
-        field == "headers" &&
-          (name.lowercase() in forbiddenHeaders || name.startsWith("proxy-", ignoreCase = true))
-      ) {
-        return fail(entryPath, "Forbidden request header")
-      }
-      if (field == "headers" && !headerNamePattern.matches(name)) {
-        return fail(entryPath, "Invalid header name")
-      }
-      // Header names are case-insensitive: X-Test and x-test are one header.
-      if (field == "headers" && !seenHeaders.add(name.lowercase())) {
-        return fail(entryPath, "Duplicate header name (names are case-insensitive)")
-      }
       val literal = (value as? JsonObject)?.get("value")
-      val text = ((literal ?: value) as? kotlinx.serialization.json.JsonPrimitive)?.content
-      if (field == "headers" && text != null && text.any { it == '\r' || it == '\n' }) {
-        return fail(entryPath, "CR/LF in header value")
+      if (field == "headers") {
+        headerError(name, literal ?: value, seenHeaders)?.let {
+          return fail(entryPath, it)
+        }
       }
       if (literal != null && !isValidLiteral(literal)) {
         return fail(
@@ -120,6 +109,21 @@ internal object PrototypeRequestRules {
         )
       }
     }
+    return null
+  }
+
+  private fun headerError(
+    name: String,
+    value: JsonElement,
+    seen: MutableSet<String>,
+  ): String? {
+    if (name.lowercase() in forbiddenHeaders || name.startsWith("proxy-", ignoreCase = true))
+      return "Forbidden request header"
+    if (!headerNamePattern.matches(name)) return "Invalid header name"
+    // Header names are case-insensitive: X-Test and x-test are one header.
+    if (!seen.add(name.lowercase())) return "Duplicate header name (names are case-insensitive)"
+    val text = (value as? JsonPrimitive)?.content
+    if (text?.any { it == '\r' || it == '\n' } == true) return "CR/LF in header value"
     return null
   }
 }

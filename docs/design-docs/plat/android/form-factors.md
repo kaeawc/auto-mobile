@@ -226,11 +226,11 @@ Run on a booted image of each kind. Record the command, the image id and the API
 
 Filed under #14072, each gated on its checklist rows:
 
-- **TV:** `sendKeys` `select`, `focusNavigate`, and the TV form factor (rows 1 to 4).
-- **Wear OS:** rotary scroll, `isScreenRound`, and ambient toggle if row 7 finds a command
-  (rows 5 to 8).
-- **Form-factor vocabulary:** `tv`, `watch` and `automotive` in matching, classified by
-  system-image tag, which applies to all of the above and can be built first.
+- **TV (#14947):** `sendKeys` `select` and `focusNavigate` (rows 1 to 4).
+- **Wear OS (#14948):** rotary scroll, `isScreenRound`, and ambient toggle if row 7 finds a
+  command (rows 5 to 8).
+- **Form-factor vocabulary (#14946):** `tv`, `watch` and `automotive` in matching,
+  classified by system-image tag, which applies to all of the above and can be built first.
 
 Android Auto projection is a documented no-go. Automotive OS has no follow-up until rows 9
 and 10 are run.

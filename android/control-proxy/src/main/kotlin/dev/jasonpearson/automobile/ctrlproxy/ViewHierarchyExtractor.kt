@@ -842,8 +842,9 @@ internal constructor(
     windows: List<AccessibilityWindowInfo>,
     activeWindowRoot: AccessibilityNodeInfo?,
   ): AccessibilityNodeInfo? {
+    val search = accessibilityFocusSearch(windows)
     var accessibilityFocusedNode: AccessibilityNodeInfo? = null
-    for (window in windows) {
+    for (window in search.windows) {
       val rootNode =
         try {
           window.root
@@ -869,7 +870,7 @@ internal constructor(
       }
     }
     // Fallback to activeWindowRoot if not found in windows list
-    if (accessibilityFocusedNode == null && activeWindowRoot != null) {
+    if (accessibilityFocusedNode == null && search.activeRootFallback && activeWindowRoot != null) {
       accessibilityFocusedNode =
         activeWindowRoot.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
     }
@@ -2341,4 +2342,26 @@ internal constructor(
       }
       .takeIf { it >= 0 }
   }
+}
+
+/**
+ * Which windows a capture searches for accessibility focus (#13957). Each search costs a
+ * cross-process `getRoot` and `findFocus`, so only windows reporting
+ * [AccessibilityWindowInfo.isAccessibilityFocused] are searched. Without TalkBack no window holds
+ * that focus and nothing is searched. The active window root is still searched when a window
+ * reported focus but its search came back empty, or when there is no window list at all.
+ */
+internal data class AccessibilityFocusSearch(
+  val windows: List<AccessibilityWindowInfo>,
+  val activeRootFallback: Boolean,
+)
+
+internal fun accessibilityFocusSearch(
+  windows: List<AccessibilityWindowInfo>,
+): AccessibilityFocusSearch {
+  val focused = windows.filter { it.isAccessibilityFocused }
+  return AccessibilityFocusSearch(
+    focused,
+    activeRootFallback = windows.isEmpty() || focused.isNotEmpty(),
+  )
 }

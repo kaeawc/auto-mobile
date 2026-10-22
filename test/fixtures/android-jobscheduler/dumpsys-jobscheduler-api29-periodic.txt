@@ -1,0 +1,54 @@
+Current JobScheduler state:
+  Settings:
+    min_idle_count=1
+    min_charging_count=1
+    min_connectivity_count=1
+    min_content_count=1
+    min_ready_jobs_count=1
+    heavy_use_factor=0.9
+    moderate_use_factor=0.5
+
+  Started users: u0
+Registered 2 jobs:
+  JOB #u0a123/7: 4e5f6a7 dev.example.playground/androidx.work.impl.background.systemjob.SystemJobService
+    u0a123 tag=*job*/dev.example.playground/androidx.work.impl.background.systemjob.SystemJobService
+    Source: uid=u0a123 user=0 pkg=dev.example.playground
+    JobInfo:
+      Service: dev.example.playground/androidx.work.impl.background.systemjob.SystemJobService
+      PERIODIC: interval=+15m0s0ms flex=+15m0s0ms
+      Requires: charging=false batteryNotLow=true deviceIdle=false
+      Extras: mParcelledData.dataSize=92
+      Network type: 1
+      Backoff: policy=1 initial=+30s0ms
+      Has early constraint
+      Has late constraint
+    Required constraints: TIMING_DELAY DEADLINE BATTERY_NOT_LOW CONNECTIVITY
+    Satisfied constraints: DEADLINE CONNECTIVITY
+    Unsatisfied constraints: TIMING_DELAY BATTERY_NOT_LOW
+    Tracking: BATTERY CONNECTIVITY TIME
+    Enqueue time: -2m3s456ms
+    Run time: earliest=+12m56s544ms, latest=+27m56s544ms, original latest=+27m56s544ms
+    Last successful run time: 0
+  JOB #u0a123/12: 9c8d7e6 dev.example.playground/dev.example.playground.sync.LegacySyncService
+    u0a123 tag=*job*/dev.example.playground/dev.example.playground.sync.LegacySyncService
+    Source: uid=u0a123 user=0 pkg=dev.example.playground
+    JobInfo:
+      Service: dev.example.playground/dev.example.playground.sync.LegacySyncService
+      Requires: charging=true batteryNotLow=false deviceIdle=true
+      Extras: mParcelledData.dataSize=0
+      Network type: 2
+      Minimum latency: +1h0m0s0ms
+      Max execution delay: +2h0m0s0ms
+    Required constraints: TIMING_DELAY DEADLINE CHARGING IDLE UNMETERED
+    Satisfied constraints: DEADLINE
+    Unsatisfied constraints: TIMING_DELAY CHARGING IDLE UNMETERED
+    Tracking: BATTERY CONNECTIVITY IDLE TIME
+    Enqueue time: -4s0ms
+    Run time: earliest=+59m56s0ms, latest=+1h59m56s0ms, original latest=+1h59m56s0ms
+    Last successful run time: 0
+
+Pending queue:
+
+Active jobs:
+
+Ready queue:

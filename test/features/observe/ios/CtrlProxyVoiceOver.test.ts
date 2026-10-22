@@ -781,7 +781,7 @@ describe("CtrlProxyVoiceOver", function () {
             for (let i = 0; i < 30; i++) {
               await Promise.resolve();
             }
-            expect(client["requestManager"].getPendingCount()).toBe(0);
+            expect(client.connectionTestHooks.requestManager.getPendingCount()).toBe(0);
             timer.advanceTime(5000);
           } else {
             socket!.simulateMessage(
@@ -803,7 +803,7 @@ describe("CtrlProxyVoiceOver", function () {
           expect(result.retryable).toBe(mode === "refusal" ? undefined : false);
           expect(commandPayloads(socket!)).toHaveLength(1);
           expect(dispatchCount).toBe(1);
-          expect(client["requestManager"].getPendingCount()).toBe(0);
+          expect(client.connectionTestHooks.requestManager.getPendingCount()).toBe(0);
           if (mode === "refusal") {
             expect(result.error).toBe("link refused");
           }

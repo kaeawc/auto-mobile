@@ -55,6 +55,7 @@ import dev.jasonpearson.automobile.desktop.core.control.GestureStreamingConfig
 import dev.jasonpearson.automobile.desktop.core.control.rememberDeviceControlSession
 import dev.jasonpearson.automobile.desktop.core.daemon.ActiveRecordingTracker
 import dev.jasonpearson.automobile.desktop.core.daemon.AllocatingAppearanceClient
+import dev.jasonpearson.automobile.desktop.core.daemon.AppearanceChoiceMemory
 import dev.jasonpearson.automobile.desktop.core.daemon.AppearanceClient
 import dev.jasonpearson.automobile.desktop.core.daemon.AppearanceSocketClient
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
@@ -74,6 +75,7 @@ import dev.jasonpearson.automobile.desktop.core.daemon.McpDeviceSnapshotActions
 import dev.jasonpearson.automobile.desktop.core.daemon.McpHttpClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpVideoRecordingActions
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
+import dev.jasonpearson.automobile.desktop.core.daemon.RememberingAppearanceClient
 import dev.jasonpearson.automobile.desktop.core.daemon.TelemetryPushClient
 import dev.jasonpearson.automobile.desktop.core.daemon.TelemetryPushSocketClient
 import dev.jasonpearson.automobile.desktop.core.daemon.VideoRecordingActions
@@ -90,6 +92,7 @@ import dev.jasonpearson.automobile.desktop.core.datasource.InstalledApp
 import dev.jasonpearson.automobile.desktop.core.datasource.Result
 import dev.jasonpearson.automobile.desktop.core.device.DeviceControlsClients
 import dev.jasonpearson.automobile.desktop.core.device.DeviceControlsDashboard
+import dev.jasonpearson.automobile.desktop.core.device.DeviceRelease
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.diagnostics.DiagnosticsDashboard
 import dev.jasonpearson.automobile.desktop.core.failures.DateRange
@@ -719,6 +722,8 @@ fun AutoMobileContent(options: AutoMobileContentOptions = AutoMobileContentOptio
       }
       ?.let { it.socketPath ?: DaemonSocketPaths.socketPath() }
   val activeRecordings = remember { ActiveRecordingTracker() }
+  // The user's appearance choice outlives each desktop session: every new one gets it (#11363).
+  val appearanceChoices = remember { AppearanceChoiceMemory() }
   val desktopSessionState =
     rememberDesktopDaemonSession(
       DesktopDaemonSessionOptions(
@@ -726,6 +731,7 @@ fun AutoMobileContent(options: AutoMobileContentOptions = AutoMobileContentOptio
         desktopSessionPanes,
         hostVisible = hostVisible,
         activeRecordings = activeRecordings,
+        appearanceChoices = appearanceChoices,
       ),
     )
   val desktopDaemonSession = desktopSessionState.session
@@ -802,16 +808,20 @@ fun AutoMobileContent(options: AutoMobileContentOptions = AutoMobileContentOptio
     }
 
   // Appearance and video recording follow the same split: config over their own sockets, verbs
-  // over the MCP client.
+  // over the MCP client. A new client once the remembered choice was restored under the session,
+  // so the dashboard re-reads the session's config instead of keeping the default it read (#11363).
   val appearanceClient: AppearanceClient? =
-    remember(dataSourceMode, desktopDaemonSession) {
+    remember(dataSourceMode, desktopDaemonSession, desktopSessionState.appearanceRestores) {
       if (dataSourceMode == DataSourceMode.Real) {
-        AllocatingAppearanceClient(
-          AppearanceSocketClient(
-            sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
+        RememberingAppearanceClient(
+          AllocatingAppearanceClient(
+            AppearanceSocketClient(
+              sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
+            ),
+            allocation = { inputAllocation },
+            activeDeviceId = { latestActiveDeviceId },
           ),
-          allocation = { inputAllocation },
-          activeDeviceId = { latestActiveDeviceId },
+          appearanceChoices,
         )
       } else {
         null
@@ -2195,14 +2205,16 @@ fun AutoMobileContent(options: AutoMobileContentOptions = AutoMobileContentOptio
                         DeviceControlsDashboard(
                           activeDeviceId = activeDeviceId,
                           activeRecordings = activeRecordings,
-                          releasedDeviceId = desktopSessionState.idleReleasedDeviceId,
+                          release =
+                            desktopSessionState.idleReleasedDeviceId?.let {
+                              DeviceRelease(it, desktopSessionState.releaseReason)
+                            },
                           options =
                             DeviceControlsClients(
                               appearanceClient = appearanceClient,
                               recordingActions = recordingActions,
                               recordingConfigClient = recordingConfigClient,
                               streamClient = webRtcStreamClient,
-                              sessionUuidProvider = desktopSessionState.sessionUuidProvider,
                             ),
                         )
                       "diagnostics" ->

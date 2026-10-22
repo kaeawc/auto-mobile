@@ -102,7 +102,7 @@ function anchoredNodes(root: Raw): { node: Raw; path: string; anchor: PrototypeA
 }
 
 /** Whether any node of the spec carries an anchor, of either kind. */
-export function hasPrototypeAnchors(spec: PrototypeSpec): boolean {
+export function hasPrototypeAnchors(spec: { root?: unknown }): boolean {
   const root = record(spec.root);
   return root !== undefined && anchoredNodes(root).length > 0;
 }

@@ -103,3 +103,49 @@ describe("session requirement parsing", () => {
     expect(parsed.ok).toBeTrue();
   });
 });
+
+describe("deviceProfile selector (#14058)", () => {
+  const android = {
+    schemaVersion: 1,
+    platform: "android",
+    hardware: { kind: "omitted" },
+    os: { kind: "omitted" },
+  } as const;
+
+  test("an Android request may name a manufacturer profile and the capabilities it needs", () => {
+    expect(
+      unwrap(
+        parseSessionDeviceRequirement({
+          ...android,
+          deviceProfile: { manufacturerProfile: "samsung-oneui", requires: ["knox"] },
+        }),
+      ),
+    ).toEqual({
+      ...android,
+      deviceProfile: { manufacturerProfile: "samsung-oneui", requires: ["knox"] },
+    });
+  });
+
+  test.each<[unknown, string | undefined]>([
+    [{ manufacturerProfile: "huawei-emui" }, "deviceProfile.manufacturerProfile"],
+    [{ manufacturerProfile: "samsung-oneui", requires: ["dex"] }, "deviceProfile.requires"],
+    [{ manufacturerProfile: "samsung-oneui", skin: "galaxy" }, undefined],
+    ["samsung-oneui", "deviceProfile"],
+  ])("rejects malformed selector %#", (deviceProfile, field) => {
+    const error = unwrapError(parseSessionDeviceRequirement({ ...android, deviceProfile }));
+    expect(error.code).toBe("invalid_request");
+    expect(error.field).toBe(field);
+  });
+
+  test("an iOS request naming one is an unexpected field", () => {
+    const error = unwrapError(
+      parseSessionDeviceRequirement({
+        ...android,
+        platform: "ios",
+        deviceProfile: { manufacturerProfile: "pixel-baseline" },
+      }),
+    );
+    expect(error.code).toBe("invalid_request");
+    expect(error.message).toContain("deviceProfile");
+  });
+});

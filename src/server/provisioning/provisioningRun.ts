@@ -34,6 +34,7 @@ import {
 } from "./provisioningReservation";
 import { bootExactProvisionedDevice, provisionExactDevice } from "./provisioningBoot";
 import { buildProvisionDeviceResult } from "./provisioningReadiness";
+import { assertDeviceProfileEmulatable } from "./provisioningDeviceProfile";
 import {
   rethrowFailedProvisionDeviceLifecycle,
   undeliveredProvisionRollback,
@@ -58,6 +59,8 @@ export async function executeProvisionDevice(
   // readiness), clamped so rollback still fits inside the daemon's queued
   // request deadline (the `reserveRollbackTime` form).
   const totalDeadlineMs = provisionDeviceDeadlineMs(args, deps.timer, true);
+  // Before any lease, creation or boot: a stock emulator can never serve this request (#14058).
+  assertDeviceProfileEmulatable(args);
   try {
     return await runProvisionDeviceLifecycle(ctx, args, deps, {
       recordLifecycle,

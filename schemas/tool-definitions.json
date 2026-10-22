@@ -1768,6 +1768,9 @@
                   "type": "string",
                   "enum": ["ios_ips", "android_dropbox"]
                 },
+                "reportId": {
+                  "type": "string"
+                },
                 "reportPath": {
                   "type": "string"
                 },
@@ -1796,7 +1799,7 @@
                   "type": "string"
                 }
               },
-              "required": ["status", "source", "reportPath", "exceptionType", "frames"],
+              "required": ["status", "source", "reportId", "reportPath", "exceptionType", "frames"],
               "additionalProperties": false
             },
             {

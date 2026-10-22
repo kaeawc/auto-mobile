@@ -257,6 +257,7 @@ export const crashAppResultSchema = z.object({
       z.object({
         status: z.literal("found"),
         source: z.enum(["ios_ips", "android_dropbox"]),
+        reportId: z.string(),
         reportPath: z.string(),
         exceptionType: z.string(),
         exceptionCode: z.string().optional(),

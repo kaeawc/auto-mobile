@@ -10,6 +10,10 @@ import type {
   DeviceConditionInjector,
 } from "./DeviceConditionController";
 import type { DeviceConditionKey } from "./DeviceConditionTypes";
+import { errorMessage } from "../../utils/describeUnknownError";
+import { logger } from "../../utils/logger";
+import { shellQuote } from "../../utils/shellQuote";
+import { OwedResetError } from "./OwedResetError";
 import { adbCommand, rejectValue, shell } from "./injectorSupport";
 
 /**
@@ -62,7 +66,8 @@ async function remountWritable(adb: AdbExecutor, signal?: AbortSignal): Promise<
 
 async function plantArtifacts(adb: AdbExecutor, signal?: AbortSignal): Promise<void> {
   for (const path of ROOT_ARTIFACT_PATHS) {
-    await shell(adb, ["sh", "-c", `printf '${STUB_SCRIPT}' > ${path}`], signal);
+    // adb joins these with spaces for the device shell, so the script must be one quoted word.
+    await shell(adb, ["printf", shellQuote(STUB_SCRIPT), ">", path], signal);
     await shell(adb, ["chmod", path.endsWith(".apk") ? "0644" : "06755", path], signal);
   }
 }
@@ -89,18 +94,31 @@ export function createRootStateInjector(adb: AdbExecutor): DeviceConditionInject
       }
       await assertRootableImage(adb, signal);
       baselineSelinux = (await shell(adb, ["getenforce"], signal)) || "Enforcing";
-      await remountWritable(adb, signal);
-      // From here the device holds partial state, so a failure still owes a reset.
+      let selinuxChanged = false;
+      // Defined before the first mutation (`adb root`) so every later failure can undo it.
       const reset = async (resetSignal?: AbortSignal): Promise<void> => {
         await removeArtifacts(adb, resetSignal);
-        await shell(adb, ["setenforce", selinuxFlag(baselineSelinux)], resetSignal);
+        if (selinuxChanged) {
+          await shell(adb, ["setenforce", selinuxFlag(baselineSelinux)], resetSignal);
+        }
         await adbCommand(adb, ["unroot"], resetSignal);
       };
       try {
+        await remountWritable(adb, signal);
+        selinuxChanged = true;
         await shell(adb, ["setenforce", "0"], signal);
         await plantArtifacts(adb, signal);
       } catch (error) {
-        await reset().catch(() => undefined);
+        try {
+          await reset();
+        } catch (cleanupError) {
+          logger.warn(`rootState rollback failed: ${errorMessage(cleanupError)}`, cleanupError);
+          throw new OwedResetError(
+            `${errorMessage(error)} Cleanup also failed (${errorMessage(cleanupError)}); the device may still be rooted, and release will retry.`,
+            reset,
+            { cause: error },
+          );
+        }
         throw error;
       }
       return { status: "applied", detail: "rooted-detectable fixture planted", reset };

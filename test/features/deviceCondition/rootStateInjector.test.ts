@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import type { BootedDevice, ExecResult } from "../../../src/models";
+import { OwedResetError } from "../../../src/features/deviceCondition/OwedResetError";
 import {
   ROOT_ARTIFACT_PATHS,
   createRootStateInjector,
@@ -101,5 +102,40 @@ describe("rootState injector (#14060)", () => {
     expect(resolveRootStateInjector(android, "faults.battery")).toBeUndefined();
     expect(resolveRootStateInjector(ios, "rootState")).toBeUndefined();
     expect(resolveRootStateInjector(android, "rootState")?.key).toBe("rootState");
+  });
+
+  test("plants the stub with one quoted printf script, as the device shell will see it", async () => {
+    const adb = adbWith(ROOTABLE);
+    await createRootStateInjector(adb).apply("rooted-detectable");
+    expect(adb.getExecutedCommands()).toContain(
+      "shell printf '#!/system/bin/sh\\nexit 1\\n' > /system/xbin/su",
+    );
+    expect(adb.getExecutedCommands().some((c) => c.includes("sh -c"))).toBe(false);
+  });
+
+  test("a remount failure after adb root un-roots the device", async () => {
+    const adb = adbWith({ ...ROOTABLE, remount: "remount failed: Read-only file system (verity)" });
+    await expect(createRootStateInjector(adb).apply("rooted-detectable")).rejects.toThrow(
+      /-writable-system/,
+    );
+    const commands = adb.getExecutedCommands();
+    expect(commands).toContain("root");
+    expect(commands).toContain("unroot");
+    // SELinux was never touched, so the rollback must not flip it.
+    expect(commands.some((c) => c.startsWith("shell setenforce"))).toBe(false);
+  });
+
+  test("when rollback also fails, the thrown error carries the owed reset", async () => {
+    const adb = adbWith(ROOTABLE);
+    adb.setCommandError("chmod", new Error("Read-only file system"));
+    adb.setCommandError("rm -f", new Error("device offline"));
+    const error = await createRootStateInjector(adb)
+      .apply("rooted-detectable")
+      .then(
+        () => undefined,
+        (caught: unknown) => caught,
+      );
+    expect(error).toBeInstanceOf(OwedResetError);
+    expect((error as OwedResetError).message).toMatch(/Cleanup also failed/);
   });
 });

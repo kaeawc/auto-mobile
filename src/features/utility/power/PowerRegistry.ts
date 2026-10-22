@@ -35,8 +35,9 @@ export class PowerRegistry {
   ensure(deviceId: string, sessionId: string): SessionPower {
     const existing = this.records.get(deviceId);
     if (existing) {
-      existing.sessionId = sessionId;
-      return existing;
+      const adopted: SessionPower = { ...existing, sessionId };
+      this.records.set(deviceId, adopted);
+      return adopted;
     }
     const created: SessionPower = { deviceId, sessionId, baseline: {}, changed: [] };
     this.records.set(deviceId, created);

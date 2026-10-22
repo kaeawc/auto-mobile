@@ -226,6 +226,24 @@ describe("TelemetryPushSocketServer backfill characterization", () => {
     expect(infoSpy).not.toHaveBeenCalled();
   });
 
+  test("a backfilling subscriber is performance demand and receives the push-only event after backfill (#14461)", async () => {
+    const filter = server.filter("performance");
+    server.subscribe(socket, filter);
+    // The sampler's demand check lands while the initial backfill is in flight.
+    expect(server.hasSubscriberForPerformanceTelemetry("device")).toBe(true);
+    server.pushTelemetryEvent({
+      category: "performance",
+      timestamp: 1,
+      deviceId: "device",
+      sessionId: "session",
+      data: { timestamp: 1, packageName: "com.example", fps: 12, health: "warning" },
+    });
+    expect(messages()).toEqual([]);
+    await server.backfill(socket, filter);
+    await server.finish();
+    expect(messages().map(({ data }) => data.category)).toEqual(["performance"]);
+  });
+
   test("queues distinct prototype sequences during backfill and deduplicates repeated sequence", async () => {
     const filter = server.filter("prototype");
     server.subscribe(socket, filter);
@@ -886,11 +904,17 @@ describe("TelemetryPushSocketServer performance demand", () => {
     }
   }
 
-  test("ignores destroyed and backfilling sockets while finding a live match", () => {
-    server.addSubscriber({}, true);
+  test("ignores destroyed sockets while finding a live match", () => {
     server.addSubscriber().destroy();
     expect(server.hasSubscriberForPerformanceTelemetry("device")).toBe(false);
     server.addSubscriber({ category: "performance" });
+    expect(server.hasSubscriberForPerformanceTelemetry("device")).toBe(true);
+  });
+
+  test("a backfilling subscriber counts as demand when its filter matches (#14461)", () => {
+    server.addSubscriber({ category: "network" }, true);
+    expect(server.hasSubscriberForPerformanceTelemetry("device")).toBe(false);
+    server.addSubscriber({ category: "performance" }, true);
     expect(server.hasSubscriberForPerformanceTelemetry("device")).toBe(true);
   });
 

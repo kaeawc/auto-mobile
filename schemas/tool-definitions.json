@@ -2114,6 +2114,9 @@
                   "type": "string",
                   "enum": ["ios_ips", "android_dropbox"]
                 },
+                "reportId": {
+                  "type": "string"
+                },
                 "reportPath": {
                   "type": "string"
                 },
@@ -2142,7 +2145,7 @@
                   "type": "string"
                 }
               },
-              "required": ["status", "source", "reportPath", "exceptionType", "frames"],
+              "required": ["status", "source", "reportId", "reportPath", "exceptionType", "frames"],
               "additionalProperties": false
             },
             {
@@ -2976,7 +2979,7 @@
   },
   {
     "name": "displayProfile",
-    "description": "Android: apply an OEM-style display persona in one call (screen size, density, font scale, display-cutout and navigation-mode overlays, force dark, fold posture), composing displayConfig and setPosture. Each step reports applied | partial | unsupported | failed. The state before each facet's first change is recorded once; reset restores every recorded facet, and in a daemon session release or rebind does too. Approximates OEM look and geometry; it cannot reproduce OEM SystemUI.",
+    "description": "Android: apply an OEM-style display profile in one call (screen size, density, font scale, display-cutout and navigation-mode overlays, force dark, fold posture), composing displayConfig and setPosture. Each step reports applied | partial | unsupported | failed. The state before each facet's first change is recorded once; reset restores every recorded facet, and in a daemon session release or rebind does too. Approximates OEM look and geometry; it cannot reproduce OEM SystemUI.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -10956,7 +10959,7 @@
   },
   {
     "name": "manufacturerProfile",
-    "description": "Android: apply an OEM manufacturer profile (pixel-baseline, samsung-oneui, xiaomi-hyperos, oneplus-oxygenos, oppo-coloros, motorola) on a stock device by composing the keyboard profile, killProfile and displayProfile executors. describe reports every facet's evidence status (focused_trace | vendor_documented | cdd_derived | inferred | experimental) and the OEM capabilities that cannot be emulated; apply with requires naming one of those returns route_to_real_device and changes nothing. applying a different manufacturer profile resets the recorded one first; reset restores the display, kill and keyboard changes (display and device-wide kill state are shared with displayProfile and killProfile). The keyboard profile persists until reset, even across sessions. Simulates effects, not firmware.",
+    "description": "Android: apply an OEM manufacturer profile (pixel-baseline, samsung-oneui, xiaomi-hyperos, oneplus-oxygenos, oppo-coloros, motorola) on a stock device by composing the keyboard profile, killProfile and displayProfile executors. describe reports every facet's evidence status (focused_trace | vendor_documented | cdd_derived | inferred | experimental) and the OEM capabilities that cannot be emulated; apply with requires naming one of those returns route_to_real_device and changes nothing. applying a different manufacturer profile resets the recorded one first; reset restores the display, kill and keyboard changes (display, keyboard and device-wide kill state are shared with displayProfile, keyboard setProfile and killProfile, so reset also undoes their direct changes). In a daemon session, release or rebind restores all three. Simulates effects, not firmware.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -16079,7 +16082,7 @@
   },
   {
     "name": "pressButton",
-    "description": "Press a device or navigation button. On iOS simulators, volume_up, volume_down, and power use hardware-button events; menu is unsupported on iOS. action and camera are iOS-only (Action button, Camera Control) and return unsupported_button where the device lacks that hardware.",
+    "description": "Press a device or navigation button. On iOS simulators, volume_up, volume_down, and power use hardware-button events; menu is unsupported on iOS. action and camera are iOS-only (Action button, Camera Control) and return unsupported_button where the device lacks that hardware. Android-only system actions: lock, power_dialog, quick_settings, screenshot, split_screen (raw system toggle; windowMode places a chosen app) and dismiss_notification_shade; each needs the API level and CtrlProxy APK that supports it and otherwise returns unsupported_system_action. lock leaves the device locked (wakeAndUnlock); power_dialog and quick_settings stay open until back/home.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -16095,7 +16098,13 @@
             "volume_down",
             "recent",
             "action",
-            "camera"
+            "camera",
+            "lock",
+            "power_dialog",
+            "quick_settings",
+            "screenshot",
+            "split_screen",
+            "dismiss_notification_shade"
           ]
         },
         "platform": {

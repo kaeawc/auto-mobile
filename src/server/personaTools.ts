@@ -160,9 +160,10 @@ const personaTool = defineDeviceTool({
     "executors. describe reports every facet's evidence status (focused_trace | vendor_documented | cdd_derived | " +
     "inferred | experimental) and the OEM capabilities that cannot be emulated; apply with requires naming one of " +
     "those returns route_to_real_device and changes nothing. applying a different manufacturer profile resets the " +
-    "recorded one first; reset restores the display, kill and keyboard changes (display and device-wide kill state " +
-    "are shared with displayProfile and killProfile). The keyboard profile persists until reset, even across " +
-    "sessions. Simulates effects, not firmware.",
+    "recorded one first; reset restores the display, kill and keyboard changes (display, keyboard and " +
+    "device-wide kill state are shared with displayProfile, keyboard setProfile and killProfile, so reset also " +
+    "undoes their direct changes). In a daemon session, release or rebind restores all three. Simulates " +
+    "effects, not firmware.",
   input: personaInput,
   options: {
     ...PLAN_RELEVANT,

@@ -1,10 +1,19 @@
-import { expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { registerKeyboardProfileSessionCleanup } from "../../src/daemon/keyboardProfileSessionCleanup";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import { KeyboardProfileRestoreRegistry } from "../../src/features/utility/KeyboardProfileRestore";
 import type { BootedDevice } from "../../src/models";
 import { keyboardSchema } from "../../src/server/interactionTools";
+import { setKeyboardProfileRecorded } from "../../src/features/utility/KeyboardProfileRestore";
 import {
+  createKeyboardHandler,
   listKeyboardProfilesForTool,
+  resetKeyboardProfileForTool,
   setKeyboardProfileForTool,
 } from "../../src/server/interactionToolHandlers";
+import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 const androidDevice = { deviceId: "device", platform: "android", name: "Device" } as BootedDevice;
 const iosDevice = { deviceId: "simulator", platform: "ios", name: "Simulator" } as BootedDevice;
@@ -160,4 +169,153 @@ test("setProfile fails closed on an older build", async () => {
     "update/re-cut the APK",
   );
   expect(calls).toEqual([]);
+});
+
+/** A CtrlProxy that tracks the active keyboard profile the way KeyboardProfileStore persists it. */
+class FakeKeyboardProfileProxy {
+  active = "direct";
+  readonly writes: string[] = [];
+  refuse = false;
+
+  async supportsCommand(): Promise<boolean> {
+    return true;
+  }
+
+  async setKeyboardProfile(profileId: string) {
+    this.writes.push(profileId);
+    if (this.refuse) {
+      return { success: false, error: "CtrlProxy refused" };
+    }
+    const previousProfileId = this.active;
+    this.active = profileId;
+    return { success: true, activeProfileId: profileId, previousProfileId };
+  }
+}
+
+describe("keyboard profile restore record (#14705)", () => {
+  let proxy: FakeKeyboardProfileProxy;
+  let registry: KeyboardProfileRestoreRegistry;
+
+  beforeEach(() => {
+    proxy = new FakeKeyboardProfileProxy();
+    registry = new KeyboardProfileRestoreRegistry();
+  });
+
+  test("setProfile records the profile before the first change for its owner", async () => {
+    await setKeyboardProfileForTool(androidDevice, "gboard", proxy, undefined, {
+      owner: "session-1",
+      registry,
+    });
+    await setKeyboardProfileForTool(androidDevice, "samsung", proxy, undefined, {
+      owner: "session-1",
+      registry,
+    });
+    expect(registry.pending(androidDevice.deviceId)).toBe("direct");
+    expect(registry.takeOwnedBy(androidDevice.deviceId, "session-1")?.profileId).toBe("direct");
+  });
+
+  test("a refused setProfile records nothing", async () => {
+    proxy.refuse = true;
+    await expect(
+      setKeyboardProfileForTool(androidDevice, "gboard", proxy, undefined, { registry }),
+    ).rejects.toThrow("CtrlProxy refused");
+    expect(registry.pending(androidDevice.deviceId)).toBeUndefined();
+  });
+
+  test("reset puts the recorded profile back once and keeps a refused one recorded", async () => {
+    await setKeyboardProfileForTool(androidDevice, "gboard", proxy, undefined, { registry });
+    proxy.refuse = true;
+    await expect(
+      resetKeyboardProfileForTool(androidDevice, proxy, undefined, registry),
+    ).rejects.toThrow("CtrlProxy refused");
+    expect(registry.pending(androidDevice.deviceId)).toBe("direct");
+
+    proxy.refuse = false;
+    expect(await resetKeyboardProfileForTool(androidDevice, proxy, undefined, registry)).toEqual({
+      restoredProfileId: "direct",
+    });
+    expect(proxy.active).toBe("direct");
+    proxy.writes.length = 0;
+    expect(await resetKeyboardProfileForTool(androidDevice, proxy, undefined, registry)).toEqual(
+      {},
+    );
+    expect(proxy.writes).toEqual([]);
+  });
+});
+
+describe("keyboard setProfile in a daemon session (#14705)", () => {
+  let timer: FakeTimer;
+  let manager: SessionManager;
+  let proxy: FakeKeyboardProfileProxy;
+  let registry: KeyboardProfileRestoreRegistry;
+  let handler: ReturnType<typeof createKeyboardHandler>;
+
+  beforeEach(() => {
+    timer = new FakeTimer();
+    manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+    });
+    proxy = new FakeKeyboardProfileProxy();
+    registry = new KeyboardProfileRestoreRegistry();
+    registerKeyboardProfileSessionCleanup(manager, { registry, clientFor: () => proxy, timer });
+    handler = createKeyboardHandler({
+      keyboardProfile: { sessionManager: () => manager, clientFor: () => proxy, registry },
+    });
+  });
+
+  afterEach(() => {
+    manager.stopCleanupTimer();
+  });
+
+  test("release puts back the profile active before the session's first change", async () => {
+    await manager.createSession("session-1", androidDevice.deviceId, "android");
+    for (const profile of ["gboard", "samsung"] as const) {
+      await handler(androidDevice, { action: "setProfile", profile, sessionUuid: "session-1" });
+    }
+    expect(proxy.active).toBe("samsung");
+
+    await manager.releaseSession("session-1", "explicit-release");
+    await manager.getPendingDeviceCleanup(androidDevice.deviceId);
+    expect(proxy.active).toBe("direct");
+    expect(registry.pending(androidDevice.deviceId)).toBeUndefined();
+  });
+
+  test("a sessionless change persists after another session's release", async () => {
+    await manager.createSession("session-1", androidDevice.deviceId, "android");
+    await handler(androidDevice, { action: "setProfile", profile: "gboard" });
+    await manager.releaseSession("session-1", "explicit-release");
+    await manager.getPendingDeviceCleanup(androidDevice.deviceId);
+    expect(proxy.active).toBe("gboard");
+    expect(proxy.writes).toEqual(["gboard"]);
+  });
+
+  test("a released session cannot change the profile", async () => {
+    await manager.createSession("session-1", androidDevice.deviceId, "android");
+    await manager.releaseSession("session-1", "explicit-release");
+    await expect(
+      handler(androidDevice, { action: "setProfile", profile: "gboard", sessionUuid: "session-1" }),
+    ).rejects.toThrow("Cannot change the keyboard profile");
+    expect(proxy.writes).toEqual([]);
+  });
+  test("a session bound to another device is refused before anything changes", async () => {
+    await manager.createSession("session-1", "other-device", "android");
+    await expect(
+      handler(androidDevice, { action: "setProfile", profile: "gboard", sessionUuid: "session-1" }),
+    ).rejects.toThrow("Cannot change the keyboard profile");
+    expect(proxy.writes).toEqual([]);
+  });
+
+  test("an acquisition-time manufacturer-profile write is restored by the same release path", async () => {
+    await manager.createSession("session-1", androidDevice.deviceId, "android");
+    await setKeyboardProfileRecorded(androidDevice, "samsung", proxy, undefined, {
+      owner: "session-1",
+      registry,
+    });
+    expect(proxy.active).toBe("samsung");
+
+    await manager.releaseSession("session-1", "explicit-release");
+    await manager.getPendingDeviceCleanup(androidDevice.deviceId);
+    expect(proxy.active).toBe("direct");
+    expect(registry.pending(androidDevice.deviceId)).toBeUndefined();
+  });
 });

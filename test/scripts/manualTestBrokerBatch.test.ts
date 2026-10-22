@@ -207,3 +207,41 @@ test.each([
     "Invalid session broker host configuration",
   );
 });
+
+test("every host-config key the product accepts survives the batch round trip (#14789)", () => {
+  const input = {
+    ...brokerBatchInput(),
+    limits: { totalDeviceCap: 2, sessionCap: 2, idlePoolCap: 0, maxConcurrentResetBoots: 1 },
+    androidResetMode: "keep-booted",
+    reuseAndroidCleanDevices: true,
+    androidKeepBootedMaxUses: 5,
+    androidKeepBootedFallback: "snapshot",
+    androidResetTimeoutMs: 60_000,
+    reuse: { ios: { mode: "off" } },
+  };
+  const batch = parseBrokerBatch(input, { allowReuse: true });
+  expect(batch.limits.maxConcurrentResetBoots).toBe(1);
+  const host = renderHostConfig(batch);
+  expect(host).toMatchObject({
+    limits: { maxConcurrentResetBoots: 1 },
+    androidResetMode: "keep-booted",
+    androidKeepBootedMaxUses: 5,
+    androidKeepBootedFallback: "snapshot",
+    androidResetTimeoutMs: 60_000,
+  });
+  // The product parser accepts the rendered host config, and re-wrapping it as a batch is lossless.
+  const { clients: _clients, ...hostOnly } = { ...host, schemaVersion: 1, clients: [] };
+  expect(
+    renderHostConfig(parseBrokerBatch({ ...hostOnly, clients: [] }, { allowReuse: true })),
+  ).toEqual(host);
+});
+
+test("the product parser still owns invalid host-config values and required caps", () => {
+  const input = brokerBatchInput();
+  expect(() =>
+    parseBrokerBatch({ ...input, limits: { ...input.limits, maxConcurrentResetBoots: 0 } }),
+  ).toThrow("Invalid session broker host configuration");
+  expect(() => parseBrokerBatch({ ...input, limits: { totalDeviceCap: 2 } })).toThrow(
+    "are required",
+  );
+});

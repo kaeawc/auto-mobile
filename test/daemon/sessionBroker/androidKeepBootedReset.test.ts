@@ -190,6 +190,39 @@ describe("Android keep-booted strategy", () => {
     expect(await journal.getBaseline(SCOPE)).toBeNull();
   });
 
+  test("a deviceSnapshot session skips the journal clean and escalates with the opaque flag", async () => {
+    let seenOpaque: boolean | undefined;
+    const { port, strategy } = await rig({
+      fallback: {
+        reset: async (_device, _packages, _assertOwned, context) => {
+          seenOpaque = context.opaquePersistentChanges;
+          return { outcome: "clean", mode: "wipe-data", phases: {} };
+        },
+      },
+    });
+    const result = await strategy.reset(ANDROID_RESET_DEVICE, new Set(), async () => {}, {
+      ...SESSION,
+      opaquePersistentChanges: true,
+      rebindIncarnation: async () => SESSION.incarnation ?? SESSION.resourceId,
+      assertBindingOwned: async () => {},
+    });
+    expect(port.cleanCount).toBe(0);
+    expect(seenOpaque).toBe(true);
+    expect(result).toMatchObject({ outcome: "fallback:wipe-data", mode: "wipe-data" });
+    expect(result.fallbackReason).toContain("deviceSnapshot");
+  });
+
+  test("a deviceSnapshot session without a fallback fails closed", async () => {
+    const { port, strategy } = await rig();
+    await expect(
+      strategy.reset(ANDROID_RESET_DEVICE, new Set(), async () => {}, {
+        ...SESSION,
+        opaquePersistentChanges: true,
+      }),
+    ).rejects.toThrow("fallback or destruction");
+    expect(port.cleanCount).toBe(0);
+  });
+
   test("fallback receives a fresh cancellable budget after replay consumes its entire budget", async () => {
     const replayReached = Promise.withResolvers<void>();
     const replayRelease = Promise.withResolvers<void>();

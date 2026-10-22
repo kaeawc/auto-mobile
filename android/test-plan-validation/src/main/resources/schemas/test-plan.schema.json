@@ -796,6 +796,9 @@
                 "required": ["screenLock"]
               },
               {
+                "required": ["power"]
+              },
+              {
                 "required": ["deviceCondition"]
               },
               {
@@ -1721,6 +1724,49 @@
             }
           ]
         },
+        "power": {
+          "description": "Android only. Fake battery (level, charging ac|usb|wireless|none, reset), battery saver, Doze (off|light|deep; light/deep unplug the battery and turn the screen off first), an app's standby bucket and inactive state, Data Saver and thermal status (0-6 or reset). Battery, Doze and thermal faking is refused on physical devices. A session restores every changed field on release.",
+          "type": "object",
+          "properties": {
+            "battery": {
+              "type": "object",
+              "properties": {
+                "level": { "type": "integer", "minimum": 0, "maximum": 100 },
+                "charging": { "type": "string", "enum": ["ac", "usb", "wireless", "none"] },
+                "reset": { "type": "boolean" }
+              },
+              "additionalProperties": false
+            },
+            "batterySaver": { "type": "boolean" },
+            "doze": { "type": "string", "enum": ["off", "light", "deep"] },
+            "standbyBucket": {
+              "type": "object",
+              "properties": {
+                "appId": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+$" },
+                "bucket": {
+                  "type": "string",
+                  "enum": ["active", "working_set", "frequent", "rare", "restricted"]
+                }
+              },
+              "required": ["appId", "bucket"],
+              "additionalProperties": false
+            },
+            "appInactive": {
+              "type": "object",
+              "properties": {
+                "appId": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+$" },
+                "inactive": { "type": "boolean" }
+              },
+              "required": ["appId", "inactive"],
+              "additionalProperties": false
+            },
+            "dataSaver": { "type": "boolean" },
+            "thermalStatus": {
+              "anyOf": [{ "type": "integer", "minimum": 0, "maximum": 6 }, { "type": "string", "const": "reset" }]
+            }
+          },
+          "additionalProperties": false
+        },
         "location": {
           "description": "Set a static fix, start a timed route, or stop route playback on an Android emulator or iOS Simulator.",
           "anyOf": [
@@ -1891,6 +1937,9 @@
         },
         {
           "required": ["screenLock"]
+        },
+        {
+          "required": ["power"]
         },
         {
           "required": ["deviceCondition"]

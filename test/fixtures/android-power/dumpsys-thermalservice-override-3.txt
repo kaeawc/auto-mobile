@@ -1,0 +1,13 @@
+IsStatusOverride: true
+ThermalEventListeners:
+	callbacks: 1
+	killed: false
+	broadcasts count: -1
+ThermalStatusListeners:
+	callbacks: 1
+	killed: false
+	broadcasts count: -1
+Thermal Status: 3
+Cached temperatures:
+	Temperature{mValue=25.0, mType=0, mName=battery, mStatus=0}
+HAL Ready: true

@@ -15,6 +15,10 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { patchDeviceBinding } from "../helpers/patchDeviceBinding";
 import { registerScreenLockSessionCleanup } from "../../src/daemon/screenLockSessionCleanup";
+import { registerPowerSessionCleanup } from "../../src/daemon/powerSessionCleanup";
+import { AdbPowerClient } from "../../src/features/utility/power/AndroidPowerClient";
+import { PowerRegistry } from "../../src/features/utility/power/PowerRegistry";
+import { FakePowerAdb } from "../fakes/FakePowerAdb";
 import { ScreenLockRegistry } from "../../src/features/utility/screenLock/ScreenLockRegistry";
 import { logger } from "../../src/utils/logger";
 import { FakeLockSettingsClient } from "../fakes/FakeLockSettingsClient";
@@ -285,6 +289,39 @@ describe.each([false, true])("terminal release retry (autolock=%s)", (autolock) 
       expect(JSON.stringify(released)).not.toContain("1357");
       expect(await release()).toMatchObject({
         result: { alreadyReleased: true, screenLockRestore: { status: "failed" } },
+      });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  arranged("a power restore that fails is reported in the release result", async () => {
+    const registry = new PowerRegistry();
+    const adb = new FakePowerAdb();
+    adb.failing.add("restrict-background false");
+    const cleanupTimer = new FakeTimer();
+    cleanupTimer.enableAutoAdvance();
+    registerPowerSessionCleanup(manager, {
+      registry,
+      timer: cleanupTimer,
+      clientFactory: () => new AdbPowerClient(adb),
+    });
+    registry.ensure(deviceId, sessionId).changed.push("dataSaver");
+    state = { ...state, getPowerRegistry: () => registry };
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      expect(await release()).toMatchObject({
+        success: true,
+        result: {
+          powerRestore: {
+            status: "failed",
+            deviceId,
+            fields: [{ field: "dataSaver", status: "failed" }],
+          },
+        },
+      });
+      expect(await release()).toMatchObject({
+        result: { alreadyReleased: true, powerRestore: { status: "failed" } },
       });
     } finally {
       warn.mockRestore();

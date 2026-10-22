@@ -35,6 +35,12 @@ internal abstract class DesktopDaemonSessionCompositionFixture(
   /** Extra virtual milliseconds a slow fake call adds to the session's monotonic clock. */
   @Volatile protected var clockSkewMs = 0L
 
+  /** The user's appearance choice, kept across the sessions a test rotates through (#11363). */
+  protected val appearanceChoices = AppearanceChoiceMemory()
+
+  /** The daemon's per-session appearance rows the restored choice is sent to (#11363). */
+  protected val appearanceStore = SessionAppearanceStore()
+
   protected fun ComposeUiTest.tick() {
     mainClock.advanceTimeBy(HEARTBEAT_MS)
     mainClock.advanceTimeByFrame()
@@ -106,6 +112,8 @@ internal abstract class DesktopDaemonSessionCompositionFixture(
             },
             ioDispatcher = testDispatcher,
             cleanupDispatcher = testDispatcher,
+            appearanceChoices = appearanceChoices,
+            appearanceClientFactory = appearanceStore::clientFor,
           ),
         )
     }

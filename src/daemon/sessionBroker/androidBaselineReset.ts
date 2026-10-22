@@ -438,29 +438,7 @@ export class AndroidBaselineReset {
     }
     const inventory = await this.dependencies.inventory({ signal, timeoutMs });
     signal?.throwIfAborted();
-    const matches = inventory.filter(
-      (candidate) => candidate.deviceId === device.deviceId || candidate.name === device.name,
-    );
-    const target = matches[0];
-    if (matches.length !== 1 || !target) {
-      throw new ActionableError(
-        "Fresh Android inventory did not prove the exact online reset target",
-      );
-    }
-    // Console-exclusive snapshot work temporarily omits the AVD name and its config fields.
-    // Only after the initial full profile proof may serial presence stand in for that profile.
-    const pendingName = allowPendingName && isUnknownEmulatorName(target.name, device.deviceId);
-    const validTarget = [
-      target.platform === "android",
-      target.deviceId === device.deviceId,
-      pendingName || target.name === device.name,
-      target.isRunning === true,
-      target.isRunningStateKnown !== false,
-      pendingName || target.runtimeId === profile.systemImagePackage,
-      pendingName || target.deviceType === profile.profileId,
-      pendingName || target.apiLevel === profile.apiLevel,
-    ].every(Boolean);
-    if (!validTarget) {
+    if (!inventoryProvesTarget(inventory, device, profile, allowPendingName)) {
       throw new ActionableError(
         "Fresh Android inventory did not prove the exact online reset target",
       );
@@ -599,4 +577,41 @@ export class AndroidBaselineReset {
     }
     return packages;
   }
+}
+
+function targetProvesProfile(
+  target: DeviceInfo,
+  device: BootedDevice,
+  profile: AndroidResetProfile,
+  pendingName: boolean,
+): boolean {
+  return [
+    target.platform === "android",
+    target.deviceId === device.deviceId,
+    pendingName || target.name === device.name,
+    target.isRunning === true,
+    target.isRunningStateKnown !== false,
+    pendingName || target.runtimeId === profile.systemImagePackage,
+    pendingName || target.deviceType === profile.profileId,
+    pendingName || target.apiLevel === profile.apiLevel,
+  ].every(Boolean);
+}
+
+function inventoryProvesTarget(
+  inventory: DeviceInfo[],
+  device: BootedDevice,
+  profile: AndroidResetProfile,
+  allowPendingName: boolean,
+): boolean {
+  const matches = inventory.filter(
+    (candidate) => candidate.deviceId === device.deviceId || candidate.name === device.name,
+  );
+  const target = matches[0];
+  if (matches.length !== 1 || !target) {
+    return false;
+  }
+  // Console-exclusive snapshot work temporarily omits the AVD name and its config fields.
+  // Only after the initial full profile proof may serial presence stand in for that profile.
+  const pendingName = allowPendingName && isUnknownEmulatorName(target.name, device.deviceId);
+  return targetProvesProfile(target, device, profile, pendingName);
 }

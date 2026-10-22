@@ -87,14 +87,30 @@ describe("AndroidBaselineReset", () => {
           },
         ];
         const target = host.devices[0]!;
-        if (failure === "foreign serial") target.deviceId = "emulator-5556";
-        if (failure === "foreign placeholder") target.name = "Unknown (emulator-5556)";
-        if (failure === "real name") target.name = "different-avd";
-        if (failure === "offline") target.isRunning = false;
-        if (failure === "unknown running state") target.isRunningStateKnown = false;
-        if (failure === "duplicate") host.devices.push({ ...target });
-        if (failure === "boot") host.booted = false;
-        if (failure === "boot identity") host.bootId = "87654321-4321-4321-4321-cba987654321";
+        if (failure === "foreign serial") {
+          target.deviceId = "emulator-5556";
+        }
+        if (failure === "foreign placeholder") {
+          target.name = "Unknown (emulator-5556)";
+        }
+        if (failure === "real name") {
+          target.name = "different-avd";
+        }
+        if (failure === "offline") {
+          target.isRunning = false;
+        }
+        if (failure === "unknown running state") {
+          target.isRunningStateKnown = false;
+        }
+        if (failure === "duplicate") {
+          host.devices.push({ ...target });
+        }
+        if (failure === "boot") {
+          host.booted = false;
+        }
+        if (failure === "boot identity") {
+          host.bootId = "87654321-4321-4321-4321-cba987654321";
+        }
         await context.assertOwned();
       },
       reset: async () => {},

@@ -235,8 +235,12 @@ describe("ManagedDevicePort preparation and release", () => {
             canCapture: true,
             capture: async () => {
               heldDuringCapture = leaseKeepalive.held;
-              if (outcome === "deadline failure") timer.advanceTime(1000);
-              if (outcome !== "success") throw captureError;
+              if (outcome === "deadline failure") {
+                timer.advanceTime(1000);
+              }
+              if (outcome !== "success") {
+                throw captureError;
+              }
             },
             forget: async () => {},
             reset: async () => "clean",

@@ -176,29 +176,37 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
       }
     }
     const sessionId = await this.readySessionId(result, resource, profile);
-    const release = this.dependencies.leaseKeepalive?.hold({
-      taskId: resource.requestId,
-      ownerKey: "session-broker",
-      sessionUuid: sessionId,
+    await this.captureBaselinesHoldingLease(resource, result, profile, sessionId, {
+      signal: options.signal,
+      deadlineMs,
     });
-    try {
-      await this.captureAndroidBaseline(resource, result, profile, sessionId, {
-        signal: options.signal,
-        deadlineMs,
-      });
-      if (profile.platform === "ios" && this.dependencies.captureIosBaseline) {
-        await this.capturePoolEntryBaseline(resource, sessionId, {
-          signal: options.signal,
-          deadlineMs,
-        });
-      }
-    } finally {
-      release?.();
-    }
     const binding = result.bindings.find(
       (entry) => entry.bindingIndex === resource.allocationIndex,
     );
     return { sessionId, profile, timing: preparationTiming(binding?.lifecycle) };
+  }
+
+  /** Keeps the acquired session's lease renewed while baseline capture delays the client grant. */
+  private async captureBaselinesHoldingLease(
+    resource: BrokerResourceRecord,
+    result: BrokerDeviceAcquisitionResult,
+    profile: BrokerNativeProfile,
+    sessionId: string,
+    options: { signal?: AbortSignal; deadlineMs: number },
+  ): Promise<void> {
+    const release = this.dependencies.leaseKeepalive?.hold({
+      taskId: resource.requestId!,
+      ownerKey: "session-broker",
+      sessionUuid: sessionId,
+    });
+    try {
+      await this.captureAndroidBaseline(resource, result, profile, sessionId, options);
+      if (profile.platform === "ios" && this.dependencies.captureIosBaseline) {
+        await this.capturePoolEntryBaseline(resource, sessionId, options);
+      }
+    } finally {
+      release?.();
+    }
   }
 
   private async captureAndroidBaseline(

@@ -248,12 +248,7 @@ export async function openSessionBrokerService(
     const devices = new ManagedDevicePort({
       scope: SESSION_BROKER_SCOPE,
       timer: options.timer,
-      leaseKeepalive: options.mutationSessions
-        ? new HeartbeatTaskLeaseKeepalive({
-            sessions: () => options.mutationSessions,
-            timer: options.timer,
-          })
-        : undefined,
+      leaseKeepalive: preparationLeaseKeepalive(options),
       brokerDeviceAcquisition: options.acquisition,
       brokerExecutionRelease: options.release,
       registry: options.registry,
@@ -787,4 +782,13 @@ export class SessionBrokerService {
       };
     });
   }
+}
+
+function preparationLeaseKeepalive(
+  options: Pick<OpenSessionBrokerServiceOptions, "mutationSessions" | "timer">,
+): HeartbeatTaskLeaseKeepalive | undefined {
+  const { mutationSessions, timer } = options;
+  return mutationSessions
+    ? new HeartbeatTaskLeaseKeepalive({ sessions: () => mutationSessions, timer })
+    : undefined;
 }

@@ -1487,7 +1487,8 @@ describe("systemTray clearAll dumpsys ownership", () => {
     expect(payload).toMatchObject({ success: false, dismissedCount: 0 });
     expect(payload.message).toContain("matching notification may remain");
     expect(payload.message).not.toContain("No notifications found");
-    expect(commands().filter((command) => command.startsWith("shell input swipe"))).toHaveLength(1);
+    // The row reads exactly as before the swipe, so the swipe missed: it is retried once.
+    expect(commands().filter((command) => command.startsWith("shell input swipe"))).toHaveLength(2);
     expect(commands().at(-1)).toBe("shell cmd statusbar collapse");
   });
 
@@ -1513,7 +1514,8 @@ describe("systemTray clearAll dumpsys ownership", () => {
         expect(commands().filter((command) => command.includes("shell cmd statusbar"))).toEqual([
           "shell cmd statusbar expand-notifications",
         ]);
-        expect(timer.getSleepHistory()).toEqual([250, 250, 125]);
+        // One verified miss, then the retried swipe's own budget.
+        expect(timer.getSleepHistory()).toEqual([250, 250, 125, 250, 250, 125]);
         if (restoreThrows) {
           expect(warnSpy).toHaveBeenCalledWith(
             "Failed to restore notification shade: Failed to expand system tray: statusbar restore failed",

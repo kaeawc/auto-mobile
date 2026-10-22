@@ -111,6 +111,10 @@ export const readGitVersion = (
  */
 export const releaseVersion = (version: string): string => version.split("+")[0];
 
+/** Remove a trailing working-tree stamp only from git build metadata (+g<sha>). */
+export const withoutDirtyStamp = (version: string): string =>
+  version.replace(/(\+g[\da-f]+)\.dirty(?:\.[\da-f]+)?$/i, "$1");
+
 /**
  * Stamp a git short SHA (and dirty marker) onto a base version as semver build
  * metadata. Release builds (no git info) are returned unchanged.
@@ -210,26 +214,30 @@ export const createMcpVersionResolver = (
 
 let resolver: ReturnType<typeof createMcpVersionResolver> | undefined;
 
-const getResolver = (): ReturnType<typeof createMcpVersionResolver> => {
-  resolver ??= createMcpVersionResolver({
-    env: {
-      MCP_SERVER_VERSION: readEnvRaw(AMBIENT_ENV.MCP_SERVER_VERSION),
-      npm_package_version: readEnvRaw(AMBIENT_ENV.NPM_PACKAGE_VERSION),
+const defaultResolverDeps = (): McpVersionResolverDeps => ({
+  env: {
+    MCP_SERVER_VERSION: readEnvRaw(AMBIENT_ENV.MCP_SERVER_VERSION),
+    npm_package_version: readEnvRaw(AMBIENT_ENV.NPM_PACKAGE_VERSION),
+  },
+  readPackageVersion: readPackageVersionFromDisk,
+  readGitVersion: () => readGitVersion(moduleDir(), testOverrides.gitMetadataClient),
+  readDirtyState: () =>
+    (testOverrides.gitMetadataClient ?? defaultGitMetadataClient).readDirtyState(moduleDir()),
+  timer: {
+    setTimeout(callback, ms) {
+      const handle = defaultTimer.setTimeout(callback, ms);
+      handle.unref?.();
+      return handle;
     },
-    readPackageVersion: readPackageVersionFromDisk,
-    readGitVersion: () => readGitVersion(moduleDir(), testOverrides.gitMetadataClient),
-    readDirtyState: () =>
-      (testOverrides.gitMetadataClient ?? defaultGitMetadataClient).readDirtyState(moduleDir()),
-    timer: {
-      setTimeout(callback, ms) {
-        const handle = defaultTimer.setTimeout(callback, ms);
-        handle.unref?.();
-        return handle;
-      },
-    },
-  });
-  return resolver;
-};
+  },
+});
+
+const getResolver = (): ReturnType<typeof createMcpVersionResolver> =>
+  (resolver ??= createMcpVersionResolver(defaultResolverDeps()));
+
+/** Probe the version a process started from this checkout right now would report. */
+export const probeCheckoutMcpServerVersion = (): Promise<string> =>
+  createMcpVersionResolver(defaultResolverDeps()).resolveSettled();
 
 export const getMcpServerVersion = (): string => getResolver().current();
 

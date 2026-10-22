@@ -74,7 +74,7 @@ abstract class ApiSignatureCheckTask : ApiSignatureTask() {
     if (current != expected.readText()) {
       throw GradleException(
         "Public API has changed! Run $command to update the API file.\n" +
-          "Expected file: ${expected.name}"
+          "Expected file: ${expected.name}",
       )
     }
     logger.lifecycle("API check passed: public API matches ${expected.name}")

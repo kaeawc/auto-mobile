@@ -5,7 +5,8 @@ import { prototypeThemeModeFields } from "../../../src/features/prototype/protot
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
 
 const fixtures = join(import.meta.dir, "../../fixtures/prototype-spec/valid");
-const load = (name: string): unknown => JSON.parse(readFileSync(join(fixtures, name), "utf8"));
+const load = (name: string): unknown =>
+  JSON.parse(readFileSync(join(fixtures, name), "utf8").replace(/^\uFEFF/, ""));
 
 describe("prototypeThemeModeFields", () => {
   test("lists every per-mode field of the colour fixture in document order", () => {

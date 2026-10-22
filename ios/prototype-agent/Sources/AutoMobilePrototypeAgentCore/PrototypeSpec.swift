@@ -849,6 +849,11 @@ final class PrototypeNode: Decodable {
     let multiline: Bool?
     let minLines: Int?
     let maxLength: Int?
+    /// `chart` series, fixed y axis, x label mode and goal line (#14209), read through `/data`.
+    let chartSeries: [PrototypeChartSeries]?
+    let yRange: PrototypeChartRange?
+    let xLabels: String?
+    let goal: Double?
 
     /// Gesture-only nodes have the same touch target and accessibility semantics as tap nodes.
     var isInteractive: Bool {
@@ -868,7 +873,8 @@ final class PrototypeNode: Decodable {
              linkify,
              activeKey, trailingActions, onSubmit, pageSpacing, peek, pageSize, indicator, itemWidth, itemSpacing,
              dismissOnSwipe, supportingText, keyboardType, secure, multiline, minLines, maxLength, trailingIcon,
-             imeAction
+             imeAction, yRange, xLabels, goal
+        case chartSeries = "series"
     }
 
     init(from decoder: Decoder) throws {
@@ -962,6 +968,10 @@ final class PrototypeNode: Decodable {
         maxLength = try container.decodeIfPresent(Int.self, forKey: .maxLength)
         trailingIcon = try container.decodeIfPresent(PrototypeAppBarAction.self, forKey: .trailingIcon)
         imeAction = try container.decodeIfPresent(String.self, forKey: .imeAction)
+        chartSeries = try container.decodeIfPresent([PrototypeChartSeries].self, forKey: .chartSeries)
+        yRange = try container.decodeIfPresent(PrototypeChartRange.self, forKey: .yRange)
+        xLabels = try container.decodeIfPresent(String.self, forKey: .xLabels)
+        goal = try container.decodeIfPresent(Double.self, forKey: .goal)
     }
 
     /// Android's `resolvePrototypeStyle`: every `styleWhen` entry whose condition holds is merged over

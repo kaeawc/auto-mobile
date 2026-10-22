@@ -43,6 +43,7 @@ import { preparationTiming } from "./preparationTiming";
 
 import { BROKER_BINDING_ROLE } from "./persistedIdentity";
 import type { AndroidBaselineReset } from "./androidBaselineReset";
+import type { TaskLeaseKeepalive } from "../tasks/taskLeaseKeepalive";
 
 type ManagedDevicePortRegistry = Pick<
   BindingRegistry,
@@ -57,6 +58,8 @@ export interface ManagedDevicePortDependencies {
   /** Stable provider-owned identity. Consumer requests never choose this scope or a binding index. */
   scope: BindingScopeIdentity;
   timer?: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
+  /** Renews the acquired session while baseline preparation delays the client grant. */
+  leaseKeepalive?: TaskLeaseKeepalive;
   brokerDeviceAcquisition: Pick<BrokerDeviceAcquisition, "acquire">;
   brokerExecutionRelease: Pick<BrokerExecutionRelease, "releaseExecution">;
   registry: ManagedDevicePortRegistry;
@@ -173,20 +176,37 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
       }
     }
     const sessionId = await this.readySessionId(result, resource, profile);
-    await this.captureAndroidBaseline(resource, result, profile, sessionId, {
+    await this.captureBaselinesHoldingLease(resource, result, profile, sessionId, {
       signal: options.signal,
       deadlineMs,
     });
-    if (profile.platform === "ios" && this.dependencies.captureIosBaseline) {
-      await this.capturePoolEntryBaseline(resource, sessionId, {
-        signal: options.signal,
-        deadlineMs,
-      });
-    }
     const binding = result.bindings.find(
       (entry) => entry.bindingIndex === resource.allocationIndex,
     );
     return { sessionId, profile, timing: preparationTiming(binding?.lifecycle) };
+  }
+
+  /** Keeps the acquired session's lease renewed while baseline capture delays the client grant. */
+  private async captureBaselinesHoldingLease(
+    resource: BrokerResourceRecord,
+    result: BrokerDeviceAcquisitionResult,
+    profile: BrokerNativeProfile,
+    sessionId: string,
+    options: { signal?: AbortSignal; deadlineMs: number },
+  ): Promise<void> {
+    const release = this.dependencies.leaseKeepalive?.hold({
+      taskId: resource.requestId!,
+      ownerKey: "session-broker",
+      sessionUuid: sessionId,
+    });
+    try {
+      await this.captureAndroidBaseline(resource, result, profile, sessionId, options);
+      if (profile.platform === "ios" && this.dependencies.captureIosBaseline) {
+        await this.capturePoolEntryBaseline(resource, sessionId, options);
+      }
+    } finally {
+      release?.();
+    }
   }
 
   private async captureAndroidBaseline(
@@ -266,7 +286,10 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     if (this.preparationStopped(options.deadlineMs, options.signal)) {
       throw new ActionableError("Android reset baseline capture exceeded preparation deadline");
     }
-    logger.warn("Android reset baseline unavailable; device will be destroyed on release", error);
+    logger.warn(
+      `Android reset baseline unavailable; device will be destroyed on release: ${errorMessage(error)}`,
+      error,
+    );
   }
 
   private async capturePoolEntryBaseline(

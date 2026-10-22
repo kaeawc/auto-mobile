@@ -4,7 +4,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeAssetContract
 import java.io.File
 
 /** Immutable verified snapshot; infer decoder metadata using the existing signature checks. */
-internal class SavedPrototypeAssetSource(private val loaded: SavedPrototypeLoadResult.Loaded) :
+class SavedPrototypeAssetSource(private val loaded: SavedPrototypeLoadResult.Loaded) :
   PrototypeAssetSource {
   private val metadata = mutableMapOf<String, PrototypeAssetInfo?>()
 

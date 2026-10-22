@@ -88,6 +88,47 @@ export function isIosHomePressOnSpringboard(
   );
 }
 
+/**
+ * True when the pre-press tree was SpringBoard reached through the runner's foreground fallback.
+ * On the real home screen the runner always reports `fallbackToSpringboard: true` (#14954), so
+ * the flag cannot veto a Home press; the post-press SpringBoard check decides instead.
+ */
+export function isIosSpringboardFallbackPress(
+  platform: string,
+  button: string,
+  observation: ObserveResult | undefined,
+): boolean {
+  const hierarchy = observation?.viewHierarchy;
+  return (
+    platform === "ios" &&
+    button.toLowerCase() === "home" &&
+    hierarchy?.packageName === "com.apple.springboard" &&
+    hierarchy.fallbackToSpringboard === true &&
+    !hierarchy.hierarchy?.error
+  );
+}
+
+/**
+ * A Home press that began on a fallback SpringBoard and still ends on a healthy SpringBoard
+ * without a visual change was already home: report success instead of "No visual change".
+ */
+export function acceptIosHomeAlreadyOnSpringboard(
+  result: { success: boolean; error?: string; observation?: ObserveResult },
+  startedOnFallbackSpringboard: boolean,
+): void {
+  const after = result.observation?.viewHierarchy;
+  if (
+    startedOnFallbackSpringboard &&
+    !result.success &&
+    result.error === "No visual change observed" &&
+    after?.packageName === "com.apple.springboard" &&
+    !after.hierarchy?.error
+  ) {
+    result.success = true;
+    delete result.error;
+  }
+}
+
 export class PressButton extends BaseVisualChange {
   private readonly globalActionClient?: PressButtonCtrlProxyOverrides["globalActionClient"];
   private readonly frameContextClient?: PressButtonCtrlProxyOverrides["frameContextClient"];
@@ -192,15 +233,23 @@ export class PressButton extends BaseVisualChange {
       signal,
       perf,
     };
-    return this.observedInteraction(async (previousObservation) => {
+    let startedOnFallbackSpringboard = false;
+    const result = await this.observedInteraction(async (previousObservation) => {
       // A Home press on SpringBoard may change nothing (#14954); that is a no-op success.
       if (isIosHomePressOnSpringboard(this.device.platform, button, previousObservation)) {
         options.changeExpected = false;
       }
+      startedOnFallbackSpringboard = isIosSpringboardFallbackPress(
+        this.device.platform,
+        button,
+        previousObservation,
+      );
       return await perf.track("buttonPress", () =>
         this.press(button, undefined, undefined, signal),
       );
     }, options);
+    acceptIosHomeAlreadyOnSpringboard(result, startedOnFallbackSpringboard);
+    return result;
   }
 
   /**

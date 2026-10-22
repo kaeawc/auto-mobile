@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { workingTreeFiles } from "../helpers/workingTreeFiles";
 
 // Every `*.integration.test.ts` must be classified in test/integration-safe-tier.txt,
 // so `scripts/prepush-integration-safe.sh` runs exactly the safe tier and a new
@@ -42,22 +42,8 @@ let entries: TierEntry[];
 let malformed: string[];
 
 beforeAll(() => {
-  // --others picks up a new, not yet committed file (jj checkouts do not stage).
-  tracked = execFileSync(
-    "git",
-    [
-      "ls-files",
-      "-z",
-      "--cached",
-      "--others",
-      "--exclude-standard",
-      "--",
-      "*" + INTEGRATION_SUFFIX,
-    ],
-    { cwd: root, encoding: "utf8" },
-  )
-    .split("\0")
-    .filter((path) => path !== "" && existsSync(join(root, path)));
+  // Includes untracked files: a new, not yet committed file (jj checkouts do not stage).
+  tracked = workingTreeFiles(root, ["*" + INTEGRATION_SUFFIX]);
   ({ entries, malformed } = parseTierFile(readFileSync(join(root, TIER_FILE), "utf8")));
 });
 

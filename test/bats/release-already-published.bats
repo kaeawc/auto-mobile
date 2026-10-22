@@ -74,7 +74,7 @@ EOF
   [[ "$output" != *missing* ]]
 }
 
-@test "maven: all four artifacts present reports published" {
+@test "maven: all five artifacts present reports published" {
   stub_curl 200
   MAVEN_BASE_URL="http://maven-stub" run "$SCRIPT" maven 0.0.44
   [ "$status" -eq 0 ]
@@ -90,7 +90,7 @@ EOF
 @test "maven: the probed artifacts match the modules release.yml publishes" {
   local repo_root="$BATS_TEST_DIRNAME/../.."
   local module
-  for module in protocol test-plan-validation junit-runner auto-mobile-sdk; do
+  for module in protocol test-plan-validation junit-runner auto-mobile-sdk prototype-compose; do
     local artifact
     artifact="$(sed -n 's/^POM_ARTIFACT_ID=//p' "$repo_root/android/$module/gradle.properties")"
     [ -n "$artifact" ]
@@ -107,7 +107,7 @@ EOF
 
 @test "maven: a partial publish fails closed instead of picking a side" {
   # 200 for the first artifact, 404 for the rest — the shape left behind when the
-  # publish step dies midway through its four modules.
+  # publish step dies midway through its five modules.
   cat > "$STUB_DIR/curl" <<'EOF'
 #!/usr/bin/env bash
 url="${*: -1}"
@@ -119,7 +119,7 @@ EOF
   chmod +x "$STUB_DIR/curl"
   MAVEN_BASE_URL="http://maven-stub" run "$SCRIPT" maven 0.0.45
   [ "$status" -ne 0 ]
-  [[ "$output" == *"1 of 4"* ]]
+  [[ "$output" == *"1 of 5"* ]]
   [[ "$output" == *"manual repair"* ]]
 }
 

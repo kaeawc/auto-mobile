@@ -48,6 +48,9 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     "ios/**/README.md",
     // sdkApiBaselineWorkflow.test.ts reads the SDK API baseline and Gradle wiring.
     "android/auto-mobile-sdk/build.gradle.kts",
+    // ...and the shared API task classes plus the renderer's registration of them (#13727).
+    "android/prototype-compose/build.gradle.kts",
+    "android/build-logic/src/main/kotlin/dev/jasonpearson/automobile/buildlogic/apisignature/ApiSignatureTasks.kt",
     "ios/auto-mobile-sdk/api/auto-mobile-sdk.api",
     // validToolsRegistryParity.test.ts reads the Kotlin plan-tool allowlist.
     "android/test-plan-validation/src/main/kotlin/dev/jasonpearson/automobile/validation/ValidTools.kt",
@@ -95,6 +98,8 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeAgentProtocol.swift",
     "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeIconSymbolData.swift",
     "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeSpecContractData.swift",
+    // prototypeAccessibilityLint.test.ts pins the TypeScript baseline palette to the Swift tables.
+    "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeTheme.swift",
     "ios/prototype-agent/ICON-SYMBOLS.md",
   ] as const;
 

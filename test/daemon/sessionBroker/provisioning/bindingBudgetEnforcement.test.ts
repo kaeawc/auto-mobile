@@ -266,7 +266,7 @@ describe("binding total-resource enforcement on SQLite", () => {
   );
 
   test.each(["orphan"] as const)(
-    "compatible %s adoption is charge-neutral at the limit",
+    "compatible %s reclamation is charge-neutral at the limit",
     async (source) => {
       const req = await request();
 
@@ -279,9 +279,9 @@ describe("binding total-resource enforcement on SQLite", () => {
         ...SPEC,
       });
       const result = await make().reconcile(req);
-      expect(result).toMatchObject({ outcome: "ready", disposition: "adopted" });
-      expect(provisioner.calls.map((call) => call.mode)).toEqual(["adopt"]);
-      expect(deleter.calls).toEqual([]);
+      expect(result).toMatchObject({ outcome: "ready", disposition: "replaced" });
+      expect(provisioner.calls.map((call) => call.mode)).toEqual(["create"]);
+      expect(deleter.stableIds()).toEqual([bindingDeviceName(req.key, 1, "abcd")]);
       expect((await usage()).total).toBe(1);
     },
   );

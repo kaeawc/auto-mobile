@@ -668,59 +668,91 @@ test("HTTP request callback handles unexpected rejection before transport dispat
 });
 
 describe("daemon HTTP bearer authentication", () => {
-  test("defers every path and method until publication without evaluating credentials", async () => {
+  /** A daemon whose listener is up but whose token is not published yet. */
+  async function unpublishedHarness(timer = new FakeTimer()) {
     const server = new FakeHttpServer();
     const store = new FakeDaemonHttpTokenStore();
     const daemon = new Daemon(
       { port, host: "127.0.0.1" },
       {
-        timer: new FakeTimer(),
+        timer,
         httpToken: HTTP_TOKEN,
         httpTokenStore: store,
         httpServerFactory: () => server,
       },
     );
-    let completeBind: () => void = () => {
-      throw new Error("listen was not called");
-    };
-    const listen = spyOn(server, "listen").mockImplementation((_port, _host, callback) => {
-      completeBind = callback;
-      return server;
-    });
-    try {
-      const starting = daemon.testHooks.httpIngress.start();
-      for (const method of ["GET", "POST", "OPTIONS", "DELETE"]) {
-        for (const path of ["/heartbeat", "/unknown", MCP_STREAMABLE_PATH]) {
-          const response = await server.dispatch(
-            { host: `localhost:${port}`, authorization: "invalid" },
-            method,
-            path,
-          );
-          expect(response.statusCode).toBe(503);
-          expect(response.headers.get("retry-after")).toBe("1");
-          expect(response.body).toBe('{"error":"Service unavailable"}');
-          expect(server.lastRequest?.headers.authorization).toBe("invalid");
-        }
+    await daemon.testHooks.httpIngress.start();
+    return { server, store, daemon, timer };
+  }
+
+  test("holds every path and method until publication without evaluating credentials (#14424)", async () => {
+    const { server, store, daemon } = await unpublishedHarness();
+    const held: Array<Promise<FakeResponse>> = [];
+    const requests: FakeRequest[] = [];
+    for (const method of ["GET", "POST", "OPTIONS", "DELETE"]) {
+      for (const path of ["/heartbeat", "/unknown", MCP_STREAMABLE_PATH]) {
+        held.push(
+          server.dispatch({ host: `localhost:${port}`, authorization: "invalid" }, method, path),
+        );
+        requests.push(server.lastRequest!);
       }
-      expect((await server.dispatch({ host: "untrusted" })).statusCode).toBe(403);
-      expect(
-        (await server.dispatch({ host: `localhost:${port}`, origin: "http://untrusted" }))
-          .statusCode,
-      ).toBe(403);
-      expect(store.read()).toBeUndefined();
-      daemon.testHooks.publishHttpToken();
-      expect(
-        (await server.dispatch({ host: `localhost:${port}`, authorization: undefined }, "OPTIONS"))
-          .statusCode,
-      ).toBe(401);
-      expect((await server.dispatch({ host: `localhost:${port}` }, "OPTIONS")).statusCode).toBe(
-        200,
-      );
-      completeBind();
-      await starting;
-    } finally {
-      listen.mockRestore();
     }
+    let answered = 0;
+    for (const response of held) {
+      void response.then(() => answered++);
+    }
+    expect((await server.dispatch({ host: "untrusted" })).statusCode).toBe(403);
+    expect(
+      (await server.dispatch({ host: `localhost:${port}`, origin: "http://untrusted" })).statusCode,
+    ).toBe(403);
+    await Bun.sleep(0);
+    expect(answered).toBe(0);
+    expect(requests.every((request) => request.headers.authorization === "invalid")).toBeTrue();
+    expect(store.read()).toBeUndefined();
+
+    daemon.testHooks.publishHttpToken();
+    daemon.testHooks.resolveStartupCompletion();
+    for (const response of await Promise.all(held)) {
+      expect(response.statusCode).toBe(401);
+      expect(response.body).toBe('{"error":"Unauthorized"}');
+    }
+    expect((await server.dispatch({ host: `localhost:${port}` }, "OPTIONS")).statusCode).toBe(200);
+  });
+
+  test("a held request with the published token is admitted once startup completes", async () => {
+    const { server, daemon } = await unpublishedHarness();
+    const response = server.dispatch({ host: `localhost:${port}` }, "OPTIONS");
+    await Bun.sleep(0);
+    daemon.testHooks.publishHttpToken();
+    daemon.testHooks.resolveStartupCompletion();
+    expect((await response).statusCode).toBe(200);
+  });
+
+  test("answers 503 with Retry-After when publication outlives the startup bound", async () => {
+    const warnings = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const { server, timer } = await unpublishedHarness();
+      const response = server.dispatch({ host: `localhost:${port}` }, "OPTIONS", "/heartbeat");
+      for (let turn = 0; turn < 20 && timer.getPendingTimeoutCount() === 0; turn++) {
+        await Promise.resolve();
+      }
+      timer.advanceTime(30_000);
+      const result = await response;
+      expect(result.statusCode).toBe(503);
+      expect(result.headers.get("retry-after")).toBe("1");
+      expect(JSON.parse(result.body)).toEqual({ error: "Daemon is still starting" });
+    } finally {
+      warnings.mockRestore();
+    }
+  });
+
+  test("answers 503 Service unavailable without waiting once the daemon stops accepting", async () => {
+    const { server, daemon } = await unpublishedHarness();
+    daemon.testHooks.httpIngress.setAcceptingHttpSessions(false);
+    const response = await server.dispatch({ host: `localhost:${port}` }, "OPTIONS");
+    expect(response.statusCode).toBe(503);
+    expect(response.headers.get("retry-after")).toBe("1");
+    expect(response.body).toBe('{"error":"Service unavailable"}');
   });
 
   test.each(["Bearer", "bearer", "BEARER", "bEaReR"])(

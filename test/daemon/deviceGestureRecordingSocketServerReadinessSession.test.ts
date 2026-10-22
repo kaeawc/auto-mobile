@@ -134,6 +134,17 @@ describe("device-gesture-recording start readies the device for the session that
     expect(nightModeWrites()).toEqual(["shell cmd uimode night no"]);
   });
 
+  test("a padded session UUID selects and readies its device under the trimmed UUID (#14378)", async () => {
+    const { server, configKeys, selectedSessions } = harness();
+
+    await expect(
+      server.invoke({ command: "start", sessionUuid: ` ${HOLDER} `, platform: "android" }),
+    ).rejects.toThrow("stop after readiness");
+
+    expect(selectedSessions).toEqual([HOLDER]);
+    expect(configKeys).toEqual([HOLDER]);
+  });
+
   test("a start without a session still uses the global config", async () => {
     const { server, configKeys, nightModeWrites } = harness();
 

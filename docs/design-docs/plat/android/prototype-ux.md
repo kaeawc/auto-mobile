@@ -2454,8 +2454,10 @@ Style `shimmer: true` draws a highlight band sweeping across a `box`, `row`, `co
 over its background and inside its clip; any other node type is rejected at
 `<path>.style.shimmer`. The node reports state description "Loading". With `motion: "none"` or
 animator scale 0 no band is drawn, so screenshots see the plain placeholder. A `repeat` of literal
-placeholder rows makes a skeleton list. The iOS agent evaluates `empty` but does not draw shimmer
-yet and does not advertise the capability (#14689).
+placeholder rows makes a skeleton list. The iOS agent advertises the capability too (#14689): it
+sweeps the same band (1.2 s, 35% white, clipped to the node's corner shape) over the node, reads
+"Loading" to VoiceOver with the updates-frequently trait, draws no band under `motion: "none"` or
+Reduce Motion, and rejects shimmer on other node types at the same path.
 
 ## Charts (#14209, not device-verified)
 

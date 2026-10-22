@@ -1,0 +1,15 @@
+<resources>
+  <string name="app_name">ProtoViewer</string>
+  <string name="empty_library">Your prototype library is empty.</string>
+  <string name="loading">Loading…</string>
+  <string name="library_error">Unable to read the prototype library.</string>
+  <string name="not_found">Prototype not found.</string>
+  <string name="corrupt">This prototype could not be opened.</string>
+  <string name="unsupported">This prototype needs a newer ProtoViewer.</string>
+  <string name="relaunch">Relaunch</string><string name="reset">Reset</string>
+  <string name="back">Back</string><string name="cancel">Cancel</string>
+  <string name="more">More options for %1$s</string>
+  <string name="reset_title">Reset prototype?</string>
+  <string name="reset_body">Clear this prototype’s saved values and start again?</string>
+  <string name="action_error">Unable to reset this prototype.</string>
+</resources>

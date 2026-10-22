@@ -6,6 +6,12 @@
 
     /// No hostname lookup or proxy discovery occurs in this adapter: NWConnection receives an IP.
     struct PrototypeNWConnector: PrototypePinnedConnecting {
+        private let onLocalNetworkDenied: @Sendable () -> Void
+
+        init(onLocalNetworkDenied: @escaping @Sendable () -> Void = {}) {
+            self.onLocalNetworkDenied = onLocalNetworkDenied
+        }
+
         func connect(address: String, port: Int, tlsServerName: String?) async throws -> any PrototypePinnedConnection {
             guard let port = NWEndpoint.Port(rawValue: UInt16(exactly: port) ?? 0),
                   IPv4Address(address) != nil || IPv6Address(address) != nil
@@ -14,7 +20,7 @@
             }
             let parameters = Self.parameters(tlsServerName: tlsServerName)
             let raw = NWConnection(host: NWEndpoint.Host(address), port: port, using: parameters)
-            let connection = PrototypeNWConnection(raw)
+            let connection = PrototypeNWConnection(raw, onLocalNetworkDenied: onLocalNetworkDenied)
             return try await withTaskCancellationHandler {
                 try Task.checkCancellation()
                 try await connection.start()
@@ -49,22 +55,66 @@
         }
     }
 
+    /// PolicyDenied also covers an unanswered permission prompt; only teardown concludes the wait.
+    struct PrototypeNWWaitPolicy {
+        enum Action {
+            case ready
+            case reject(Error)
+            case keepWaiting
+            case none
+        }
+
+        private(set) var awaitingPermission = false
+        private(set) var stopped = false
+
+        mutating func observe(_ state: NWConnection.State) -> Action {
+            guard !stopped else { return .none }
+            switch state {
+            case .waiting(.dns(-65570)):
+                awaitingPermission = true
+                return .keepWaiting
+            case .ready:
+                awaitingPermission = false
+                return .ready
+            case let .failed(error), let .waiting(error):
+                let mapped: Error = if case let .posix(code) = error { POSIXError(code) }
+                else { error }
+                return .reject(mapped)
+            case .cancelled:
+                return .reject(CancellationError())
+            default:
+                return .none
+            }
+        }
+
+        /// Consumes the pending permission report once, including repeated cancellation callbacks.
+        mutating func teardown() -> Bool {
+            guard !stopped else { return false }
+            stopped = true
+            return awaitingPermission
+        }
+    }
+
     /// Network.framework owns its I/O queue; the lock protects readiness and the peer snapshot.
     private final class PrototypeNWConnection: PrototypePinnedConnection, @unchecked Sendable {
         private let connection: NWConnection
         private let queue = DispatchQueue(label: "dev.jasonpearson.automobile.prototype-agent.pinned")
         private let lock = NSLock()
         private var ready: CheckedContinuation<Void, Error>?
-        private var stopped = false
+        private var waitPolicy = PrototypeNWWaitPolicy()
+        private let onLocalNetworkDenied: @Sendable () -> Void
         private var peer: String?
         var remoteAddress: String? { lock.withLock { peer } }
 
-        init(_ connection: NWConnection) { self.connection = connection }
+        init(_ connection: NWConnection, onLocalNetworkDenied: @escaping @Sendable () -> Void) {
+            self.connection = connection
+            self.onLocalNetworkDenied = onLocalNetworkDenied
+        }
 
         func start() async throws {
             try await withCheckedThrowingContinuation { continuation in
                 let cancelled = lock.withLock {
-                    guard !stopped else { return true }
+                    guard !waitPolicy.stopped else { return true }
                     ready = continuation
                     return false
                 }
@@ -75,31 +125,29 @@
         }
 
         private func changed(_ state: NWConnection.State) {
-            switch state {
-            case .ready:
-                let address = Self.address(connection.currentPath?.remoteEndpoint)
-                let continuation = lock.withLock {
-                    peer = address
-                    defer { ready = nil }
-                    return ready
-                }
-                continuation?.resume()
-            case let .failed(error), let .waiting(error):
-                let mapped: Error = if case let .posix(code) = error { POSIXError(code) }
-                else { error }
-                reject(mapped)
-            case .cancelled: reject(CancellationError())
-            default: break
+            let address = Self.address(connection.currentPath?.remoteEndpoint)
+            let (action, continuation) = lock.withLock {
+                let action = waitPolicy.observe(state)
+                guard case .ready = action else { return (action, nil as CheckedContinuation<Void, Error>?) }
+                peer = address
+                defer { ready = nil }
+                return (action, ready)
+            }
+            switch action {
+            case .ready: continuation?.resume()
+            case let .reject(error): reject(error)
+            case .keepWaiting, .none: break
             }
         }
 
         private func reject(_ error: Error) {
-            let continuation = lock.withLock {
-                stopped = true
+            let (continuation, reportDenied) = lock.withLock {
+                let reportDenied = waitPolicy.teardown()
                 defer { ready = nil }
-                return ready
+                return (ready, reportDenied)
             }
             connection.cancel()
+            if reportDenied { onLocalNetworkDenied() }
             continuation?.resume(throwing: error)
         }
 

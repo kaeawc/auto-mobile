@@ -80,6 +80,8 @@ declarative).
 
 ### 3.1 Standalone, unprivileged apps
 
+iOS declares `NSLocalNetworkUsageDescription`; the first LAN connection prompts for local-network access.
+
 A standalone app per platform reuses the existing renderer and saved-prototype code. Library
 prototypes never render inside CtrlProxy: it is an accessibility service, input method and overlay,
 and its renderer honours privileged window options. ProtoViewer declares `INTERNET` and the
@@ -293,9 +295,8 @@ app's release plus the capability gates. There are no migrations.
 **Imported prototypes (library imports, and prototypes saved through MCP, which follow the same
 policy):** one global switch, "Allow network for imported prototypes", **default off**. When off,
 `request` actions fail with a typed error shown to the prototype (`statusKey` `error`). Switching
-network off cancels in-flight Android requests and drops late responses, even after a quick off/on
-cycle. Per-host
-consent is later work. MCP-direct `show` keeps today's behaviour. When on:
+network off cancels in-flight Android and iOS requests and drops late responses, even after a quick
+off/on cycle. Per-host consent is later work. MCP-direct `show` keeps today's behaviour. When on:
 
 - The egress check runs in the HTTP client on the resolved address, at every hop. It blocks
   loopback, link-local ranges, the emulator host alias `10.0.2.2`, and the AutoMobile daemon ports.
@@ -313,8 +314,11 @@ consent is later work. MCP-direct `show` keeps today's behaviour. When on:
   size, time and header limits). The checked address is the only one dialled. The path monitor and
   connection state callbacks are used to refuse a connection whose remote endpoint differs from the
   checked address. The transport is `PrototypePinnedHttpClient`, selected through
-  `PrototypeNetworkConfiguration.pinned`. The ProtoViewer network switch stays unavailable on iOS
-  until the app (#13619) wires it to that configuration; `URLSession` stays in use only for MCP-direct
+  `PrototypeNetworkConfiguration.pinned`. The ProtoViewer network switch is wired on iOS (#13619): switching off cancels
+  in-flight requests and drops late responses across off/on cycles. A pending local-network permission
+  prompt cannot be distinguished from denial: the switch turns off only when a LAN connection ends
+  while still waiting on permission, and explains that access was not granted and how to restore it.
+  Device verification of the prompt-pending and denied flows is still owed. `URLSession` stays in use only for MCP-direct
   `show` flows, which keep today's behaviour, and it is never described as enforcing this policy.
   The egress check and resolver are an injected interface with a fake in tests.
 - Redirects are not followed automatically; each redirect is evaluated as a new request, and an

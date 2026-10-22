@@ -421,7 +421,7 @@ describe("IOSCtrlProxyClient auto-setup", function () {
     );
 
     try {
-      IOSCtrlProxyManager.startOrphanRunnerReapOnStartup();
+      void IOSCtrlProxyManager.startOrphanRunnerReapOnStartup();
       const connecting = client.ensureConnected();
       await Promise.resolve();
 

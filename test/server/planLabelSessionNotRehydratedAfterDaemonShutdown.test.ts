@@ -47,7 +47,7 @@ describe("daemon shutdown while a multi-device plan runs", () => {
   });
   beforeEach(setUp);
   afterEach(() => {
-    monitor?.stop();
+    void monitor?.stop();
     monitor = undefined;
     hunt.tearDown();
   });

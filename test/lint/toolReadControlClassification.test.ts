@@ -102,6 +102,10 @@ const CLASSIFICATION: Classification = {
       reads: [{ action: "list" }, { action: "describe", manufacturerProfile: "samsung-oneui" }],
       controls: [{ action: "apply" }, { action: "reset" }],
     },
+    systemAlerts: {
+      reads: [{ action: "get" }],
+      controls: [{ action: "setPolicy", policy: "allow" }, { action: "clear" }],
+    },
     prototype: PROTOTYPE_ARGS,
     sqlQuery: {
       reads: [{ query: "SELECT * FROM t" }],

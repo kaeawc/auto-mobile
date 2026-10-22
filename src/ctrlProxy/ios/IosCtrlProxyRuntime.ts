@@ -6,6 +6,7 @@ import { IosDeviceDetector } from "./IosDeviceDetector";
 import type {
   IosCtrlProxyLifecycleSteps,
   IosCtrlProxyStepOverrides,
+  RunnerLaunchProvenance,
   SharedCtrlProxyStart,
 } from "./IosCtrlProxyLifecycleSteps";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -27,6 +28,7 @@ import { exponentialBackoff } from "../../utils/Backoff";
 import { ForcedRestartBudget } from "../ForcedRestartBudget";
 import {
   DefaultProcessSupervisor,
+  type LivenessProbe,
   type ProcessSupervisor,
   type ProcessSupervisorOptions,
 } from "../../utils/ProcessSupervisor";
@@ -55,8 +57,8 @@ interface IosCtrlProxyRuntimeHost {
   startInternal(sharedStart: SharedCtrlProxyStart): Promise<void>;
   waitForNonJoinableStart(signal: AbortSignal | undefined): Promise<SharedCtrlProxyStart | null>;
   retireRunnerAfterFinalSharedStartCancellation(sharedStart: SharedCtrlProxyStart): Promise<void>;
-  startOnSimulator(): Promise<void>;
-  startOnDevice(): Promise<void>;
+  startOnSimulator(): Promise<RunnerLaunchProvenance>;
+  startOnDevice(): Promise<RunnerLaunchProvenance>;
   waitForHealthEndpoint(
     sharedStart: SharedCtrlProxyStart,
     perf: PerformanceTracker,
@@ -72,7 +74,7 @@ interface IosCtrlProxyRuntimeHost {
   ): Promise<unknown>;
   fenceLateRemoteStartAfterShutdown(runnerPid: number): Promise<void>;
   start(options?: CtrlProxyStartOptions): Promise<void>;
-  isSupervisedCtrlProxyProcessAlive(): Promise<boolean>;
+  isSupervisedCtrlProxyProcessAlive(probe: LivenessProbe): Promise<boolean>;
   clearCaches(): void;
   isProcessRunning(pid: number): Promise<boolean>;
   restartIproxyTunnel(): Promise<void>;
@@ -299,7 +301,7 @@ export class IosCtrlProxyRuntime {
           this.isProcessSupervisorRestarting = false;
         }
       },
-      isAlive: () => this.host.isSupervisedCtrlProxyProcessAlive(),
+      isAlive: (probe) => this.host.isSupervisedCtrlProxyProcessAlive(probe),
       onExit: () => {
         const sharedStart = this.sharedStart;
         if (

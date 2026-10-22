@@ -1,0 +1,59 @@
+{
+  "spec": {
+    "id": "secure",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "secret": "",
+      "password": "",
+      "public": "ok"
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "textField",
+          "stateKey": "secret",
+          "secure": true
+        },
+        {
+          "type": "textField",
+          "stateKey": "password",
+          "keyboardType": "password"
+        },
+        {
+          "type": "column",
+          "repeat": {
+            "items": {
+              "path": "/rows"
+            },
+            "as": "item"
+          },
+          "children": [
+            {
+              "type": "button",
+              "label": "Send",
+              "onTap": [
+                {
+                  "type": "request",
+                  "url": "https://example.com/{secret}",
+                  "via": "device"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "data": {
+      "rows": []
+    }
+  },
+  "options": {
+    "library": true
+  },
+  "expectedPath": "root.children[2].children[0].onTap[0].url"
+}

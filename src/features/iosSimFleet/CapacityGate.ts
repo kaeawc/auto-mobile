@@ -125,12 +125,20 @@ export class IosSimCapacityGate
     this.admittedBoots = options.ledger ?? new BootAdmissionLedger(timer);
   }
 
-  /** Collect a fresh report and fold it into the pressure history. Used by the monitor too. */
-  async refresh(options: { fresh?: boolean } = {}): Promise<FleetCostReport> {
-    // A fresh run is bounded at the sample budget so one abandoned by a lost race cannot
-    // outlive it and stack under retries (#13801).
+  /**
+   * Collect a fresh report and fold it into the pressure history. Used by the monitor too.
+   * `sampleTimeoutMs` is the caller's sample budget, starting now; it defaults to the gate's.
+   */
+  async refresh(
+    options: { fresh?: boolean; sampleTimeoutMs?: number } = {},
+  ): Promise<FleetCostReport> {
+    // A fresh run ends by the same absolute deadline as the caller's sample race, across both its
+    // phases, so one abandoned by a lost race cannot outlive it and stack under retries (#13801,
+    // #14496).
     const report = await (options.fresh
-      ? this.fleet.collectFresh({ timeoutMs: DEFAULT_SAMPLE_TIMEOUT_MS })
+      ? this.fleet.collectFresh({
+          deadlineMs: this.timer.now() + (options.sampleTimeoutMs ?? DEFAULT_SAMPLE_TIMEOUT_MS),
+        })
       : this.fleet.collect());
     this.foldIntoPressureHistory(report);
     return report;
@@ -243,14 +251,15 @@ export class IosSimCapacityGate
 
   async reserveBoot(options: BootReservationOptions): Promise<BootSlotReservation> {
     let admission: LedgerAdmission | undefined;
+    const sampleTimeoutMs = Math.min(options.timeoutMs, DEFAULT_SAMPLE_TIMEOUT_MS);
     const result = await admitBootNow<FleetCostReport, CapacityDecision>({
       timer: this.timer,
       platform: "ios",
       signal: options.signal,
-      sampleTimeoutMs: Math.min(options.timeoutMs, DEFAULT_SAMPLE_TIMEOUT_MS),
+      sampleTimeoutMs,
       label: CAPACITY_LABEL,
       sample: async () => {
-        return this.refreshOwnership(await this.refresh({ fresh: true }));
+        return this.refreshOwnership(await this.refresh({ fresh: true, sampleTimeoutMs }));
       },
       ledger: this.admittedBoots,
       decide: (report, window) =>
@@ -363,10 +372,12 @@ export class IosSimCapacityGate
     const window = this.admittedBoots.beginSample();
     try {
       // The collector's run is shared with other callers, so losing the race never cancels it;
-      // the run's own commands carry the same budget so an abandoned one ends too (#13801).
+      // the whole run (listing, then host snapshot) ends by this race's own deadline, so an
+      // abandoned one has ended too by the time a caller can retry (#13801, #14496).
+      const deadlineMs = this.timer.now() + DEFAULT_SAMPLE_TIMEOUT_MS;
       const report = await raceWithDeadline(
         async () => {
-          const report = await this.fleet.collectFresh({ timeoutMs: DEFAULT_SAMPLE_TIMEOUT_MS });
+          const report = await this.fleet.collectFresh({ deadlineMs });
           return options.ownership ? this.refreshOwnership(report) : report;
         },
         {

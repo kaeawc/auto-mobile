@@ -48,14 +48,86 @@ export function resolveChangedImports(specifier: string, importer: string): stri
   ];
 }
 
-/** Parse-only reverse closure; an uncertain local edge conservatively selects all units. */
+/**
+ * The graph drops node_modules edges, so nothing links a dependency bump to the
+ * code importing that package; like native `--changed`, a manifest or lockfile
+ * change selects all units (#14426).
+ */
+export const DEPENDENCY_MANIFESTS: readonly string[] = ["package.json", "bun.lock"];
+
+/** The files that define the global preload set, so a change to either selects all units. */
+export const PRELOAD_CONFIG = {
+  bunfig: "bunfig.toml",
+  unitCommand: "scripts/lib/bun-unit-test.sh",
+} as const;
+
+/** `[test].preload` entries Bun loads before every test file, as repository-relative paths. */
+export function bunfigPreloads(bunfig: string): string[] {
+  const config: unknown = Bun.TOML.parse(bunfig);
+  const test: unknown =
+    typeof config === "object" && config !== null && "test" in config ? config.test : undefined;
+  const preload: unknown =
+    typeof test === "object" && test !== null && "preload" in test ? test.preload : [];
+  const entries: unknown[] = Array.isArray(preload) ? preload : [preload];
+  if (!entries.every((entry): entry is string => typeof entry === "string")) {
+    throw new Error("bunfig.toml [test].preload must be a string or an array of strings");
+  }
+  return entries.map((entry) => path.posix.normalize(entry));
+}
+
+/** `--preload` paths the shared unit commands add, read by running their own configure function. */
+export function unitCommandPreloads(root: string): string[] {
+  // Root "." from cwd keeps native Windows paths out of bash and yields ./-relative preloads.
+  const argv = execFileSync(
+    "bash",
+    [
+      "-c",
+      'source "$1" && configure_bun_unit_test . Linux && printf "%s\\0" "${BUN_UNIT_TEST_COMMAND[@]}" "${BUN_UNIT_SHARED_TEST_COMMAND[@]}"',
+      "bash",
+      PRELOAD_CONFIG.unitCommand,
+    ],
+    { cwd: root, encoding: "utf8" },
+  ).split("\0");
+  return [
+    ...new Set(
+      argv
+        .filter((_, index) => argv[index - 1] === "--preload")
+        .map((file) => path.posix.normalize(file)),
+    ),
+  ];
+}
+
+/**
+ * Repository-relative files whose change selects all units: dependency manifests (#14426), the
+ * preload configuration, and every preload it configures (#14425).
+ */
+export function unitFullSuiteTriggers(root: string): string[] {
+  return [
+    ...DEPENDENCY_MANIFESTS,
+    ...Object.values(PRELOAD_CONFIG),
+    ...bunfigPreloads(readFileSync(path.join(root, PRELOAD_CONFIG.bunfig), "utf8")),
+    ...unitCommandPreloads(root),
+  ];
+}
+
+/**
+ * Parse-only reverse closure; an uncertain local edge conservatively selects all units.
+ * A changed `fullSuiteTriggers` file (a dependency manifest, or a global preload no test
+ * imports) also selects all units.
+ */
 export function changedGraphTests(
   tests: string[],
   changed: string[],
   reader: ChangedGraphReader,
+  fullSuiteTriggers: readonly string[] = DEPENDENCY_MANIFESTS,
 ): string[] {
   if (changed.length === 0) {
     return [];
+  }
+  const trigger = changed.find((file) => fullSuiteTriggers.includes(file));
+  if (trigger !== undefined) {
+    console.error(`${trigger} changed; selecting all unit files.`);
+    return tests;
   }
   const reverse = new Map<string, Set<string>>();
   const visited = new Set<string>();
@@ -139,12 +211,18 @@ if (import.meta.main) {
     )
     .sort();
   const read = (file: string): string => readFileSync(path.resolve(root, file), "utf8");
-  const graph = changedGraphTests(tests.map(canonical), changed, {
-    read,
-    imports: scanChangedImports,
-    resolve: (specifier, importer) =>
-      resolveChangedImports(specifier, path.resolve(root, importer)).map(canonical),
-  });
+  // Manifests, preloads and their configuration reach tests without an import edge.
+  const graph = changedGraphTests(
+    tests.map(canonical),
+    changed,
+    {
+      read,
+      imports: scanChangedImports,
+      resolve: (specifier, importer) =>
+        resolveChangedImports(specifier, path.resolve(root, importer)).map(canonical),
+    },
+    unitFullSuiteTriggers(root).map(canonical),
+  );
   const extras = selectAffectedTests({
     reader: {
       list: () => files.filter((file) => /\.(ts|tsx|mts)$/.test(file)).concat("package.json"),

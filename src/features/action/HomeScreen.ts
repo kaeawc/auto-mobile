@@ -62,6 +62,9 @@ const ANDROID_LAUNCHER_OVERLAY_MARKERS = [
  */
 const SPOTLIGHT_BUNDLE_ID = "com.apple.Spotlight";
 
+/** The runner's one-shot foreground check failure; keep in sync with CommandHandler+TextInput.swift. */
+const RUNNER_HOME_NOT_FOREGROUND_ERROR = "Home press did not bring SpringBoard to the foreground";
+
 export class HomeScreen extends BaseVisualChange {
   /**
    * Deadline for the ADB `KEYCODE_HOME` fallback keyevent. Without a bound a
@@ -415,10 +418,20 @@ export class HomeScreen extends BaseVisualChange {
       this.tryIosRunnerHome(client, 5000, perf, undefined, { signal, onDispatch }),
       signal,
     );
-    if (pressError) {
+    // The runner checks the foreground once, right after the press, and SpringBoard can take
+    // about a second to settle after Spotlight (#14827). That error means "sent, unverified", so
+    // fall through to the polling check instead of failing before it runs.
+    if (pressError && pressError !== RUNNER_HOME_NOT_FOREGROUND_ERROR) {
       throw new ActionableError(pressError);
     }
-    await this.verifyIosHomeForeground(client, perf, undefined, undefined, undefined, { signal });
+    await this.verifyIosHomeForeground(
+      client,
+      perf,
+      HomeScreen.IOS_SIMULATOR_RETRY_DELAYS_MS,
+      undefined,
+      HomeScreen.IOS_SIMULATOR_READ_TIMEOUT_MS,
+      { pollUntilDeadline: true, signal },
+    );
   }
 
   /** The device's runner client, resolved at each use so a retired client is never reused. */

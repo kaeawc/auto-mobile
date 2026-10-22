@@ -36,6 +36,39 @@ test("Android tap strategy retries unknown once and reports its default decision
   expect(warnings[0]).toContain("could not determine");
 });
 
+/** The policy flags a fake must copy from the strategy it stands in for (#13316). */
+const POLICY_FLAGS = [
+  "longPressDurationMs",
+  "warnsOnDisabledElement",
+  "settlesPostTapChange",
+  "verifiesRefreshedDisplay",
+  "promotesClickableAncestor",
+  "settlesFocusChangeAfterTap",
+  "rethrowsKeyboardOcclusion",
+  "retryTapIfNoChange",
+] as const;
+
+function policy(strategy: TapStrategy) {
+  return Object.fromEntries(POLICY_FLAGS.map((flag) => [flag, strategy[flag]]));
+}
+
+test("the iOS fake tap strategy carries IosTapStrategy's policy flags", () => {
+  const ios = new IosTapStrategy(
+    { name: "ios", deviceId: "ios", platform: "ios" },
+    new FakeIosVoiceOverDetector(),
+  );
+  expect(policy(FakeTapStrategy.ios())).toEqual(policy(ios));
+});
+
+test("the default fake tap strategy carries Android's policy flags with retries off", () => {
+  const android = new AndroidTapStrategy(
+    { name: "android", deviceId: "android", platform: "android" },
+    new FakeAdbClient(),
+    new FakeAccessibilityDetector(),
+  );
+  expect(policy(new FakeTapStrategy())).toEqual({ ...policy(android), retryTapIfNoChange: false });
+});
+
 describe("TapStrategy", () => {
   const androidDevice: BootedDevice = {
     deviceId: "emulator-5554",

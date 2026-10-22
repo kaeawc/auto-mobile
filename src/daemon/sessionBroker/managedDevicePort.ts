@@ -119,21 +119,6 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     this.isExecOwnerLive = dependencies.isExecOwnerLive ?? defaultBindingExecOwnerLiveness;
   }
 
-  /** Whether the binding is empty, so acquisition could create a retained device. */
-  private async bindingCanCreateDevice(resource: BrokerResourceRecord): Promise<boolean> {
-    try {
-      const assignment = await this.dependencies.registry.getAssignment(this.key(resource));
-      return assignment === null || assignment.stableDeviceId === null;
-    } catch (error) {
-      // If the optional budget hint is unavailable, preserve the existing retry reserve.
-      logger.warn(
-        `Cannot read binding for iOS readiness retry budget: ${errorMessage(error)}`,
-        error,
-      );
-      return true;
-    }
-  }
-
   async prepare(
     resource: BrokerResourceRecord,
     options: SessionDevicePreparationOptions,
@@ -151,25 +136,29 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     const timer = this.dependencies.timer ?? defaultTimer;
     const deadlineMs =
       timer.now() + (options.preparationTimeoutMs ?? DEFAULT_PROVISION_DEVICE_TIMEOUT_MS);
-    const acquire = (preparationTimeoutMs: number) => {
+    const acquire = (preparationTimeoutMs: number, createRetryReserveMs = 0) => {
       const config = this.bindingConfig(resource, profile, requestedSpec, {
         ...options,
         preparationTimeoutMs: Math.max(1, preparationTimeoutMs),
       });
-      return this.dependencies.brokerDeviceAcquisition.acquire(config, {
-        livenessOwnerToken: options.livenessOwnerToken,
-        ...(options.signal ? { signal: options.signal } : {}),
-      });
+      return this.dependencies.brokerDeviceAcquisition.acquire(
+        createRetryReserveMs > 0 ? { ...config, createRetryReserveMs } : config,
+        {
+          livenessOwnerToken: options.livenessOwnerToken,
+          ...(options.signal ? { signal: options.signal } : {}),
+        },
+      );
     };
-    // Only an empty iOS binding can create a retained device for one warm readiness retry.
-    // Reserve one third (at most a runner provisioning window) for that retry; an occupied
-    // binding's reuse/adoption cannot produce retained creation evidence and gets the full budget.
-    const canCreate = profile.platform === "ios" && (await this.bindingCanCreateDevice(resource));
+    // Only an empty iOS binding's create path can retain a device for one warm readiness retry.
+    // Reserve one third (at most a runner provisioning window) for that retry, but spend it only
+    // once provisioning actually chooses to create (#14643): adopting a leftover simulator or
+    // reusing a bound device keeps the caller's full timeout for its boot wait.
     const remainingMs = deadlineMs - timer.now();
-    const retryReserveMs = canCreate
-      ? Math.min(remainingMs / 3, DEFAULT_RUNNER_PROVISION_TIMEOUT_MS)
-      : 0;
-    let result = await acquire(remainingMs - retryReserveMs);
+    const retryReserveMs =
+      profile.platform === "ios"
+        ? Math.min(remainingMs / 3, DEFAULT_RUNNER_PROVISION_TIMEOUT_MS)
+        : 0;
+    let result = await acquire(remainingMs, retryReserveMs);
     if (
       this.canRetryReadiness(result, resource, profile) &&
       !this.preparationStopped(deadlineMs, options.signal)

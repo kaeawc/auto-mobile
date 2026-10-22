@@ -1,3 +1,4 @@
+import { prototypeContractPatterns } from "./prototypeContractPatterns";
 /**
  * The placeholder grammar and bindable-field set shared by `repeat` list templates and reusable
  * components (#11051, #11053).
@@ -11,14 +12,13 @@
 export type Raw = Record<string, unknown>;
 
 /** A literal state key, and the shape of every repeat field name and component prop name. */
-export const STATE_KEY = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
+export const STATE_KEY = prototypeContractPatterns.stateKey;
 
 /**
  * A state-key field: a literal key, or key characters mixed with at least one placeholder that
  * must bind to a literal key for every instance. Both validators re-check the bound result.
  */
-export const BOUND_STATE_KEY_PATTERN =
-  /^(?:[A-Za-z_][A-Za-z0-9_]{0,63}|(?=[^{]*\{)(?:[A-Za-z0-9_]|\{(?:index|[A-Za-z_][A-Za-z0-9_]{0,63}\.[A-Za-z_][A-Za-z0-9_]{0,63})\})+)$/;
+export const BOUND_STATE_KEY_PATTERN = prototypeContractPatterns.boundKey;
 
 export type Segment =
   | { kind: "literal"; text: string }
@@ -230,7 +230,7 @@ function mapEmitAction(action: Raw, path: string, visit: FieldVisitor): void {
   if (record(action.context)) {
     action.context = Object.fromEntries(
       Object.entries(record(action.context)!).map(([name, value]) => {
-        const at = /^[A-Za-z_][A-Za-z0-9_]*$/.test(name)
+        const at = prototypeContractPatterns.pathKey.test(name)
           ? `${path}.context.${name}`
           : `${path}.context[${JSON.stringify(name)}]`;
         return [name, mapBinding(value, at, visit)];
@@ -283,7 +283,9 @@ function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
 }
 
 const memberPath = (path: string, name: string): string =>
-  /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? `${path}.${name}` : `${path}[${JSON.stringify(name)}]`;
+  prototypeContractPatterns.pathKey.test(name)
+    ? `${path}.${name}`
+    : `${path}[${JSON.stringify(name)}]`;
 
 /** A header or query entry: a literal is text, an object is a value binding. */
 function mapRequestEntries(action: Raw, field: string, path: string, visit: FieldVisitor): void {

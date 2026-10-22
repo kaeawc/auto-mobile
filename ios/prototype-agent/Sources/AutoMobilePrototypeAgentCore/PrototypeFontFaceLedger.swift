@@ -19,6 +19,15 @@ enum PrototypeFontRegistrationResult: Equatable {
 final class PrototypeFontFaceLedger<Font, Digest: Equatable> {
     private var faces: [String: (digest: Digest, font: Font)] = [:]
 
+    /// Releases this ledger's registrations after its last presentation has stopped.
+    func unregisterAll(unregister: (Font) -> Void) {
+        let registered = faces.values.map(\.font)
+        faces.removeAll()
+        for font in registered {
+            unregister(font)
+        }
+    }
+
     /// Registers `font` as `face`. Returns false when the manager refuses it, or reports the name as
     /// already registered for bytes this ledger did not record.
     func register(

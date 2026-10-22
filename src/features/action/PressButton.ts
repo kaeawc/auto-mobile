@@ -10,7 +10,7 @@ import {
   ProgressCallback,
   type DisplayFenceDependencies,
 } from "./BaseVisualChange";
-import { BootedDevice, PressButtonResult } from "../../models";
+import { BootedDevice, ObserveResult, PressButtonResult } from "../../models";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { IOSCtrlProxyClient, type IosCtrlProxy } from "../observe/ios";
 import { AndroidCtrlProxyClient } from "../observe/android";
@@ -70,6 +70,22 @@ function indeterminatePressResult(
     retryable: false,
     error: `Button press outcome is indeterminate: the request was dispatched but no result was confirmed (${reason ?? "unknown error"}). The press may have been applied. Do not retry automatically. Observe before retrying.`,
   };
+}
+
+/** True when an iOS Home press starts from a verified SpringBoard, so "no visual change" is fine. */
+export function isIosHomePressOnSpringboard(
+  platform: string,
+  button: string,
+  observation: ObserveResult | undefined,
+): boolean {
+  const hierarchy = observation?.viewHierarchy;
+  return (
+    platform === "ios" &&
+    button.toLowerCase() === "home" &&
+    hierarchy?.packageName === "com.apple.springboard" &&
+    hierarchy.fallbackToSpringboard !== true &&
+    !hierarchy.hierarchy?.error
+  );
 }
 
 export class PressButton extends BaseVisualChange {
@@ -168,21 +184,23 @@ export class PressButton extends BaseVisualChange {
     // Hardware buttons (volume, menu) don't change the hierarchy.
     const isNavigationButton = isNavigationPressButton(button);
 
-    return this.observedInteraction(
-      async () => {
-        return await perf.track("buttonPress", () =>
-          this.press(button, undefined, undefined, signal),
-        );
-      },
-      {
-        ...OBSERVED_INTERACTION_PROFILES.noTreeResolution,
-        changeExpected: isNavigationButton,
-        timeoutMs: SETTLE_BUDGET_MS.navigation,
-        progress,
-        signal,
-        perf,
-      },
-    );
+    const options = {
+      ...OBSERVED_INTERACTION_PROFILES.noTreeResolution,
+      changeExpected: isNavigationButton,
+      timeoutMs: SETTLE_BUDGET_MS.navigation,
+      progress,
+      signal,
+      perf,
+    };
+    return this.observedInteraction(async (previousObservation) => {
+      // A Home press on SpringBoard may change nothing (#14954); that is a no-op success.
+      if (isIosHomePressOnSpringboard(this.device.platform, button, previousObservation)) {
+        options.changeExpected = false;
+      }
+      return await perf.track("buttonPress", () =>
+        this.press(button, undefined, undefined, signal),
+      );
+    }, options);
   }
 
   /**

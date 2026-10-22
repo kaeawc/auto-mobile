@@ -3,13 +3,12 @@ package dev.jasonpearson.automobile.protocol
 import dev.jasonpearson.automobile.protocol.PrototypeRepeatKeyBindings.bound
 import dev.jasonpearson.automobile.protocol.PrototypeRepeatTextChecks.RepeatState
 import dev.jasonpearson.automobile.protocol.PrototypeRepeatValidator.Scope
+import dev.jasonpearson.automobile.protocol.PrototypeSpecContract.stateKeyPattern
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
 internal object PrototypeRepeatFields {
-  val stateKeyPattern = Regex("^[A-Za-z_][A-Za-z0-9_]{0,63}$")
-
   fun fail(path: String, message: String) = PrototypeSpecError(path, message)
 
   fun JsonObject.text(key: String): String? =

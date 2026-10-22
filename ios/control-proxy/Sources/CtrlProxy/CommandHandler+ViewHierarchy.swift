@@ -196,8 +196,19 @@ extension CommandHandler {
         await sdkServerInfoForTrackedForegroundApp() != nil
     }
 
+    /// The tracked foreground bundle, refreshed and handed to the SDK endpoint resolver. Every
+    /// foreground-aware SDK path goes through here, so a newly foregrounded SDK app is not reported
+    /// unavailable from an earlier app's cached failed discovery (#14397).
+    func refreshTrackedForegroundBundleId() async -> String? {
+        guard let bundleId = normalizedBundleId(await elementLocator.refreshForegroundBundleId()) else {
+            return nil
+        }
+        await sdkHierarchyClient?.foregroundBundleDidChange(bundleId)
+        return bundleId
+    }
+
     func sdkServerInfoForTrackedForegroundApp() async -> SdkHierarchyServerInfo? {
-        guard let foregroundBundleId = normalizedBundleId(await elementLocator.refreshForegroundBundleId()) else {
+        guard let foregroundBundleId = await refreshTrackedForegroundBundleId() else {
             return nil
         }
         guard let serverInfo = await sdkHierarchyClient?.fetchServerInfo(),

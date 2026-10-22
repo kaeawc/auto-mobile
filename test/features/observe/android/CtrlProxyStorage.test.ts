@@ -167,7 +167,7 @@ describe("CtrlProxyStorage (Android)", function () {
       expect(await pending).toEqual(state);
       expect(request.packageName).toBe("com.example");
     } finally {
-      client.close();
+      void client.close();
     }
   });
 
@@ -194,7 +194,7 @@ describe("CtrlProxyStorage (Android)", function () {
         socket!.sentMessages.some((message) => JSON.parse(message).type === "discover_keystore"),
       ).toBe(false);
     } finally {
-      client.close();
+      void client.close();
     }
   });
 
@@ -239,7 +239,7 @@ describe("CtrlProxyStorage (Android)", function () {
       );
       return await pending;
     } finally {
-      client.close();
+      void client.close();
     }
   };
 
@@ -286,7 +286,7 @@ describe("CtrlProxyStorage (Android)", function () {
       );
       return { request, result: await pending };
     } finally {
-      client.close();
+      void client.close();
     }
   };
 
@@ -323,7 +323,7 @@ describe("CtrlProxyStorage (Android)", function () {
         socket.sentMessages.some((message) => JSON.parse(message).type === "get_sdk_capabilities"),
       ).toBe(false);
     } finally {
-      client.close();
+      void client.close();
     }
   });
 

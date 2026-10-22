@@ -65,7 +65,9 @@ enum PrototypeChart {
     static func model(
         variant: String, series definitions: [PrototypeChartSeries], yRange: PrototypeChartRange?,
         goal: Double?, xLabels: String?, data: [String: JSONValue]?
-    ) -> PrototypeChartModel {
+    )
+        -> PrototypeChartModel
+    {
         let series = definitions.map { definition -> PrototypeChartSeriesModel in
             guard case let .array(items)? = PrototypeDataPointer.resolve(data, pointer: definition.path) else {
                 return PrototypeChartSeriesModel(label: definition.label, points: [], color: definition.color)
@@ -86,7 +88,9 @@ enum PrototypeChart {
     /// The drawn y range: the values and goal, with bars rising from zero, never empty.
     private static func autoRange(
         variant: String, series: [PrototypeChartSeriesModel], goal: Double?
-    ) -> (Double, Double) {
+    )
+        -> (Double, Double)
+    {
         var values = series.flatMap { $0.points.map(\.y) } + [goal].compactMap(\.self)
         if variant == "bar" { values.append(0) }
         let low = values.min() ?? 0

@@ -41,7 +41,10 @@ final class PrototypeChartTests: XCTestCase {
     func testAuthoredContentDescriptionWinsOverTheSummary() throws {
         let spec = try JSONDecoder().decode(PrototypeSpec.self, from: fixture)
         let nodes = try XCTUnwrap(spec.root.children)
-        XCTAssertEqual(nodes[0].chartLabel(data: spec.data, state: [:]), "Line chart, Heart rate, 5 points, min 58, max 141, latest 72")
+        XCTAssertEqual(
+            nodes[0].chartLabel(data: spec.data, state: [:]),
+            "Line chart, Heart rate, 5 points, min 58, max 141, latest 72"
+        )
         XCTAssertEqual(nodes[3].chartLabel(data: spec.data, state: [:]), "Steps today, 6500 of 10000")
     }
 

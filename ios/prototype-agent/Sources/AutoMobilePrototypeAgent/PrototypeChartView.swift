@@ -56,7 +56,8 @@
 
         private var goalStyle: StrokeStyle { StrokeStyle(lineWidth: 1, dash: [6, 6]) }
 
-        @ViewBuilder private func plot(_ chart: PrototypeChartModel) -> some View {
+        @ViewBuilder
+        private func plot(_ chart: PrototypeChartModel) -> some View {
             if chart.variant == "bar" {
                 bars(chart)
             } else {
@@ -84,9 +85,12 @@
             .frame(height: chartHeight)
         }
 
-        @ChartContentBuilder private func lineMarks(
+        @ChartContentBuilder
+        private func lineMarks(
             _ chart: PrototypeChartModel, seriesIndex: Int, label: String, index: Int, y: Double
-        ) -> some ChartContent {
+        )
+            -> some ChartContent
+        {
             let drawn: Double = clamp(y, chart)
             let tint: Color = color(chart, seriesIndex)
             if chart.variant == "area" {
@@ -130,9 +134,12 @@
             .frame(height: chartHeight)
         }
 
-        @ChartContentBuilder private func barMark(
+        @ChartContentBuilder
+        private func barMark(
             _ chart: PrototypeChartModel, seriesIndex: Int, label: String, index: Int, y: Double, base: Double
-        ) -> some ChartContent {
+        )
+            -> some ChartContent
+        {
             let drawn: Double = clamp(y, chart)
             BarMark(
                 x: .value("Index", String(index)),
@@ -145,7 +152,8 @@
             .cornerRadius(2)
         }
 
-        @ChartContentBuilder private func goalRule(_ chart: PrototypeChartModel) -> some ChartContent {
+        @ChartContentBuilder
+        private func goalRule(_ chart: PrototypeChartModel) -> some ChartContent {
             if let goal = chart.goal {
                 RuleMark(y: .value("Goal", clamp(goal, chart)))
                     .lineStyle(goalStyle)
@@ -168,7 +176,8 @@
         }
 
         /// The first series' x labels: none, the two ends, or all of them evenly spaced.
-        @ViewBuilder private func xLabels(_ chart: PrototypeChartModel) -> some View {
+        @ViewBuilder
+        private func xLabels(_ chart: PrototypeChartModel) -> some View {
             let shown = chart.shownXLabels
             if !shown.isEmpty {
                 HStack(spacing: 0) {

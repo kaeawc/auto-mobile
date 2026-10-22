@@ -17,6 +17,8 @@ export class FakeCtrlProxyManager implements AndroidCtrlProxyManagerHandle {
   private shouldCleanupFail: boolean = false;
   private installedSha256: string | null = null;
   private versionCompatible: boolean = true;
+  /** Overrides the status `ensureCompatibleVersion` reports (e.g. "upgraded" after a stale-APK swap). */
+  private compatibilityStatus: "upgraded" | "installed" | "reinstalled" | undefined;
   private enabledForUsers: Map<number, boolean> = new Map();
 
   /** A manager whose accessibility service is (un)available, for stubbing `getInstance`. */
@@ -110,6 +112,10 @@ export class FakeCtrlProxyManager implements AndroidCtrlProxyManagerHandle {
    * Configure version compatibility result.
    * @param compatible - Whether version is compatible
    */
+  setCompatibilityStatus(status: "upgraded" | "installed" | "reinstalled" | undefined): void {
+    this.compatibilityStatus = status;
+  }
+
   setVersionCompatible(compatible: boolean): void {
     this.versionCompatible = compatible;
   }
@@ -214,7 +220,7 @@ export class FakeCtrlProxyManager implements AndroidCtrlProxyManagerHandle {
   }> {
     this.executedOperations.push("ensureCompatibleVersion");
     return {
-      status: this.versionCompatible ? "compatible" : "failed",
+      status: this.compatibilityStatus ?? (this.versionCompatible ? "compatible" : "failed"),
       installedSha256: this.installedSha256,
     };
   }

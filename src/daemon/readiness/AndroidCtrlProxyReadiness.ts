@@ -136,6 +136,7 @@ export class AndroidCtrlProxyReadiness {
       logger.info(
         `[DeviceReadiness] Accessibility service enabled and connected for ${deviceId}, verifying version compatibility`,
       );
+      await this.upgradeStaleInstall(deviceId, manager, setupState);
     } else {
       await this.throwAndroidForwardConflictIfPresent(
         deviceId,
@@ -151,6 +152,41 @@ export class AndroidCtrlProxyReadiness {
       setupState.needsSetup = true;
     }
     return false;
+  }
+
+  /**
+   * A connected service says nothing about which build is running: compare the installed APK's
+   * content (SHA-256, cached per manager) with the expected one, so a same-versionName build or
+   * a local APK override reaches the device (#15007). A swapped APK restarts the service, so
+   * setup follows to reconnect; a failed or skipped check keeps the running service.
+   */
+  private async upgradeStaleInstall(
+    deviceId: string,
+    manager: CtrlProxyManager,
+    setupState: { didSetup: boolean; needsSetup: boolean },
+  ): Promise<void> {
+    try {
+      const compatibility = await manager.ensureCompatibleVersion();
+      if (
+        compatibility.status === "upgraded" ||
+        compatibility.status === "installed" ||
+        compatibility.status === "reinstalled"
+      ) {
+        logger.info(
+          `[DeviceReadiness] CtrlProxy APK on ${deviceId} was ${compatibility.status}; reconnecting`,
+        );
+        setupState.needsSetup = true;
+      }
+    } catch (error) {
+      if (error instanceof this.dependencies.errors.DeviceOwnedByOtherDaemonError) {
+        throw error;
+      }
+      // A failed content check must not take down a service that is already answering.
+      logger.warn(
+        `[DeviceReadiness] CtrlProxy APK check failed on ${deviceId}: ${errorMessage(error)}`,
+        error,
+      );
+    }
   }
 
   private async enableInstalledAndroidService(

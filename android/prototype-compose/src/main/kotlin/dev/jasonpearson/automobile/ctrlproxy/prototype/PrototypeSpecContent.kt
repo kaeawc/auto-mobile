@@ -852,7 +852,9 @@ private fun RenderPrototypeNodeContent(
           }
         }
       }
-    // Spacer keeps its size and authored actions.
+    // Spacer keeps its size and authored actions. An axis with no authored size fills what the
+    // parent offers, as on iOS; wrapping to zero collapsed skeleton rows to nothing (#14793).
+    "spacer" -> Box(modifier.prototypeSpacerFill(node.style.source))
     else -> Box(modifier)
   }
   if (traceEnabled) traceSink.end()
@@ -1676,6 +1678,18 @@ private fun dimensionModifier(
     null -> if (weighted) modifier else wrapContent(modifier, horizontal)
     PrototypeDimension.Wrap -> wrapContent(modifier, horizontal)
   }
+
+/**
+ * A `spacer` fills each axis it has no size on. A weighted spacer keeps the share its parent hands
+ * it, and an unbounded axis (a scroll) still wraps, since fill ignores an infinite maximum.
+ */
+private fun Modifier.prototypeSpacerFill(style: PrototypeStyle): Modifier {
+  if (style.weight != null) return this
+  var filled = this
+  if (style.width == null) filled = filled.fillMaxWidth()
+  if (style.height == null) filled = filled.fillMaxHeight()
+  return filled
+}
 
 private fun wrapContent(modifier: Modifier, horizontal: Boolean): Modifier =
   if (horizontal) modifier.wrapContentWidth() else modifier.wrapContentHeight()

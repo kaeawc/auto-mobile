@@ -292,9 +292,9 @@ describe("navigation resource session resolution", () => {
     const previous = new FakeNavigationGraphManager();
     const replacement = new FakeNavigationGraphManager();
     setNavigationGraphProvider(previous);
-    previous.setCurrentApp("old");
+    void previous.setCurrentApp("old");
     setNavigationGraphProvider(replacement);
-    replacement.setCurrentApp("new");
+    void replacement.setCurrentApp("new");
     await timer.advanceTimeAsync(1000);
     expect(server.server.notifications).toHaveLength(3);
     expect((await payload(graphUri)).appId).toBe("new");

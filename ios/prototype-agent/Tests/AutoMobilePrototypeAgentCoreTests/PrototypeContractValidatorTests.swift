@@ -2,6 +2,16 @@
 import XCTest
 
 final class PrototypeContractValidatorTests: XCTestCase {
+    func testSecureLibraryPolicyPreservesNonlibraryAndOpaqueLiterals() throws {
+        let unbound = fixtures.appendingPathComponent("valid/strict-library-secure-unbound.json")
+        XCTAssertNoThrow(try PrototypeSpecStrictValidator.validate(data: Data(contentsOf: unbound), library: true))
+        for url in try files("invalid") where url.lastPathComponent.hasPrefix("strict-library-secure-") {
+            let fixture = try JSONDecoder().decode(InvalidFixture.self, from: Data(contentsOf: url))
+            let data = try JSONEncoder().encode(XCTUnwrap(fixture.spec))
+            XCTAssertNoThrow(try PrototypeSpecStrictValidator.validate(data: data), url.lastPathComponent)
+        }
+    }
+
     private var fixtures: URL {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -92,6 +102,7 @@ final class PrototypeContractValidatorTests: XCTestCase {
         }
 
         let expectedPath: String
+        let expectedMessage: String?
     }
 
     func testInvalidFixtures() throws {
@@ -115,6 +126,39 @@ final class PrototypeContractValidatorTests: XCTestCase {
             }
         }
         print("Checked \(invalid.count) invalid fixtures; 0 exemptions")
+    }
+
+    func testHostRequestsWithoutLibrary() throws {
+        for url in try files("invalid") where url.lastPathComponent.hasPrefix("strict-library-via-host") {
+            let fixture = try JSONDecoder().decode(InvalidFixture.self, from: Data(contentsOf: url))
+            let data = try JSONEncoder().encode(XCTUnwrap(fixture.spec))
+            XCTAssertThrowsError(try PrototypeSpecStrictValidator.validate(data: data, library: true)) { error in
+                XCTAssertEqual(
+                    error as? PrototypeLoadError,
+                    .invalidSpec(path: fixture.expectedPath, message: fixture.expectedMessage ?? "")
+                )
+            }
+            XCTAssertNoThrow(try PrototypeSpecStrictValidator.validate(data: data), url.lastPathComponent)
+            XCTAssertNoThrow(
+                try PrototypeSpecStrictValidator.validate(data: data, library: false),
+                url.lastPathComponent
+            )
+        }
+    }
+
+    func testLibraryAcceptsDeviceAndDefaultRequestsWithOpaqueHostShapedJSON() throws {
+        for via in ["", #", "via":"device""#] {
+            let input = #"""
+            {"id":"safe","window":{"placement":{"type":"fullscreen"}},
+              "data":{"opaque":{"type":"request","via":"host"}},
+              "root":{"type":"button","label":"Load","onTap":[
+                {"type":"request","method":"POST","url":"https://example.com"\#(via),
+                  "body":{"value":{"type":"request","via":"host"}},
+                  "onSuccess":[{"type":"emit","name":"done","payload":{"type":"request","via":"host"}}]}
+              ]}}
+            """#
+            XCTAssertNoThrow(try PrototypeSpecStrictValidator.validate(data: Data(input.utf8), library: true))
+        }
     }
 
     private func assertInvalid(_ json: String, path: String, file: StaticString = #filePath, line: UInt = #line) {

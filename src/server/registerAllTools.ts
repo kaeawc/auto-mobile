@@ -45,6 +45,7 @@ import { registerAccessibilityTools } from "./accessibilityTools";
 import { registerAccessibilityFocusTools } from "./accessibilityFocusTools";
 import { registerNetworkTools } from "./networkTools";
 import { registerKillProfileTools } from "./killProfileTools";
+import { registerSystemAlertTools } from "./systemAlertTools";
 import { registerSensorTools } from "./sensorTools";
 import { registerDisplayProfileTools } from "./displayProfileTools";
 import { registerPersonaTools } from "./personaTools";
@@ -128,6 +129,7 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerAccessibilityFocusTools();
   registerNetworkTools();
   registerKillProfileTools();
+  registerSystemAlertTools();
   registerSensorTools();
   registerDisplayProfileTools();
   registerPersonaTools();

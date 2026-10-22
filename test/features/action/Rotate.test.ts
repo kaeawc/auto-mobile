@@ -326,6 +326,11 @@ describe("Rotate", () => {
     test("reports a direct auto-rotate reversion during post-action observation", async () => {
       let commandsAtObservation: string[] = [];
       let observationTime = 0;
+      // Pre-call 0, then this call's own write (1) when the end-of-call check rolls it back (#14955).
+      fakeAdb.setCommandResponseSequence("shell settings get system user_rotation", [
+        createExecResult("0"),
+        createExecResult("1"),
+      ]);
       scriptLandscapeRotation(() => {
         commandsAtObservation = fakeAdb.getExecutedCommands();
         fakeTimer.advanceTime(2500);
@@ -352,6 +357,10 @@ describe("Rotate", () => {
       expect(commandsAtObservation).toContain("shell settings put system accelerometer_rotation 1");
       expect(fakeAdb.getExecutedCommands().slice(commandsAtObservation.length)).toEqual([
         liveCommand,
+        "shell settings get system user_rotation",
+        "shell settings put system user_rotation 0",
+        "shell settings get system user_rotation",
+        "shell cmd device_state print-states",
       ]);
       expect(fakeTimer.getSleepHistory()).toEqual([150]);
       expect(fakeTimer.now()).toBe(observationTime);
@@ -359,7 +368,11 @@ describe("Rotate", () => {
         fakeAdb
           .getExecutedCommands()
           .filter((command) => command.includes("put system user_rotation")),
-      ).toEqual(["shell settings put system user_rotation 1"]);
+      ).toEqual([
+        "shell settings put system user_rotation 1",
+        // The sensor undid the rotation: restore the prior value so a later lock does not flip it.
+        "shell settings put system user_rotation 0",
+      ]);
     });
 
     test("preserves direct success when auto-rotate never reverts", async () => {

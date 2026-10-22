@@ -1,3 +1,4 @@
+import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { PROTOTYPE_PLATFORM_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import { expandPrototypeComponents } from "./prototypeComponents";
@@ -111,7 +112,7 @@ export function prototypePlatformPointerModule(pointer: string): string {
 }
 
 const memberPath = (path: string, name: string): string =>
-  /^[A-Za-z_][A-Za-z0-9_]*$/.test(name)
+  prototypeContractPatterns.pathKey.test(name)
     ? path
       ? `${path}.${name}`
       : name

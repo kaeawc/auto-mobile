@@ -65,7 +65,7 @@ describe("MCP Navigation Graph Resource", () => {
     // Re-register the same provider (what MCP server re-initialization does).
     setNavigationGraphProvider(fakeGraph);
 
-    fakeGraph.setCurrentApp("com.example.app");
+    void fakeGraph.setCurrentApp("com.example.app");
     expect(daemonPushes).toBe(1);
   });
 

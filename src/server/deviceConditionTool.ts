@@ -9,6 +9,7 @@ import {
   DEVICE_CONDITION_SCHEMA_VERSION,
   type DeviceConditionInput,
 } from "../features/deviceCondition/DeviceConditionTypes";
+import { attestationCeilingRefusal } from "../features/deviceCondition/attestationCeiling";
 import { parseDeviceConditionInput } from "./deviceConditionSchema";
 
 /**
@@ -110,6 +111,10 @@ export async function handleDeviceConditionCall(
 ) {
   if (args.deviceCondition === undefined) {
     return refuse(device, "deviceCondition was not provided.");
+  }
+  const ceiling = attestationCeilingRefusal(args.deviceCondition);
+  if (ceiling !== undefined) {
+    return refuse(device, ceiling);
   }
   const parsed = parseDeviceConditionInput(args.deviceCondition);
   if (!parsed.ok) {

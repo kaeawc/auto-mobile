@@ -153,6 +153,7 @@ const FORMER_PLAN_RELEVANT_TOOLS = [
   "statusBar",
   "swipeAt",
   "swipeOn",
+  "systemAlerts",
   "systemTray",
   "tapAny",
   "tapAt",
@@ -239,6 +240,7 @@ describe("PLAN_RELEVANT_TOOLS coverage (#9928)", () => {
     recordPlanCall(recorder, "systemTray", { action: "list", appId: "com.example" });
     recordPlanCall(recorder, "systemTray", { action: "find", notification: { title: "Hi" } });
     recordPlanCall(recorder, "displayConfig", {});
+    recordPlanCall(recorder, "systemAlerts", { action: "get" });
     expect(recorder.stop()).toEqual([]);
   });
 
@@ -256,6 +258,7 @@ describe("PLAN_RELEVANT_TOOLS coverage (#9928)", () => {
     recordPlanCall(recorder, "displayConfig", { size: { width: 720, height: 1600 } });
     recordPlanCall(recorder, "displayConfig", { navigationMode: "threeButton" });
     recordPlanCall(recorder, "displayConfig", { displayCutout: "hole" });
+    recordPlanCall(recorder, "systemAlerts", { action: "setPolicy", policy: "allow" });
     expect(recorder.stop().map((step) => step.tool)).toEqual([
       "keyboard",
       "clipboard",
@@ -268,6 +271,7 @@ describe("PLAN_RELEVANT_TOOLS coverage (#9928)", () => {
       "displayConfig",
       "displayConfig",
       "displayConfig",
+      "systemAlerts",
     ]);
   });
 

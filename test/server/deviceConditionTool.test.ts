@@ -142,3 +142,30 @@ describe("deviceCondition setDeviceState wiring", () => {
     expect(calls).toEqual([JSON.stringify({ clock: { reset: true } })]);
   });
 });
+
+describe("attestation ceiling refusal (#14074)", () => {
+  test.each([
+    [{ integrityState: "MEETS_STRONG_INTEGRITY" }, "integrityState"],
+    [{ rootState: "verified" }, "rootState"],
+    [{ integrity: { ctsProfileMatch: true } }, "integrity.ctsProfileMatch"],
+  ])("refuses %j without applying anything", async (deviceCondition, field) => {
+    const response = await handleDeviceConditionCall(
+      device,
+      { deviceCondition, sessionUuid: "s" },
+      { featureFlags: flagOn, registry: freshRegistry() },
+    );
+    expect(toolStructured(response).success).toBe(false);
+    expect(toolText(response)).toContain("attestation_ceiling");
+    expect(toolText(response)).toContain(field);
+    expect(toolText(response)).toMatch(/physical device/);
+  });
+
+  test("does not refuse an admissible request", async () => {
+    const response = await handleDeviceConditionCall(
+      device,
+      { deviceCondition: { rootState: "unset" }, sessionUuid: "s" },
+      { featureFlags: flagOn, registry: freshRegistry() },
+    );
+    expect(toolText(response)).not.toContain("attestation_ceiling");
+  });
+});

@@ -5,6 +5,7 @@ import {
   IOS_RUNNER_FEATURE_FLAGS,
   getRequiredIosRunnerFeatureFlags,
 } from "../../../../src/features/observe/ios/IOSCtrlProxyClient";
+import { isSdkAppActivity } from "../../../../src/features/observe/ios/sdkAppActivity";
 import { CtrlProxyServicePortChangedError } from "../../../../src/features/observe/ios/CtrlProxyServicePortChangedError";
 import { SdkCapabilityProbeSupersededError } from "../../../../src/features/observe/ios/SdkCapabilityProbeSupersededError";
 import { BootedDevice, HighlightShape } from "../../../../src/models";
@@ -5496,7 +5497,7 @@ describe("IOSCtrlProxyClient", function () {
         });
         testClient.getSdkCapabilityTestHooks().seedForTesting("com.example.ios", []);
         testClient["lastForegroundBundleId"] = "com.example.ios";
-        expect(await testClient.refreshSdkScreenIdentity("com.example.ios", 4242)).toEqual(
+        expect(await testClient.refreshSdkScreenIdentity("com.example.ios", 4241)).toEqual(
           identity,
         );
         expect(polls).toBe(2);
@@ -6367,8 +6368,26 @@ describe("IOSCtrlProxyClient", function () {
     });
 
     test.each([
+      [{ type: "hierarchy_update" }, true],
+      [{ type: "tap_coordinates_result", requestId: "tap", success: true }, true],
+      [{ type: "set_network_mock_rules_result", success: true }, true],
+      [{ type: "set_network_fault_rules_result", ok: true }, true],
+      [{ type: "set_network_error_simulation_result" }, true],
+      [{ type: "set_network_mock_rules_result", success: false }, false],
+      [{ type: "set_network_error_simulation_result", ok: false }, false],
+      [{ type: "set_network_mock_rules_result", requestId: "sync", success: false }, true],
+      [{ type: "performance_update", requestId: "metrics" }, false],
+      [{ type: "connected", requestId: "hello" }, false],
+      [{ type: "tap_coordinates_result", success: true }, false],
+    ] as const)("isSdkAppActivity(%j) is %p (#14414)", (message, expected) => {
+      expect(isSdkAppActivity(message)).toBe(expected);
+    });
+
+    test.each([
       { type: "hierarchy_update" },
       { type: "tap_coordinates_result", requestId: "tap-activity", success: true },
+      // A fire-and-forget network sync answers without a requestId (#14414).
+      { type: "set_network_mock_rules_result", success: true },
     ])("only app activity resets SDK-event poll backoff: %j (#13966)", async function (activity) {
       const timer = new FakeTimer();
       const { factory } = createCapturingWebSocketFactory(timer);

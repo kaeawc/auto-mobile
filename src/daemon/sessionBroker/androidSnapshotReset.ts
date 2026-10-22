@@ -104,6 +104,11 @@ export class AndroidSnapshotReset implements AndroidResetStrategy {
     return this.bounded({ ...context, assertOwned, resetTiming: timing }, async (run) => {
       const baseline = this.baselines.get(context.resourceId);
       try {
+        if (context.opaquePersistentChanges) {
+          throw new ActionableError(
+            "Android session made opaque persistent changes a snapshot load cannot revert",
+          );
+        }
         const identity = await run("identity", (step) => this.port.identity(device, step));
         if (
           !baseline ||

@@ -82,7 +82,7 @@ const methods: Method[] = [
   {
     name: "requestInstallCaCertificate",
     autoConnect: true,
-    invoke: (h) => h.client["certificates"].requestInstallCaCertificate(" PEM ", 50),
+    invoke: (h) => h.client.testHooks.certificates().requestInstallCaCertificate(" PEM ", 50),
     frame: (requestId) => ctrlProxyRequests.installCaCert({ requestId, certificate: "PEM" }),
     literal: '{"type":"install_ca_cert","requestId":"caCertInstall_wire-1","certificate":"PEM"}',
     response: certResponse,
@@ -110,7 +110,7 @@ const methods: Method[] = [
   {
     name: "requestRemoveCaCertificate",
     autoConnect: true,
-    invoke: (h) => h.client["certificates"].requestRemoveCaCertificate(" alias ", 50),
+    invoke: (h) => h.client.testHooks.certificates().requestRemoveCaCertificate(" alias ", 50),
     frame: (requestId) => ctrlProxyRequests.removeCaCert({ requestId, alias: "alias" }),
     literal: '{"type":"remove_ca_cert","requestId":"caCertRemove_wire-1","alias":"alias"}',
     response: { type: "ca_cert_result", action: "remove" },
@@ -120,7 +120,7 @@ const methods: Method[] = [
   {
     name: "requestDeviceOwnerStatus",
     autoConnect: true,
-    invoke: (h) => h.client["certificates"].requestDeviceOwnerStatus(50),
+    invoke: (h) => h.client.testHooks.certificates().requestDeviceOwnerStatus(50),
     frame: (requestId) => ctrlProxyRequests.getDeviceOwnerStatus({ requestId }),
     literal: '{"type":"get_device_owner_status","requestId":"deviceOwnerStatus_wire-1"}',
     response: { type: "device_owner_status_result", isDeviceOwner: false, isAdminActive: false },
@@ -130,7 +130,7 @@ const methods: Method[] = [
   {
     name: "requestPermission",
     autoConnect: true,
-    invoke: (h) => h.client["certificates"].requestPermission(" perm ", false, 50),
+    invoke: (h) => h.client.testHooks.certificates().requestPermission(" perm ", false, 50),
     frame: (requestId) =>
       ctrlProxyRequests.getPermission({ requestId, permission: "perm", requestPermission: false }),
     literal:
@@ -143,7 +143,7 @@ const methods: Method[] = [
     name: "focus sendAction",
     autoConnect: true,
     invoke: (h) =>
-      h.client["focus"]["sendAction"]("focus", "res/id", 50, new NoOpPerformanceTracker()),
+      h.client.testHooks.focus()["sendAction"]("focus", "res/id", 50, new NoOpPerformanceTracker()),
     frame: (requestId) =>
       ctrlProxyRequests.requestAction({ requestId, action: "focus", resourceId: "res/id" }),
     literal:
@@ -155,7 +155,7 @@ const methods: Method[] = [
   {
     name: "requestCurrentFocus",
     autoConnect: true,
-    invoke: (h) => h.client["focus"].requestCurrentFocus(50),
+    invoke: (h) => h.client.testHooks.focus().requestCurrentFocus(50),
     frame: (requestId) => ctrlProxyRequests.getCurrentFocus({ requestId }),
     literal: '{"type":"get_current_focus","requestId":"currentFocus_wire-1"}',
     response: { type: "current_focus_result" },
@@ -165,7 +165,7 @@ const methods: Method[] = [
   {
     name: "requestTraversalOrder",
     autoConnect: true,
-    invoke: (h) => h.client["focus"].requestTraversalOrder(50),
+    invoke: (h) => h.client.testHooks.focus().requestTraversalOrder(50),
     frame: (requestId) => ctrlProxyRequests.getTraversalOrder({ requestId }),
     literal: '{"type":"get_traversal_order","requestId":"traversalOrder_wire-1"}',
     response: {
@@ -178,7 +178,7 @@ const methods: Method[] = [
   {
     name: "requestInstalledPackages",
     autoConnect: false,
-    invoke: (h) => h.client["packages"].requestInstalledPackages(false, 3, 50),
+    invoke: (h) => h.client.testHooks.packages().requestInstalledPackages(false, 3, 50),
     frame: (requestId) =>
       ctrlProxyRequests.requestInstalledPackages({ requestId, includeSystem: false, userId: 3 }),
     literal:
@@ -190,7 +190,7 @@ const methods: Method[] = [
   {
     name: "requestPackageInfo",
     autoConnect: false,
-    invoke: (h) => h.client["packages"].requestPackageInfo("pkg", {}, 50),
+    invoke: (h) => h.client.testHooks.packages().requestPackageInfo("pkg", {}, 50),
     frame: (requestId) =>
       ctrlProxyRequests.requestPackageInfo({
         requestId,
@@ -206,7 +206,7 @@ const methods: Method[] = [
   {
     name: "requestLaunchIntent",
     autoConnect: false,
-    invoke: (h) => h.client["packages"].requestLaunchIntent("pkg", 50),
+    invoke: (h) => h.client.testHooks.packages().requestLaunchIntent("pkg", 50),
     frame: (requestId) => ctrlProxyRequests.requestLaunchIntent({ requestId, packageName: "pkg" }),
     literal:
       '{"type":"request_launch_intent","requestId":"launch_intent_123_delegate-1","packageName":"pkg"}',
@@ -218,7 +218,7 @@ const methods: Method[] = [
     name: "requestAddHighlight",
     autoConnect: true,
     invoke: (h) =>
-      h.client["highlights"].requestAddHighlight(
+      h.client.testHooks.highlights().requestAddHighlight(
         "h1",
         {
           type: "box",

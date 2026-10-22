@@ -8,6 +8,7 @@
 import contract from "../../../schemas/prototype-spec-contract.json";
 import type { PrototypeCheck } from "./prototypeSpec";
 import { matchesCheckPattern } from "./prototypeCheckPattern";
+import { prototypeContractPatterns } from "./prototypeContractPatterns";
 
 export const MAX_PROTOTYPE_CHECK_VALUE_LENGTH = contract.limits.MAX_PROTOTYPE_CHECK_VALUE_LENGTH;
 /** Exact format expressions. Format whitespace is JS whitespace; pattern shorthand s is ASCII.
@@ -21,6 +22,7 @@ const formats = {
   decimal: /^-?[0-9]+(\.[0-9]+)?$/u,
   url: /^https?:\/\/[^\s/?#]+([/?#]\S*)?$/u,
 };
+export type PrototypeCheckFormat = keyof typeof formats;
 function required(value: unknown, nodeType: string): boolean {
   if (nodeType === "checkbox" || nodeType === "switch") {
     return value === true;
@@ -28,7 +30,7 @@ function required(value: unknown, nodeType: string): boolean {
   if (nodeType === "slider" || nodeType === "timePicker") {
     return typeof value === "number" && Number.isFinite(value);
   }
-  return typeof value === "string" && value.trim().length > 0;
+  return typeof value === "string" && !prototypeContractPatterns.blankText.test(value);
 }
 function formatPasses(text: string, format: keyof typeof formats): boolean {
   const match = formats[format].exec(text);

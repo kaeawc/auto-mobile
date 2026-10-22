@@ -1297,6 +1297,49 @@ describe("DevicePool", () => {
       }
     });
 
+    test("a timed-out probe during a pending replacement leaves it resolved (#14377)", async () => {
+      const device = stamped(poolDevice("emulator-5554", "Pixel_8_API_35"), 1);
+      const replacement = stamped(poolDevice("emulator-5554", "Pixel_7_API_34"), 2);
+      const timedOut = { ...stamped(unresolved("emulator-5554"), 4), nameProbeTimedOut: true };
+      await initializeLiveDevices([device]);
+      await devicePool.reconcileDiscoveryObservation([device], "test:initial");
+      const pooled = requirePooledDevice(devicePool, device.deviceId);
+
+      const internals = devicePool.testHooks;
+      const cacheCleanupStarted = Promise.withResolvers<void>();
+      const finishCacheCleanup = Promise.withResolvers<void>();
+      const restore_clearDeviceSessionCache = internals.clearDeviceSessionCache.intercept(
+        (clearDeviceSessionCache) => async (deviceId) => {
+          cacheCleanupStarted.resolve();
+          await finishCacheCleanup.promise;
+          await clearDeviceSessionCache(deviceId);
+        },
+      );
+      try {
+        const replacementPromise = internals.replacePooledDeviceForRuntimeIdentity.call(
+          pooled,
+          replacement,
+        );
+        await cacheCleanupStarted.promise;
+
+        // Host load timed the AVD-name probe out: no identity evidence either way.
+        await devicePool.reconcileDiscoveryObservation([timedOut], "test:timed-out");
+        expect(
+          internals.runtimeIdentity.getPendingUnresolvedEvidence(device.deviceId),
+        ).toBeUndefined();
+
+        finishCacheCleanup.resolve();
+        await replacementPromise;
+
+        const installed = devicePool.getDevice(device.deviceId);
+        expect(installed?.name).toBe("Pixel_7_API_34");
+        expect(installed?.identityUnresolved).not.toBeTrue();
+      } finally {
+        restore_clearDeviceSessionCache();
+        finishCacheCleanup.resolve();
+      }
+    });
+
     test("lets a later resolved replacement clear pending unresolved evidence", async () => {
       const device = stamped(poolDevice("emulator-5554", "Pixel_8_API_35"), 1);
       const replacement = stamped(poolDevice("emulator-5554", "Pixel_7_API_34"), 2);

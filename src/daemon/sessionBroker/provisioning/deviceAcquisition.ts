@@ -123,8 +123,19 @@ export function acquisitionFailure(
   };
 }
 
+/** The create path's earlier deadline, when the caller reserved a warm readiness retry. */
+function createDeadline(
+  deadlineMs: number,
+  reserveMs: number | undefined,
+): { createDeadlineMs?: number } {
+  return reserveMs !== undefined && reserveMs > 0
+    ? { createDeadlineMs: deadlineMs - reserveMs }
+    : {};
+}
+
 interface BindingPreparationOptions {
   deadlineMs: number;
+  createDeadlineMs?: number;
   idleTimeoutMs: number;
   livenessOwnerToken: string;
   signal?: AbortSignal;
@@ -276,6 +287,7 @@ export class BrokerDeviceAcquisition {
       config.requests,
       {
         deadlineMs,
+        ...createDeadline(deadlineMs, config.createRetryReserveMs),
         idleTimeoutMs,
         livenessOwnerToken: options.livenessOwnerToken,
         signal: options.signal,
@@ -374,6 +386,9 @@ export class BrokerDeviceAcquisition {
       requestedSpec: request.requestedSpec as BindingRequestedSpec,
       ...(request.priorDeviceHint ? { priorDeviceHint: request.priorDeviceHint } : {}),
       deadlineMs: options.deadlineMs,
+      ...(options.createDeadlineMs === undefined
+        ? {}
+        : { createDeadlineMs: options.createDeadlineMs }),
       signal: options.signal,
       owner: this.deps.owner(),
     });

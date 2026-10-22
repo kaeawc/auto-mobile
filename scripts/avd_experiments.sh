@@ -75,7 +75,7 @@ for pkg in "${requested_packages[@]}"; do
   mkdir -p "$outdir"
 
   echo "Starting emulator for ${name}" | tee "$outdir/run.log"
-  "$emulator" -avd "$name" -no-window -no-audio -gpu swiftshader_indirect -no-snapshot-save -no-boot-anim -wipe-data >"$outdir/emulator.log" 2>&1 &
+  "$emulator" -avd "$name" -no-window -no-audio -gpu swiftshader -no-snapshot-save -no-boot-anim -wipe-data >"$outdir/emulator.log" 2>&1 &
   emu_pid=$!
 
   "$adb" wait-for-device

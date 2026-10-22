@@ -35,7 +35,7 @@ export class IosCtrlProxyHealth {
    * daemon run, or the Android runner reached through `adb forward` — is never
    * mistaken for this device's runner. Every
    * caller (`isRunning()`, the `start()` short-circuit, `waitForHealthEndpoint`,
-   * `isCtrlProxyProcessAlive()`) inherits the identity check through this one
+   * `checkCtrlProxyProcessLiveness()`) inherits the identity check through this one
    * method.
    */
   async checkHealthEndpoint(): Promise<boolean> {

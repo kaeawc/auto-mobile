@@ -8,7 +8,9 @@ export function createIosSimulatorOwnershipReader(
   sessions: () => Pick<SessionManager, "getAssignedDevices"> | undefined,
 ): IosSimulatorOwnershipReader {
   return {
-    refresh: () => bindings.refresh({ fresh: true, requireCurrent: true }),
+    // A pending registry upgrade hides persisted bindings: surface it as unknown, not external.
+    refresh: () =>
+      bindings.refresh({ fresh: true, requireCurrent: true, refuseUpgradePending: true }),
     isAutoMobileOwned: (udid) =>
       bindings.stableIdsFor("ios").has(udid) ||
       (sessions()?.getAssignedDevices().has(udid) ?? false),

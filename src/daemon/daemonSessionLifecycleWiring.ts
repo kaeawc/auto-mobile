@@ -30,6 +30,7 @@ import { registerPerformanceMonitorSessionCleanup } from "./performanceMonitorSe
 import { registerAppLinksSessionCleanup } from "./appLinksSessionCleanup";
 import { registerScreenLockSessionCleanup } from "./screenLockSessionCleanup";
 import { registerPowerSessionCleanup } from "./powerSessionCleanup";
+import { registerSystemAlertSessionCleanup } from "./systemAlertSessionCleanup";
 import {
   createOwnerlessRecordingAcquisitionCleanup,
   createRecorderTeardownRecoveryMarker,
@@ -110,6 +111,7 @@ export function wireSessionLifecycle(
   registerPerformanceMonitorSessionCleanup(sessionManager);
   registerScreenLockSessionCleanup(sessionManager);
   registerPowerSessionCleanup(sessionManager);
+  registerSystemAlertSessionCleanup(sessionManager);
   registerRecordingSessionCleanup(sessionManager, {
     ...defaultRecordingSessionCleanupDeps,
     markDeviceNeedsRecorderRecovery: createRecorderTeardownRecoveryMarker(sessionManager),

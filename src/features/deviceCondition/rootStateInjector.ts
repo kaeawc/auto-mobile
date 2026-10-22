@@ -82,7 +82,8 @@ async function plantArtifacts(
 /**
  * Which of `paths` exist. `ls` exits nonzero when ANY operand is missing even though it still
  * lists the ones that exist, and the adb client rejects a nonzero exit, so `; true` keeps the
- * partial listing. A failed read reads as "none exist".
+ * partial listing. A read that genuinely fails (transport error) throws instead of reading as
+ * "none exist".
  */
 async function listExisting(
   adb: AdbExecutor,
@@ -92,7 +93,8 @@ async function listExisting(
   if (paths.length === 0) {
     return new Set();
   }
-  const out = await shell(adb, ["ls", ...paths, "2>/dev/null;", "true"], signal).catch(() => "");
+  // A failed listing throws: reading it as "none exist" would let apply overwrite a real file.
+  const out = await shell(adb, ["ls", ...paths, "2>/dev/null;", "true"], signal);
   return new Set(
     out
       .split("\n")
@@ -128,11 +130,12 @@ export function createRootStateInjector(adb: AdbExecutor): DeviceConditionInject
       if (active && (await plantedStillThere(signal))) {
         return { status: "unchanged", detail: "rooted-detectable fixture is already applied" };
       }
+      // Both reads happen before the first mutation, so a failed probe changes nothing.
+      const existing = await listExisting(adb, ROOT_ARTIFACT_PATHS, signal);
       if (!baselineCaptured) {
         baselineSelinux = (await shell(adb, ["getenforce"], signal)) || "Enforcing";
         baselineCaptured = true;
       }
-      const existing = await listExisting(adb, ROOT_ARTIFACT_PATHS, signal);
       const toPlant = ROOT_ARTIFACT_PATHS.filter((path) => !existing.has(path));
       // Defined before the first mutation (`adb root`) so every later failure can undo it.
       const reset = async (resetSignal?: AbortSignal): Promise<void> => {
@@ -182,8 +185,22 @@ export function createRootStateInjector(adb: AdbExecutor): DeviceConditionInject
       };
     },
     async isClean(signal): Promise<boolean> {
-      if (planted.size > 0 && (await listExisting(adb, [...planted], signal)).size > 0) {
-        return false;
+      if (planted.size > 0) {
+        try {
+          if ((await listExisting(adb, [...planted], signal)).size > 0) {
+            return false;
+          }
+        } catch (error) {
+          if (signal?.aborted) {
+            throw error;
+          }
+          // A read that cannot run cannot show the device is clean, so report it as not clean.
+          logger.warn(
+            `rootState clean check could not list artifacts: ${errorMessage(error)}`,
+            error,
+          );
+          return false;
+        }
       }
       const mode = await shell(adb, ["getenforce"], signal);
       return /permissive/i.test(mode) === /permissive/i.test(baselineSelinux);

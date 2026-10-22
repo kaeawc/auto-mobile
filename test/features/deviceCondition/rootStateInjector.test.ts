@@ -256,4 +256,26 @@ describe("rootState injector (#14060)", () => {
     expect(lastSetenforce).toBe("shell setenforce 1");
     expect(commands.filter((c) => c === "shell getenforce")).toHaveLength(1);
   });
+
+  test("a failed artifact listing stops the apply before anything on the device changes", async () => {
+    const adb = adbWith({ ...ROOTABLE, "ls /system/xbin/su": "/system/bin/busybox" });
+    failFirst(adb, "ls ", 1);
+    await expect(createRootStateInjector(adb).apply("rooted-detectable")).rejects.toThrow();
+    const commands = adb.getExecutedCommands();
+    // Nothing was written, un-rooted or toggled, and the baseline was not read yet either.
+    expect(commands.filter((c) => /^(root|remount|unroot)$/.test(c))).toEqual([]);
+    expect(commands.some((c) => c.startsWith("shell printf") || c.startsWith("shell chmod"))).toBe(
+      false,
+    );
+    expect(commands.some((c) => c.startsWith("shell setenforce"))).toBe(false);
+    expect(commands.filter((c) => c === "shell getenforce")).toHaveLength(0);
+  });
+
+  test("isClean fails closed when the artifact listing cannot run", async () => {
+    const adb = adbWith(ROOTABLE);
+    const injector = createRootStateInjector(adb);
+    await injector.apply("rooted-detectable");
+    failFirst(adb, "ls ", 1);
+    expect(await injector.isClean()).toBe(false);
+  });
 });

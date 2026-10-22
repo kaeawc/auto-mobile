@@ -197,7 +197,7 @@ is a zip, MIME `application/vnd.automobile.prototype+zip`, iOS UTI
 
 - Entries: `bundle.json`, `spec.json`, `assets/[0-9a-f]{64}\.(png|jpg|webp)` and
   `fonts/[0-9a-f]{64}\.(ttf|otf)`. It rejects directories, parent-relative or absolute paths,
-  backslashes, NUL, non-ASCII names, `__MACOSX`, duplicate names, symlink or unix-mode attributes,
+  backslashes, NUL, non-ASCII names, `__MACOSX`, duplicate names, symlink or nonregular Unix file-type attributes,
   encrypted entries, compression methods other than STORED and DEFLATE, and multi-disk archives.
 - `bundle.json`: `{ "bundleFormatVersion": 1, "specSha256": "...", "assets": [{id,file,sha256,mediaType}], "fonts": [...], "requires": [capabilities] }`.
   Strict; no label, source or storage. Each platform's importer translates it into its own store
@@ -217,6 +217,41 @@ is a zip, MIME `application/vnd.automobile.prototype+zip`, iOS UTI
   one custom URL scheme in the first release is the internal launch scheme `automobile-proto://open`
   (section 7): the iOS app registers it, and it only opens an entry that is already in the library.
   It never fetches, imports or carries spec bytes.
+
+Bundle limits (shared TS/Kotlin/Swift transport contract):
+
+- `BUNDLE_MAX_ENTRIES = 36`: two JSON files + the asset contract's 32 assets + two fonts headroom;
+  36 is fixed for this format, independently of future asset-contract count changes.
+- `BUNDLE_MAX_SPEC_BYTES = 1,048,576`; `BUNDLE_MAX_MANIFEST_BYTES = 65,536`.
+- Each image is at most `MAX_PROTOTYPE_ASSET_BYTES = 4,194,304` bytes; each font is at most
+  `MAX_PROTOTYPE_FONT_ASSET_BYTES = 2,097,152` bytes, from the asset contract.
+- `BUNDLE_MAX_EXPANDED_BYTES = MAX_PROTOTYPE_ASSET_TOTAL_BYTES + BUNDLE_MAX_SPEC_BYTES +
+  BUNDLE_MAX_MANIFEST_BYTES = 17,891,328`; `BUNDLE_MAX_COMPRESSED_BYTES` is the same value and
+  caps the entire archive file, including headers.
+- `BUNDLE_MAX_RATIO = 100`: actual total inflated bytes / total compressed entry data bytes;
+  the known compressed-data total supplies a hard output budget during inflation. Header sizes
+  never authorize extra allocation. JSON nesting is limited to 64 levels.
+
+The reader rejects ZIP64, nonempty extra fields or comments, data descriptors, local/central
+header mismatches, overlapping entries, hidden records/preambles, extra EOCD signatures in the
+last 65,557 bytes, and bytes after EOCD. Unix file types must be regular or unspecified (zero).
+CRC32 precedes SHA256 verification. Every image/font reference, manifest record and ZIP entry
+must match in both directions; listed-but-unreferenced IDs fail with `unreferenced_asset`.
+`requires` is advisory, sorted and unique. The reader validates strict spec JSON with the existing
+validator; library policy/capability checks remain the importing app's responsibility.
+
+Canonical export preserves spec bytes verbatim, uses compact manifest JSON without a newline,
+sorts manifest arrays by ID (UTF-16 code units, exact identity without Unicode normalization)
+and ZIP asset/font entries by filename, and deduplicates identical
+content paths. ZIP entries are STORED, flags 0, DOS date/time 1980-01-01 00:00:00, made-by/version
+20 (MS-DOS), external attributes 0, with no extras, comments or descriptors. Private record and
+library metadata never enter the transport manifest; authored spec bytes are not redacted.
+The shared `test/fixtures/prototype-bundle/corpus.json` contains the error vocabulary, limits,
+portable hostile ZIPs and canonical export inputs/bytes. Generated PNG/signature/font-tag probes
+are not captured user assets. The oversized whole-file and combined-expanded boundaries are
+also tested in TS without committing megabytes of base64. Commits target fresh library IDs in an
+app-owned parent directory; callers serialize commits and the Node adapter uses exclusive
+`O_NOFOLLOW` writes, `lstat`/directory-open checks, 0700 staging, cleanup and same-volume rename.
 
 ## 5. Import validation flow
 
@@ -379,12 +414,9 @@ request allowed with the switch on.
 | Stores                     | GitHub releases only.                                                                                   |
 | LAN egress                 | RFC1918 LAN is allowed; loopback, link-local, `10.0.2.2` and the daemon ports stay blocked.             |
 | iOS egress transport       | Network.framework (NWConnection) pinned transport (owner, 2026-10-21, #14540).                          |
-| Missing referenced assets  | Recommended default, pending owner decision: reject the import on every platform.                       |
-| Android LAN permission     | Recommended default, pending owner decision: declare `ACCESS_LOCAL_NETWORK`, request on switch-on.      |
+| Missing referenced assets  | Reject the import on every platform with the offending path (owner, 2026-10-21, #14542).                |
+| Android LAN permission     | Declare `ACCESS_LOCAL_NETWORK` + `INTERNET`, request on switch-on (owner, 2026-10-21, #14539).          |
 | MCP-saved prototypes       | Follow the imported-prototype network policy.                                                           |
-
-Rows marked "Recommended default, pending owner decision" are not yet owner-decided; they are the
-defaults this document assumes until the owner answers.
 
 ## Issues
 

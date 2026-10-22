@@ -1,3 +1,4 @@
+import { collectPrototypeStrings } from "../../prototype/prototypeAssetReferences";
 import type { PrototypeShowOverrides } from "../../prototype/PrototypeTransport";
 import {
   prototypePatchReplyFields,
@@ -311,33 +312,6 @@ export function decodePrototypeEvent(
 
 function isKnownPrototypeEventKind(kind: string): boolean {
   return (PROTOTYPE_EVENT_KINDS as readonly string[]).includes(kind);
-}
-
-/** Match cached IDs throughout JSON; asset and image values identify uncached references too. */
-function collectPrototypeStrings(
-  value: unknown,
-  strings: Set<string>,
-  references: Set<string>,
-  assetValue = false,
-  arbitraryJson = false,
-): void {
-  if (typeof value === "string") {
-    strings.add(value);
-    if (assetValue && !arbitraryJson) {
-      references.add(value);
-    }
-  } else if (typeof value === "object" && value !== null) {
-    // Object.entries also traverses array elements without changing subtree context.
-    for (const [key, child] of Object.entries(value)) {
-      collectPrototypeStrings(
-        child,
-        strings,
-        references,
-        assetValue || ["asset", "image"].includes(key),
-        arbitraryJson || ["state", "payload"].includes(key),
-      );
-    }
-  }
 }
 
 export class CtrlProxyPrototypes {

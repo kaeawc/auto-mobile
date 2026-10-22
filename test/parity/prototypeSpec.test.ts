@@ -9,7 +9,6 @@ import {
   MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES,
   prototypeSpecSchema,
 } from "../../src/features/prototype/prototypeSpec";
-import { requiredPrototypeCapabilities } from "../../src/features/prototype/prototypeCapabilityGates";
 import type { PrototypeStrictOptions } from "../../src/features/prototype/prototypeStrictPolicy";
 import {
   PROTOTYPE_SPEC_CAPABILITY_GATES,

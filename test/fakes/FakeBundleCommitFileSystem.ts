@@ -1,16 +1,10 @@
 import { join, resolve, sep } from "node:path";
 import type { BundleCommitFileSystem } from "../../src/features/prototype/prototypeBundle";
 
-/**
- * The library root, resolved the way `commitBundleToDirectory` resolves its destination, so the
- * fake's paths match on Windows (`D:\library`) as well as POSIX (`/library`).
- */
-export const FAKE_BUNDLE_LIBRARY = resolve("/library");
-
 export class FakeBundleCommitFileSystem implements BundleCommitFileSystem {
   readonly operations: string[] = [];
   readonly files = new Map<string, Uint8Array>();
-  readonly directories = new Set([FAKE_BUNDLE_LIBRARY]);
+  readonly directories = new Set([resolve("/library")]);
   readonly symlinks = new Set<string>();
   failOn: string | undefined;
   private operation(value: string): void {

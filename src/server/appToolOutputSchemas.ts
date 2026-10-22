@@ -1,4 +1,5 @@
 import { z } from "zod/v4";
+import { APP_TRIM_MEMORY_LEVELS } from "../models/AppLifecycleResult";
 
 const appPlatformOutputSchema = z.enum(["android", "ios"]);
 
@@ -202,10 +203,11 @@ export const appLifecycleResultSchema = z.object({
   message: z.string(),
   success: z.boolean(),
   supported: z.boolean(),
-  action: z.enum(["background", "killBackgrounded"]),
+  action: z.enum(["background", "killBackgrounded", "trimMemory"]),
   platform: z.enum(["android", "ios"]),
   appId: z.string(),
-  mechanism: z.enum(["home", "am-kill", "unsupported"]),
+  mechanism: z.enum(["home", "am-kill", "am-send-trim-memory", "unsupported"]),
+  trimLevel: z.enum(APP_TRIM_MEMORY_LEVELS).optional(),
   userId: z.number().int().nonnegative().optional(),
   pid: z.number().int().positive().optional(),
   pidBefore: z.number().int().positive().optional(),
@@ -219,6 +221,9 @@ export const appLifecycleResultSchema = z.object({
       "kill_failed",
       "ambiguous_user",
       "invalid_app_id",
+      "trim_level_required",
+      "trim_level_not_applicable",
+      "trim_failed",
     ])
     .optional(),
   error: z.string().optional(),
@@ -257,6 +262,7 @@ export const crashAppResultSchema = z.object({
       z.object({
         status: z.literal("found"),
         source: z.enum(["ios_ips", "android_dropbox"]),
+        reportId: z.string(),
         reportPath: z.string(),
         exceptionType: z.string(),
         exceptionCode: z.string().optional(),

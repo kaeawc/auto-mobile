@@ -55,12 +55,13 @@ Facets follow the ICSME 2024 taxonomy of OEM compatibility issues
 - Manufacturer profiles replace one another. Applying one other than the one recorded on the device
   first resets the recorded one, so its facets do not linger; the result names it as
   `replaced`.
-- `reset` restores the display facets, the kill facet of every package a manufacturer profile changed, and
-  the keyboard profile that was active before the first manufacturer profile. The display and kill records
-  are shared with `displayProfile` and `killProfile`, so reset also undoes their direct changes
-  on the device.
-- In a daemon session, release or rebind restores the kill and display facets. The keyboard
-  profile stays until `reset`, including for the device's next session.
+- `reset` restores the display facets, the kill facet of every package a manufacturer profile
+  changed, and the keyboard profile that was active before the first change. The display, kill
+  and keyboard records are shared with `displayProfile`, `killProfile` and `keyboard`
+  `setProfile`, so reset also undoes their direct changes on the device.
+- In a daemon session, release or rebind restores the keyboard, kill and display facets, so the
+  device's next session does not inherit them. A facet release already restored is not written
+  again by a later `reset`.
 
 ## Acquiring a device with a manufacturer profile
 

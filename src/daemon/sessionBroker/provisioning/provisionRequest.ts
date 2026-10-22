@@ -34,6 +34,11 @@ export interface BrokerProvisionRequest {
   localBindingCapacity: number;
   requests: BrokerDeviceRequest[];
   preparationTimeoutMs?: number;
+  /**
+   * Milliseconds an empty binding's create path holds back from `preparationTimeoutMs` so the
+   * caller keeps one warm readiness retry window. Adoption and reuse keep the full deadline.
+   */
+  createRetryReserveMs?: number;
   idleTimeoutMs?: number;
   executionOwnerPid?: number;
   executionOwnerStartIdentity?: string;

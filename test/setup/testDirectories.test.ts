@@ -5,10 +5,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   DB_PATH_OVERRIDE_ENV_KEYS,
+  SESSION_TIMING_OVERRIDE_ENV_KEYS,
   isolatedTestDirectoryEnv,
   testDirectoryRoot,
   withoutInheritedDatabaseOverrides,
+  withoutInheritedSessionTimingOverrides,
 } from "./testDirectories";
+import { DAEMON_ENV } from "../../src/config/envDaemon";
 import { DB_PATH_OVERRIDE_ENV_KEYS as guardDbOverrideKeys } from "../../src/db/database";
 import { useScratchRoot } from "../helpers/scratchRoot";
 import {
@@ -124,7 +127,42 @@ test("preload DB override keys match the production guard", () => {
   expect([...DB_PATH_OVERRIDE_ENV_KEYS].sort()).toEqual([...guardDbOverrideKeys].sort());
 });
 
-describe("inherited DB overrides through the real preload", () => {
+const inheritedTimingEnv = Object.fromEntries(
+  SESSION_TIMING_OVERRIDE_ENV_KEYS.map((key, index) => [key, `${60_000 + index}`]),
+);
+
+test.each(["/repo/test/daemon/x.test.ts", "C:\\repo\\test\\daemon\\x.test.ts"])(
+  "%s discards inherited session timing overrides without mutating input (#14750)",
+  (entrypoint) => {
+    const env = { ...inheritedTimingEnv, NODE_ENV: "test", OTHER: "kept" };
+    const result = withoutInheritedSessionTimingOverrides(env, entrypoint);
+    expect(result).toEqual({ NODE_ENV: "test", OTHER: "kept" });
+    expect(env).toEqual({ ...inheritedTimingEnv, NODE_ENV: "test", OTHER: "kept" });
+    expect(result).not.toBe(env);
+  },
+);
+
+test.each(["/repo/test/daemon/x.integration.test.ts", "/repo/test/stress/x.test.ts"])(
+  "%s preserves inherited session timing overrides",
+  (entrypoint) => {
+    const env = { ...inheritedTimingEnv, OTHER: "kept" };
+    expect(withoutInheritedSessionTimingOverrides(env, entrypoint)).toEqual(env);
+  },
+);
+
+test("session timing override keys cover every session liveness variable and its legacy twin", () => {
+  const specs = Object.values(DAEMON_ENV).filter((spec) =>
+    /^AUTOMOBILE_(CLI_)?SESSION_.*_MS$/.test(spec.name),
+  );
+  const expected = specs.flatMap((spec) => [
+    spec.name,
+    ...("legacyName" in spec ? [spec.legacyName] : []),
+  ]);
+  expect(expected.length).toBeGreaterThan(0);
+  expect([...SESSION_TIMING_OVERRIDE_ENV_KEYS].sort()).toEqual(expected.sort());
+});
+
+describe("inherited DB and session timing overrides through the real preload", () => {
   const scratch = useScratchRoot("db-override-preload-");
   let exitCode: number;
   let stderr: string;
@@ -141,11 +179,11 @@ describe("inherited DB overrides through the real preload", () => {
     for (const probe of probes) {
       writeFileSync(
         probe,
-        `import { test } from "bun:test"; import { writeFileSync } from "node:fs"; writeFileSync(${JSON.stringify(`${probe}.json`)}, JSON.stringify(Object.fromEntries(${JSON.stringify(DB_PATH_OVERRIDE_ENV_KEYS)}.map(key => [key, process.env[key]]))));\ntest("fixture", () => {});\n`,
+        `import { test } from "bun:test"; import { writeFileSync } from "node:fs"; writeFileSync(${JSON.stringify(`${probe}.json`)}, JSON.stringify(Object.fromEntries(${JSON.stringify([...DB_PATH_OVERRIDE_ENV_KEYS, ...SESSION_TIMING_OVERRIDE_ENV_KEYS])}.map(key => [key, process.env[key]]))));\ntest("fixture", () => {});\n`,
       );
     }
     writeFileSync(path.join(dir, "bunfig.toml"), "[test]\n");
-    const env: NodeJS.ProcessEnv = { ...process.env, ...inheritedDbEnv };
+    const env: NodeJS.ProcessEnv = { ...process.env, ...inheritedDbEnv, ...inheritedTimingEnv };
     delete env.BUN_OPTIONS;
     delete env.AUTOMOBILE_SPAWN_GUARD_CENSUS_FILE;
     delete env.AUTOMOBILE_SPAWN_GUARD_ALLOWLIST;
@@ -170,11 +208,11 @@ describe("inherited DB overrides through the real preload", () => {
     expect(exitCode, stderr).toBe(0);
   });
 
-  test("unit probe has none of the inherited DB overrides", () => {
+  test("unit probe has none of the inherited DB or session timing overrides", () => {
     expect(unitEnv).toEqual({});
   });
 
-  test("integration probe retains all inherited DB overrides", () => {
-    expect(integrationEnv).toEqual(inheritedDbEnv);
+  test("integration probe retains all inherited DB and session timing overrides", () => {
+    expect(integrationEnv).toEqual({ ...inheritedDbEnv, ...inheritedTimingEnv });
   });
 });

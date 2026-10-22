@@ -30,6 +30,7 @@ import {
   type DisplayProfilePortsFactory,
 } from "../features/utility/DisplayProfilePorts";
 import { recordDeviceSettingDefaultsBeforeChange } from "../features/utility/DeviceSettingDefaults";
+import { changedSettings } from "../features/utility/personaExecutors";
 
 const displayProfileInput = z.object({
   action: z
@@ -93,13 +94,7 @@ function profileInput(args: DisplayProfileArgs): DisplayProfileInput {
   );
 }
 
-export function changedSettings(input: DisplayProfileInput): DeviceSettingKey[] {
-  return [
-    ...(input.fontScale !== undefined ? (["fontScale"] as const) : []),
-    ...(input.density !== undefined ? (["density"] as const) : []),
-    ...(input.forceDark === true ? (["nightMode"] as const) : []),
-  ];
-}
+export { changedSettings };
 
 export const createDisplayProfileHandler =
   (deps: DisplayProfileToolDependencies = {}): DeviceToolHandler<typeof displayProfileInput> =>

@@ -516,14 +516,18 @@ export class DaemonClient {
   }
 
   /**
-   * Adopt the daemon's effective budget (#13797), measured from send time. Rebuild the progress
-   * deadline so subsequent ticks use the daemon's budget and ceiling, including after shortening.
+   * Adopt the daemon's effective budget (#13797), measured from this notice's receipt (#14489).
+   * The daemon starts its budget when it parses the frame and announces it right then, so that
+   * moment lies between our send and now; anchoring at now never cancels before the daemon's
+   * deadline even when delivery or parsing outlasted the response grace. Rebuild the progress
+   * deadline on the same anchor so later ticks use the daemon's budget and ceiling. A larger budget
+   * cannot pull back an existing deadline, which progress only pushed to an earlier tick plus the
+   * smaller old budget; a smaller budget may shorten it.
    */
   private adoptPendingRequestBudget(requestId: string, timeoutMs: number): void {
     const pending = this.pendingRequests.get(requestId);
     if (
       !pending ||
-      pending.sentAtMs === undefined ||
       pending.requestTimeoutMs === undefined ||
       !Number.isFinite(timeoutMs) ||
       timeoutMs <= 0 ||
@@ -531,21 +535,16 @@ export class DaemonClient {
     ) {
       return;
     }
+    const nowMs = this.timer.now();
     if (pending.deadline) {
-      const initialTimeoutMs =
-        timeoutMs < pending.requestTimeoutMs
-          ? timeoutMs
-          : Math.max(timeoutMs, pending.deadline.value - pending.sentAtMs);
-      pending.deadline = new ProgressExtendableDeadline(pending.sentAtMs, initialTimeoutMs);
+      pending.deadline = new ProgressExtendableDeadline(nowMs, timeoutMs);
     }
-    const targetMs = Math.max(pending.sentAtMs + timeoutMs, pending.deadline?.value ?? 0);
-    const remainingMs = Math.max(0, targetMs - this.timer.now());
     pending.requestTimeoutMs = timeoutMs;
     this.timer.clearTimeout(pending.timeout);
     pending.timeout = this.scheduleRequestTimeout(
       requestId,
       pending.toolName,
-      remainingMs,
+      timeoutMs,
       pending.reject,
     );
   }
@@ -831,7 +830,6 @@ export class DaemonClient {
         progressToken,
         deadline,
         requestTimeoutMs,
-        sentAtMs: this.timer.now(),
         disconnectCause,
       },
       signal,

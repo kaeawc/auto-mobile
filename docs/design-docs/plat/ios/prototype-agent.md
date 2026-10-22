@@ -17,16 +17,32 @@ screenshots (#10943, #10988) and the renderer and accessibility fixes that follo
 
 ## Embedded input validation
 
-The embedded/serverless API validates raw JSON against the compiled structural contract before
-`PrototypeSpec` decoding (#14482). Unknown fields and node types, malformed storage, invalid values,
-unions and structural budgets produce `PrototypeLoadError.invalidSpec(path:message:)` with host-style
-JSON paths. The generated contract has no resource-bundle dependency and a Bun drift test guards it.
-The Viewer/file loader retains its existing behavior. Host-only checks remain for state/action
-bindings, repeat expansion and substituted-text budgets, cross-node targets, component/ancestor
-combinations, check pattern grammar, chart data semantics, emit/link scope and platform registries;
-the Swift fixture test names each exemption and rejects stale exemptions. Element anchors still need
-host resolution to bounds (three structurally valid fixtures retain this diagnostic). Foundation
-rejects lone UTF-16 surrogates before constructing a JSON tree, so those parse failures report `$`.
+`PrototypeSpecStrictValidator.validate(data:supportedCapabilities:library:)` is the reject-only
+raw-byte entry point (#13620). It extends the generated structural interpreter from #14803 and
+composes the existing request/platform validators, state binding rules, portable check grammar,
+repeat tokenizer/binder/data projection and resource guards. Located checks cover charts, storage
+cross-references, template scope and cross-node targets. Success returns no render model; failures
+throw `PrototypeLoadError.invalidSpec(path:message:)` before rendering, storage or networking.
+The embedded/serverless loader runs this boundary before its existing decoder/capability checks.
+The Viewer/file loader retains its existing behavior. The generated contract remains bundle-free
+and protected by its Bun drift test.
+
+The shared corpus runner has no exemptions: every valid spec is accepted and every invalid fixture
+is rejected at the TS-captured path. `corpus.json` ratchets the complete file inventory and TS-computed
+capabilities in TS, Kotlin and Swift. Regenerate with
+`bun scripts/capture-prototype-strict-fixtures.ts`. Invalid envelopes can use `rawJson` or
+`rawBytesBase64` where an ordinary `spec` would erase duplicate keys or invalid encoding. Message
+parity is not required. The existing LF attribute covers these JSON fixtures.
+
+The byte boundary strips one BOM, rejects duplicate keys, invalid UTF-8, lone surrogates and
+nonfinite tokens at `$`, and limits JSON container depth to 128 before Foundation decoding. Semantic
+limits are unchanged. IDs and finite numbers retain TS semantics, including Unicode form, control
+characters escaped in JSON, negative zero and double precision above 2^53. Supplying
+`supportedCapabilities` checks authored features (including hidden and empty-template nodes).
+`library: true` rejects explicit system windows/device persistence; other import network/secret
+policies are applied by the importing app. Forbidden headers and literal CR/LF reject in either mode.
+Element anchors still need host resolution to bounds: three valid fixtures retain that loader
+diagnostic. Validation does not imply that the iOS renderer advertises every capability.
 
 ## Feature support
 
@@ -308,7 +324,7 @@ on it closes the sheet by writing `!equals` to its `openWhen` key, as on Android
 when the asset is uploaded, then its `icon`, then a placeholder square. Both ids of a pair are
 reported in `missingAssets` until they are uploaded.
 
-**Malformed values.** The agent has no copy of the host validator. For the forms this capability
+**Malformed values.** The strict input boundary validates the shared host contract and semantics. For the forms this capability
 added it checks them while decoding, and a malformed one fails `show_prototype` with
 `Invalid prototype spec: <path>: ...`, leaving the shown prototype untouched: a pair that is not
 exactly `{light, dark}` strings, a pair side or a gradient stop or a scrim that is neither a hex
@@ -521,8 +537,8 @@ Data stays agent-owned and read-only except through the data actions below; insp
 it next to state.
 Two data keys that are canonically equivalent Unicode strings collapse into one on iOS because
 Swift dictionary keys compare by canonical equivalence, unlike the host and Android.
-The agent re-checks data depth and array limits in the host's traversal order. It does not duplicate
-the host validator's data byte-cost rule at show; the existing 1 MiB whole-spec byte cap still bounds input.
+The agent re-checks data depth and array limits in the host's traversal order. The strict input
+boundary also enforces the host data byte-cost rule at show.
 
 ## Data actions capability
 
@@ -629,8 +645,9 @@ does not depend on Alamofire. The URLSession client above is in place behind the
 `PrototypeHttpClient` protocol, which is the fallback the proposal describes; an Alamofire client would
 be a second conformance, chosen where the agent builds the driver, with no change to Core.
 
-**App Transport Security.** localhost and IP-literal `http://` hosts are exempt from ATS; any other
-cleartext `http://` host falls under the host app's own ATS settings. There is no allowlist. The
+**App Transport Security.** IP-literal `http://` hosts are exempt from ATS; any other cleartext
+`http://` host falls under the host app's own ATS settings. (`localhost` is exempt from ATS too, but the
+[destination policy](#destination-policy-13815) refuses it first.) There is no allowlist. The
 viewer template app sets `NSAllowsArbitraryLoads` in `Viewer/Info.plist`, so a viewer runs any URL. In
 an injected agent a `via: "device"` request that ATS blocks
 (`NSURLErrorAppTransportSecurityRequiresSecureConnection`) completes as a typed `network` error whose
@@ -648,18 +665,38 @@ map live in the Android design doc, [Data, storage and network](../android/proto
 | `prototype_network_v1`        | `request` with `via: "host"`                                         | Advertised; see [Request action capability](#request-action-capability)                                 |
 | `prototype_network_device_v1` | `request` with `via: "device"`                                       | Advertised; a dedicated ephemeral `URLSession`                                                          |
 
-**`localhost` on a simulator.** An iOS simulator shares the Mac's network stack, so `localhost`,
-`127.0.0.1` and `[::1]` are the Mac for both `via` values and nothing is reversed (Android needs
+### Destination policy (#13815)
+
+`via: "device"` requests are checked by `PrototypeEgressPolicy` before the request starts, against every
+DNS answer, and at each redirect. It refuses:
+
+- `localhost` and `*.localhost` names;
+- loopback (`127.0.0.0/8`, `[::1]`), unspecified, link-local and multicast addresses, and the Android
+  emulator host aliases;
+- names with no DNS answer or any refused answer, and ambiguous numeric spellings;
+- the daemon's HTTP ports (3000–3010 and 8765) on private addresses.
+
+Other private (RFC1918) and public addresses are permitted. A refusal completes the request as
+`blocked_destination`.
+
+**`localhost` on a simulator.** An iOS simulator shares the Mac's network stack, but `localhost`,
+`127.0.0.1` and `[::1]` are refused for both `via` values: by this policy for `via: "device"`, and by the
+host's own egress policy for `via: "host"` (see the Android doc's
+[host egress policy](../android/prototype-ux.md#data-storage-and-network-12531)). To call a service on
+the Mac, bind it to a non-loopback interface and use the Mac's LAN address on a port other than the
+daemon's, for example `http://192.168.1.10:8080/feed`. Nothing is reversed on iOS (Android uses
 `adb reverse` for `via: "device"`).
 
 **Transports.** `via: "host"` is a `prototype_request` frame to exactly one connection, the most
-recently authenticated one, answered by a `prototype_response`; the host runs the fetch and applies no
-allowlist. `via: "device"` runs on `URLSession` inside the target app. There is no URL allowlist on
-either path.
+recently authenticated one, answered by a `prototype_response`; the host runs the fetch under its
+egress policy. `via: "device"` runs on `URLSession` inside the target app under the
+[destination policy](#destination-policy-13815). Neither path has an allowlist; both refuse the
+destinations their policy denies.
 
-**App Transport Security.** `via: "device"` is subject to the app's ATS: cleartext `http://` to `localhost`
-and IP addresses is exempt, any other cleartext host is blocked and reported as `network` with a message
-that points to `via: "host"` (which the host runs without ATS) or `https://`.
+**App Transport Security.** `via: "device"` is subject to the app's ATS: cleartext `http://` to IP
+addresses is exempt (so is `localhost`, which the destination policy refuses first), any other cleartext
+host is blocked and reported as `network` with a message that points to `via: "host"` (which the host
+runs without ATS) or `https://`.
 
 **Storage.** Precedence is the same as Android: a changed `version` discards stored values, stored values
 replace the spec's for listed keys, and values that no longer fit are dropped. A failed disk write keeps
@@ -761,7 +798,10 @@ Android uses Material `PullToRefreshBox`.
 `prototype_text_field_actions_v1` gates textField `trailingIcon {icon, label, onTap?}`, `imeAction`
 (`done`, `next`, `search`, `send`, `go`) and `onSubmit` (1-32 actions); multiline text has no IME
 action, so the host refuses them with `multiline: true`. iOS maps `imeAction` to `submitLabel` (done
-when only `onSubmit` is authored) and runs `onSubmit` from `onSubmit`; the trailing icon is an SF
+when only `onSubmit` is authored) and runs `onSubmit` from `onSubmit`. The number, decimal and
+phone pads have no Return key, so while such a field is focused a keyboard toolbar shows a button
+named for the action (Done, Next, Search, Send or Go) that runs `onSubmit` and dismisses the pad
+(#12998). The trailing icon is an SF
 Symbol button beside the field (a plain glyph without `onTap`), named by `label`, with the
 accessibility identifier `<testTag>.trailingIcon` that `tapOn` can target. Android draws an
 `IconButton` in the field's trailing slot and uses Compose `ImeAction` with `KeyboardActions`.

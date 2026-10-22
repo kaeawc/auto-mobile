@@ -65,6 +65,11 @@ test("daemon settlement updates a client constructed before dirty refinement", a
       evaluateClientHandshake(server.daemonIdentity, {
         clientVersion: "0.0.39+gabcdef123456.dirty.bbbbbbbbbbbb",
       }).ok,
+    ).toBe(true);
+    expect(
+      evaluateClientHandshake(server.daemonIdentity, {
+        clientVersion: "0.0.39+g123456abcdef.dirty.aaaaaaaaaaaa",
+      }).ok,
     ).toBe(false);
     timer.advanceTime(0);
     expect(await constants.resolveDaemonVersion()).toBe(settled);

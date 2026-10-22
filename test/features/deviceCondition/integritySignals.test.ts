@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
+import { logger } from "../../../src/utils/logger";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import type { ExecResult } from "../../../src/models";
 import {
@@ -120,9 +121,21 @@ describe("integrity signals (#14062)", () => {
   });
 
   test("an ExecResult error is logged and treated as a failed read", async () => {
-    const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("getprop", { ...execResult(""), error: "closed" });
-    const active = byId(await readIntegritySignals(adb));
-    expect(active["debuggable-build"]).toBe(false);
+    // The fake drops `error` from configured responses, so return it straight from execute.
+    const adb = adbWith({ getprop: EMULATOR_PROPS, getenforce: "Enforcing" });
+    const real = adb.execute.bind(adb);
+    adb.execute = (args, options) =>
+      args.includes("getprop")
+        ? Promise.resolve({ ...execResult(EMULATOR_PROPS), error: "closed" })
+        : real(args, options);
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const active = byId(await readIntegritySignals(adb));
+      // The dump carried debuggable=1, but the read failed, so nothing from it is trusted.
+      expect(active["debuggable-build"]).toBe(false);
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

@@ -1,10 +1,13 @@
-import type { AdbExecuteOptions } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import type {
+  AdbExecuteOptions,
+  AdbExecutor,
+} from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { ExecResult } from "../../src/models";
 import { createExecResult } from "../../src/utils/execResult";
 import { FakeAdbExecutor } from "./FakeAdbExecutor";
 
 /** A small emulator power model behind the `FakeAdbExecutor` seam: commands change state, dumps read it. */
-export class FakePowerAdb extends FakeAdbExecutor {
+export class FakePowerAdb extends FakeAdbExecutor implements AdbExecutor {
   battery = { level: 100, ac: true, usb: false, wireless: false, status: 2, stopped: false };
   deepEnabled = true;
   lightEnabled = true;

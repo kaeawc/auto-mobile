@@ -79,12 +79,16 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, PendingMutat
     "journaled",
   ),
   ...pendingTools(
-    ["persona", "statusBar"],
+    ["manufacturerProfile", "statusBar"],
     "Pending device-appearance intent and prior-value adapters (#14359); unavailable journal coverage limits best-effort reverts but does not gate tool actions or unconditional keep-booted cleaning.",
   ),
   ...pendingTools(
     ["sendBroadcast"],
     "Pending data/provider-specific journal adapter (#14359); opaque priors cannot drive best-effort reverts and do not gate keep-booted cleaning.",
+  ),
+  ...pendingTools(
+    ["backgroundWork"],
+    "Pending app-state journal adapter (#14359): runJob and WorkManager diagnostics run app-owned work whose effects are opaque, so best-effort reverts cannot undo them; keep-booted cleaning runs unconditionally.",
   ),
   ...pendingTools(
     ["stageSessionDownloads"],
@@ -146,7 +150,7 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, PendingMutat
     "notJournaled",
   ),
   ...pendingTools(
-    ["exportPlan", "recordToolCalls", "setActiveDevice", "setToolEnabled"],
+    ["exportPlan", "recordToolCalls", "setActiveDevice", "setToolEnabled", "systemAlerts"],
     "Host routing/recording configuration has no direct persistent device setting; device-side child operations remain pending (#14359).",
     "notJournaled",
   ),

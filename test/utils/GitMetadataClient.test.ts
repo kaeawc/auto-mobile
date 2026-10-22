@@ -17,7 +17,11 @@ const plainRepo = () =>
     [`${ROOT}/.git/refs/heads/main`]: `${SHA}\n`,
   });
 
-const fixture = (fs = plainRepo(), responses: Record<string, string | null> = {}) => {
+const fixture = (
+  fs = plainRepo(),
+  responses: Record<string, string | null> = {},
+  env: NodeJS.ProcessEnv = {},
+) => {
   const calls: Array<{ command: string; args: readonly string[]; cwd: string; timeoutMs: number }> =
     [];
   const run: GitCommandRunner = (command, args, options) => {
@@ -35,8 +39,14 @@ const fixture = (fs = plainRepo(), responses: Record<string, string | null> = {}
         ? ""
         : null;
   };
-  const client = new DefaultGitMetadataClient(run, fs, async (...args) => run(...args));
-  return { client, calls, fs, read: (cwd = ROOT) => client.readVersion(cwd, () => OWN) };
+  const client = new DefaultGitMetadataClient(run, fs, async (...args) => run(...args), env);
+  const roots: string[] = [];
+  const read = (cwd = ROOT) =>
+    client.readVersion(cwd, (root) => {
+      roots.push(root);
+      return OWN;
+    });
+  return { client, calls, fs, roots, read };
 };
 
 describe("DefaultGitMetadataClient", () => {
@@ -255,6 +265,7 @@ describe("DefaultGitMetadataClient", () => {
         recorded.push([...args]);
         return args[0] === "status" ? status : diff;
       },
+      {},
     );
     const read = () => client.readDirtyState(ROOT);
     expect(await read()).toEqual({
@@ -304,4 +315,117 @@ describe("DefaultGitMetadataClient", () => {
       expect(calls.map(({ args }) => args)).toEqual([STATUS]);
     },
   );
+
+  describe("repository environment overrides (#14506)", () => {
+    const WORK = "/work/tree";
+    // A separate work tree exposed via GIT_DIR has no .git marker of its own.
+    const envRepo = (entries: Record<string, string | null> = {}) =>
+      new FakeGitMetadataReader({
+        "/repos/am.git": null,
+        "/repos/am.git/HEAD": "ref: refs/heads/main\n",
+        "/repos/am.git/refs/heads/main": `${SHA}\n`,
+        ...entries,
+      });
+
+    test("honours GIT_DIR and GIT_WORK_TREE without a .git marker, resolved from cwd", () => {
+      const { read, calls, roots } = fixture(
+        envRepo(),
+        {},
+        {
+          GIT_DIR: "../../../repos/am.git",
+          GIT_WORK_TREE: "..",
+        },
+      );
+      expect(read(`${WORK}/src`)).toEqual(CLEAN);
+      expect(roots).toEqual([resolve(WORK)]);
+      expect(calls).toEqual([]);
+    });
+
+    test("never mixes a physical checkout's HEAD with GIT_DIR-scoped probes", () => {
+      const fs = envRepo({
+        [`${WORK}/.git`]: null,
+        [`${WORK}/.git/HEAD`]: `${OTHER_SHA}\n`,
+      });
+      const { read, calls } = fixture(fs, {}, { GIT_DIR: "/repos/am.git", GIT_WORK_TREE: WORK });
+      expect(read(WORK)).toEqual(CLEAN);
+      expect(calls).toEqual([]);
+      expect(fs.reads).not.toContain(`${WORK}/.git/HEAD`);
+    });
+
+    test("asks git for the work tree when only GIT_DIR is set", () => {
+      const { read, calls, roots } = fixture(envRepo(), {}, { GIT_DIR: "/repos/am.git" });
+      expect(read(WORK)).toEqual(CLEAN);
+      expect(roots).toEqual([ROOT]);
+      expect(calls).toEqual([
+        { command: "git", args: ["rev-parse", "--show-toplevel"], cwd: WORK, timeoutMs: 2_000 },
+      ]);
+    });
+
+    test("follows a GIT_DIR gitfile and a GIT_COMMON_DIR override", () => {
+      const fs = new FakeGitMetadataReader({
+        "/repos/link": "gitdir: lane\n",
+        "/repos/lane/HEAD": "ref: refs/heads/main\n",
+        "/repos/lane/commondir": "/ignored\n",
+        "/ignored/refs/heads/main": OTHER_SHA,
+        "/common/refs/heads/main": SHA,
+      });
+      const { read, calls } = fixture(
+        fs,
+        {},
+        {
+          GIT_DIR: "/repos/link",
+          GIT_WORK_TREE: WORK,
+          GIT_COMMON_DIR: "../../common",
+        },
+      );
+      expect(read(WORK)).toEqual(CLEAN);
+      expect(calls).toEqual([]);
+    });
+
+    test("GIT_WORK_TREE alone keeps discovery but checks the work tree's package", () => {
+      const { client, calls } = fixture(plainRepo(), {}, { GIT_WORK_TREE: WORK });
+      const roots: string[] = [];
+      expect(
+        client.readVersion(`${ROOT}/src`, (root) => {
+          roots.push(root);
+          return "some-host-app";
+        }),
+      ).toBeNull();
+      expect(roots).toEqual([resolve(WORK)]);
+      expect(calls).toEqual([]);
+    });
+
+    test("falls back to rev-parse HEAD in the same environment when GIT_DIR HEAD is unreadable", () => {
+      const fs = envRepo({ "/repos/am.git/HEAD": "unresolvable" });
+      const { read, calls } = fixture(fs, {}, { GIT_DIR: "/repos/am.git", GIT_WORK_TREE: WORK });
+      expect(read(WORK)).toEqual(CLEAN);
+      expect(calls.map(({ args, cwd }) => [args, cwd])).toEqual([[["rev-parse", "HEAD"], WORK]]);
+    });
+
+    test("returns null when GIT_DIR names no repository, ignoring a physical checkout", () => {
+      const { read, calls } = fixture(
+        plainRepo(),
+        { sha: null },
+        {
+          GIT_DIR: "/missing.git",
+          GIT_WORK_TREE: ROOT,
+        },
+      );
+      expect(read()).toBeNull();
+      expect(calls.map(({ args }) => args)).toEqual([["rev-parse", "HEAD"]]);
+    });
+
+    test.each(["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR"])(
+      "delegates an empty %s to git instead of reading the physical checkout",
+      (name) => {
+        const { read, calls, fs } = fixture(plainRepo(), { sha: null }, { [name]: "" });
+        expect(read()).toBeNull();
+        expect(calls.map(({ args }) => args)).toEqual([
+          ["rev-parse", "--show-toplevel"],
+          ["rev-parse", "HEAD"],
+        ]);
+        expect(fs.reads).toEqual([]);
+      },
+    );
+  });
 });

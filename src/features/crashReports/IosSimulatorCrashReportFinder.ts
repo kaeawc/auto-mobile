@@ -8,9 +8,11 @@ import {
   FRESHNESS_SLACK_MS,
   isFreshCrashReport,
   matchesCrashQuery,
+  type NativeCrashReportBody,
   type NativeCrashReportFinder,
   type NativeCrashReportLookup,
   type NativeCrashReportQuery,
+  type NativeCrashReportReader,
 } from "./NativeCrashReport";
 
 /** Newest `.ips` files inspected per lookup, so a full DiagnosticReports folder stays cheap. */
@@ -35,7 +37,9 @@ export const nodeCrashReportFileSystem: CrashReportFileSystem = {
  * `~/Library/Logs/DiagnosticReports/*.ips`, shared by every Simulator, so a
  * report is attributed only when its process path names this Simulator's UDID.
  */
-export class IosSimulatorCrashReportFinder implements NativeCrashReportFinder {
+export class IosSimulatorCrashReportFinder
+  implements NativeCrashReportFinder, NativeCrashReportReader
+{
   constructor(
     private readonly deviceId: string,
     private readonly fileSystem: CrashReportFileSystem,
@@ -46,7 +50,7 @@ export class IosSimulatorCrashReportFinder implements NativeCrashReportFinder {
     const deviceId = this.deviceId.toUpperCase();
     for (const path of await this.freshCandidates(query.notBeforeTimestampMs)) {
       query.signal?.throwIfAborted();
-      const parsed = await this.readReport(path);
+      const parsed = (await this.readReport(path))?.parsed;
       if (
         parsed?.simulatorDeviceId === deviceId &&
         matchesCrashQuery(parsed.report, query) &&
@@ -56,6 +60,19 @@ export class IosSimulatorCrashReportFinder implements NativeCrashReportFinder {
       }
     }
     return { status: "notFound" };
+  }
+
+  /** The `.ips` with this incident id, only if it was written for this Simulator. */
+  async read(reportId: string, signal?: AbortSignal): Promise<NativeCrashReportBody | undefined> {
+    const deviceId = this.deviceId.toUpperCase();
+    for (const path of await this.freshCandidates(0)) {
+      signal?.throwIfAborted();
+      const read = await this.readReport(path);
+      if (read?.parsed?.simulatorDeviceId === deviceId && read.parsed.report.id === reportId) {
+        return { report: read.parsed.report, text: read.text };
+      }
+    }
+    return undefined;
   }
 
   /** `.ips` files modified since the crash, newest first. */
@@ -94,10 +111,8 @@ export class IosSimulatorCrashReportFinder implements NativeCrashReportFinder {
 
   private async readReport(path: string) {
     try {
-      return parseIpsCrashReport(
-        (await this.fileSystem.readFileBuffer(path)).toString("utf8"),
-        path,
-      );
+      const text = (await this.fileSystem.readFileBuffer(path)).toString("utf8");
+      return { text, parsed: parseIpsCrashReport(text, path) };
     } catch (error) {
       logger.warn(`[CrashReports] failed to read ${path}: ${errorMessage(error)}`, error);
       return undefined;

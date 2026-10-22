@@ -1,0 +1,64 @@
+{
+  "spec": {
+    "id": "secure",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "secret": "",
+      "password": "",
+      "public": "ok",
+      "secret_a": ""
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "column",
+          "repeat": {
+            "items": [
+              {
+                "id": "a"
+              }
+            ],
+            "as": "item"
+          },
+          "children": [
+            {
+              "type": "row",
+              "children": [
+                {
+                  "type": "textField",
+                  "stateKey": "secret_{item.id}",
+                  "secure": true
+                },
+                {
+                  "type": "button",
+                  "label": "Send",
+                  "onTap": [
+                    {
+                      "type": "request",
+                      "via": "device",
+                      "url": "https://example.com",
+                      "query": {
+                        "token": {
+                          "state": "secret_{item.id}"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "options": {
+    "library": true
+  },
+  "expectedPath": "root.children[0].children[0].children[1].onTap[0].query.token.state"
+}

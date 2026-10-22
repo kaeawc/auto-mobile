@@ -402,7 +402,7 @@ test("connected greeting records gesture display capability without gating core 
   );
   expect(await proxy.supportsCommand("gesture_display_id_v1")).toBe(false);
   expect(context.isCommandSupported?.("gesture_display_id_v1")).toBe(false);
-  proxy["supportedCommands"] = null;
+  proxy.connectionTestHooks.supportedCommands = null;
   expect(context.isCommandSupported?.("gesture_display_id_v1")).toBe(false);
 });
 

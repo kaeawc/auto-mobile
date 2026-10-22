@@ -1,0 +1,26 @@
+{
+  "spec": {
+    "id": "strict",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "button",
+      "label": "Go",
+      "onTap": [
+        {
+          "type": "request",
+          "url": "https://example.com/",
+          "headers": {
+            "X-Test": {
+              "value": "a\r\nb"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].headers[\"X-Test\"]"
+}

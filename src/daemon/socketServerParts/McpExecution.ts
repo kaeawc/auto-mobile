@@ -124,6 +124,7 @@ export class McpExecution {
     this.inventoryForward = new HostInventoryForward(state.timer, state.idGenerator);
     this.discoveryCache = new ControlDiscoveryCache(
       () => this.state.mcpDispatcher.refreshResources?.() ?? Promise.resolve(),
+      state.timer,
     );
   }
   private get callbacks(): Callbacks {
@@ -486,7 +487,7 @@ export class McpExecution {
         // Cleanup includes the live dispatch evidence on every tools/call and
         // the abort timer on progress-capable calls.
         // Lets a handler on the
-        // OTHER side of this same call (e.g. `setUIStateHandler`) read this
+        // OTHER side of this same call (e.g. the `createSetUIStateHandler` handler) read this
         // exact `deadline`'s CURRENT (possibly progress-extended) value via
         // `liveDeadlineRegistry` instead of only the frozen snapshot forwarded
         // through `INTERNAL_MCP_REQUEST_TIMEOUT_PARAM` (issue #6222 P1 reopen).

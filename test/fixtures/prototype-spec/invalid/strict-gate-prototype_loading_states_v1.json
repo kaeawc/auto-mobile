@@ -1,0 +1,113 @@
+{
+  "spec": {
+    "id": "loading-states",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "feedStatus": "loading"
+    },
+    "data": {
+      "feed": []
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "column",
+          "visibleWhen": {
+            "key": "feedStatus",
+            "equals": "loading"
+          },
+          "repeat": {
+            "items": [
+              {
+                "id": "a"
+              },
+              {
+                "id": "b"
+              },
+              {
+                "id": "c"
+              }
+            ],
+            "as": "row",
+            "key": "id"
+          },
+          "children": [
+            {
+              "type": "row",
+              "style": {
+                "shimmer": true,
+                "height": {
+                  "dp": 56
+                },
+                "background": "surfaceVariant",
+                "cornerRadius": "medium"
+              },
+              "children": [
+                {
+                  "type": "spacer"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "No posts yet",
+          "visibleWhen": {
+            "all": [
+              {
+                "key": "feedStatus",
+                "equals": "success"
+              },
+              {
+                "data": "/feed",
+                "empty": true
+              }
+            ]
+          }
+        },
+        {
+          "type": "text",
+          "text": "Couldn't load the feed",
+          "visibleWhen": {
+            "key": "feedStatus",
+            "equals": "error"
+          }
+        },
+        {
+          "type": "card",
+          "visibleWhen": {
+            "data": "/feed",
+            "empty": false
+          },
+          "styleWhen": [
+            {
+              "when": {
+                "key": "feedStatus",
+                "equals": "loading"
+              },
+              "style": {
+                "shimmer": true
+              }
+            }
+          ],
+          "children": [
+            {
+              "type": "text",
+              "text": "Feed"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "options": {
+    "supportedCapabilities": ["prototype_data_model_v1"]
+  },
+  "expectedPath": "$"
+}

@@ -3,7 +3,7 @@ import { fakeServerContext } from "../helpers/fakeServerContext";
 import { DaemonShuttingDownError } from "../../src/daemon/DaemonShuttingDownError";
 import { Server } from "@modelcontextprotocol/server";
 import { McpError } from "../../src/daemon/mcpError";
-import { beforeEach, afterEach, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, expect, spyOn, test } from "bun:test";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { ActionableError } from "../../src/models";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
@@ -17,8 +17,8 @@ import {
 import { McpOverloadError } from "../../src/daemon/McpTimeoutError";
 import { DeviceControlTransportError } from "../../src/daemon/deviceControlTransportFailure";
 
-function createHarness() {
-  const harness = createProxyMcpServer({
+function createProxy() {
+  return createProxyMcpServer({
     proxyConfig: {
       timer: new FakeTimer(),
       clientFactory: () => new FakeDaemonClient(),
@@ -27,6 +27,10 @@ function createHarness() {
       autoStartDaemon: false,
     },
   });
+}
+
+function createHarness() {
+  const harness = createProxy();
   // The SDK has two overloads; mock.calls exposes only the final three-argument one.
   // Keep the captured slot unknown and check callability before invoking two-argument handlers.
   const registrations: ReadonlyArray<readonly [string, unknown, ...unknown[]]> = [
@@ -35,22 +39,21 @@ function createHarness() {
   return { ...harness, registrations };
 }
 
-let registration: ReturnType<typeof spyOn<typeof Server.prototype, "setRequestHandler">>;
-let warmed = false;
-beforeEach(async () => {
-  registration = spyOn(Server.prototype, "setRequestHandler");
-  if (warmed) {
-    return;
-  }
-  warmed = true;
-  // Warm the SDK's one-off handler/schema initialization with a disposable server.
-  const { server, proxy } = createHarness();
+// CI's per-test time excludes only beforeAll: warm the SDK's one-off handler/schema
+// initialization with a disposable server here, before any spy exists, so the first timed
+// test does not pay for it and the file stays shared-safe (#14473).
+beforeAll(async () => {
+  const { server, proxy } = createProxy();
   try {
     await server.close();
   } finally {
     await proxy.close();
-    registration.mockClear();
   }
+});
+
+let registration: ReturnType<typeof spyOn<typeof Server.prototype, "setRequestHandler">>;
+beforeEach(() => {
+  registration = spyOn(Server.prototype, "setRequestHandler");
 });
 afterEach(() => {
   registration.mockRestore();

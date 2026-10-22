@@ -106,6 +106,8 @@ const FORMER_PLAN_RELEVANT_TOOLS = [
   // Added after the list was frozen: an audit runs as a plan assertion step (#14075).
   "audit",
   "appLifecycle",
+  // Added after the list was frozen: a triggered job replays as a plan step (#14090).
+  "backgroundWork",
   "biometricAuth",
   "changeLocalization",
   "clipboard",
@@ -120,11 +122,11 @@ const FORMER_PLAN_RELEVANT_TOOLS = [
   "keyboard",
   "killProfile",
   "launchApp",
+  "manufacturerProfile",
   "mediaSession",
   "multiTouch",
   "observe",
   "openLink",
-  "persona",
   "phoneCall",
   "pinchOn",
   "postNotification",
@@ -151,6 +153,7 @@ const FORMER_PLAN_RELEVANT_TOOLS = [
   "statusBar",
   "swipeAt",
   "swipeOn",
+  "systemAlerts",
   "systemTray",
   "tapAny",
   "tapAt",
@@ -237,6 +240,7 @@ describe("PLAN_RELEVANT_TOOLS coverage (#9928)", () => {
     recordPlanCall(recorder, "systemTray", { action: "list", appId: "com.example" });
     recordPlanCall(recorder, "systemTray", { action: "find", notification: { title: "Hi" } });
     recordPlanCall(recorder, "displayConfig", {});
+    recordPlanCall(recorder, "systemAlerts", { action: "get" });
     expect(recorder.stop()).toEqual([]);
   });
 
@@ -251,6 +255,10 @@ describe("PLAN_RELEVANT_TOOLS coverage (#9928)", () => {
     recordPlanCall(recorder, "displayConfig", { increaseContrast: true });
     recordPlanCall(recorder, "displayConfig", { reduceMotion: false });
     recordPlanCall(recorder, "displayConfig", { boldText: true });
+    recordPlanCall(recorder, "displayConfig", { size: { width: 720, height: 1600 } });
+    recordPlanCall(recorder, "displayConfig", { navigationMode: "threeButton" });
+    recordPlanCall(recorder, "displayConfig", { displayCutout: "hole" });
+    recordPlanCall(recorder, "systemAlerts", { action: "setPolicy", policy: "allow" });
     expect(recorder.stop().map((step) => step.tool)).toEqual([
       "keyboard",
       "clipboard",
@@ -260,6 +268,10 @@ describe("PLAN_RELEVANT_TOOLS coverage (#9928)", () => {
       "displayConfig",
       "displayConfig",
       "displayConfig",
+      "displayConfig",
+      "displayConfig",
+      "displayConfig",
+      "systemAlerts",
     ]);
   });
 

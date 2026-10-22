@@ -958,6 +958,7 @@ describe("CrashApp native crash reports (#14103)", () => {
       crashReport: {
         status: "found",
         source: "android_dropbox",
+        reportId: "report-3220",
         exceptionType: "CrashedByAdbException",
         terminationReason: "SIGNAL 6: Abort trap: 6",
         frames: ["abort (libsystem_c.dylib)"],

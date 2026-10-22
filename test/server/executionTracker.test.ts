@@ -46,7 +46,7 @@ describe("ExecutionTracker", function () {
       tracker.unmarkSessionAdmitted(execution.id);
       expect(tracker.getAdmittedSessionUse(execution.id)).toBeUndefined();
       tracker.endExecution(execution.id);
-      expect(ends).toEqual([{ admitted: false }]);
+      expect(ends.map(({ admitted }) => admitted)).toEqual([false]);
       tracker.unmarkSessionAdmitted(execution.id);
       expect(ends).toHaveLength(1);
     } finally {

@@ -272,6 +272,79 @@ describe("AndroidBaselineReset", () => {
     expect(host.closed).toBe(2);
   });
 
+  test("activity guard marks only a user snapshot capture as opaque persistent", () => {
+    const tracker = new ExecutionTracker(new FakeTimer(), new CountingIdGenerator("execution"));
+    const activity = watchAndroidResetSession(tracker, "session-a");
+    const run = (toolName: string) => {
+      const execution = tracker.startExecution(toolName, undefined, "session-a");
+      tracker.markSessionAdmitted(execution.id);
+      tracker.endExecution(execution.id);
+    };
+    run("displayConfig");
+    run("installApp");
+    expect(activity.canReset()).toBe(false);
+    expect(activity.madeOpaquePersistentChanges()).toBe(false);
+    expect(activity.madeHostSideChanges()).toBe(false);
+    run("setDeviceResources");
+    expect(activity.madeHostSideChanges()).toBe(true);
+    run("deviceSnapshot");
+    expect(activity.madeOpaquePersistentChanges()).toBe(true);
+    activity.close();
+  });
+
+  test("a capture step that times out is retried inside the preparation deadline (#14956)", async () => {
+    const host = new FakeAndroidResetHost();
+    host.strategy = { reset: async () => {} };
+    let calls = 0;
+    host.onInventory = () => {
+      if (++calls === 1) {
+        throw new Error("Android baseline reset inventory timed out after 2000ms");
+      }
+    };
+    await new AndroidBaselineReset(host).capture(
+      "resource-a",
+      ANDROID_RESET_DEVICE,
+      ANDROID_RESET_PROFILE,
+      "session-a",
+      { timer: new FakeTimer(), timeoutMs: 30_000 },
+    );
+    expect(host.inventoryCalls).toBeGreaterThan(1);
+    expect(host.closed).toBe(0);
+  });
+
+  test("a capture step that keeps timing out fails after bounded attempts, other errors are not retried", async () => {
+    const timedOut = new FakeAndroidResetHost();
+    timedOut.strategy = { reset: async () => {} };
+    timedOut.onInventory = () => {
+      throw new Error("Android baseline reset inventory timed out after 2000ms");
+    };
+    await expect(
+      new AndroidBaselineReset(timedOut).capture(
+        "resource-a",
+        ANDROID_RESET_DEVICE,
+        ANDROID_RESET_PROFILE,
+        "session-a",
+        { timer: new FakeTimer(), timeoutMs: 30_000 },
+      ),
+    ).rejects.toThrow("timed out after 2000ms");
+    expect(timedOut.inventoryCalls).toBe(3);
+    const broken = new FakeAndroidResetHost();
+    broken.strategy = { reset: async () => {} };
+    broken.onInventory = () => {
+      throw new Error("adb exploded");
+    };
+    await expect(
+      new AndroidBaselineReset(broken).capture(
+        "resource-a",
+        ANDROID_RESET_DEVICE,
+        ANDROID_RESET_PROFILE,
+        "session-a",
+        { timer: new FakeTimer(), timeoutMs: 30_000 },
+      ),
+    ).rejects.toThrow("adb exploded");
+    expect(broken.inventoryCalls).toBe(1);
+  });
+
   test("native activity guard ignores reads and foreign sessions but rejects admitted session use", () => {
     const tracker = new ExecutionTracker(new FakeTimer(), new CountingIdGenerator("execution"));
     const activity = watchAndroidResetSession(tracker, "session-a");

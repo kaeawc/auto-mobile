@@ -139,6 +139,7 @@ Importing a prototype needs identical accept and reject behaviour on all three p
 
 ### 3.3 Android app
 
+- `minSdk` is 26: a new standalone app, and the bundle commit relies on `java.nio` NOFOLLOW checks and atomic same-volume moves.
 - Package `dev.jasonpearson.automobile.protoviewer`. `LibraryActivity` is the launcher list,
   `ViewerActivity` is a document task per prototype (not exported), and an exported `ImportActivity`
   handles VIEW and SEND for `content://` data only.

@@ -16,6 +16,7 @@ for (const name of readdirSync(join(fixtures, "invalid"))
   const fixture = JSON.parse(readFileSync(join(fixtures, "invalid", name), "utf8")) as {
     spec: unknown;
     expectedPath: string;
+    expectedMessage: string;
   };
   test(`${name} rejects only in library mode at its authored path`, () => {
     expect(validatePrototypeSpec(fixture.spec).success).toBe(true);
@@ -23,9 +24,7 @@ for (const name of readdirSync(join(fixtures, "invalid"))
       success: false,
       error: {
         path: fixture.expectedPath,
-        message: name.includes("storage")
-          ? "Secure value cannot be persisted"
-          : "Secure value cannot be bound into a request",
+        message: fixture.expectedMessage,
       },
     });
   });

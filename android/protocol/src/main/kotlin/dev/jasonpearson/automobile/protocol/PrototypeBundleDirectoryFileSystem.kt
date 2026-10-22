@@ -10,16 +10,32 @@ import java.nio.file.StandardOpenOption.WRITE
 import java.nio.file.attribute.BasicFileAttributes
 import java.nio.file.attribute.PosixFilePermissions
 
-/** POSIX app-owned storage adapter. Unsupported permissions/atomic rename fail closed. */
-class PrototypeBundleDirectoryFileSystem : PrototypeBundleCommitFileSystem {
+/**
+ * POSIX app-owned storage adapter rooted at [root]. Unsupported permissions/atomic rename fail
+ * closed.
+ *
+ * Only [root] and the components below it are verified: ancestors above the app-owned root belong
+ * to the platform (Android's `/data`, `/data/user/0`) and apps cannot list them, so walking them
+ * failed every import with a storage error. Paths outside [root] are rejected outright.
+ */
+class PrototypeBundleDirectoryFileSystem(root: Path) : PrototypeBundleCommitFileSystem {
+  private val root: Path = root.toAbsolutePath().normalize()
+
   override fun assertRealDirectory(path: Path) {
+    val target = path.toAbsolutePath().normalize()
+    require(target.startsWith(root)) { "Bundle path must stay inside the app-owned root" }
+    // Verify every component up to the root rather than letting a directory symlink redirect it.
+    generateSequence(target) { it.parent }
+      .takeWhile { it.startsWith(root) }
+      .forEach(::assertRealDirectoryComponent)
+  }
+
+  private fun assertRealDirectoryComponent(path: Path) {
     require(
       Files.readAttributes(path, BasicFileAttributes::class.java, NOFOLLOW_LINKS).isDirectory,
     ) {
       "Bundle path must be a real directory"
     }
-    // Verify every ancestor rather than letting a directory symlink redirect the operation.
-    path.parent?.let(::assertRealDirectory)
     Files.newDirectoryStream(path).use {
       /* Opening verifies that the checked directory is readable. */
     }

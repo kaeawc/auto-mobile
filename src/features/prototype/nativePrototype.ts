@@ -13,10 +13,9 @@ import { renderComposeHostFile, renderSwiftUiHostFile } from "./nativePrototypeT
  * published renderer libraries. Only the small host file is generated; the renderer draws the spec.
  */
 
-export const PROTOTYPE_COMPOSE_ARTIFACT =
-  "dev.jasonpearson.auto-mobile:auto-mobile-prototype-compose";
-export const PROTOTYPE_SWIFT_PACKAGE_URL = "https://github.com/kaeawc/auto-mobile";
-export const PROTOTYPE_SWIFT_PRODUCT = "AutoMobilePrototype";
+const PROTOTYPE_COMPOSE_ARTIFACT = "dev.jasonpearson.auto-mobile:auto-mobile-prototype-compose";
+const PROTOTYPE_SWIFT_PACKAGE_URL = "https://github.com/kaeawc/auto-mobile";
+const PROTOTYPE_SWIFT_PRODUCT = "AutoMobilePrototype";
 
 export type NativePrototypePlatform = "android" | "ios";
 
@@ -140,7 +139,7 @@ export function prototypeHostTypeName(id: string): string {
 }
 
 /** Asset ids a spec references, by kind, sorted (images first). */
-export function referencedAssets(spec: ShownSpecJson): { id: string; kind: "image" | "font" }[] {
+function referencedAssets(spec: ShownSpecJson): { id: string; kind: "image" | "font" }[] {
   const { images, fonts } = collectPrototypeAssetReferences(spec);
   return [
     ...[...images].sort().map((id) => ({ id, kind: "image" as const })),

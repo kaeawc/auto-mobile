@@ -10,8 +10,8 @@ import org.junit.Test
  * test passed) but threw `PatternSyntaxException` on Android, whose `java.util.regex` is backed by
  * ICU and rejects a lone `}`.
  *
- * What this proves: no regex *literal* in `control-proxy/src/main`, `prototype-compose/src/main` or
- * `protocol/src/main` contains a construct from [IcuRegexSyntax.problems] (unescaped `{`/`}`/`]`
+ * What this proves: no regex *literal* in `control-proxy/src/main`, `prototype-compose/src/main`,
+ * `prototype-saved/src/main` or `protocol/src/main` contains a construct from [IcuRegexSyntax.problems] (unescaped `{`/`}`/`]`
  * literals, a `]` opening a character class, `&&` class intersection, lookbehind, named groups, `\h
  * \H \R \X \N`), and no pattern is built from a non-literal or templated string that this scan
  * could not inspect, except the explicitly reviewed parser-validated compilation in
@@ -149,7 +149,7 @@ class IcuRegexCompatibilityTest {
 
   private fun mainSourceFiles(): List<File> {
     val android = locateAndroidDir()
-    return listOf("control-proxy", "prototype-compose", "protocol").flatMap { module ->
+    return listOf("control-proxy", "prototype-compose", "prototype-saved", "protocol").flatMap { module ->
       File(android, "$module/src/main").walkTopDown().filter { it.extension == "kt" }.toList()
     }
   }

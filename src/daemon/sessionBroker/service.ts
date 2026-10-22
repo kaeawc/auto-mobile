@@ -60,10 +60,12 @@ import { FileAvdConfigReader } from "../../utils/android-cmdline-tools/AvdConfig
 import { executionTracker } from "../executionTracker";
 import type { Session } from "../sessionManager/sessionTypes";
 import {
+  brokerIosMutationIncarnation,
   brokerMutationIncarnation,
   SessionMutationRecorder,
   type MutationRecorder,
 } from "./mutations/recorder";
+import { nativeProfile } from "./profile";
 import type { DeviceMutationScope } from "./mutations/types";
 import { readFile, rm } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -358,15 +360,16 @@ async function recoverSessionMutationRecorder(
   const assignment = resource
     ? await options.registry.getAssignment({ scopeKey, bindingIndex: resource.allocationIndex })
     : null;
-  assertRecoveredMutationAssignment(
-    assignment,
-    sessionUuid,
-    session.stableDeviceId ?? session.assignedDevice,
-  );
+  const stableDeviceId = session.stableDeviceId ?? session.assignedDevice;
+  assertRecoveredMutationAssignment(assignment, sessionUuid, stableDeviceId);
   bindMutationRecorder({
     sessionUuid,
     deviceId: session.assignedDevice,
-    incarnation: brokerMutationIncarnation(request.resourceId, assignment.generation),
+    // Rebind the scope the session first recorded into, which on iOS is its reset's (#14790).
+    incarnation:
+      resource && nativeProfile(resource).platform === "ios"
+        ? brokerIosMutationIncarnation(resource, stableDeviceId)
+        : brokerMutationIncarnation(request.resourceId, assignment.generation),
   });
   return options.mutationSessions.peekSession(sessionUuid)?.mutationRecorder;
 }

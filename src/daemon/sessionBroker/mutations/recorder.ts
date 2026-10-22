@@ -24,6 +24,18 @@ export function brokerMutationIncarnation(
   return JSON.stringify([resourceId, assignmentGeneration]);
 }
 
+/**
+ * The iOS journal incarnation: one pooled slot's simulator, stable across the sessions that reuse
+ * it, so the first captured baseline stays the reset target. The recorder must bind this same
+ * scope, or the keep-booted reset lists none of the session's rows and reverts nothing (#14790).
+ */
+export function brokerIosMutationIncarnation(
+  resource: { scopeKey: string; allocationIndex: number },
+  stableDeviceId: string,
+): string {
+  return JSON.stringify([resource.scopeKey, resource.allocationIndex, stableDeviceId]);
+}
+
 export interface MutationRecorder {
   readonly scope: Readonly<DeviceMutationScope>;
   record(mutation: DeviceMutationInput): Promise<void>;

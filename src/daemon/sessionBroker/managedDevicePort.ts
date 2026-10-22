@@ -10,7 +10,7 @@ import type { BrokerDeviceAcquisition } from "./provisioning/deviceAcquisition";
 import type { BindingJournal } from "./registry/bindingJournal";
 import { defaultBindingExecOwnerLiveness } from "./registry/ownerLiveness";
 import { runAsBindingReconciler } from "./provisioning/exclusion";
-import { brokerMutationIncarnation } from "./mutations/recorder";
+import { brokerIosMutationIncarnation, brokerMutationIncarnation } from "./mutations/recorder";
 import type { DeviceMutationScope } from "./mutations/types";
 import {
   computeBindingScopeKey,
@@ -421,14 +421,7 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     if (resultReady && this.isReadyBinding(binding, profile)) {
       if (this.dependencies.bindMutationRecorder) {
         try {
-          this.dependencies.bindMutationRecorder({
-            sessionUuid: binding.sessionUuid,
-            deviceId: binding.device!.transportId ?? binding.device!.stableId,
-            incarnation: brokerMutationIncarnation(
-              resource.resourceId,
-              binding.assignmentGeneration,
-            ),
-          });
+          this.dependencies.bindMutationRecorder(this.recorderScope(resource, binding, profile));
         } catch (error) {
           logger.warn(
             "Failed to bind broker device mutation recorder; acquiring without recording",
@@ -605,11 +598,28 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     }
     return {
       deviceId: assignment.stableDeviceId,
-      incarnation: JSON.stringify([
-        resource.scopeKey,
-        resource.allocationIndex,
-        assignment.stableDeviceId,
-      ]),
+      incarnation: brokerIosMutationIncarnation(resource, assignment.stableDeviceId),
+    };
+  }
+
+  /** The scope the session's mutations journal into; on iOS, the one its reset reads (#14790). */
+  private recorderScope(
+    resource: BrokerResourceRecord,
+    binding: BrokerDeviceAcquisitionEntry & { sessionUuid: string },
+    profile: BrokerNativeProfile,
+  ): DeviceMutationScope {
+    const device = binding.device!;
+    if (profile.platform === "ios") {
+      return {
+        sessionUuid: binding.sessionUuid,
+        deviceId: device.stableId,
+        incarnation: brokerIosMutationIncarnation(resource, device.stableId),
+      };
+    }
+    return {
+      sessionUuid: binding.sessionUuid,
+      deviceId: device.transportId ?? device.stableId,
+      incarnation: brokerMutationIncarnation(resource.resourceId, binding.assignmentGeneration),
     };
   }
 

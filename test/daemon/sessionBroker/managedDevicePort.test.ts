@@ -170,29 +170,50 @@ function acquisition(
 }
 
 describe("ManagedDevicePort preparation and release", () => {
-  test("binds the exact broker mutation scope before returning a ready session", async () => {
-    const scopes: DeviceMutationScope[] = [];
-    const port = new ManagedDevicePort({
-      scope: SCOPE,
-      timer: new FakeTimer(),
-      brokerDeviceAcquisition: acquisition(async (config) => readyResult(config)),
-      brokerExecutionRelease: { releaseExecution: async (id) => releaseResult(id) },
-      registry: new FakeBindingRegistry(new FakeTimer()),
-      bindingJournal: {
-        owner: OWNER,
-        redriveBinding: async () => ({ kind: "clear", redriven: [] }),
+  test.each([
+    {
+      platform: "ios",
+      profile: IOS,
+      // The scope the iOS keep-booted reset and pool-entry baseline read back (#14790).
+      expected: {
+        sessionUuid: "session-1",
+        deviceId: "device-1",
+        incarnation: JSON.stringify([SCOPE_KEY, 7, "device-1"]),
       },
-      bindMutationRecorder: (scope) => {
-        scopes.push(scope);
+    },
+    {
+      platform: "android",
+      profile: ANDROID,
+      expected: {
+        sessionUuid: "session-1",
+        deviceId: "transport-1",
+        incarnation: '["resource-1",1]',
       },
-    });
-    expect(await port.prepare(resource(), { livenessOwnerToken: "consumer" })).toMatchObject({
-      sessionId: "session-1",
-    });
-    expect(scopes).toEqual([
-      { sessionUuid: "session-1", deviceId: "transport-1", incarnation: '["resource-1",1]' },
-    ]);
-  });
+    },
+  ])(
+    "binds the exact $platform broker mutation scope before returning a ready session",
+    async ({ profile, expected }) => {
+      const scopes: DeviceMutationScope[] = [];
+      const port = new ManagedDevicePort({
+        scope: SCOPE,
+        timer: new FakeTimer(),
+        brokerDeviceAcquisition: acquisition(async (config) => readyResult(config)),
+        brokerExecutionRelease: { releaseExecution: async (id) => releaseResult(id) },
+        registry: new FakeBindingRegistry(new FakeTimer()),
+        bindingJournal: {
+          owner: OWNER,
+          redriveBinding: async () => ({ kind: "clear", redriven: [] }),
+        },
+        bindMutationRecorder: (scope) => {
+          scopes.push(scope);
+        },
+      });
+      expect(
+        await port.prepare(resource(profile), { livenessOwnerToken: "consumer" }),
+      ).toMatchObject({ sessionId: "session-1" });
+      expect(scopes).toEqual([expected]);
+    },
+  );
 
   test("a mutation recorder binding failure warns and returns the ready session without releasing it", async () => {
     const releases: string[] = [];
@@ -626,6 +647,38 @@ describe("ManagedDevicePort clean-reset ownership", () => {
         .sessionId,
     ).toBe("session-1");
     expect(captures).toBe(1);
+  });
+
+  test("an iOS session records into the scope its baseline capture and reset read (#14790)", async () => {
+    const rig = await destructionRig();
+    const assignment = await rig.registry.getAssignment(rig.key);
+    if (!assignment) {
+      throw new Error("Missing binding");
+    }
+    await rig.registry.claimExecution(rig.key, assignment, { ...OWNER, sessionUuid: "session-1" });
+    const recorded: DeviceMutationScope[] = [];
+    const captured: DeviceMutationScope[] = [];
+    const port = new ManagedDevicePort({
+      scope: SCOPE,
+      timer: new FakeTimer(),
+      registry: rig.registry,
+      bindingJournal: rig.journal,
+      brokerDeviceAcquisition: acquisition(async (config) =>
+        readyResult(config, {
+          device: { stableId: "UDID-1", transportId: "UDID-1", name: "UDID-1" },
+        }),
+      ),
+      brokerExecutionRelease: { releaseExecution: async (id) => releaseResult(id) },
+      bindMutationRecorder: (scope) => {
+        recorded.push(scope);
+      },
+      captureIosBaseline: async (context) => {
+        captured.push(context.scope);
+      },
+    });
+    await port.prepare({ ...rig.resource, state: "reserved" }, { livenessOwnerToken: "token" });
+    expect(captured).toHaveLength(1);
+    expect(recorded).toEqual(captured);
   });
 
   test("a failed optional baseline capture does not release the acquired session", async () => {

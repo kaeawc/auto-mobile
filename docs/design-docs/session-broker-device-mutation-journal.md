@@ -21,10 +21,13 @@ device inside the service, bypassing the recorded device dispatcher. A mapping
 alone would not journal that production path; service-side wiring is required.
 
 For a `journaled` mutation, production tool dispatch records its intent before
-the action under the broker recorder scope, whose incarnation is
-`resourceId + assignmentGeneration`. The iOS and Android keep-booted reset paths
-do not read that scope today, so tool-recorded intents are not replayed by those
-resets in this slice. A prior is revertible only when
+the action under the broker recorder scope. On iOS that is the scope the
+keep-booted reset and the pool-entry baseline read, the pooled slot's simulator
+`[scopeKey, allocationIndex, udid]`, so the reset replays the session's
+tool-recorded intents and deletes them afterwards (#14790). On Android the
+incarnation is `resourceId + assignmentGeneration`, which the Android keep-booted
+reset does not read today, so Android tool-recorded intents are not replayed in
+this slice. A prior is revertible only when
 `deviceMutationPriorReader.ts` has a reader for that mutation's kind and key;
 otherwise the prior is `unobservable`/opaque and reverts are best-effort only.
 Full acceptance criterion 2 still
@@ -241,8 +244,9 @@ unconditional keep-booted cleaning.
 
 Install intents resolve the artifact's package/bundle identifier before installing,
 using the existing installer metadata readers. In this slice, `installed-app`
-priors that need an incarnation baseline are `unobservable` because the recorder
-scope does not match the baseline/reset scope. Unknown metadata or incomplete
+priors read the pool-entry baseline on iOS. On Android, priors that need an
+incarnation baseline are `unobservable` because the recorder scope does not match
+the baseline/reset scope. Unknown metadata or incomplete
 inventory also records `unobservable` without blocking installation or
 keep-booted cleaning. Installed-app and uninstall keys share the baseline app
 identity when metadata is readable.

@@ -238,3 +238,35 @@ enum PrototypeDataWrite {
         }
     }
 }
+
+extension PrototypeDataWrite {
+    /// Static authored-action checks, sharing the runtime's pointer and value limits.
+    static func validate(actions: [PrototypeLocatedValue], data: [String: JSONValue]?) throws {
+        for action in actions {
+            let fields = action.value
+            guard ["setData", "appendData", "removeData"].contains(fields["type"]?.stringValue ?? "") else { continue }
+            let path = fields["path"]?.stringValue ?? ""
+            let bound = path.split(separator: "/", omittingEmptySubsequences: false)
+                .map { $0 == "{index}" ? "0" : String($0) }.joined(separator: "/")
+            guard let pointer = pointer(ofPath: bound) else { throw PrototypeContractValidator.invalid(
+                "\(action.path).path",
+                "Invalid data write path"
+            ) }
+            if let literal = fields["value"]?.objectFields?["value"] {
+                do { try PrototypeLimits.guardDataWrite(["value": literal]) }
+                catch { throw PrototypeContractValidator.invalid(
+                    "\(action.path).value.value",
+                    "Invalid data write value"
+                ) }
+            }
+            if fields["type"] == .string("appendData"), !path.contains("{index}"),
+               let value = PrototypeDataPointer.resolve(data, pointer: pointer)
+            {
+                guard case .array = value else { throw PrototypeContractValidator.invalid(
+                    "\(action.path).path",
+                    "appendData needs array"
+                ) }
+            }
+        }
+    }
+}

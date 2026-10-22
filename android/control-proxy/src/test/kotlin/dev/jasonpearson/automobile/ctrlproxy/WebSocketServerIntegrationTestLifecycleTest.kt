@@ -11,6 +11,7 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.websocket.Frame
 import io.ktor.websocket.readText
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -273,8 +274,10 @@ internal class WebSocketServerIntegrationTestLifecycleTest :
           path = "/ws",
         ) {
           incoming.receive() // Connection message
-          delay(10)
-          // Connection will be closed when coroutine ends
+          // Hold the connection open until the test cancels the job. A session that ended on
+          // its own after a short delay could close before the server-side count was observed
+          // at 1, timing out the first waitFor on a slow runner.
+          awaitCancellation()
         }
       }
 

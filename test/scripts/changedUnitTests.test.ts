@@ -69,6 +69,12 @@ describe("changed unit parse graph", () => {
       'import type { T } from "./types"; throw new Error("unreachable"); require("@/runtime");';
     expect(scanChangedImports("test/a.test.ts", source)).toEqual(["@/runtime"]);
   });
+  test.each(["package.json", "bun.lock"])(
+    "a %s-only dependency bump selects all units (#14426)",
+    (manifest) => {
+      expect(changedGraphTests(tests, [manifest], reader)).toEqual(tests);
+    },
+  );
   test("unsupported loaders select all units instead of dropping transitive edges", () => {
     expect(
       changedGraphTests(tests, ["asset.css"], {

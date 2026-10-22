@@ -48,14 +48,27 @@ export function resolveChangedImports(specifier: string, importer: string): stri
   ];
 }
 
+/**
+ * The graph drops node_modules edges, so nothing links a dependency bump to the
+ * code importing that package; like native `--changed`, a manifest or lockfile
+ * change selects all units (#14426).
+ */
+export const DEPENDENCY_MANIFESTS: readonly string[] = ["package.json", "bun.lock"];
+
 /** Parse-only reverse closure; an uncertain local edge conservatively selects all units. */
 export function changedGraphTests(
   tests: string[],
   changed: string[],
   reader: ChangedGraphReader,
+  fullSuiteTriggers: readonly string[] = DEPENDENCY_MANIFESTS,
 ): string[] {
   if (changed.length === 0) {
     return [];
+  }
+  const trigger = changed.find((file) => fullSuiteTriggers.includes(file));
+  if (trigger !== undefined) {
+    console.error(`${trigger} changed; selecting all unit files.`);
+    return tests;
   }
   const reverse = new Map<string, Set<string>>();
   const visited = new Set<string>();

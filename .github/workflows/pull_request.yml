@@ -3791,12 +3791,11 @@ jobs:
           source ./scripts/ios/run_with_timeout.sh
 
           reap_before_retry() {
-            pkill -f "index.js --daemon-mode" 2>/dev/null || true
-            pkill -x mediamtx 2>/dev/null || true
-            pkill -f "remote-debugging-port=9222" 2>/dev/null || true
-            sleep 2
-            pkill -KILL -x mediamtx 2>/dev/null || true
-            pkill -KILL -f "index.js --daemon-mode" 2>/dev/null || true
+            # Scoped to this job's own daemon (pid files under its data dirs),
+            # mediamtx and Chrome (cwd in the workspace). Never kill by process name:
+            # the self-hosted host also runs other AutoMobile daemons (#14826).
+            bash scripts/ci/reap-job-processes.sh "${GITHUB_WORKSPACE}" \
+              "${GITHUB_WORKSPACE}/scratch/webrtc-device-integration" >/dev/null
             if [ -n "${AUTOMOBILE_IOS_SIMULATOR_UDID:-}" ]; then
               if ! run_with_timeout 10 xcrun simctl bootstatus "${AUTOMOBILE_IOS_SIMULATOR_UDID}" -b >/dev/null 2>&1; then
                 echo "Simulator did not report booted within 10s after cleanup; skipping reboot (best-effort re-verify only, #7605)." >&2

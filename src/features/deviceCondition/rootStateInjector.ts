@@ -49,9 +49,8 @@ async function assertRootableImage(adb: AdbExecutor, signal?: AbortSignal): Prom
   }
 }
 
-async function remountWritable(adb: AdbExecutor, signal?: AbortSignal): Promise<void> {
-  await adbCommand(adb, ["root"], signal);
-  await adbCommand(adb, ["wait-for-device"], signal);
+/** `adb remount`, refusing with guidance when /system stays read-only. */
+async function remountSystem(adb: AdbExecutor, signal?: AbortSignal): Promise<void> {
   const out = await adbCommand(adb, ["remount"], signal);
   if (
     /remount failed|verity|not permitted|read-only/i.test(out) &&
@@ -62,6 +61,12 @@ async function remountWritable(adb: AdbExecutor, signal?: AbortSignal): Promise<
         "-writable-system, or run `adb disable-verity` and reboot first.",
     );
   }
+}
+
+async function remountWritable(adb: AdbExecutor, signal?: AbortSignal): Promise<void> {
+  await adbCommand(adb, ["root"], signal);
+  await adbCommand(adb, ["wait-for-device"], signal);
+  await remountSystem(adb, signal);
 }
 
 async function plantArtifacts(
@@ -125,6 +130,8 @@ export function createRootStateInjector(adb: AdbExecutor): DeviceConditionInject
     await adbCommand(adb, ["wait-for-device"], resetSignal);
     let remaining = new Set<string>();
     if (planted.size > 0) {
+      // A reboot can return /system to read-only while the planted files survive.
+      await remountSystem(adb, resetSignal);
       await shell(adb, ["rm", "-f", ...planted], resetSignal);
       // Confirm the removal; `planted` is only cleared once the files are really gone.
       remaining = await listExisting(adb, [...planted], resetSignal);

@@ -337,4 +337,24 @@ describe("rootState injector (#14060)", () => {
     // Nothing was forgotten: the device is not reported clean.
     expect(await injector.isClean()).toBe(false);
   });
+
+  test("reset remounts /system writable before it removes the planted files", async () => {
+    const adb = adbWith(ROOTABLE);
+    const outcome = await createRootStateInjector(adb).apply("rooted-detectable");
+    const before = adb.getExecutedCommands().length;
+    await outcome.reset?.();
+    const commands = adb.getExecutedCommands().slice(before);
+    const remount = commands.indexOf("remount");
+    expect(remount).toBeGreaterThan(commands.indexOf("root"));
+    expect(remount).toBeLessThan(commands.findIndex((c) => c.startsWith("shell rm -f")));
+  });
+
+  test("a reset that cannot make /system writable stays owed instead of half-cleaning", async () => {
+    const adb = adbWith(ROOTABLE);
+    const outcome = await createRootStateInjector(adb).apply("rooted-detectable");
+    // After a reboot the system partition is read-only again and remount is refused.
+    adb.setCommandResponse("remount", execResult("remount failed: Read-only file system"));
+    await expect(outcome.reset?.()).rejects.toThrow(/-writable-system/);
+    expect(adb.getExecutedCommands().filter((c) => c.startsWith("shell rm -f"))).toHaveLength(0);
+  });
 });

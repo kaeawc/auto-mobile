@@ -418,6 +418,7 @@ test.each([false, true])(
     const path = join(f.batchDir, "batch.json");
     const manifest = JSON.parse(f.files.get(path)!);
     manifest.options.protectedDevices = protectedDevice ? ["native"] : [];
+    manifest.specs = derivePrivateDaemonBatch(manifest.options);
     f.files.set(path, JSON.stringify(manifest));
     f.client.infoResults = [
       { nativeDevice: { name: "ordinary-phone", deviceId: "native", platform: "android" } },

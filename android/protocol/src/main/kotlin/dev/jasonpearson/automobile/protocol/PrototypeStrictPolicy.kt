@@ -1,6 +1,5 @@
 package dev.jasonpearson.automobile.protocol
 
-import dev.jasonpearson.automobile.protocol.PrototypeStateChecks.Located
 import dev.jasonpearson.automobile.protocol.PrototypeValidationPaths.text
 import kotlinx.serialization.json.*
 

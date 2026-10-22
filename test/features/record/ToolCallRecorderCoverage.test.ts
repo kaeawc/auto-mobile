@@ -106,6 +106,8 @@ const FORMER_PLAN_RELEVANT_TOOLS = [
   // Added after the list was frozen: an audit runs as a plan assertion step (#14075).
   "audit",
   "appLifecycle",
+  // Added after the list was frozen: a triggered job replays as a plan step (#14090).
+  "backgroundWork",
   "biometricAuth",
   "changeLocalization",
   "clipboard",
@@ -251,10 +253,16 @@ describe("PLAN_RELEVANT_TOOLS coverage (#9928)", () => {
     recordPlanCall(recorder, "displayConfig", { increaseContrast: true });
     recordPlanCall(recorder, "displayConfig", { reduceMotion: false });
     recordPlanCall(recorder, "displayConfig", { boldText: true });
+    recordPlanCall(recorder, "displayConfig", { size: { width: 720, height: 1600 } });
+    recordPlanCall(recorder, "displayConfig", { navigationMode: "threeButton" });
+    recordPlanCall(recorder, "displayConfig", { displayCutout: "hole" });
     expect(recorder.stop().map((step) => step.tool)).toEqual([
       "keyboard",
       "clipboard",
       "systemTray",
+      "displayConfig",
+      "displayConfig",
+      "displayConfig",
       "displayConfig",
       "displayConfig",
       "displayConfig",

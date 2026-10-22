@@ -1,4 +1,5 @@
 import { DISPLAY_KEYS } from "../features/utility/DefaultDeviceSettingsAccess";
+import { DISPLAY_GEOMETRY_FIELDS } from "../features/utility/AndroidDisplayGeometry";
 import { ACCESSIBILITY_DISPLAY_FIELDS } from "../features/utility/AccessibilityDisplayPreferences";
 import type { DeviceSettingKey } from "../models/DeviceSettingDefaults";
 import type { Platform } from "../models";
@@ -43,7 +44,20 @@ function settingMutations(args: Record<string, unknown>, platform?: Platform): T
           .filter((key) => key !== "density")
           .map((key) => (key === "fontScale" ? "contentSize" : key))
       : keys;
-  return [...new Set(journaled)].map((key) => mutation("device-setting", key));
+  return [...new Set(journaled), ...geometryKeys(args, platform)].map((key) =>
+    mutation("device-setting", key),
+  );
+}
+
+/**
+ * Runtime size, navigation mode and cutout (#14101) have no journal vocabulary: their prior
+ * state is not a readable setting, so they record one opaque intent (restored by the session's
+ * display-profile cleanup, not by a revert). The iOS Simulator and devices refuse them.
+ */
+function geometryKeys(args: Record<string, unknown>, platform?: Platform): string[] {
+  return platform !== "ios" && DISPLAY_GEOMETRY_FIELDS.some((field) => args[field] !== undefined)
+    ? ["tool:displayConfig"]
+    : [];
 }
 
 function permissionMutations(args: Record<string, unknown>): ToolMutation[] {

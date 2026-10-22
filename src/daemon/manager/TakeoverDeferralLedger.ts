@@ -86,42 +86,70 @@ export function deferredRestartError({
   return new DaemonRestartDeferredError(reason);
 }
 
+function sameGeneration(left: TakeoverGenerationKey, right: TakeoverGenerationKey): boolean {
+  return (
+    left.pid === right.pid &&
+    left.startedAt === right.startedAt &&
+    left.processGenerationToken === right.processGenerationToken
+  );
+}
+
 /**
  * The start path calls this under the daemon startup lock, so independent CLI launches share one
  * generation count. The proxy's expected-generation restart records without that lock; a lost
  * concurrent update only delays guidance by an attempt and never authorizes a stop.
  */
 export class DefaultTakeoverDeferralLedger implements TakeoverDeferralLedger {
-  private unpersistedRecord: DeferralRecord | undefined;
+  /** This process's latest record and how many of its attempts never reached the file. */
+  private unpersisted: { record: DeferralRecord; attempts: number } | undefined;
 
   constructor(private readonly store: StartupFailureStore) {}
 
   recordDeferral(key: TakeoverGenerationKey, nowMs: number): DeferralSummary {
     // Refresh after each lock acquisition: another CLI may have updated the file since our call.
-    // If persistence failed, retain this process's progress until a write succeeds.
-    const previous = this.unpersistedRecord ?? this.read();
-    const sameGeneration =
-      previous?.key.pid === key.pid &&
-      previous?.key.startedAt === key.startedAt &&
-      previous?.key.processGenerationToken === key.processGenerationToken;
+    // Attempts a failed write kept in memory are added to the latest persisted same-generation
+    // record, so a peer's progress written meanwhile is never overwritten (#14401).
+    const buffered =
+      this.unpersisted && sameGeneration(this.unpersisted.record.key, key)
+        ? this.unpersisted
+        : undefined;
+    const previous = this.previousProgress(key, buffered);
     const record = {
       key: { ...key },
-      attempts: sameGeneration && previous ? previous.attempts + 1 : 1,
-      firstDeferredAtMs: sameGeneration && previous ? previous.firstDeferredAtMs : nowMs,
+      attempts: (previous?.attempts ?? 0) + 1,
+      firstDeferredAtMs: previous?.firstDeferredAtMs ?? nowMs,
     };
     try {
       this.store.write(JSON.stringify(record));
     } catch (error) {
       logger.warn(`Failed to persist takeover deferral ledger: ${errorMessage(error)}`, error);
-      this.unpersistedRecord = record;
+      this.unpersisted = { record, attempts: (buffered?.attempts ?? 0) + 1 };
       return { attempts: record.attempts, firstDeferredAtMs: record.firstDeferredAtMs };
     }
-    this.unpersistedRecord = undefined;
+    this.unpersisted = undefined;
     return { attempts: record.attempts, firstDeferredAtMs: record.firstDeferredAtMs };
   }
 
+  /** The latest persisted same-generation record plus this process's unpersisted attempts. */
+  private previousProgress(
+    key: TakeoverGenerationKey,
+    buffered: { record: DeferralRecord; attempts: number } | undefined,
+  ): DeferralSummary | undefined {
+    const persisted = this.read();
+    if (!persisted || !sameGeneration(persisted.key, key)) {
+      return buffered?.record;
+    }
+    return {
+      attempts: persisted.attempts + (buffered?.attempts ?? 0),
+      firstDeferredAtMs: Math.min(
+        persisted.firstDeferredAtMs,
+        buffered?.record.firstDeferredAtMs ?? persisted.firstDeferredAtMs,
+      ),
+    };
+  }
+
   clear(): void {
-    this.unpersistedRecord = undefined;
+    this.unpersisted = undefined;
     this.store.clear();
   }
 

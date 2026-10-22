@@ -85,6 +85,34 @@ describe("takeover deferral ledger", () => {
     });
   });
 
+  test("a buffered attempt merges with a peer's later progress instead of overwriting it (#14401)", () => {
+    const store = new FakeStartupFailureStore();
+    spyOn(logger, "warn").mockImplementation(() => {});
+    const first = new DefaultTakeoverDeferralLedger(store);
+    const peer = new DefaultTakeoverDeferralLedger(store);
+    store.failWrites = true;
+    expect(first.recordDeferral(key, 100)).toEqual({ attempts: 1, firstDeferredAtMs: 100 });
+    store.failWrites = false;
+    peer.recordDeferral(key, 200);
+    expect(peer.recordDeferral(key, 300)).toEqual({ attempts: 2, firstDeferredAtMs: 200 });
+    // Four deferrals happened; the earliest was the buffered one.
+    expect(first.recordDeferral(key, 400)).toEqual({ attempts: 4, firstDeferredAtMs: 100 });
+    expect(new DefaultTakeoverDeferralLedger(store).recordDeferral(key, 500)).toEqual({
+      attempts: 5,
+      firstDeferredAtMs: 100,
+    });
+  });
+
+  test("a buffered attempt for another generation does not count toward the current one", () => {
+    const store = new FakeStartupFailureStore();
+    spyOn(logger, "warn").mockImplementation(() => {});
+    const ledger = new DefaultTakeoverDeferralLedger(store);
+    store.failWrites = true;
+    ledger.recordDeferral({ ...key, pid: 2002 }, 100);
+    store.failWrites = false;
+    expect(ledger.recordDeferral(key, 200)).toEqual({ attempts: 1, firstDeferredAtMs: 200 });
+  });
+
   test("clear removes persisted and in-memory progress", () => {
     const store = new FakeStartupFailureStore();
     const ledger = new DefaultTakeoverDeferralLedger(store);

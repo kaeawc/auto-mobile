@@ -10,6 +10,8 @@ export interface SessionPower {
   changed: PowerField[];
   /** The screen was on and this session turned it off. */
   screenSlept?: boolean;
+  /** The charger was connected and this session unplugged it so Doze could start. */
+  unpluggedForDoze?: boolean;
 }
 
 /** Release reports kept for late `releaseSession` replies, as for screen-lock reports. */

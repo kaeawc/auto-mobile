@@ -60,6 +60,7 @@ function unplug(ctx: PowerStepContext): PowerStep {
         return;
       }
       await client.setBatteryCharging("none");
+      record.unpluggedForDoze = true;
       ctx.preconditions.push("battery unplugged (dumpsys battery unplug)");
     },
   };
@@ -88,6 +89,35 @@ function screenOff(ctx: PowerStepContext): PowerStep {
   };
 }
 
+/**
+ * Undo what forcing Doze needed: `unforce` alone leaves a device that Doze put to sleep
+ * asleep, unplugged and still idle. Only a device that was actually dozing is woken, and
+ * only a charger this record unplugged is put back.
+ */
+async function leaveForcedDoze(ctx: PowerStepContext): Promise<void> {
+  const { client, record } = ctx;
+  const wasDozing = (await client.readDoze()).mode !== "off";
+  await client.unforceDoze();
+  if (!wasDozing) {
+    return;
+  }
+  if (!(await client.isScreenOn())) {
+    await client.wakeScreen();
+    record.screenSlept = false;
+    ctx.preconditions.push("screen woken (KEYCODE_WAKEUP)");
+  }
+  const before = record.baseline.battery;
+  if (record.unpluggedForDoze && before) {
+    if (before.faked) {
+      await client.setBatteryCharging(before.charging);
+    } else {
+      await client.resetBattery();
+    }
+    record.unpluggedForDoze = false;
+    ctx.preconditions.push("battery plug state put back");
+  }
+}
+
 function doze(mode: NonNullable<SetPowerInput["doze"]>, ctx: PowerStepContext): PowerStep {
   const { client, record } = ctx;
   return {
@@ -98,7 +128,7 @@ function doze(mode: NonNullable<SetPowerInput["doze"]>, ctx: PowerStepContext): 
     },
     run: async () => {
       if (mode === "off") {
-        await client.unforceDoze();
+        await leaveForcedDoze(ctx);
         return;
       }
       await client.forceDoze(mode);

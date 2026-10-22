@@ -402,6 +402,16 @@ export class DeviceReadiness implements DeviceReadinessContract {
     }
   }
 
+  private async isAndroidAsleep(device: BootedDevice): Promise<boolean> {
+    try {
+      return !(await this.adbFactory.create(device).isScreenOn());
+    } catch (error) {
+      // Unknown wakefulness keeps the original window failure.
+      logger.warn(`[DeviceReadiness] Could not read screen state of ${device.deviceId}`, error);
+      return false;
+    }
+  }
+
   /**
    * Verify an Android device is connected and ready
    */
@@ -436,10 +446,15 @@ export class DeviceReadiness implements DeviceReadinessContract {
       const activeWindow = await window.getActive(true);
       assertAndroidActiveWindow(deviceId, activeWindow);
     } catch (error) {
-      const errorMsg = errorMessage(error);
-      throw new ActionableError(
-        `Failed to verify Android device ${deviceId} readiness: ${errorMsg}`,
-      );
+      // An asleep device has no focused window to read; a booted-only caller (power faking,
+      // waking) must still reach it.
+      if (!(options?.readiness === "booted" && (await this.isAndroidAsleep(device)))) {
+        const errorMsg = errorMessage(error);
+        throw new ActionableError(
+          `Failed to verify Android device ${deviceId} readiness: ${errorMsg}`,
+        );
+      }
+      logger.info(`[DeviceReadiness] Android device ${deviceId} is asleep; booted readiness holds`);
     }
 
     options?.signal?.throwIfAborted();

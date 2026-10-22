@@ -426,7 +426,7 @@ export class DeviceReadiness implements DeviceReadinessContract {
       );
     }
     await verifyAndroidWindow(
-      { provider: this.provider, adbFactory: this.adbFactory },
+      { getWindow: (target) => this.provider.getWindow(target), adbFactory: this.adbFactory },
       device,
       resolvedIdentity,
       options,

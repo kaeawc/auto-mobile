@@ -86,7 +86,7 @@ async function isAndroidAsleep(
 
 /** The device must show an active window; a sleeping device is exempt for booted-only callers. */
 export async function verifyAndroidWindow(
-  deps: { provider: DeviceClientProvider; adbFactory: AdbClientFactory },
+  deps: { getWindow: DeviceClientProvider["getWindow"]; adbFactory: AdbClientFactory },
   device: BootedDevice,
   resolvedIdentity: ResolvedDeviceIdentity | undefined,
   options: DeviceReadyOptions | undefined,
@@ -94,7 +94,7 @@ export async function verifyAndroidWindow(
   const { deviceId } = device;
   try {
     logger.info(`[DeviceReadiness] Verifying Android device ${deviceId} readiness`);
-    const window = deps.provider.getWindow(androidReadinessWindowDevice(device, resolvedIdentity));
+    const window = deps.getWindow(androidReadinessWindowDevice(device, resolvedIdentity));
     assertAndroidActiveWindow(deviceId, await window.getActive(true));
   } catch (error) {
     // An asleep device has no focused window to read; power faking and waking must reach it.

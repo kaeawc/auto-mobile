@@ -8,6 +8,7 @@ import { isRecord } from "./pipeline/isRecord";
 import { KEYBOARD_READ_ACTIONS } from "./interactionToolTypes";
 import { dataToolMutations } from "./deviceMutationDataAdapters";
 import { appearanceToolMutations } from "./deviceMutationAppearanceAdapters";
+import { interactionToolMutations } from "./deviceMutationInteractionAdapters";
 import { lifecycleToolMutations } from "./deviceMutationLifecycleAdapters";
 import { orchestrationToolMutations } from "./deviceMutationOrchestrationAdapters";
 import { isReadOnlySqlQuery } from "../features/database/sqlQueryClassification";
@@ -195,6 +196,7 @@ export function deviceToolMutations(
   const family =
     appearanceToolMutations(name, args, platform) ??
     lifecycleToolMutations(name, args, platform) ??
+    interactionToolMutations(name, args, platform) ??
     orchestrationToolMutations(name, args, platform);
   if (family !== undefined) {
     return family;

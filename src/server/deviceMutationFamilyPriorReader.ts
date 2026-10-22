@@ -4,6 +4,7 @@ import type { ToolMutation } from "./deviceMutationAdapters";
 import type { MutationPriorReader } from "./deviceMutationPriorReader";
 import { DataMutationPriorReader } from "./deviceMutationDataPriorReader";
 import { AppearanceMutationPriorReader } from "./deviceMutationAppearancePriorReader";
+import { InteractionMutationPriorReader } from "./deviceMutationInteractionPriorReader";
 import { LifecycleMutationPriorReader } from "./deviceMutationLifecyclePriorReader";
 import { OrchestrationMutationPriorReader } from "./deviceMutationOrchestrationPriorReader";
 
@@ -17,6 +18,7 @@ export class FamilyMutationPriorReader implements MutationPriorReader {
       new DataMutationPriorReader(),
       new AppearanceMutationPriorReader(),
       new LifecycleMutationPriorReader(),
+      new InteractionMutationPriorReader(),
       new OrchestrationMutationPriorReader(),
     ],
   ) {}

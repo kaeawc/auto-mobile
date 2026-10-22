@@ -61,6 +61,14 @@ const CLASSIFICATION: Classification = {
   ],
   perArgs: {
     accessibility: { reads: [{}], controls: [{ talkback: true }, { voiceover: false }] },
+    backgroundWork: {
+      reads: [{ action: "list" }, { action: { listAlarms: true } }],
+      controls: [
+        { action: { runJob: { jobId: 7 } } },
+        { action: { runJob: { worker: "SyncWorker", force: true } } },
+        { action: { workManagerDiagnostics: true } },
+      ],
+    },
     clipboard: {
       reads: [{ action: "get" }],
       controls: [{ action: "copy", text: "x" }, { action: "paste" }, { action: "clear" }],

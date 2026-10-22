@@ -70,6 +70,7 @@ object ValidTools {
         "rotate",
         "selectAllText",
         "sendBroadcast",
+        "backgroundWork",
         "sendKeys",
         "setActiveDevice",
         "setAppLinks",

@@ -143,6 +143,14 @@ function newestCompatibleIdle(snapshot: BrokerSnapshot): ResourceView | undefine
 }
 
 /**
+ * A zero total cap admits nothing (#14462): its idle resources are evicted rather than handed to a
+ * new session, so there is nothing to reuse.
+ */
+function reusableIdle(snapshot: BrokerSnapshot, limits: BrokerLimits): ResourceView | undefined {
+  return limits.totalDeviceCap === 0 ? undefined : newestCompatibleIdle(snapshot);
+}
+
+/**
  * Selects the next admission action from one immutable view and returns immediately.
  *
  * These decisions are not reservations. The durable broker owner must evaluate this function
@@ -159,11 +167,24 @@ export function selectAdmission(snapshot: BrokerSnapshot, limits: BrokerLimits):
   }
 
   // Reuse does not increase the total, including after a cap reduction.
-  const reusable = newestCompatibleIdle(snapshot);
+  const reusable = reusableIdle(snapshot, limits);
   if (reusable) {
     return { kind: "reuse", resourceId: reusable.id };
   }
+  return resettingWait(snapshot, limits) ?? totalCapDecision(snapshot, limits);
+}
 
+/**
+ * A compatible device whose reset finishes within the wait threshold is waited for rather than
+ * replaced. A zero total cap admits nothing (#14462), so it waits for nothing either.
+ */
+function resettingWait(
+  snapshot: BrokerSnapshot,
+  limits: BrokerLimits,
+): AdmissionDecision | undefined {
+  if (limits.totalDeviceCap === 0) {
+    return undefined;
+  }
   const resetting = snapshot.resources
     .filter(
       (resource) =>
@@ -186,7 +207,11 @@ export function selectAdmission(snapshot: BrokerSnapshot, limits: BrokerLimits):
       waitMs: Math.min(resetting.expectedReadyMs!, snapshot.resetWaitThresholdMs!),
     };
   }
+  return undefined;
+}
 
+/** Without a reusable resource: create under the total cap, else evict the oldest idle one. */
+function totalCapDecision(snapshot: BrokerSnapshot, limits: BrokerLimits): AdmissionDecision {
   const total = snapshot.resources.length;
   if (limits.totalDeviceCap !== undefined && total > limits.totalDeviceCap) {
     const candidate = oldestIdle(snapshot);

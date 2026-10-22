@@ -11,6 +11,7 @@ import type {
   NativeCrashReportFinder,
   NativeCrashReportLookup,
   NativeCrashReportQuery,
+  NativeCrashReportReader,
 } from "./NativeCrashReport";
 
 export type { NativeCrashReportFinder } from "./NativeCrashReport";
@@ -75,4 +76,18 @@ export function createNativeCrashReportFinder(
     new IosSimulatorCrashReportFinder(device.deviceId, deps.fileSystem),
     deps.timer,
   );
+}
+
+/** Full-report reader for the crash-report resource; physical iOS has none yet. */
+export function createNativeCrashReportReader(
+  device: BootedDevice,
+  deps: Omit<NativeCrashReportFinderDependencies, "timer">,
+): NativeCrashReportReader | undefined {
+  if (device.platform === "android") {
+    return new AndroidDropboxCrashReportFinder(deps.adb);
+  }
+  if (resolveIosDeviceKind({ deviceId: device.deviceId }) === "physical") {
+    return undefined;
+  }
+  return new IosSimulatorCrashReportFinder(device.deviceId, deps.fileSystem);
 }

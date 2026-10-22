@@ -1,0 +1,10 @@
+backup_manager_constants=key_value_backup_interval_milliseconds=43200000
+default_input_method=com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME
+dropbox:data_app_anr=disabled
+dropbox:data_app_crash=disabled
+dropbox:data_app_wtf=disabled
+location_mode=3
+serial_blacklist=
+show_ime_with_hard_keyboard=0
+speak_password=1
+user_setup_complete=1

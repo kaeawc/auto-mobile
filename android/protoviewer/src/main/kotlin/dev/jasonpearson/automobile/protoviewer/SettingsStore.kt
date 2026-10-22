@@ -10,16 +10,23 @@ import kotlinx.coroutines.flow.asStateFlow
 interface SettingsStore {
   val allowNetwork: StateFlow<Boolean>
 
+  /** Monotonic revocation epoch: StateFlow conflation must not hide a quick off/on cycle. */
+  val networkRevocations: StateFlow<Long>
+
   fun setAllowNetwork(enabled: Boolean)
 }
 
 class SharedPreferencesSettingsStore(private val preferences: SharedPreferences) : SettingsStore {
   private val network = MutableStateFlow(preferences.getBoolean(ALLOW_NETWORK, false))
   override val allowNetwork = network.asStateFlow()
+  private val revocations = MutableStateFlow(0L)
+  override val networkRevocations = revocations.asStateFlow()
 
+  @Synchronized
   override fun setAllowNetwork(enabled: Boolean) {
     // apply updates memory immediately and serializes disk writes off the main thread.
     preferences.edit { putBoolean(ALLOW_NETWORK, enabled) }
+    if (!enabled && network.value) revocations.value++
     network.value = enabled
   }
 

@@ -148,6 +148,39 @@ class LibraryRepositoryTest {
   }
 
   @Test
+  fun loadByteCapRejectsListAndGetBeforeReadingSavedContent() {
+    files.usedBytes = MAX_LIBRARY_BYTES + 1
+    val unreadableStore =
+      object : dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeStore by store {
+        override fun load(id: String): SavedPrototypeLoadResult =
+          error("Over-budget content was loaded")
+      }
+    val target = DirectoryLibraryRepository(unreadableStore, files, storage)
+    assertEquals(LibraryResult.Failure(LibraryError.Limit), target.list())
+    assertEquals(LibraryResult.Failure(LibraryError.Limit), target.get(FIRST))
+  }
+
+  @Test
+  fun exactLoadByteCapAllowsValidEntriesAndSkipsCorruptMetadata() {
+    files.usedBytes = MAX_LIBRARY_BYTES
+    files.documents[SECOND] = "corrupt"
+    assertEquals(listOf(FIRST), success(repository.list()).map { it.libraryId })
+    assertEquals(FIRST, success(repository.get(FIRST)).entry.libraryId)
+    assertEquals(LibraryResult.Failure(LibraryError.NotFound), repository.get(SECOND))
+  }
+
+  @Test
+  fun loadSizeFailureIsTyped() {
+    val failing =
+      object : LibraryFileOperations by files {
+        override fun sizeBytes(): Long = throw IOException("Cannot size library")
+      }
+    val target = DirectoryLibraryRepository(store, failing, storage)
+    assertEquals(LibraryResult.Failure(LibraryError.Storage), target.list())
+    assertEquals(LibraryResult.Failure(LibraryError.Storage), target.get(FIRST))
+  }
+
+  @Test
   fun listIoErrorsAreTyped() {
     files.fail = true
     assertEquals(LibraryResult.Failure(LibraryError.Storage), repository.list())

@@ -19,6 +19,6 @@
   <string name="delete_body">Permanently remove this prototype, its assets and saved values?</string>
   <string name="allow_network">Allow network for imported prototypes</string>
   <string name="allow_network_explanation">Allow imported prototypes to contact internet and local-network (LAN) addresses. Device control and AutoMobile daemon addresses remain blocked.</string>
-  <string name="local_network_denied">Local-network permission denied. Internet access stays enabled; local-network (LAN) requests may time out. You can grant permission in Android settings.</string>
+  <string name="local_network_denied">Local-network permission denied. Network access is off. Enable the switch to request permission again.</string>
   <string name="network_provenance">Imported prototype · Network enabled</string>
 </resources>

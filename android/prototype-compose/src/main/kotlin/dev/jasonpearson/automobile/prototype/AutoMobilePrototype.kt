@@ -172,6 +172,7 @@ private fun EmbeddedPrototype(
       if (host == null) interactions.withLock { session.runtime.handle(it) }
       else host.onInteraction(it, session.runtime)
     }
+    SideEffect { if (host?.isCurrent?.invoke() == true) host.onReady() }
   }
   owner.error?.let { onError(it) }
 }

@@ -17604,7 +17604,7 @@
                           "anyOf": [
                             {
                               "type": "string",
-                              "pattern": "^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$"
+                              "pattern": "^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$(?![\\s\\S])"
                             },
                             {
                               "type": "string",
@@ -18203,7 +18203,7 @@
                                         "properties": {
                                           "state": {
                                             "type": "string",
-                                            "pattern": "^(?:[A-Za-z_][A-Za-z0-9_]{0,63}|(?=[^{]*\\{)(?:[A-Za-z0-9_]|\\{(?:index|[A-Za-z_][A-Za-z0-9_]{0,63}\\.[A-Za-z_][A-Za-z0-9_]{0,63})\\})+)$"
+                                            "pattern": "^(?:[A-Za-z_][A-Za-z0-9_]{0,63}|(?=[^{]*\\{)(?:[A-Za-z0-9_]|\\{(?:index|[A-Za-z_][A-Za-z0-9_]{0,63}\\.[A-Za-z_][A-Za-z0-9_]{0,63})\\})+)$(?![\\s\\S])"
                                           }
                                         },
                                         "required": ["state"],
@@ -18214,7 +18214,7 @@
                                         "properties": {
                                           "item": {
                                             "type": "string",
-                                            "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                                            "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$(?![\\s\\S])"
                                           }
                                         },
                                         "required": ["item"],
@@ -18238,7 +18238,7 @@
                                             "type": "string",
                                             "minLength": 1,
                                             "maxLength": 256,
-                                            "pattern": "^(?:\\/(?:[^~\\/]|~[01])*)+$"
+                                            "pattern": "^(?:\\/(?:[^~/]|~[01])*)+$(?![\\s\\S])"
                                           }
                                         },
                                         "required": ["data"],
@@ -19625,7 +19625,7 @@
                                   ]
                                 },
                                 "propertyNames": {
-                                  "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                                  "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$(?![\\s\\S])"
                                 }
                               },
                               "minItems": 1,
@@ -22705,7 +22705,7 @@
                     },
                     "component": {
                       "type": "string",
-                      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$(?![\\s\\S])"
                     },
                     "props": {
                       "type": "object",
@@ -22723,7 +22723,7 @@
               "type": "object",
               "description": "Reusable node templates by name, placed with {type:\"use\",component,props}; expanded on the host before validation (use nesting up to 8 deep, no cycles, every prop used); limits apply to the expanded spec",
               "propertyNames": {
-                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$(?![\\s\\S])"
               },
               "additionalProperties": {
                 "type": "object",

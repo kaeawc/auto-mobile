@@ -1,3 +1,4 @@
+import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import { z } from "zod";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
@@ -39,7 +40,7 @@ export const containerSchema: z.ZodType<ElementContainerSelector> = z.lazy(
         elementId: z.string().min(1).optional(),
         text: z
           .string()
-          .refine((value) => value.trim().length > 0)
+          .refine((value) => !prototypeContractPatterns.blankText.test(value))
           .optional(),
         index: z.number().finite().int().min(0).max(2147483647).optional(),
         selectionStrategy: z.literal("unique").optional(),
@@ -210,7 +211,7 @@ export const cornerRadiiSchema = z
   })
   .strict();
 
-export const hexColorSchema = z.string().regex(/^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/);
+export const hexColorSchema = z.string().regex(prototypeContractPatterns.color);
 
 /** One colour: a hex value or a Material role name. */
 export const colorTokenSchema = z.union([hexColorSchema, z.enum(PROTOTYPE_COLOR_ROLES)]);

@@ -12,6 +12,7 @@ import {
   withoutInheritedSessionTimingOverrides,
 } from "./testDirectories";
 import { DAEMON_ENV } from "../../src/config/envDaemon";
+import type { EnvVarSpec } from "../../src/config/envSpec";
 import { DB_PATH_OVERRIDE_ENV_KEYS as guardDbOverrideKeys } from "../../src/db/database";
 import { useScratchRoot } from "../helpers/scratchRoot";
 import {
@@ -151,15 +152,15 @@ test.each(["/repo/test/daemon/x.integration.test.ts", "/repo/test/stress/x.test.
 );
 
 test("session timing override keys cover every session liveness variable and its legacy twin", () => {
-  const specs = Object.values(DAEMON_ENV).filter((spec) =>
+  const specs = Object.values<EnvVarSpec>(DAEMON_ENV).filter((spec) =>
     /^AUTOMOBILE_(CLI_)?SESSION_.*_MS$/.test(spec.name),
   );
-  const expected = specs.flatMap((spec) => [
-    spec.name,
-    ...("legacyName" in spec ? [spec.legacyName] : []),
-  ]);
+  const expected = specs.flatMap((spec): string[] =>
+    spec.legacyName === undefined ? [spec.name] : [spec.name, spec.legacyName],
+  );
   expect(expected.length).toBeGreaterThan(0);
-  expect([...SESSION_TIMING_OVERRIDE_ENV_KEYS].sort()).toEqual(expected.sort());
+  const actual: string[] = [...SESSION_TIMING_OVERRIDE_ENV_KEYS];
+  expect(actual.sort()).toEqual(expected.sort());
 });
 
 describe("inherited DB and session timing overrides through the real preload", () => {

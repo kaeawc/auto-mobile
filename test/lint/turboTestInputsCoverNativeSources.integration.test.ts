@@ -55,6 +55,7 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     "android/auto-mobile-sdk/src/main/kotlin/**",
     "android/control-proxy/src/main/kotlin/**",
     "android/prototype-compose/src/main/kotlin/**",
+    "android/prototype-saved/src/main/kotlin/**",
     "ios/auto-mobile-sdk/Sources/**",
     "ios/control-proxy/Sources/**",
     // ctrlProxyProtocol.test.ts reads the @SerialName set from this tree.
@@ -93,6 +94,7 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     // Prototype icon tests read the Swift capability declaration, generated symbol data and doc.
     "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeAgentProtocol.swift",
     "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeIconSymbolData.swift",
+    "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeSpecContractData.swift",
     "ios/prototype-agent/ICON-SYMBOLS.md",
   ] as const;
 

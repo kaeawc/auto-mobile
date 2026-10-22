@@ -59,6 +59,21 @@ export function recordProvisionedDeviceStarted(
   };
 }
 
+/** What the request applied to the booted device: resources, then a manufacturer profile. */
+function postBootResults(
+  booted:
+    | {
+        resources?: DeviceResourceConfigurationResult;
+        manufacturerProfile?: Record<string, unknown>;
+      }
+    | undefined,
+): Record<string, unknown> {
+  return {
+    ...(booted?.resources ? { resources: booted.resources } : {}),
+    ...(booted?.manufacturerProfile ? { manufacturerProfile: booted.manufacturerProfile } : {}),
+  };
+}
+
 export async function applyProvisionDeviceResources(
   args: ProvisionDeviceArgs,
   deps: DeviceToolsDependencies,
@@ -211,6 +226,7 @@ export function buildProvisionDeviceResult(
         sessionId: string;
         sourceImage?: DeviceInfo;
         resources?: DeviceResourceConfigurationResult;
+        manufacturerProfile?: Record<string, unknown>;
       }
     | undefined,
 ): Record<string, unknown> {
@@ -227,7 +243,7 @@ export function buildProvisionDeviceResult(
     serviceStatus: provisionedServiceStatus(booted !== undefined, args.readiness),
   });
   return {
-    ...(booted?.resources ? { resources: booted.resources } : {}),
+    ...postBootResults(booted),
     device: projectProvisionedDevice(description),
     requestedSpec: args.device.spec,
     resolvedSpec: provisioned.resolvedSpec,

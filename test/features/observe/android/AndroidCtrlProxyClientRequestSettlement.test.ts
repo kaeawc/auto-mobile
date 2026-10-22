@@ -42,7 +42,7 @@ async function harness() {
   );
   await Promise.resolve();
   client.connectionTestHooks.socket = socket;
-  client["supportedCommands"] = new Set([
+  client.connectionTestHooks.supportedCommands = new Set([
     "full_command_set_v1",
     "request_id_echo_v1",
     "tap_double_v1",
@@ -89,9 +89,9 @@ async function harness() {
   client["connectWebSocket"] = async () => true;
   client["cancelScreenshotBackoff"] = () => {};
   // A lost connection otherwise arms a reconnect timer, which is not a request leak.
-  client["autoReconnectEnabled"] = false;
+  client.connectionTestHooks.autoReconnectEnabled = false;
   adb.setCommandResponse("pidof", createExecResult("1234", ""));
-  return { client, timer, socket, manager: client["requestManager"] };
+  return { client, timer, socket, manager: client.connectionTestHooks.requestManager };
 }
 type Harness = Awaited<ReturnType<typeof harness>>;
 

@@ -95,8 +95,43 @@ object PrototypeSpecValidator {
   private fun variants(name: String) =
     definitions.getValue(name).jsonObject.getValue("variants").jsonObject.keys
 
-  fun validate(input: String): PrototypeSpecValidation =
-    PrototypeSpecInput.validateInput(input, Context())
+  fun validate(
+    input: String,
+    supportedCapabilities: Set<String>? = null,
+    library: Boolean = false,
+  ): PrototypeSpecValidation {
+    val context = Context()
+    val result = PrototypeSpecInput.validateInput(input, context)
+    if (result is PrototypeSpecValidation.Failure) return result
+    val error =
+      PrototypeStrictPolicy.error(
+        checkNotNull(context.root).jsonObject,
+        supportedCapabilities,
+        library,
+        context,
+      )
+    return if (error == null) result else PrototypeSpecValidation.Failure(error)
+  }
+
+  fun validate(
+    input: ByteArray,
+    supportedCapabilities: Set<String>? = null,
+    library: Boolean = false,
+  ): PrototypeSpecValidation =
+    if (input.size > MAX_PROTOTYPE_SPEC_BYTES)
+      PrototypeSpecValidation.Failure(PrototypeSpecError("$", "Spec byte limit exceeded"))
+    else
+      try {
+        validate(
+          input.toString(Charsets.UTF_8).also {
+            require(it.toByteArray(Charsets.UTF_8).contentEquals(input)) { "Invalid UTF-8" }
+          },
+          supportedCapabilities,
+          library,
+        )
+      } catch (_: IllegalArgumentException) {
+        PrototypeSpecValidation.Failure(PrototypeSpecError("$", "Invalid UTF-8"))
+      }
 
   /** The caller supplies the same compact encoder it uses for full-spec writes. */
   fun prepareStateWrites(spec: PrototypeSpec, encoder: Json): PrototypeStateWriteValidator {
@@ -146,11 +181,19 @@ object PrototypeSpecValidator {
       if (fixedBytes + encodedState.toByteArray(Charsets.UTF_8).size > MAX_PROTOTYPE_SPEC_BYTES) {
         fail("", "Spec byte limit exceeded")
       } else {
-        val stored = json.parseToJsonElement(encodedState)
-        if (!validNumberTokens(stored)) fail("", "Invalid JSON")
-        else
-          walk(stored, stateRule, "state", Context(), 0)
-            ?: checkedStateErrors(checked, buildJsonObject { put("state", stored) })
+        try {
+          val stored = json.parseToJsonElement(PrototypeStrictJson.prepare(encodedState))
+          if (!validNumberTokens(stored)) fail("", "Invalid JSON")
+          else
+            walk(stored, stateRule, "state", Context(), 0)
+              ?: PrototypeStorageValidation.error(
+                JsonObject(value + ("state" to stored)),
+                enforceBytes = false,
+              )
+              ?: checkedStateErrors(checked, buildJsonObject { put("state", stored) })
+        } catch (_: IllegalArgumentException) {
+          fail("", "Invalid JSON")
+        }
       }
     }
   }

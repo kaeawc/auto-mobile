@@ -44,7 +44,7 @@ function harness(observation: ObserveResult, platform: "ios" | "android" = "ios"
     new FakeAdbExecutor(),
     {
       timer,
-      tapStrategy: new FakeTapStrategy(),
+      tapStrategy: platform === "ios" ? FakeTapStrategy.ios() : new FakeTapStrategy(),
       visionConfig: { ...DEFAULT_VISION_CONFIG, enabled: false },
       selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
     },

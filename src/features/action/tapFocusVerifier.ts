@@ -106,6 +106,36 @@ export class FocusVerifier {
       : undefined;
   }
 
+  /**
+   * iOS re-labels a text field once it is focused: a field holding text exposes its
+   * value rather than the label it was resolved by while unfocused (#13539). The
+   * sole focused field at the target's pre-tap bounds, with no conflicting identity,
+   * is the target.
+   */
+  private findSoleFocusedFieldAtTargetBounds(
+    target: Element,
+    nodes: readonly SearchableEntry[],
+    labelText?: string,
+  ): Element | undefined {
+    if (this.deps.device.platform !== "ios") {
+      return undefined;
+    }
+    const focusedFields = distinctFocusFields(
+      nodes.filter(
+        (node) =>
+          node.element &&
+          isFocusEditableElement(node.properties) &&
+          isElementKeyboardFocused(node.element),
+      ),
+    );
+    const candidate = focusedFields.length === 1 ? focusedFields[0].element : undefined;
+    return candidate &&
+      boundsNearlyEqual(target.bounds, candidate.bounds, ANDROID_PRE_TAP_BOUNDS_EPSILON_PX) &&
+      !this.focusIdentitySignals(target, candidate, labelText).conflict
+      ? candidate
+      : undefined;
+  }
+
   /** Shared so each captured hierarchy is projected once across the focus-confirmation reads. */
   private readonly focusProjection = new SearchableHierarchy();
 
@@ -481,6 +511,9 @@ export class FocusVerifier {
       return true;
     }
     if (this.findSoleFocusedFieldByStableIdentity(target, nodes, labelText, preTapHierarchy)) {
+      return true;
+    }
+    if (this.findSoleFocusedFieldAtTargetBounds(target, nodes, labelText)) {
       return true;
     }
     if (!options.testTag && !(options.elementId && target["resource-id"])) {

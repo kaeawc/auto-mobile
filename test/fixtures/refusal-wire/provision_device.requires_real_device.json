@@ -1,0 +1,13 @@
+{
+  "code": "provision_device.requires_real_device",
+  "builder": "ProvisionDeviceError via createToolErrorResponse",
+  "result": {
+    "isError": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"message\":\"requires_real_device fixture\",\"error\":{\"code\":\"requires_real_device\",\"message\":\"requires_real_device fixture\",\"retryable\":false}}"
+      }
+    ]
+  }
+}

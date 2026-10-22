@@ -66,6 +66,7 @@
         "android/auto-mobile-sdk/src/main/kotlin/**",
         "android/control-proxy/src/main/kotlin/**",
         "android/prototype-compose/src/main/kotlin/**",
+        "android/prototype-saved/src/main/kotlin/**",
         "android/control-proxy/src/test/kotlin/**",
         "android/desktop-core/src/main/kotlin/dev/jasonpearson/automobile/desktop/core/daemon/McpDaemonClient.kt",
         "android/desktop-core/src/main/kotlin/dev/jasonpearson/automobile/desktop/core/daemon/McpHttpClient.kt",
@@ -90,7 +91,8 @@
         "ios/network-filter/Packaging/**",
         "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeAgentProtocol.swift",
         "ios/prototype-agent/ICON-SYMBOLS.md",
-        "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeIconSymbolData.swift"
+        "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeIconSymbolData.swift",
+        "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeSpecContractData.swift"
       ],
       "outputs": [],
       "outputLogs": "new-only",
@@ -118,6 +120,7 @@
         "android/auto-mobile-sdk/src/main/kotlin/**",
         "android/control-proxy/src/main/kotlin/**",
         "android/prototype-compose/src/main/kotlin/**",
+        "android/prototype-saved/src/main/kotlin/**",
         "android/control-proxy/src/test/kotlin/**",
         "android/desktop-core/src/main/kotlin/dev/jasonpearson/automobile/desktop/core/daemon/McpDaemonClient.kt",
         "android/desktop-core/src/main/kotlin/dev/jasonpearson/automobile/desktop/core/daemon/McpHttpClient.kt",
@@ -142,7 +145,8 @@
         "ios/network-filter/Packaging/**",
         "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeAgentProtocol.swift",
         "ios/prototype-agent/ICON-SYMBOLS.md",
-        "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeIconSymbolData.swift"
+        "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeIconSymbolData.swift",
+        "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeSpecContractData.swift"
       ],
       "outputs": [],
       "outputLogs": "new-only",
@@ -196,6 +200,7 @@
         "android/auto-mobile-sdk/src/main/kotlin/**",
         "android/control-proxy/src/main/kotlin/**",
         "android/prototype-compose/src/main/kotlin/**",
+        "android/prototype-saved/src/main/kotlin/**",
         "android/control-proxy/src/test/kotlin/**",
         "android/desktop-core/**",
         "android/desktop-core/src/main/kotlin/dev/jasonpearson/automobile/desktop/core/daemon/McpDaemonClient.kt",
@@ -221,7 +226,8 @@
         "ios/network-filter/Packaging/**",
         "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeAgentProtocol.swift",
         "ios/prototype-agent/ICON-SYMBOLS.md",
-        "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeIconSymbolData.swift"
+        "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeIconSymbolData.swift",
+        "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeSpecContractData.swift"
       ],
       "outputs": [],
       "outputLogs": "new-only",
@@ -325,6 +331,7 @@
         "android/auto-mobile-sdk/src/main/kotlin/**",
         "android/control-proxy/src/main/kotlin/**",
         "android/prototype-compose/src/main/kotlin/**",
+        "android/prototype-saved/src/main/kotlin/**",
         "android/control-proxy/src/test/kotlin/**",
         "android/desktop-core/src/main/kotlin/dev/jasonpearson/automobile/desktop/core/daemon/McpDaemonClient.kt",
         "android/desktop-core/src/main/kotlin/dev/jasonpearson/automobile/desktop/core/daemon/McpHttpClient.kt",
@@ -349,7 +356,8 @@
         "ios/network-filter/Packaging/**",
         "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeAgentProtocol.swift",
         "ios/prototype-agent/ICON-SYMBOLS.md",
-        "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeIconSymbolData.swift"
+        "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeIconSymbolData.swift",
+        "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeSpecContractData.swift"
       ],
       "outputs": ["coverage/**"],
       "outputLogs": "new-only",

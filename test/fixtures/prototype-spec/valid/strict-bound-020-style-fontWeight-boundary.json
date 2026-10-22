@@ -1,0 +1,242 @@
+{
+  "id": "prototype",
+  "window": {
+    "placement": {
+      "type": "fullscreen",
+      "scrim": "#80000000"
+    },
+    "opacity": 100
+  },
+  "state": {
+    "open": false,
+    "title": "Prototype",
+    "query": "",
+    "selected": 0
+  },
+  "root": {
+    "id": "layout",
+    "testTag": "prototype",
+    "style": {
+      "width": "fill",
+      "height": "fill",
+      "padding": {
+        "top": 16,
+        "bottom": 12,
+        "start": 8,
+        "end": 8
+      },
+      "background": "#FF121212",
+      "cornerRadius": 8,
+      "border": {
+        "width": 1,
+        "color": "#112233"
+      },
+      "alpha": 0.8,
+      "alignment": "center",
+      "arrangement": "spaceBetween",
+      "spacing": 4,
+      "textSize": 16,
+      "fontWeight": 900,
+      "color": "#FFFFFF",
+      "textAlign": "center",
+      "maxLines": 4,
+      "fontFamily": "sansSerif"
+    },
+    "safeAreaPadding": {
+      "edges": ["top", "bottom", "start", "end"],
+      "types": ["systemBars", "cutout", "ime"]
+    },
+    "type": "column",
+    "children": [
+      {
+        "type": "tabBar",
+        "items": [
+          {
+            "label": "First",
+            "icon": "home"
+          },
+          {
+            "label": "Second",
+            "image": "preview"
+          }
+        ],
+        "pager": "variants",
+        "scrollable": true
+      },
+      {
+        "id": "variants",
+        "type": "pager",
+        "children": [
+          {
+            "anchor": {
+              "type": "bounds",
+              "bounds": {
+                "x": 0,
+                "y": 24,
+                "width": 300,
+                "height": 500
+              }
+            },
+            "type": "box",
+            "children": [
+              {
+                "type": "scroll",
+                "axis": "vertical",
+                "child": {
+                  "onTap": [
+                    {
+                      "type": "emit",
+                      "name": "choose",
+                      "payload": {
+                        "nested": [null, true, 4, "hello"]
+                      }
+                    },
+                    {
+                      "type": "setPage",
+                      "pager": "variants",
+                      "page": "next"
+                    },
+                    {
+                      "type": "setPage",
+                      "pager": "variants",
+                      "page": "prev"
+                    },
+                    {
+                      "type": "setPage",
+                      "pager": "variants",
+                      "page": 0
+                    },
+                    {
+                      "type": "setState",
+                      "key": "open",
+                      "value": true
+                    },
+                    {
+                      "type": "toggle",
+                      "key": "open"
+                    },
+                    {
+                      "type": "increment",
+                      "key": "selected"
+                    },
+                    {
+                      "type": "increment",
+                      "key": "selected",
+                      "by": -0.5
+                    },
+                    {
+                      "type": "dismiss"
+                    }
+                  ],
+                  "visibleWhen": {
+                    "all": [
+                      {
+                        "key": "open",
+                        "equals": true
+                      },
+                      {
+                        "not": {
+                          "key": "selected",
+                          "gt": 3
+                        }
+                      },
+                      {
+                        "any": [
+                          {
+                            "key": "title",
+                            "notEquals": "Hidden"
+                          },
+                          {
+                            "key": "selected",
+                            "lt": -1
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  "type": "text",
+                  "text": "Page {page} / {pageCount}; {title}"
+                }
+              }
+            ]
+          },
+          {
+            "type": "scroll",
+            "axis": "horizontal",
+            "child": {
+              "type": "row",
+              "children": [
+                {
+                  "type": "image",
+                  "asset": "preview",
+                  "contentScale": "crop"
+                },
+                {
+                  "type": "icon",
+                  "name": "search"
+                },
+                {
+                  "style": {
+                    "width": {
+                      "dp": 12
+                    },
+                    "height": "wrap"
+                  },
+                  "type": "spacer"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "safeAreaPadding": {
+          "edges": ["bottom"],
+          "types": ["ime"]
+        },
+        "type": "textField",
+        "stateKey": "query",
+        "placeholder": "Search"
+      },
+      {
+        "type": "bottomNav",
+        "items": [
+          {
+            "label": "Home",
+            "icon": "home"
+          },
+          {
+            "label": "Search",
+            "image": "preview"
+          }
+        ],
+        "stateKey": "selected"
+      },
+      {
+        "safeAreaPadding": {
+          "edges": ["bottom"],
+          "types": ["systemBars", "ime"]
+        },
+        "type": "bottomSheet",
+        "openWhen": {
+          "key": "open",
+          "equals": true
+        },
+        "detents": [
+          {
+            "dp": 240
+          },
+          "half",
+          "full"
+        ],
+        "scrim": "#80000000",
+        "dragHandle": true,
+        "dismissOnSwipe": true,
+        "child": {
+          "type": "text",
+          "text": "Confirm"
+        }
+      }
+    ]
+  }
+}

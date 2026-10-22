@@ -79,6 +79,13 @@ export interface ManagedDevicePortDependencies {
     android?: Pick<AndroidBaselineReset, "canCapture" | "capture" | "reset" | "forget">;
   };
   captureIosBaseline?: (context: DeviceMutationResetContext) => Promise<void>;
+  /**
+   * Heartbeats the device session prepare bound until prepare returns (#14835). The client is
+   * handed the session only with the grant, so it cannot heartbeat during a baseline capture,
+   * and the daemon's heartbeat monitor otherwise cancels the session under host load. Returns
+   * the release.
+   */
+  preparationLease?: (sessionUuid: string, requestId: string) => () => void;
   /** Durable request/revision fence; a stale reset must not act on a later session's resource. */
   isCurrentReset?: (resource: BrokerResourceRecord) => Promise<boolean>;
 }
@@ -173,20 +180,34 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
       }
     }
     const sessionId = await this.readySessionId(result, resource, profile);
-    await this.captureAndroidBaseline(resource, result, profile, sessionId, {
+    await this.captureBaselines(resource, result, profile, sessionId, {
+      requestId: resource.requestId,
       signal: options.signal,
       deadlineMs,
     });
-    if (profile.platform === "ios" && this.dependencies.captureIosBaseline) {
-      await this.capturePoolEntryBaseline(resource, sessionId, {
-        signal: options.signal,
-        deadlineMs,
-      });
-    }
     const binding = result.bindings.find(
       (entry) => entry.bindingIndex === resource.allocationIndex,
     );
     return { sessionId, profile, timing: preparationTiming(binding?.lifecycle) };
+  }
+
+  /** Pool-entry baselines, captured while a preparation lease keeps the bound session alive. */
+  private async captureBaselines(
+    resource: BrokerResourceRecord,
+    result: BrokerDeviceAcquisitionResult,
+    profile: BrokerNativeProfile,
+    sessionId: string,
+    { requestId, ...options }: { requestId: string; signal?: AbortSignal; deadlineMs: number },
+  ): Promise<void> {
+    const releaseLease = this.dependencies.preparationLease?.(sessionId, requestId);
+    try {
+      await this.captureAndroidBaseline(resource, result, profile, sessionId, options);
+      if (profile.platform === "ios" && this.dependencies.captureIosBaseline) {
+        await this.capturePoolEntryBaseline(resource, sessionId, options);
+      }
+    } finally {
+      releaseLease?.();
+    }
   }
 
   private async captureAndroidBaseline(

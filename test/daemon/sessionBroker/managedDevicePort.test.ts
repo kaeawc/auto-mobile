@@ -1,4 +1,5 @@
 import { SessionBroker } from "../../../src/daemon/sessionBroker/broker";
+import { HeartbeatTaskLeaseKeepalive } from "../../../src/daemon/tasks/taskLeaseKeepalive";
 import { openSqliteBindingRegistry } from "../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import { iosCatalog, iosDefaults } from "../../devices/sessionRequirements/fixtures";
 import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
@@ -626,6 +627,81 @@ describe("ManagedDevicePort clean-reset ownership", () => {
         .sessionId,
     ).toBe("session-1");
     expect(captures).toBe(1);
+  });
+
+  test("heartbeats the bound session through a long baseline capture, then stops (#14835)", async () => {
+    const rig = await destructionRig();
+    const assignment = (await rig.registry.getAssignment(rig.key))!;
+    await rig.registry.claimExecution(rig.key, assignment, { ...OWNER, sessionUuid: "session-1" });
+    const timer = new FakeTimer();
+    const session = { heartbeatTimeoutMs: 4_000 };
+    const heartbeats: string[] = [];
+    const leases = new HeartbeatTaskLeaseKeepalive({
+      sessions: () => ({
+        peekSession: (id) => (id === "session-1" ? session : null),
+        recordHeartbeat: (id) => {
+          heartbeats.push(id);
+        },
+      }),
+      timer,
+    });
+    const holds: { sessionUuid: string; requestId: string }[] = [];
+    const port = new ManagedDevicePort({
+      scope: SCOPE,
+      timer,
+      registry: rig.registry,
+      bindingJournal: rig.journal,
+      brokerDeviceAcquisition: acquisition(async (config) => readyResult(config)),
+      brokerExecutionRelease: { releaseExecution: async (id) => releaseResult(id) },
+      preparationLease: (sessionUuid, requestId) => {
+        holds.push({ sessionUuid, requestId });
+        return leases.hold({
+          taskId: `broker-prepare:${requestId}`,
+          ownerKey: "broker",
+          sessionUuid,
+        });
+      },
+      captureIosBaseline: async (context) => {
+        await context.assertOwned();
+        // A capture slower than the 4 s heartbeat timeout, as under host load.
+        timer.advanceTime(9_000);
+        expect(leases.heldCount).toBe(1);
+      },
+    });
+
+    await port.prepare({ ...rig.resource, state: "reserved" }, { livenessOwnerToken: "token" });
+
+    expect(holds).toEqual([{ sessionUuid: "session-1", requestId: rig.resource.requestId! }]);
+    // One renewal at hold, then every 1 s (under half the timeout) for the 9 s capture.
+    expect(heartbeats.length).toBeGreaterThanOrEqual(9);
+    expect(leases.heldCount).toBe(0);
+    const afterPrepare = heartbeats.length;
+    timer.advanceTime(5_000);
+    expect(heartbeats).toHaveLength(afterPrepare);
+  });
+
+  test("a failed baseline capture still releases the preparation lease (#14835)", async () => {
+    const rig = await destructionRig();
+    const assignment = (await rig.registry.getAssignment(rig.key))!;
+    await rig.registry.claimExecution(rig.key, assignment, { ...OWNER, sessionUuid: "session-1" });
+    let released = 0;
+    const port = new ManagedDevicePort({
+      scope: SCOPE,
+      timer: new FakeTimer(),
+      registry: rig.registry,
+      bindingJournal: rig.journal,
+      brokerDeviceAcquisition: acquisition(async (config) => readyResult(config)),
+      brokerExecutionRelease: { releaseExecution: async (id) => releaseResult(id) },
+      preparationLease: () => () => {
+        released++;
+      },
+      captureIosBaseline: async () => {
+        throw new DOMException("inventory timed out", "TimeoutError");
+      },
+    });
+
+    await port.prepare({ ...rig.resource, state: "reserved" }, { livenessOwnerToken: "token" });
+    expect(released).toBe(1);
   });
 
   test("a failed optional baseline capture does not release the acquired session", async () => {

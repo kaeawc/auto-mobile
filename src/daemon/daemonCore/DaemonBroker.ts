@@ -1,4 +1,5 @@
 import type { DaemonDeviceSessionStore } from "../daemonDependencies";
+import { HeartbeatTaskLeaseKeepalive } from "../tasks/taskLeaseKeepalive";
 import type {
   DaemonCoreServices,
   DaemonIdentityState,
@@ -412,6 +413,10 @@ export class DaemonBroker {
       release,
       journal: acquisition.journalFor(registry),
       mutationSessions: this.host.services.sessionManager(),
+      preparationLeases: new HeartbeatTaskLeaseKeepalive({
+        sessions: () => this.host.services.sessionManager(),
+        timer: this.host.services.timer(),
+      }),
       owner: this.bindingJournalOwner(),
       timer: this.host.services.timer(),
       sessionDisposition: (sessionUuid) =>

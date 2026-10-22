@@ -1,4 +1,5 @@
 import { ActionableError, toActionableError } from "../../models/ActionableError";
+import type { TaskLeaseKeepalive } from "../tasks/taskLeaseKeepalive";
 import type { BootedDevice } from "../../models/DeviceInfo";
 import {
   readAndroidSessionDeviceCatalog,
@@ -111,12 +112,30 @@ export function sessionBrokerHostLock(
   };
 }
 
+/** Holds the bound session's lease, named for its request, while preparation runs (#14835). */
+function preparationLeaseDependency(
+  leases: TaskLeaseKeepalive | undefined,
+): Pick<ManagedDevicePortDependencies, "preparationLease"> {
+  return leases
+    ? {
+        preparationLease: (sessionUuid, requestId) =>
+          leases.hold({
+            taskId: `broker-prepare:${requestId}`,
+            ownerKey: "session-broker",
+            sessionUuid,
+          }),
+      }
+    : {};
+}
+
 export interface OpenSessionBrokerServiceOptions {
   mutationSessions?: {
     peekSession(
       sessionUuid: string,
     ): Pick<Session, "sessionId" | "assignedDevice" | "stableDeviceId" | "mutationRecorder"> | null;
   };
+  /** Heartbeats a device session the broker bound until preparation hands it over (#14835). */
+  preparationLeases?: TaskLeaseKeepalive;
   /** Daemon startup starts the loop explicitly after binding its control socket. */
   deferStart?: boolean;
   config: SessionBrokerHostConfig;
@@ -248,6 +267,7 @@ export async function openSessionBrokerService(
       registry: options.registry,
       bindingJournal: options.journal,
       bindMutationRecorder,
+      ...preparationLeaseDependency(options.preparationLeases),
       ...(reset
         ? {
             resetBaseline: {

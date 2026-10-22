@@ -62,6 +62,9 @@ internal fun releasedNoticeText(reason: SessionReleaseReason?): String =
         "interact with the device to control it again"
     SessionReleaseReason.DAEMON_RESTARTED ->
       "Released because the daemon or device restarted: interact with the device to control it again"
+    SessionReleaseReason.DEVICE_SWITCH ->
+      "Released when another device was selected, which stopped its recording: " +
+        "interact with the device to control it again"
     SessionReleaseReason.DAEMON_RELEASED,
     null ->
       "Released by the daemon (idle for 2 minutes, restarted or expired): " +

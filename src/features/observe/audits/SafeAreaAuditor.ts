@@ -5,7 +5,7 @@ import type {
   ObserveResult,
 } from "../../../models";
 import { isTruthy } from "../../../models/Element";
-import { BASELINE_ACCESSIBILITY_ACTIONS } from "./accessibilityActions";
+import { hasInteractionAction } from "./accessibilityActions";
 
 type Node = Record<string, unknown>;
 type Side = LayoutWarning["sides"][number];
@@ -441,8 +441,7 @@ function categoriesFor(node: Node): LayoutWarning["categories"] {
     isTruthy(node.clickable as boolean | string | undefined) ||
     isTruthy(node["long-clickable"] as boolean | string | undefined) ||
     isTruthy(node.checkable as boolean | string | undefined) ||
-    (Array.isArray(node.actions) &&
-      node.actions.some((action) => !BASELINE_ACCESSIBILITY_ACTIONS.has(action))) ||
+    (Array.isArray(node.actions) && hasInteractionAction(node.actions)) ||
     hasSdkInteraction(node.extras);
   return [text ? "text" : undefined, interaction ? "interaction" : undefined].filter(
     (category): category is "text" | "interaction" => category !== undefined,

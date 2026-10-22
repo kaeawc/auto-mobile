@@ -87,6 +87,10 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, PendingMutat
     "Pending data/provider-specific journal adapter (#14359); opaque priors cannot drive best-effort reverts and do not gate keep-booted cleaning.",
   ),
   ...pendingTools(
+    ["backgroundWork"],
+    "Pending app-state journal adapter (#14359): runJob and WorkManager diagnostics run app-owned work whose effects are opaque, so best-effort reverts cannot undo them; keep-booted cleaning runs unconditionally.",
+  ),
+  ...pendingTools(
     ["stageSessionDownloads"],
     "The deprecated Downloads alias resolves its device inside the service through nonDeviceHandler and bypasses the recorded device dispatcher. It needs service-side record-before-act wiring (#14359), not only an intent mapping. putAppFile is journaled; this alias remains pending and does not gate keep-booted cleaning.",
   ),

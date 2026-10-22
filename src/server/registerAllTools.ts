@@ -7,6 +7,7 @@ import { registerUtilityTools } from "./utilityTools";
 import { registerDeviceTools } from "./deviceTools";
 import { registerDeepLinkTools } from "./deepLinkTools";
 import { registerSendBroadcastTools } from "./sendBroadcastTools";
+import { registerBackgroundWorkTools } from "./backgroundWorkTools";
 import { registerGetLogsTools } from "./getLogsTools";
 import { registerCompareScreenshotTools } from "./compareScreenshotTools";
 import { registerStatusBarTools } from "./statusBarTools";
@@ -81,6 +82,7 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerDeviceTools();
   registerDeepLinkTools();
   registerSendBroadcastTools();
+  registerBackgroundWorkTools();
   registerGetLogsTools();
   registerCompareScreenshotTools();
   registerStatusBarTools();

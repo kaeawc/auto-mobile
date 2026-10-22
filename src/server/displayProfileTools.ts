@@ -127,7 +127,7 @@ export const createDisplayProfileHandler =
 const displayProfileTool = defineDeviceTool({
   name: "displayProfile",
   description:
-    "Android: apply an OEM-style display persona in one call (screen size, density, font scale, display-cutout " +
+    "Android: apply an OEM-style display profile in one call (screen size, density, font scale, display-cutout " +
     "and navigation-mode overlays, force dark, fold posture), composing displayConfig and setPosture. Each step " +
     "reports applied | partial | unsupported | failed. The state before each facet's first change is recorded once; " +
     "reset restores every recorded facet, and in a daemon session release or rebind does too. Approximates OEM " +

@@ -23,7 +23,6 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeShownThemeFlow
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidation
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
-import java.time.LocalDate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -375,19 +374,5 @@ class PrototypeModeRenderTest {
   fun imageAndNavItemPairsRequestOnlyTheAssetForTheMode() {
     assertEquals(setOf("logo-light", "plain", "home-light"), requestedAssets("light"))
     assertEquals(setOf("logo-dark", "plain", "home-dark"), requestedAssets("dark"))
-  }
-
-  /**
-   * Material's date picker rings `LocalDate.now()` as today, so a render that read the wall clock
-   * would move that ring daily and break the date picker baselines. Compositions see the pin.
-   */
-  @Test
-  fun rendersSeeThePinnedToday() {
-    var today: LocalDate? = null
-    renderComposable("today") {
-      today = LocalDate.now()
-      Box(Modifier.size(1.dp))
-    }
-    assertEquals(PROTOTYPE_RENDER_TODAY, today)
   }
 }

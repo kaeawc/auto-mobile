@@ -13,12 +13,8 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.mapPrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidation
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
-import io.mockk.every
-import io.mockk.mockkStatic
-import io.mockk.unmockkStatic
 import java.io.File
 import java.time.Duration
-import java.time.LocalDate
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -32,25 +28,6 @@ import org.robolectric.Shadows.shadowOf
  * the fake looper clock only; no wall-clock time passes.
  */
 private val SETTLE: Duration = Duration.ofSeconds(1)
-
-/**
- * The day every prototype render treats as "today". Material's date picker rings today's date and
- * reads it from `LocalDate.now()` (material3 `CalendarModelImpl.today`) with no injectable clock,
- * so an unpinned render follows the wall clock and its baseline breaks the next day. This is the
- * date the committed baselines were recorded on.
- */
-internal val PROTOTYPE_RENDER_TODAY: LocalDate = LocalDate.of(2026, 10, 21)
-
-/** Runs [block] with `LocalDate.now()` pinned to [PROTOTYPE_RENDER_TODAY]. */
-private inline fun <T> withPinnedToday(block: () -> T): T {
-  mockkStatic(LocalDate::class)
-  try {
-    every { LocalDate.now() } returns PROTOTYPE_RENDER_TODAY
-    return block()
-  } finally {
-    unmockkStatic(LocalDate::class)
-  }
-}
 
 /** Encodes PNGs through the platform codec, which Robolectric's native graphics mode provides. */
 internal object BitmapPngCodec : PrototypeScreenshotComparator.PngCodec {
@@ -185,14 +162,13 @@ internal fun renderComposable(
 /**
  * Draws [content] in a Robolectric activity and captures the composed view. Shared by
  * [renderPrototype] and the host-chrome screenshot test. [settle] optionally synchronizes Compose
- * effects before the final main-looper drain and capture. The render runs with today pinned to
- * [PROTOTYPE_RENDER_TODAY], so a date picker draws the same frame on any day.
+ * effects before the final main-looper drain and capture.
  */
 internal fun renderComposable(
   name: String,
   settle: () -> Unit = {},
   content: @Composable () -> Unit,
-): PrototypeScreenshotComparator.Image = withPinnedToday {
+): PrototypeScreenshotComparator.Image {
   val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
   try {
     val activity = controller.get()
@@ -204,7 +180,7 @@ internal fun renderComposable(
     check(view.width > 0 && view.height > 0) { "$name: prototype view was not laid out" }
     val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
     view.draw(Canvas(bitmap))
-    BitmapPngCodec.toImage(bitmap)
+    return BitmapPngCodec.toImage(bitmap)
   } finally {
     controller.pause().stop().destroy()
   }

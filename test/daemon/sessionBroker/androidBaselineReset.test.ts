@@ -3,6 +3,7 @@ import {
   AndroidBaselineReset,
   watchAndroidResetSession,
 } from "../../../src/daemon/sessionBroker/androidBaselineReset";
+import { boundAndroidResetInventory } from "../../../src/daemon/sessionBroker/service";
 import { ExecutionTracker } from "../../../src/daemon/executionTracker";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
@@ -13,6 +14,82 @@ import {
   FakeAndroidResetHost,
 } from "./fixtures/androidReset";
 describe("AndroidBaselineReset", () => {
+  test("reset target inventory can take 3000ms within a 600000ms reset budget", async () => {
+    const host = new FakeAndroidResetHost();
+    const timer = new FakeTimer();
+    host.timer = timer;
+    host.strategy = {
+      reset: async (_device, _packages, owned, context) => {
+        await owned();
+        await context.rebindIncarnation?.();
+        await context.healthCheck?.({
+          scope: {
+            deviceId: ANDROID_RESET_DEVICE.deviceId,
+            incarnation: "resource-a",
+            sessionUuid: "session-a",
+          },
+          signal: context.signal!,
+          assertOwned: owned,
+        });
+      },
+    };
+    const baseline = new AndroidBaselineReset(host);
+    await baseline.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-a", {
+      timer,
+    });
+    const inventory = host.inventory.bind(host);
+    const budgets: number[] = [];
+    const bounded = boundAndroidResetInventory(async (options) => {
+      budgets.push(options.timeoutMs);
+      await timer.sleep(3000);
+      return [ANDROID_RESET_DEVICE];
+    }, timer);
+    host.inventory = async (options) => {
+      await bounded(options);
+      return inventory(options);
+    };
+    timer.enableAutoAdvance();
+    await expect(
+      baseline.reset("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, async () => {}),
+    ).resolves.toBe("clean");
+    expect(budgets.length).toBeGreaterThan(3);
+    expect(budgets.every((budget) => budget > 2000 && budget <= 600000)).toBe(true);
+  });
+
+  test("capture shares target inventory budget across retries and ownership checks", async () => {
+    const host = new FakeAndroidResetHost();
+    const timer = new FakeTimer();
+    const inventory = host.inventory.bind(host);
+    const budgets: number[] = [];
+    const targets: Array<string | undefined> = [];
+    host.inventory = async (options) => {
+      targets.push(options.targetDeviceId);
+      budgets.push(options.timeoutMs);
+      if (budgets.length === 1) {
+        timer.advanceTime(options.timeoutMs);
+        throw new Error(`Android baseline reset inventory timed out after ${options.timeoutMs}ms`);
+      }
+      return inventory(options);
+    };
+    host.strategy = {
+      capture: async (_device, context) => {
+        await context.assertOwned();
+      },
+      reset: async () => {},
+    };
+    await new AndroidBaselineReset(host).capture(
+      "resource-a",
+      ANDROID_RESET_DEVICE,
+      ANDROID_RESET_PROFILE,
+      "session-a",
+      { timer, timeoutMs: 30000 },
+    );
+    expect(budgets).toEqual([10000, 10000, 20000]);
+    expect(targets).toEqual(Array(3).fill(ANDROID_RESET_DEVICE.deviceId));
+    expect(host.closed).toBe(0);
+    expect(host.commandOptions.every((options) => options!.timeoutMs === 2000)).toBe(true);
+  });
+
   test("reset ownership, incarnation rebinding and health accept a pending inventory name", async () => {
     const host = new FakeAndroidResetHost();
     host.strategy = {
@@ -493,7 +570,7 @@ describe("AndroidBaselineReset", () => {
     const host = new FakeAndroidResetHost();
     let called = false;
     const reset = new AndroidBaselineReset({
-      inventory: () => host.inventory(),
+      inventory: (options) => host.inventory(options),
       adb: () => host.adb(),
       watchSession: (sessionId) => host.watchSession(sessionId),
       ctrlProxyReady: () => host.ctrlProxyReady(),

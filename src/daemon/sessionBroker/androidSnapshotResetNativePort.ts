@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { errorMessage } from "../../utils/describeUnknownError";
+import { logger } from "../../utils/logger";
 import type { BootedDevice } from "../../models/DeviceInfo";
 import { ActionableError } from "../../models/ActionableError";
 import type { BootCapacityReserver } from "../../devices/bootAdmission/BootSlotReservation";
@@ -31,6 +33,8 @@ import type {
   AndroidSnapshotStep,
 } from "./androidSnapshotReset";
 
+const ANDROID_RESET_POLL_TIMEOUT_MS = 5000;
+
 export interface AndroidSnapshotReadiness {
   ready(device: BootedDevice, step: AndroidSnapshotStep): Promise<void>;
   ctrlProxyIdentity(device: BootedDevice, signal: AbortSignal): Promise<string>;
@@ -55,7 +59,11 @@ export interface AndroidSnapshotNativeDependencies {
     step: AndroidSnapshotStep,
   ): ReturnType<NonNullable<Parameters<AndroidEmulator["launchEmulator"]>[0]["admitColdBoot"]>>;
   readiness: AndroidSnapshotReadiness;
-  inventory(options: { signal: AbortSignal; timeoutMs: number }): Promise<BootedDevice[]>;
+  inventory(options: {
+    signal: AbortSignal;
+    timeoutMs: number;
+    targetDeviceId: string;
+  }): Promise<BootedDevice[]>;
   ctrlProxyReady(device: BootedDevice): Promise<boolean>;
   imageMetadata(imagePath: string, signal: AbortSignal): Promise<string>;
   timer: Timer;
@@ -199,37 +207,59 @@ export class NativeAndroidSnapshotResetPort implements AndroidSnapshotResetPort 
       timeoutMs: Math.min(30_000, step.timeoutMs),
       processStop: { stopper: this.dependencies.processStopper, expectedAvdName: device.name },
     });
-    for (;;) {
-      await step.assertOwned();
-      const devices = await this.dependencies.inventory({
-        signal: step.signal,
-        timeoutMs: Math.min(2000, step.timeoutMs),
-      });
-      if (
-        !devices.some(
-          (candidate) => candidate.deviceId === device.deviceId || candidate.name === device.name,
-        )
-      ) {
-        const unsettled = await this.dependencies.emulator.getListedNonDeviceStatesAmong(
-          [device.deviceId],
-          {
-            signal: step.signal,
-            timeoutMs: Math.min(2000, step.timeoutMs),
-          },
-        );
-        if (
-          !unsettled.has(device.deviceId) &&
-          (await this.processExited(device, step, deadlineMs))
-        ) {
-          return;
-        }
-      }
+    let lastPollError: unknown;
+    const pollTimeout = () =>
+      Math.max(
+        1,
+        Math.min(ANDROID_RESET_POLL_TIMEOUT_MS, deadlineMs - this.dependencies.timer.now()),
+      );
+    const assertBeforeDeadline = () => {
       if (this.dependencies.timer.now() >= deadlineMs) {
         throw new ActionableError(
-          "Android reset emulator process did not exit before the deadline",
+          "Android reset emulator process did not exit before the deadline" +
+            (lastPollError === undefined ? "" : `: ${errorMessage(lastPollError)}`),
         );
       }
-      await this.dependencies.timer.sleep(100);
+    };
+    for (;;) {
+      await step.assertOwned();
+      step.signal.throwIfAborted();
+      assertBeforeDeadline();
+      let absent = false;
+      try {
+        const devices = await this.dependencies.inventory({
+          signal: step.signal,
+          timeoutMs: pollTimeout(),
+          targetDeviceId: device.deviceId,
+        });
+        if (
+          !devices.some(
+            (candidate) => candidate.deviceId === device.deviceId || candidate.name === device.name,
+          ) &&
+          this.dependencies.timer.now() < deadlineMs
+        ) {
+          const unsettled = await this.dependencies.emulator.getListedNonDeviceStatesAmong(
+            [device.deviceId],
+            { signal: step.signal, timeoutMs: pollTimeout() },
+          );
+          absent = !unsettled.has(device.deviceId);
+        }
+      } catch (error) {
+        step.signal.throwIfAborted();
+        // A failed read never proves absence; keep waiting and fail closed at the exit deadline.
+        logger.debug("Android reset exit inventory poll failed; continuing to wait", error);
+        lastPollError = error;
+      }
+      await step.assertOwned();
+      step.signal.throwIfAborted();
+      assertBeforeDeadline();
+      if (absent && (await this.processExited(device, step, deadlineMs))) {
+        return;
+      }
+      assertBeforeDeadline();
+      await this.dependencies.timer.sleep(
+        Math.min(100, deadlineMs - this.dependencies.timer.now()),
+      );
     }
   }
 

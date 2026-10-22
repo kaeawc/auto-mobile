@@ -186,6 +186,134 @@ describe("NativeAndroidSnapshotResetPort", () => {
     expect(quickBootCleared()).toBe(true);
   });
 
+  test.each(["inventory", "listed states"])(
+    "stop retries failed %s polls until absence is proven",
+    async (poll) => {
+      const { port, step, timer, dependencies, processStopper, quickBootCleared } = nativeRig();
+      timer.enableAutoAdvance();
+      processStopper.identities = [
+        {
+          kind: "match",
+          pid: 4242,
+          avdName: ANDROID_RESET_DEVICE.name,
+          port: 5554,
+          command: "emulator -avd broker-avd",
+        },
+      ];
+      let calls = 0;
+      const read = async () => {
+        if (++calls <= 2) {
+          throw new Error("Android baseline reset inventory timed out after 2000ms");
+        }
+      };
+      dependencies.inventory = async () => {
+        if (poll === "inventory") {
+          await read();
+        }
+        return [];
+      };
+      dependencies.emulator.getListedNonDeviceStatesAmong = async () => {
+        if (poll === "listed states") {
+          await read();
+        }
+        return new Map();
+      };
+      await expect(port.stop(ANDROID_RESET_DEVICE, step)).resolves.toBeUndefined();
+      expect(calls).toBe(3);
+      expect(quickBootCleared()).toBe(true);
+    },
+  );
+
+  test("stop fails closed at the exit deadline with the last poll error", async () => {
+    const { port, step, timer, dependencies, processStopper, quickBootCleared } = nativeRig();
+    timer.enableAutoAdvance();
+    processStopper.identities = [
+      {
+        kind: "match",
+        pid: 4242,
+        avdName: ANDROID_RESET_DEVICE.name,
+        port: 5554,
+        command: "emulator -avd broker-avd",
+      },
+    ];
+    dependencies.inventory = async () => {
+      throw new Error("inventory unavailable");
+    };
+    await expect(port.stop(ANDROID_RESET_DEVICE, step)).rejects.toThrow(
+      "did not exit before the deadline: inventory unavailable",
+    );
+    expect(timer.now()).toBe(step.timeoutMs);
+    expect(quickBootCleared()).toBe(false);
+  });
+
+  test("stop propagates an aborted poll promptly", async () => {
+    const { port, step, timer, dependencies, processStopper } = nativeRig();
+    const controller = new AbortController();
+    processStopper.identities = [
+      {
+        kind: "match",
+        pid: 4242,
+        avdName: ANDROID_RESET_DEVICE.name,
+        port: 5554,
+        command: "emulator -avd broker-avd",
+      },
+    ];
+    dependencies.inventory = async () => {
+      controller.abort(new Error("stop cancelled"));
+      throw controller.signal.reason;
+    };
+    await expect(
+      port.stop(ANDROID_RESET_DEVICE, { ...step, signal: controller.signal }),
+    ).rejects.toThrow("stop cancelled");
+    expect(timer.getSleepCallCount()).toBe(0);
+  });
+
+  test("stop bounds each targeted read by the remaining exit budget", async () => {
+    const { port, step, timer, dependencies, processStopper } = nativeRig();
+    processStopper.identities = [
+      {
+        kind: "match",
+        pid: 4242,
+        avdName: ANDROID_RESET_DEVICE.name,
+        port: 5554,
+        command: "emulator -avd broker-avd",
+      },
+    ];
+    dependencies.inventory = async (options) => {
+      expect(options).toEqual({
+        signal: step.signal,
+        timeoutMs: 5000,
+        targetDeviceId: ANDROID_RESET_DEVICE.deviceId,
+      });
+      timer.advanceTime(1500);
+      return [];
+    };
+    dependencies.emulator.getListedNonDeviceStatesAmong = async (_ids, options) => {
+      expect(options?.timeoutMs).toBe(4500);
+      return new Map();
+    };
+    await port.stop(ANDROID_RESET_DEVICE, { ...step, timeoutMs: 6000 });
+  });
+
+  test("stop still propagates ownership loss after a failed poll", async () => {
+    const { port, step, dependencies, processStopper, loseOwnership, timer } = nativeRig();
+    processStopper.identities = [
+      {
+        kind: "match",
+        pid: 4242,
+        avdName: ANDROID_RESET_DEVICE.name,
+        port: 5554,
+        command: "emulator -avd broker-avd",
+      },
+    ];
+    dependencies.inventory = async () => {
+      loseOwnership();
+      throw new Error("inventory unavailable");
+    };
+    await expect(port.stop(ANDROID_RESET_DEVICE, step)).rejects.toThrow("ownership lost");
+    expect(timer.getSleepCallCount()).toBe(0);
+  });
+
   test("an absent process lookup refuses stop as unprovable", async () => {
     const { port, step, processStopper, quickBootCleared, killCalls } = nativeRig();
     processStopper.identity = { kind: "absent" };

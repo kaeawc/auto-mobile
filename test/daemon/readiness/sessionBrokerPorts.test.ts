@@ -25,7 +25,11 @@ describe("DeviceReadiness session broker ports", () => {
     const controller = new AbortController();
 
     await expect(
-      readiness.listBootedAndroidDevices({ signal: controller.signal }),
+      readiness.listBootedAndroidDevices({
+        signal: controller.signal,
+        androidTargetDeviceId: androidDevice.deviceId,
+        skipAndroidProfileEnrichment: true,
+      }),
     ).resolves.toEqual([androidDevice]);
     expect(deviceUtils.getBootedDevicesDetailedCalls()).toEqual([
       {
@@ -33,6 +37,8 @@ describe("DeviceReadiness session broker ports", () => {
         options: {
           bypassAndroidDeviceListCache: true,
           signal: controller.signal,
+          androidTargetDeviceId: androidDevice.deviceId,
+          skipAndroidProfileEnrichment: true,
         },
       },
     ]);

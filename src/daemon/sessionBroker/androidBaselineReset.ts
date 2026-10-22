@@ -109,7 +109,11 @@ export interface AndroidResetContext extends AndroidResetSessionContext {
 export type AndroidResetCaptureContext = AndroidResetContext;
 
 export interface AndroidBaselineResetDependencies {
-  inventory(options?: { signal?: AbortSignal; timeoutMs?: number }): Promise<DeviceInfo[]>;
+  inventory(options: {
+    signal?: AbortSignal;
+    timeoutMs: number;
+    targetDeviceId: string;
+  }): Promise<DeviceInfo[]>;
   adb(device: BootedDevice): AdbCommandRunner;
   watchSession(sessionId: string): AndroidResetSessionActivity;
   ctrlProxyReady(
@@ -167,7 +171,11 @@ export class AndroidBaselineReset {
     const signal = options.signal
       ? AbortSignal.any([options.signal, deadlineController.signal])
       : deadlineController.signal;
-    const runStepOnce = <T>(operation: (timeoutMs: number) => Promise<T>, label: string) => {
+    const runStepOnce = <T>(
+      operation: (timeoutMs: number) => Promise<T>,
+      label: string,
+      attemptsLeft?: number,
+    ) => {
       signal.throwIfAborted();
       const timeoutMs = deadlineMs - timer.now();
       if (timeoutMs <= 0) {
@@ -177,7 +185,11 @@ export class AndroidBaselineReset {
         async () => {
           await options.assertOwned?.();
           signal.throwIfAborted();
-          const result = await operation(Math.min(2000, timeoutMs));
+          const result = await operation(
+            attemptsLeft === undefined
+              ? Math.min(2000, timeoutMs)
+              : Math.min(timeoutMs, Math.max(2000, Math.floor(timeoutMs / attemptsLeft))),
+          );
           signal.throwIfAborted();
           await options.assertOwned?.();
           return result;
@@ -201,10 +213,14 @@ export class AndroidBaselineReset {
     const runStep = async <T>(
       operation: (timeoutMs: number) => Promise<T>,
       label: string,
+      targetVerification = false,
     ): Promise<T> => {
       for (let attempt = 1; ; attempt++) {
         try {
-          return await runStepOnce(operation, label);
+          const attemptsLeft = targetVerification
+            ? ANDROID_BASELINE_STEP_ATTEMPTS - attempt + 1
+            : undefined;
+          return await runStepOnce(operation, label, attemptsLeft);
         } catch (error) {
           const retry =
             attempt < ANDROID_BASELINE_STEP_ATTEMPTS &&
@@ -222,6 +238,7 @@ export class AndroidBaselineReset {
       await runStep(
         (timeoutMs) => this.assertTarget(device, profile, signal, timeoutMs),
         "Android reset baseline target verification",
+        true,
       );
       const packages = await runStep(
         (timeoutMs) => this.packages(device, signal, timeoutMs),
@@ -250,7 +267,13 @@ export class AndroidBaselineReset {
           timeoutMs: Math.max(0, deadlineMs - timer.now()),
           assertOwned: async () => {
             await options.assertOwned?.();
-            await this.assertTarget(device, profile, signal, 2000, { allowPendingName: true });
+            await this.assertTarget(
+              device,
+              profile,
+              signal,
+              Math.max(1, deadlineMs - timer.now()),
+              { allowPendingName: true },
+            );
             if (bootId) {
               await this.assertBootIdentity(device, bootId, signal);
             }
@@ -385,7 +408,7 @@ export class AndroidBaselineReset {
       if (!strategy.handlesSessionMutations && !activityAllowsReset(strategy, baseline.activity)) {
         throw new ActionableError("Android session mutations cannot be restored by this reset");
       }
-      await this.assertTarget(device, profile, signal, 2000, {
+      await this.assertTarget(device, profile, signal, Math.max(1, deadlineMs - timer.now()), {
         requireBoot: !strategy.handlesSessionMutations,
         allowPendingName: true,
       });
@@ -406,9 +429,15 @@ export class AndroidBaselineReset {
       }
       const healthCheck = async (context?: DeviceMutationResetContext) => {
         await context?.assertOwned();
-        await this.assertTarget(device, profile, context?.signal ?? signal, 2000, {
-          allowPendingName: true,
-        });
+        await this.assertTarget(
+          device,
+          profile,
+          context?.signal ?? signal,
+          Math.max(1, deadlineMs - timer.now()),
+          {
+            allowPendingName: true,
+          },
+        );
         await context?.assertOwned();
         await this.packages(device, context?.signal ?? signal);
         await context?.assertOwned();
@@ -445,7 +474,13 @@ export class AndroidBaselineReset {
           assertBindingOwned: assertOwned,
           rebindIncarnation: async () => {
             await assertOwned();
-            await this.assertTarget(device, profile, signal, 2000, { allowPendingName: true });
+            await this.assertTarget(
+              device,
+              profile,
+              signal,
+              Math.max(1, deadlineMs - timer.now()),
+              { allowPendingName: true },
+            );
             const bootId = await this.bootIdentity(device, signal);
             await assertOwned();
             baseline.bootId = bootId;
@@ -498,7 +533,11 @@ export class AndroidBaselineReset {
         "Android reset requires an exact emulator and system-image profile",
       );
     }
-    const inventory = await this.dependencies.inventory({ signal, timeoutMs });
+    const inventory = await this.dependencies.inventory({
+      signal,
+      timeoutMs,
+      targetDeviceId: device.deviceId,
+    });
     signal?.throwIfAborted();
     if (!inventoryProvesTarget(inventory, device, profile, allowPendingName)) {
       throw new ActionableError(
@@ -506,7 +545,7 @@ export class AndroidBaselineReset {
       );
     }
     if (requireBoot) {
-      await this.assertBoot(device, signal, timeoutMs);
+      await this.assertBoot(device, signal, Math.min(2000, timeoutMs));
     }
   }
 
@@ -665,6 +704,7 @@ function inventoryProvesTarget(
   profile: AndroidResetProfile,
   allowPendingName: boolean,
 ): boolean {
+  // Targeted inventory omits other serials; the emulator AVD lock prevents a second writable instance.
   const matches = inventory.filter(
     (candidate) => candidate.deviceId === device.deviceId || candidate.name === device.name,
   );

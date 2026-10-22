@@ -1,3 +1,4 @@
+import type { BootedDeviceDiscoveryOptions } from "../../devices/deviceDiscoveryContracts";
 import type { CtrlProxyManager } from "../../ctrlProxy/CtrlProxyManager";
 import { CtrlProxyIosManager } from "../../ctrlProxy/IOSCtrlProxyManager";
 import { type IosSimulatorCreator } from "../../devices/deviceProvisioning";
@@ -125,7 +126,12 @@ export interface DeviceReadinessContract {
   verifyAndroidDevice(deviceId: string, options?: DeviceReadyOptions): Promise<void>;
 
   /** Fresh, complete Android inventory for session-broker reset verification. */
-  listBootedAndroidDevices(options?: { signal?: AbortSignal }): Promise<BootedDevice[]>;
+  listBootedAndroidDevices(
+    options?: Pick<
+      BootedDeviceDiscoveryOptions,
+      "signal" | "androidTargetDeviceId" | "skipAndroidProfileEnrichment"
+    >,
+  ): Promise<BootedDevice[]>;
 
   /** Verify CtrlProxy health through the injected device-client provider. */
   verifyAndroidCtrlProxyServiceReady(

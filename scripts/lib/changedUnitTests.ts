@@ -55,6 +55,12 @@ export function resolveChangedImports(specifier: string, importer: string): stri
  */
 export const DEPENDENCY_MANIFESTS: readonly string[] = ["package.json", "bun.lock"];
 
+/** The files that define the global preload set, so a change to either selects all units. */
+export const PRELOAD_CONFIG = {
+  bunfig: "bunfig.toml",
+  unitCommand: "scripts/lib/bun-unit-test.sh",
+} as const;
+
 /** `[test].preload` entries Bun loads before every test file, as repository-relative paths. */
 export function bunfigPreloads(bunfig: string): string[] {
   const config: unknown = Bun.TOML.parse(bunfig);
@@ -76,7 +82,9 @@ export function unitCommandPreloads(root: string): string[] {
     "bash",
     [
       "-c",
-      'source scripts/lib/bun-unit-test.sh && configure_bun_unit_test . Linux && printf "%s\\0" "${BUN_UNIT_TEST_COMMAND[@]}" "${BUN_UNIT_SHARED_TEST_COMMAND[@]}"',
+      'source "$1" && configure_bun_unit_test . Linux && printf "%s\\0" "${BUN_UNIT_TEST_COMMAND[@]}" "${BUN_UNIT_SHARED_TEST_COMMAND[@]}"',
+      "bash",
+      PRELOAD_CONFIG.unitCommand,
     ],
     { cwd: root, encoding: "utf8" },
   ).split("\0");
@@ -86,6 +94,19 @@ export function unitCommandPreloads(root: string): string[] {
         .filter((_, index) => argv[index - 1] === "--preload")
         .map((file) => path.posix.normalize(file)),
     ),
+  ];
+}
+
+/**
+ * Repository-relative files whose change selects all units: dependency manifests (#14426), the
+ * preload configuration, and every preload it configures (#14425).
+ */
+export function unitFullSuiteTriggers(root: string): string[] {
+  return [
+    ...DEPENDENCY_MANIFESTS,
+    ...Object.values(PRELOAD_CONFIG),
+    ...bunfigPreloads(readFileSync(path.join(root, PRELOAD_CONFIG.bunfig), "utf8")),
+    ...unitCommandPreloads(root),
   ];
 }
 
@@ -190,8 +211,7 @@ if (import.meta.main) {
     )
     .sort();
   const read = (file: string): string => readFileSync(path.resolve(root, file), "utf8");
-  // Preloads run before every unit file without an import edge (#14425).
-  const preloads = [...bunfigPreloads(read("bunfig.toml")), ...unitCommandPreloads(root)];
+  // Manifests, preloads and their configuration reach tests without an import edge.
   const graph = changedGraphTests(
     tests.map(canonical),
     changed,
@@ -201,7 +221,7 @@ if (import.meta.main) {
       resolve: (specifier, importer) =>
         resolveChangedImports(specifier, path.resolve(root, importer)).map(canonical),
     },
-    [...DEPENDENCY_MANIFESTS, ...preloads.map(canonical)],
+    unitFullSuiteTriggers(root).map(canonical),
   );
   const extras = selectAffectedTests({
     reader: {

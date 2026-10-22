@@ -8,6 +8,7 @@ import {
   scanChangedImports,
   type ChangedGraphReader,
   unitCommandPreloads,
+  unitFullSuiteTriggers,
 } from "../../scripts/lib/changedUnitTests";
 
 const root = path.resolve(import.meta.dir, "../..");
@@ -113,5 +114,20 @@ describe("changed unit global preloads (#14425)", () => {
     expect(preloads).toContain("test/setup/testPreload.ts");
     expect(preloads).toContain("test/setup/fileTimingProbe.ts");
     expect(preloads.filter((file) => !existsSync(path.join(root, file)))).toEqual([]);
+  });
+  test("a preload configuration change alone selects all units", () => {
+    const triggers = unitFullSuiteTriggers(root);
+    expect(triggers).toEqual(
+      expect.arrayContaining(["bunfig.toml", "scripts/lib/bun-unit-test.sh"]),
+    );
+    const units = ["test/a.test.ts"];
+    const unconnected: ChangedGraphReader = {
+      read: () => "",
+      imports: () => [],
+      resolve: () => [],
+    };
+    for (const config of ["bunfig.toml", "scripts/lib/bun-unit-test.sh"]) {
+      expect(changedGraphTests(units, [config], unconnected, triggers)).toEqual(units);
+    }
   });
 });

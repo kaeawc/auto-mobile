@@ -899,6 +899,18 @@ describe("HomeScreen", () => {
         await expect(action.executeIosHomeNavigation()).rejects.toThrow("com.apple.Spotlight");
         expect(client.getPressHomeRequestCount()).toBe(1);
       });
+
+      test("reports a failed runner Home press after Spotlight survives the launch", async () => {
+        const { action, client } = createIosHomeScreen({ simulator: true, simctl });
+        client.setHierarchyData(iosHierarchy("com.apple.Spotlight"));
+        spyOn(client, "requestPressHome").mockResolvedValue({
+          success: false,
+          totalTimeMs: 1,
+          error: "runner busy",
+        });
+
+        await expect(action.executeIosHomeNavigation()).rejects.toThrow("runner busy");
+      });
     });
 
     describe("simulator launch budget regression", () => {

@@ -43,16 +43,16 @@ class RetrofitPrototypeHttpClientTimeoutTest {
       MockResponse.Builder()
         .body("{}")
         .addHeader("Content-Type", "application/json")
-        .headersDelay(400, TimeUnit.MILLISECONDS)
+        .headersDelay(30, TimeUnit.MILLISECONDS)
         .build(),
     )
     val shortReadTimeouts =
       RetrofitPrototypeHttpClient(
         OkHttpClient.Builder()
           .dns(loopbackDns)
-          .connectTimeout(100, TimeUnit.MILLISECONDS)
-          .readTimeout(100, TimeUnit.MILLISECONDS)
-          .writeTimeout(100, TimeUnit.MILLISECONDS)
+          .connectTimeout(10, TimeUnit.MILLISECONDS)
+          .readTimeout(10, TimeUnit.MILLISECONDS)
+          .writeTimeout(10, TimeUnit.MILLISECONDS)
           .build(),
         policy = permissivePolicy,
         clock = { 0L },

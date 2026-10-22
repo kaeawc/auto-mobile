@@ -199,10 +199,29 @@ export const MULTI_FINGER_GESTURE_CAPABILITY = "multi_finger_gesture_v1";
  */
 export const SEMANTIC_NODE_ACTIONS_CAPABILITY = "semantic_node_actions_v1";
 
+/**
+ * `request_global_action` accepts the system actions behind `pressButton` (#14095). A CtrlProxy
+ * advertises each flag only when it knows the action and the device API level can perform it, so
+ * one check covers both the APK and the Android version. An older APK drops the unknown action.
+ */
+export const GLOBAL_ACTION_POWER_DIALOG_CAPABILITY = "global_action_power_dialog_v1";
+export const GLOBAL_ACTION_QUICK_SETTINGS_CAPABILITY = "global_action_quick_settings_v1";
+export const GLOBAL_ACTION_SPLIT_SCREEN_CAPABILITY = "global_action_split_screen_v1";
+export const GLOBAL_ACTION_LOCK_SCREEN_CAPABILITY = "global_action_lock_screen_v1";
+export const GLOBAL_ACTION_SCREENSHOT_CAPABILITY = "global_action_screenshot_v1";
+export const GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE_CAPABILITY =
+  "global_action_dismiss_notification_shade_v1";
+
 /** Capability flags in the handshake that are never sent as wire requests. */
 export const ANDROID_CAPABILITY_FLAGS = [
   "node_selector_actions",
   SEMANTIC_NODE_ACTIONS_CAPABILITY,
+  GLOBAL_ACTION_POWER_DIALOG_CAPABILITY,
+  GLOBAL_ACTION_QUICK_SETTINGS_CAPABILITY,
+  GLOBAL_ACTION_SPLIT_SCREEN_CAPABILITY,
+  GLOBAL_ACTION_LOCK_SCREEN_CAPABILITY,
+  GLOBAL_ACTION_SCREENSHOT_CAPABILITY,
+  GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE_CAPABILITY,
   "ime_key_events_v1",
   "ime_clear_field_v1",
   "ime_password_commit_v1",

@@ -706,7 +706,10 @@ data class ClearPreferences(
 @SerialName("request_global_action")
 data class RequestGlobalAction(
   override val requestId: String? = null,
-  val action: String, // back, home, recent, notifications, power_dialog, lock_screen
+  // back, home, recent, notifications, power_dialog, quick_settings, split_screen, lock_screen,
+  // screenshot, dismiss_notification_shade. Hosts send the latter six only to a service advertising
+  // `global_action_<action>_v1`.
+  val action: String,
   val frameContext: String? = null,
 ) : WebSocketRequest()
 

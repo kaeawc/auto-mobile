@@ -59,6 +59,15 @@ public enum PrototypeSpecStrictValidator {
                     throw PrototypeContractValidator.invalid("window.persistence", "Privileged window")
                 }
             }
+            // Located actions exclude opaque data, request bodies and emit payloads.
+            if library, let host = context.actions.first(where: {
+                $0.value["type"] == .string("request") && $0.value["via"] == .string("host")
+            }) {
+                throw PrototypeContractValidator.invalid(
+                    "\(host.path).via",
+                    "Host requests are unavailable in a library"
+                )
+            }
         } catch let error as PrototypeLoadError { throw error }
         catch let DecodingError.dataCorrupted(context) {
             if let separator = context.debugDescription.range(of: ": ") {

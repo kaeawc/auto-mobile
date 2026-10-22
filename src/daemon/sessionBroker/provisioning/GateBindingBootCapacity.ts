@@ -48,6 +48,11 @@ export class GateBindingBootCapacity implements BindingBootCapacity {
     private readonly reserveCapacity: typeof reserveBootCapacity = reserveBootCapacity,
   ) {}
 
+  /**
+   * The replacement lookup and the gate's sample each get the BOOT_CAPACITY_CHECK_TIMEOUT_MS
+   * backstop, the sample's starting after the lookup (#14495): a slow lookup must not eat into the
+   * sample budget. `options.timeoutMs` still bounds the whole reservation.
+   */
   async reserve(
     platform: BindingPlatform,
     options: BindingBootReservationOptions,
@@ -56,32 +61,39 @@ export class GateBindingBootCapacity implements BindingBootCapacity {
     const signal = options.signal
       ? AbortSignal.any([options.signal, controller.signal])
       : controller.signal;
+    const deadlineMs = this.timer.now() + options.timeoutMs;
+    const remainingMs = () => Math.max(0, deadlineMs - this.timer.now());
+    const bounded = <T>(operation: () => Promise<T>) =>
+      raceWithDeadline(operation, {
+        timer: this.timer,
+        timeoutMs: Math.min(remainingMs(), BOOT_CAPACITY_CHECK_TIMEOUT_MS),
+        signal: options.signal,
+        label: `Reserving ${platform} boot capacity`,
+        onTimeout: () => controller.abort(),
+        timeoutError: () =>
+          new BootCapacityCheckTimeoutError(`Timed out reserving ${platform} boot capacity.`),
+      });
     let acquired = false;
     let pending: BootSlotReservation | undefined;
     try {
-      const reservation = await raceWithDeadline(
-        async () => {
-          const replacingDeviceId = options.resolveReplacingDeviceId
-            ? await options.resolveReplacingDeviceId({ signal })
-            : options.replacingDeviceId;
+      const resolveReplacingDeviceId = options.resolveReplacingDeviceId;
+      const replacingDeviceId = resolveReplacingDeviceId
+        ? await bounded(() => resolveReplacingDeviceId({ signal }))
+        : options.replacingDeviceId;
+      signal.throwIfAborted();
+      const reservation = await bounded(async () => {
+        pending = await this.reserveCapacity(platform, {
+          ...options,
+          replacingDeviceId,
+          timeoutMs: Math.max(1, remainingMs()),
+          signal,
+        });
+        if (signal.aborted) {
+          pending.release();
           signal.throwIfAborted();
-          pending = await this.reserveCapacity(platform, { ...options, replacingDeviceId, signal });
-          if (signal.aborted) {
-            pending.release();
-            signal.throwIfAborted();
-          }
-          return pending;
-        },
-        {
-          timer: this.timer,
-          timeoutMs: Math.min(options.timeoutMs, BOOT_CAPACITY_CHECK_TIMEOUT_MS),
-          signal: options.signal,
-          label: `Reserving ${platform} boot capacity`,
-          onTimeout: () => controller.abort(),
-          timeoutError: () =>
-            new BootCapacityCheckTimeoutError(`Timed out reserving ${platform} boot capacity.`),
-        },
-      );
+        }
+        return pending;
+      });
       acquired = true;
       return { kind: "available", reservation };
     } catch (error) {

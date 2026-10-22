@@ -39,6 +39,15 @@ const displayConfigValuesOutputSchema = z
     density: z.union([z.number(), z.enum(["smaller", "default", "larger"])]).optional(),
     theme: displayThemeOutputSchema.optional(),
     contentSize: z.string().optional(),
+    // Android runtime geometry (#14101); `current`/`applied` report the effective pixel size.
+    size: z
+      .union([
+        z.object({ width: z.number(), height: z.number() }).passthrough(),
+        z.literal("default"),
+      ])
+      .optional(),
+    navigationMode: z.enum(["gesture", "threeButton", "twoButton", "default"]).optional(),
+    displayCutout: z.enum(["none", "corner", "double", "hole", "tall", "waterfall"]).optional(),
     increaseContrast: z.boolean().optional(),
     reduceMotion: z.boolean().optional(),
     boldText: z.boolean().optional(),
@@ -64,6 +73,9 @@ export const displayConfigResultSchema = z
         fontScale: z.boolean(),
         density: z.union([z.boolean(), z.literal("partial")]),
         theme: z.boolean(),
+        size: accessibilityDisplaySupportOutputSchema.optional(),
+        navigationMode: z.boolean().optional(),
+        displayCutout: z.boolean().optional(),
         increaseContrast: accessibilityDisplaySupportOutputSchema.optional(),
         reduceMotion: accessibilityDisplaySupportOutputSchema.optional(),
         boldText: accessibilityDisplaySupportOutputSchema.optional(),
@@ -85,6 +97,10 @@ export const displayConfigResultSchema = z
         magnificationScale: z.string().optional(),
         extraDim: z.string().optional(),
       })
+      .passthrough()
+      .optional(),
+    available: z
+      .object({ navigationMode: z.array(z.string()), displayCutout: z.array(z.string()) })
       .passthrough()
       .optional(),
     current: displayConfigValuesOutputSchema.optional(),

@@ -60,7 +60,7 @@ async function harness() {
   client["cancelScreenshotBackoff"] = () => {
     cancels++;
   };
-  const storage = client["storage"];
+  const storage = client.testHooks.storage();
   return {
     client,
     storage,

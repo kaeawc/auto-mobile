@@ -13,6 +13,8 @@ export interface ParsedDropboxCrashReport {
   report: NativeCrashReport;
   /** Process name as the entry states it (`com.example.app` or `com.example.app:remote`). */
   processName: string;
+  /** The whole dropbox entry, from its header line on, for the full-report resource. */
+  rawText: string;
 }
 
 const ENTRY_SEPARATOR = /^={20,}\s*$/m;
@@ -24,6 +26,7 @@ interface DropboxEntry {
   localTime: string;
   headers: Map<string, string>;
   body: string[];
+  rawText: string;
 }
 
 function splitEntry(chunk: string): DropboxEntry | undefined {
@@ -46,7 +49,29 @@ function splitEntry(chunk: string): DropboxEntry | undefined {
     localTime: `${match[1]} ${match[2]}`,
     headers,
     body: lines.slice(index + 1),
+    rawText: lines.slice(start).join("\n").trimEnd(),
   };
+}
+
+/**
+ * URI-safe report id: `<tag>-<YYYYMMDDTHHMMSS>-<pid>`. It names one entry so the
+ * full-report resource can find it again, and survives a URI path segment.
+ */
+export function dropboxReportId(
+  tag: AndroidCrashDropboxTag,
+  localTime: string,
+  process: number | string,
+): string {
+  const compactTime = localTime.replace(/-/g, "").replace(" ", "T").replace(/:/g, "");
+  return `${tag}-${compactTime}-${String(process).replace(/[^A-Za-z0-9._]/g, "_")}`;
+}
+
+/** The dropbox tag a report id was minted for, or `undefined` for a foreign id. */
+export function dropboxTagOfReportId(reportId: string): AndroidCrashDropboxTag | undefined {
+  // Longest tag first: `data_app_native_crash` also starts with `data_app_`.
+  return [...ANDROID_CRASH_DROPBOX_TAGS]
+    .sort((left, right) => right.length - left.length)
+    .find((tag) => reportId.startsWith(`${tag}-`));
 }
 
 /** `2026-10-21 10:00:02` in the device's zone, given its UTC offset in minutes. */
@@ -197,8 +222,9 @@ function toReport(
   const { processName, appId, appVersion, processId } = identity;
   return {
     processName,
+    rawText: entry.rawText,
     report: {
-      id: `${entry.tag}@${entry.localTime}#${processId ?? processName}`,
+      id: dropboxReportId(entry.tag, entry.localTime, processId ?? processName),
       platform: "android",
       source: "android_dropbox",
       appId,

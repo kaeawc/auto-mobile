@@ -270,10 +270,13 @@ export class PerformanceMonitor {
 
   /**
    * Fence samples already collecting for the prior guest and clear their
-   * baselines while retaining the opt-in monitoring subscription.
+   * baselines while retaining the opt-in monitoring subscription. The prior
+   * guest's observe lease and dormant marker are dropped too, so the
+   * replacement samples only once a consumer or a fresh observe demands it.
    */
   resetDeviceState(deviceId: string): void {
     this.cancelActiveAndroidSample(deviceId, "Device incarnation changed");
+    this.samplingDemand.remove(deviceId);
     ttiStore.delete(deviceId);
     const monitored = this.monitoredDevices.get(deviceId);
     if (monitored) {

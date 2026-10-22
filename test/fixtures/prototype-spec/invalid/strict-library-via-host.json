@@ -1,0 +1,14 @@
+{
+  "spec": {
+    "id": "library-host",
+    "window": { "placement": { "type": "fullscreen" } },
+    "root": {
+      "type": "button",
+      "label": "Load",
+      "onTap": [{ "type": "request", "url": "https://example.com", "via": "host" }]
+    }
+  },
+  "options": { "library": true },
+  "expectedPath": "root.onTap[0].via",
+  "expectedMessage": "Host requests are unavailable in a library"
+}

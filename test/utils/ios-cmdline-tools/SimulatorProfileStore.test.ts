@@ -51,6 +51,7 @@ describe("FileSimulatorProfileStore filesystem boundary", () => {
       store,
     );
     await profiles.profileFor("phone");
+    await profiles.flushPersistence();
     expect(JSON.parse(await store.read()).profiles[0].pixelWidth).toBe(1206);
   }
 

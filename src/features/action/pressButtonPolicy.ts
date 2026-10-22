@@ -1,5 +1,16 @@
+import { ANDROID_SYSTEM_ACTION_BUTTONS } from "./androidSystemActions";
+
 // iOS action runs a user-chosen shortcut and camera opens the camera: both can change the UI.
-const NAVIGATION_PRESS_BUTTONS = new Set(["back", "home", "recent", "power", "action", "camera"]);
+// The Android system actions (#14095) open or close system UI, lock the device or split the task.
+const NAVIGATION_PRESS_BUTTONS = new Set([
+  "back",
+  "home",
+  "recent",
+  "power",
+  "action",
+  "camera",
+  ...ANDROID_SYSTEM_ACTION_BUTTONS,
+]);
 const IN_PLACE_PRESS_BUTTONS = new Set(["menu", "volume_up", "volume_down"]);
 
 export function isNavigationPressButton(button: unknown): boolean {

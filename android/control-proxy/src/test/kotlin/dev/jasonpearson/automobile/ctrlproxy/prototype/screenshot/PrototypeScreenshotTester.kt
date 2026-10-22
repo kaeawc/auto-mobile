@@ -84,9 +84,10 @@ internal fun validPrototypeFixture(
   resolveElementAnchors: Boolean = false,
   stateOverrides: Map<String, JsonElement> = emptyMap(),
   themeFrom: String? = null,
+  edit: ((JsonObject) -> JsonObject)? = null,
 ): PrototypeSpec {
   val file = validPrototypeFixtureFile(name)
-  if (!resolveElementAnchors && stateOverrides.isEmpty() && themeFrom == null) {
+  if (!resolveElementAnchors && stateOverrides.isEmpty() && themeFrom == null && edit == null) {
     return loadPrototypeSpec(file)
   }
   var edited = Json.parseToJsonElement(file.readText())
@@ -99,6 +100,7 @@ internal fun validPrototypeFixture(
     check(theme is JsonObject) { "fixture $themeFrom has no theme object" }
     edited = JsonObject((edited as JsonObject) + ("theme" to theme))
   }
+  if (edit != null) edited = edit(edited as JsonObject)
   return loadPrototypeSpecText(file.path, Json.encodeToString(JsonElement.serializer(), edited))
 }
 
@@ -106,6 +108,32 @@ private fun validPrototypeFixtureFile(name: String): File =
   generateSequence(File(System.getProperty("user.dir") ?: ".").absoluteFile) { it.parentFile }
     .map { File(it, "test/fixtures/prototype-spec/valid/$name.json") }
     .first { it.isFile }
+
+/**
+ * Replaces the root's single authored `background` with a `{light, dark}` pair of the same dark
+ * colour, so the device's `night`/`notnight` qualifier decides the appearance: a pair never takes
+ * part in appearance inference, while a single opaque colour decides it (#14583, #14589).
+ */
+internal fun withModeRootBackground(spec: JsonObject): JsonObject {
+  val root = spec["root"] as JsonObject
+  val style = root["style"] as JsonObject
+  val authored = style["background"]
+  check(authored is JsonPrimitive && authored.isString) {
+    "fixture root authors no single background"
+  }
+  val pair = JsonObject(mapOf("light" to JsonPrimitive("#FFFFFFFF"), "dark" to authored))
+  return JsonObject(
+    spec + ("root" to JsonObject(root + ("style" to JsonObject(style + ("background" to pair))))),
+  )
+}
+
+/** Drops the root child at [index], so a capture shows one of several overlays that share a key. */
+internal fun withoutRootChild(index: Int): (JsonObject) -> JsonObject = { spec ->
+  val root = spec["root"] as JsonObject
+  val children = (root["children"] as JsonArray).toMutableList()
+  children.removeAt(index)
+  JsonObject(spec + ("root" to JsonObject(root + ("children" to JsonArray(children)))))
+}
 
 /**
  * Replaces keys of the spec's initial `state`, so a gallery case can open a dialog or bottom sheet

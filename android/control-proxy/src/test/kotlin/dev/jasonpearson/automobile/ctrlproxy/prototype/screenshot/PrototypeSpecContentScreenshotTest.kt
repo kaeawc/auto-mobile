@@ -19,6 +19,8 @@ import dev.jasonpearson.automobile.protocol.PrototypeCheck
 import dev.jasonpearson.automobile.protocol.PrototypeColumnNode
 import dev.jasonpearson.automobile.protocol.PrototypeScalar
 import dev.jasonpearson.automobile.protocol.PrototypeSliderNode
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -45,6 +47,9 @@ class PrototypeSpecContentScreenshotTest {
 
   private companion object {
     val OPEN = JsonPrimitive(true)
+    /** `theme-modes-colors` root child indices of its half and full bottom sheets. */
+    const val HALF_SHEET = 1
+    const val FULL_SHEET = 2
   }
 
   // Pending: #12395 added these cases (and changed material_slider_chip_card's render) without
@@ -398,8 +403,9 @@ class PrototypeSpecContentScreenshotTest {
       validPrototypeFixture("theme-role-overrides"),
     )
 
-  // Dark-mode gallery (#11217). The specs carry no theme, so the `+night` device decides; every
-  // case is pending until recorded by the Linux workflow described above.
+  // Dark-mode gallery (#11217). The specs carry no theme, so the `+night` device decides. The
+  // gallery's authored `#FF121212` root background would otherwise win (appearance is inferred from
+  // a single authored background), so the gallery cases pair it with a light side (#14583, #14589).
 
   /** Every node type on a dark device; the unresolved image assets draw their placeholders. */
   @Test
@@ -407,7 +413,7 @@ class PrototypeSpecContentScreenshotTest {
   fun fullscreenAllNodesDark() =
     prototypeScreenshotTest(
       "fullscreen_all_nodes_dark",
-      validPrototypeFixture("fullscreen-all-nodes"),
+      validPrototypeFixture("fullscreen-all-nodes", edit = ::withModeRootBackground),
     )
 
   /** A bottom sheet opened over the dark gallery: scrim, surface and drag handle. */
@@ -416,7 +422,11 @@ class PrototypeSpecContentScreenshotTest {
   fun bottomSheetOpenDark() =
     prototypeScreenshotTest(
       "bottom_sheet_open_dark",
-      validPrototypeFixture("fullscreen-all-nodes", stateOverrides = mapOf("open" to OPEN)),
+      validPrototypeFixture(
+        "fullscreen-all-nodes",
+        stateOverrides = mapOf("open" to OPEN),
+        edit = ::withModeRootBackground,
+      ),
     )
 
   /** The same open bottom sheet on a light device, for the scrim and handle contrast. */
@@ -425,7 +435,11 @@ class PrototypeSpecContentScreenshotTest {
   fun bottomSheetOpenLight() =
     prototypeScreenshotTest(
       "bottom_sheet_open_light",
-      validPrototypeFixture("fullscreen-all-nodes", stateOverrides = mapOf("open" to OPEN)),
+      validPrototypeFixture(
+        "fullscreen-all-nodes",
+        stateOverrides = mapOf("open" to OPEN),
+        edit = ::withModeRootBackground,
+      ),
     )
 
   /** An alarm dialog opened over the dark gallery: scrim and dialog surface. */
@@ -492,23 +506,55 @@ class PrototypeSpecContentScreenshotTest {
       validPrototypeFixture("theme-modes-colors"),
     )
 
-  /** Its sheets open on a light device: the `styleWhen` pair and the pair and role scrims. */
+  // Both of the fixture's sheets open on the same `open` key and the full-height one, declared
+  // last, covers the other, so each capture keeps one sheet (#14586). A `full` detent covers the
+  // scrim too, so the role-scrim capture opens that sheet at `half`.
+
+  /** Its half sheet open on a light device: the `styleWhen` pair and the pair scrim. */
   @Test
   @Config(qualifiers = "+notnight")
   fun themeModesColorsOpenLight() =
-    prototypeScreenshotTest(
-      "theme_modes_colors_open_light",
-      validPrototypeFixture("theme-modes-colors", stateOverrides = mapOf("open" to OPEN)),
-    )
+    themeModesColorsOpen("theme_modes_colors_open_light", FULL_SHEET)
 
-  /** Its sheets open on a dark device. */
+  /** Its half sheet open on a dark device. */
   @Test
   @Config(qualifiers = "+night")
-  fun themeModesColorsOpenDark() =
+  fun themeModesColorsOpenDark() = themeModesColorsOpen("theme_modes_colors_open_dark", FULL_SHEET)
+
+  /** Its role-scrim sheet open at half height on a light device: the `scrim` role scrim. */
+  @Test
+  @Config(qualifiers = "+notnight")
+  fun themeModesColorsFullSheetOpenLight() =
+    themeModesColorsOpen("theme_modes_colors_role_scrim_open_light", HALF_SHEET)
+
+  /** Its role-scrim sheet open at half height on a dark device. */
+  @Test
+  @Config(qualifiers = "+night")
+  fun themeModesColorsFullSheetOpenDark() =
+    themeModesColorsOpen("theme_modes_colors_role_scrim_open_dark", HALF_SHEET)
+
+  private fun themeModesColorsOpen(name: String, droppedSheet: Int) =
     prototypeScreenshotTest(
-      "theme_modes_colors_open_dark",
-      validPrototypeFixture("theme-modes-colors", stateOverrides = mapOf("open" to OPEN)),
+      name,
+      validPrototypeFixture(
+        "theme-modes-colors",
+        stateOverrides = mapOf("open" to OPEN),
+        edit = { spec -> halfDetents(withoutRootChild(droppedSheet)(spec)) },
+      ),
     )
+
+  /** Opens every remaining root bottom sheet at `half`, so its scrim shows above it. */
+  private fun halfDetents(spec: JsonObject): JsonObject {
+    val root = spec["root"] as JsonObject
+    val children =
+      (root["children"] as JsonArray).map { child ->
+        val node = child as JsonObject
+        if ((node["type"] as? JsonPrimitive)?.content == "bottomSheet")
+          JsonObject(node + ("detents" to JsonArray(listOf(JsonPrimitive("half")))))
+        else node
+      }
+    return JsonObject(spec + ("root" to JsonObject(root + ("children" to JsonArray(children)))))
+  }
 
   // Pending: #14207 skeleton rows with shimmer, static under the screenshot's motion off; no
   // Linux baseline recorded yet.

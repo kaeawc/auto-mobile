@@ -141,7 +141,7 @@ function requirePersona(args: PersonaArgs): OemPersonaId {
  * The tool's public vocabulary is "manufacturer profile"; the catalog code keeps its persona
  * names. Rename the result keys at this boundary only.
  */
-function toToolResult<T extends object>(result: T): Record<string, unknown> {
+export function toManufacturerProfileResult<T extends object>(result: T): Record<string, unknown> {
   const renamed: Record<string, string> = {
     persona: "manufacturerProfile",
     personaId: "manufacturerProfileId",
@@ -155,13 +155,13 @@ function toToolResult<T extends object>(result: T): Record<string, unknown> {
 function readOnlyResult(device: BootedDevice, args: PersonaArgs) {
   if (args.action === "list") {
     const catalog = listPersonas();
-    return toToolResult({
+    return toManufacturerProfileResult({
       message: `${catalog.personas.length} manufacturer profiles`,
       ...catalog,
     });
   }
   const description = describePersona(requirePersona(args));
-  return toToolResult({
+  return toManufacturerProfileResult({
     message: `${description.persona.displayName} v${description.persona.version}: ${description.facets.length} facets`,
     ...description,
   });
@@ -207,7 +207,7 @@ export const createPersonaHandler =
     );
     const success = result.status !== "route_to_real_device";
     return withIsErrorOnFailure(
-      createStructuredToolResponse({ success, ...toToolResult(result) }),
+      createStructuredToolResponse({ success, ...toManufacturerProfileResult(result) }),
       success,
     );
   };

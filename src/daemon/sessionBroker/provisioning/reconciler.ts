@@ -656,10 +656,13 @@ export class BindingReconciler {
     if (assignment.platform !== context.request.platform) {
       assignment = await this.emptyOnRequestedPlatform(context, assignment);
     }
+    // Both the journaled orphan replacement (#14799) and a fresh create make a new device, so
+    // both spend the create deadline's retry reserve (#14643).
+    const createContext = withCreateDeadline(context);
     if (candidate) {
-      return await this.creation.replaceOrphan(context, assignment, candidate);
+      return await this.creation.replaceOrphan(createContext, assignment, candidate);
     }
-    return await this.createAndCommit(withCreateDeadline(context), assignment, "created");
+    return await this.createAndCommit(createContext, assignment, "created");
   }
 
   private async findAdoptionCandidate(

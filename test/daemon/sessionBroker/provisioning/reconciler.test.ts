@@ -235,13 +235,13 @@ describe("BindingReconciler", () => {
   }
 
   test.each([
-    { disposition: "adopted", provisionDeadlineMs: 60_000 },
+    { disposition: "replaced", provisionDeadlineMs: 40_000 },
     { disposition: "created", provisionDeadlineMs: 40_000 },
     { disposition: "reused", provisionDeadlineMs: 60_000 },
   ] as const)(
-    "only the create path stops at the create deadline: $disposition (#14643)",
+    "only a device-making path stops at the create deadline: $disposition (#14643, #14799)",
     async ({ disposition, provisionDeadlineMs }) => {
-      if (disposition === "adopted") {
+      if (disposition === "replaced") {
         inventory.devices.push({
           name: bindingDeviceName(key, 1, "leftover"),
           platform: "ios",

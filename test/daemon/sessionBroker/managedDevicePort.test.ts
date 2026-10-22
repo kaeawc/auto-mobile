@@ -1363,7 +1363,7 @@ describe("ManagedDevicePort retained readiness retries", () => {
     );
   });
 
-  test("an empty binding that adopts a leftover simulator boots within the full timeout (#14643)", async () => {
+  test("an empty binding that replaces a leftover simulator spends the create reserve (#14643, #14799)", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const rig = await retryRig(new FakeBindingRegistry(timer), timer);
@@ -1375,14 +1375,6 @@ describe("ManagedDevicePort retained readiness retries", () => {
       runtime: IOS.profile.runtimeId,
       deviceType: IOS.profile.simulatorDeviceTypeIdentifier,
     });
-    // The leftover's boot wait outlasts the create path's reserved deadline (600 ms) but fits the
-    // caller's full timeout; a boot that would overrun its own deadline fails like a real one.
-    rig.provisioner.beforeReturn = async (request) => {
-      if (timer.now() + 800 > request.deadlineMs) {
-        throw new ProvisionDeviceError("timeout", "leftover boot deadline");
-      }
-      timer.advanceTime(800);
-    };
 
     expect(
       await rig.port.prepare(resource(), {
@@ -1390,14 +1382,14 @@ describe("ManagedDevicePort retained readiness retries", () => {
         preparationTimeoutMs: 900,
       }),
     ).toMatchObject({ sessionId: "session-1" });
-    expect(rig.provisioner.calls).toEqual([
-      expect.objectContaining({ mode: "adopt", deviceId: "UDID-LEFTOVER", deadlineMs: 900 }),
-    ]);
-    // The create reserve was offered but adoption never spent it.
-    expect(rig.budgets).toEqual([900]);
+    // A leftover is reclaimed by delete-and-recreate (#14799), so it is a create that holds back
+    // the warm retry reserve; the leftover itself is never handed out unreset.
+    expect(rig.provisioner.calls.map((call) => call.mode)).toEqual(["create", "adopt"]);
+    expect(rig.provisioner.calls.map((call) => call.deviceId)).not.toContain("UDID-LEFTOVER");
+    expect(rig.provisioner.calls[0]).toMatchObject({ mode: "create", deadlineMs: 600 });
+    expect(rig.budgets).toEqual([900, 900]);
     expect(rig.createDeadlines).toEqual([600]);
-    expect(rig.provisioner.created()).toEqual([]);
-    expect(rig.deleter.calls).toEqual([]);
+    expect(rig.deleter.calls).toHaveLength(1);
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 

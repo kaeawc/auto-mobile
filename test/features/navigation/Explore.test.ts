@@ -230,7 +230,7 @@ describe("Explore", () => {
       executeCommand: async (cmd: string) => {
         if (cmd.includes("KEYCODE_BACK")) {
           // Simulate navigation event when back is pressed
-          fakeGraph.recordNavigationEvent({
+          void fakeGraph.recordNavigationEvent({
             destination: "PreviousScreen",
             source: "TEST",
             arguments: {},
@@ -255,7 +255,7 @@ describe("Explore", () => {
         observeCallCount++;
         // Alternate between screens to simulate navigation
         if (observeCallCount % 2 === 0) {
-          fakeGraph.recordNavigationEvent({
+          void fakeGraph.recordNavigationEvent({
             destination: `Screen${observeCallCount}`,
             source: "TEST",
             arguments: {},
@@ -412,7 +412,7 @@ describe("Explore", () => {
 
     for (const mode of ["hybrid", "discover"] as const) {
       test(`should use graph stats instead of exporting the full graph for ${mode} progress node counts`, async () => {
-        fakeGraph.recordNavigationEvent({
+        void fakeGraph.recordNavigationEvent({
           destination: "Home",
           source: "TEST",
           arguments: {},
@@ -427,7 +427,7 @@ describe("Explore", () => {
           execute: async () => createMockObservation(),
         });
         explore.performInteraction = async () => {
-          fakeGraph.recordNavigationEvent({
+          void fakeGraph.recordNavigationEvent({
             destination: "Settings",
             source: "TEST",
             arguments: {},
@@ -868,7 +868,7 @@ describe("Explore", () => {
       explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
       explore.observeScreen = scriptedObserve({
         execute: async () => {
-          fakeGraph.clearCurrentGraph();
+          void fakeGraph.clearCurrentGraph();
           fakeGraph.setCurrentAppId("com.android.launcher3");
           return createMockObservation([], "com.android.launcher3");
         },
@@ -896,7 +896,7 @@ describe("Explore", () => {
     });
 
     test("relaunches the target and resets consecutive attempts after returning", async () => {
-      seedTargetGraph();
+      void seedTargetGraph();
       explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
       let foreground = "com.android.launcher3";
       explore.observeScreen = scriptedObserve({
@@ -1067,7 +1067,7 @@ describe("Explore", () => {
     for (const appId of ["com.test.app", null]) {
       test(`clamps report counts when the graph shrinks (initial appId ${appId})`, async () => {
         const initialGraph = { ...(await seedTargetGraph()), appId };
-        fakeGraph.clearCurrentGraph();
+        void fakeGraph.clearCurrentGraph();
         explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
         const result = await recoverySeams().generateReport(initialGraph, fakeTimer.now(), false);
         expect(result.screensDiscovered).toBe(0);
@@ -1078,7 +1078,7 @@ describe("Explore", () => {
     }
 
     test("keeps a normal in-app report unchanged", async () => {
-      seedTargetGraph();
+      void seedTargetGraph();
       explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
       explore.observeScreen = scriptedObserve({
         execute: async () => createMockObservation(),
@@ -1942,7 +1942,7 @@ describe("Explore", () => {
         sequenceNumber: 0,
         applicationId: "com.test.app",
       });
-      fakeGraph.recordNavigationEvent(event("Home"));
+      void fakeGraph.recordNavigationEvent(event("Home"));
       const tap = spyOn(TapOnElement.prototype, "execute").mockResolvedValue(tapOnResult());
       try {
         await perform()(
@@ -1952,7 +1952,7 @@ describe("Explore", () => {
       } finally {
         tap.mockRestore();
       }
-      fakeGraph.recordNavigationEvent(event("Settings"));
+      void fakeGraph.recordNavigationEvent(event("Settings"));
 
       const [edge] = await fakeGraph.getEdgesFrom("Home");
       expect(edge.interaction?.toolName).toBe("tapOn");
@@ -2068,7 +2068,7 @@ describe("Explore", () => {
         });
 
       async function swipeWithoutNavigation(): Promise<Explore> {
-        navigate("Home");
+        void navigate("Home");
         const swipe = spyOn(SwipeOnElement.prototype, "execute").mockResolvedValue({
           success: true,
         } as never);
@@ -2086,7 +2086,7 @@ describe("Explore", () => {
 
       function unrecordedPress(destination: string) {
         return spyOn(PressButton.prototype, "press").mockImplementation(async () => {
-          navigate(destination);
+          void navigate(destination);
           return pressResult();
         });
       }
@@ -2140,7 +2140,7 @@ describe("Explore", () => {
 
         expect(fakeGraph.getMethodCallCount("recordToolCall")).toBe(2);
         expect(await historySize()).toBe(1);
-        navigate("Settings");
+        void navigate("Settings");
         expect(
           (await fakeGraph.getEdgesFrom("Home")).map((edge) => edge.interaction?.toolName),
         ).toEqual(["tapOn"]);
@@ -2158,7 +2158,7 @@ describe("Explore", () => {
           sequenceNumber: 0,
           applicationId: "com.test.app",
         });
-      navigate("Home");
+      void navigate("Home");
       const tap = spyOn(TapOnElement.prototype, "execute").mockResolvedValue(tapOnResult());
       const press = spyOn(PressButton.prototype, "press").mockResolvedValue(pressResult());
       try {
@@ -2166,7 +2166,7 @@ describe("Explore", () => {
           createMockElement({ text: "Settings", "resource-id": "com.test:id/settings_btn" }),
           createMockObservation(),
         );
-        navigate("Settings");
+        void navigate("Settings");
         await explore.handleDeadEnd.call(explore);
       } finally {
         tap.mockRestore();
@@ -2230,9 +2230,9 @@ describe("Explore", () => {
     test("the dead-end Back records pressButton back, and the edge it creates replays as that Back", async () => {
       const press = spyOn(PressButton.prototype, "press").mockResolvedValue(pressResult());
       try {
-        fakeGraph.recordNavigationEvent(event("Settings"));
+        void fakeGraph.recordNavigationEvent(event("Settings"));
         await backSeam()(undefined, createMockObservation());
-        fakeGraph.recordNavigationEvent(event("Home"));
+        void fakeGraph.recordNavigationEvent(event("Home"));
       } finally {
         press.mockRestore();
       }
@@ -3293,7 +3293,7 @@ describe("Explore", () => {
 
     test("should initialize graph traversal state in validate mode", async () => {
       // Pre-populate the graph with some nodes and edges
-      fakeGraph.recordNavigationEvent({
+      void fakeGraph.recordNavigationEvent({
         destination: "Screen1",
         source: "TEST",
         arguments: {},
@@ -3311,7 +3311,7 @@ describe("Explore", () => {
         },
       );
 
-      fakeGraph.recordNavigationEvent({
+      void fakeGraph.recordNavigationEvent({
         destination: "Screen2",
         source: "TEST",
         arguments: {},

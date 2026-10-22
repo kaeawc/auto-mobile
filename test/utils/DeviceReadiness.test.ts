@@ -837,7 +837,7 @@ describe("DeviceReadiness iOS push-update cache invalidation", () => {
     const manager = createTestSessionManager(provider);
 
     try {
-      IOSCtrlProxyManager.startOrphanRunnerReapOnStartup();
+      void IOSCtrlProxyManager.startOrphanRunnerReapOnStartup();
       const verify = manager.verifyIosDevice("ios-push-1");
       await new Promise<void>((resolve) => setImmediate(resolve));
 

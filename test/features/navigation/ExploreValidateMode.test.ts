@@ -77,7 +77,7 @@ describe("ExploreValidateMode", () => {
     test("should populate state from existing graph", async () => {
       const navManager = NavigationGraphManager.getInstance();
 
-      navManager.recordNavigationEvent({
+      void navManager.recordNavigationEvent({
         destination: "Screen1",
         source: "TEST",
         arguments: {},
@@ -96,7 +96,7 @@ describe("ExploreValidateMode", () => {
         },
       );
 
-      navManager.recordNavigationEvent({
+      void navManager.recordNavigationEvent({
         destination: "Screen2",
         source: "TEST",
         arguments: {},

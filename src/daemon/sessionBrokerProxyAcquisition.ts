@@ -147,6 +147,38 @@ async function queryStatus(
   }
 }
 
+async function queryStatusAfterReconnect(
+  config: SessionConfig,
+  ports: SessionBrokerProxyAcquisitionPorts,
+  deadlineMs: number,
+  signal: AbortSignal | undefined,
+): Promise<SessionBrokerResult | undefined> {
+  const remainingMs = deadlineMs - ports.timer.now();
+  try {
+    await raceWithDeadline(() => ports.ensureConnected(), {
+      timer: ports.timer,
+      timeoutMs: Math.max(1, Math.min(CAPABILITY_PROBE_TIMEOUT_MS, remainingMs)),
+      signal,
+      label: "session broker status connection",
+    });
+  } catch (error) {
+    if (!signal?.aborted) {
+      // A daemon restart is expected to refuse connections briefly; polling retries.
+      logger.debug(`[SessionBroker] Status reconnect failed: ${errorMessage(error)}`, error);
+    }
+    return undefined;
+  }
+  if (signal?.aborted || ports.timer.now() >= deadlineMs) {
+    return undefined;
+  }
+  return queryStatus(
+    config,
+    ports,
+    Math.max(1, Math.min(CAPABILITY_PROBE_TIMEOUT_MS, deadlineMs - ports.timer.now())),
+    signal,
+  );
+}
+
 async function statusUntilSettled(
   config: SessionConfig,
   ports: SessionBrokerProxyAcquisitionPorts,
@@ -156,13 +188,10 @@ async function statusUntilSettled(
 ): Promise<SessionBrokerResult> {
   let last = initial;
   while (!signal?.aborted && ports.timer.now() < deadlineMs) {
-    const remainingMs = deadlineMs - ports.timer.now();
-    const reply = await queryStatus(
-      config,
-      ports,
-      Math.max(1, Math.min(CAPABILITY_PROBE_TIMEOUT_MS, remainingMs)),
-      signal,
-    );
+    const reply = await queryStatusAfterReconnect(config, ports, deadlineMs, signal);
+    if (signal?.aborted) {
+      break;
+    }
     if (reply?.outcome !== "pending" && reply !== undefined) {
       return reply;
     }
@@ -571,6 +600,8 @@ function acquisitionFailure(
  * Prepares exactly one durable request. Recovery reads status for the same request ID and owner
  * token, except a typed session_broker_stopping refusal admitted nothing: after its retry delay,
  * prepare is resent with identical params within the acquisition deadline.
+ * A retryable session_broker_stopping receipt with retryRequires: "new_request_id" is returned
+ * to the caller without resending: the request ID belongs to the caller.
  */
 export async function acquireSessionThroughDaemon(
   config: SessionConfig,

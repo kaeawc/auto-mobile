@@ -6,11 +6,15 @@ import type { BrokerClientFiles } from "./brokerClientFiles";
 import { readBrokerIdentity, resolveBrokerClient } from "./brokerClientFiles";
 import {
   BROKER_CLEANUP_TIMEOUT_MS,
+  BrokerTransportError,
   waitForBrokerRelease,
   type BrokerDaemonClient,
 } from "./brokerDaemonClient";
 import type { ProxySessionCommand, ProxySessionDeps } from "./proxy-session";
-import type { SessionBrokerResult } from "../../src/devices/sessionBrokerResult";
+import type {
+  SessionBrokerResult,
+  SessionBrokerReleaseResult,
+} from "../../src/devices/sessionBrokerResult";
 import { BrokerDeviceLedger } from "./brokerDeviceLedger";
 
 function deviceLedger(context: BrokerClientFiles, deps: ProxySessionDeps): BrokerDeviceLedger {
@@ -156,6 +160,7 @@ export async function closeBrokerSession(
       requireReleased: !refused,
       allowFailed: true,
       missingReceipt: refused ? missingReceipt : undefined,
+      log: deps.log,
     });
   } catch (error) {
     if (!refused) {
@@ -293,7 +298,23 @@ export async function runBrokerLifecycle(
   const receipt = await raceWithDeadline(
     async () => {
       const deadline = deps.timer.now() + BROKER_CLEANUP_TIMEOUT_MS;
-      const result = await client.release(sessionUuid, token);
+      let result: SessionBrokerReleaseResult | undefined;
+      while (deps.timer.now() < deadline) {
+        try {
+          result = await client.release(sessionUuid, token);
+          break;
+        } catch (error) {
+          if (!(error instanceof BrokerTransportError)) {
+            throw error;
+          }
+          // Release is idempotent; the successor can finish the predecessor's committed release.
+          deps.log(`Broker release transport retry: ${errorMessage(error)}`);
+          await deps.timer.sleep(Math.min(1000, Math.max(0, deadline - deps.timer.now())));
+        }
+      }
+      if (!result) {
+        throw new Error("Timed out resending broker release.");
+      }
       if (result.outcome !== "unknown_session") {
         const status = await waitForBrokerRelease({
           client,
@@ -302,6 +323,7 @@ export async function runBrokerLifecycle(
           timer: deps.timer,
           requireReleased: true,
           timeoutMs: Math.max(1, deadline - deps.timer.now()),
+          log: deps.log,
         });
         if (status.sessionUuid !== sessionUuid) {
           throw new Error("Release status session mismatch.");

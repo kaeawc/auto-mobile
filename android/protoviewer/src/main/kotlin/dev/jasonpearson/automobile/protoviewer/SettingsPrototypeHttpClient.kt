@@ -43,8 +43,12 @@ class SettingsPrototypeHttpClient(
       }
     }
 
-  @Suppress("TooGenericExceptionCaught") // Any transport failure is deferred until consent is rechecked.
-  private suspend fun runTransport(request: PrototypeHttpRequest): Result<PrototypeRequestResponse> =
+  @Suppress(
+    "TooGenericExceptionCaught",
+  ) // Any transport failure is deferred until consent is rechecked.
+  private suspend fun runTransport(
+    request: PrototypeHttpRequest,
+  ): Result<PrototypeRequestResponse> =
     try {
       Result.success(allowed.execute(request))
     } catch (error: CancellationException) {

@@ -205,7 +205,7 @@ final class SdkEndpointResolverTests: XCTestCase {
         }
     }
 
-    func testOnlyFreshUnavailableErrorsCarryWarningPerWindow() async throws {
+    func testOnlyTheFirstUnavailableErrorForABundleCarriesAWarning() async throws {
         let clock = FakeMonotonicClock()
         let failures = refusedCandidates + [.transportError]
         let stub = StubHTTPTransport(failures + failures)
@@ -217,7 +217,9 @@ final class SdkEndpointResolverTests: XCTestCase {
         try await assertUnavailable(resolver, cached: true)
         XCTAssertEqual(stub.recordedRequests.count, SdkSimulatorPort.probeCount + 1)
         clock.advance(by: 1)
-        try await assertUnavailable(resolver)
+        // The window expired, so discovery probes again, but the same bundle is not warned about
+        // twice (#14399).
+        try await assertUnavailable(resolver, cached: true)
         try await assertUnavailable(resolver, cached: true)
         XCTAssertEqual(stub.recordedRequests.count, 2 * (SdkSimulatorPort.probeCount + 1))
     }

@@ -13,6 +13,7 @@ import {
   bootProfileId,
 } from "../../../src/features/iosSimFleet/IosBootInstrumentation";
 import { BindingDiscoveryIncompleteError } from "../../../src/daemon/sessionBroker/provisioning/refusal";
+import { BindingRegistryUpgradePendingError } from "../../../src/daemon/sessionBroker/registry/bindingRegistryMigrations";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeLogger } from "../../fakes/FakeLogger";
 import { FakeBindingRegistry } from "../../fakes/FakeBindingRegistry";
@@ -327,6 +328,31 @@ describe("iOS simulator ownership", () => {
       throw new Error("expected refusal");
     }
     expect(recovered.decision.message).not.toContain("Ownership could not be read");
+  });
+
+  test("a pending registry upgrade surfaces as unknown ownership, not as external devices (#14476)", async () => {
+    const timer = new FakeTimer();
+    const bindings = new RegistryBindingExclusion(async () => {
+      throw new BindingRegistryUpgradePendingError("retirement deferred");
+    }, timer);
+    const reader = createIosSimulatorOwnershipReader(bindings, () => undefined);
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      await expect(reader.refresh()).rejects.toBeInstanceOf(BindingDiscoveryIncompleteError);
+      const result = await setup(3, reader).gate.admitBoot(undefined, { bootUdid: "NEW" });
+      expect(result.decision).toMatchObject({ outcome: "refuse", bootedCount: 3 });
+      if (result.decision.outcome !== "refuse") {
+        throw new Error("expected refusal");
+      }
+      expect(result.decision.message).toContain("Ownership could not be read");
+      expect(result.decision.message).toContain("have unconfirmed AutoMobile ownership");
+      expect(result.decision.message).not.toContain("have no AutoMobile owner");
+      // Generic pool callers keep the established "absent" treatment of a pending upgrade.
+      await bindings.refresh({ fresh: true, requireCurrent: true });
+      expect(bindings.lastReadFailed()).toBe(false);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   test("daemon reader is lazy and reads registry snapshot plus live session assignments", async () => {

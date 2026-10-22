@@ -84,6 +84,7 @@ object ValidTools {
         "putAppFile",
         "swipeAt",
         "swipeOn",
+        "systemAlerts",
         "systemTray",
         "tapOn",
         "deleteDevice",

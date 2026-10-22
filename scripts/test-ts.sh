@@ -645,6 +645,16 @@ launch_unit_shard() {
   cleanup_pids+=("$!")
 }
 
+# Launches the first attempt of the next queued shard and advances next_shard.
+# Reads and sets run_unit_shards' locals through Bash's dynamic scoping.
+launch_queued_unit_shard() {
+  cleanup_pgid_prefixes+=("$shard_root/shard-${next_shard}.pgid")
+  shard_attempts[next_shard]=1
+  shard_starts[next_shard]="$(date +%s)"
+  launch_unit_shard "$next_shard" 1
+  next_shard=$((next_shard + 1))
+}
+
 # Runs in the background shell launched above; reads the launcher's dynamic locals.
 run_unit_shard_attempt() {
   local shard_pgid_file="${AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE:-}"
@@ -1037,7 +1047,7 @@ run_unit_shards() {
   # AUTOMOBILE_TEST_TS_SCRATCH_DIR relocates the shard scratch tree so the bats
   # suite can run this lane hermetically (per-test dir) instead of serially.
   local shard_root="${AUTOMOBILE_TEST_TS_SCRATCH_DIR:-$ROOT/scratch}/test-ts-${shard_mode}-shards"
-  local file index shard shard_number worker_count rc shard_status report_name
+  local file index shard shard_number worker_count max_running next_shard rc shard_status report_name
   local shard_start=0 shard_end
   local coverage_chunks=()
   local shard_portable_timeout=1
@@ -1140,16 +1150,26 @@ run_unit_shards() {
 
   if [[ "$shard_mode" == coverage ]]; then
     # The shard count is explicit configuration (AUTOMOBILE_COVERAGE_SHARDS) and
-    # shapes the partition, so it is never reduced; acquire the available host
-    # slots to account for coverage like any other unit lane.
-    if [[ "${TEST_TS_PRINT_CMD:-}" != 1 ]]; then cap_unit_workers "$coverage_shards"; fi
+    # shapes the partition, so it is never reduced. The acquired host slots bound
+    # how many of those fixed shards run at once instead (#14448): the rest wait
+    # for a running shard to finish. Like the unit lane, zero acquired slots
+    # still runs one shard at a time rather than every shard unslotted.
+    max_running="$coverage_shards"
+    if [[ "${TEST_TS_PRINT_CMD:-}" != 1 ]]; then
+      cap_unit_workers "$coverage_shards"
+      max_running="$capped_workers"
+    fi
     worker_count="$coverage_shards"
   else
     cap_unit_workers "$unit_workers"
     worker_count="$capped_workers"
+    max_running="$worker_count"
   fi
   if [[ "$worker_count" -gt "${#test_files[@]}" ]]; then
     worker_count="${#test_files[@]}"
+  fi
+  if [[ "$max_running" -gt "$worker_count" ]]; then
+    max_running="$worker_count"
   fi
 
   if [[ -n "${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS:-}" ]]; then
@@ -1171,11 +1191,14 @@ run_unit_shards() {
     return 0
   fi
 
-  for ((shard = shard_start; shard < shard_end; shard += 1)); do
-    cleanup_pgid_prefixes+=("$shard_root/shard-${shard}.pgid")
-    shard_attempts[shard]=1
-    shard_starts[shard]="$(date +%s)"
-    launch_unit_shard "$shard" 1
+  if [[ "$max_running" -lt "$worker_count" ]]; then
+    printf 'test-ts: %s shards=%s running at most %s at once (host slots)\n' \
+      "$shard_mode" "$worker_count" "$max_running" >&2
+  fi
+  next_shard="$shard_start"
+  while [[ "$next_shard" -lt "$shard_end" && "$((next_shard - shard_start))" -lt "$max_running" ]]; do
+    launch_queued_unit_shard
+    pending_shards+=("$((next_shard - 1))")
   done
 
   if [[ "${TEST_TS_PRINT_CMD:-}" == "1" ]]; then
@@ -1190,9 +1213,8 @@ run_unit_shards() {
   # `kill -0`; Bash reaps exited children on SIGCHLD and `wait PID` still
   # returns the remembered status. The interval adds at most one poll of
   # latency per reap, well inside UNIT_SHARD_ATTEMPT_OVERHEAD_SECONDS.
-  for ((shard = shard_start; shard < shard_end; shard += 1)); do
-    pending_shards+=("$shard")
-  done
+  # A retry reuses its shard's running seat; a finished shard hands its seat
+  # to the next queued one, so at most max_running attempts are ever live.
   while [[ "${#pending_shards[@]}" -gt 0 ]]; do
     still_pending=()
     reaped_any=0
@@ -1220,6 +1242,10 @@ run_unit_shards() {
         continue
       fi
       finish_unit_shard "$index" "$shard_status"
+      if [[ "$next_shard" -lt "$shard_end" ]]; then
+        launch_queued_unit_shard
+        still_pending+=("$((next_shard - 1))")
+      fi
     done
     pending_shards=(${still_pending[@]+"${still_pending[@]}"})
     if [[ "$reaped_any" -eq 0 && "${#pending_shards[@]}" -gt 0 ]]; then

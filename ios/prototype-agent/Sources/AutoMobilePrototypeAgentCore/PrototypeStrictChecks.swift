@@ -21,10 +21,7 @@ extension PrototypeChecks {
             for (index, check) in checks.enumerated() {
                 guard let kind = check.keys.first(where: { $0 != "message" }) else { continue }
                 let path = "\(node.path).checks[\(index)].\(kind)"
-                if ["minLength", "maxLength", "format", "pattern"].contains(kind), type != "textField" {
-                    throw PrototypeContractValidator.invalid(path, "Check does not fit control")
-                }
-                if ["min", "max"].contains(kind), !["slider", "datePicker", "timePicker"].contains(type) {
+                if !PrototypeContractValidator.checkFits(kind, type) {
                     throw PrototypeContractValidator.invalid(path, "Check does not fit control")
                 }
                 if let pattern = check["pattern"]?.stringValue, !PrototypeCheckPattern.withinLimits(pattern) {

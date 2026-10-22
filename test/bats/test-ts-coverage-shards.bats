@@ -26,6 +26,10 @@ setup() {
   export AUTOMOBILE_TEST_LOADAVG_FILE="$BATS_TEST_TMPDIR/loadavg"
   echo 0 > "$AUTOMOBILE_TEST_LOADAVG_FILE"
   unset AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS AUTOMOBILE_UNIT_SHARD_RETRIES AUTOMOBILE_UNIT_LANE_WALL_TIMEOUT_SECONDS
+  # A per-test host slot pool, so another lane on this machine cannot shrink the
+  # coverage concurrency these tests observe, and the slot tests can stub it.
+  export AUTOMOBILE_COORDINATION_DIR="$BATS_TEST_TMPDIR/coordination"
+  unset AUTOMOBILE_HOST_TEST_SLOTS
   STUB_BIN="$(mktemp -d)"
   REAL_BUN="$(command -v bun)"
   export REAL_BUN
@@ -202,6 +206,84 @@ run_coverage() {
     fi
   done < coverage/shards/events
   [ "$peak" -le 2 ]
+}
+
+# Stubs another lane in the shared slot pool: slots [0, $1) owned by this live process.
+hold_pool_slots() {
+  local index
+  for ((index = 0; index < $1; index += 1)); do
+    mkdir -p "$AUTOMOBILE_COORDINATION_DIR/test-slots/$index"
+    echo "$$" > "$AUTOMOBILE_COORDINATION_DIR/test-slots/$index/owner.pid"
+  done
+}
+
+# Prints the most chunks that were running at once, from the start/end events.
+peak_running_chunks() {
+  local event number running=0 peak=0
+  while read -r event number; do
+    if [[ "$event" == start ]]; then running=$((running + 1)); else running=$((running - 1)); fi
+    if [[ "$running" -gt "$peak" ]]; then peak="$running"; fi
+  done < coverage/shards/events
+  echo "$peak"
+}
+
+# Asserts shard S of N ran exactly the round-robin files S-1, S-1+N, ... of $3 files.
+assert_round_robin_shard() {
+  local number="$1" shards="$2" total="$3" index
+  for ((index = number - 1; index < total; index += shards)); do printf 'test/fixture%03d.test.ts\n' "$index"; done > "$BATS_TEST_TMPDIR/expected-$number"
+  cat "coverage/shards/files-${number}-"* > "$BATS_TEST_TMPDIR/seen-$number"
+  cmp "$BATS_TEST_TMPDIR/seen-$number" "$BATS_TEST_TMPDIR/expected-$number"
+}
+
+@test "coverage runs its fixed shards no wider than the host slots it acquired (#14448)" {
+  stub_find 9
+  hold_pool_slots 2
+  run_coverage AUTOMOBILE_HOST_TEST_SLOTS=3 AUTOMOBILE_COVERAGE_SHARDS=3
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'host slots demand=3 acquired=1 workers=1'* ]]
+  [[ "$output" == *'coverage shards=3 running at most 1 at once'* ]]
+  [ "$(peak_running_chunks)" -eq 1 ]
+  # The partition is still the configured three shards, not the one slot.
+  for number in 1 2 3; do assert_round_robin_shard "$number" 3 9; done
+  [ "$(grep -c '^SF:src/fixture' coverage/lcov.info)" -eq 9 ]
+  # The other lane's slots are left booked to it.
+  [ "$(cat "$AUTOMOBILE_COORDINATION_DIR/test-slots/0/owner.pid")" = "$$" ]
+  [ "$(cat "$AUTOMOBILE_COORDINATION_DIR/test-slots/1/owner.pid")" = "$$" ]
+  [ ! -d "$AUTOMOBILE_COORDINATION_DIR/test-slots/2" ]
+}
+
+@test "coverage with zero acquired slots runs one shard at a time like the unit lane (#14448)" {
+  stub_find 8
+  hold_pool_slots 2
+  run_coverage AUTOMOBILE_HOST_TEST_SLOTS=2
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'host slots demand=2 acquired=0 workers=1'* ]]
+  [[ "$output" == *'coverage shards=2 running at most 1 at once'* ]]
+  [ "$(peak_running_chunks)" -eq 1 ]
+  for number in 1 2; do assert_round_robin_shard "$number" 2 8; done
+  [ -f coverage/lcov.info ]
+}
+
+@test "a bounded coverage retry reuses its shard's seat before the next shard starts (#14448)" {
+  stub_find 8
+  hold_pool_slots 2
+  run_coverage AUTOMOBILE_HOST_TEST_SLOTS=2 STUB_INFRA_EXIT_ONCE=1 INFRA_EXIT=137
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'host slots demand=2 acquired=0 workers=1'* ]]
+  [ "$(grep -c 'passed on its retry' <<< "$output")" -eq 2 ]
+  # A killed attempt logs a start with no end. Shard 1's retry ran in its seat
+  # and finished before shard 2's first attempt began, so nothing overlapped.
+  [ "$(cat coverage/shards/events)" = "$(printf 'start 1\nstart 1\nend 1\nstart 2\nstart 2\nend 2')" ]
+  for number in 1 2; do assert_round_robin_shard "$number" 2 8; done
+}
+
+@test "coverage launches every shard at once when the pool covers them" {
+  stub_find 8
+  run_coverage AUTOMOBILE_HOST_TEST_SLOTS=2
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'host slots demand=2 acquired=2 workers=2'* ]]
+  [[ "$output" != *'running at most'* ]]
+  for number in 1 2; do assert_round_robin_shard "$number" 2 8; done
 }
 
 @test "every chunk of a shard appends to that shard's one timing log" {

@@ -15,11 +15,36 @@ import { ResetFailureError } from "./ResetFailureError";
 import type { DeviceMutationResetContext } from "./mutations/reset";
 
 export const DEFAULT_ANDROID_RESET_TIMEOUT_MS = 600_000;
+const ANDROID_BASELINE_STEP_ATTEMPTS = 3;
+// User snapshot capture writes emulator state outside the guest that a broker snapshot load keeps.
+// Host-side state (AVD config, mock-network rules) survives snapshot load and wipe-data alike.
+const HOST_SIDE_TOOLS: ReadonlySet<string> = new Set([
+  "network",
+  "mockNetwork",
+  "clearMockNetwork",
+  "setDeviceResources",
+]);
+const OPAQUE_PERSISTENT_TOOLS: ReadonlySet<string> = new Set(["deviceSnapshot"]);
+
+function activityAllowsReset(
+  strategy: AndroidResetStrategy,
+  activity: AndroidResetSessionActivity,
+): boolean {
+  return strategy.fullBaseline ? !activity.madeHostSideChanges() : activity.canReset();
+}
+
+function isStepTimeout(error: unknown): boolean {
+  return error instanceof Error && /timed out after \d+ms/.test(error.message);
+}
 
 export type AndroidResetProfile = Extract<BrokerNativeProfile, { platform: "android" }>;
 
 export interface AndroidResetSessionActivity {
   canReset(): boolean;
+  /** True once the session ran a tool whose effects a snapshot load cannot revert. */
+  madeOpaquePersistentChanges(): boolean;
+  /** True once the session ran a tool that changes host-side state no guest reset reverts. */
+  madeHostSideChanges(): boolean;
   close(): void;
 }
 
@@ -28,12 +53,21 @@ export function watchAndroidResetSession(
   sessionId: string,
 ): AndroidResetSessionActivity {
   let safe = true;
+  let opaque = false;
+  let hostSide = false;
   const close = tracker.onSessionExecutionEnded((sessionIds, activity) => {
     if (sessionIds.includes(sessionId) && activity.admitted) {
       safe = false;
+      opaque ||= OPAQUE_PERSISTENT_TOOLS.has(activity.toolName);
+      hostSide ||= HOST_SIDE_TOOLS.has(activity.toolName);
     }
   });
-  return { canReset: () => safe, close };
+  return {
+    canReset: () => safe,
+    madeOpaquePersistentChanges: () => opaque,
+    madeHostSideChanges: () => hostSide,
+    close,
+  };
 }
 
 export interface AndroidResetStrategy {
@@ -55,6 +89,8 @@ export interface AndroidResetSessionContext {
   resourceId: string;
   sessionId?: string;
   incarnation?: string;
+  /** The session made changes a snapshot load cannot revert; only wipe-data is clean. */
+  opaquePersistentChanges?: boolean;
   signal?: AbortSignal;
   timeoutMs?: number;
   deadlineMs?: number;
@@ -131,7 +167,7 @@ export class AndroidBaselineReset {
     const signal = options.signal
       ? AbortSignal.any([options.signal, deadlineController.signal])
       : deadlineController.signal;
-    const runStep = <T>(operation: (timeoutMs: number) => Promise<T>, label: string) => {
+    const runStepOnce = <T>(operation: (timeoutMs: number) => Promise<T>, label: string) => {
       signal.throwIfAborted();
       const timeoutMs = deadlineMs - timer.now();
       if (timeoutMs <= 0) {
@@ -159,6 +195,28 @@ export class AndroidBaselineReset {
             ),
         },
       );
+    };
+    // One slow adb read under host load must not discard the baseline (and with it a reusable
+    // device): retry a step whose own cap expired while the preparation deadline still has room.
+    const runStep = async <T>(
+      operation: (timeoutMs: number) => Promise<T>,
+      label: string,
+    ): Promise<T> => {
+      for (let attempt = 1; ; attempt++) {
+        try {
+          return await runStepOnce(operation, label);
+        } catch (error) {
+          const retry =
+            attempt < ANDROID_BASELINE_STEP_ATTEMPTS &&
+            !signal.aborted &&
+            deadlineMs - timer.now() > 0 &&
+            isStepTimeout(error);
+          if (!retry) {
+            throw error;
+          }
+          logger.warn(`${label} timed out; retrying (attempt ${attempt + 1})`);
+        }
+      }
     };
     try {
       await runStep(
@@ -324,7 +382,7 @@ export class AndroidBaselineReset {
     }
     const fence = async () => {
       await assertOwned();
-      if (!strategy.handlesSessionMutations && !baseline.activity.canReset()) {
+      if (!strategy.handlesSessionMutations && !activityAllowsReset(strategy, baseline.activity)) {
         throw new ActionableError("Android session mutations cannot be restored by this reset");
       }
       await this.assertTarget(device, profile, signal, 2000, {
@@ -365,7 +423,10 @@ export class AndroidBaselineReset {
         strategy.fullBaseline
           ? async () => {
               await assertOwned();
-              if (!strategy.handlesSessionMutations && !baseline.activity.canReset()) {
+              if (
+                !strategy.handlesSessionMutations &&
+                !activityAllowsReset(strategy, baseline.activity)
+              ) {
                 throw new ActionableError(
                   "Android session mutations cannot be restored by this reset",
                 );
@@ -376,6 +437,7 @@ export class AndroidBaselineReset {
           resourceId,
           sessionId: baseline.sessionId,
           incarnation: baseline.incarnation,
+          opaquePersistentChanges: baseline.activity.madeOpaquePersistentChanges(),
           signal,
           timeoutMs: deadlineMs - timer.now(),
           deadlineMs,

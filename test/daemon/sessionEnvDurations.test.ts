@@ -105,7 +105,7 @@ describe("heartbeat monitor check interval env", () => {
     );
     monitor.start();
     const [period] = timer.getPendingIntervals().slice(-1);
-    monitor.stop();
+    void monitor.stop();
     return period;
   };
 

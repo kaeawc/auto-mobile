@@ -77,7 +77,7 @@ enum PrototypeChecks {
         case "slider", "timePicker": return value?.numberValue?.isFinite == true
         default:
             guard let text = value?.stringValue else { return false }
-            return !PrototypeCheckPattern.wholeMatch("[\(whitespace)]*", text)
+            return !PrototypeContractValidator.matches("blankText", text)
         }
     }
 

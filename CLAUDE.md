@@ -211,7 +211,8 @@ exit non-zero). `complexity`, `max-depth`, `max-params`, `max-lines-per-function
 `auto-mobile/catch-convention` are fully burned down and are `error` too, so the ratchet's
 violation counts no longer cover them.
 `typescript/no-floating-promises` and `typescript/no-misused-promises` are fully
-burned down and are `error` in `.oxlintrc.json`, but they need type information and
+burned down and are `error` in `.oxlintrc.json` (`no-floating-promises` covers `test/` too,
+where a deliberately unawaited call is written `void`), but they need type information and
 the fast stage is not type-aware, so they are enforced by the ratchet stage
 (`oxlint --type-aware`), which keeps them in its gated codes at a zero baseline: any
 diagnostic is a new violation and fails the gate (`--update` refuses to record one

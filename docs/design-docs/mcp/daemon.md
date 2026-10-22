@@ -43,7 +43,18 @@ OPTIONS and unknown paths, requires `Authorization: Bearer <token>` (the scheme 
 case-insensitive). Host and
 Origin checks still run first. Missing or invalid credentials return `401`,
 `WWW-Authenticate: Bearer`, and `{"error":"Unauthorized"}`. An ingress without a
-configured token refuses to start. Credentials are removed before MCP dispatch
+configured token refuses to start.
+
+The listener binds, and its port is discoverable, before the daemon publishes its
+token at the end of device discovery and session rehydration. A request that passes
+the Host and Origin checks during that window is held, without evaluating its
+credentials, until startup finishes (at most 30 seconds), then authenticated. A client
+still holding a previous daemon's token then gets `401` and should re-read the token
+file once and retry. If startup outlives that bound the request gets `503` with
+`Retry-After: 1` and `{"error":"Daemon is still starting"}`; a failed startup answers
+`503` with `{"error":"Daemon startup failed"}`, and a daemon that is shutting down
+answers `503`. Treat a `503` carrying `Retry-After` as transient and retry it until
+the caller's own deadline. Credentials are removed before MCP dispatch
 and are never included in diagnostics, status, PID records or telemetry.
 
 Local clients read the UTF-8 token file and trim whitespace. On POSIX, the file
@@ -53,7 +64,9 @@ rename it into place. The parent directory is created with mode `0700` where
 supported. Windows uses the same publication rules without POSIX uid/mode checks.
 External clients must discover the file using the daemon's
 launch environment and read it again after a daemon restart. TypeScript clients
-can use `readDaemonHttpToken(env)` or `daemonHttpAuthHeaders(env)`; the client-only
+can use `readDaemonHttpToken(env)` or `daemonHttpAuthHeaders(endpoint, env)`, which
+returns the Authorization header only for a daemon loopback endpoint (and `{}` for any
+other URL); the client-only
 `AUTOMOBILE_DAEMON_HTTP_TOKEN` override takes precedence over file discovery.
 Keep the token and Authorization header out of logs and error reports.
 

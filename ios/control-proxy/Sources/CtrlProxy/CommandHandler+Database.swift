@@ -180,7 +180,7 @@ extension CommandHandler {
             throw CommandError.missingParameter("appId")
         }
 
-        guard let foregroundAppId = normalizedBundleId(await elementLocator.refreshForegroundBundleId()),
+        guard let foregroundAppId = await refreshTrackedForegroundBundleId(),
               foregroundAppId == requestedAppId
         else {
             throw CommandError.executionFailed(

@@ -56,6 +56,8 @@ describe("createPathClassifier", () => {
     expect(classify(["android/app/build.gradle.kts", "src/a.ts"])).toBe("android");
     expect(classify(["ios/App/App.swift"])).toBe("ios");
     expect(classify(["ios/prototype-agent/Sources/Example/Example.swift"])).toBe("ios");
+    // The root manifest builds the published AutoMobilePrototype library product (#14457).
+    expect(classify(["Package.swift"])).toBe("ios");
     expect(classify(["ios/App/App.swift", "android/app/Main.kt"])).toBe("mixed");
   });
 

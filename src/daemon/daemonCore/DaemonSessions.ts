@@ -23,6 +23,7 @@ import { defaultKillProfileRestoreRegistry } from "../../features/utility/KillPr
 import { defaultEmulatorSensorRestoreRegistry } from "../../features/utility/EmulatorSensorRestore";
 import { defaultDisplayProfileRestoreRegistry } from "../../features/utility/DisplayProfileRestore";
 import { defaultPersonaRestoreRegistry } from "../../features/utility/PersonaRestore";
+import { defaultSystemAlertPolicyRegistry } from "../../features/action/systemAlerts/SystemAlertPolicy";
 import { defaultKeyboardProfileRestoreRegistry } from "../../features/utility/KeyboardProfileRestore";
 import { defaultMockLocationClearRegistry } from "../../features/utility/MockLocationClear";
 import { forgetStatusBarOverrideForRemovedDevice } from "../statusBarSessionCleanup";
@@ -180,6 +181,7 @@ export class DaemonSessions {
         defaultEmulatorSensorRestoreRegistry.retireDevice(deviceId);
         defaultDisplayProfileRestoreRegistry.retireDevice(deviceId);
         defaultPersonaRestoreRegistry.retireDevice(deviceId);
+        defaultSystemAlertPolicyRegistry.retireDevice(deviceId);
         defaultKeyboardProfileRestoreRegistry.retireDevice(deviceId);
         defaultDisplayInventoryProvider.invalidate(deviceId);
         this.host.services.deviceReadiness().clearExplicitDevicePin(deviceId);

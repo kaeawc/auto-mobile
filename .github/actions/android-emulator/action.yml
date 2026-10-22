@@ -146,7 +146,7 @@ runs:
         avd-name: ${{ inputs.avd-name }}
         profile: ${{ inputs.profile }}
         force-avd-creation: false
-        emulator-options: ${{ inputs.windowed == 'true' && '-gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none' || '-no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none' }}
+        emulator-options: ${{ inputs.windowed == 'true' && '-gpu swiftshader -noaudio -no-boot-anim -camera-back none' || '-no-window -gpu swiftshader -noaudio -no-boot-anim -camera-back none' }}
         disable-animations: false
         script: |
           echo "=========================================="
@@ -206,7 +206,7 @@ runs:
       env:
         ANDROID_EMULATOR_PREBUILD_SCRIPT: ${{ inputs.prebuild-script }}
       run: |
-        export AUTOMOBILE_EMULATOR_ARGS='${{ inputs.windowed == 'true' && '["-no-snapshot-save","-gpu","swiftshader_indirect","-noaudio","-no-boot-anim","-camera-back","none"]' || '["-no-snapshot-save","-no-window","-gpu","swiftshader_indirect","-noaudio","-no-boot-anim","-camera-back","none"]' }}'
+        export AUTOMOBILE_EMULATOR_ARGS='${{ inputs.windowed == 'true' && '["-no-snapshot-save","-gpu","swiftshader","-noaudio","-no-boot-anim","-camera-back","none"]' || '["-no-snapshot-save","-no-window","-gpu","swiftshader","-noaudio","-no-boot-anim","-camera-back","none"]' }}'
         export AUTOMOBILE_BOOT_PROGRESS=true
         export AUTOMOBILE_EMULATOR_DIAGNOSTICS_DIR="${{ github.workspace }}/android-emulator-diagnostics/attempt-1"
         "${{ github.workspace }}/scripts/android/run-with-background-prebuild.sh" "$ANDROID_EMULATOR_PREBUILD_SCRIPT" -- "${{ github.workspace }}/scripts/android/boot-emulator.sh" --avd-name "${{ inputs.avd-name }}"
@@ -241,7 +241,7 @@ runs:
         ANDROID_EMULATOR_PREBUILD_SCRIPT: ${{ inputs.prebuild-script }}
       run: |
         echo "Starting emulator retry attempt 2."
-        export AUTOMOBILE_EMULATOR_ARGS='${{ inputs.windowed == 'true' && '["-no-snapshot-save","-gpu","swiftshader_indirect","-noaudio","-no-boot-anim","-camera-back","none"]' || '["-no-snapshot-save","-no-window","-gpu","swiftshader_indirect","-noaudio","-no-boot-anim","-camera-back","none"]' }}'
+        export AUTOMOBILE_EMULATOR_ARGS='${{ inputs.windowed == 'true' && '["-no-snapshot-save","-gpu","swiftshader","-noaudio","-no-boot-anim","-camera-back","none"]' || '["-no-snapshot-save","-no-window","-gpu","swiftshader","-noaudio","-no-boot-anim","-camera-back","none"]' }}'
         export AUTOMOBILE_BOOT_PROGRESS=true
         export AUTOMOBILE_EMULATOR_DIAGNOSTICS_DIR="${{ github.workspace }}/android-emulator-diagnostics/attempt-2"
         "${{ github.workspace }}/scripts/android/run-with-background-prebuild.sh" "$ANDROID_EMULATOR_PREBUILD_SCRIPT" -- "${{ github.workspace }}/scripts/android/boot-emulator.sh" --avd-name "${{ inputs.avd-name }}"

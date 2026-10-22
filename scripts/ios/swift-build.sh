@@ -146,6 +146,20 @@ else
 fi
 echo ""
 
+# The library app shares the renderer but owns its offline library and storage namespaces.
+echo -e "${BLUE}Building iOS simulator ProtoViewer...${NC}"
+if xcrun --sdk iphonesimulator --show-sdk-path > /dev/null 2>&1; then
+    if "${SCRIPT_DIR}/protoviewer-build.sh" "${PROJECT_ROOT}/scratch/protoviewer-ci" 2>&1; then
+        print_status 0 "ProtoViewer app built successfully"
+    else
+        print_status 1 "ProtoViewer app build failed"
+        FAILED_PACKAGES+=("ProtoViewer app")
+    fi
+else
+    print_info "Skipping ProtoViewer app (no iphonesimulator SDK)"
+fi
+echo ""
+
 # Optional: sign XCTestRunner for iOS releases when credentials are available.
 if [[ "${IOS_SIGNING_ENABLED:-false}" == "true" ]]; then
     echo -e "${BLUE}Signing iOS frameworks for release builds...${NC}"

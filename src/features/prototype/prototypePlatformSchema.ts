@@ -1,3 +1,4 @@
+import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import { z } from "zod";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import {
@@ -76,7 +77,7 @@ export const prototypeRequiresSchema = z
             purpose: z
               .string()
               .max(512)
-              .refine((purpose) => purpose.trim().length > 0),
+              .refine((purpose) => !prototypeContractPatterns.blankText.test(purpose)),
           })
           .strict(),
       )

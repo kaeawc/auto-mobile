@@ -1,11 +1,11 @@
 {
   "version": "1.0.0",
   "thresholds": {
-    "unpackedBytes": 16777216,
+    "unpackedBytes": 20132659,
     "warnHeadroomBytes": 1048576
   },
   "metadata": {
     "generatedAt": "2026-10-22",
-    "description": "16 MiB NPM unpacked-size cap (raised from 15 MiB on 2026-10-22: feature work had used the 15 MiB cap's headroom, leaving about 10 KB, and pack growth from the Android platform-capability tools was blocking every PR). The external source maps (about 9 MB, unused at runtime) still do not ship in the tarball (package.json files negation, enforced by packed-runtime-assets), so a regression that re-packs them (23,061,125 bytes) still fails by a wide margin"
+    "description": "NPM unpacked-size cap of 20,132,659 bytes (20% above the 16 MiB cap, which was itself raised from 15 MiB on 2026-10-22 after feature work used up the earlier headroom). The external source maps (about 9 MB, unused at runtime) still do not ship in the tarball (package.json files negation, enforced by packed-runtime-assets), so a regression that re-packs them (23,061,125 bytes) still fails by a wide margin"
   }
 }

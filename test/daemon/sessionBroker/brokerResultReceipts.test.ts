@@ -1,5 +1,6 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test, mock } from "bun:test";
 import { SessionBrokerFailureError } from "../../../src/daemon/sessionBroker/devicePort";
+import { SessionBrokerStoppingError } from "../../../src/daemon/sessionBroker/SessionBrokerStoppingError";
 import { SessionBroker, type SessionBrokerOptions } from "../../../src/daemon/sessionBroker/broker";
 import {
   openSqliteBindingRegistry,
@@ -88,7 +89,7 @@ describe("broker result receipts", () => {
     ["shutdown", "pre-admission"],
     ["shutdown", "post-admission"],
   ] as const)(
-    "%s cancellation %s requires a new request ID on the initial result and replay",
+    "%s cancellation %s preserves its admission and replay contract",
     async (source, phase) => {
       const controller = new AbortController();
       const cancel = async (signal?: AbortSignal) => {
@@ -109,7 +110,18 @@ describe("broker result receipts", () => {
       }
 
       const request = config("cancelled-request");
-      const first = await broker.prepare(request, "owner-token", controller.signal);
+      const preparing = broker.prepare(request, "owner-token", controller.signal);
+      if (source === "shutdown" && phase === "pre-admission") {
+        await expect(preparing).rejects.toBeInstanceOf(SessionBrokerStoppingError);
+        expect(await options.store.getRequest(request.requestId)).toBeUndefined();
+        await broker.close();
+        options.catalog = async () => iosCatalog();
+        broker = new SessionBroker(options);
+        expect(await broker.prepare(request, "owner-token")).toMatchObject({ outcome: "ready" });
+        expect(devices.prepared).toHaveLength(1);
+        return;
+      }
+      const first = await preparing;
       if (source === "shutdown") {
         await broker.close();
         broker = new SessionBroker(options);
@@ -118,7 +130,12 @@ describe("broker result receipts", () => {
       const expected = {
         outcome: "failed",
         cleanupPending: false,
-        failure: { code: "cancelled", retryable: true, retryRequires: "new_request_id" },
+        failure: {
+          code: source === "shutdown" ? "session_broker_stopping" : "cancelled",
+          retryable: true,
+          retryRequires: "new_request_id",
+          ...(source === "shutdown" ? { retryAfterMs: 5_000 } : {}),
+        },
       };
       expect(first).toMatchObject(expected);
       expect(replay).toMatchObject(expected);

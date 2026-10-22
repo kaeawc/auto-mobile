@@ -246,7 +246,16 @@ struct PrototypePinnedHttpClient: PrototypeHttpClient {
             return nil
         }
         guard let left = bytes(lhs), let right = bytes(rhs) else { return false }
-        return left == right
+        return left == right || nat64Embedded(left, equals: right) || nat64Embedded(right, equals: left)
+    }
+
+    /// An IPv6-only NAT64 network reports a dialed IPv4 literal as 64:ff9b::/96 (RFC 6052 well-known prefix) plus
+    /// that IPv4. The embedded address must equal the checked address, so the connection stays pinned. Other
+    /// RFC 6052 prefixes are network-specific and cannot be recognised without trusting an unverified prefix.
+    private static let nat64Prefix = Data([0x00, 0x64, 0xFF, 0x9B] + [UInt8](repeating: 0, count: 8))
+
+    private static func nat64Embedded(_ ipv6: Data, equals ipv4: Data) -> Bool {
+        ipv6.count == 16 && ipv4.count == 4 && ipv6.prefix(12) == nat64Prefix && ipv6.suffix(4) == ipv4
     }
 
     /// TLS and protocol failures are terminal; only transport establishment errors try another IP.

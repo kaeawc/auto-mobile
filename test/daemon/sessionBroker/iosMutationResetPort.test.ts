@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import type { ExecResult } from "../../../src/models/ExecResult";
 import {
   IosDeviceMutationResetPort,
@@ -700,6 +701,20 @@ describe("iOS mutation reset adapter", () => {
         key,
       ]);
     }
+  });
+
+  test("iOS 27 already absent AppleCalendar default is a successful sanitation no-op", async () => {
+    const rig = harness();
+    rig.state.commandErrors.set(
+      `spawn ${UDID} defaults delete .GlobalPreferences AppleCalendar`,
+      new Error(
+        readFileSync(
+          `${import.meta.dir}/../../fixtures/ios-simctl/defaults-delete-absent-key-ios27.txt`,
+          "utf8",
+        ),
+      ),
+    );
+    await expect(rig.port.sanitize(rig.context)).resolves.toBeUndefined();
   });
 
   test("already absent defaults are successful no-ops but unrelated defaults failures propagate", async () => {

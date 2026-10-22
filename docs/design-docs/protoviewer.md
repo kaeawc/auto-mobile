@@ -86,8 +86,10 @@ and its renderer honours privileged window options. ProtoViewer declares `INTERN
 runtime-granted `ACCESS_LOCAL_NETWORK` permission that Android 17 (API 37) requires for private LAN
 connections, and nothing else (no accessibility, input method, overlay, device-admin or camera).
 `ACCESS_LOCAL_NETWORK` is requested only when the user turns on "Allow network for imported
-prototypes" (section 6), never at install or first launch; if it is denied, LAN requests fail with
-the same typed error as a blocked host. The validator rejects `window.layer: "system"` and any other privileged window option for library prototypes.
+prototypes" (section 6), never at install or first launch; if it is denied, the switch stays on for
+internet access and the library explains that LAN requests may time out (Android slice 3, closing
+#14539 via this work). The validator rejects `window.layer: "system"` and any other privileged window
+option for library prototypes.
 
 - **Android renderer extraction is one mechanical move.** The `ctrlproxy/prototype` package imports
   only a few symbols from the rest of CtrlProxy, so moving it to a `:prototype-render` module

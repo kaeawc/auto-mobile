@@ -66,7 +66,9 @@ export function renderClientRequest(client: BrokerBatchClient, requestId: string
 
 function parseHostKeys(raw: Record<string, unknown>): SessionBrokerHostConfig {
   // Drop the batch envelope; everything else is the host config, whatever keys the product adds.
-  const { schemaVersion: _schemaVersion, clients: _clients, ...hostKeys } = raw;
+  const hostKeys = Object.fromEntries(
+    Object.entries(raw).filter(([key]) => key !== "schemaVersion" && key !== "clients"),
+  );
   return parseSessionBrokerHostConfig({ ...hostKeys, contractVersion: 1 });
 }
 
@@ -84,7 +86,10 @@ export function parseBrokerBatch(input: unknown, options: BrokerBatchOptions = {
       "limits.totalDeviceCap, limits.sessionCap and limits.idlePoolCap are required.",
     );
   }
-  const { contractVersion: _contractVersion, ...hostRest } = host;
+  const hostRest: Omit<SessionBrokerHostConfig, "contractVersion"> & { contractVersion?: 1 } = {
+    ...host,
+  };
+  delete hostRest.contractVersion;
   const batch: BrokerBatch = {
     ...hostRest,
     schemaVersion: 1,

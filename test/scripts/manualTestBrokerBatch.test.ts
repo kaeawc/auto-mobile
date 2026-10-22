@@ -230,9 +230,10 @@ test("every host-config key the product accepts survives the batch round trip (#
     androidResetTimeoutMs: 60_000,
   });
   // The product parser accepts the rendered host config, and re-wrapping it as a batch is lossless.
-  const { clients: _clients, ...hostOnly } = { ...host, schemaVersion: 1, clients: [] };
   expect(
-    renderHostConfig(parseBrokerBatch({ ...hostOnly, clients: [] }, { allowReuse: true })),
+    renderHostConfig(
+      parseBrokerBatch({ ...host, schemaVersion: 1, clients: [] }, { allowReuse: true }),
+    ),
   ).toEqual(host);
 });
 

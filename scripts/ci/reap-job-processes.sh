@@ -48,7 +48,8 @@ for root in "$@"; do
   while IFS= read -r pid_file; do
     pid="$(tr -dc '0-9' <"${pid_file}" 2>/dev/null | head -c 10)"
     [[ -n "${pid}" ]] || continue
-    if command_of "${pid}" | grep -q -- "--daemon-mode"; then
+    cmd="$(command_of "${pid}")"
+    if [[ "${cmd}" == *"--daemon-mode"* ]]; then
       pids+=("${pid}")
     fi
   done < <(find "${root}" -maxdepth 2 -name daemon.pid 2>/dev/null)
@@ -70,7 +71,7 @@ unique=()
 while IFS= read -r pid; do
   unique+=("${pid}")
 done < <(printf '%s\n' "${pids[@]}" | sort -un)
-pids=("${unique[@]}")
+pids=("${unique[@]}") # portability-ok: unique is non-empty here
 printf '%s\n' "${pids[@]}"
 kill -TERM "${pids[@]}" 2>/dev/null || true
 sleep "${grace}"

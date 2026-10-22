@@ -177,6 +177,7 @@ nav:
       - "Android windowing": design-docs/plat/android/windowing.md
       - "Android form factors": design-docs/plat/android/form-factors.md
       - "Device-condition capability probe": design-docs/plat/android/device-condition-capability-probe.md
+      - "Device-condition attestation ceiling": design-docs/plat/android/device-condition-attestation-ceiling.md
       - "Desktop App": design-docs/plat/android/desktop-app.md
       - "Pressure, hover and stylus input": design-docs/plat/pressure-hover-stylus-input.md
   - "Contributing": contributing.md

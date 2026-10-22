@@ -52,8 +52,6 @@ class PrototypeSpecContentScreenshotTest {
     const val FULL_SHEET = 2
   }
 
-  // Pending: #12395 added these cases (and changed material_slider_chip_card's render) without
-  // Linux baselines; record them with the Linux workflow, commit the PNGs, then drop pending.
   // Pending: #12066 textField trailing icon and IME action; no Linux baseline recorded yet.
   @Test
   fun textFieldActions() =
@@ -97,16 +95,13 @@ class PrototypeSpecContentScreenshotTest {
       pending = true,
     )
 
-  @Test
-  fun flowBasic() =
-    prototypeScreenshotTest("flow_basic", validPrototypeFixture("flow-basic"), pending = true)
+  @Test fun flowBasic() = prototypeScreenshotTest("flow_basic", validPrototypeFixture("flow-basic"))
 
   @Test
   fun flowMaxLinesRepeat() =
     prototypeScreenshotTest(
       "flow_max_lines_repeat",
       validPrototypeFixture("flow-max-lines-repeat"),
-      pending = true,
     )
 
   @Test
@@ -114,7 +109,6 @@ class PrototypeSpecContentScreenshotTest {
     prototypeScreenshotTest(
       "grid_fixed_columns_span",
       validPrototypeFixture("grid-fixed-columns-span"),
-      pending = true,
     )
 
   @Test
@@ -122,7 +116,6 @@ class PrototypeSpecContentScreenshotTest {
     prototypeScreenshotTest(
       "grid_adaptive_min_width",
       validPrototypeFixture("grid-adaptive-min-width"),
-      pending = true,
     )
 
   // Pending until the Linux recording workflow produces these new pager-option baselines.

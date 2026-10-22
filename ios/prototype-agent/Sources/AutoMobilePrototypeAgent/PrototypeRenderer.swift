@@ -389,6 +389,8 @@
                 PrototypeBadgeView(text: interpolated(node.text), style: style, tagged: node.identifier != nil)
             case "progress":
                 PrototypeProgressView(node: node, model: model)
+            case "chart":
+                PrototypeChartView(node: node, model: model)
             case "timePicker":
                 PrototypeTimePickerView(node: node, model: model)
             case "datePicker":
@@ -493,6 +495,8 @@
         /// Text nodes already read their text, so only an authored description or a tappable icon's
         /// name needs to be applied explicitly.
         private var accessibilityLabelOverride: String? {
+            // A chart reads its summary, unless an authored description wins (#14679).
+            if node.type == "chart" { return node.chartLabel(data: model.spec?.data, state: model.state) }
             guard node.contentDescription != nil || ["icon", "iconButton", "fab"].contains(node.type)
             else { return nil }
             return node.accessibilityLabel(

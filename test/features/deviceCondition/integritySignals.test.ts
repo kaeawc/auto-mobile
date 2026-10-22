@@ -1,0 +1,100 @@
+import { describe, expect, test } from "bun:test";
+import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import type { ExecResult } from "../../../src/models";
+import {
+  INTEGRITY_SIGNALS,
+  parseGetprop,
+  readIntegritySignals,
+} from "../../../src/features/deviceCondition/integritySignals";
+
+function execResult(stdout: string): ExecResult {
+  return {
+    stdout,
+    stderr: "",
+    toString: () => stdout,
+    trim: () => stdout.trim(),
+    includes: (s: string) => stdout.includes(s),
+  };
+}
+
+function adbWith(responses: Record<string, string>): FakeAdbExecutor {
+  const adb = new FakeAdbExecutor();
+  for (const [pattern, stdout] of Object.entries(responses)) {
+    adb.setCommandResponse(pattern, execResult(stdout));
+  }
+  return adb;
+}
+
+const EMULATOR_PROPS = [
+  "[ro.debuggable]: [1]",
+  "[ro.secure]: [0]",
+  "[ro.build.tags]: [test-keys]",
+  "[ro.kernel.qemu]: [1]",
+  "[ro.hardware]: [ranchu]",
+  "[ro.product.model]: [sdk_gphone64_arm64]",
+].join("\n");
+
+const byId = (readings: Awaited<ReturnType<typeof readIntegritySignals>>) =>
+  Object.fromEntries(readings.map((r) => [r.id, r.active]));
+
+describe("integrity signals (#14062)", () => {
+  test("parseGetprop reads [key]: [value] lines and ignores noise", () => {
+    const props = parseGetprop("[ro.a]: [1]\nnot a prop\n[ro.empty]: []\n");
+    expect(props.get("ro.a")).toBe("1");
+    expect(props.get("ro.empty")).toBe("");
+    expect(props.size).toBe(2);
+  });
+
+  test("a rooted-looking emulator reports root and emulator signals", async () => {
+    const adb = adbWith({
+      getprop: EMULATOR_PROPS,
+      getenforce: "Permissive",
+      "ls -d": "/system/xbin/su\n/dev/qemu_pipe\n/etc/security/otacerts.zip",
+    });
+    const active = byId(await readIntegritySignals(adb));
+    expect(active).toMatchObject({
+      "su-binary": true,
+      "superuser-apk": false,
+      "selinux-permissive": true,
+      "debuggable-build": true,
+      "insecure-build": true,
+      "test-keys": true,
+      "missing-otacerts": false,
+      "qemu-props": true,
+      "emulator-hardware": true,
+      "qemu-pipe": true,
+      "emulator-build-fields": true,
+    });
+  });
+
+  test("a clean production-like device presents no signals except a missing otacerts", async () => {
+    const adb = adbWith({
+      getprop:
+        "[ro.debuggable]: [0]\n[ro.secure]: [1]\n[ro.build.tags]: [release-keys]\n[ro.hardware]: [pixel]",
+      getenforce: "Enforcing",
+      "ls -d": "/etc/security/otacerts.zip",
+    });
+    const active = Object.entries(byId(await readIntegritySignals(adb)))
+      .filter(([, on]) => on)
+      .map(([id]) => id);
+    expect(active).toEqual([]);
+  });
+
+  test("a failed sub-read leaves its signals inactive instead of failing the probe", async () => {
+    const adb = adbWith({ getprop: EMULATOR_PROPS });
+    adb.setCommandError("getenforce", new Error("adb offline"));
+    const active = byId(await readIntegritySignals(adb));
+    expect(active["selinux-permissive"]).toBe(false);
+    expect(active["debuggable-build"]).toBe(true);
+  });
+
+  test("every build-prop signal is classified image-fixed, every file/mode signal needs root", () => {
+    const mutability = Object.fromEntries(INTEGRITY_SIGNALS.map((s) => [s.id, s.mutability]));
+    for (const id of ["debuggable-build", "insecure-build", "test-keys", "qemu-props"]) {
+      expect(mutability[id]).toBe("image-fixed");
+    }
+    for (const id of ["su-binary", "superuser-apk", "selinux-permissive"]) {
+      expect(mutability[id]).toBe("needs-root");
+    }
+  });
+});

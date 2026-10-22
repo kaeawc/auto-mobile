@@ -273,6 +273,10 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
       calls: 1,
       reason: "Diagnostics; reports what adb sees and reads no pool state.",
     },
+    "src/doctor/checks/androidIntegrity.ts": {
+      calls: 1,
+      reason: "Diagnostics; lists booted devices to probe their signals and reads no pool state.",
+    },
     "src/doctor/checks/automobile.ts": {
       calls: 2,
       reason: "Diagnostics; reports what adb sees and reads no pool state.",

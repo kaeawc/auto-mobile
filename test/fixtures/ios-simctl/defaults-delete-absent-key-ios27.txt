@@ -1,0 +1,3 @@
+Command failed: xcrun simctl spawn E9BFA042-8988-472E-B423-A0A8BFEFAA94 defaults delete .GlobalPreferences AppleCalendar
+Error: Could not find key 'AppleCalendar' in domain 'kCFPreferencesAnyApplication'.
+Defaults have not been changed.

@@ -54,6 +54,7 @@
     "deleteDevice",
     "getDeepLinks",
     "sendBroadcast",
+    "backgroundWork",
     "getLogs",
     "compareScreenshot",
     "statusBar",
@@ -107,7 +108,7 @@
     "killProfile",
     "setSensor",
     "displayProfile",
-    "persona",
+    "manufacturerProfile",
     "setToolEnabled"
   ],
   "serverStdio": [
@@ -164,6 +165,7 @@
     "deleteDevice",
     "getDeepLinks",
     "sendBroadcast",
+    "backgroundWork",
     "getLogs",
     "compareScreenshot",
     "statusBar",
@@ -215,7 +217,7 @@
     "killProfile",
     "setSensor",
     "displayProfile",
-    "persona",
+    "manufacturerProfile",
     "setToolEnabled"
   ],
   "cli": [
@@ -293,6 +295,7 @@
     "sqlQuery",
     "getDeepLinks",
     "sendBroadcast",
+    "backgroundWork",
     "getLogs",
     "compareScreenshot",
     "statusBar",
@@ -309,7 +312,7 @@
     "killProfile",
     "setSensor",
     "displayProfile",
-    "persona",
+    "manufacturerProfile",
     "getPreference",
     "setPreference",
     "deviceSnapshot",

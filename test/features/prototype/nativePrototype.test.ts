@@ -230,6 +230,16 @@ describe("automobile:prototype/native", () => {
     expect(prototypeDirectoryName("checkout")).toBe("checkout");
   });
 
+  test("the longest legal ids still give short, distinct file and type names", () => {
+    const a = `${"a".repeat(255)}1`;
+    const b = `${"a".repeat(255)}2`;
+    for (const name of [prototypeAssetFileStem, prototypeDirectoryName, prototypeHostTypeName]) {
+      expect(name(a).length).toBeLessThanOrEqual(73);
+      expect(name(a)).not.toBe(name(b));
+    }
+    expect(prototypeAssetFileStem("a".repeat(64))).toBe("a".repeat(64));
+  });
+
   test("the pinned library version is the Android library's release version", () => {
     const pkg = JSON.parse(readFileSync(path.join(REPO, "package.json"), "utf8")) as {
       version: string;

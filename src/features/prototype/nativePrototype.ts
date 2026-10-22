@@ -99,12 +99,22 @@ function sanitizedName(id: string): string {
 }
 
 /**
- * A file name stem for an asset id. Ids are opaque strings, so one that needed sanitizing gets a
- * short hash of the original id: `hero/a` and `hero?a` stay distinct, while safe ids stay readable.
+ * Longest generated name stem. Ids may be 256 characters, but a file name component is limited to
+ * 255 bytes, and the stem still needs room for an extension or the `Prototype` suffix.
+ */
+const MAX_NAME_STEM = 64;
+
+/**
+ * A file name stem for an asset id. Ids are opaque strings, so one that needed sanitizing or
+ * shortening gets a short hash of the original id: `hero/a` and `hero?a` stay distinct, as do two
+ * long ids sharing a prefix, while short safe ids stay readable.
  */
 export function prototypeAssetFileStem(id: string): string {
   const safe = sanitizedName(id);
-  return safe === id ? safe : `${safe}-${shortHash(id)}`;
+  if (safe === id && safe.length <= MAX_NAME_STEM) {
+    return safe;
+  }
+  return `${safe.slice(0, MAX_NAME_STEM - 9)}-${shortHash(id)}`;
 }
 
 /**
@@ -119,10 +129,14 @@ export function prototypeDirectoryName(id: string): string {
 export function prototypeHostTypeName(id: string): string {
   const words = id.split(/[^A-Za-z0-9]+/).filter((word) => word.length > 0);
   const name = words.map((word) => word[0].toUpperCase() + word.slice(1)).join("");
-  const base = `${/^[A-Za-z]/.test(name) ? name : `P${name}`}Prototype`;
-  // Only a plain alphanumeric id maps back to one type name; any other (checkout-flow vs
-  // checkout_flow) gets a short hash so two prototypes in one app never share a host type.
-  return /^[A-Za-z][A-Za-z0-9]*$/.test(id) ? base : `${base}${shortHash(id)}`;
+  const prefixed = /^[A-Za-z]/.test(name) ? name : `P${name}`;
+  // Only a short plain alphanumeric id maps back to one type name; any other (checkout-flow vs
+  // checkout_flow, or a long id cut to fit a file name) gets a short hash so two prototypes in
+  // one app never share a host type.
+  if (/^[A-Za-z][A-Za-z0-9]*$/.test(id) && prefixed.length <= MAX_NAME_STEM) {
+    return `${prefixed}Prototype`;
+  }
+  return `${prefixed.slice(0, MAX_NAME_STEM - 8)}Prototype${shortHash(id)}`;
 }
 
 /** Asset ids a spec references, by kind, sorted (images first). */

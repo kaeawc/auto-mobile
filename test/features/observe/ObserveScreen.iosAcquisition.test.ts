@@ -285,7 +285,7 @@ for (const tool of ["tapOn", "tapAny"] as const) {
           tool === "tapOn"
             ? new TestTapOnElement(device, adb, {
                 timer: h.timer,
-                tapStrategy: new FakeTapStrategy(),
+                tapStrategy: FakeTapStrategy.ios(),
                 visionConfig: { ...DEFAULT_VISION_CONFIG, enabled: false },
                 selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
               })

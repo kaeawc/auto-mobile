@@ -22,6 +22,23 @@ export class FakeTapStrategy implements TapStrategy {
   promotesClickableAncestor: boolean = true;
   settlesFocusChangeAfterTap: boolean = false;
   rethrowsKeyboardOcclusion: boolean = true;
+
+  /**
+   * A fake whose policy flags match {@link IosTapStrategy}'s (#13316). The default constructor keeps
+   * Android's flags (with retries off), which an iOS-path test must not inherit: it would warn on
+   * disabled elements, settle and re-verify displays, and promote ancestors where iOS does not.
+   */
+  static ios(): FakeTapStrategy {
+    const fake = new FakeTapStrategy();
+    fake.longPressDurationMs = 1000;
+    fake.warnsOnDisabledElement = false;
+    fake.settlesPostTapChange = false;
+    fake.verifiesRefreshedDisplay = false;
+    fake.promotesClickableAncestor = false;
+    fake.settlesFocusChangeAfterTap = true;
+    fake.rethrowsKeyboardOcclusion = false;
+    return fake;
+  }
   /** Restamps nothing by default; iOS-parity tests may record via `refreshedRotations`. */
   readonly refreshedRotations: Array<number | undefined> = [];
 

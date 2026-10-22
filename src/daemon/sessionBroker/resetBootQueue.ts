@@ -9,10 +9,17 @@ export class ResetBootQueue {
   constructor(
     private readonly limit = Number.POSITIVE_INFINITY,
     private readonly timer: Pick<Timer, "setTimeout" | "clearTimeout"> = defaultTimer,
+    private readonly now: () => number = () => defaultTimer.now(),
   ) {}
 
-  async run<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+  /** `onAdmitted` receives the milliseconds this call waited for a slot (0 when none was queued). */
+  async run<T>(
+    operation: () => Promise<T>,
+    signal?: AbortSignal,
+    onAdmitted?: (waitMs: number) => void,
+  ): Promise<T> {
     signal?.throwIfAborted();
+    const queuedAt = this.now();
     if (this.active >= this.limit) {
       const admitted = Promise.withResolvers<void>();
       const start = () => {
@@ -40,6 +47,7 @@ export class ResetBootQueue {
     }
     try {
       signal?.throwIfAborted();
+      onAdmitted?.(this.now() - queuedAt);
       return await operation();
     } finally {
       this.release();

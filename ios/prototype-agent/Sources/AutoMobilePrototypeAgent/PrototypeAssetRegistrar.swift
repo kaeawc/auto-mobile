@@ -44,6 +44,11 @@
             return face
         }
 
+        /// ProtoViewer owns the process and calls this only after its sole renderer has stopped.
+        static func releaseProcessFonts() {
+            processFontRegistry.unregisterAll(unregister: unregisterGraphicsFont)
+        }
+
         // CoreText's font manager is thread-safe; nonisolated so the ledger can call these directly.
         private nonisolated static func registerGraphicsFont(_ font: CGFont) -> PrototypeFontRegistrationResult {
             var error: Unmanaged<CFError>?

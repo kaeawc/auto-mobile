@@ -28,6 +28,7 @@ import { exponentialBackoff } from "../../utils/Backoff";
 import { ForcedRestartBudget } from "../ForcedRestartBudget";
 import {
   DefaultProcessSupervisor,
+  type LivenessProbe,
   type ProcessSupervisor,
   type ProcessSupervisorOptions,
 } from "../../utils/ProcessSupervisor";
@@ -73,7 +74,7 @@ interface IosCtrlProxyRuntimeHost {
   ): Promise<unknown>;
   fenceLateRemoteStartAfterShutdown(runnerPid: number): Promise<void>;
   start(options?: CtrlProxyStartOptions): Promise<void>;
-  isSupervisedCtrlProxyProcessAlive(): Promise<boolean>;
+  isSupervisedCtrlProxyProcessAlive(probe: LivenessProbe): Promise<boolean>;
   clearCaches(): void;
   isProcessRunning(pid: number): Promise<boolean>;
   restartIproxyTunnel(): Promise<void>;
@@ -300,7 +301,7 @@ export class IosCtrlProxyRuntime {
           this.isProcessSupervisorRestarting = false;
         }
       },
-      isAlive: () => this.host.isSupervisedCtrlProxyProcessAlive(),
+      isAlive: (probe) => this.host.isSupervisedCtrlProxyProcessAlive(probe),
       onExit: () => {
         const sharedStart = this.sharedStart;
         if (

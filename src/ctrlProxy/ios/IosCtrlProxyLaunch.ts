@@ -7,6 +7,7 @@ import { logger } from "../../utils/logger";
 import { ActionableError } from "../../models/ActionableError";
 import type { HostChildProcess as ChildProcess } from "../../utils/HostCommandExecutor";
 import { AMBIENT_ENV, ENV, readEnvBool, readEnvRaw } from "../../config/env";
+import type { LivenessProbe } from "../../utils/ProcessSupervisor";
 import {
   RemoteCtrlProxyIOSRunner,
   IproxyTunnelStartOptions,
@@ -36,8 +37,15 @@ export const IOS_CTRL_PROXY_CONSECUTIVE_HEALTH_MISS_THRESHOLD = 3;
 
 /** Launches local or remote XCTest runners and supervises their process events. */
 export class IosCtrlProxyLaunch {
+  /**
+   * Bumped for every runner this launch starts or adopts. A health-miss streak is
+   * scoped to one (PID, launch generation) pair, so a replacement that the OS
+   * hands the retired runner's PID still starts with no misses (#14494).
+   */
+  private runnerLaunchGeneration = 0;
   private consecutiveHealthMisses = 0;
   private supervisedPid: number | null = null;
+  private supervisedLaunchGeneration = 0;
   constructor(
     private readonly state: Pick<
       IosCtrlProxyRuntime,
@@ -164,8 +172,7 @@ export class IosCtrlProxyLaunch {
           `[IOSCtrlProxy] Reusing remote CtrlProxy process on service port ${existingServicePort}`,
         );
         this.host.adoptServicePort(existingServicePort);
-        this.state.xcTestProcessId = existingProcess.data.pid ?? null;
-        this.state.xcTestProcess = null;
+        this.trackLaunchedRunner(existingProcess.data.pid ?? null, null);
         return "adopted";
       }
 
@@ -183,8 +190,7 @@ export class IosCtrlProxyLaunch {
 
       this.assertRemoteRunnerStarted(result);
 
-      this.state.xcTestProcessId = result.data.pid;
-      this.state.xcTestProcess = null;
+      this.trackLaunchedRunner(result.data.pid, null);
       await this.state.steps.fenceLateRemoteStartAfterShutdown(result.data.pid);
 
       if (typeof result.data.port === "number") {
@@ -323,8 +329,7 @@ export class IosCtrlProxyLaunch {
         logger.info(
           `[IOSCtrlProxy] Reusing remote CtrlProxy process on device port ${existingDevicePort}`,
         );
-        this.state.xcTestProcessId = existingProcess.data.pid ?? null;
-        this.state.xcTestProcess = null;
+        this.trackLaunchedRunner(existingProcess.data.pid ?? null, null);
         await this.host.startIproxyTunnel({ devicePort: existingDevicePort });
         return "adopted";
       }
@@ -346,8 +351,7 @@ export class IosCtrlProxyLaunch {
 
       // A shutdown can begin at the following await or either tunnel await.
       // Publish first so its bounded force-stop can always recover this runner.
-      this.state.xcTestProcessId = result.data.pid;
-      this.state.xcTestProcess = null;
+      this.trackLaunchedRunner(result.data.pid, null);
       await this.state.steps.fenceLateRemoteStartAfterShutdown(result.data.pid);
 
       const resultDevicePort = result.data.port;
@@ -503,13 +507,19 @@ export class IosCtrlProxyLaunch {
       if (token !== undefined) {
         this.state.runnerGenerationTokens.set(child.pid, token);
       }
-      this.state.xcTestProcessId = child.pid;
-      this.state.xcTestProcess = child;
+      this.trackLaunchedRunner(child.pid, child);
       logger.info(`[IOSCtrlProxy] Started xcodebuild test with PID ${child.pid}`);
 
       // Capture output for debugging
       this.captureProcessOutput(child);
     }
+  }
+
+  /** Publish a runner this launch started or adopted, opening a new runner generation. */
+  private trackLaunchedRunner(pid: number | null, child: ChildProcess | null): void {
+    this.runnerLaunchGeneration++;
+    this.state.xcTestProcessId = pid;
+    this.state.xcTestProcess = child;
   }
 
   /**
@@ -571,50 +581,88 @@ export class IosCtrlProxyLaunch {
     this.state.processSupervisor.processExited();
   }
 
-  async startProcessSupervision(): Promise<void> {
+  /**
+   * Arm (or re-arm) runner supervision. Re-arming alone keeps the miss streak, so
+   * a start() that merely finds the runner alive cannot keep resetting it (#13821);
+   * `healthConfirmed` is passed only when the caller just saw this runner answer
+   * its health endpoint, which ends the streak like a successful probe (#14493).
+   */
+  async startProcessSupervision(options: { healthConfirmed?: boolean } = {}): Promise<void> {
+    if (options.healthConfirmed) {
+      this.resetHealthMissStreak();
+    }
     if (!this.state.isProcessSupervisorRestarting) {
       await this.state.processSupervisor.start();
     }
   }
 
-  async isSupervisedCtrlProxyProcessAlive(): Promise<boolean> {
-    if (this.supervisedPid !== this.state.xcTestProcessId) {
-      this.supervisedPid = this.state.xcTestProcessId;
-      this.consecutiveHealthMisses = 0;
-    }
+  /**
+   * Liveness probe for the runner supervisor. Only a probe of the current
+   * supervision epoch records anything: once start(), stop() or an exit opens a
+   * new epoch the supervisor discards this answer, so a miss counted (or the
+   * retain-tracking flag armed) here would outlive it and leak into a later,
+   * unrelated exit (#14492). A stale probe reports what it saw and records nothing.
+   */
+  async isSupervisedCtrlProxyProcessAlive(probe: LivenessProbe): Promise<boolean> {
     const isHealthy = await this.host.checkHealthEndpoint();
+    if (!probe.isCurrent()) {
+      return isHealthy;
+    }
     if (isHealthy) {
-      this.consecutiveHealthMisses = 0;
+      this.resetHealthMissStreak();
       return true;
     }
-    if (!this.state.xcTestProcessId) {
-      this.consecutiveHealthMisses = 0;
+    const pid = this.state.xcTestProcessId;
+    if (!pid) {
+      this.resetHealthMissStreak();
       logger.warn("[IOSCtrlProxy] XCTest process is not tracked, health endpoint not responding");
       return false;
     }
 
     const processRunning = this.host.useRemoteRunner()
       ? await this.state.steps.isOwnRunnerProcessAlive()
-      : await this.host.isProcessRunning(this.state.xcTestProcessId);
-    if (processRunning) {
-      this.consecutiveHealthMisses++;
-      if (this.consecutiveHealthMisses < this.healthMissThreshold) {
-        logger.warn(
-          `[IOSCtrlProxy] Live XCTest runner missed health probe ${this.consecutiveHealthMisses}/${this.healthMissThreshold}; retaining it`,
-        );
-        return true;
-      }
-      this.consecutiveHealthMisses = 0;
-      logger.warn(
-        `[IOSCtrlProxy] Live XCTest runner missed ${this.healthMissThreshold} consecutive health probes; treating the runner as unhealthy`,
-      );
-      // The supervisor's onExit would otherwise untrack this still-alive runner, and
-      // the restart it schedules would then launch a second one beside it (#10234).
-      this.state.retainRunnerTrackingOnSupervisorExit = true;
-    } else {
-      this.consecutiveHealthMisses = 0;
-      logger.warn("[IOSCtrlProxy] XCTest process crashed, health endpoint not responding");
+      : await this.host.isProcessRunning(pid);
+    if (!probe.isCurrent()) {
+      return processRunning;
     }
+    if (!processRunning) {
+      this.resetHealthMissStreak();
+      logger.warn("[IOSCtrlProxy] XCTest process crashed, health endpoint not responding");
+      return false;
+    }
+    return this.recordLiveRunnerHealthMiss();
+  }
+
+  /** Count a miss by the live tracked runner; false once the streak reaches the threshold. */
+  private recordLiveRunnerHealthMiss(): boolean {
+    if (
+      this.supervisedPid !== this.state.xcTestProcessId ||
+      this.supervisedLaunchGeneration !== this.runnerLaunchGeneration
+    ) {
+      // A different runner than the streak belongs to: it starts from zero.
+      this.resetHealthMissStreak();
+    }
+    this.consecutiveHealthMisses++;
+    if (this.consecutiveHealthMisses < this.healthMissThreshold) {
+      logger.warn(
+        `[IOSCtrlProxy] Live XCTest runner missed health probe ${this.consecutiveHealthMisses}/${this.healthMissThreshold}; retaining it`,
+      );
+      return true;
+    }
+    this.resetHealthMissStreak();
+    logger.warn(
+      `[IOSCtrlProxy] Live XCTest runner missed ${this.healthMissThreshold} consecutive health probes; treating the runner as unhealthy`,
+    );
+    // The supervisor's onExit would otherwise untrack this still-alive runner, and
+    // the restart it schedules would then launch a second one beside it (#10234).
+    this.state.retainRunnerTrackingOnSupervisorExit = true;
     return false;
+  }
+
+  /** Start an empty streak owned by the currently tracked runner. */
+  private resetHealthMissStreak(): void {
+    this.consecutiveHealthMisses = 0;
+    this.supervisedPid = this.state.xcTestProcessId;
+    this.supervisedLaunchGeneration = this.runnerLaunchGeneration;
   }
 }

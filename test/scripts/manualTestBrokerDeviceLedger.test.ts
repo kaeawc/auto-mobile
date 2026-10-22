@@ -1,5 +1,5 @@
 import { BrokerTransportError } from "../../scripts/manual-test/brokerDaemonClient";
-import { expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { join, resolve } from "node:path";
 import {
   BrokerDeviceLedger,
@@ -359,6 +359,55 @@ function timingWithReset(
     },
   };
 }
+
+describe("grant ended by session_owner_exited (#14780)", () => {
+  const ended = (f: ReturnType<typeof fixture>): SessionBrokerResult => ({
+    ...f.released,
+    outcome: "failed",
+    failure: {
+      code: "session_owner_exited",
+      message: "Session owner exited before relinquishing its device",
+      retryable: false,
+    },
+  });
+
+  test("destroyed device absent from healthy inventory verifies without timing out", async () => {
+    const f = fixture();
+    f.bind();
+    f.broker.statusResults = [ended(f)];
+    await assertReleasedAndAbsent({
+      ledger: f.ledger,
+      daemonClient: f.broker,
+      timer: f.timer,
+      budgetMs: 240_000,
+      devicesView: async () => f.view,
+    });
+    expect(f.ledger.releaseComplete(f.ledger.devices()[0])).toBe(true);
+    expect(leakReport(f.ledger, f.view)).toEqual([]);
+    expect(f.timer.now()).toBe(0);
+  });
+
+  test("a device still present is not accepted as absent", async () => {
+    const f = fixture();
+    f.bind();
+    f.broker.statusResults = [ended(f)];
+    const pending = assertReleasedAndAbsent({
+      ledger: f.ledger,
+      daemonClient: f.broker,
+      timer: f.timer,
+      budgetMs: 500,
+      devicesView: async () => ({ ...f.view, devices: [device] }),
+    });
+    const result = pending.then(
+      () => null,
+      (error: unknown) => error,
+    );
+    await drainUntilQuiescent(f.timer);
+    f.timer.advanceTime(500);
+    expect(await result).toBeInstanceOf(Error);
+    f.timer.reset();
+  });
+});
 
 test.each(["clean", "fallback:erase"] as const)(
   "present released %s device is pooled immediately and survives reload",

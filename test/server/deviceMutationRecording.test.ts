@@ -27,60 +27,10 @@ import {
 } from "../../src/server/deviceMutationRecording";
 import { ToolRegistryClass } from "../../src/server/toolRegistry";
 import { logger } from "../../src/utils/logger";
+import { DEVICE_MUTATION_TOOL_CASES as CASES } from "../helpers/deviceMutationToolCases";
 
 const DEVICE: BootedDevice = { deviceId: "phone", platform: "android", name: "Phone" };
 const SCOPE = { sessionUuid: "broker-session", deviceId: DEVICE.deviceId, incarnation: "native-1" };
-const CASES: readonly { name: string; args: Record<string, unknown>; kind: string }[] = [
-  {
-    name: "installApp",
-    args: { artifactPath: "/app.apk", appId: "com.example" },
-    kind: "installed-app",
-  },
-  { name: "uninstallApp", args: { appId: "com.example" }, kind: "installed-app" },
-  {
-    name: "setAppPermissions",
-    args: { appId: "com.example", permissions: ["camera"] },
-    kind: "permission",
-  },
-  { name: "clipboard", args: { action: "copy", text: "new" }, kind: "clipboard" },
-  { name: "displayConfig", args: { theme: "dark" }, kind: "device-setting" },
-  { name: "changeLocalization", args: { locale: "ja-JP" }, kind: "device-setting" },
-  { name: "setDeviceState", args: { location: { latitude: 1, longitude: 2 } }, kind: "location" },
-  { name: "biometricAuth", args: { action: "enroll" }, kind: "biometric-enrollment" },
-  { name: "network", args: { simulateErrors: { durationSeconds: 5 } }, kind: "network-condition" },
-  {
-    name: "putAppFile",
-    args: {
-      target: { domain: "app_containers", appId: "com.example", container: "documents" },
-      files: [{ destinationPath: "a.txt", contentText: "new" }],
-    },
-    kind: "shared-file",
-  },
-  { name: "openLink", args: { url: "https://example.com" }, kind: "opened-url" },
-  {
-    name: "setUIState",
-    args: { fields: [{ selector: { text: "Name" }, value: "new" }] },
-    kind: "preference",
-  },
-  { name: "accessibility", args: { talkback: true }, kind: "screen-reader" },
-  { name: "keyboard", args: { action: "hide" }, kind: "keyboard" },
-  { name: "postNotification", args: { title: "New" }, kind: "notification" },
-  { name: "resetKeychain", args: {}, kind: "keychain" },
-  { name: "rotate", args: { orientation: "landscape" }, kind: "rotation" },
-  {
-    name: "windowMode",
-    args: { appId: "com.example", mode: "fullscreen" },
-    kind: "device-setting",
-  },
-  { name: "setNotificationPolicy", args: {}, kind: "notification" },
-  { name: "setPosture", args: { posture: "folded" }, kind: "device-setting" },
-  { name: "accessibilityAction", args: {}, kind: "opaque" },
-  { name: "displayProfile", args: {}, kind: "opaque" },
-  { name: "killProfile", args: {}, kind: "opaque" },
-  { name: "mediaSession", args: {}, kind: "opaque" },
-  { name: "setAppLinks", args: {}, kind: "opaque" },
-  { name: "setSensor", args: {}, kind: "opaque" },
-];
 
 class FakePriorReader implements MutationPriorReader {
   calls = 0;

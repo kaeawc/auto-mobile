@@ -119,6 +119,9 @@ describe("broker reset readiness lifecycle", () => {
       const pending = broker.prepare(exportConfig("refused-after-wait"), "token");
       await drainUntilQuiescent(harness.timer);
       harness.timer.advanceTime(25);
+      // The reset is still running, so the wait extends once by the cold-create estimate (#14791).
+      await drainUntilQuiescent(harness.timer);
+      harness.timer.advanceTime(harness.timer.getMsUntilNextDueEvent() ?? 0);
       const result = await pending;
       expect(result.timing?.acquisition).toMatchObject({
         admission: "wait",

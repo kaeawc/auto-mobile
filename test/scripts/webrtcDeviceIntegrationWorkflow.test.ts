@@ -240,3 +240,13 @@ describe("#4308 device WebRTC integration workflow", () => {
     }
   });
 });
+
+describe("iOS WHEP retry cleanup scope (#14826)", () => {
+  test("never pkills AutoMobile daemons by name on a shared host", () => {
+    const capture = jobSteps(PULL_REQUEST_WORKFLOW, "ios-device-webrtc").find(
+      (step) => step.name === "Run iOS device capture integration",
+    );
+    expect(capture?.run).not.toContain("pkill");
+    expect(capture?.run).toContain("scripts/ci/reap-job-processes.sh");
+  });
+});

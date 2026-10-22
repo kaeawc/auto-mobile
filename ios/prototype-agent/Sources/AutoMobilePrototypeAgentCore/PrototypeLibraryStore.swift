@@ -144,6 +144,20 @@ final class PrototypeLibraryStore {
         if files.exists(url) { try files.remove(url) }
     }
 
+    func delete(_ libraryId: String) throws {
+        let prototype = try directory(libraryId)
+        let storage = storageRoot.appendingPathComponent(libraryId, isDirectory: true)
+        // Attempt both removals even if one fails, and report every failed path.
+        var failures: [String] = []
+        for path in [prototype, storage] where files.exists(path) {
+            do { try files.remove(path) }
+            catch { failures.append("\(path.path): \(error.localizedDescription)") }
+        }
+        if !failures.isEmpty {
+            throw PrototypeLibraryFailure(path: libraryId, message: failures.joined(separator: "; "))
+        }
+    }
+
     /// Internal commit seam: callers supply provenance, never read it from imported bundle metadata.
     @discardableResult
     func add(
@@ -185,6 +199,8 @@ final class PrototypeLibraryStore {
             throw PrototypeLibraryFailure(path: "library", message: "Library capacity exceeded")
         }
         try files.assertAbsent(destination)
+        // Orphaned values from an earlier partial deletion cannot become a new import's storage.
+        try files.assertAbsent(storageRoot.appendingPathComponent(id, isDirectory: true))
         let stage = try files.makeStagingDirectory(parent: root, mode: 0o700)
         do {
             try files.excludeFromBackup(stage)
@@ -229,21 +245,20 @@ final class PrototypeLibraryStore {
         return entry
     }
 
-    private func validate(_ bytes: Data) throws {
+    func validate(
+        _ bytes: Data, supportedCapabilities: Set<String> = Set(AutoMobilePrototypeCapabilities.supported)
+    )
+        throws
+    {
         do {
-            try PrototypeSpecStrictValidator.validate(
-                data: bytes, supportedCapabilities: Set(AutoMobilePrototypeCapabilities.supported), library: true
-            )
-            let (_, context) = try PrototypeContractValidator.inspect(data: PrototypeStrictJSON.prepare(bytes))
-            for action in context.actions where action.value["type"] == .string("request") &&
-                action.value["via"] == .string("host")
-            {
-                throw PrototypeLibraryFailure(
-                    path: "\(action.path).via",
-                    message: "Host requests are unavailable in the library"
-                )
-            }
-        } catch let failure as PrototypeLibraryFailure { throw failure }
+            try PrototypeSpecStrictValidator.validate(data: bytes, library: true)
+            let (value, context) = try PrototypeContractValidator.inspect(data: PrototypeStrictJSON.prepare(bytes))
+            let missing = PrototypeStrictCapabilities.required(value.objectFields ?? [:])
+                .subtracting(supportedCapabilities).sorted()
+            if !missing.isEmpty { throw PrototypeLibraryImportFailure.needsNewerViewer(missing: missing) }
+            try PrototypeLibraryPolicy.validate(value.objectFields ?? [:], context: context)
+        } catch let failure as PrototypeLibraryImportFailure { throw failure }
+        catch let failure as PrototypeLibraryFailure { throw failure }
         catch let PrototypeLoadError.invalidSpec(path, message) {
             throw PrototypeLibraryFailure(path: path, message: message)
         } catch { throw PrototypeLibraryFailure(path: "spec.json", message: error.localizedDescription) }

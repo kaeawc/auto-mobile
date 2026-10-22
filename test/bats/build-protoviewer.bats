@@ -74,7 +74,7 @@ SCRIPT
   [[ "$output" == *'--force --sign - '* ]]
 }
 
-@test "plist has the exact app identity and no ATS file sharing or compiled icon key" {
+@test "plist declares prototype and JSON imports without ATS file sharing or compiled icon keys" {
   run python3 - "$FIXTURE/ios/prototype-agent/ProtoViewer/Info.plist" <<'PY'
 import plistlib
 import sys
@@ -82,6 +82,19 @@ with open(sys.argv[1], 'rb') as source:
     value = plistlib.load(source)
 assert value['CFBundleIdentifier'] == 'dev.jasonpearson.automobile.protoviewer'
 assert value['CFBundleDisplayName'] == value['CFBundleName'] == value['CFBundleExecutable'] == 'ProtoViewer'
+assert value['LSSupportsOpeningDocumentsInPlace'] is False
+uti = 'dev.jasonpearson.automobile.prototype'
+declaration, = value['UTExportedTypeDeclarations']
+assert declaration['UTTypeIdentifier'] == uti
+assert set(declaration['UTTypeConformsTo']) == {'public.data', 'public.zip-archive'}
+assert declaration['UTTypeTagSpecification'] == {
+    'public.filename-extension': ['automobile-proto'],
+    'public.mime-type': 'application/vnd.automobile.prototype+zip',
+}
+document, = value['CFBundleDocumentTypes']
+assert document['CFBundleTypeRole'] == 'Viewer'
+assert document['LSHandlerRank'] == 'Alternate'
+assert set(document['LSItemContentTypes']) == {uti, 'public.json'}
 def check(value):
     if isinstance(value, dict):
         assert not {'NSAppTransportSecurity', 'UIFileSharingEnabled', 'CFBundleIconName'} & value.keys()

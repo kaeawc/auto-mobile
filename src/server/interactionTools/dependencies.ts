@@ -19,6 +19,9 @@ import type { SetPosture } from "../../features/device/SetPosture";
 import type { RealObserveScreen } from "../../features/observe/ObserveScreen";
 import type { BootedDevice, ObserveResult } from "../../models";
 import type { WaitForObservationOutcome } from "../observeTools";
+import type { AndroidCtrlProxy } from "../../features/observe/android";
+import type { KeyboardProfileRestoreRegistry } from "../../features/utility/KeyboardProfileRestore";
+import type { SessionKeyboardProfileHost } from "../sessionKeyboardProfile";
 
 export interface SendKeysRunnerCommandSource {
   getSupportedCommands(): Promise<string[] | null>;
@@ -63,6 +66,16 @@ export interface InteractionToolDependencies {
   recentAppsFactory?: (device: BootedDevice) => Pick<RecentApps, "execute">;
   clipboardFactory?: (device: BootedDevice) => Pick<Clipboard, "execute">;
   wakeAndUnlockFactory?: (device: BootedDevice) => Pick<WakeAndUnlock, "execute">;
+  keyboardProfile?: KeyboardProfileToolDependencies;
+}
+
+/** Collaborators of `keyboard setProfile`; each defaults to the daemon's own (#14705). */
+export interface KeyboardProfileToolDependencies {
+  sessionManager?: () => SessionKeyboardProfileHost | undefined;
+  clientFor?: (
+    device: BootedDevice,
+  ) => Pick<AndroidCtrlProxy, "supportsCommand" | "setKeyboardProfile">;
+  registry?: KeyboardProfileRestoreRegistry;
 }
 
 type SendKeysLike = Pick<SendKeys, "execute">;

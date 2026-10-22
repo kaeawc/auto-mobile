@@ -92,6 +92,14 @@ class DaemonSocketPathsUserIdTest {
   }
 
   @Test
+  fun `a security policy that denies running id falls back to the user name`() {
+    assertEquals(
+      "jason",
+      resolveDaemonUserId("jason", "linux") { throw SecurityException("exec denied") },
+    )
+  }
+
+  @Test
   fun `a successful uid read is trimmed and Windows uses the user name without reading`() {
     assertEquals("1000", resolveDaemonUserId("jason", "linux") { "1000\n" })
     assertEquals(

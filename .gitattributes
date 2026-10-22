@@ -12,6 +12,7 @@ test/features/observe/activityActivitiesDumps/*.log text eol=lf
 test/fixtures/android-dumpsys-package/*.txt text eol=lf
 test/fixtures/android-notification-policy/*.txt text eol=lf
 test/fixtures/android-app-links/*.txt text eol=lf
+test/fixtures/ios-simctl/*.txt text eol=lf
 test/fixtures/android-emulator/*.txt text eol=lf
 test/fixtures/android-startup/*.txt text eol=lf
 test/fixtures/duo-enumerate.txt text eol=lf

@@ -90,16 +90,24 @@ class DirectoryLibraryRepository(
   }
 
   @Synchronized
-  override fun list(): LibraryResult<List<LibraryEntry>> = storageResult {
-    files
-      .ids()
-      .mapNotNull { id -> readEntry(id) }
-      .sortedWith(compareByDescending<LibraryEntry> { it.lastOpenedAt }.thenBy { it.libraryId })
-      .take(MAX_LIBRARY_PROTOTYPES)
+  override fun list(): LibraryResult<List<LibraryEntry>> {
+    loadLimit()?.let {
+      return it
+    }
+    return storageResult {
+      files
+        .ids()
+        .mapNotNull { id -> readEntry(id) }
+        .sortedWith(compareByDescending<LibraryEntry> { it.lastOpenedAt }.thenBy { it.libraryId })
+        .take(MAX_LIBRARY_PROTOTYPES)
+    }
   }
 
   @Synchronized
   override fun get(libraryId: String): LibraryResult<LibraryPrototype> {
+    loadLimit()?.let {
+      return it
+    }
     val entry = readEntry(libraryId) ?: return LibraryResult.Failure(LibraryError.NotFound)
     return when (val loaded = storageResult { store.load(libraryId) }) {
       is LibraryResult.Failure -> loaded
@@ -113,6 +121,14 @@ class DirectoryLibraryRepository(
         }
     }
   }
+
+  /** Count the entire on-disk library, including corrupt or orphaned entries, before any load. */
+  private fun loadLimit(): LibraryResult.Failure? =
+    when (val size = storageResult { files.sizeBytes() }) {
+      is LibraryResult.Failure -> size
+      is LibraryResult.Success ->
+        if (size.value > MAX_LIBRARY_BYTES) LibraryResult.Failure(LibraryError.Limit) else null
+    }
 
   private fun validateLoaded(
     entry: LibraryEntry,

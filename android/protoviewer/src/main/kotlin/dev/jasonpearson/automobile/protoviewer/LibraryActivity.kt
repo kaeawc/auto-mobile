@@ -74,7 +74,10 @@ class LibraryActivity : ComponentActivity() {
     networkSettings =
       NetworkSettings(
         services.settings,
-        services.localNetworkPermission(this) { granted -> localNetworkDenied = !granted },
+        services.localNetworkPermission(this) { granted ->
+          networkSettings.onPermissionResult(granted)
+          localNetworkDenied = !granted
+        },
         Build.VERSION.SDK_INT,
       )
     setContent {
@@ -247,7 +250,7 @@ internal fun LibraryScreen(
         )
       },
     )
-    if (allowNetwork && localNetworkDenied) Text(stringResource(R.string.local_network_denied))
+    if (localNetworkDenied) Text(stringResource(R.string.local_network_denied))
     if (actionFailed) Text(stringResource(R.string.action_error))
     when (result) {
       null -> Text(stringResource(R.string.loading))

@@ -77,22 +77,22 @@ class LibraryActivityTest {
   }
 
   @Test
-  fun denialExplainsLanTimeoutsAndKeepsInternetSwitchOn() {
+  fun denialTurnsSwitchOffAndExplainsNetworkIsDisabled() {
     launch()
     compose.onNodeWithTag("allow-network").performClick()
     // Deliver the injected platform result without requiring a Robolectric API 37 sandbox.
     compose.runOnIdle { permission.result(false) }
     compose
       .onNodeWithText(
-        "Local-network permission denied. Internet access stays enabled; local-network (LAN) requests may time out. You can grant permission in Android settings.",
+        "Local-network permission denied. Network access is off. Enable the switch to request permission again.",
       )
       .assertIsDisplayed()
-    compose.onNodeWithTag("allow-network").assertIsOn()
-    assertTrue(settings.allowNetwork.value)
+    compose.onNodeWithTag("allow-network").assertIsOff()
+    assertFalse(settings.allowNetwork.value)
     compose.onNodeWithTag("allow-network").performClick()
     compose
       .onNodeWithText(
-        "Local-network permission denied. Internet access stays enabled; local-network (LAN) requests may time out. You can grant permission in Android settings.",
+        "Local-network permission denied. Network access is off. Enable the switch to request permission again.",
       )
       .assertDoesNotExist()
   }

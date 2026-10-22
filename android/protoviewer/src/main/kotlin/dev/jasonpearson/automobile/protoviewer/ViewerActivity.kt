@@ -29,6 +29,7 @@ import androidx.lifecycle.lifecycleScope
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpClient
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpRequest
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRuntime
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeScheduledTask
 import dev.jasonpearson.automobile.prototype.AutoMobilePrototype
 import dev.jasonpearson.automobile.prototype.EmbeddedPrototypeHost
 import dev.jasonpearson.automobile.prototype.PrototypeAssets
@@ -50,6 +51,8 @@ class ViewerActivity : ComponentActivity() {
 
   private val interactions = Mutex()
   private var runtime: PrototypeRuntime? = null
+  private var watchdog: PrototypeScheduledTask? = null
+  private var renderFailed = false
   private var content by mutableStateOf<ViewerContent?>(null)
   private var state by mutableStateOf<ViewerScreenState>(ViewerScreenState.Loading)
   private var confirmReset by mutableStateOf(false)
@@ -63,10 +66,13 @@ class ViewerActivity : ComponentActivity() {
     libraryId = intent.getStringExtra(ViewerLaunch.LIBRARY_ID)
     libraryId?.let { services.register(it, restart) }
     setContent { ProtoViewerTheme { ViewerScreen() } }
+    watchdog = services.renderWatchdog.start(lifecycleScope) { failRender() }
     lifecycleScope.launch {
-      state = withContext(services.io) { loadViewer(libraryId, services.repository) }
-      if (!isFinishing && !restarting)
-        (state as? ViewerScreenState.Ready)?.let { prepare(it.prototype) }
+      val loaded = withContext(services.io) { loadViewer(libraryId, services.repository) }
+      if (!isFinishing && !restarting && !renderFailed) {
+        state = loaded
+        if (loaded is ViewerScreenState.Ready) prepare(loaded.prototype) else stopWatchdog()
+      }
     }
   }
 
@@ -75,8 +81,9 @@ class ViewerActivity : ComponentActivity() {
       EmbeddedPrototypeHost(lifecycleScope, interactions, services.io).apply {
         clock = services.clock::nowMillis
         flushScope = services.flushScope
-        isCurrent = { content?.host === this && !isFinishing && !restarting }
+        isCurrent = { content?.host === this && !isFinishing && !restarting && !renderFailed }
         onRuntime = { opened -> if (isCurrent()) runtime = opened else opened.close() }
+        onReady = { if (isCurrent()) stopWatchdog() }
       }
     content =
       ViewerContent(
@@ -106,27 +113,33 @@ class ViewerActivity : ComponentActivity() {
           modifier = Modifier.fillMaxWidth().testTag("network-provenance"),
         )
       if (restartFailed) Text(stringResource(R.string.action_error))
+      // Spec dialogs, menus, dropdowns, sheets and anchored overlays are all in-window renderer
+      // layers. Clip that whole surface, including its scrims, below the app-owned provenance.
       Box(Modifier.weight(1f).fillMaxWidth().clipToBounds().testTag("viewer-content")) {
         val current = content
         if (current == null) ViewerStatus(state) { finish() }
         else
-          ProvideEmbeddedPrototypeHost(current.host) {
-            AutoMobilePrototype(
-              spec = current.prototype.saved.specJson,
-              modifier = Modifier.fillMaxSize().testTag("viewer-ready"),
-              assets = current.assets,
-              storage = current.storage,
-              network = current.network,
-              handleBack = true,
-              onDismiss = { finish() },
-              onError = {
-                SideEffect {
-                  content = null
-                  state = ViewerScreenState.Error(LibraryError.Corrupt)
-                }
-              },
-            )
-          }
+          services.renderer.Render(
+            onFailure = { failRender() },
+            content = {
+              ProvideEmbeddedPrototypeHost(current.host) {
+                AutoMobilePrototype(
+                  spec = current.prototype.saved.specJson,
+                  modifier = Modifier.fillMaxSize().testTag("viewer-ready"),
+                  assets = current.assets,
+                  storage = current.storage,
+                  network = current.network,
+                  handleBack = true,
+                  onDismiss = { finish() },
+                  onError = {
+                    SideEffect {
+                      failRender()
+                    }
+                  },
+                )
+              }
+            },
+          )
       }
     }
     if (confirmReset)
@@ -136,10 +149,26 @@ class ViewerActivity : ComponentActivity() {
       }
   }
 
+  private fun stopWatchdog() {
+    watchdog?.cancel()
+    watchdog = null
+  }
+
+  private fun failRender() {
+    if (renderFailed || isFinishing || restarting) return
+    renderFailed = true
+    stopWatchdog()
+    runtime?.close()
+    runtime = null
+    content = null
+    state = ViewerScreenState.Error(LibraryError.Corrupt)
+  }
+
   private suspend fun relaunch(reset: Boolean) = interactions.withLock {
     if (restarting || isFinishing) return@withLock
     val id = libraryId ?: return@withLock
     restarting = true
+    stopWatchdog()
     try {
       runtime?.flushStorage()
     } catch (error: CancellationException) {
@@ -185,6 +214,7 @@ class ViewerActivity : ComponentActivity() {
   }
 
   override fun onDestroy() {
+    stopWatchdog()
     libraryId?.let { services.unregister(it, restart) }
     runtime?.close()
     super.onDestroy()

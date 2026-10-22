@@ -41,6 +41,8 @@ class EmbeddedPrototypeHost(
    */
   var isCurrent: () -> Boolean = { true }
   var onRuntime: (PrototypeRuntime) -> Unit = {}
+  /** Called only after runtime content successfully composes, never while storage/fonts load. */
+  var onReady: () -> Unit = {}
   var onInteraction: suspend (PrototypeInteraction, PrototypeRuntime) -> Unit =
     { interaction, runtime ->
       interactions.withLock { runtime.handle(interaction) }

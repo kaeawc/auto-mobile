@@ -40,6 +40,10 @@ class NetworkSettings(
   private val permission: LocalNetworkPermission,
   private val apiLevel: Int,
 ) {
+  fun onPermissionResult(granted: Boolean) {
+    if (!granted) settings.setAllowNetwork(false)
+  }
+
   fun setEnabled(enabled: Boolean) {
     val enabling = enabled && !settings.allowNetwork.value
     settings.setAllowNetwork(enabled)

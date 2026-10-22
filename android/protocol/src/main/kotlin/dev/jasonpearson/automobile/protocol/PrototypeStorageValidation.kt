@@ -5,8 +5,8 @@ import kotlinx.serialization.json.*
 /** Strict cross-references reuse the runtime key grammar, pointer lookup and entry accounting. */
 internal object PrototypeStorageValidation {
   /**
-   * [enforceBytes] is false for live state writes: the runtime applies an over-limit write on screen
-   * and only skips persisting it, so the byte budget is an import-time check.
+   * [enforceBytes] is false for live state writes: the runtime applies an over-limit write on
+   * screen and only skips persisting it, so the byte budget is an import-time check.
    */
   fun error(spec: JsonObject, enforceBytes: Boolean = true): PrototypeSpecError? {
     val storage = spec["storage"] as? JsonObject ?: return null
@@ -38,7 +38,8 @@ internal object PrototypeStorageValidation {
     }
     return if (
       enforceBytes &&
-        bytes > PrototypeSpecContract.limits.getValue("MAX_PROTOTYPE_STORAGE_BYTES").jsonPrimitive.int
+        bytes >
+          PrototypeSpecContract.limits.getValue("MAX_PROTOTYPE_STORAGE_BYTES").jsonPrimitive.int
     )
       PrototypeSpecError("storage.keys", "Storage byte limit exceeded")
     else null

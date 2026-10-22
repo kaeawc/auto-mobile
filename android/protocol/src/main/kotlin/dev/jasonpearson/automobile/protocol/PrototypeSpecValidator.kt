@@ -185,7 +185,10 @@ object PrototypeSpecValidator {
           if (!validNumberTokens(stored)) fail("", "Invalid JSON")
           else
             walk(stored, stateRule, "state", Context(), 0)
-              ?: PrototypeStorageValidation.error(JsonObject(value + ("state" to stored)), enforceBytes = false)
+              ?: PrototypeStorageValidation.error(
+                JsonObject(value + ("state" to stored)),
+                enforceBytes = false,
+              )
               ?: checkedStateErrors(checked, buildJsonObject { put("state", stored) })
         } catch (_: IllegalArgumentException) {
           fail("", "Invalid JSON")

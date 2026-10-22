@@ -6,6 +6,7 @@ import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import { runWithToolDispatchReporter } from "../../../utils/ToolDispatchContext";
 import { throwIfAborted } from "../../../utils/toolUtils";
+import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
 import { RealObserveScreen } from "../../observe/ObserveScreen";
 import { TapOnElement } from "../TapOnElement";
 import {
@@ -21,6 +22,13 @@ import {
 
 /** Alerts answered before one action at most; a longer chain is left for the caller. */
 export const SYSTEM_ALERT_MAX_ANSWERS_PER_ACTION = 3;
+
+/**
+ * A dialog raised by the action itself is still animating in when first read, and a tap
+ * during the animation is lost (#15005). Reads this far apart must agree before it is answered.
+ */
+export const SYSTEM_ALERT_SETTLE_INTERVAL_MS = 250;
+export const SYSTEM_ALERT_SETTLE_MAX_READS = 8;
 
 export type SystemAlertTapSelector = { elementId: string } | { text: string };
 
@@ -42,6 +50,7 @@ export interface SystemAlertGateDependencies {
   registry?: SystemAlertPolicyRegistry;
   reader?: SystemAlertHierarchyReader;
   tapper?: SystemAlertTapper;
+  timer?: Pick<Timer, "sleep">;
 }
 
 /** The slice of an observe screen the reader uses; `RealObserveScreen` satisfies it. */
@@ -111,6 +120,11 @@ function buttonList(alert: DetectedSystemAlert): string {
   return alert.buttons.map((button) => `"${button.label}"`).join(", ");
 }
 
+/** The alert's content and where its buttons sit; unequal across reads while it animates. */
+function layoutKey(alert: DetectedSystemAlert): string {
+  return `${alertKey(alert)}\u0000${alert.buttons.map((button) => button.bounds ?? "").join("\u0000")}`;
+}
+
 function alertKey(alert: DetectedSystemAlert): string {
   return `${alert.message}\u0000${alert.buttons.map((button) => button.label).join("\u0000")}`;
 }
@@ -127,11 +141,13 @@ export class SystemAlertGate {
   private readonly registry: SystemAlertPolicyRegistry;
   private readonly reader: SystemAlertHierarchyReader;
   private readonly tapper: SystemAlertTapper;
+  private readonly timer: Pick<Timer, "sleep">;
 
   constructor(dependencies: SystemAlertGateDependencies = {}) {
     this.registry = dependencies.registry ?? defaultSystemAlertPolicyRegistry;
     this.reader = dependencies.reader ?? createObserveHierarchyReader();
     this.tapper = dependencies.tapper ?? createTapOnTapper();
+    this.timer = dependencies.timer ?? defaultTimer;
   }
 
   beforeAction(device: BootedDevice, signal?: AbortSignal): Promise<string[]> {
@@ -206,15 +222,51 @@ export class SystemAlertGate {
     }
   }
 
+  /**
+   * Re-reads until two reads agree on the alert and its button positions, so the tap lands on
+   * a dialog that has finished animating. Null when the alert went away meanwhile.
+   */
+  private async settle(
+    device: BootedDevice,
+    first: DetectedSystemAlert,
+    signal: AbortSignal | undefined,
+    warnings: string[],
+  ): Promise<DetectedSystemAlert | null> {
+    let current = first;
+    for (let read = 0; read < SYSTEM_ALERT_SETTLE_MAX_READS; read += 1) {
+      await this.timer.sleep(SYSTEM_ALERT_SETTLE_INTERVAL_MS);
+      throwIfAborted(signal);
+      const next = await this.readAlert(device, signal, warnings);
+      if (!next) {
+        return null;
+      }
+      if (layoutKey(next) === layoutKey(current)) {
+        return next;
+      }
+      current = next;
+    }
+    // Never settled: answer the latest layout rather than leave the prompt.
+    return current;
+  }
+
   /** Taps the policy's button and returns its label, or records why it did not. */
   private async answer(
     device: BootedDevice,
-    alert: DetectedSystemAlert,
+    detected: DetectedSystemAlert,
     policy: SystemAlertPolicy,
     signal: AbortSignal | undefined,
     warnings: string[],
   ): Promise<string | undefined> {
-    const decision = chooseSystemAlertButton(alert, policy.policy, policy.match);
+    let alert = detected;
+    let decision = chooseSystemAlertButton(alert, policy.policy, policy.match);
+    if (decision.answer === "tap") {
+      const settled = await this.settle(device, alert, signal, warnings);
+      if (!settled) {
+        return undefined;
+      }
+      alert = settled;
+      decision = chooseSystemAlertButton(alert, policy.policy, policy.match);
+    }
     if (decision.answer === "report") {
       warnings.push(
         `${sentence(alert)} is showing (buttons ${buttonList(alert)}); ` +

@@ -1,4 +1,5 @@
 import type { ViewHierarchyNode, ViewHierarchyResult } from "../../../models";
+import { nodeAttributes } from "../../../models/ViewHierarchyResult";
 import { ViewHierarchyParser } from "../../../utils/ViewHierarchyParser";
 import type { SystemAlertMatch, SystemAlertPolicyName } from "./SystemAlertPolicy";
 
@@ -11,6 +12,8 @@ export interface SystemAlertButton {
   rank: number;
   /** The `tapOn` selector for this button: a resource id on Android, its label on iOS. */
   selector: { elementId: string } | { text: string };
+  /** The button's bounds as reported, so a dialog that is still animating reads as changing. */
+  bounds?: string;
 }
 
 export interface DetectedSystemAlert {
@@ -97,6 +100,19 @@ function nodeLabel(attrs: Record<string, unknown>): string | undefined {
   return stringAttr(attrs, "text", "content-desc", "ios-accessibility-label", "label");
 }
 
+function boundsField(node: ViewHierarchyNode): { bounds?: string } {
+  const bounds = nodeAttributes(node).bounds;
+  return bounds === undefined ? {} : { bounds: JSON.stringify(bounds) };
+}
+
+/**
+ * iOS accessibility exposes scroll indicators ("Vertical scroll bar, 2 pages") inside the
+ * alert's subtree; they are not part of what the alert says.
+ */
+function isAccessibilityNoise(label: string): boolean {
+  return /\bscroll bar\b/i.test(label);
+}
+
 function allRoots(hierarchy: ViewHierarchyResult): ViewHierarchyNode[] {
   return [...parser.extractRootNodes(hierarchy), ...parser.extractWindowRootNodes(hierarchy)];
 }
@@ -128,6 +144,7 @@ function detectAndroidAlert(hierarchy: ViewHierarchyResult): DetectedSystemAlert
             label,
             ...(known ?? { kind: "other", rank: 0 }),
             selector: { elementId: id },
+            ...boundsField(node),
           });
         }
       }
@@ -159,8 +176,13 @@ function iosAlertContent(alert: ViewHierarchyNode): {
     const className = stringAttr(attrs, "className", "class");
     if (attrs.role === "button" || (className && IOS_BUTTON_CLASSES.has(className))) {
       const known = IOS_BUTTONS[normalizeLabel(label)];
-      buttons.push({ label, ...(known ?? { kind: "other", rank: 0 }), selector: { text: label } });
-    } else if (!texts.includes(label)) {
+      buttons.push({
+        label,
+        ...(known ?? { kind: "other", rank: 0 }),
+        selector: { text: label },
+        ...boundsField(node),
+      });
+    } else if (!isAccessibilityNoise(label) && !texts.includes(label)) {
       texts.push(label);
     }
   });

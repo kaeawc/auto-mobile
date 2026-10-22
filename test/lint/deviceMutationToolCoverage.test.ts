@@ -76,7 +76,7 @@ describe("device mutation tool coverage", () => {
     ).toHaveLength(1);
   });
 
-  test.each(["persona", "statusBar", "sendBroadcast", "measureStartup"])(
+  test.each(["manufacturerProfile", "statusBar", "sendBroadcast", "measureStartup"])(
     "%s stays pending until a production mutation adapter is exercised",
     (name) => {
       expect(DEVICE_MUTATION_TOOL_COVERAGE[name].status).toBe("pending-adapter");

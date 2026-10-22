@@ -27,7 +27,9 @@ final class PrototypeFontFaceLedger<Font, Digest: Equatable> {
         font: Font,
         register: (Font) -> PrototypeFontRegistrationResult,
         unregister: (Font) -> Void
-    ) -> Bool {
+    )
+        -> Bool
+    {
         if let current = faces[face], current.digest != digest {
             unregister(current.font)
             faces[face] = nil

@@ -7,7 +7,6 @@ import { readBrokerProtectedDevices } from "./brokerClientFiles";
 import { BrokerTransportError, type BrokerDaemonClient } from "./brokerDaemonClient";
 import type { SessionBrokerResult } from "../../src/devices/sessionBrokerResult";
 import { errorMessage } from "../../src/utils/describeUnknownError";
-import { logger } from "../../src/utils/logger";
 import {
   matchesProtection,
   nameEvidenceMissing,
@@ -330,11 +329,7 @@ export async function assertReleasedAndAbsent(options: {
               }
               // Restart transport loss is not a receipt; leave this grant unconfirmed for this pass.
               const message = `Broker status transport retry for ${device.client}: ${errorMessage(error)}`;
-              if (options.log) {
-                options.log(message);
-              } else {
-                logger.debug(message, error);
-              }
+              options.log?.(message);
               transportFailed = true;
               continue;
             }

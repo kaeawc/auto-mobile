@@ -10,7 +10,6 @@ import { defaultIdGenerator, type IdGenerator } from "../../src/utils/IdGenerato
 import { defaultTimer, type Timer } from "../../src/utils/SystemTimer";
 import { raceWithDeadline } from "../../src/utils/raceWithDeadline";
 import { errorMessage } from "../../src/utils/describeUnknownError";
-import { logger } from "../../src/utils/logger";
 import { connectFrameSocket } from "./daemon-frame";
 import {
   encodeDaemonFrame,
@@ -263,11 +262,7 @@ export async function waitForBrokerRelease(options: {
           }
           // A daemon restart can drop this read; retry within the same cleanup deadline.
           const message = `Broker release status transport retry: ${errorMessage(error)}`;
-          if (options.log) {
-            options.log(message);
-          } else {
-            logger.debug(message, error);
-          }
+          options.log?.(message);
           await options.timer.sleep(Math.min(1000, Math.max(0, deadline - options.timer.now())));
           continue;
         }

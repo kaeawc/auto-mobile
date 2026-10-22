@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import {
+  BrokerTransportError,
   createFrameBrokerDaemonClient,
   waitForBrokerRelease,
 } from "../../scripts/manual-test/brokerDaemonClient";
@@ -159,6 +160,7 @@ test("silent sockets expire at short and cleanup deadlines with FakeTimer", asyn
     await drainUntilQuiescent(f.timer);
     f.timer.advanceTime(budget);
     expect(await assertion).toBeInstanceOf(Error);
+    expect(await assertion).not.toBeInstanceOf(BrokerTransportError);
     expect(f.sockets[0].destroyed).toBe(true);
     expect(f.timer.getPendingTimeoutCount()).toBe(0);
   }
@@ -205,6 +207,11 @@ test("closed and oversized sockets fail and clean up", async () => {
       );
     }
     expect(await assertion).toBeInstanceOf(Error);
+    if (mode === "closed") {
+      expect(await assertion).toBeInstanceOf(BrokerTransportError);
+    } else {
+      expect(await assertion).not.toBeInstanceOf(BrokerTransportError);
+    }
     expect(f.sockets[0].destroyed).toBe(true);
     expect(f.timer.getPendingTimeoutCount()).toBe(0);
   }
@@ -294,3 +301,97 @@ test("native info supports the daemon text envelope and iOS UDID", async () => {
     nativeDevice: { deviceId: "udid", name: "ambroker-ios", platform: "ios" },
   });
 });
+
+test("connect and premature close failures are typed transport errors with causes", async () => {
+  const timer = new FakeTimer();
+  const cause = new Error("connection refused");
+  const client = createFrameBrokerDaemonClient({
+    socketPath: "/fake",
+    timer,
+    connect: async () => {
+      throw cause;
+    },
+  });
+  const error = await client.status("request", "secret").then(
+    () => null,
+    (error: unknown) => error,
+  );
+  expect(error).toBeInstanceOf(BrokerTransportError);
+  expect(error).toMatchObject({ name: "BrokerTransportError", cause });
+  for (const cause of [undefined, new Error("reset")]) {
+    const f = fixture();
+    f.replies.push(undefined);
+    const pending = f.client.status("request", "secret").then(
+      () => null,
+      (error: unknown) => error,
+    );
+    await drainUntilQuiescent(f.timer);
+    f.sockets[0].close(cause);
+    expect(await pending).toBeInstanceOf(BrokerTransportError);
+    if (cause) {
+      expect(await pending).toMatchObject({ cause });
+    }
+  }
+});
+
+test.each([true, false])(
+  "release polling retries only transport errors (%s)",
+  async (transport) => {
+    const timer = new FakeTimer();
+    const client = new FakeBrokerDaemonClient();
+    const error = transport ? new BrokerTransportError("restarting") : new Error("refused");
+    client.statusResults = [error, released];
+    const pending = waitForBrokerRelease({
+      client,
+      requestId: "request",
+      token: "secret",
+      timer,
+    }).then(
+      (result) => result,
+      (error: unknown) => error,
+    );
+    await drainUntilQuiescent(timer);
+    if (transport) {
+      timer.advanceTime(1000);
+    }
+    expect(await pending).toBe(transport ? released : error);
+    expect(client.calls).toHaveLength(transport ? 2 : 1);
+  },
+);
+
+test("transport retry sleeps only the remaining release budget", async () => {
+  const timer = new FakeTimer();
+  const client = new FakeBrokerDaemonClient();
+  client.statusResults = [new BrokerTransportError("restarting")];
+  const pending = waitForBrokerRelease({
+    client,
+    requestId: "request",
+    token: "secret",
+    timer,
+    timeoutMs: 400,
+  }).then(
+    () => null,
+    (error: unknown) => error,
+  );
+  await drainUntilQuiescent(timer);
+  timer.advanceTime(400);
+  expect(await pending).toBeInstanceOf(Error);
+  expect(client.calls).toHaveLength(1);
+  expect(timer.now()).toBe(400);
+});
+
+test.each(["refused", "schema"])(
+  "daemon %s errors remain outside transport retry classification",
+  async (mode) => {
+    const f = fixture();
+    f.replies.push(
+      mode === "refused" ? { success: false, error: "refused" } : { success: true, result: {} },
+    );
+    const error = await f.client.status("request", "secret").then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(BrokerTransportError);
+  },
+);

@@ -11,13 +11,40 @@ set -euo pipefail
 repo_root="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 out_dir="${1:-${repo_root}/site}"
 
-ts_count=$(grep -rE '^\s*(it|test)\(' "${repo_root}/test/" --include='*.test.ts' \
-  | grep -vc '\.skip(' || true)
+# grep's status 1 means "nothing matched", which is a valid count of zero. Anything above it (a
+# missing or unreadable tree) is a real error and must fail the script rather than publish a zero
+# badge (#14575).
+grep_lines() {
+  local status=0
+  grep "$@" || status=$?
+  if [ "$status" -gt 1 ]; then
+    echo "generate-test-count-badges: grep failed with status ${status}: grep $*" >&2
+    return "$status"
+  fi
+}
 
-kotlin_count=$(grep -rE '^\s*@Test' "${repo_root}/android/" --include='*.kt' \
-  | grep -cE 'src/(test|androidTest)/' || true)
+# BSD grep (macOS) exits 1, not 2, for a missing tree when --include is given, so check the trees
+# explicitly rather than relying on grep's status alone.
+for tree in test android ios; do
+  if [ ! -d "${repo_root}/${tree}" ]; then
+    echo "generate-test-count-badges: grep failed with status 2: missing source tree ${repo_root}/${tree}" >&2
+    exit 2
+  fi
+done
 
-swift_count=$(grep -rcE '^\s*func test' "${repo_root}/ios/" --include='*.swift' \
+# Count the lines of $1 that match the extended regex $2 (an empty $1 counts zero).
+count_matching() {
+  printf '%s\n' "$1" | awk -v pattern="$2" 'NF && $0 ~ pattern {n++} END {print n+0}'
+}
+
+ts_lines=$(grep_lines -rE '^\s*(it|test)\(' "${repo_root}/test/" --include='*.test.ts')
+ts_count=$(printf '%s\n' "$ts_lines" | awk 'NF && !/\.skip\(/ {n++} END {print n+0}')
+
+kotlin_lines=$(grep_lines -rE '^\s*@Test' "${repo_root}/android/" --include='*.kt')
+kotlin_count=$(count_matching "$kotlin_lines" 'src/(test|androidTest)/')
+
+# Per-file counts summed; a tree with no `func test` at all is a count of zero (#14574).
+swift_count=$(grep_lines -rcE '^\s*func test' "${repo_root}/ios/" --include='*.swift' \
   | awk -F: '{s+=$NF} END {print s+0}')
 
 format_number() {

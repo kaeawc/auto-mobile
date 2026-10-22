@@ -41,6 +41,9 @@ include(":protocol")
 
 include(":prototype-compose")
 
+// Saved-prototype store and device HTTP transport, split from CtrlProxy for ProtoViewer (#13617).
+include(":prototype-saved")
+
 include(":junit-runner")
 
 include(":test-plan-validation")

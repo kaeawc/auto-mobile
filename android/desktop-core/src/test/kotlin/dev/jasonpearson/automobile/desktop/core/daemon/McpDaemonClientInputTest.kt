@@ -294,9 +294,9 @@ internal class McpDaemonClientInputTest : McpDaemonClientInputFixture() {
             sessionUuid = "desktop-session",
           )
 
-        client.callTool("observe", JsonObject(emptyMap()))
+        client.callTool("tapOn", JsonObject(emptyMap()))
         client.callTool(
-          "observe",
+          "tapOn",
           JsonObject(mapOf("sessionUuid" to JsonPrimitive("explicit-session"))),
         )
         client.callTool("setToolEnabled", JsonObject(emptyMap()))

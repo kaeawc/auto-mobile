@@ -1,0 +1,46 @@
+{
+  "spec": {
+    "id": "flow-grid",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "opacity": 100
+    },
+    "root": {
+      "type": "scroll",
+      "axis": "vertical",
+      "child": {
+        "style": {
+          "spacing": 8,
+          "runSpacing": 16
+        },
+        "type": "grid",
+        "columns": 13,
+        "children": [
+          {
+            "span": 2,
+            "type": "text",
+            "text": "Hello"
+          },
+          {
+            "span": 2,
+            "type": "text",
+            "text": "Hello"
+          },
+          {
+            "span": 3,
+            "type": "column",
+            "children": [
+              {
+                "type": "text",
+                "text": "Hello"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "expectedPath": "root.child.columns"
+}

@@ -1,0 +1,50 @@
+{
+  "spec": {
+    "id": "bounds-anchor-aligned",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "opacity": 100
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "anchor": {
+            "type": "bounds",
+            "bounds": {
+              "x": 209.52380952380952,
+              "y": 605.3333333333334,
+              "width": 169.9047619047619,
+              "height": 48,
+              "zzzUnknown": true
+            },
+            "alignment": "cover"
+          },
+          "type": "box",
+          "children": []
+        },
+        {
+          "anchor": {
+            "type": "bounds",
+            "bounds": {
+              "x": 16,
+              "y": 556,
+              "width": 379,
+              "height": 224
+            },
+            "alignment": "bottom",
+            "offset": {
+              "x": 0,
+              "y": 8
+            }
+          },
+          "type": "text",
+          "text": "Below"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].anchor.bounds.zzzUnknown"
+}

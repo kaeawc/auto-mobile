@@ -8,7 +8,7 @@ export type SessionPersonaHost = Pick<
 >;
 
 /**
- * Admit a `persona` write against the session's device and track it as
+ * Admit a `manufacturerProfile` write against the session's device and track it as
  * session setup (#14055): release drains tracked setup before its cleanup runs,
  * so a release racing the write restores what the write recorded instead of
  * being overwritten by it. The mutation receives the owning session id;
@@ -30,7 +30,7 @@ export async function runSessionPersonaMutation<T>(
     session.assignedDevice !== deviceId
   ) {
     throw new ActionableError(
-      "Cannot apply or reset a persona: session is released, releasing, rebound, or replaced.",
+      "Cannot apply or reset a manufacturer profile: session is released, releasing, rebound, or replaced.",
     );
   }
   let completed = false;
@@ -41,7 +41,7 @@ export async function runSessionPersonaMutation<T>(
   });
   if (!completed) {
     throw new ActionableError(
-      "Session began releasing or rebinding before the persona change started; nothing was changed.",
+      "Session began releasing or rebinding before the manufacturer profile change started; nothing was changed.",
     );
   }
   return result;

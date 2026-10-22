@@ -4,7 +4,7 @@ import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import contract from "../schemas/prototype-spec-contract.json";
 import { object, type Rule } from "../src/features/prototype/prototypeBindingValidation";
-import { requiredPrototypeCapabilities } from "../src/features/prototype/prototypeCapabilityGates";
+import { prototypeGateCapabilities } from "../src/features/prototype/prototypeCapabilityGates";
 import {
   validatePrototypeSpec,
   validatePrototypeSpecBytes,
@@ -23,7 +23,7 @@ const save = (kind: string, name: string, value: unknown) =>
 function capture(name: string, spec: unknown, options?: PrototypeStrictOptions): void {
   const result = validatePrototypeSpec(
     spec,
-    options && { ...options, requiredCapabilities: requiredPrototypeCapabilities },
+    options && { ...options, requiredCapabilities: prototypeGateCapabilities },
   );
   if (result.success) {
     if (options) {
@@ -454,7 +454,7 @@ for (const name of readdirSync(join(directory, "valid"))
   const spec: unknown = JSON.parse(
     readFileSync(join(directory, "valid", name), "utf8").replace(/^\uFEFF/, ""),
   );
-  for (const capability of requiredPrototypeCapabilities(spec)) {
+  for (const capability of prototypeGateCapabilities(spec)) {
     if (!capabilityExamples.has(capability)) {
       capabilityExamples.set(capability, spec);
     }
@@ -462,9 +462,7 @@ for (const name of readdirSync(join(directory, "valid"))
 }
 for (const [capability, spec] of capabilityExamples) {
   capture(`strict-gate-${capability}`, spec, {
-    supportedCapabilities: requiredPrototypeCapabilities(spec).filter(
-      (name) => name !== capability,
-    ),
+    supportedCapabilities: prototypeGateCapabilities(spec).filter((name) => name !== capability),
   });
 }
 const valid = readdirSync(join(directory, "valid"))
@@ -479,7 +477,7 @@ const validCapabilities = Object.fromEntries(
     if (!result.success) {
       throw new Error(name + JSON.stringify(result.error));
     }
-    return [name, requiredPrototypeCapabilities(result.data)];
+    return [name, prototypeGateCapabilities(result.data)];
   }),
 );
 writeFileSync(

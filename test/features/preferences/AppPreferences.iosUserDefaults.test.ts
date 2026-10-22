@@ -675,7 +675,7 @@ describe("iOS app UserDefaults resolution", () => {
     // Model the open connection this test advertises before resolving its replies.
     const socket = createSuccessWebSocketFactory(timer)("ws://fake");
     await Promise.resolve();
-    client["ws"] = socket;
+    client.connectionTestHooks.socket = socket;
     const connect = spyOn(client, "ensureConnected").mockImplementation(() => {
       throw new Error("Auto-start forbidden");
     });
@@ -685,7 +685,7 @@ describe("iOS app UserDefaults resolution", () => {
       try {
         const read = existing.getPreference(input.appId, "Standard", input.key, 2500);
         await Promise.resolve();
-        const manager = client["getRequestManager"]();
+        const manager = client.connectionTestHooks.requestManager;
         manager.resolve(manager.getPendingIds()[0]!, {
           success: true,
           found: true,
@@ -697,7 +697,7 @@ describe("iOS app UserDefaults resolution", () => {
         await Promise.resolve();
         manager.resolve(manager.getPendingIds()[0]!, { success: true, totalTimeMs: 0 });
         await write;
-        client["ws"] = null;
+        client.connectionTestHooks.socket = null;
         connection.mockReturnValue(false);
       } finally {
         connection.mockRestore();

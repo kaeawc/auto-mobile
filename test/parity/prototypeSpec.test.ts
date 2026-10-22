@@ -12,7 +12,7 @@ import {
 import type { PrototypeStrictOptions } from "../../src/features/prototype/prototypeStrictPolicy";
 import {
   PROTOTYPE_SPEC_CAPABILITY_GATES,
-  requiredPrototypeCapabilities,
+  prototypeGateCapabilities,
 } from "../../src/features/prototype/prototypeCapabilityGates";
 import {
   validatePrototypeSpecBytes,
@@ -20,7 +20,7 @@ import {
 } from "../../src/features/prototype/prototypeValidation";
 
 const withGates = (options?: PrototypeStrictOptions): PrototypeStrictOptions | undefined =>
-  options && { ...options, requiredCapabilities: requiredPrototypeCapabilities };
+  options && { ...options, requiredCapabilities: prototypeGateCapabilities };
 
 const fixtures = join(import.meta.dir, "../fixtures/prototype-spec");
 function files(kind: string): string[] {
@@ -114,7 +114,7 @@ describe("shared prototype contract", () => {
   });
   for (const { name, json } of valid) {
     test(`capabilities ${name}`, () => {
-      expect(requiredPrototypeCapabilities(decoded.get(name))).toEqual(
+      expect(prototypeGateCapabilities(decoded.get(name))).toEqual(
         inventory.validCapabilities[name],
       );
     });

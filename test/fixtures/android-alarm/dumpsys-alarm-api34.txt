@@ -1,0 +1,28 @@
+Current Alarm Manager state:
+
+  nowRTC=1700000000000=2023-11-14 22:13:20.000 nowELAPSED=3600000
+  mLastTimeChangeClockTime=1699990000000
+  Next alarm clock: none
+
+  Pending alarm batches: 2
+  Batch{4f5a6b7 num=2 start=3700000 end=3700000 flgs=0x1}:
+    ELAPSED_WAKEUP #1: Alarm{8c9d0e1 type 2 origWhen 3700000 whenElapsed 3700000 dev.example.playground}
+      tag=*walarm*:dev.example.playground.EXACT_REMINDER
+      type=2 origWhen=+1m40s0ms window=0 repeatInterval=0 count=0 flags=0x9
+      policyWhenElapsed: requester=+1m40s0ms app_standby=+1m40s0ms device_idle=--- battery_saver=---
+      whenElapsed=+1m40s0ms maxWhenElapsed=+1m40s0ms
+      operation=PendingIntent{2b3c4d5: PendingIntentRecord{6e7f8a9 dev.example.playground broadcastIntent}}
+    ELAPSED_WAKEUP #0: Alarm{1e2f3a4 type 2 origWhen 3650000 whenElapsed 3650000 dev.example.other}
+      tag=*walarm*:dev.example.other.TICK
+      type=2 origWhen=+50s0ms window=0 repeatInterval=0 count=0 flags=0x1
+      whenElapsed=+50s0ms maxWhenElapsed=+50s0ms
+      operation=PendingIntent{5b6c7d8: PendingIntentRecord{9e0f1a2 dev.example.other broadcastIntent}}
+  Batch{9a0b1c2 num=1 start=4500000 end=5400000 flgs=0x0}:
+    RTC #0: Alarm{3d4e5f6 type 1 origWhen 1700000900000 whenElapsed 4500000 dev.example.playground}
+      tag=*alarm*:dev.example.playground.NIGHTLY_UPLOAD
+      type=1 origWhen=2023-11-14 22:28:20.000 window=900000 repeatInterval=86400000 count=2 flags=0x0
+      whenElapsed=+15m0s0ms maxWhenElapsed=+30m0s0ms
+      listener=dev.example.playground.sched.UploadAlarmListener@a1b2c3
+
+  Pending user blocked background alarms: 
+  None

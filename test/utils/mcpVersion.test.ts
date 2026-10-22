@@ -81,6 +81,7 @@ describe("getMcpServerVersion laziness", () => {
         commands.push([...args]);
         return null;
       },
+      {},
     );
     try {
       const version: typeof import("../../src/utils/mcpVersion") = await import(
@@ -476,7 +477,12 @@ describe("readGitVersion", () => {
           }
         : {},
     );
-    return new DefaultGitMetadataClient((_command, args, { cwd }) => run(cwd, [...args]), fs);
+    return new DefaultGitMetadataClient(
+      (_command, args, { cwd }) => run(cwd, [...args]),
+      fs,
+      undefined,
+      {},
+    );
   };
   const ownsRepo = () => OWN;
 

@@ -103,4 +103,37 @@ final class PrototypeChartTests: XCTestCase {
         let chart = try XCTUnwrap(decoded.root.children?.first)
         XCTAssertEqual(chart.chartModel(data: decoded.data)?.summary, "Line chart, A, 2 points, min 1, max 3, latest 3")
     }
+
+    /// #14679: a bar chart that maps to no drawable rectangle is an empty plot. Every point of the
+    /// fixture's bar chart must become a bar with width, height and a place inside the x slots and y axis.
+    func testEveryBarPointBecomesAVisibleRectangleInsideThePlot() throws {
+        let bar = try charts()[2]
+        let bars = bar.bars(fill: 0.7)
+        XCTAssertEqual(bar.barSlots, 3)
+        XCTAssertEqual(bars.count, 6)
+        for drawn in bars {
+            XCTAssertGreaterThan(drawn.xEnd - drawn.xStart, 0.1)
+            XCTAssertGreaterThanOrEqual(drawn.xStart, 0)
+            XCTAssertLessThanOrEqual(drawn.xEnd, Double(bar.barSlots))
+            XCTAssertEqual(drawn.yStart, 0)
+            XCTAssertGreaterThan(drawn.yEnd, drawn.yStart)
+            XCTAssertLessThanOrEqual(drawn.yEnd, bar.yMax)
+        }
+        // Two series share a slot side by side without overlapping, centred on the slot.
+        let first = bars.filter { $0.index == 0 }.sorted { $0.seriesIndex < $1.seriesIndex }
+        XCTAssertEqual(first[0].xEnd, first[1].xStart, accuracy: 1e-9)
+        XCTAssertEqual((first[0].xStart + first[1].xEnd) / 2, 0.5, accuracy: 1e-9)
+    }
+
+    func testASingleSeriesBarFillsTheRatioOfItsSlotAndClampsToTheAxis() {
+        let series = PrototypeChartSeries(path: "/p", x: nil, y: "y", label: "Load", color: nil)
+        let chart = PrototypeChart.model(
+            variant: "bar", series: [series], yRange: PrototypeChartRange(min: 0, max: 5), goal: nil, xLabels: nil,
+            data: ["p": .array([.object(["y": .number(9)]), .object(["y": .number(2)])])]
+        )
+        let bars = chart.bars(fill: 0.5)
+        XCTAssertEqual(bars.map(\.xStart), [0.25, 1.25])
+        XCTAssertEqual(bars.map(\.xEnd), [0.75, 1.75])
+        XCTAssertEqual(bars.map(\.yEnd), [5, 2])
+    }
 }

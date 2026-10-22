@@ -4,6 +4,7 @@ import {
   type DisplayProfileRestoreRegistry,
   type OwnedDisplayProfileRestore,
 } from "../features/utility/DisplayProfileRestore";
+import { invalidateDisplayCaches } from "../features/observe/DisplayTransition";
 import { restoreDisplayProfileAction } from "../features/utility/DisplayProfile";
 import {
   defaultDisplayProfilePortsFactory,
@@ -22,6 +23,8 @@ export interface DisplayProfileSessionCleanupOptions {
   registry?: DisplayProfileRestoreRegistry;
   portsFor?: DisplayProfilePortsFactory;
   timer?: Pick<Timer, "setTimeout" | "clearTimeout">;
+  /** Clears cached observations and coordinates after a size or overlay restore (#14101). */
+  invalidate?: (deviceId: string, reason: string) => void;
 }
 
 /**
@@ -33,6 +36,7 @@ export async function restoreOwnedDisplayProfile(
   owned: OwnedDisplayProfileRestore,
   portsFor: DisplayProfilePortsFactory,
   timer: Pick<Timer, "setTimeout" | "clearTimeout">,
+  invalidate: (deviceId: string, reason: string) => void = invalidateDisplayCaches,
 ): Promise<string[]> {
   const ports = portsFor(owned.device);
   const failed: string[] = [];
@@ -52,6 +56,14 @@ export async function restoreOwnedDisplayProfile(
         error,
       );
     }
+  }
+  // A restored size or overlay moves the display geometry under every cached observation.
+  if (
+    owned.actions.some((action) =>
+      ["screenSize", "cutout", "navigationMode"].includes(action.facet),
+    )
+  ) {
+    invalidate(owned.device.deviceId, "Display geometry restored");
   }
   return failed;
 }
@@ -73,6 +85,7 @@ export function registerDisplayProfileSessionCleanup(
   const registry = options.registry ?? defaultDisplayProfileRestoreRegistry;
   const portsFor = options.portsFor ?? defaultDisplayProfilePortsFactory;
   const timer = options.timer ?? defaultTimer;
+  const invalidate = options.invalidate ?? invalidateDisplayCaches;
   const cleanup = (
     sessionId: string,
     deviceId: string,
@@ -90,7 +103,7 @@ export function registerDisplayProfileSessionCleanup(
     }
     manager.registerPendingDeviceCleanup(
       deviceId,
-      restoreOwnedDisplayProfile(owned, portsFor, timer),
+      restoreOwnedDisplayProfile(owned, portsFor, timer, invalidate),
       {
         name: "restore display profile",
         leftover:

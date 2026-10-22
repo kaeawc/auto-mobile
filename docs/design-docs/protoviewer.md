@@ -10,11 +10,11 @@ SDUI spec.
 
 - Contract: `schemas/prototype-spec-contract.json` (limits, per-node field rules). Host validator
   and types: `src/features/prototype/prototypeSpec.ts` and `prototypeValidation.ts`. Kotlin twin:
-  `PrototypeSpecValidator` in `android/protocol`. Swift: `PrototypeSpec.swift` and
-  `PrototypeStateValidator.swift` in `ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore`
-  validate requests, data, size bounds, stacks, themes and menus, but there is no Swift twin of the
-  contract validator: unknown top-level keys are ignored and a malformed `storage` block is treated
-  as absent. Swift tests assert only a subset of `test/fixtures/prototype-spec/invalid`.
+  `PrototypeSpecValidator` in `android/protocol`. Swift's reject-only `PrototypeSpecStrictValidator`
+  extends the generated structural interpreter from #14803 in `AutoMobilePrototypeAgentCore`.
+  It composes the existing request, platform, state, check, repeat and resource-limit helpers with
+  located host semantics. Unknown keys and malformed storage reject the whole spec. All three
+  runtimes consume the complete shared valid/invalid corpus; there are no Swift exemptions.
 - Envelope: `{ id, window, data?, state?, motion?, storage?, theme?, root }`. There is **no
   `specVersion`**: the 2026-10-04 owner decision rejects older and newer shapes instead of migrating
   (see Owner decisions in [Android prototype specification](plat/android/prototype-ux.md)).
@@ -86,8 +86,10 @@ and its renderer honours privileged window options. ProtoViewer declares `INTERN
 runtime-granted `ACCESS_LOCAL_NETWORK` permission that Android 17 (API 37) requires for private LAN
 connections, and nothing else (no accessibility, input method, overlay, device-admin or camera).
 `ACCESS_LOCAL_NETWORK` is requested only when the user turns on "Allow network for imported
-prototypes" (section 6), never at install or first launch; if it is denied, LAN requests fail with
-the same typed error as a blocked host. The validator rejects `window.layer: "system"` and any other privileged window option for library prototypes.
+prototypes" (section 6), never at install or first launch; if it is denied, the switch stays on for
+internet access and the library explains that LAN requests may time out (Android slice 3, closing
+#14539 via this work). The validator rejects `window.layer: "system"` and any other privileged window
+option for library prototypes.
 
 - **Android renderer extraction is one mechanical move.** The `ctrlproxy/prototype` package imports
   only a few symbols from the rest of CtrlProxy, so moving it to a `:prototype-render` module
@@ -100,19 +102,46 @@ the same typed error as a blocked host. The validator rejects `window.layer: "sy
 
 Importing a prototype needs identical accept and reject behaviour on all three platforms:
 
-1. A hand-ported, reject-only Swift validator (`PrototypeSpecStrictValidator`): strict envelope and
-   keys at every level, duplicate JSON keys, `storage` shape, limits, capability computation and
-   privileged-window rejection. It returns accept or `(path, message)`; it does not need
-   Kotlin-identical message text or a render model.
-2. A shared corpus extending `test/fixtures/prototype-spec/{valid,invalid}` (no new directory).
-   Every invalid fixture is rejected by TS, Kotlin and Swift. The assertion is accept or reject plus
-   the error path, never message text. Differential cases cover unknown keys everywhere, duplicate
-   keys, numeric and encoding edge cases, deep nesting, reserved key names, id edge cases, URL
-   forms, forbidden headers, and every limit at the boundary and one past it (#13620).
-3. Import never partially renders: a spec that fails any check is not stored.
+1. `PrototypeSpecStrictValidator.validate(data:supportedCapabilities:library:)` accepts raw UTF-8
+   `Data` and returns normally or throws `PrototypeLoadError.invalidSpec(path:message:)`. It extends
+   `PrototypeContractValidator` and the generated `PrototypeSpecContractData.swift`; it does not
+   replace the interpreter or return a render model. Existing runtime helpers supply request,
+   platform, state binding, check grammar, repeat projection/binding and limit rules. Additional
+   strict checks retain authored paths for cross-node targets, charts, storage and template scope.
+2. All three corpus runners discover **every** `.json` in
+   `test/fixtures/prototype-spec/{valid,invalid}` and compare their lists with `corpus.json`.
+   The inventory also records TS-computed capabilities for every valid spec, asserted by all three.
+   An added fixture without a refreshed inventory fails the ratchet in each runner. Capture with
+   `bun scripts/capture-prototype-strict-fixtures.ts`: `expectedPath` comes from real TS output.
+   Assertions compare acceptance and error path, never message text. Unknown-key cases cover each
+   observed strict object rule; boundary cases exercise structural and data/expanded-tree budgets.
+3. Valid fixtures remain ordinary specs. An invalid envelope contains `spec` or, when JSON cannot
+   preserve the input, `rawJson` (duplicate keys, escaped surrogates, non-JSON tokens, nesting) or
+   `rawBytesBase64` (invalid UTF-8), plus `expectedPath`. Optional `options` supplies `library` and
+   `supportedCapabilities`. No additional fixture directory or binary assets are needed; the
+   existing `.gitattributes` JSON rule pins LF.
+4. Raw inputs allow one leading UTF-8 BOM. Duplicate keys (including escaped aliases), lone UTF-16
+   surrogates, invalid UTF-8, nonfinite numeric tokens and more than 128 JSON containers reject at
+   `$` before recursive decoding. The semantic tree/data depths remain 24/8. Finite numbers follow
+   TS double semantics, including `-0` and values above 2^53; IDs keep the existing TS grammar
+   without imposing an undocumented 256-character or Unicode-normalization restriction.
+5. Capability computation is independent of the agent's advertised renderer support; supplying a
+   capability set rejects missing features at `$`. `library: true` additionally rejects explicit
+   system windows and device persistence at their window paths. Host validation continues to accept
+   these options for CtrlProxy. Forbidden headers and literal CR/LF header values reject in every
+   mode. Network routing and secure-binding import policy in section 5 still require the import
+   boundary; this validator alone does not enable network access.
+6. Import never partially renders or stores a failed spec. Element anchors are structurally valid;
+   the existing embedded loader still requires host resolution to bounds (three corpus fixtures).
+   Storage version/key _shape_ and declarations are validated here; persisted-version mismatch
+   remains the existing storage restore/drop policy. Runtime-only caps (in-flight calls, response
+   bytes, stack navigation and patch operations) are tested at their runtime boundaries rather than
+   represented as invalid authored specs. The data-write pair is captured after a real TS write:
+   data fits its own budget but its repeat expansion exceeds the node budget.
 
 ### 3.3 Android app
 
+- `minSdk` is 26: a new standalone app, and the bundle commit relies on `java.nio` NOFOLLOW checks and atomic same-volume moves.
 - Package `dev.jasonpearson.automobile.protoviewer`. `LibraryActivity` is the launcher list,
   `ViewerActivity` is a document task per prototype (not exported), and an exported `ImportActivity`
   handles VIEW and SEND for `content://` data only.
@@ -171,7 +200,7 @@ is a zip, MIME `application/vnd.automobile.prototype+zip`, iOS UTI
 
 - Entries: `bundle.json`, `spec.json`, `assets/[0-9a-f]{64}\.(png|jpg|webp)` and
   `fonts/[0-9a-f]{64}\.(ttf|otf)`. It rejects directories, parent-relative or absolute paths,
-  backslashes, NUL, non-ASCII names, `__MACOSX`, duplicate names, symlink or unix-mode attributes,
+  backslashes, NUL, non-ASCII names, `__MACOSX`, duplicate names, symlink or nonregular Unix file-type attributes,
   encrypted entries, compression methods other than STORED and DEFLATE, and multi-disk archives.
 - `bundle.json`: `{ "bundleFormatVersion": 1, "specSha256": "...", "assets": [{id,file,sha256,mediaType}], "fonts": [...], "requires": [capabilities] }`.
   Strict; no label, source or storage. Each platform's importer translates it into its own store
@@ -192,6 +221,41 @@ is a zip, MIME `application/vnd.automobile.prototype+zip`, iOS UTI
   (section 7): the iOS app registers it, and it only opens an entry that is already in the library.
   It never fetches, imports or carries spec bytes.
 
+Bundle limits (shared TS/Kotlin/Swift transport contract):
+
+- `BUNDLE_MAX_ENTRIES = 36`: two JSON files + the asset contract's 32 assets + two fonts headroom;
+  36 is fixed for this format, independently of future asset-contract count changes.
+- `BUNDLE_MAX_SPEC_BYTES = 1,048,576`; `BUNDLE_MAX_MANIFEST_BYTES = 65,536`.
+- Each image is at most `MAX_PROTOTYPE_ASSET_BYTES = 4,194,304` bytes; each font is at most
+  `MAX_PROTOTYPE_FONT_ASSET_BYTES = 2,097,152` bytes, from the asset contract.
+- `BUNDLE_MAX_EXPANDED_BYTES = MAX_PROTOTYPE_ASSET_TOTAL_BYTES + BUNDLE_MAX_SPEC_BYTES +
+  BUNDLE_MAX_MANIFEST_BYTES = 17,891,328`; `BUNDLE_MAX_COMPRESSED_BYTES` is the same value and
+  caps the entire archive file, including headers.
+- `BUNDLE_MAX_RATIO = 100`: actual total inflated bytes / total compressed entry data bytes;
+  the known compressed-data total supplies a hard output budget during inflation. Header sizes
+  never authorize extra allocation. JSON nesting is limited to 64 levels.
+
+The reader rejects ZIP64, nonempty extra fields or comments, data descriptors, local/central
+header mismatches, overlapping entries, hidden records/preambles, extra EOCD signatures in the
+last 65,557 bytes, and bytes after EOCD. Unix file types must be regular or unspecified (zero).
+CRC32 precedes SHA256 verification. Every image/font reference, manifest record and ZIP entry
+must match in both directions; listed-but-unreferenced IDs fail with `unreferenced_asset`.
+`requires` is advisory, sorted and unique. The reader validates strict spec JSON with the existing
+validator; library policy/capability checks remain the importing app's responsibility.
+
+Canonical export preserves spec bytes verbatim, uses compact manifest JSON without a newline,
+sorts manifest arrays by ID (UTF-16 code units, exact identity without Unicode normalization)
+and ZIP asset/font entries by filename, and deduplicates identical
+content paths. ZIP entries are STORED, flags 0, DOS date/time 1980-01-01 00:00:00, made-by/version
+20 (MS-DOS), external attributes 0, with no extras, comments or descriptors. Private record and
+library metadata never enter the transport manifest; authored spec bytes are not redacted.
+The shared `test/fixtures/prototype-bundle/corpus.json` contains the error vocabulary, limits,
+portable hostile ZIPs and canonical export inputs/bytes. Generated PNG/signature/font-tag probes
+are not captured user assets. The oversized whole-file and combined-expanded boundaries are
+also tested in TS without committing megabytes of base64. Commits target fresh library IDs in an
+app-owned parent directory; callers serialize commits and the Node adapter uses exclusive
+`O_NOFOLLOW` writes, `lstat`/directory-open checks, 0700 staging, cleanup and same-volume rename.
+
 ## 5. Import validation flow
 
 1. Source-side caps before parsing: bare JSON at most 1 MiB, bundle within the compressed cap,
@@ -204,7 +268,7 @@ is a zip, MIME `application/vnd.automobile.prototype+zip`, iOS UTI
 2. The strict zip reader (section 4) for bundles.
 3. Strict JSON parse: BOM strip, duplicate keys rejected, depth-limited.
 4. The full validator (TS and Kotlin full; Swift reject-only port): unknown keys rejected,
-   `window.layer: "system"` rejected, `secure` and `password` bindings into request URL, headers or
+   `window.layer: "system"` rejected, `secure` and `password` bindings into request URL, headers, query or
    body and into `storage` rejected, forbidden request headers (`Host`, `Connection`, `Upgrade`,
    `Proxy-*`, `Cookie`) and CR/LF rejected, and `via: "host"` rejected for library prototypes.
 5. Capability check: `PROTOTYPE_SPEC_CAPABILITY_GATES` against the app's capability set, yielding
@@ -353,12 +417,9 @@ request allowed with the switch on.
 | Stores                     | GitHub releases only.                                                                                   |
 | LAN egress                 | RFC1918 LAN is allowed; loopback, link-local, `10.0.2.2` and the daemon ports stay blocked.             |
 | iOS egress transport       | Network.framework (NWConnection) pinned transport (owner, 2026-10-21, #14540).                          |
-| Missing referenced assets  | Recommended default, pending owner decision: reject the import on every platform.                       |
-| Android LAN permission     | Recommended default, pending owner decision: declare `ACCESS_LOCAL_NETWORK`, request on switch-on.      |
+| Missing referenced assets  | Reject the import on every platform with the offending path (owner, 2026-10-21, #14542).                |
+| Android LAN permission     | Declare `ACCESS_LOCAL_NETWORK` + `INTERNET`, request on switch-on (owner, 2026-10-21, #14539).          |
 | MCP-saved prototypes       | Follow the imported-prototype network policy.                                                           |
-
-Rows marked "Recommended default, pending owner decision" are not yet owner-decided; they are the
-defaults this document assumes until the owner answers.
 
 ## Issues
 

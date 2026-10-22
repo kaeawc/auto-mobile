@@ -569,7 +569,7 @@ describe("tapOn on iOS (#9971)", () => {
     const instance = spyOnIosClientInstance(client);
     const tapOn = new TapOnElement(IOS_DEVICE, new FakeAdbClient(), {
       timer,
-      tapStrategy: new FakeTapStrategy(),
+      tapStrategy: FakeTapStrategy.ios(),
       visionConfig: { ...DEFAULT_VISION_CONFIG, enabled: false },
       selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
     });

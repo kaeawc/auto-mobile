@@ -343,7 +343,7 @@ test("native info refuses protected or non-product devices without appending any
   }
 });
 
-function resetTiming(
+function timingWithReset(
   outcome: NonNullable<NonNullable<SessionBrokerResult["timing"]>["reset"]>["outcome"],
   retired = false,
 ) {
@@ -365,7 +365,7 @@ test.each(["clean", "fallback:erase"] as const)(
   async (outcome) => {
     const f = fixture();
     f.bind();
-    f.broker.statusResults = [{ ...f.released, timing: resetTiming(outcome) }];
+    f.broker.statusResults = [{ ...f.released, timing: timingWithReset(outcome) }];
     const options = {
       ledger: f.ledger,
       daemonClient: f.broker,
@@ -401,7 +401,7 @@ test.each(["clean", "pending", "destroyed", "retired", "unconfirmed", "transport
       requestId: "new-request",
       sessionUuid: "new-session",
       cleanupPending: mode === "unconfirmed",
-      timing: resetTiming(
+      timing: timingWithReset(
         mode === "pending" || mode === "destroyed" ? mode : "clean",
         mode === "retired",
       ),
@@ -412,7 +412,7 @@ test.each(["clean", "pending", "destroyed", "retired", "unconfirmed", "transport
       }
       return requestId === "new-request"
         ? latestStatus
-        : { ...f.released, timing: resetTiming("clean") };
+        : { ...f.released, timing: timingWithReset("clean") };
     };
     const pending = assertReleasedAndAbsent({
       ledger: f.ledger,

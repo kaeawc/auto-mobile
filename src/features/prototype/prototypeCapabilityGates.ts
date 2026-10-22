@@ -278,12 +278,15 @@ function preflightCapabilities(spec: unknown): string[] {
   ];
 }
 
+/**
+ * Capability names required by the gate table alone: the set the native strict validators
+ * (Kotlin and Swift) compute and the shared corpus records.
+ */
+export function prototypeGateCapabilities(spec: unknown): string[] {
+  return [...new Set(prototypeRequiredCapabilities(spec).map((gate) => gate.capability))].sort();
+}
+
 /** Capability names required by a spec, for the native-code resource's renderer contract. */
 export function requiredPrototypeCapabilities(spec: unknown): string[] {
-  return [
-    ...new Set([
-      ...prototypeRequiredCapabilities(spec).map((gate) => gate.capability),
-      ...preflightCapabilities(spec),
-    ]),
-  ].sort();
+  return [...new Set([...prototypeGateCapabilities(spec), ...preflightCapabilities(spec)])].sort();
 }

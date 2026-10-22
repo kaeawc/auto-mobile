@@ -2474,9 +2474,10 @@ from the current `/data` on every mapping pass, so a data action, request or pat
 a later write broke (a non-object, a non-numeric `y`) are skipped rather than failing the frame. The
 chart is one accessibility node labelled with its summary ("Line chart, Heart rate, 24 points, min
 58, max 141, latest 72"; "Ring chart, Steps today, 6500 of 10000"); an authored
-`contentDescription` replaces it, and `observe` reports it. The x labels are visual only. iOS
-rendering with Swift Charts and `AXChartDescriptor` is #14679; until then the iOS agent does not
-advertise the capability and the host refuses chart specs there.
+`contentDescription` replaces it, and `observe` reports it. The x labels are visual only. The iOS
+agent advertises the capability too (#14679): it draws the same four variants with Swift Charts and
+describes line, area and bar charts to VoiceOver with an `AXChartDescriptor`; its summary text is
+checked against the shared `chart-variants.json` fixture.
 
 ## Rich text
 

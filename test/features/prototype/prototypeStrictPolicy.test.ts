@@ -1,32 +1,37 @@
-import { expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { describe, expect, test } from "bun:test";
+import hostFixture from "../../fixtures/prototype-spec/invalid/strict-library-via-host.json";
+import nestedFixture from "../../fixtures/prototype-spec/invalid/strict-library-via-host-nested.json";
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
 
-const fixtures = join(import.meta.dir, "../../fixtures/prototype-spec");
-
-test("library secure fields allow unbound values and opaque literals", () => {
-  const spec = readFileSync(join(fixtures, "valid/strict-library-secure-unbound.json"), "utf8");
-  expect(validatePrototypeSpec(spec, { library: true }).success).toBe(true);
-});
-
-for (const name of readdirSync(join(fixtures, "invalid"))
-  .filter((name) => name.startsWith("strict-library-secure-"))
-  .sort()) {
-  const fixture = JSON.parse(readFileSync(join(fixtures, "invalid", name), "utf8")) as {
-    spec: unknown;
-    expectedPath: string;
-  };
-  test(`${name} rejects only in library mode at its authored path`, () => {
-    expect(validatePrototypeSpec(fixture.spec).success).toBe(true);
-    expect(validatePrototypeSpec(fixture.spec, { library: true })).toEqual({
+describe("library request policy", () => {
+  test.each([hostFixture, nestedFixture])("rejects host requests at $expectedPath", (fixture) => {
+    expect(validatePrototypeSpec(fixture.spec, fixture.options)).toEqual({
       success: false,
-      error: {
-        path: fixture.expectedPath,
-        message: name.includes("storage")
-          ? "Secure value cannot be persisted"
-          : "Secure value cannot be bound into a request",
-      },
+      error: { path: fixture.expectedPath, message: fixture.expectedMessage },
     });
+    expect(validatePrototypeSpec(fixture.spec).success).toBe(true);
+    expect(validatePrototypeSpec(fixture.spec, { library: false }).success).toBe(true);
   });
-}
+
+  test.each([undefined, "device"])("accepts %s transport and opaque host-shaped JSON", (via) => {
+    const opaque = { type: "request", via: "host" };
+    const spec = {
+      ...hostFixture.spec,
+      data: { opaque },
+      root: {
+        ...hostFixture.spec.root,
+        onTap: [
+          {
+            type: "request",
+            method: "POST",
+            url: "https://example.com",
+            ...(via === undefined ? {} : { via }),
+            body: { value: opaque },
+            onSuccess: [{ type: "emit", name: "done", payload: opaque }],
+          },
+        ],
+      },
+    };
+    expect(validatePrototypeSpec(spec, { library: true }).success).toBe(true);
+  });
+});

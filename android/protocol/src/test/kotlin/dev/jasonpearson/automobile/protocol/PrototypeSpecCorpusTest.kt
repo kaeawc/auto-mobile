@@ -97,6 +97,47 @@ class PrototypeSpecCorpusTest {
     }
   }
 
+  @TestFactory
+  fun hostRequestsWithoutLibrary(): List<DynamicTest> =
+    invalid
+      .filter { it.name.startsWith("strict-library-via-host") }
+      .map { file ->
+        DynamicTest.dynamicTest("accept host without library ${file.name}") {
+          val input = invalidSpec.getValue(file)
+          val fixture = invalidJson.getValue(file)
+          assertEquals(
+            PrototypeSpecValidation.Failure(
+              PrototypeSpecError(
+                fixture.getValue("expectedPath").jsonPrimitive.content,
+                fixture.getValue("expectedMessage").jsonPrimitive.content,
+              ),
+            ),
+            PrototypeSpecValidator.validate(input, library = true),
+          )
+          assertTrue(PrototypeSpecValidator.validate(input) is PrototypeSpecValidation.Success)
+          assertTrue(
+            PrototypeSpecValidator.validate(input, library = false)
+              is PrototypeSpecValidation.Success,
+          )
+        }
+      }
+
+  @Test
+  fun `library accepts device and default requests with opaque host shaped JSON`() {
+    for (via in listOf("", ", \"via\":\"device\"")) {
+      val input =
+        """{"id":"safe","window":{"placement":{"type":"fullscreen"}},
+          "data":{"opaque":{"type":"request","via":"host"}},
+          "root":{"type":"button","label":"Load","onTap":[
+            {"type":"request","method":"POST","url":"https://example.com"$via,
+              "body":{"value":{"type":"request","via":"host"}},
+              "onSuccess":[{"type":"emit","name":"done","payload":{"type":"request","via":"host"}}]}
+          ]}}"""
+      val result = PrototypeSpecValidator.validate(input, library = true)
+      assertTrue(result is PrototypeSpecValidation.Success, result.toString())
+    }
+  }
+
   @Test
   fun `fixtures are nonempty and cover every node action and placement`() {
     assertTrue(valid.isNotEmpty())

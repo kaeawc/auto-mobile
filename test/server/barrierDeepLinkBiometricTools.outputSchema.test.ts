@@ -1,8 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { registerBarrierTools } from "../../src/server/barrierTools";
 import { barrierResultSchema } from "../../src/server/barrierToolOutputSchemas";
-import { registerBiometricTools } from "../../src/server/biometricTools";
-import { biometricAuthResultSchema } from "../../src/server/biometricToolOutputSchemas";
+import {
+  getIosSimulatorCapabilitiesHandler,
+  registerBiometricTools,
+} from "../../src/server/biometricTools";
+import {
+  biometricAuthResultSchema,
+  getIosSimulatorCapabilitiesResultSchema,
+} from "../../src/server/biometricToolOutputSchemas";
 import { createGetDeepLinksHandler, registerDeepLinkTools } from "../../src/server/deepLinkTools";
 import { getDeepLinksResultSchema } from "../../src/server/deepLinkToolOutputSchemas";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -37,9 +43,32 @@ describe("barrier, getDeepLinks and biometricAuth output schemas (#11830)", () =
     ["barrier", barrierResultSchema],
     ["getDeepLinks", getDeepLinksResultSchema],
     ["biometricAuth", biometricAuthResultSchema],
+    ["getIosSimulatorCapabilities", getIosSimulatorCapabilitiesResultSchema],
   ] as const)("%s declares its outputSchema", (name, schema) => {
     expect(findTool(name)?.outputSchema).toBe(schema);
   });
+
+  test.each([
+    [
+      "com.apple.CoreSimulator.SimDeviceType.iPhone-16",
+      "com.apple.CoreSimulator.SimRuntime.iOS-18-0",
+    ],
+    [
+      "com.apple.CoreSimulator.SimDeviceType.Apple-Watch-Series-9-45mm",
+      "com.apple.CoreSimulator.SimRuntime.watchOS-11-0",
+    ],
+  ])(
+    "getIosSimulatorCapabilities (%s) keeps the text payload and validates structuredContent",
+    async (deviceType, runtime) => {
+      const response = await getIosSimulatorCapabilitiesHandler({ deviceType, runtime });
+      expect(JSON.parse(textOf(response))).toEqual(
+        JSON.parse(JSON.stringify(response.structuredContent)),
+      );
+      expect(
+        getIosSimulatorCapabilitiesResultSchema.safeParse(response.structuredContent).success,
+      ).toBe(true);
+    },
+  );
 
   test("barrier keeps the text payload and validates structuredContent", async () => {
     const response = (await findTool("barrier")!.deviceAwareHandler!(device, {

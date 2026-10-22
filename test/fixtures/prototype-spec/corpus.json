@@ -134,6 +134,7 @@
     "strict-id-nul.json",
     "strict-id-over.json",
     "strict-library-secure-unbound.json",
+    "strict-non-library-via-host.json",
     "strict-nonlibrary-secure-request.json",
     "strict-number-minusZero.json",
     "strict-number-unsafeInteger.json",
@@ -779,6 +780,8 @@
     "strict-library-secure-storage.json",
     "strict-library-secure-url.json",
     "strict-library-system.json",
+    "strict-library-via-host-nested.json",
+    "strict-library-via-host.json",
     "strict-literal-nul.json",
     "strict-lone-high-surrogate.json",
     "strict-lone-low-surrogate.json",
@@ -1216,6 +1219,7 @@
       "prototype_storage_v1",
       "prototype_text_field_options_v1"
     ],
+    "strict-non-library-via-host.json": ["prototype_network_v1"],
     "strict-nonlibrary-secure-request.json": [
       "prototype_network_device_v1",
       "prototype_network_v1",

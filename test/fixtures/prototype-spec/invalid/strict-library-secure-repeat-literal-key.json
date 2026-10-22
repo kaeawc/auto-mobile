@@ -55,5 +55,6 @@
   "options": {
     "library": true
   },
-  "expectedPath": "root.children[1].onTap[0].body.state"
+  "expectedPath": "root.children[1].onTap[0].body.state",
+  "expectedMessage": "Secure value cannot be bound into a request"
 }

@@ -53,12 +53,14 @@ class ProtoViewerApplication : Application() {
           },
           AutoMobilePrototype.capabilities,
           AndroidImportAssetCheck(),
-          DirectoryLibraryImport(
-            repository,
-            staging.canonicalFile.toPath(),
-            PrototypeBundleDirectoryFileSystem(),
-            ids,
-          ),
+          staging.canonicalFile.toPath().let { stagingRoot ->
+            DirectoryLibraryImport(
+              repository,
+              stagingRoot,
+              PrototypeBundleDirectoryFileSystem(stagingRoot),
+              ids,
+            )
+          },
         ),
       sharer = sharer,
       settings = SharedPreferencesSettingsStore(app.getSharedPreferences("settings", MODE_PRIVATE)),

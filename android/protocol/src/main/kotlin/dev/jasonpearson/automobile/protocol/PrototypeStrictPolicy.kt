@@ -45,10 +45,14 @@ internal object PrototypeStrictPolicy {
       requestFields(context)
         .sortedBy { it.path }
         .firstOrNull { field ->
-          isRequestBinding(field, requests) && bindsSecure(field, scopes, secure)
+          isSinkBinding(field, requests) && bindsSecure(field, scopes, secure)
         }
     if (leaked != null)
-      return PrototypeSpecError(leaked.path, "Secure value cannot be bound into a request")
+      return PrototypeSpecError(
+        leaked.path,
+        if (inRequest(leaked.path, requests)) "Secure value cannot be bound into a request"
+        else "Secure value cannot be bound into an action payload",
+      )
     return persistedSecureError(spec, secure)
   }
 
@@ -87,16 +91,16 @@ internal object PrototypeStrictPolicy {
     return fields
   }
 
-  private fun isRequestBinding(field: Field, requests: List<String>): Boolean =
+  private fun isSinkBinding(field: Field, requests: List<String>): Boolean =
     // The binding visitor exposes request/data/emit/platform state bindings as KEY fields.
-    (field.key && field.path.endsWith(".state")) ||
-      requests.any { at ->
-        field.path == "$at.url" ||
-          field.path == "$at.body.state" ||
-          listOf("headers", "query").any {
-            field.path.startsWith("$at.$it.") || field.path.startsWith("$at.$it[")
-          }
-      }
+    (field.key && field.path.endsWith(".state")) || inRequest(field.path, requests)
+
+  private fun inRequest(path: String, requests: List<String>): Boolean =
+    requests.any { at ->
+      path == "$at.url" ||
+        path == "$at.body.state" ||
+        listOf("headers", "query").any { path.startsWith("$at.$it.") || path.startsWith("$at.$it[") }
+    }
 
   private fun bindsSecure(
     field: Field,

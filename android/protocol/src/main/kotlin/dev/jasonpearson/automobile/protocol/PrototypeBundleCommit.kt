@@ -83,7 +83,9 @@ object PrototypeBundleCommit {
           cleanupFailed = true
         }
       }
-      PrototypeBundleCommitResult.Failure(error.message ?: "Bundle commit failed", cleanupFailed)
+      // Keep the exception type: AccessDeniedException's message is only the denied path.
+      val message = error.message?.let { "${error.javaClass.simpleName}: $it" }
+      PrototypeBundleCommitResult.Failure(message ?: "Bundle commit failed", cleanupFailed)
     }
   }
 }

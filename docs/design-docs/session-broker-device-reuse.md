@@ -31,6 +31,11 @@ mode defaults off.
 Keep-booted is best-effort cleanup, not a guarantee that all device state has
 been reset.
 
+Known degradation: until #14786 lands, iOS keep-booted reset on iOS 27 always
+falls back to erase, because the absent-key `defaults delete` wording is not
+recognized. Measured keep-booted reuse (about 10 s) is therefore not yet
+reachable there.
+
 ## Choose an iOS reuse mode
 
 The mode table describes only `reuse.ios.mode`; Android uses
@@ -184,6 +189,23 @@ erase fallback. Ownership loss
 prevents idle publication; cleanup and fallback must remain ownership-fenced,
 so the broker may leave the resource pending or destroy it rather than run a
 reset under a stale fence. For `off`, release destroys the device.
+
+## When a device is not reused
+
+Reuse applies to a normal release. Two lifecycle events destroy the device
+instead of resetting it, whatever the configured mode (including `erase`):
+
+- **Owner exit.** When the owning client exits (`session_owner_exited`), the
+  broker destroys the device after a delay (about 26 s in batch 20261021e)
+  rather than resetting and returning it to the idle pool.
+- **Graceful daemon restart.** A restart ends active broker sessions with
+  `binding-ownership-lost` and destroys their devices, including a device that
+  was mid-reset. Restarting does not preserve devices for reuse. A mid-reset
+  device now converges (#14780); at the batch SHA the release receipt of an
+  in-flight release was lost.
+
+Plan capacity around both: a client that crashes or a daemon that restarts pays
+a cold create for its next session.
 
 ## Keep-booted cleaning operations
 

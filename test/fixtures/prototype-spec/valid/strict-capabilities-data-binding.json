@@ -1,0 +1,20 @@
+{
+  "id": "strict",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "spacer",
+    "onTap": [
+      {
+        "type": "setData",
+        "path": "/data/x",
+        "value": {
+          "data": "/y"
+        }
+      }
+    ]
+  }
+}

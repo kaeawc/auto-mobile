@@ -1,0 +1,4 @@
+{
+  "rawJson": "{\"__proto__\":true,\"id\":\"strict\",\"window\":{\"placement\":{\"type\":\"fullscreen\"}},\"root\":{\"type\":\"spacer\"}}",
+  "expectedPath": "__proto__"
+}

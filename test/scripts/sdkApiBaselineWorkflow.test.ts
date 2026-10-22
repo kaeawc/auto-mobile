@@ -9,6 +9,17 @@ const build = readFileSync(
   join(import.meta.dir, "../../android/auto-mobile-sdk/build.gradle.kts"),
   "utf8",
 );
+const prototypeBuild = readFileSync(
+  join(import.meta.dir, "../../android/prototype-compose/build.gradle.kts"),
+  "utf8",
+);
+const tasks = readFileSync(
+  join(
+    import.meta.dir,
+    "../../android/build-logic/src/main/kotlin/dev/jasonpearson/automobile/buildlogic/apisignature/ApiSignatureTasks.kt",
+  ),
+  "utf8",
+);
 
 for (const workflow of ["pull_request", "merge"]) {
   const path = `.github/workflows/${workflow}.yml`;
@@ -78,14 +89,22 @@ for (const workflow of ["pull_request", "merge"]) {
 }
 
 test("Android API actions use typed task properties and name the local repair command", () => {
-  expect(build).toContain('tasks.register<SdkApiDumpTask>("apiDump")');
-  expect(build).toContain('tasks.register<SdkApiCheckTask>("apiCheck")');
-  expect(build).toContain("abstract class SdkApiSignatureTask : DefaultTask()");
-  expect(build).toContain("@TaskAction");
-  expect(build).toContain("@get:InputFiles");
-  expect(build).toContain("@get:OutputFile");
+  // The task classes are shared from build-logic (#13727); each library only registers them.
+  for (const [module, file] of [
+    [":auto-mobile-sdk", build],
+    [":prototype-compose", prototypeBuild],
+  ] as const) {
+    expect(file).toContain('tasks.register<ApiSignatureDumpTask>("apiDump")');
+    expect(file).toContain('tasks.register<ApiSignatureCheckTask>("apiCheck")');
+    expect(file).toContain(`dumpCommand.set("cd android && ./gradlew ${module}:apiDump")`);
+    expect(file).not.toContain("generateApiSignature(files(");
+  }
   expect(build).toContain(androidFix);
-  expect(build).not.toContain("doLast");
-  expect(build).not.toContain("generateApiSignature(files(");
-  expect(build).not.toContain("relativeTo(projectDir)");
+  expect(tasks).toContain("abstract class ApiSignatureTask : DefaultTask()");
+  expect(tasks).toContain("@TaskAction");
+  expect(tasks).toContain("@get:InputFiles");
+  expect(tasks).toContain("@get:OutputFile");
+  expect(tasks).toContain("Run $command first.");
+  expect(tasks).not.toContain("doLast");
+  expect(tasks).not.toContain("relativeTo(projectDir)");
 });

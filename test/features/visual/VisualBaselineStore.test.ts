@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import path from "node:path";
 import {
   FileVisualBaselineStore,
   type BaselineFs,
@@ -28,7 +29,7 @@ class MemoryFs implements BaselineFs {
   async mkdir(): Promise<void> {}
 
   async readdir(dirPath: string): Promise<string[]> {
-    const prefix = `${dirPath}/`;
+    const prefix = `${dirPath}${path.sep}`;
     const entries = [...this.files.keys()]
       .filter((key) => key.startsWith(prefix))
       .map((key) => key.slice(prefix.length));
@@ -40,6 +41,9 @@ class MemoryFs implements BaselineFs {
 }
 
 const memoryFs = () => new MemoryFs();
+
+/** The store joins with the platform separator, so expected paths do too (`\\` on Windows). */
+const underRoot = (...segments: string[]) => path.join("/root", ...segments);
 
 const LIGHT: VisualDeviceProfile = {
   platform: "ios",
@@ -55,11 +59,13 @@ describe("FileVisualBaselineStore (#14083)", () => {
     const fs = memoryFs();
     const store = new FileVisualBaselineStore(() => "/root", fs);
     const written = await store.write("login", LIGHT, Buffer.from("png"), "t0");
-    expect(written.path).toBe("/root/login/ios-1179x2556-d3-fna-light.png");
+    expect(written.path).toBe(underRoot("login", "ios-1179x2556-d3-fna-light.png"));
     const read = await store.read("login", LIGHT);
     expect(read?.png.toString()).toBe("png");
     expect(read?.recordedAt).toBe("t0");
-    expect(store.diffPath("login", LIGHT)).toBe("/root/login/ios-1179x2556-d3-fna-light.diff.png");
+    expect(store.diffPath("login", LIGHT)).toBe(
+      underRoot("login", "ios-1179x2556-d3-fna-light.diff.png"),
+    );
   });
 
   test("a missing baseline reads as null and has no other profiles", async () => {
@@ -80,7 +86,10 @@ describe("FileVisualBaselineStore (#14083)", () => {
     const fs = memoryFs();
     const store = new FileVisualBaselineStore(() => "/root", fs);
     await store.write("login", LIGHT, Buffer.from("a"), "t0");
-    fs.files.set("/root/login/ios-1179x2556-d3-fna-light.json", Buffer.from('{"profile":{}}'));
+    fs.files.set(
+      underRoot("login", "ios-1179x2556-d3-fna-light.json"),
+      Buffer.from('{"profile":{}}'),
+    );
     await expect(store.read("login", LIGHT)).rejects.toThrow();
   });
 

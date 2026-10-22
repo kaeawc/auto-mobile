@@ -288,6 +288,9 @@ jobs:
               - 'test/fixtures/refusal-wire/**'
               - 'scripts/generate-refusal-wire-fixtures.ts'
               - 'test/daemon/refusalWireContract.test.ts'
+              # Replayed by desktop-core's DaemonHttpTokenProviderTest (#14418); the
+              # android and ios filters already carry it for the JUnit and XCTest replays.
+              - 'test/fixtures/daemon-http-endpoints.json'
               # Shared job bodies live in composite actions; editing one must run
               # the jobs that consume it.
               - '.github/actions/ci-build-desktop-core/**'

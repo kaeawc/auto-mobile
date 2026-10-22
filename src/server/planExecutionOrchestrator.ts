@@ -147,11 +147,29 @@ export class PlanExecutionOrchestrator {
 
   private registerPlanExecution(): PlanExecutionLease {
     const context = getToolSelectionContext();
+    const labelSessionUuids = this.request.sessionUuid
+      ? Object.values(
+          buildDeviceLabelMap(
+            this.effectiveLabels(),
+            this.request.sessionUuid,
+            this.request.device,
+          ),
+        )
+      : [];
     return serverConfig.acquirePlanExecutionLease({
       sessionUuid: this.request.sessionUuid ?? context?.routingSessionUuid,
       deviceId: this.device.deviceId,
       executionId: context?.execution?.executionId,
+      // The label sessions allocateDevices() will publish, named before its first await (#14444).
+      labelSessionUuids,
     });
+  }
+
+  /** The labels this invocation allocates: the request's `devices`, else the plan's own. */
+  private effectiveLabels(): string[] {
+    return this.request.devices && this.request.devices.length > 0
+      ? this.request.devices
+      : (this.normalizedDevices ?? normalizePlanDevices()).labels;
   }
 
   /**
@@ -358,11 +376,7 @@ export class PlanExecutionOrchestrator {
    */
   private async allocateDevices(_plan: Plan): Promise<Record<string, string> | undefined> {
     const normalized = this.normalizedDevices ?? normalizePlanDevices();
-    const planDeviceLabels = normalized.labels;
-    const effectiveLabels =
-      this.request.devices && this.request.devices.length > 0
-        ? this.request.devices
-        : planDeviceLabels;
+    const effectiveLabels = this.effectiveLabels();
 
     if (effectiveLabels.length === 0) {
       if (this.request.device) {

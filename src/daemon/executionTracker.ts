@@ -710,7 +710,7 @@ export class ExecutionTracker {
         // Tool-scoped loss cancels only work already bound to this device. A
         // session rebind (no tool filter) still fences unresolved calls too.
         (options.onlyToolName === undefined || execution.deviceIds?.has(deviceId)) &&
-        this.belongsToSessionFilter(execution, options.onlySessionUuid)
+        this.isInCancellationScope(execution, options)
       ) {
         execution.revokedDeviceBindings ??= new Map();
         execution.revokedDeviceBindings.set(deviceId, revocation);
@@ -960,6 +960,16 @@ export class ExecutionTracker {
     });
   }
 
+  private isInCancellationScope(
+    execution: ActiveExecution,
+    options: ExecutionCancellationOptions,
+  ): boolean {
+    return (
+      this.belongsToSessionFilter(execution, options.onlySessionUuid) ||
+      options.includeExecutionIds?.includes(execution.id) === true
+    );
+  }
+
   private belongsToSessionFilter(execution: ActiveExecution, sessionUuid?: string): boolean {
     return (
       sessionUuid === undefined ||
@@ -1019,7 +1029,7 @@ export class ExecutionTracker {
       if (
         execution.id === options.excludeExecutionId ||
         (options.onlyToolName !== undefined && execution.toolName !== options.onlyToolName) ||
-        !this.belongsToSessionFilter(execution, options.onlySessionUuid)
+        !this.isInCancellationScope(execution, options)
       ) {
         continue;
       }

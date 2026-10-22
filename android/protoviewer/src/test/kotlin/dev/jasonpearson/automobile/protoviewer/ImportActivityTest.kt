@@ -34,6 +34,7 @@ class ImportActivityTest {
         LibraryStorage(FakePrototypeStorage()),
         UnconfinedTestDispatcher(),
         importer = importer,
+        settings = FakeSettingsStore(),
       )
     }
   }

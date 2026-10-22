@@ -30,6 +30,7 @@ dependencies {
   implementation(projects.prototypeCompose)
   implementation(projects.prototypeSaved)
   implementation(projects.protocol)
+  implementation(libs.okhttp) // Existing transport dependency; no alternate HTTP stack.
   implementation(libs.androidx.core)
   implementation(libs.androidx.activity.compose)
   implementation(libs.androidx.lifecycle.runtime)

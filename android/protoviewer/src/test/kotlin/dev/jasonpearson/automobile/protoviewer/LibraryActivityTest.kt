@@ -3,6 +3,8 @@ package dev.jasonpearson.automobile.protoviewer
 import android.app.ActivityManager
 import android.content.Intent
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -26,6 +28,8 @@ import org.robolectric.shadows.ShadowAppTask
 class LibraryActivityTest {
   @get:Rule val compose = createComposeRule()
   private val repository = FakeLibraryRepository()
+  private val settings = FakeSettingsStore()
+  private val permission = FakeLocalNetworkPermission()
   private val exports = FakeExportFiles()
   private val sharer = CanonicalLibrarySharer(repository, exports, IdGenerator { SECOND })
   private var controller: ActivityController<LibraryActivity>? = null
@@ -38,6 +42,8 @@ class LibraryActivityTest {
         LibraryStorage(FakePrototypeStorage()),
         UnconfinedTestDispatcher(),
         LibraryClock { 42 },
+        settings = settings,
+        localNetworkPermission = { _, result -> permission.apply { this.result = result } },
         sharer = sharer,
       )
     }
@@ -58,6 +64,37 @@ class LibraryActivityTest {
   fun emptyLibraryShowsEmptyState() {
     launch()
     compose.onNodeWithText("Your prototype library is empty.").assertIsDisplayed()
+  }
+
+  @Test
+  fun switchStartsOffAndUpdatesSharedSettingWithoutPromptOnLowerApi() {
+    launch()
+    compose.onNodeWithTag("allow-network").assertIsOff().performClick().assertIsOn()
+    assertTrue(settings.allowNetwork.value)
+    assertEquals(0, permission.requests)
+    compose.onNodeWithTag("allow-network").performClick().assertIsOff()
+    assertFalse(settings.allowNetwork.value)
+  }
+
+  @Test
+  fun denialExplainsLanTimeoutsAndKeepsInternetSwitchOn() {
+    launch()
+    compose.onNodeWithTag("allow-network").performClick()
+    // Deliver the injected platform result without requiring a Robolectric API 37 sandbox.
+    compose.runOnIdle { permission.result(false) }
+    compose
+      .onNodeWithText(
+        "Local-network permission denied. Internet access stays enabled; local-network (LAN) requests may time out. You can grant permission in Android settings.",
+      )
+      .assertIsDisplayed()
+    compose.onNodeWithTag("allow-network").assertIsOn()
+    assertTrue(settings.allowNetwork.value)
+    compose.onNodeWithTag("allow-network").performClick()
+    compose
+      .onNodeWithText(
+        "Local-network permission denied. Internet access stays enabled; local-network (LAN) requests may time out. You can grant permission in Android settings.",
+      )
+      .assertDoesNotExist()
   }
 
   @Test

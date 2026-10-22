@@ -9,7 +9,8 @@ import { createStructuredToolResponse } from "../../../src/utils/toolUtils";
 import { FakeArtifactWriter } from "../../fakes/FakeArtifactWriter";
 import { describe, expect, spyOn, test } from "bun:test";
 import { createExecResult } from "../../../src/utils/execResult";
-import { PressButton } from "../../../src/features/action/PressButton";
+import { PressButton, isIosHomePressOnSpringboard } from "../../../src/features/action/PressButton";
+import type { ObserveResult } from "../../../src/models";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { BootedDevice, ExecResult } from "../../../src/models";
@@ -868,3 +869,30 @@ async function dispatch(
   expect(pressButtonResultSchema.parse({ message: "Result", ...result })).toBeDefined();
   return result;
 }
+
+describe("isIosHomePressOnSpringboard (#14954)", () => {
+  const observation = (packageName: string, fallbackToSpringboard?: boolean): ObserveResult =>
+    ({
+      viewHierarchy: {
+        packageName,
+        ...(fallbackToSpringboard === undefined ? {} : { fallbackToSpringboard }),
+        hierarchy: {},
+      },
+    }) as ObserveResult;
+
+  test("is true for a Home press that starts on a real SpringBoard", () => {
+    expect(isIosHomePressOnSpringboard("ios", "home", observation("com.apple.springboard"))).toBe(
+      true,
+    );
+  });
+
+  test.each([
+    ["android", "home", observation("com.apple.springboard")],
+    ["ios", "back", observation("com.apple.springboard")],
+    ["ios", "home", observation("com.apple.Maps")],
+    ["ios", "home", observation("com.apple.springboard", true)],
+    ["ios", "home", undefined],
+  ] as const)("is false for %s %s %#", (platform, button, previous) => {
+    expect(isIosHomePressOnSpringboard(platform, button, previous)).toBe(false);
+  });
+});

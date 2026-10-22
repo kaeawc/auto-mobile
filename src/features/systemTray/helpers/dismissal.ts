@@ -548,11 +548,15 @@ export const clearMatchingSystemTrayNotifications = async (
     SYSTEM_TRAY_CLEAR_MAX_ITERATIONS,
   );
   let swipeCount = 0;
+  // Swipes at a row for the first time. `maxSwipes` is the inventory of rows to clear, so a swipe
+  // that repeats a missed one must not spend it, or the last row of the group is left behind
+  // (#13810); the retries are bounded by `SYSTEM_TRAY_CLEAR_MAX_MISSED_SWIPES` per row instead.
+  let rowSwipeCount = 0;
   let dismissedCount = 0;
   let missedSwipes = 0;
   // Keep reopen attempts throttled across consecutive rows.
   const reexpandState = { lastAttemptAtMs: Number.NEGATIVE_INFINITY };
-  while (current.match && swipeCount < maxSwipes && timer.now() < deadlineMs) {
+  while (current.match && rowSwipeCount < maxSwipes && timer.now() < deadlineMs) {
     const expanded = await expandAndRematchIfCollapsed(
       device,
       criteria,
@@ -576,6 +580,9 @@ export const clearMatchingSystemTrayNotifications = async (
     await swipeElement(device, swipeTarget, signal);
     deadlineMs = timer.now() + awaitTimeoutMs;
     swipeCount++;
+    if (missedSwipes === 0) {
+      rowSwipeCount++;
+    }
     const verified = await waitForClearAllDismissal(
       device,
       baseline,

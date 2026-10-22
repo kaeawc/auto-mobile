@@ -17,6 +17,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -25,10 +26,13 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.lifecycleScope
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpClient
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpRequest
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRuntime
 import dev.jasonpearson.automobile.prototype.AutoMobilePrototype
 import dev.jasonpearson.automobile.prototype.EmbeddedPrototypeHost
 import dev.jasonpearson.automobile.prototype.PrototypeAssets
+import dev.jasonpearson.automobile.prototype.PrototypeHttpClient as EmbeddedHttpClient
 import dev.jasonpearson.automobile.prototype.PrototypeNetwork
 import dev.jasonpearson.automobile.prototype.PrototypeStorage
 import dev.jasonpearson.automobile.prototype.ProvideEmbeddedPrototypeHost
@@ -74,7 +78,13 @@ class ViewerActivity : ComponentActivity() {
         isCurrent = { content?.host === this && !isFinishing && !restarting }
         onRuntime = { opened -> if (isCurrent()) runtime = opened else opened.close() }
       }
-    content = ViewerContent(prototype, services.storage.namespace(prototype.entry.libraryId), host)
+    content =
+      ViewerContent(
+        prototype,
+        services.storage.namespace(prototype.entry.libraryId),
+        host,
+        services.networkClient,
+      )
   }
 
   @Composable
@@ -89,6 +99,12 @@ class ViewerActivity : ComponentActivity() {
           Text(stringResource(R.string.reset))
         }
       }
+      val allowNetwork by services.settings.allowNetwork.collectAsState()
+      if (allowNetwork)
+        Text(
+          stringResource(R.string.network_provenance),
+          modifier = Modifier.fillMaxWidth().testTag("network-provenance"),
+        )
       if (restartFailed) Text(stringResource(R.string.action_error))
       Box(Modifier.weight(1f).fillMaxWidth().clipToBounds().testTag("viewer-content")) {
         val current = content
@@ -179,10 +195,29 @@ private class ViewerContent(
   val prototype: LibraryPrototype,
   val storage: PrototypeStorage,
   val host: EmbeddedPrototypeHost,
+  client: PrototypeHttpClient,
 ) {
   val assets =
     PrototypeAssets(image = prototype.saved::assetBytes, font = prototype.saved::assetBytes)
-  val network = PrototypeNetwork(device = DeniedPrototypeHttpClient)
+  // The embedded renderer exposes a read-only request facade; the saved transport consumes
+  // the shared runtime contract. Preserve every resolved field at this app boundary.
+  val network =
+    PrototypeNetwork(
+      device =
+        EmbeddedHttpClient { request ->
+          client.execute(
+            PrototypeHttpRequest(
+              request.requestId,
+              request.prototypeId,
+              request.method,
+              request.url,
+              request.headers,
+              request.body,
+              request.timeoutMs,
+            ),
+          )
+        },
+    )
 }
 
 @Composable

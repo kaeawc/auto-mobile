@@ -271,6 +271,27 @@ describe("PerformanceMonitor demand", () => {
     expect(monitor.isMonitoring("ios-a")).toBe(true);
   });
 
+  test("an incarnation reset mid-lease drops the old lease so the replacement stays dormant (#14472)", async () => {
+    const { monitor, advance, pushes, demanded } = setup();
+    monitor.requestPerfWindow("ios-a", "com.c", "ios");
+    await advance(500);
+    expect(pushes).toHaveLength(1);
+    // VM restore / identity replacement well inside the five-minute lease.
+    monitor.resetDeviceState("ios-a");
+    await advance(1000);
+    expect(pushes).toHaveLength(1);
+    expect(monitor.isMonitoring("ios-a")).toBe(true);
+    // A real consumer of the replacement incarnation still resumes sampling.
+    demanded.add("ios-a");
+    await advance(500);
+    expect(pushes).toHaveLength(2);
+    // A fresh observe on the replacement grants a new lease.
+    demanded.clear();
+    monitor.requestPerfWindow("ios-a", "com.c", "ios");
+    await advance(500);
+    expect(pushes).toHaveLength(3);
+  });
+
   test("hierarchy-style registration stays monitored without doing work", async () => {
     const { monitor, advance, adb, ps, pushes, buffer, timer } = setup();
     monitor.startMonitoring("android-a", "com.a");

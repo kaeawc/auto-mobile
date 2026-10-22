@@ -59,6 +59,7 @@ import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbCl
 import { FileAvdConfigReader } from "../../utils/android-cmdline-tools/AvdConfigReader";
 import { executionTracker } from "../executionTracker";
 import type { Session } from "../sessionManager/sessionTypes";
+import { HeartbeatTaskLeaseKeepalive } from "../tasks/taskLeaseKeepalive";
 import {
   brokerMutationIncarnation,
   SessionMutationRecorder,
@@ -115,7 +116,11 @@ export interface OpenSessionBrokerServiceOptions {
   mutationSessions?: {
     peekSession(
       sessionUuid: string,
-    ): Pick<Session, "sessionId" | "assignedDevice" | "stableDeviceId" | "mutationRecorder"> | null;
+    ): Pick<
+      Session,
+      "sessionId" | "assignedDevice" | "stableDeviceId" | "mutationRecorder" | "heartbeatTimeoutMs"
+    > | null;
+    recordHeartbeat(sessionId: string): void;
   };
   /** Daemon startup starts the loop explicitly after binding its control socket. */
   deferStart?: boolean;
@@ -243,6 +248,7 @@ export async function openSessionBrokerService(
     const devices = new ManagedDevicePort({
       scope: SESSION_BROKER_SCOPE,
       timer: options.timer,
+      leaseKeepalive: preparationLeaseKeepalive(options),
       brokerDeviceAcquisition: options.acquisition,
       brokerExecutionRelease: options.release,
       registry: options.registry,
@@ -776,4 +782,13 @@ export class SessionBrokerService {
       };
     });
   }
+}
+
+function preparationLeaseKeepalive(
+  options: Pick<OpenSessionBrokerServiceOptions, "mutationSessions" | "timer">,
+): HeartbeatTaskLeaseKeepalive | undefined {
+  const { mutationSessions, timer } = options;
+  return mutationSessions
+    ? new HeartbeatTaskLeaseKeepalive({ sessions: () => mutationSessions, timer })
+    : undefined;
 }

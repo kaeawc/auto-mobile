@@ -13,9 +13,9 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 
 /**
- * The `loading-states` fixture draws its three skeleton rows (#14793). The rows hold only an unsized
- * `spacer`, so a spacer that wrapped to nothing collapsed each row to zero width and the whole
- * placeholder rendered blank on Android while iOS filled it.
+ * The `loading-states` fixture draws its three skeleton rows (#14793). The rows hold only an
+ * unsized `spacer`, so a spacer that wrapped to nothing collapsed each row to zero width and the
+ * whole placeholder rendered blank on Android while iOS filled it.
  */
 @RunWith(RobolectricTestRunner::class)
 class AutoMobilePrototypeLoadingStatesTest {

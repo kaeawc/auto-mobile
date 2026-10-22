@@ -169,11 +169,8 @@ function expectationPlan(command: BrokerBatchCommand, deps: BrokerBatchOrchestra
     : undefined;
   const batch = parseBrokerBatch(
     {
+      ...host,
       schemaVersion: 1,
-      limits: host.limits,
-      defaults: host.defaults,
-      reuseCleanDevices: host.reuseCleanDevices,
-      reuse: host.reuse,
       clients,
     },
     { maxDevices: command.maxDevices, allowReuse: manifest?.broker?.allowReuse ?? false },

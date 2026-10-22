@@ -164,6 +164,7 @@ const CLASSIFICATION: Classification = {
     "setSensor",
     "setUIState",
     "shake",
+    "siri",
     "stageSessionDownloads",
     "swipeAt",
     "swipeOn",

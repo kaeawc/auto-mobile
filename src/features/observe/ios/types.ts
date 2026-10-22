@@ -388,6 +388,14 @@ export interface CtrlProxyLocationResult {
   totalTimeMs: number;
 }
 
+/** `request_siri` result (#14109); `unsupported` marks a runner that predates the command. */
+export interface CtrlProxySiriResult {
+  success: boolean;
+  unsupported?: boolean;
+  error?: string;
+  totalTimeMs: number;
+}
+
 /** System light/dark appearance read back by the runner (`XCUIDevice.appearance`, #14092). */
 export type CtrlProxyAppearance = "light" | "dark" | "unspecified";
 

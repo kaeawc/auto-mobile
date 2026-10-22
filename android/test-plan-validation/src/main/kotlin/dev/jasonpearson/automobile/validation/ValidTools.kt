@@ -114,6 +114,7 @@ object ValidTools {
         "setPreference",
         "setSensor",
         "setToolEnabled",
+        "siri",
         "snapshotOf",
         "stageSessionDownloads",
         "statusBar",

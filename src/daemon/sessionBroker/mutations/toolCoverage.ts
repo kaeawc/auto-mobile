@@ -109,6 +109,7 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, PendingMutat
       "selectAllText",
       "sendKeys",
       "shake",
+      "siri",
       "swipeAt",
       "swipeOn",
       "systemTray",

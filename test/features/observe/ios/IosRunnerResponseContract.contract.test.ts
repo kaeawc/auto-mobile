@@ -183,6 +183,7 @@ const typedResults: Record<string, Record<string, unknown>> = {
   clipboard_result: { success: true, text: "fixture text", action: "", totalTimeMs: 17 },
   appearance_result: { success: true, appearance: "dark", totalTimeMs: 17 },
   location_result: { success: true, totalTimeMs: 17 },
+  siri_result: { success: true, totalTimeMs: 17 },
 };
 const genericTypes = new Set([
   "tap_coordinates_result",

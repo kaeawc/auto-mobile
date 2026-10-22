@@ -573,6 +573,12 @@ export abstract class IosCtrlProxyDelegatingFacade extends IosCtrlProxyDiagnosti
     return this.navigation.requestLocation(...args);
   }
 
+  async requestSiri(
+    ...args: Parameters<CtrlProxyNavigation["requestSiri"]>
+  ): ReturnType<CtrlProxyNavigation["requestSiri"]> {
+    return this.navigation.requestSiri(...args);
+  }
+
   async requestAppearance(
     ...args: Parameters<CtrlProxyNavigation["requestAppearance"]>
   ): ReturnType<CtrlProxyNavigation["requestAppearance"]> {

@@ -70,6 +70,7 @@ const SWIFT_REQUEST_TYPES = [
   "request_launch_app",
   "request_rotate",
   "request_location",
+  "request_siri",
   "set_hinge_angle",
   "request_appearance",
   "request_clipboard",

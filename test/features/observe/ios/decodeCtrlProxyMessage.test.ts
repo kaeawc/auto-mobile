@@ -904,6 +904,7 @@ const EXPECTED_RESHAPED_RESPONSE_TYPES = [
   "set_network_mock_rules_result",
   "set_preference_result",
   "set_text_result",
+  "siri_result",
   "storage_capabilities_result",
   "swipe_result",
   "table_data_result",
@@ -938,8 +939,8 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
     "connected",
   ];
 
-  test("Swift ResponseType declares exactly 54 rawValues", () => {
-    expect(rawValues.length).toBe(54);
+  test("Swift ResponseType declares exactly 55 rawValues", () => {
+    expect(rawValues.length).toBe(55);
   });
 
   test("rawValues are unique (no accidental duplicate)", () => {
@@ -952,9 +953,9 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
     }
   });
 
-  test("the decoder explicitly reshapes exactly the 49 expected response types", () => {
+  test("the decoder explicitly reshapes exactly the 50 expected response types", () => {
     const reshaped = rawValues.filter(isExplicitlyDecoded).sort();
-    expect(reshaped.length).toBe(49);
+    expect(reshaped.length).toBe(50);
     expect(reshaped).toEqual(EXPECTED_RESHAPED_RESPONSE_TYPES);
   });
 
@@ -1103,6 +1104,7 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     { type: "hinge_angle_result", expected: false },
     { type: "appearance_result", expected: false },
     { type: "location_result", expected: false },
+    { type: "siri_result", expected: false },
     { type: "ime_action_result", expected: true },
     { type: "action_result", expected: true },
     { type: "magic_tap_result", expected: false },
@@ -1223,8 +1225,8 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     });
   });
 
-  test("the passthrough set is the 48 success-reading types", () => {
-    expect(READS_MESSAGE_SUCCESS.length).toBe(48);
+  test("the passthrough set is the 49 success-reading types", () => {
+    expect(READS_MESSAGE_SUCCESS.length).toBe(49);
   });
 
   for (const type of READS_MESSAGE_SUCCESS) {

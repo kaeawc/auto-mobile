@@ -9,6 +9,7 @@ import { registerDeepLinkTools } from "./deepLinkTools";
 import { registerSendBroadcastTools } from "./sendBroadcastTools";
 import { registerGetLogsTools } from "./getLogsTools";
 import { registerCompareScreenshotTools } from "./compareScreenshotTools";
+import { registerSiriTools } from "./siriTools";
 import { registerStatusBarTools } from "./statusBarTools";
 import { registerAppLinkTools } from "./appLinkTools";
 import { registerNavigationTools } from "./navigationTools";
@@ -83,6 +84,7 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerGetLogsTools();
   registerCompareScreenshotTools();
   registerStatusBarTools();
+  registerSiriTools();
   registerAppLinkTools();
   registerNavigationTools();
   registerNotificationTools();

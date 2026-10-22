@@ -540,6 +540,7 @@ const messageDecoders = new Map<
   ["rotate_result", decodeRotateResult],
   ["hinge_angle_result", decodeHingeAngleResult],
   ["location_result", decodeLocationResult],
+  ["siri_result", decodeLocationResult],
   ["appearance_result", decodeAppearanceResult],
   ["ime_action_result", decodeImeActionResult],
   ["action_result", decodeImeActionResult],

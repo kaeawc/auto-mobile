@@ -41,6 +41,7 @@ public enum WebSocketRequest: Decodable, Sendable {
     case location(RequestLocation)
     case setHingeAngle(RequestSetHingeAngle)
     case appearance(RequestAppearance)
+    case siri(RequestSiri)
     case clipboard(RequestClipboard)
 
     case getCurrentFocus(RequestEnvelope)
@@ -101,7 +102,7 @@ public enum WebSocketRequest: Decodable, Sendable {
         case .requestPressButton, .requestPressHome, .requestPressBack, .requestShake, .requestRecentApps:
             return try decodeNavigation(requestType, from: decoder)
         case .requestAction, .requestActivateAccessibilityLink, .requestLaunchApp, .requestResetPermissions,
-             .requestRotate, .requestLocation, .setHingeAngle, .requestAppearance, .requestClipboard:
+             .requestRotate, .requestLocation, .setHingeAngle, .requestAppearance, .requestSiri, .requestClipboard:
             return try decodeAppAndDevice(requestType, from: decoder)
         case .getCurrentFocus, .getTraversalOrder, .addHighlight, .magicTap, .sdkTrigger, .getVoiceOverState,
              .setVoiceOverState, .requestAccessibilityAudit:
@@ -208,6 +209,8 @@ public enum WebSocketRequest: Decodable, Sendable {
             return try .setHingeAngle(RequestSetHingeAngle(from: decoder))
         case .requestAppearance:
             return try .appearance(RequestAppearance(from: decoder))
+        case .requestSiri:
+            return try .siri(RequestSiri(from: decoder))
         case .requestClipboard:
             return try .clipboard(RequestClipboard(from: decoder))
         default:
@@ -325,6 +328,7 @@ public enum WebSocketRequest: Decodable, Sendable {
         case .location: return .requestLocation
         case .setHingeAngle: return .setHingeAngle
         case .appearance: return .requestAppearance
+        case .siri: return .requestSiri
         case .clipboard: return .requestClipboard
         case .getCurrentFocus: return .getCurrentFocus
         case .getTraversalOrder: return .getTraversalOrder
@@ -382,6 +386,7 @@ public enum WebSocketRequest: Decodable, Sendable {
         case let .sdkTrigger(payload): return payload
         case let .setHingeAngle(payload): return payload
         case let .appearance(payload): return payload
+        case let .siri(payload): return payload
         case let .tapCoordinates(payload): return payload
         case let .swipe(payload): return payload
         case let .twoFingerSwipe(payload), let .multiFingerSwipe(payload):

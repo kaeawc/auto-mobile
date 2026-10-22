@@ -29,7 +29,7 @@ The following tools expose `sessionUuid` and `keepScreenAwake`:
 `resetAppLogs`, `resetKeychain`, `rotate`, `selectAllText`, `sendKeys`, `sendSms`,
 `setActiveDevice`, `setAppLinks`, `setAppPermissions`, `setDeviceResources`, `setDeviceState`,
 `setKeyValue`,
-`setNotificationPolicy`, `setPosture`, `setPreference`, `setSensor`, `setUIState`, `shake`, `snapshotOf`,
+`setNotificationPolicy`, `setPosture`, `setPreference`, `setSensor`, `setUIState`, `shake`, `siri`, `snapshotOf`,
 `sqlQuery`, `statusBar`,
 `resetAppLogs`, `resetKeychain`, `rotate`, `selectAllText`, `sendBroadcast`, `sendKeys`, `sendSms`,
 `swipeAt`, `swipeOn`, `systemTray`, `tapAny`, `tapAt`, `tapOn`, `terminateApp`, `uninstallApp`,
@@ -1428,6 +1428,37 @@ settled screenshot is eligible.
 | 🔘 <code>pressButton</code>   | Presses a device or navigation button. iOS simulators support volume and power; iOS does not support menu.                                                          |
 | ⌨️ <code>keyboard</code>      | Opens, closes, or detects the keyboard; selects AutoMobile profiles or installed Android IMEs.                                                                      |
 | 📋 <code>clipboard</code>     | Copies, pastes, clears, or reads the clipboard.                                                                                                                     |
+| 🗣️ <code>siri</code>          | iOS: activates Siri with a phrase (e.g. an App Shortcut) and returns the observation; Android returns unsupported.                                                  |
+
+### siri
+
+`siri` activates Siri on iOS with recognized-speech text, so an agent can invoke an
+App Intent or App Shortcut by its phrase and check where it lands (#14109). It
+sends `phrase` (1 to 500 characters, trimmed) to the runner, which calls
+`XCUIDevice.shared.siriService.activate(voiceRecognitionText:)`, then returns the
+settled observation. `status` is `activated`, `unsupported` or `failed` (`failed`
+also sets `isError`).
+
+- Android returns `status: "unsupported"` without touching the device. App Actions
+  (`am start -a android.intent.action.VOICE_COMMAND`) are a possible follow-up.
+- A runner built before this command returns `status: "unsupported"` with a hint
+  to update the AutoMobile runner.
+- `activated` means the runner handed the phrase to Siri, not that a shortcut ran.
+  Check the returned observation for the target screen.
+
+Research outcome:
+
+- `XCUISiriService` is available to UI tests on iOS 10.3 and later, on simulators
+  and physical devices. The call returns once Siri has the text; Siri's answer and
+  any app launch follow asynchronously, which is why the tool waits for the screen
+  to settle before observing.
+- Whether a given Simulator runtime resolves an App Shortcut phrase offline, or
+  without a signed-in Apple ID, has not been verified on a device yet. Siri must be
+  enabled in the Simulator's Settings. If a phrase only shows Siri's generic
+  answer, the shortcut was not resolved.
+- Latency has not been measured on a device yet. The runner request is bounded to
+  10 seconds and the settle wait is bounded to 12 seconds, the same as a URL
+  dispatch that can launch another app.
 
 ### Tap, swipe, and form search options
 

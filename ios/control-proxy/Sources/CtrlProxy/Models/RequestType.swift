@@ -45,6 +45,7 @@ public enum RequestType: String, CaseIterable, Sendable {
     case requestLocation = "request_location"
     case setHingeAngle = "set_hinge_angle"
     case requestAppearance = "request_appearance"
+    case requestSiri = "request_siri"
 
     /// Clipboard
     case requestClipboard = "request_clipboard"
@@ -119,6 +120,7 @@ extension RequestType {
         case .requestLocation: return .locationResult
         case .setHingeAngle: return .hingeAngleResult
         case .requestAppearance: return .appearanceResult
+        case .requestSiri: return .siriResult
         case .requestClipboard: return .clipboardResult
         case .getCurrentFocus: return .currentFocusResult
         case .getTraversalOrder: return .traversalOrderResult

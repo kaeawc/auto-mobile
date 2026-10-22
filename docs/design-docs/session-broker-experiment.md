@@ -96,9 +96,12 @@ Once restart handoff begins, new prepare and abandon calls return an RPC refusal
 `success: false`, `code: "session_broker_stopping"`, `error: "Session broker is stopping"`,
 `retryable: true`, and `retryAfterMs: 5000`. Retry the same request identity against the
 successor daemon; the stopping refusal neither admits a request nor stores a terminal
-receipt. It stays outside preparation's `failureFor` mapping. Already-running
-preparations cancelled by shutdown retain the existing `session_preparation_failed`
-terminal receipt and cleanup behavior.
+receipt. Preparations interrupted before admission follow the same refusal contract.
+Already-admitted preparations interrupted by shutdown store a terminal
+`session_broker_stopping` receipt with `retryable: true`, `retryAfterMs: 5000`, and
+`retryRequires: "new_request_id"`, even while cleanup is pending. The first reply and
+every replay carry identical failure guidance; retry against the successor daemon
+with a new request ID.
 
 Retryable `session_restart_handoff_pending` and configured-but-unavailable broker
 refusals use the same hint, shared with the service's five-second idle interval between

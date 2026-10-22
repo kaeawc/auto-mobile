@@ -211,3 +211,4 @@ test/fixtures/android-secure-settings/*.txt text eol=lf
 # Generated prototype spec models are compared byte-for-byte by a unit test on Windows.
 android/protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol/PrototypeSpecModels.generated.kt text eol=lf
 ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeSpecModels.generated.swift text eol=lf
+test/fixtures/android-sdkmanager/*.txt text eol=lf

@@ -11,6 +11,7 @@ import { BootCapacityExhaustedError } from "../../../src/models/BootCapacityExha
 import type { AppleDevice } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import {
   DEVICE_MUTATION_KINDS,
+  opaqueIntentKey,
   type DeviceBaseline,
 } from "../../../src/daemon/sessionBroker/mutations/types";
 import type { DeviceMutationResetContext } from "../../../src/daemon/sessionBroker/mutations/reset";
@@ -213,6 +214,33 @@ describe("iOS keep-booted best-effort cleaning", () => {
     expect(await rig.run()).toMatchObject({ outcome: "clean", mode: "keep-booted" });
     expect(rig.mutations.reverted.map((entry) => entry.kind)).toEqual(["preference", "clipboard"]);
     expect(rig.mutations.sanitizeCount).toBe(1);
+    expect(rig.state.eraseCalls).toBe(0);
+  });
+
+  test("a fallback-forcing opaque journal row erases instead of reporting a clean keep-booted reset", async () => {
+    const rig = await harness();
+    await rig.journal.record(SCOPE, {
+      kind: "opaque",
+      key: opaqueIntentKey("sendBroadcast", "com.example.app"),
+      priorValue: { state: "unobservable" },
+      toolName: "sendBroadcast",
+    });
+    const result = await rig.run();
+    expect(result).toMatchObject({ outcome: "fallback:erase", mode: "erase" });
+    expect(result.fallbackReason).toContain("sendBroadcast");
+    expect(rig.mutations.sanitizeCount).toBe(0);
+    expect(rig.state.eraseCalls).toBe(1);
+  });
+
+  test("a best-effort opaque journal row keeps the booted reset", async () => {
+    const rig = await harness();
+    await rig.journal.record(SCOPE, {
+      kind: "opaque",
+      key: "tool:sendSms",
+      priorValue: { state: "unobservable" },
+      toolName: "sendSms",
+    });
+    expect(await rig.run()).toMatchObject({ outcome: "clean", mode: "keep-booted" });
     expect(rig.state.eraseCalls).toBe(0);
   });
 

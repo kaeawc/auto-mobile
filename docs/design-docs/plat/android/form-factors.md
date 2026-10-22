@@ -16,12 +16,12 @@ Spike notes for #14118, part of #14072.
 
 ## Verdicts
 
-| Form factor                                  | Verdict            | Smallest useful tool surface                                           | Main risk                                                                  |
-| -------------------------------------------- | ------------------ | ---------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| Android TV / Google TV                       | **Go**             | `focusNavigate`, a `select` key on `sendKeys`, TV form-factor matching | The CtrlProxy has never been run on a TV image                             |
-| Wear OS                                      | **Conditional go** | rotary scroll, `isScreenRound` in `observe`, ambient toggle            | Every rotary and ambient command is unconfirmed                            |
-| Android Auto (projection to a DHU)           | **No-go**          | none                                                                   | The car UI is not in any accessibility tree AutoMobile can read            |
-| Android Automotive OS (an AAOS system image) | **Investigate**    | none yet                                                               | Not named in the issue, but it is a normal Android image and may just work |
+| Form factor                                  | Verdict            | Smallest useful tool surface                                                                       | Main risk                                                                  |
+| -------------------------------------------- | ------------------ | -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| Android TV / Google TV                       | **Go**             | `focusNavigate`, a `select` key on `sendKeys` only if `enter` falls short, TV form-factor matching | The CtrlProxy has never been run on a TV image                             |
+| Wear OS                                      | **Conditional go** | rotary scroll, `isScreenRound` in `observe`, ambient toggle                                        | Every rotary and ambient command is unconfirmed                            |
+| Android Auto (projection to a DHU)           | **No-go**          | none                                                                                               | The car UI is not in any accessibility tree AutoMobile can read            |
+| Android Automotive OS (an AAOS system image) | **Investigate**    | none yet                                                                                           | Not named in the issue, but it is a normal Android image and may just work |
 
 Android Auto and Android Automotive OS are different products. Android Auto projects a
 phone's UI to a head unit. Automotive OS is a full Android build that runs on the car. The
@@ -96,8 +96,14 @@ missing is a loop that connects them, and one key.
 
 ### Proposed surface
 
-1. **`sendKeys` gains `select`** (`KEYCODE_DPAD_CENTER`). Without it the agent can move
-   focus but cannot activate anything. This is a one-entry change to `INPUT_KEY_CODE_MAP`.
+1. **A way to activate the focused item.** `sendKeys` already supports `enter`
+   (`KEYCODE_ENTER`), and Android's TV guidance treats both `KEYCODE_ENTER` and
+   `KEYCODE_DPAD_CENTER` as select input, so `enter` may already be enough. Test `enter`
+   on the TV image first (checklist row 3). If it activates the focused item, no new key is
+   needed. If not, add `select` (`KEYCODE_DPAD_CENTER`) to **both** `SUPPORTED_INPUT_KEYS`
+   and `INPUT_KEY_CODE_MAP` in `src/features/action/InputKey.ts`: `InputKeyName` is derived
+   from the first, and the second is checked against it, so one entry alone does not
+   compile.
 2. **`focusNavigate({ until, direction?, maxSteps?, settleMs? })`.** It observes, stops if
    the focused element matches the selector `until`, otherwise presses one D-pad key
    and observes again. It returns the path of focused elements, so a failure shows where
@@ -209,24 +215,25 @@ and foldables, which take the same geometry path as today.
 
 Run on a booted image of each kind. Record the command, the image id and the API level.
 
-| #   | Image                                    | Check                                                                                                                            |
-| --- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | TV (`android-tv` or `google-tv`, API 34) | `avdmanager create avd` with `--device tv_1080p` succeeds; the AVD boots                                                         |
-| 2   | TV                                       | `adb install` of the CtrlProxy APK succeeds; the service can be enabled from the host; `observe` returns a hierarchy             |
-| 3   | TV                                       | `sendKeys` with `arrow_right` moves focus and `observe.focusedElement` changes; `KEYCODE_DPAD_CENTER` activates the focused item |
-| 4   | TV                                       | `tapOn` works on an image with no touchscreen                                                                                    |
-| 5   | Wear (`android-wear`, API 34)            | The same install, enable and `observe` checks as TV                                                                              |
-| 6   | Wear                                     | Each rotary candidate above against a `ScalingLazyColumn`: which one changes the scroll position                                 |
-| 7   | Wear                                     | Which command, if any, enters and leaves ambient mode                                                                            |
-| 8   | Wear                                     | `isScreenRound` is true on `wearos_small_round`; the left-edge swipe dismisses a screen                                          |
-| 9   | Automotive (`android-automotive`)        | Install, enable and `observe`; behavior of the secondary displays                                                                |
-| 10  | Any                                      | `sdkmanager --list` shows the tags named above; `avdmanager list device` shows the profile ids                                   |
+| #   | Image                                    | Check                                                                                                                                                               |
+| --- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | TV (`android-tv` or `google-tv`, API 34) | `avdmanager create avd` with `--device tv_1080p` succeeds; the AVD boots                                                                                            |
+| 2   | TV                                       | `adb install` of the CtrlProxy APK succeeds; the service can be enabled from the host; `observe` returns a hierarchy                                                |
+| 3   | TV                                       | `sendKeys` with `arrow_right` moves focus and `observe.focusedElement` changes; `enter` and, if that does not work, `KEYCODE_DPAD_CENTER` activate the focused item |
+| 4   | TV                                       | `tapOn` works on an image with no touchscreen                                                                                                                       |
+| 5   | Wear (`android-wear`, API 34)            | The same install, enable and `observe` checks as TV                                                                                                                 |
+| 6   | Wear                                     | Each rotary candidate above against a `ScalingLazyColumn`: which one changes the scroll position                                                                    |
+| 7   | Wear                                     | Which command, if any, enters and leaves ambient mode                                                                                                               |
+| 8   | Wear                                     | `isScreenRound` is true on `wearos_small_round`; the left-edge swipe dismisses a screen                                                                             |
+| 9   | Automotive (`android-automotive`)        | Install, enable and `observe`; behavior of the secondary displays                                                                                                   |
+| 10  | Any                                      | `sdkmanager --list` shows the tags named above; `avdmanager list device` shows the profile ids                                                                      |
 
 ## Follow-ups
 
 Filed under #14072, each gated on its checklist rows:
 
-- **TV (#14947):** `sendKeys` `select` and `focusNavigate` (rows 1 to 4).
+- **TV (#14947):** `focusNavigate`, and a `select` key if `enter` does not activate the
+  focused item (rows 1 to 4).
 - **Wear OS (#14948):** rotary scroll, `isScreenRound`, and ambient toggle if row 7 finds a
   command (rows 5 to 8).
 - **Form-factor vocabulary (#14946):** `tv`, `watch` and `automotive` in matching,

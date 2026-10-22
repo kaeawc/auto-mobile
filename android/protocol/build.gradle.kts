@@ -26,6 +26,10 @@ tasks.withType<Test>().configureEach {
     .withPathSensitivity(PathSensitivity.RELATIVE)
     .withPropertyName("prototypeSpecFixtures")
   inputs
+    .dir(layout.projectDirectory.dir("../../test/fixtures/prototype-bundle"))
+    .withPathSensitivity(PathSensitivity.RELATIVE)
+    .withPropertyName("prototypeBundleFixtures")
+  inputs
     .dir(layout.projectDirectory.dir("../../test/fixtures/android-contract"))
     .withPathSensitivity(PathSensitivity.RELATIVE)
     .withPropertyName("androidWireContractFixtures")

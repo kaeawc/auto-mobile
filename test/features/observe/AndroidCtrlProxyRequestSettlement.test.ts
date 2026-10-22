@@ -41,7 +41,7 @@ async function harness() {
   );
   await Promise.resolve();
   client.connectionTestHooks.socket = socket;
-  client["supportedCommands"] = new Set([
+  client.connectionTestHooks.supportedCommands = new Set([
     ...ANDROID_CAPABILITY_GATED_COMMANDS,
     "request_activate_accessibility_link",
     "discover_keystore",
@@ -49,7 +49,7 @@ async function harness() {
     SDK_CAPABILITIES_USER_ID_CAPABILITY,
     "tap_double_v1",
   ]);
-  const manager = client["requestManager"];
+  const manager = client.connectionTestHooks.requestManager;
   const ids = new CountingIdGenerator("wire");
   manager.generateId = (prefix) => `${prefix}_${ids.next()}`;
   client.ensureConnected = async () => true;

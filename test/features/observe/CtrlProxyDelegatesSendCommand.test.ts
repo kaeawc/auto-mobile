@@ -42,7 +42,7 @@ async function harness() {
   await Promise.resolve();
   timer.advanceTime(123);
   client.connectionTestHooks.socket = socket;
-  const manager = client["requestManager"];
+  const manager = client.connectionTestHooks.requestManager;
   const ids = new CountingIdGenerator("wire");
   manager.generateId = (prefix) => `${prefix}_${ids.next()}`;
   let connects = 0;

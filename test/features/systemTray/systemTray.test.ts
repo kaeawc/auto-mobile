@@ -4917,7 +4917,8 @@ describe("Android systemTray clearAll progress budget", () => {
     );
   };
 
-  const setup = (stuckAfter = 3) => {
+  // `missedSwipe` is the 1-based swipe that changes nothing (the swipe lands on a moving row).
+  const setup = (stuckAfter = 3, missedSwipe = Number.POSITIVE_INFINITY) => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const adb = new FakeAdbExecutor();
@@ -4941,7 +4942,8 @@ describe("Android systemTray clearAll progress budget", () => {
         timer.advanceTime(400);
         verifiedSwipes = swipeCount;
       }
-      return observations[Math.min(swipeCount, stuckAfter)];
+      const effective = swipeCount >= missedSwipe ? swipeCount - 1 : swipeCount;
+      return observations[Math.min(effective, stuckAfter)];
     });
     setSystemTrayDependencies({
       timer,
@@ -5025,13 +5027,20 @@ describe("Android systemTray clearAll progress budget", () => {
     expect(timer.now()).toBeGreaterThan(5000);
   });
 
-  test("stalls with partial progress without swiping a surviving row again", async () => {
+  test("retries a missed swipe once, then stalls with partial progress", async () => {
     const { timer, swipes, drain } = setup(1);
 
-    expect(await drain()).toMatchObject({ swipeCount: 2, dismissedCount: 1, stalled: true });
-    expect(swipes()).toHaveLength(2);
-    // First dismissal takes 3000ms; the next swipe takes 2600ms, then gets 5000ms to verify.
-    expect(timer.now()).toBe(10600);
+    expect(await drain()).toMatchObject({ swipeCount: 3, dismissedCount: 1, stalled: true });
+    expect(swipes()).toHaveLength(3);
+    // First dismissal takes 3000ms; each of the next two swipes takes 2600ms, then gets 5000ms.
+    expect(timer.now()).toBe(18200);
+  });
+
+  test("a swipe that missed a moving row is retried and the drain still empties the group (#13810)", async () => {
+    const { swipes, drain } = setup(3, 2);
+
+    expect(await drain()).toMatchObject({ swipeCount: 4, dismissedCount: 3, stalled: false });
+    expect(swipes()).toHaveLength(4);
   });
 
   test("respects maxSwipes even while dismissals keep making progress", async () => {

@@ -901,6 +901,10 @@ export class SessionBroker {
     }
     signal?.throwIfAborted();
     try {
+      if (request.state === "releasing" && resource.state === "destroying") {
+        await this.tryCleanup(destructionTicket(resource), signal);
+        return this.resetRelease.releaseStatus(request, sessionUuid);
+      }
       const disposition = await this.resetRelease.drainAndReset(
         request,
         resource,

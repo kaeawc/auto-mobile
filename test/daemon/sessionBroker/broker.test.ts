@@ -888,7 +888,12 @@ describe("session-only broker lifecycle", () => {
     expect(await pending).toMatchObject({
       outcome: "failed",
       cleanupPending: false,
-      failure: { code: "cancelled", retryable: true },
+      failure: {
+        code: "session_broker_stopping",
+        retryable: true,
+        retryAfterMs: 5_000,
+        retryRequires: "new_request_id",
+      },
     });
     await close;
     expect(devices.sessions.size).toBe(0);

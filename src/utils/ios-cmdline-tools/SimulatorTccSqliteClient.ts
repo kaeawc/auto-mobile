@@ -3,7 +3,7 @@ import { errorMessage } from "../describeUnknownError";
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { ActionableError } from "../../models/ActionableError";
+import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { DefaultHostCommandExecutor, type HostCommandExecutor } from "../HostCommandExecutor";
 import { defaultTimer, type Timer } from "../SystemTimer";
 import { resolveIosDeviceKind } from "./IosDeviceKind";
@@ -58,6 +58,14 @@ export interface TccServiceRowReader {
     services: readonly string[],
     signal?: AbortSignal,
   ): Promise<TccPermissionRow[]>;
+}
+
+/**
+ * Reads the user trust settings a simulator's trust store holds: one SHA-1 (hex) per certificate
+ * the user marked trusted, such as a root CA added with `simctl keychain add-root-cert` (#14828).
+ */
+export interface TrustStoreReader {
+  readTrustSettings(deviceId: string, signal?: AbortSignal): Promise<string[]>;
 }
 
 export interface TccDatabaseFileSystem {
@@ -166,6 +174,15 @@ function parseJsonArray(output: string, context: string): Array<Record<string, u
   }
 }
 
+/** Names one simulator sqlite database in error messages: its file and the daemon that writes it. */
+interface SimulatorSqliteDatabase {
+  name: string;
+  writer: string;
+}
+
+const TCC_DATABASE: SimulatorSqliteDatabase = { name: "TCC database", writer: "tccd" };
+const TRUST_STORE_DATABASE: SimulatorSqliteDatabase = { name: "trust store", writer: "trustd" };
+
 function sqliteErrorDetail(error: unknown): string {
   return errorMessage(error);
 }
@@ -189,6 +206,7 @@ function classifySqliteExecutionError(
   error: unknown,
   databasePath: string,
   deviceId: string,
+  database: SimulatorSqliteDatabase,
 ): never {
   const detail = sqliteErrorDetail(error);
   if (hasErrorCode(error, "ENOENT") || /\bENOENT\b|spawn sqlite3/i.test(detail)) {
@@ -198,15 +216,15 @@ function classifySqliteExecutionError(
   }
   if (/file is not a database|malformed database/i.test(detail)) {
     throw new ActionableError(
-      `Simulator TCC database is malformed for ${deviceId}: ${databasePath}`,
+      `Simulator ${database.name} is malformed for ${deviceId}: ${databasePath}`,
     );
   }
   if (/database is locked|database is busy|SQLITE_BUSY/i.test(detail)) {
     throw new ActionableError(
-      `Simulator TCC database for ${deviceId} is temporarily locked by a live tccd writer; retry the read: ${detail}`,
+      `Simulator ${database.name} for ${deviceId} is temporarily locked by a live ${database.writer} writer; retry the read: ${detail}`,
     );
   }
-  throw new ActionableError(`Failed to read simulator TCC database for ${deviceId}: ${detail}`);
+  throw new ActionableError(`Failed to read simulator ${database.name} for ${deviceId}: ${detail}`);
 }
 
 function optionalNumberField(
@@ -240,7 +258,9 @@ function parsePermissionRows(output: string, deviceId: string): TccPermissionRow
  * database path, argv construction, schema handling, timeout, and error
  * classification together so permission actions never invoke sqlite directly.
  */
-export class SimulatorTccSqliteClient implements TccPermissionReader, TccServiceRowReader {
+export class SimulatorTccSqliteClient
+  implements TccPermissionReader, TccServiceRowReader, TrustStoreReader
+{
   private readonly resolveKind: typeof resolveIosDeviceKind;
   private readonly executor: HostCommandExecutor;
   private readonly fileSystem: TccDatabaseFileSystem;
@@ -334,6 +354,66 @@ export class SimulatorTccSqliteClient implements TccPermissionReader, TccService
     return parsePermissionRows(result.stdout, deviceId);
   }
 
+  /**
+   * `simctl keychain reset` clears the keychain but not the trust store's `tsettings` rows, so a
+   * user-trusted root CA survives it (#14828). A simulator that never stored a trust setting has
+   * no trust store file, which reads as no rows.
+   */
+  async readTrustSettings(deviceId: string, signal?: AbortSignal): Promise<string[]> {
+    const udid = this.requireSimulatorUdid(deviceId, TRUST_STORE_DATABASE);
+    const databasePath = join(
+      this.deviceSetRoot,
+      udid,
+      "data",
+      "private",
+      "var",
+      "protected",
+      "trustd",
+      "private",
+      "TrustStore.sqlite3",
+    );
+    try {
+      if (!(await this.fileSystem.stat(databasePath)).isFile()) {
+        throw new ActionableError(
+          `Simulator trust store is unavailable for ${udid}: ${databasePath} is not a file`,
+        );
+      }
+    } catch (error) {
+      if (hasErrorCode(error, "ENOENT")) {
+        return [];
+      }
+      throw toActionableError(error, `Simulator trust store is unavailable for ${udid}`);
+    }
+    const result = await this.execute(
+      ["-json", databasePath, "select hex(sha1) as sha1 from tsettings;"],
+      databasePath,
+      udid,
+      signal,
+      TRUST_STORE_DATABASE,
+    );
+    return parseJsonArray(result.stdout, `simulator trust store for ${udid}`).map((row) => {
+      if (typeof row.sha1 !== "string") {
+        throw new ActionableError(`sqlite3 returned a trust setting without a sha1 for ${udid}`);
+      }
+      return row.sha1;
+    });
+  }
+
+  private requireSimulatorUdid(deviceId: string, database: SimulatorSqliteDatabase): string {
+    const normalizedDeviceId = deviceId.trim();
+    if (!normalizedDeviceId) {
+      throw new ActionableError(
+        `Simulator ${database.name} lookup requires a non-empty device UDID`,
+      );
+    }
+    if (this.resolveKind({ deviceId: normalizedDeviceId }) === "physical") {
+      throw new ActionableError(
+        `Simulator ${database.name} lookup requires a simulator UDID, received ${normalizedDeviceId}`,
+      );
+    }
+    return normalizedDeviceId;
+  }
+
   private async readPermissionColumns(
     databasePath: string,
     deviceId: string,
@@ -352,15 +432,7 @@ export class SimulatorTccSqliteClient implements TccPermissionReader, TccService
   }
 
   private async resolveDatabasePath(deviceId: string): Promise<string> {
-    const normalizedDeviceId = deviceId.trim();
-    if (!normalizedDeviceId) {
-      throw new ActionableError("Simulator TCC database lookup requires a non-empty device UDID");
-    }
-    if (this.resolveKind({ deviceId: normalizedDeviceId }) === "physical") {
-      throw new ActionableError(
-        `Simulator TCC database lookup requires a simulator UDID, received ${normalizedDeviceId}`,
-      );
-    }
+    const normalizedDeviceId = this.requireSimulatorUdid(deviceId, TCC_DATABASE);
     const databasePath = join(
       this.deviceSetRoot,
       normalizedDeviceId,
@@ -407,6 +479,7 @@ export class SimulatorTccSqliteClient implements TccPermissionReader, TccService
     databasePath: string,
     deviceId: string,
     parentSignal?: AbortSignal,
+    database: SimulatorSqliteDatabase = TCC_DATABASE,
   ) {
     const controller = new AbortController();
     let timedOut = false;
@@ -418,7 +491,7 @@ export class SimulatorTccSqliteClient implements TccPermissionReader, TccService
     }
     const timeout = this.timer.setTimeout(() => {
       timedOut = true;
-      controller.abort(new Error("simulator TCC query timed out"));
+      controller.abort(new Error(`simulator ${database.name} query timed out`));
     }, this.timeoutMs);
 
     try {
@@ -428,13 +501,15 @@ export class SimulatorTccSqliteClient implements TccPermissionReader, TccService
     } catch (error) {
       if (timedOut) {
         throw new ActionableError(
-          `Timed out after ${this.timeoutMs}ms while reading simulator TCC database for ${deviceId}`,
+          `Timed out after ${this.timeoutMs}ms while reading simulator ${database.name} for ${deviceId}`,
         );
       }
       if (parentSignal?.aborted) {
-        throw new ActionableError(`Reading simulator TCC database for ${deviceId} was cancelled`);
+        throw new ActionableError(
+          `Reading simulator ${database.name} for ${deviceId} was cancelled`,
+        );
       }
-      classifySqliteExecutionError(error, databasePath, deviceId);
+      classifySqliteExecutionError(error, databasePath, deviceId, database);
     } finally {
       this.timer.clearTimeout(timeout);
       parentSignal?.removeEventListener("abort", cancelFromParent);

@@ -576,4 +576,86 @@ describe("SimulatorTccSqliteClient", () => {
       /locked|busy/i,
     );
   });
+
+  describe("readTrustSettings (#14828)", () => {
+    const deviceSetRoot = "/Users/tester/Library/Developer/CoreSimulator/Devices";
+    const trustStorePath = join(
+      deviceSetRoot,
+      DEVICE_ID,
+      "data",
+      "private",
+      "var",
+      "protected",
+      "trustd",
+      "private",
+      "TrustStore.sqlite3",
+    );
+    function trustClient() {
+      const executor = new FakeSqliteExecutor();
+      const fileSystem = new FakeTccFileSystem();
+      const client = new SimulatorTccSqliteClient({
+        timer: new FakeTimer(),
+        environment: {},
+        executor,
+        fileSystem,
+        homeDirectory: "/Users/tester",
+        deviceSetRoot,
+      });
+      return { client, executor, fileSystem };
+    }
+
+    test("reads the user trust settings from the device's trust store read-only", async () => {
+      const { client, executor, fileSystem } = trustClient();
+      executor.response = result(JSON.stringify([{ sha1: "AB12" }, { sha1: "CD34" }]));
+      await expect(client.readTrustSettings(DEVICE_ID)).resolves.toEqual(["AB12", "CD34"]);
+      expect(fileSystem.paths).toEqual([trustStorePath]);
+      expect(executor.calls.map(({ file, args }) => [file, ...args])).toEqual([
+        [
+          "sqlite3",
+          "-readonly",
+          "-json",
+          trustStorePath,
+          "select hex(sha1) as sha1 from tsettings;",
+        ],
+      ]);
+    });
+
+    test("a simulator without a trust store file holds no trust settings", async () => {
+      const { client, executor, fileSystem } = trustClient();
+      fileSystem.error = Object.assign(new Error("missing"), { code: "ENOENT" });
+      await expect(client.readTrustSettings(DEVICE_ID)).resolves.toEqual([]);
+      expect(executor.calls).toHaveLength(0);
+    });
+
+    test("an unreadable trust store or malformed row fails with trust store context", async () => {
+      const { client, executor, fileSystem } = trustClient();
+      fileSystem.isFile = false;
+      await expect(client.readTrustSettings(DEVICE_ID)).rejects.toThrow(
+        "Simulator trust store is unavailable",
+      );
+      fileSystem.isFile = true;
+      executor.error = new Error("database is locked");
+      await expect(client.readTrustSettings(DEVICE_ID)).rejects.toThrow(
+        "is temporarily locked by a live trustd writer",
+      );
+      executor.error = new Error("no such table: tsettings");
+      await expect(client.readTrustSettings(DEVICE_ID)).rejects.toThrow(
+        "Failed to read simulator trust store",
+      );
+      executor.error = null;
+      executor.response = result(JSON.stringify([{ sha1: 7 }]));
+      await expect(client.readTrustSettings(DEVICE_ID)).rejects.toThrow(
+        "sqlite3 returned a trust setting without a sha1",
+      );
+    });
+
+    test("rejects a non-simulator UDID before touching the host", async () => {
+      const { client, executor, fileSystem } = trustClient();
+      await expect(client.readTrustSettings("00008110-000A1234ABCD801E")).rejects.toThrow(
+        "Simulator trust store lookup requires a simulator UDID",
+      );
+      expect(fileSystem.paths).toHaveLength(0);
+      expect(executor.calls).toHaveLength(0);
+    });
+  });
 });

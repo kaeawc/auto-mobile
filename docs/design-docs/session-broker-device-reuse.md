@@ -255,6 +255,11 @@ do not mean the device is equivalent to a freshly erased or wiped device.
 - **iOS:** Photos, Contacts and Calendar additions are not removed. Baseline app
   data is not reset, and baseline app-group data can persist where shared
   containers are retained. Other unsupported or out-of-band state may remain.
+  A user-trusted root certificate (for example one added with
+  `simctl keychain add-root-cert`) survives `simctl keychain reset` and simctl
+  cannot remove it, so keep-booted never reuses a simulator whose trust store
+  holds one: the release falls back to erase, and the receipt reports
+  `fallback:erase` with the reason (#14828).
 - **Android:** Accounts are not removed, and baseline apps' data is not reset
   (there is no default `pm clear`). Existing baseline files that were
   overwritten or deleted are not restored; added files are only removed under the

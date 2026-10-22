@@ -10,6 +10,7 @@ import type { SimCtlClient } from "../../../utils/ios-cmdline-tools/SimCtlClient
 import {
   SIMCTL_PRIVACY_TCC_SERVICES,
   type TccServiceRowReader,
+  type TrustStoreReader,
 } from "../../../utils/ios-cmdline-tools/SimulatorTccSqliteClient";
 import { isProcessAlreadyGoneError } from "../../../utils/ios-cmdline-tools/iosProcessErrors";
 import { getIosInstalledAppBundleId } from "../../../utils/ios-cmdline-tools/iosInstalledApp";
@@ -177,6 +178,7 @@ export interface IosMutationResetDependencies {
   files: IosResetFiles;
   pasteboard: IosResetPasteboard;
   privacyGrants: Pick<TccServiceRowReader, "readServiceRows">;
+  trustStore: Pick<TrustStoreReader, "readTrustSettings">;
 }
 
 interface IosAppGroupCleanup {
@@ -510,7 +512,35 @@ export class IosDeviceMutationResetPort implements DeviceMutationResetPort {
       );
     }
     await this.resetSurvivingPrivacyGrants(context);
+    await this.assertNoTrustedRoots(context);
     await this.restoreSettings(context);
+  }
+
+  /**
+   * `simctl keychain reset` leaves the trust store's user trust settings, so a root CA trusted
+   * during the session would intercept the next session's TLS (#14828). simctl cannot remove one,
+   * so a surviving trust setting fails the keep-booted clean and the release falls back to erase.
+   */
+  private async assertNoTrustedRoots(context: DeviceMutationResetContext): Promise<void> {
+    await context.assertOwned();
+    const started = this.timer.now();
+    let trusted: string[];
+    try {
+      trusted = await this.dependencies.trustStore.readTrustSettings(
+        context.scope.deviceId,
+        context.signal,
+      );
+    } catch (error) {
+      throw toActionableError(error, "iOS trust store verification failed");
+    } finally {
+      context.recordPhase?.("trustd:trust-verify", this.timer.now() - started);
+    }
+    await context.assertOwned();
+    if (trusted.length > 0) {
+      throw new ActionableError(
+        `iOS trust store holds ${trusted.length} user-trusted certificate(s) after keychain reset; erase required`,
+      );
+    }
   }
 
   private async resetSurvivingPrivacyGrants(context: DeviceMutationResetContext): Promise<void> {

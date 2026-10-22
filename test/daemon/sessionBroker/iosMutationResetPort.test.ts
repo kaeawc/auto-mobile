@@ -51,6 +51,8 @@ function harness() {
     owned: true,
     privacyRows: [] as (TccPermissionRow[] | Error)[],
     privacyReads: [] as { deviceId: string; services: readonly string[]; signal?: AbortSignal }[],
+    trustSettings: [] as string[] | Error,
+    trustReads: [] as { deviceId: string; signal?: AbortSignal; commandsBefore: string[][] }[],
     phases: [] as { phase: string; durationMs: number }[],
     groups: { "group.probe": GROUP } as Record<string, string>,
     appInventory: { "probe.app": { CFBundleVersion: "1", ApplicationType: "User" } } as Record<
@@ -164,6 +166,16 @@ function harness() {
             throw rows;
           }
           return rows;
+        },
+      },
+      trustStore: {
+        readTrustSettings: async (deviceId, signal) => {
+          state.trustReads.push({ deviceId, signal, commandsBefore: [...state.commands] });
+          timer.advanceTime(3);
+          if (state.trustSettings instanceof Error) {
+            throw state.trustSettings;
+          }
+          return state.trustSettings;
         },
       },
       files: {
@@ -615,6 +627,34 @@ describe("iOS mutation reset adapter", () => {
       "iOS privacy grants survived reset: kTCCServiceAddressBook:com.apple.mobilesafari",
     );
     expect(rig.state.privacyReads).toHaveLength(2);
+    expect(rig.state.commands.some((args) => args[0] === "ui")).toBe(false);
+  });
+
+  test("sanitation verifies an empty trust store after the keychain reset (#14828)", async () => {
+    const rig = harness();
+    await rig.port.sanitize(rig.context);
+    expect(rig.state.trustReads).toHaveLength(1);
+    expect(rig.state.trustReads[0]).toMatchObject({ deviceId: UDID, signal: rig.context.signal });
+    expect(rig.state.trustReads[0].commandsBefore).toContainEqual(["keychain", UDID, "reset"]);
+    expect(rig.state.phases).toContainEqual({ phase: "trustd:trust-verify", durationMs: 3 });
+  });
+
+  test("a user-trusted root surviving the keychain reset fails sanitation so release erases (#14828)", async () => {
+    const rig = harness();
+    rig.state.trustSettings = ["0123456789ABCDEF0123456789ABCDEF01234567"];
+    await expect(rig.port.sanitize(rig.context)).rejects.toThrow(
+      "iOS trust store holds 1 user-trusted certificate(s) after keychain reset; erase required",
+    );
+    // Settings restore runs after the check, so a refused clean stops before it.
+    expect(rig.state.commands.some((args) => args[0] === "ui")).toBe(false);
+  });
+
+  test("an unreadable trust store fails sanitation closed (#14828)", async () => {
+    const rig = harness();
+    rig.state.trustSettings = new Error("database is locked");
+    await expect(rig.port.sanitize(rig.context)).rejects.toThrow(
+      "iOS trust store verification failed",
+    );
     expect(rig.state.commands.some((args) => args[0] === "ui")).toBe(false);
   });
 

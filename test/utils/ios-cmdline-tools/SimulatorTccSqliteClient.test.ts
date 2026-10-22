@@ -617,11 +617,13 @@ describe("SimulatorTccSqliteClient", () => {
       expect(executor.calls[0]?.options?.signal).toBeInstanceOf(AbortSignal);
     });
 
-    test("an empty result set and an absent database both mean no trusted certificates", async () => {
+    test("an empty result set means no trusted certificates, but an absent database fails closed", async () => {
       expect(await trustRig("").client.readUserTrustedCertificates(DEVICE_ID)).toEqual([]);
       const missing = trustRig();
       missing.fileSystem.error = Object.assign(new Error("gone"), { code: "ENOENT" });
-      expect(await missing.client.readUserTrustedCertificates(DEVICE_ID)).toEqual([]);
+      await expect(missing.client.readUserTrustedCertificates(DEVICE_ID)).rejects.toThrow(
+        "Simulator trust store is unavailable",
+      );
       expect(missing.executor.calls).toEqual([]);
     });
 

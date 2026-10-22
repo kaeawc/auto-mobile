@@ -1,6 +1,5 @@
 import { customSimulatorDeviceSetPath } from "./simctlArgs";
 import { errorMessage } from "../describeUnknownError";
-import { logger } from "../logger";
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -376,11 +375,7 @@ export class SimulatorTccSqliteClient
     try {
       await this.fileSystem.stat(databasePath);
     } catch (error) {
-      if (hasErrorCode(error, "ENOENT")) {
-        // trustd creates the database on first use, so a simulator without one trusts nothing.
-        logger.debug(`simulator ${udid} has no trust store database`);
-        return [];
-      }
+      // A missing store is unverifiable, not clean: fail closed so keep-booted erases (#14848).
       throw new ActionableError(
         `Simulator trust store is unavailable for ${udid}: ${sqliteErrorDetail(error)}`,
       );

@@ -61,11 +61,21 @@ function createHarness(available: boolean | undefined) {
 }
 
 describe("bounded SDK identity refresh", () => {
-  test("a known no-SDK app skips all polls and sleeps", async () => {
+  test("a known no-SDK app drains once and skips retry sleeps", async () => {
     const h = createHarness(false);
     const result = await h.refresh(200);
-    expect(result.polls).toBe(0);
-    expect(result.wallMs).toBe(0);
+    expect(result.polls).toBe(1);
+    expect(result.wallMs).toBe(8);
+    expect(h.timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("a cached SDK absence still picks up a navigation the late-started SDK queued", async () => {
+    const h = createHarness(false);
+    h.state.navigationOnPoll = 1;
+    // #14432: the negative probe predates the SDK server, which then queued Details.
+    const result = await h.refresh(200);
+    expect(result.identity?.components.navigationRoute).toBe("Details");
+    expect(result.polls).toBe(1);
     expect(h.timer.getSleepHistory()).toEqual([]);
   });
 
@@ -118,6 +128,6 @@ describe("bounded SDK identity refresh", () => {
     const result = await h.refresh(100);
     expect(result.polls).toBe(6);
     expect(result.wallMs).toBe(100);
-    expect(knownNegative.polls).toBe(0);
+    expect(knownNegative.polls).toBe(1);
   });
 });

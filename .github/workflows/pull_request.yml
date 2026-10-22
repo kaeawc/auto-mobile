@@ -428,6 +428,8 @@ jobs:
               - 'test/fixtures/encoded-h264-golden-vectors.json'
               - '.swiftformat'
               - '.swiftlint.yml'
+              # The root SwiftPM manifest defines the published AutoMobilePrototype product (#14457).
+              - 'Package.swift'
 
       # TypeScript-only concerns (memory-leak harness, benchmarks). CodeQL runs
       # from codeql.yml on push to main and weekly (#10888), not per PR.

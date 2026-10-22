@@ -10,7 +10,7 @@ export function writeCoverageBunfig(output: string, coverageDir: string): void {
   if (typeof test !== "object" || test === null) {
     throw new Error("Expected a [test] table in bunfig.toml");
   }
-  const expected = ["coverageDir", "coverageReporter", "preload"];
+  const expected = ["coverageDir", "coverageReporter", "pathIgnorePatterns", "preload"];
   if (
     Object.keys(config).some((key) => key !== "test") ||
     Object.keys(test).some((key) => !expected.includes(key)) ||
@@ -19,15 +19,23 @@ export function writeCoverageBunfig(output: string, coverageDir: string): void {
     !test.preload.every((value) => typeof value === "string") ||
     !("coverageReporter" in test) ||
     !Array.isArray(test.coverageReporter) ||
-    !test.coverageReporter.every((value) => typeof value === "string")
+    !test.coverageReporter.every((value) => typeof value === "string") ||
+    ("pathIgnorePatterns" in test &&
+      (!Array.isArray(test.pathIgnorePatterns) ||
+        !test.pathIgnorePatterns.every((value) => typeof value === "string")))
   ) {
     throw new Error(
       "Unsupported bunfig.toml test settings; update the coverage shard config writer",
     );
   }
+  // Keep the repo's test-scan ignores (#14717) so a shard's scan stays bounded.
+  const ignores =
+    "pathIgnorePatterns" in test
+      ? `pathIgnorePatterns = ${JSON.stringify(test.pathIgnorePatterns)}\n`
+      : "";
   writeFileSync(
     output,
-    `[test]\npreload = ${JSON.stringify(test.preload)}\ncoverageReporter = ${JSON.stringify(test.coverageReporter)}\ncoverageDir = ${JSON.stringify(coverageDir)}\n`,
+    `[test]\npreload = ${JSON.stringify(test.preload)}\n${ignores}coverageReporter = ${JSON.stringify(test.coverageReporter)}\ncoverageDir = ${JSON.stringify(coverageDir)}\n`,
   );
 }
 

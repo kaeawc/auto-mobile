@@ -3,6 +3,7 @@
  * never refuses a show. Findings are advisory and name the spec path they apply to.
  */
 
+import { expandPrototypeComponents } from "./prototypeComponents";
 import { prototypeNodeChildren, prototypeSpecNodeRoots } from "./prototypeNodeChildren";
 import {
   compositeColor,
@@ -322,17 +323,25 @@ function contrastFindings(visit: Visit, context: LintContext): PrototypeAccessib
   });
 }
 
-/** The tool-output fields for a spec's lint: both absent when there is nothing to report. */
+/**
+ * The tool-output fields for a spec's lint: both absent when there is nothing to report. A spec
+ * with `use` nodes is linted after component expansion, so findings inside a component are
+ * reported, at the authored path they came from (for example `root.children[2] (use card) →
+ * components.card.root`).
+ */
 export function prototypeAccessibilityOutput(spec: unknown): {
   accessibilityFindings?: PrototypeAccessibilityFinding[];
   accessibilityFindingsTotal?: number;
 } {
-  const { findings, total } = lintPrototypeAccessibility(spec);
+  const expansion = expandPrototypeComponents(spec);
+  const linted = expansion.success ? expansion.spec : spec;
+  const locate = expansion.success ? expansion.locate : (path: string) => path;
+  const { findings, total } = lintPrototypeAccessibility(linted);
   if (findings.length === 0) {
     return {};
   }
   return {
-    accessibilityFindings: findings,
+    accessibilityFindings: findings.map((finding) => ({ ...finding, path: locate(finding.path) })),
     ...(total > findings.length ? { accessibilityFindingsTotal: total } : {}),
   };
 }

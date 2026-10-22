@@ -188,6 +188,21 @@ describe("prototype accessibility lint (#14126)", () => {
   });
 });
 
+describe("components", () => {
+  test("a finding inside a used component is reported at its authored path", () => {
+    const withComponent = {
+      ...spec(column({ type: "use", component: "close", props: {} })),
+      components: { close: { root: { type: "iconButton", icon: "close" } } },
+    };
+
+    const { accessibilityFindings } = prototypeAccessibilityOutput(withComponent);
+
+    expect(accessibilityFindings).toEqual([expect.objectContaining({ rule: "unlabeled-control" })]);
+    expect(accessibilityFindings![0]!.path).toContain("use close");
+    expect(accessibilityFindings![0]!.path).toContain("components.close.root");
+  });
+});
+
 describe("prototype contrast helpers", () => {
   test("parses Android-style hex and computes WCAG ratios", () => {
     expect(parsePrototypeHex("#80FF0000")).toEqual({ r: 255, g: 0, b: 0, a: 128 / 255 });

@@ -95,6 +95,8 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeAgentProtocol.swift",
     "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeIconSymbolData.swift",
     "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeSpecContractData.swift",
+    // prototypeAccessibilityLint.test.ts pins the TypeScript baseline palette to the Swift tables.
+    "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeTheme.swift",
     "ios/prototype-agent/ICON-SYMBOLS.md",
   ] as const;
 

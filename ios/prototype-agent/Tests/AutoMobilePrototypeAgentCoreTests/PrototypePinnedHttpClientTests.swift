@@ -46,6 +46,20 @@ final class PrototypePinnedHttpClientTests: XCTestCase {
         XCTAssertTrue(connection.sent.contains("Host: [2606:4700::1]"))
     }
 
+    func testNAT64PeerMustEmbedTheCheckedIPv4() async throws {
+        XCTAssertTrue(PrototypePinnedHttpClient.sameAddress("64:ff9b::808:808", "8.8.8.8"))
+        XCTAssertTrue(PrototypePinnedHttpClient.sameAddress("8.8.8.8", "64:ff9b::8.8.8.8"))
+        XCTAssertFalse(PrototypePinnedHttpClient.sameAddress("64:ff9b::808:809", "8.8.8.8"))
+        XCTAssertFalse(PrototypePinnedHttpClient.sameAddress("64:ff9b:1::808:808", "8.8.8.8"))
+        XCTAssertFalse(PrototypePinnedHttpClient.sameAddress("2001:db8::808:808", "8.8.8.8"))
+        let connection = FakePinnedConnection(address: "64:ff9b::808:808")
+        _ = try await client(FakeHostResolver(["8.8.8.8"]), FakePinnedConnector([connection]))
+            .perform(pinnedRequest())
+        let other = FakePinnedConnection(address: "64:ff9b::101:101")
+        await failure(pinnedRequest(), connector: FakePinnedConnector([other]), code: .blockedDestination)
+        XCTAssertTrue(other.cancelled)
+    }
+
     func testConnectFallbackNeverResolvesAgain() async throws {
         let resolver = FakeHostResolver(["8.8.8.8", "1.1.1.1"])
         let connector = FakePinnedConnector(outcomes: [

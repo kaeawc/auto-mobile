@@ -90,7 +90,8 @@
         "ios/network-filter/Packaging/**",
         "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeAgentProtocol.swift",
         "ios/prototype-agent/ICON-SYMBOLS.md",
-        "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeIconSymbolData.swift"
+        "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeIconSymbolData.swift",
+        "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeSpecContractData.swift"
       ],
       "outputs": [],
       "outputLogs": "new-only",
@@ -142,7 +143,8 @@
         "ios/network-filter/Packaging/**",
         "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeAgentProtocol.swift",
         "ios/prototype-agent/ICON-SYMBOLS.md",
-        "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeIconSymbolData.swift"
+        "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeIconSymbolData.swift",
+        "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeSpecContractData.swift"
       ],
       "outputs": [],
       "outputLogs": "new-only",
@@ -221,7 +223,8 @@
         "ios/network-filter/Packaging/**",
         "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeAgentProtocol.swift",
         "ios/prototype-agent/ICON-SYMBOLS.md",
-        "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeIconSymbolData.swift"
+        "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeIconSymbolData.swift",
+        "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeSpecContractData.swift"
       ],
       "outputs": [],
       "outputLogs": "new-only",
@@ -349,7 +352,8 @@
         "ios/network-filter/Packaging/**",
         "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeAgentProtocol.swift",
         "ios/prototype-agent/ICON-SYMBOLS.md",
-        "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeIconSymbolData.swift"
+        "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeIconSymbolData.swift",
+        "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeSpecContractData.swift"
       ],
       "outputs": ["coverage/**"],
       "outputLogs": "new-only",

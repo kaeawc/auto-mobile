@@ -30,6 +30,10 @@ const TCC_SERVICE_BY_PERMISSION = new Map<string, string>([
   ["siri", "kTCCServiceSiri"],
 ]);
 
+export const SIMCTL_PRIVACY_TCC_SERVICES: readonly string[] = [
+  ...new Set(TCC_SERVICE_BY_PERMISSION.values()),
+];
+
 export type TccPermissionRow = {
   service: string;
   client: string;
@@ -44,6 +48,14 @@ export interface TccPermissionReader {
     deviceId: string,
     appId: string,
     permissions?: string[],
+    signal?: AbortSignal,
+  ): Promise<TccPermissionRow[]>;
+}
+
+export interface TccServiceRowReader {
+  readServiceRows(
+    deviceId: string,
+    services: readonly string[],
     signal?: AbortSignal,
   ): Promise<TccPermissionRow[]>;
 }
@@ -228,7 +240,7 @@ function parsePermissionRows(output: string, deviceId: string): TccPermissionRow
  * database path, argv construction, schema handling, timeout, and error
  * classification together so permission actions never invoke sqlite directly.
  */
-export class SimulatorTccSqliteClient implements TccPermissionReader {
+export class SimulatorTccSqliteClient implements TccPermissionReader, TccServiceRowReader {
   private readonly resolveKind: typeof resolveIosDeviceKind;
   private readonly executor: HostCommandExecutor;
   private readonly fileSystem: TccDatabaseFileSystem;
@@ -260,17 +272,7 @@ export class SimulatorTccSqliteClient implements TccPermissionReader {
     signal?: AbortSignal,
   ): Promise<TccPermissionRow[]> {
     const databasePath = await this.resolveDatabasePath(deviceId);
-    const columns = await this.readAccessColumns(databasePath, deviceId, signal);
-    const requiredColumns = ["service", "client"].filter((column) => !columns.has(column));
-    if (requiredColumns.length > 0) {
-      throw new ActionableError(
-        `Simulator TCC database for ${deviceId} is incompatible: missing required access columns: ${requiredColumns.join(", ")}`,
-      );
-    }
-
-    const optionalColumns = ["auth_version", "auth_value", "allowed", "prompt_count"].filter(
-      (column) => columns.has(column),
-    );
+    const optionalColumns = await this.readPermissionColumns(databasePath, deviceId, signal);
     const services = (permissions ?? []).map(tccServiceForPermission);
     const parameterArgs = [
       "-cmd",
@@ -298,6 +300,55 @@ export class SimulatorTccSqliteClient implements TccPermissionReader {
       signal,
     );
     return parsePermissionRows(result.stdout, deviceId);
+  }
+
+  async readServiceRows(
+    deviceId: string,
+    services: readonly string[],
+    signal?: AbortSignal,
+  ): Promise<TccPermissionRow[]> {
+    if (services.length === 0) {
+      return [];
+    }
+    const databasePath = await this.resolveDatabasePath(deviceId);
+    const optionalColumns = await this.readPermissionColumns(databasePath, deviceId, signal);
+    const parameterArgs = [
+      "-cmd",
+      ".parameter init",
+      ...services.flatMap((service, index) => [
+        "-cmd",
+        `.parameter set :service${index} ${sqliteParameterValue(service)}`,
+      ]),
+    ];
+    const query = [
+      `select ${["service", "client", ...optionalColumns].join(", ")}`,
+      "from access",
+      `where service in (${services.map((_service, index) => `:service${index}`).join(", ")});`,
+    ].join("\n");
+    const result = await this.execute(
+      ["-json", ...parameterArgs, databasePath, query],
+      databasePath,
+      deviceId,
+      signal,
+    );
+    return parsePermissionRows(result.stdout, deviceId);
+  }
+
+  private async readPermissionColumns(
+    databasePath: string,
+    deviceId: string,
+    signal?: AbortSignal,
+  ): Promise<string[]> {
+    const columns = await this.readAccessColumns(databasePath, deviceId, signal);
+    const requiredColumns = ["service", "client"].filter((column) => !columns.has(column));
+    if (requiredColumns.length > 0) {
+      throw new ActionableError(
+        `Simulator TCC database for ${deviceId} is incompatible: missing required access columns: ${requiredColumns.join(", ")}`,
+      );
+    }
+    return ["auth_version", "auth_value", "allowed", "prompt_count"].filter((column) =>
+      columns.has(column),
+    );
   }
 
   private async resolveDatabasePath(deviceId: string): Promise<string> {

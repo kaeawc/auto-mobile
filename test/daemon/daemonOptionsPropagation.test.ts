@@ -10,6 +10,7 @@ import {
   mergeDaemonOptions,
 } from "../../src/daemon/daemonMcpProxy";
 import {
+  BUN_NO_ORPHANS_ENV,
   CONNECTION_PRESENTATION_ENV_KEYS,
   CONNECTION_PRESENTATION_OPTION_KEYS,
   daemonProcessEnvironment,
@@ -473,6 +474,14 @@ describe("reuse-critical drift guard", () => {
         AUTOMOBILE_ACTIONS_COMPACT_METADATA: "0",
         AUTOMOBILE_DEBUG: "1",
       }),
+    ).toEqual({ AUTOMOBILE_DEBUG: "1" });
+  });
+
+  test("a spawned daemon never inherits Bun's no-orphans mode (#14979)", () => {
+    // Under Bun 1.4 an inherited flag would SIGKILL the daemon's emulators and helpers with it.
+    expect(BUN_NO_ORPHANS_ENV).toBe("BUN_FEATURE_FLAG_NO_ORPHANS");
+    expect(
+      daemonProcessEnvironment({ BUN_FEATURE_FLAG_NO_ORPHANS: "1", AUTOMOBILE_DEBUG: "1" }),
     ).toEqual({ AUTOMOBILE_DEBUG: "1" });
   });
 });

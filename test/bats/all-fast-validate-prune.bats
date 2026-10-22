@@ -114,7 +114,7 @@ teardown() {
   [[ "$output" == *"0.1.0"* ]]
 }
 
-@test "Bun coherence allows only the declared advisory Bun 1.4 canary" {
+@test "Bun coherence rejects a setup-bun version off the repo pin" {
   run bun "$COHERENCE_SCRIPT"
   [ "$status" -eq 0 ]
 
@@ -127,13 +127,13 @@ teardown() {
     '    steps:' \
     '      - uses: oven-sh/setup-bun@v2' \
     '        with:' \
-    '          bun-version: 1.4.2' > "$COHERENCE_WORKFLOW_FIXTURE"
+    '          bun-version: 1.5.0' > "$COHERENCE_WORKFLOW_FIXTURE"
 
   run bun "$COHERENCE_SCRIPT"
 
   [ "$status" -ne 0 ]
   [[ "$output" == *"zz-bun-coherence-fixture.yml"* ]]
-  [[ "$output" == *"1.4.2"* ]]
+  [[ "$output" == *"1.5.0"* ]]
 }
 
 @test "fast validation registers the tool definitions drift check" {

@@ -15,6 +15,7 @@ import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import { IosCtrlProxyProcessClient } from "../../src/ctrlProxy/ios/IosCtrlProxyProcessClient";
 import { WebpBinaryResolver } from "../../src/utils/image/webp/WebpBinaryResolver";
 import { ActionableError } from "../../src/models/ActionableError";
+import { daemonProcessEnvironment } from "../../src/daemon/daemonOptionScopes";
 
 const host = new DefaultHostCommandExecutor();
 const seenDead = new Set<number>();
@@ -231,7 +232,13 @@ writeFileSync(${JSON.stringify(file)}, JSON.stringify({ sleep: sleep.pid, cat: c
 setInterval(() => {}, 1000);
 `,
     );
-    const daemon = host.spawn(process.execPath, [script], { stdio: "ignore" });
+    // Launch the stand-in with the env the real daemon gets: under Bun 1.4 an inherited
+    // no-orphans flag (from `bun test --no-orphans`) would give its children PR_SET_PDEATHSIG on
+    // Linux and SIGKILL sleep with it (#14979).
+    const daemon = host.spawn(process.execPath, [script], {
+      stdio: "ignore",
+      env: daemonProcessEnvironment(process.env),
+    });
     let children: { sleep: number; cat: number } | undefined;
     try {
       await waitUntil(() => existsSync(file));

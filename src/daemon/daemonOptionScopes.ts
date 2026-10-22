@@ -44,10 +44,22 @@ export function daemonReuseOptions(options: DaemonOptions | undefined): DaemonOp
   return reuseOptions;
 }
 
-/** Prevent a spawned daemon from re-importing connection presentation through inherited env. */
+/**
+ * Bun exports this when it runs with `--no-orphans` (or bunfig `[run] noOrphans`). A Bun 1.4 process
+ * that inherits it arms no-orphans mode itself: on Linux every child it spawns gets
+ * `PR_SET_PDEATHSIG(SIGKILL)` and dies with it, and every descendant is killed on its clean exit.
+ * The daemon owns long-lived emulators, simulators and native helpers whose lifetimes it manages
+ * itself (orphan sweeps, startup reaping), so it must never inherit the mode from its launcher.
+ */
+export const BUN_NO_ORPHANS_ENV = "BUN_FEATURE_FLAG_NO_ORPHANS";
+
+/**
+ * Prevent a spawned daemon from re-importing connection presentation through inherited env, or
+ * inheriting Bun's no-orphans mode from its launcher.
+ */
 export function daemonProcessEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const processEnvironment = { ...environment };
-  for (const key of CONNECTION_PRESENTATION_ENV_KEYS) {
+  for (const key of [...CONNECTION_PRESENTATION_ENV_KEYS, BUN_NO_ORPHANS_ENV]) {
     delete processEnvironment[key];
   }
   return processEnvironment;

@@ -1,8 +1,9 @@
 #!/usr/bin/env bats
-# Fixtures captured verbatim on 2026-10-02 with Bun 1.3.14 (0d9b296a):
+# Fixtures captured verbatim on 2026-10-22 with Bun 1.4.4 (38afee6c8):
 # AUTOMOBILE_LOG_DIR="$PWD/scratch/lane-logs" AUTOMOBILE_DATA_DIR="$PWD/scratch/lane-data"
 #   bun test ./scratch/bun-failure-{assertion,timeout}.repro.ts > fixture.log 2>&1
-# Each path was run separately, with the above environment exported. Repros removed.
+# Each path was run separately, with the above environment exported, from a temporary
+# directory outside the repository (the repo bunfig ignores scratch/). Repros removed.
 
 SCRIPT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)/scripts/ci/summarize-bun-failures.sh"
 FIXTURES="$(cd "$(dirname "$BATS_TEST_FILENAME")" && pwd)/fixtures"

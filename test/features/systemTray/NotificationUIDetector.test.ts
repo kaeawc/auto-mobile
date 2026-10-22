@@ -25,6 +25,11 @@ import { springBoardPhotosIcon } from "../../fixtures/observe/iosSpringBoardIcon
 import settings from "../../fixtures/ios/ctrlproxy-golden/settings-tap-general/0002-push-hierarchy_update.json";
 import { IOS_NOTIFICATION_CENTER_CLASS_HINTS } from "../../../src/features/systemTray/notificationHints";
 import { collectNotificationCandidates } from "../../../src/features/systemTray/systemTrayHelpers";
+import {
+  getSystemTrayDependencies,
+  resetSystemTrayDependencies,
+  setSystemTrayDependencies,
+} from "../../../src/features/systemTray/helpers/dependencies";
 
 /**
  * Conformance check for the platform-agnostic NotificationUIDetector
@@ -43,6 +48,8 @@ describe("NotificationUIDetector", () => {
     name: "iPhone 15",
     platform: "ios",
   };
+
+  beforeEach(() => resetSystemTrayDependencies());
 
   const trayHierarchy: ViewHierarchyResult = {
     packageName: "com.android.systemui",
@@ -700,6 +707,51 @@ describe("NotificationUIDetector", () => {
       await expect(detector.swipeElement(sampleElement)).rejects.toThrow(
         "Outcome of dismiss notification is indeterminate",
       );
+    });
+
+    it("maps the production home press result to an indeterminate actionable error", async () => {
+      setSystemTrayDependencies({
+        pressButtonFactory: () => ({
+          execute: async () => ({
+            success: false,
+            button: "home",
+            keyCode: -1,
+            code: "indeterminate_outcome",
+            error: "Button press outcome is indeterminate: no result was confirmed",
+          }),
+        }),
+      });
+      const observation = {
+        ...observationWithSize,
+        viewHierarchy: ios27NotificationCenterHierarchy,
+      };
+      const detector = createNotificationUIDetector(iosDevice, getSystemTrayDependencies);
+      const collapse = detector.collapseTray(observation);
+      await expect(collapse).rejects.toBeInstanceOf(ActionableError);
+      await expect(collapse).rejects.toThrow(
+        "Outcome of close Notification Center is indeterminate",
+      );
+    });
+
+    it("keeps a plain production home press failure as a plain actionable error", async () => {
+      setSystemTrayDependencies({
+        pressButtonFactory: () => ({
+          execute: async () => ({
+            success: false,
+            button: "home",
+            keyCode: -1,
+            code: "press_failed",
+            error: "Home refused",
+          }),
+        }),
+      });
+      const detector = createNotificationUIDetector(iosDevice, getSystemTrayDependencies);
+      await expect(
+        detector.collapseTray({
+          ...observationWithSize,
+          viewHierarchy: ios27NotificationCenterHierarchy,
+        }),
+      ).rejects.toThrow("Failed to close Notification Center: Home refused");
     });
 
     it("throws when iOS client factory is missing", async () => {

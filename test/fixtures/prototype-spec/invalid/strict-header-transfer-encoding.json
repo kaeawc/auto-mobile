@@ -1,0 +1,24 @@
+{
+  "spec": {
+    "id": "strict",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "button",
+      "label": "Go",
+      "onTap": [
+        {
+          "type": "request",
+          "url": "https://example.com/",
+          "headers": {
+            "Transfer-Encoding": "x"
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].headers[\"Transfer-Encoding\"]"
+}

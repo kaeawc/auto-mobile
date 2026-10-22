@@ -33,7 +33,7 @@ import { boundAndroidResetInventory } from "../../../src/daemon/sessionBroker/se
 import type { BootedDevice } from "../../../src/models/DeviceInfo";
 import { FakeNativePort } from "../../helpers/fakeSessionBrokerDevicePort";
 import type { Session } from "../../../src/daemon/sessionManager/sessionTypes";
-import { brokerMutationIncarnation } from "../../../src/daemon/sessionBroker/mutations/recorder";
+import { iosMutationIncarnation } from "../../../src/daemon/sessionBroker/mutations/recorder";
 import { logger } from "../../../src/utils/logger";
 import { DEFAULT_ANDROID_RESET_TIMEOUT_MS } from "../../../src/daemon/sessionBroker/androidBaselineReset";
 import { FakeAndroidKeepBootedResetPort } from "../../fakes/FakeAndroidKeepBootedResetPort";
@@ -444,14 +444,22 @@ describe("session broker service lifecycle", () => {
         scopeKey: BROKER_SCOPE_KEY,
         bindingIndex: resource.allocationIndex,
       }))!;
-      const session: Pick<Session, "sessionId" | "assignedDevice" | "mutationRecorder"> = {
+      const session: Pick<
+        Session,
+        "sessionId" | "assignedDevice" | "mutationRecorder" | "heartbeatTimeoutMs"
+      > = {
         sessionId: result.sessionUuid,
         assignedDevice: assignment.stableDeviceId!,
+        heartbeatTimeoutMs: 4000,
       };
       const scope = {
         sessionUuid: session.sessionId,
         deviceId: session.assignedDevice,
-        incarnation: brokerMutationIncarnation(resource.resourceId, assignment.generation),
+        incarnation: iosMutationIncarnation(
+          resource.scopeKey,
+          resource.allocationIndex,
+          assignment.stableDeviceId!,
+        ),
       };
       await registry.deviceMutationJournal().record(scope, {
         kind: "clipboard",
@@ -471,6 +479,7 @@ describe("session broker service lifecycle", () => {
         deferStart: true,
         mutationSessions: {
           peekSession: (uuid) => (visible && uuid === session.sessionId ? session : null),
+          recordHeartbeat: () => {},
         },
         liveSessionIds: () => (visible ? [session.sessionId] : []),
       });

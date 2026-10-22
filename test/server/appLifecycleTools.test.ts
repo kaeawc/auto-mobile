@@ -65,6 +65,37 @@ describe("appLifecycle registration and handler", () => {
       expect(appLifecycleSchema.safeParse(bad).success).toBe(false);
     }
   });
+  test("trimMemory takes an onTrimMemory level and forwards it (#14090)", async () => {
+    expect(
+      appLifecycleSchema.parse({ appId, action: "trimMemory", level: "COMPLETE" }),
+    ).toMatchObject({ action: "trimMemory", level: "COMPLETE" });
+    expect(
+      appLifecycleSchema.safeParse({ appId, action: "trimMemory", level: "HIDDEN" }).success,
+    ).toBe(false);
+    let received: AppLifecycleExecutionOptions | undefined;
+    ToolRegistry.clearTools();
+    registerAppTools({
+      appLifecycle: {
+        createAppLifecycle: () => ({
+          execute: async (_appId, action, options) => {
+            received = options;
+            return {
+              ...successful,
+              action,
+              mechanism: "am-send-trim-memory",
+              trimLevel: "COMPLETE",
+              message: "Sent onTrimMemory(COMPLETE)",
+            };
+          },
+        }),
+      },
+    });
+    const response = await handler()(device, { appId, action: "trimMemory", level: "COMPLETE" });
+    expect(received?.trimLevel).toBe("COMPLETE");
+    expect(appLifecycleResultSchema.safeParse(toolStructured(response)).success).toBe(true);
+    expect(toolStructured(response)).toMatchObject({ message: "Sent onTrimMemory(COMPLETE)" });
+    expect(refreshes).toEqual([]);
+  });
   test("structured success forwards options and refreshes only after actual mutation", async () => {
     const controller = new AbortController();
     ToolRegistry.clearTools();

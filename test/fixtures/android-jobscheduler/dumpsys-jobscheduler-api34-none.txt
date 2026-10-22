@@ -1,0 +1,10 @@
+JOB SCHEDULER MANAGER (jobscheduler)
+
+Current JobScheduler state:
+
+  Started users: u0
+  Registered 0 jobs:
+
+  Pending queue:
+  Active jobs:
+  Ready queue:

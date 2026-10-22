@@ -73,6 +73,12 @@ class CommandAdvertisementTest {
       "screenshot_hide_prototype_v1",
       "prototype_menus_v1",
       "semantic_node_actions_v1",
+      "global_action_power_dialog_v1",
+      "global_action_quick_settings_v1",
+      "global_action_split_screen_v1",
+      "global_action_lock_screen_v1",
+      "global_action_screenshot_v1",
+      "global_action_dismiss_notification_shade_v1",
       "full_command_set_v1",
       "request_id_echo_v1",
     )
@@ -110,6 +116,12 @@ class CommandAdvertisementTest {
         sdk >= PrototypeDisplayRouting.DISPLAY_API,
         commands.contains("prototype_display_id_v2"),
       )
+      assertEquals(
+        SystemGlobalActions.advertisedFlags(sdk),
+        commands.filter { it.startsWith("global_action_") },
+      )
+      assertEquals(sdk >= 28, commands.contains("global_action_lock_screen_v1"))
+      assertEquals(sdk >= 31, commands.contains("global_action_dismiss_notification_shade_v1"))
     }
   }
 

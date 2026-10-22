@@ -70,7 +70,7 @@ describe("Android semantic link activation outcomes", () => {
         for (let i = 0; i < 30; i++) {
           await Promise.resolve();
         }
-        expect(client["requestManager"].getPendingCount()).toBe(0);
+        expect(client.connectionTestHooks.requestManager.getPendingCount()).toBe(0);
         timer.advanceTime(5000);
       } else {
         socket.simulateMessage(
@@ -90,7 +90,7 @@ describe("Android semantic link activation outcomes", () => {
       expect(result.retryable).toBe(acknowledged ? undefined : false);
       expect(frames).toHaveLength(1);
       expect(dispatchCount).toBe(1);
-      expect(client["requestManager"].getPendingCount()).toBe(0);
+      expect(client.connectionTestHooks.requestManager.getPendingCount()).toBe(0);
       if (mode.includes("refusal")) {
         expect(result.error).toBe("node refused activation");
       }
@@ -104,7 +104,7 @@ describe("Android semantic link activation outcomes", () => {
     const { client, socket } = await createClient();
     const controller = new AbortController();
     const reason = new Error("cancelled before send");
-    const manager = client["requestManager"];
+    const manager = client.connectionTestHooks.requestManager;
     const register = manager.register.bind(manager);
     const registration = spyOn(manager, "register").mockImplementation((...args) => {
       const pending = register(...args);
@@ -123,7 +123,10 @@ describe("Android semantic link activation outcomes", () => {
         await Promise.resolve();
       }
       const pendingCount = manager.getPendingCount();
-      client["requestManager"].resolveError(manager.getPendingIds()[0], "unfixed request sent");
+      client.connectionTestHooks.requestManager.resolveError(
+        manager.getPendingIds()[0],
+        "unfixed request sent",
+      );
       await expect(pending).rejects.toBe(reason);
       expect(pendingCount).toBe(0);
       expect(registration).toHaveBeenCalledTimes(1);

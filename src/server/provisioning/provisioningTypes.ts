@@ -99,4 +99,6 @@ export type ProvisionBootResult = {
   source: "booted" | "cold-boot";
   sourceImage?: DeviceInfo;
   resources?: DeviceResourceConfigurationResult;
+  /** The applied `deviceProfile` (#14058), in the manufacturerProfile tool's result shape. */
+  manufacturerProfile?: Record<string, unknown>;
 };

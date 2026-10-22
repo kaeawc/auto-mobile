@@ -2435,7 +2435,7 @@ describe("post-action screenshot resolved display", () => {
           webSocketFactory: () => socket,
           timer: wireTimer,
         });
-        client["ws"] = socket;
+        client.connectionTestHooks.socket = socket;
         client["connectWebSocket"] = async () => true;
         client["screenshotBackoffScheduler"] = new FakeScreenshotBackoffScheduler();
         socket.send = (data: string) => {
@@ -2445,7 +2445,7 @@ describe("post-action screenshot resolved display", () => {
             displayId?: number;
           };
           wireMessages.push(message);
-          client["requestManager"].resolve(message.requestId, {
+          client.connectionTestHooks.requestManager.resolve(message.requestId, {
             success: true,
             data: Buffer.from([0xff, 0xd8, 0xff, 0xe0]).toString("base64"),
             format: "jpeg",
@@ -2492,7 +2492,7 @@ describe("post-action screenshot resolved display", () => {
           expect(wireMessages).toEqual([
             { type: "request_screenshot", requestId: expect.any(String), displayId: 2 },
           ]);
-          expect(wireClient?.["requestManager"].getPendingCount()).toBe(0);
+          expect(wireClient?.connectionTestHooks.requestManager.getPendingCount()).toBe(0);
         } else {
           expect(commands).toEqual([
             `shell "screencap ${targeted ? `-d ${EXTERNAL_PHYSICAL_DISPLAY_ID} ` : ""}-p /data/local/tmp/am-shot-command-5d347fd948b6.png && base64 /data/local/tmp/am-shot-command-5d347fd948b6.png && rm /data/local/tmp/am-shot-command-5d347fd948b6.png"`,

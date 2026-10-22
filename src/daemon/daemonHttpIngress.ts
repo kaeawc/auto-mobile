@@ -141,9 +141,9 @@ export class DaemonHttpIngress {
         ? new DaemonHandoffInterruptionError(DAEMON_HANDOFF_INTERRUPTED_MESSAGE)
         : "streamable_http_onclose",
   });
-  /** HTTP requests whose response is still open (SSE streams included). */
+  /** Admitted HTTP requests whose response is still open (SSE streams included). */
   private openHttpRequests = 0;
-  /** HTTP requests ever received. */
+  /** Admitted HTTP requests ever received. */
   private httpRequestsSeen = 0;
   private acceptingHttpSessions = false;
   /** Set once start() finished, so admitted HTTP requests skip the startup wait. */
@@ -156,12 +156,12 @@ export class DaemonHttpIngress {
     return this.httpServer;
   }
 
-  /** Open request count, for the orphaned private-daemon watchdog (#10497). */
+  /** Open admitted request count, for the orphaned private-daemon watchdog (#10497). */
   get openRequestCount(): number {
     return this.openHttpRequests;
   }
 
-  /** Requests ever received, for the orphaned private-daemon watchdog. */
+  /** Admitted requests ever received, for the orphaned private-daemon watchdog. */
   get requestsSeenCount(): number {
     return this.httpRequestsSeen;
   }
@@ -173,6 +173,8 @@ export class DaemonHttpIngress {
   /** @internal Typed view of private state for unit tests; not part of the public API. */
   get testHooks() {
     return {
+      openRequestCount: (): number => this.openRequestCount,
+      requestsSeenCount: (): number => this.requestsSeenCount,
       setHttpServer: (server: HttpListener | null): void => {
         this.httpServer = server;
       },
@@ -254,13 +256,6 @@ export class DaemonHttpIngress {
     const handleRequest = (req: IncomingMessage, res: ServerResponse): Promise<void> =>
       this.handleHttpRequest(req, res, allowedHosts);
     server.on("request", (req, res) => {
-      // Counted for the orphaned private-daemon watchdog (#10497): an open
-      // request is a connected client.
-      this.openHttpRequests++;
-      this.httpRequestsSeen++;
-      res.once("close", () => {
-        this.openHttpRequests--;
-      });
       handleRequest(req, res).catch((error) => {
         logger.warn(`HTTP request callback failed: ${errorMessage(error)}`, error);
         if (!res.headersSent) {
@@ -391,6 +386,13 @@ export class DaemonHttpIngress {
     ) {
       return;
     }
+
+    // Only admitted requests count as clients for the orphaned private-daemon watchdog.
+    this.openHttpRequests++;
+    this.httpRequestsSeen++;
+    res.once("close", () => {
+      this.openHttpRequests--;
+    });
 
     if (req.method === "OPTIONS") {
       res.writeHead(200);

@@ -35,7 +35,7 @@ const facetSchema = z
 
 /**
  * Failures that changed nothing throw. A task needing an OEM capability no
- * persona can emulate returns `success: false` with `status: route_to_real_device`.
+ * manufacturer profile can emulate returns `success: false` with `status: route_to_real_device`.
  */
 export const personaResultSchema = z
   .object({
@@ -45,10 +45,10 @@ export const personaResultSchema = z
     deviceId: z.string(),
     catalogVersion: z.number().optional(),
     status: z.enum(["applied", "partial", "unsupported", "route_to_real_device"]).optional(),
-    persona: personaSummarySchema.optional(),
-    personaId: z.enum(OEM_PERSONA_IDS).optional(),
+    manufacturerProfile: personaSummarySchema.optional(),
+    manufacturerProfileId: z.enum(OEM_PERSONA_IDS).optional(),
     replaced: z.enum(OEM_PERSONA_IDS).optional(),
-    personas: z.array(personaSummarySchema).optional(),
+    manufacturerProfiles: z.array(personaSummarySchema).optional(),
     evidenceStatuses: z.array(z.enum(PERSONA_EVIDENCE_STATUSES)).optional(),
     facets: z.array(facetSchema).optional(),
     nonEmulatable: z.array(capabilitySchema).optional(),

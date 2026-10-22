@@ -318,6 +318,44 @@ describe("BrokerSessions", () => {
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
+  test("close takes over a sleeping prepared release so it reaches the successor (#14490)", async () => {
+    const successor = { adopted: false, releases: [] as string[] };
+    let close: Promise<void> | undefined;
+    const { brokerSessions, state, state2, timer } = rig(({ method }) => {
+      if (method !== "daemon/releaseBrokerSession") {
+        // Shutdown begins while prepare answers: the ready grant is abandoned before its hold.
+        state.closing = true;
+        brokerSessions.abortAcquisition(new Error("proxy closing"));
+        return ready;
+      }
+      successor.releases.push(`${timer.now()}:${successor.adopted ? "released" : "refused"}`);
+      return successor.adopted
+        ? { sessionUuid: "session-1", outcome: "released" }
+        : { ...handoffPending, retryAfterMs: 5_000 };
+    });
+    // The successor's recovery pass adopts the handed-off request before close releases.
+    timer.setTimeout(() => {
+      successor.adopted = true;
+    }, 1_000);
+    // The `ProxyConnection.closeOnce` order: release within the shutdown budget, then drop the
+    // daemon client, while the prepared release still sleeps on its 5 s recovery hint.
+    timer.setTimeout(() => {
+      close = brokerSessions.releaseAll().then(() => {
+        state2.client = null;
+        brokerSessions.clear();
+      });
+    }, 1_200);
+
+    const result = await brokerSessions.acquire(config);
+    await close;
+
+    expect(successor.releases).toEqual(["0:refused", "1200:released"]);
+    expect(result.failure?.code).toBe("cancelled");
+    expect(result.cleanupPending).toBe(false);
+    expect(brokerSessions.sessions.size).toBe(0);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
   test("rebindConnection re-registers the held receipt on the new socket", async () => {
     const { brokerSessions, calls, client } = rig();
     await brokerSessions.acquire(config);

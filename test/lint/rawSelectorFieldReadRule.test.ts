@@ -548,3 +548,35 @@ test("raw accessor imports are rejected outside the allow-list", () => {
     ),
   ).toEqual([]);
 });
+
+test("selecting through a raw accessor is rejected, not just reading a raw field (#12635)", () => {
+  expect(
+    check(
+      'import { rawText } from "../utility/elementProperties"; const hit = nodes.find((n) => rawText(n) === query);',
+    ),
+  ).toHaveLength(1);
+});
+
+test.each([
+  'import * as props from "../utility/elementProperties"; const hit = nodes.find((n) => props.rawText(n) === query);',
+  'export { rawText } from "../utility/elementProperties";',
+  'export { rawResourceId as readId } from "../utility/elementProperties";',
+  'export * from "../utility/elementProperties";',
+  'import { rawContentDesc } from "./rawBarrel"; const hit = nodes.find((n) => rawContentDesc(n) === query);',
+  'const { rawText } = await import("../utility/elementProperties");',
+])(
+  "namespace imports, re-exports, barrels and dynamic imports cannot launder raw accessors: %s",
+  (code) => {
+    expect(check(code)).toHaveLength(1);
+    expect(check(code, "src/features/systemTray/notificationHints.ts")).toEqual([]);
+  },
+);
+
+test.each([
+  'import type * as props from "../utility/elementProperties";',
+  'export { isTruthyFlag } from "../utility/elementProperties";',
+  'export type * from "../utility/elementProperties";',
+  'const other = await import("../utility/SearchableNode");',
+])("non-accessor imports and exports of the module remain permitted: %s", (code) => {
+  expect(check(code)).toEqual([]);
+});

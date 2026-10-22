@@ -1,4 +1,5 @@
 import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
+import { spyOnPrivate } from "../helpers/spyOnPrivate";
 import {
   chmodSync,
   mkdirSync,
@@ -81,14 +82,6 @@ const complete: PidFileData = {
   launchLogPath: null,
   options: { debug: true, port: 19000, host: "127.0.0.1" },
 };
-
-/** Spy on a private/protected method, which `spyOn`'s public-key typing excludes. */
-function spyOnPrivate<Args extends unknown[] = unknown[], Result = Promise<void>>(
-  target: object,
-  method: string,
-) {
-  return spyOn(target as Record<string, (...args: Args) => Result>, method);
-}
 
 /** The replacement owner a status recovery names; the scenario must have produced one. */
 function replacementOwnerOf(status: DaemonStatus): DaemonStatus {

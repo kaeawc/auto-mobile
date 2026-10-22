@@ -17,6 +17,10 @@ const SETTING_FIELDS: Readonly<
   contentSize: { arg: "large", android: "contentSize", ios: "contentSize" },
   density: { arg: 480, android: "density", ios: null },
   theme: { arg: "dark", android: "nightMode", ios: "nightMode" },
+  // Runtime geometry (#14101) is one opaque intent on Android and refused on iOS.
+  size: { arg: { width: 720, height: 1600 }, android: "tool:displayConfig", ios: null },
+  navigationMode: { arg: "threeButton", android: "tool:displayConfig", ios: null },
+  displayCutout: { arg: "hole", android: "tool:displayConfig", ios: null },
   increaseContrast: { arg: true, android: "increaseContrast", ios: "increaseContrast" },
   reduceMotion: { arg: true, android: "reduceMotion", ios: "reduceMotion" },
   boldText: { arg: true, android: "boldText", ios: "boldText" },
@@ -33,6 +37,7 @@ const NON_SETTING_FIELDS = [
   "platform",
   "sessionUuid",
   "keepScreenAwake",
+  "display",
   "device",
   "deviceId",
 ];
@@ -91,6 +96,13 @@ describe("displayConfig mutation journaling covers every field (#14790)", () => 
       "nightMode",
     ]);
     expect(keysFor({ reset: true }, "ios")).toEqual(["contentSize", "nightMode"]);
+  });
+
+  test("several geometry fields record the opaque intent once", () => {
+    expect(keysFor({ size: "default", displayCutout: "none", theme: "dark" }, "android")).toEqual([
+      "nightMode",
+      "tool:displayConfig",
+    ]);
   });
 
   test("a call that sets nothing is a read", () => {

@@ -8,6 +8,7 @@ import {
 } from "../../../src/features/crashReports/IosSimulatorCrashReportFinder";
 import {
   createNativeCrashReportFinder,
+  createNativeCrashReportReader,
   PHYSICAL_IOS_CRASH_REPORTS_UNSUPPORTED_REASON,
   PollingCrashReportFinder,
 } from "../../../src/features/crashReports/NativeCrashReportFinder";
@@ -148,6 +149,63 @@ describe("Android dropbox finder (#14103)", () => {
       report: { processId: 4321 },
     });
     expect(await finder.find({ ...query, processId: undefined })).toEqual({ status: "notFound" });
+  });
+});
+
+describe("crash report readers (#14103)", () => {
+  const INCIDENT = "8E5D1F2A-3B4C-4D5E-8F60-718293A4B5C6";
+
+  test("reads an .ips back by incident id, only for this Simulator", async () => {
+    const reports = new MemoryReports();
+    reports.add("mine.ips", IPS);
+    reports.add("theirs.ips", IPS.replaceAll(SIMULATOR, OTHER_SIMULATOR));
+
+    const body = await new IosSimulatorCrashReportFinder(SIMULATOR, reports, REPORTS).read(
+      INCIDENT,
+    );
+    expect(body?.text).toBe(IPS);
+    expect(body?.report.appId).toBe("com.example.app");
+
+    const other = await new IosSimulatorCrashReportFinder(OTHER_SIMULATOR, reports, REPORTS).read(
+      INCIDENT,
+    );
+    expect(other?.text).toBe(IPS.replaceAll(SIMULATOR, OTHER_SIMULATOR));
+    expect(
+      await new IosSimulatorCrashReportFinder(
+        "11111111-9999-9999-9999-999999999999",
+        reports,
+        REPORTS,
+      ).read(INCIDENT),
+    ).toBeUndefined();
+  });
+
+  test("reads one dropbox entry back by id, not its neighbours", async () => {
+    const adb = new FakeAdbClient();
+    adb.setCommandResult(
+      "shell dumpsys dropbox --print data_app_crash",
+      fixture("android-dropbox-app-crash.txt"),
+    );
+
+    const body = await new AndroidDropboxCrashReportFinder(adb).read(
+      "data_app_crash-20261021T100002-4321",
+    );
+
+    expect(body?.report.processId).toBe(4321);
+    expect(body?.text).toContain("shell-induced crash");
+    expect(body?.text).not.toContain("another app's crash");
+    expect(
+      await new AndroidDropboxCrashReportFinder(adb).read("data_app_crash-20261021T100002-9999"),
+    ).toBeUndefined();
+    expect(await new AndroidDropboxCrashReportFinder(adb).read(INCIDENT)).toBeUndefined();
+  });
+
+  test("has no reader on physical iOS", () => {
+    expect(
+      createNativeCrashReportReader(
+        { deviceId: "00008110-000A1B2C3D4E5F60", name: "iPhone", platform: "ios" },
+        { adb: new FakeAdbClient(), fileSystem: new MemoryReports() },
+      ),
+    ).toBeUndefined();
   });
 });
 

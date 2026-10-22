@@ -55,7 +55,7 @@ async function harness() {
   await Promise.resolve();
   client.connectionTestHooks.socket = socket;
   const requestIds = new CountingIdGenerator("wire");
-  const manager = client["requestManager"];
+  const manager = client.connectionTestHooks.requestManager;
   manager.generateId = (prefix) => `${prefix}_${requestIds.next()}`;
   let connects = 0;
   let backoffCancels = 0;
@@ -207,7 +207,9 @@ for (const method of methods) {
 
     test("preserves the exact old frame, support bypass, and response correlation", async () => {
       const h = await harness();
-      h.client["supportedCommands"] = new Set([ANDROID_FULL_COMMAND_SET_CAPABILITY]);
+      h.client.connectionTestHooks.supportedCommands = new Set([
+        ANDROID_FULL_COMMAND_SET_CAPABILITY,
+      ]);
       h.client["rejectedCommands"].add(`request_settings_${method.operation}`);
       const pending = method.invoke(h.client);
       expect(h.socket.frames).toEqual([method.literal]);

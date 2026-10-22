@@ -342,12 +342,16 @@ final class PrototypeURLSessionCall: @unchecked Sendable {
                 let continuation = self.continuation
                 self.continuation = nil
                 let durationMs = metricsMs ?? measuredMs
-                if let policyError {
+                // The caller's cancel and the total deadline outrank a policy rejection that races
+                // them, so a late DNS, redirect or metrics refusal cannot turn the promised
+                // `cancelled` or `timeout` into `blocked_destination` or `network` (#14557).
+                let interrupted = timedOut || cancelledByCaller
+                if let policyError, !interrupted {
                     return (continuation, .failure(PrototypeHttpFailure(error: policyError, durationMs: durationMs)))
                 }
                 // Cancelling a non-2xx body ends the task with a cancel error that is ours, not a failure.
-                let skipped = skippedBody && !timedOut && !cancelledByCaller
-                if tooLarge || (error != nil && !skipped) {
+                let skipped = skippedBody && !interrupted
+                if tooLarge || policyError != nil || (error != nil && !skipped) {
                     let mapped = PrototypeURLErrorMapping.map(
                         error ?? URLError(.cancelled), url: url, timeoutMs: timeoutMs, timedOut: timedOut,
                         tooLarge: tooLarge, cancelledByCaller: cancelledByCaller, maxBytes: maxBytes

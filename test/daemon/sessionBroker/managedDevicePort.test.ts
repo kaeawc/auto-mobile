@@ -276,7 +276,7 @@ describe("ManagedDevicePort preparation and release", () => {
     },
   );
 
-  test("binds the exact broker mutation scope before returning a ready session", async () => {
+  test("binds the exact broker mutation scope, shared with the iOS reset scope, before returning a ready session", async () => {
     const scopes: DeviceMutationScope[] = [];
     const port = new ManagedDevicePort({
       scope: SCOPE,
@@ -296,7 +296,11 @@ describe("ManagedDevicePort preparation and release", () => {
       sessionId: "session-1",
     });
     expect(scopes).toEqual([
-      { sessionUuid: "session-1", deviceId: "transport-1", incarnation: '["resource-1",1]' },
+      {
+        sessionUuid: "session-1",
+        deviceId: "device-1",
+        incarnation: JSON.stringify([SCOPE_KEY, 7, "device-1"]),
+      },
     ]);
   });
 
@@ -521,6 +525,64 @@ describe("ManagedDevicePort preparation and release", () => {
       ).rejects.toThrow("does not agree with its exact system-image package");
     }
     expect(configs).toHaveLength(1);
+  });
+
+  test("applies a requested manufacturer profile to the prepared session's device (#14058)", async () => {
+    const applied: unknown[] = [];
+    let routed = false;
+    const port = new ManagedDevicePort({
+      scope: SCOPE,
+      brokerDeviceAcquisition: acquisition(async (config) => readyResult(config)),
+      brokerExecutionRelease: { releaseExecution: async (sessionId) => releaseResult(sessionId) },
+      registry: {} as never,
+      bindingJournal: {
+        owner: OWNER,
+        redriveBinding: async () => ({ kind: "clear", redriven: [] }),
+      },
+      manufacturerProfileApplier: {
+        apply: async (device, profile, sessionId) => {
+          applied.push({ device, profile, sessionId });
+          const summary = { id: profile.manufacturerProfile, version: 1, displayName: "Samsung" };
+          return routed
+            ? {
+                message: "route",
+                deviceId: device.deviceId,
+                action: "apply",
+                catalogVersion: 1,
+                persona: summary,
+                status: "route_to_real_device",
+                capabilities: [],
+              }
+            : {
+                message: "applied",
+                deviceId: device.deviceId,
+                action: "apply",
+                catalogVersion: 1,
+                persona: summary,
+                status: "applied",
+                facets: [],
+                nonEmulatable: [],
+              };
+        },
+      },
+    });
+    const deviceProfile = { manufacturerProfile: "samsung-oneui" } as const;
+
+    await port.prepare(resource(ANDROID), { livenessOwnerToken: "token", deviceProfile });
+    expect(applied).toEqual([
+      {
+        device: { platform: "android", name: "device-1", deviceId: "transport-1" },
+        profile: deviceProfile,
+        sessionId: "session-1",
+      },
+    ]);
+    await port.prepare(resource(ANDROID), { livenessOwnerToken: "token" });
+    expect(applied).toHaveLength(1);
+
+    routed = true;
+    await expect(
+      port.prepare(resource(ANDROID), { livenessOwnerToken: "token", deviceProfile }),
+    ).rejects.toThrow("route");
   });
 
   test("rejects a non-ready acquisition and drains any session it returned", async () => {

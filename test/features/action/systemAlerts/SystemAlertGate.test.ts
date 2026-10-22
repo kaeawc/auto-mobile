@@ -167,14 +167,14 @@ describe("SystemAlertGate (#14106)", () => {
         ]),
       );
     const tapsAtRead: number[] = [];
-    screens = [at(900), at(700), at(600), at(600), noAlert];
+    const frames = [at(900), at(700), at(600), at(600), noAlert];
     gate = new SystemAlertGate({
       registry,
       timer,
-      reader: { read: async () => screens.shift() ?? noAlert },
+      reader: { read: async () => frames.shift() ?? noAlert },
       tapper: {
         tap: async (_device, selector) => {
-          tapsAtRead.push(screens.length);
+          tapsAtRead.push(frames.length);
           taps.push(selector);
           return { success: true };
         },

@@ -867,6 +867,40 @@ describe("HomeScreen", () => {
       expect(fakeTimer.getSleepHistory()).toEqual([300, 600]);
     });
 
+    describe("simulator Spotlight recovery (#14827)", () => {
+      const simctl = { executeCommandArgs: async () => createExecResult("", "") };
+
+      test("falls back to the runner Home press when simctl leaves Spotlight foreground", async () => {
+        const { action, client } = createIosHomeScreen({ simulator: true, simctl });
+        spyOn(client, "requestHierarchySync").mockImplementation(async () => ({
+          hierarchy: iosHierarchy(
+            client.getPressHomeRequestCount() > 0 ? "com.apple.springboard" : "com.apple.Spotlight",
+          ),
+        }));
+
+        await expect(action.executeIosHomeNavigation()).resolves.toBeUndefined();
+        expect(client.getPressHomeRequestCount()).toBe(1);
+      });
+
+      test("does not use the runner fallback for other foreground apps", async () => {
+        const { action, client } = createIosHomeScreen({ simulator: true, simctl });
+        client.setHierarchyData(iosHierarchy("com.apple.Maps"));
+
+        await expect(action.executeIosHomeNavigation()).rejects.toThrow(
+          "foreground verification failed",
+        );
+        expect(client.getPressHomeRequestCount()).toBe(0);
+      });
+
+      test("fails when Spotlight survives the runner Home press", async () => {
+        const { action, client } = createIosHomeScreen({ simulator: true, simctl });
+        client.setHierarchyData(iosHierarchy("com.apple.Spotlight"));
+
+        await expect(action.executeIosHomeNavigation()).rejects.toThrow("com.apple.Spotlight");
+        expect(client.getPressHomeRequestCount()).toBe(1);
+      });
+    });
+
     describe("simulator launch budget regression", () => {
       test("returns a typed timeout when a successful retry uses the whole Home budget", async () => {
         const timeouts: number[] = [];

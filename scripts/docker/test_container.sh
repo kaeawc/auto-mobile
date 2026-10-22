@@ -67,6 +67,16 @@ else
   exit 1
 fi
 
+# Test 4b: the JDK trust store no longer lists the emSign roots removed from Mozilla NSS
+echo -e "\n${YELLOW}Test 4b: Checking JDK cacerts for emSign roots...${NC}"
+CACERTS_OUTPUT=$(docker exec "${CONTAINER_NAME}" keytool -list -cacerts -storepass changeit 2>&1)
+if grep -i "emsign" <<<"${CACERTS_OUTPUT}"; then
+  echo -e "${RED}✗ JDK cacerts still trusts emSign roots${NC}"
+  exit 1
+else
+  echo -e "${GREEN}✓ JDK cacerts has no emSign roots${NC}"
+fi
+
 # Test 5: Android SDK is installed
 echo -e "\n${YELLOW}Test 5: Checking Android SDK...${NC}"
 if docker exec "${CONTAINER_NAME}" test -d /opt/android-sdk; then

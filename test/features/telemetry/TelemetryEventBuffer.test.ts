@@ -144,7 +144,7 @@ describe("TelemetryEventBuffer", () => {
       const buffer = new TelemetryEventBuffer(sink, timer, { maxBufferedRows: 4 });
       const warn = spyOn(logger, "warn").mockImplementation(() => {});
       try {
-        buffer.addLayout({
+        void buffer.addLayout({
           ...makeOs("layout"),
           subType: "recomposition",
           composableName: null,

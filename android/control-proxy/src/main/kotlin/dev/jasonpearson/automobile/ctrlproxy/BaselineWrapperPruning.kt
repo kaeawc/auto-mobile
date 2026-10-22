@@ -3,12 +3,14 @@ package dev.jasonpearson.automobile.ctrlproxy
 import android.annotation.SuppressLint
 import android.util.Log
 
+internal const val BASELINE_WRAPPER_PRUNING_PROPERTY = "debug.automobile.prune_wrappers"
+
 /** Debug-only opt-in, sampled once by CtrlProxy at service construction. */
 internal fun readBaselineWrapperPruningEnabled(
   readProperty: (String) -> String? = ::readAndroidSystemProperty,
   warn: (String, Throwable) -> Unit = { message, error -> Log.w("CtrlProxy", message, error) },
 ): Boolean {
-  val property = "debug.automobile.prune_baseline_wrappers"
+  val property = BASELINE_WRAPPER_PRUNING_PROPERTY
   return try {
     readProperty(property) == "true"
   } catch (error: ReflectiveOperationException) {

@@ -58,6 +58,39 @@ struct PrototypeChartModel: Equatable, Sendable {
     }
 }
 
+/// One drawn bar in plot units: x spans slot `index`'s group (slot `i` covers `i ... i + 1`), y
+/// runs from the zero baseline to the clamped value. Numeric on both axes, so the renderer needs no
+/// categorical scale: `BarMark.position(by:)` over an `Int` series drew nothing (#14679).
+struct PrototypeChartBar: Equatable, Sendable {
+    let seriesIndex: Int
+    let index: Int
+    let xStart: Double
+    let xEnd: Double
+    let yStart: Double
+    let yEnd: Double
+}
+
+extension PrototypeChartModel {
+    /// Slots along the x axis of a bar chart: the longest series' point count.
+    var barSlots: Int { series.map(\.points.count).max() ?? 0 }
+
+    /// Grouped bars: one slot per point index, `fill` of it shared evenly by the series.
+    func bars(fill: Double) -> [PrototypeChartBar] {
+        let count = Double(series.count)
+        let width = fill / Swift.max(count, 1)
+        let base = Swift.min(Swift.max(0, yMin), yMax)
+        return series.enumerated().flatMap { seriesIndex, entry in
+            entry.points.enumerated().map { index, point in
+                let start = Double(index) + (1 - fill) / 2 + Double(seriesIndex) * width
+                return PrototypeChartBar(
+                    seriesIndex: seriesIndex, index: index, xStart: start, xEnd: start + width,
+                    yStart: base, yEnd: Swift.min(Swift.max(point.y, yMin), yMax)
+                )
+            }
+        }
+    }
+}
+
 enum PrototypeChart {
     /// The chart's points read from `data`. A point that is not an object or whose `y` is not a
     /// finite number is skipped: validation rejects them in the shown spec, but a later `/data`

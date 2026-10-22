@@ -14,7 +14,7 @@ import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { readWindowManagerRotation } from "../../utils/android-cmdline-tools/readWindowManagerRotation";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
-import { verifyIosRotation } from "./iosRotateVerification";
+import { observedIosOrientation, verifyIosRotation } from "./iosRotateVerification";
 import { ROTATION_READ_FLOOR_MS } from "../observe/Idle";
 import {
   orientationFromRotation,
@@ -387,7 +387,44 @@ export class Rotate extends BaseVisualChange {
         skipUiStability: true,
       },
     );
-    return verifyIosRotation(result, orientation, previousObservation);
+    const verified = verifyIosRotation(result, orientation, previousObservation);
+    return verified.success
+      ? verified
+      : await this.restoreIosOrientationAfterFailure(verified, previousObservation, perf, signal);
+  }
+
+  /**
+   * A rotate the display could not honor (SpringBoard ignores landscape) still leaves the device
+   * orientation changed, so the next app launches rotated. Put the prior orientation back.
+   */
+  private async restoreIosOrientationAfterFailure(
+    failed: RotateResult,
+    previousObservation: ObserveResult | undefined,
+    perf: ReturnType<typeof createGlobalPerformanceTracker>,
+    signal?: AbortSignal,
+  ): Promise<RotateResult> {
+    const prior = observedIosOrientation(previousObservation);
+    if (prior === "unknown" || prior === failed.orientation) {
+      return failed;
+    }
+    try {
+      throwIfAborted(signal);
+      const client = IOSCtrlProxyClient.getInstance(this.device);
+      const restored = await perf.track("iOSRotationRestore", () =>
+        awaitWhileRequestIsLive(client.requestRotate(prior, 5000, perf), signal),
+      );
+      if (!restored.success) {
+        throw new Error(restored.error ?? "runner reported failure");
+      }
+      return failed;
+    } catch (error) {
+      throwIfAborted(signal);
+      logger.warn(`iOS rotation restore to ${prior} failed: ${errorMessage(error)}`, error);
+      return {
+        ...failed,
+        warning: `The device orientation could not be restored to ${prior} after the failed rotate; the next app may open rotated.`,
+      };
+    }
   }
 
   private async executeAndroidRotation(

@@ -98,6 +98,28 @@ describe("iOS observed rotation verification (#8778)", () => {
     expect(result.message).toContain("portrait to landscape");
   });
 
+  test("restores the prior orientation when a rotate on the home screen fails (item6-rotate-residue)", async () => {
+    const error = "Rotation is not supported on this display (the screen size did not change)";
+    const spy = spyOn(runner, "requestRotate")
+      .mockResolvedValueOnce(runnerResult({ success: false, error, rotationPerformed: false }))
+      .mockResolvedValueOnce(runnerResult({ value: 0, currentOrientation: "portrait" }));
+    observe.setObserveSequence([createObserveResult(0), createObserveResult(0)]);
+    const result = await rotate.execute("landscape");
+    expect(result.success).toBe(false);
+    expect(spy.mock.calls.map((call) => call[0])).toEqual(["landscape", "portrait"]);
+    expect(result.warning).toBeUndefined();
+  });
+
+  test("warns when the orientation restore itself fails", async () => {
+    spyOn(runner, "requestRotate")
+      .mockResolvedValueOnce(runnerResult({ success: false, error: "no", rotationPerformed: false }))
+      .mockRejectedValueOnce(new Error("runner gone"));
+    observe.setObserveSequence([createObserveResult(0), createObserveResult(0)]);
+    const result = await rotate.execute("landscape");
+    expect(result.success).toBe(false);
+    expect(result.warning).toContain("could not be restored to portrait");
+  });
+
   test("rejects runner portrait no-op while observed display stays landscape", async () => {
     spyOn(runner, "requestRotate").mockResolvedValue(
       runnerResult({
@@ -163,8 +185,10 @@ describe("iOS observed rotation verification (#8778)", () => {
 
   test("preserves runner failure without proof of an observed orientation change", async () => {
     const error = "Rotation is not supported on this display (the screen size did not change)";
-    spyOn(runner, "requestRotate").mockResolvedValue(
-      runnerResult({ success: false, error, rotationPerformed: false }),
+    spyOn(runner, "requestRotate").mockImplementation(async (orientation) =>
+      orientation === "portrait"
+        ? runnerResult({ value: 0, currentOrientation: "portrait" })
+        : runnerResult({ success: false, error, rotationPerformed: false }),
     );
     for (const [before, after, previous, current] of [
       [createObserveResult(undefined, false), createObserveResult(1), "portrait", "landscape"],

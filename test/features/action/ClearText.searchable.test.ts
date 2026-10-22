@@ -2,6 +2,7 @@ import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { expect, test } from "bun:test";
 import {
+  getFocusedTextField,
   getFocusedTextLength,
   hasFocusedTextInput,
   verifyKeyEventClear,
@@ -253,4 +254,31 @@ test("focused field in the topmost window wins over a longer field below", () =>
 
 test("primary-window-only hierarchy still supplies the focused field length", () => {
   expect(getFocusedTextLength(capture({ focused: true, text: "Primary window" }))).toBe(14);
+});
+
+test("iOS focused-field reads prefer the native field over a focused web-page field", () => {
+  // Shape from the Safari repro (item3-sendkeys-falseneg): the page search box and the URL field both report focus.
+  const field = (id: string, value: string) => ({
+    className: "UITextField",
+    "resource-id": id,
+    focused: "true",
+    actions: ["set_text", "clear_text"],
+    value,
+  });
+  const hierarchy = capture({
+    className: "UIApplication",
+    node: [
+      { className: "WKWebView", node: [field("search", "example")] },
+      field("URL", "zq"),
+    ],
+  });
+  expect(getFocusedTextField(hierarchy, undefined, { iosPlaceholderAsBlank: true })).toEqual({
+    value: "zq",
+    secure: false,
+  });
+  const webOnly = capture({
+    className: "UIApplication",
+    node: [{ className: "WKWebView", node: [field("search", "example")] }],
+  });
+  expect(getFocusedTextField(webOnly)?.value).toBe("example");
 });

@@ -44,6 +44,8 @@ class StructuralHasherTest {
         "testTag",
         "test-tag",
         "custom.TESTTAG.alias",
+        "com.example.EXTRA_DATA_TEST_TRAVERSAL_MODE",
+        "EXTRA_DATA_TEST_TRAVERSALBEFORE_VAL",
         "sdk.source",
         "androidx.view.accessibility.AccessibilityNodeInfoCompat.STATE_DESCRIPTION_KEY",
         "androidx.view.accessibility.AccessibilityNodeInfoCompat.BOOLEAN_PROPERTY_KEY",

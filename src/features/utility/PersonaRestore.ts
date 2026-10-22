@@ -1,3 +1,4 @@
+import type { BootedDevice } from "../../models";
 import type { OemPersonaId } from "./OemPersonas";
 
 interface PersonaRestoreEntry {
@@ -7,6 +8,14 @@ interface PersonaRestoreEntry {
   keyboardProfileBefore?: string;
   /** Packages whose kill facet a persona applied, so reset restores each. */
   killAppIds: Set<string>;
+  /** The session whose release restores the keyboard (#14058), and the device it runs on. */
+  releaseOwner?: { sessionId: string; device: BootedDevice };
+}
+
+/** A released session's keyboard restore: the profile to put back on `device`. */
+export interface OwnedKeyboardRestore {
+  device: BootedDevice;
+  keyboardProfileBefore: string;
 }
 
 export interface PersonaRestoreSnapshot {
@@ -29,7 +38,11 @@ export class PersonaRestoreRegistry {
   recordApply(
     deviceId: string,
     personaId: OemPersonaId,
-    change: { keyboardProfileBefore?: string; killAppId?: string },
+    change: {
+      keyboardProfileBefore?: string;
+      killAppId?: string;
+      releaseOwner?: { sessionId: string; device: BootedDevice };
+    },
   ): void {
     const entry: PersonaRestoreEntry = this.entries.get(deviceId) ?? {
       personaId,
@@ -41,6 +54,9 @@ export class PersonaRestoreRegistry {
     }
     if (change.killAppId !== undefined) {
       entry.killAppIds.add(change.killAppId);
+    }
+    if (change.releaseOwner !== undefined) {
+      entry.releaseOwner = change.releaseOwner;
     }
     this.entries.set(deviceId, entry);
   }
@@ -56,6 +72,26 @@ export class PersonaRestoreRegistry {
           killAppIds: [...entry.killAppIds],
         }
       : undefined;
+  }
+
+  /**
+   * The keyboard restore `sessionId`'s release owes on `deviceId`, taken so it runs once.
+   * Undefined when another session (or none) owns it or nothing is left to restore.
+   */
+  takeKeyboardOwnedBy(deviceId: string, sessionId: string): OwnedKeyboardRestore | undefined {
+    const entry = this.entries.get(deviceId);
+    if (entry?.releaseOwner?.sessionId !== sessionId) {
+      return undefined;
+    }
+    const { device } = entry.releaseOwner;
+    delete entry.releaseOwner;
+    const keyboardProfileBefore = entry.keyboardProfileBefore;
+    if (keyboardProfileBefore === undefined) {
+      return undefined;
+    }
+    delete entry.keyboardProfileBefore;
+    this.clearIfRestored(deviceId);
+    return { device, keyboardProfileBefore };
   }
 
   /** The keyboard profile was put back. */

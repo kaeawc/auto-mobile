@@ -21,7 +21,10 @@ const base = () => ({
 const save = (kind: string, name: string, value: unknown) =>
   writeFileSync(join(directory, kind, name + ".json"), JSON.stringify(value, null, 2) + "\n");
 function capture(name: string, spec: unknown, options?: PrototypeStrictOptions): void {
-  const result = validatePrototypeSpec(spec, options);
+  const result = validatePrototypeSpec(
+    spec,
+    options && { ...options, requiredCapabilities: requiredPrototypeCapabilities },
+  );
   if (result.success) {
     if (options) {
       throw new Error(`Expected policy rejection: ${name}`);

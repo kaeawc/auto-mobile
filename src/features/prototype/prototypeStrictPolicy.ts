@@ -1,8 +1,12 @@
-import { requiredPrototypeCapabilities } from "./prototypeCapabilityGates";
 import { object, type PrototypeValidationError } from "./prototypeBindingValidation";
 
 export interface PrototypeStrictOptions {
   supportedCapabilities?: readonly string[];
+  /**
+   * Computes the capabilities a spec needs. Injected because the capability gates import the
+   * validator's dependencies; importing them here would create a module cycle.
+   */
+  requiredCapabilities?: (spec: unknown) => readonly string[];
   library?: boolean;
 }
 
@@ -11,10 +15,10 @@ export function prototypeStrictPolicyError(
   spec: unknown,
   options: PrototypeStrictOptions,
 ): PrototypeValidationError | undefined {
-  if (options.supportedCapabilities !== undefined) {
-    const missing = requiredPrototypeCapabilities(spec).filter(
-      (name) => !options.supportedCapabilities?.includes(name),
-    );
+  if (options.supportedCapabilities !== undefined && options.requiredCapabilities !== undefined) {
+    const missing = options
+      .requiredCapabilities(spec)
+      .filter((name) => !options.supportedCapabilities?.includes(name));
     if (missing.length) {
       return { path: "$", message: `Unsupported capabilities: ${missing.join(", ")}` };
     }

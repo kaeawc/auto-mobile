@@ -9,6 +9,7 @@ import {
   MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES,
   prototypeSpecSchema,
 } from "../../src/features/prototype/prototypeSpec";
+import { requiredPrototypeCapabilities } from "../../src/features/prototype/prototypeCapabilityGates";
 import type { PrototypeStrictOptions } from "../../src/features/prototype/prototypeStrictPolicy";
 import {
   PROTOTYPE_SPEC_CAPABILITY_GATES,
@@ -18,6 +19,9 @@ import {
   validatePrototypeSpecBytes,
   validatePrototypeSpec,
 } from "../../src/features/prototype/prototypeValidation";
+
+const withGates = (options?: PrototypeStrictOptions): PrototypeStrictOptions | undefined =>
+  options && { ...options, requiredCapabilities: requiredPrototypeCapabilities };
 
 const fixtures = join(import.meta.dir, "../fixtures/prototype-spec");
 function files(kind: string): string[] {
@@ -130,8 +134,11 @@ describe("shared prototype contract", () => {
     test(`reject ${name} at ${data.expectedPath}`, () => {
       const result =
         data.rawBytesBase64 !== undefined
-          ? validatePrototypeSpecBytes(Buffer.from(data.rawBytesBase64, "base64"), data.options)
-          : validatePrototypeSpec(data.rawJson ?? data.spec, data.options);
+          ? validatePrototypeSpecBytes(
+              Buffer.from(data.rawBytesBase64, "base64"),
+              withGates(data.options),
+            )
+          : validatePrototypeSpec(data.rawJson ?? data.spec, withGates(data.options));
       expect(result.success).toBe(false);
       if (result.success) {
         throw new Error(`Accepted ${name}`);

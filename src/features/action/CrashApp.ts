@@ -825,6 +825,7 @@ function summarizeCrashReport(
   return {
     status: "found",
     source: report.source,
+    reportId: report.id,
     reportPath: report.reportPath,
     exceptionType: report.exceptionType,
     ...(report.exceptionCode ? { exceptionCode: report.exceptionCode } : {}),

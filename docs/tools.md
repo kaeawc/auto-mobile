@@ -2328,7 +2328,7 @@ Android it is the <code>dumpsys dropbox</code> <code>data_app_crash</code> or
 names the same Simulator UDID (iOS), app, and process ID, and was captured after
 the crash was induced. A found report is bounded: exception type and codes,
 termination reason, app version, report path, and the crashing thread's top
-frames. It is also recorded as a <code>crash</code> entry in
+frames, plus a <code>reportId</code>. It is also recorded as a <code>crash</code> entry in
 <code>automobile:failures</code>, and its <code>failureOccurrenceId</code> is
 returned. A matching report confirms a crash that the log heuristic missed (its
 <code>evidence.source</code> is <code>ios_crash_report</code> or
@@ -2336,6 +2336,18 @@ returned. A matching report confirms a crash that the log heuristic missed (its
 <code>{"status": "notFound"}</code>. Physical iOS reports
 <code>{"status": "unsupported", "reason": …}</code> until device retrieval is
 verified.
+
+The full report body is a session resource:
+<code>automobile:device-session/{sessionUuid}/apps/{appId}/crash-reports/{reportId}{?maxBytes}</code>.
+Only the session's own connection can read it, from the device the session
+owns. It returns <code>reportId</code>, <code>source</code>, <code>appId</code>,
+<code>reportPath</code>, <code>byteCount</code>, <code>truncated</code>, and
+<code>text</code> (at most <code>maxBytes</code>, default 256 KiB, limit 4 MiB). A
+report that belongs to another app is reported as <code>NOT_FOUND</code>, never
+served. Errors are JSON with a <code>code</code>: <code>SESSION_NOT_BOUND</code>,
+<code>SESSION_NOT_ACTIVE</code>, <code>INVALID_REQUEST</code>,
+<code>NOT_FOUND</code>, <code>UNSUPPORTED</code> (physical iOS), or
+<code>READ_FAILED</code>.
 
 </details>
 

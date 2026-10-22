@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { ActionableError } from "../../models/ActionableError";
 import { PROTOTYPE_NATIVE_ASSET_URI, PROTOTYPE_NATIVE_URI } from "./nativePrototypeUris";
 import { collectPrototypeAssetReferences } from "./prototypeAssetReferences";
@@ -91,6 +92,19 @@ function parsePlatform(value: string | undefined): NativePrototypePlatform | und
 /** A filesystem-safe directory name for a prototype id (the spec id stays unchanged inside). */
 export function prototypeDirectoryName(id: string): string {
   return id.replace(/[^A-Za-z0-9_-]/g, "_");
+}
+
+/**
+ * A file name stem for an asset id. Ids are opaque strings, so one that needed sanitizing gets a
+ * short hash of the original id: `hero/a` and `hero?a` stay distinct, while safe ids stay readable.
+ */
+export function prototypeAssetFileStem(id: string): string {
+  const safe = prototypeDirectoryName(id);
+  if (safe === id) {
+    return safe;
+  }
+  const hash = createHash("sha256").update(id, "utf8").digest("hex").slice(0, 8);
+  return `${safe}-${hash}`;
 }
 
 /** A Kotlin/Swift type name for the host file: `checkout-flow` becomes `CheckoutFlowPrototype`. */
@@ -202,7 +216,7 @@ function nativeAssets(
       id: assetId,
       kind,
       ...(asset?.mimeType ? { mimeType: asset.mimeType } : {}),
-      path: assetPath(platform, directory, `${prototypeDirectoryName(assetId)}${extension}`),
+      path: assetPath(platform, directory, `${prototypeAssetFileStem(assetId)}${extension}`),
       uri: assetQuery(id, assetId, resolved.deviceId),
       available: asset?.bytes !== undefined,
     };

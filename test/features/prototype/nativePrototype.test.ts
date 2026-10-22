@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { ActionableError } from "../../../src/models/ActionableError";
 import {
+  prototypeAssetFileStem,
   prototypeHostTypeName,
   readNativePrototype,
   readNativePrototypeAsset,
@@ -186,6 +187,13 @@ describe("automobile:prototype/native", () => {
     await expect(
       readNativePrototype({ id: "checkout", deviceId: "serial", platform: "android" }, busy),
     ).rejects.toThrow("in flight");
+  });
+
+  test("asset ids that sanitize alike still get distinct file names", () => {
+    const names = ["hero/a", "hero?a", "hero_a"].map(prototypeAssetFileStem);
+    expect(new Set(names).size).toBe(3);
+    expect(prototypeAssetFileStem("hero_a")).toBe("hero_a");
+    expect(prototypeAssetFileStem("hero/a")).toMatch(/^hero_a-[0-9a-f]{8}$/);
   });
 
   test("host type names are valid identifiers", () => {

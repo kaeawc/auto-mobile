@@ -3,6 +3,7 @@ import type { BootedDevice, DeviceInfo } from "../../models/DeviceInfo";
 import type { AdbCommandRunner } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { parseAndroidSystemImageRuntime } from "../../utils/android-cmdline-tools/AndroidSystemImageRuntime";
 import { outputLooksLikeShellFailure } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
+import { isUnknownEmulatorName } from "../../utils/android-cmdline-tools/emulatorReadinessEvaluation";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { getAbortSignal } from "../../utils/AbortContext";
@@ -191,7 +192,7 @@ export class AndroidBaselineReset {
           timeoutMs: Math.max(0, deadlineMs - timer.now()),
           assertOwned: async () => {
             await options.assertOwned?.();
-            await this.assertTarget(device, profile, signal);
+            await this.assertTarget(device, profile, signal, 2000, { allowPendingName: true });
             if (bootId) {
               await this.assertBootIdentity(device, bootId, signal);
             }
@@ -326,7 +327,10 @@ export class AndroidBaselineReset {
       if (!strategy.handlesSessionMutations && !baseline.activity.canReset()) {
         throw new ActionableError("Android session mutations cannot be restored by this reset");
       }
-      await this.assertTarget(device, profile, signal, 2000, !strategy.handlesSessionMutations);
+      await this.assertTarget(device, profile, signal, 2000, {
+        requireBoot: !strategy.handlesSessionMutations,
+        allowPendingName: true,
+      });
       if (baseline.bootId) {
         await this.assertBootIdentity(device, baseline.bootId, signal);
       }
@@ -344,7 +348,9 @@ export class AndroidBaselineReset {
       }
       const healthCheck = async (context?: DeviceMutationResetContext) => {
         await context?.assertOwned();
-        await this.assertTarget(device, profile, context?.signal ?? signal);
+        await this.assertTarget(device, profile, context?.signal ?? signal, 2000, {
+          allowPendingName: true,
+        });
         await context?.assertOwned();
         await this.packages(device, context?.signal ?? signal);
         await context?.assertOwned();
@@ -377,7 +383,7 @@ export class AndroidBaselineReset {
           assertBindingOwned: assertOwned,
           rebindIncarnation: async () => {
             await assertOwned();
-            await this.assertTarget(device, profile, signal);
+            await this.assertTarget(device, profile, signal, 2000, { allowPendingName: true });
             const bootId = await this.bootIdentity(device, signal);
             await assertOwned();
             baseline.bootId = bootId;
@@ -411,7 +417,10 @@ export class AndroidBaselineReset {
     profile: AndroidResetProfile,
     signal?: AbortSignal,
     timeoutMs = 2000,
-    requireBoot = true,
+    {
+      requireBoot = true,
+      allowPendingName = false,
+    }: { requireBoot?: boolean; allowPendingName?: boolean } = {},
   ): Promise<void> {
     const runtime = parseAndroidSystemImageRuntime(profile.systemImagePackage);
     const validInput = [
@@ -438,15 +447,18 @@ export class AndroidBaselineReset {
         "Fresh Android inventory did not prove the exact online reset target",
       );
     }
+    // Console-exclusive snapshot work temporarily omits the AVD name and its config fields.
+    // Only after the initial full profile proof may serial presence stand in for that profile.
+    const pendingName = allowPendingName && isUnknownEmulatorName(target.name, device.deviceId);
     const validTarget = [
       target.platform === "android",
       target.deviceId === device.deviceId,
-      target.name === device.name,
+      pendingName || target.name === device.name,
       target.isRunning === true,
       target.isRunningStateKnown !== false,
-      target.runtimeId === profile.systemImagePackage,
-      target.deviceType === profile.profileId,
-      target.apiLevel === profile.apiLevel,
+      pendingName || target.runtimeId === profile.systemImagePackage,
+      pendingName || target.deviceType === profile.profileId,
+      pendingName || target.apiLevel === profile.apiLevel,
     ].every(Boolean);
     if (!validTarget) {
       throw new ActionableError(

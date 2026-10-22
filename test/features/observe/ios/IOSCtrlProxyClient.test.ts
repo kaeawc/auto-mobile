@@ -5497,7 +5497,7 @@ describe("IOSCtrlProxyClient", function () {
         });
         testClient.getSdkCapabilityTestHooks().seedForTesting("com.example.ios", []);
         testClient["lastForegroundBundleId"] = "com.example.ios";
-        expect(await testClient.refreshSdkScreenIdentity("com.example.ios", 4242)).toEqual(
+        expect(await testClient.refreshSdkScreenIdentity("com.example.ios", 4241)).toEqual(
           identity,
         );
         expect(polls).toBe(2);

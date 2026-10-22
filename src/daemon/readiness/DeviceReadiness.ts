@@ -402,6 +402,33 @@ export class DeviceReadiness implements DeviceReadinessContract {
     }
   }
 
+  /** The device must show an active window; a sleeping device is exempt for booted-only callers. */
+  private async verifyAndroidWindow(
+    device: BootedDevice,
+    resolvedIdentity: ResolvedDeviceIdentity | undefined,
+    options: DeviceReadyOptions | undefined,
+  ): Promise<void> {
+    const deviceId = device.deviceId;
+    try {
+      logger.info(`[DeviceReadiness] Verifying Android device ${deviceId} readiness`);
+
+      const deviceForWindow = androidReadinessWindowDevice(device, resolvedIdentity);
+      const window = this.provider.getWindow(deviceForWindow);
+
+      const activeWindow = await window.getActive(true);
+      assertAndroidActiveWindow(deviceId, activeWindow);
+    } catch (error) {
+      // An asleep device has no focused window to read; a booted-only caller (power faking,
+      // waking) must still reach it.
+      if (!(options?.readiness === "booted" && (await this.isAndroidAsleep(device)))) {
+        throw new ActionableError(
+          `Failed to verify Android device ${deviceId} readiness: ${errorMessage(error)}`,
+        );
+      }
+      logger.info(`[DeviceReadiness] Android device ${deviceId} is asleep; booted readiness holds`);
+    }
+  }
+
   private async isAndroidAsleep(device: BootedDevice): Promise<boolean> {
     try {
       return !(await this.adbFactory.create(device).isScreenOn());
@@ -436,26 +463,7 @@ export class DeviceReadiness implements DeviceReadinessContract {
         `Android device ${deviceId} is not connected. Available devices: ${describeDevices(allDevices)}`,
       );
     }
-    // Check if we can get an active window from the device
-    try {
-      logger.info(`[DeviceReadiness] Verifying Android device ${deviceId} readiness`);
-
-      const deviceForWindow = androidReadinessWindowDevice(device, resolvedIdentity);
-      const window = this.provider.getWindow(deviceForWindow);
-
-      const activeWindow = await window.getActive(true);
-      assertAndroidActiveWindow(deviceId, activeWindow);
-    } catch (error) {
-      // An asleep device has no focused window to read; a booted-only caller (power faking,
-      // waking) must still reach it.
-      if (!(options?.readiness === "booted" && (await this.isAndroidAsleep(device)))) {
-        const errorMsg = errorMessage(error);
-        throw new ActionableError(
-          `Failed to verify Android device ${deviceId} readiness: ${errorMsg}`,
-        );
-      }
-      logger.info(`[DeviceReadiness] Android device ${deviceId} is asleep; booted readiness holds`);
-    }
+    await this.verifyAndroidWindow(device, resolvedIdentity, options);
 
     options?.signal?.throwIfAborted();
     if (options?.readiness === "booted") {

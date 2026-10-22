@@ -1,3 +1,4 @@
+import type { DeviceProfileSelector } from "../../models/ManufacturerProfileIds";
 import type { SessionDeviceProfile } from "../../devices/sessionRequirements";
 import type { BrokerResourceRecord } from "./store";
 import { ActionableError } from "../../models/ActionableError";
@@ -32,6 +33,8 @@ export interface SessionDevicePreparationOptions {
   preparationTimeoutMs?: number;
   idleTimeoutMs?: number;
   executionOwnerPid?: number;
+  /** Applied to the prepared Android session's device after readiness (#14058). */
+  deviceProfile?: DeviceProfileSelector;
 }
 
 /**

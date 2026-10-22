@@ -158,14 +158,18 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
     this.deviceSessionResolver = resolver;
   }
 
-  /** Whether a live subscriber could receive performance telemetry for this device. */
+  /**
+   * Whether a live subscriber could receive performance telemetry for this device.
+   * A subscriber still backfilling counts: pushToSubscribers queues its live events
+   * until the backfill finishes, and push-only performance events have no DB copy
+   * the backfill could recover (#14461).
+   */
   hasSubscriberForPerformanceTelemetry(deviceId: string): boolean {
     const deviceSessionUuid = this.deviceSessionResolver.resolveUuid(deviceId);
     for (const subscriber of this.subscribers.values()) {
       const { filter } = subscriber;
       // The event's sessionId is unknown at demand time; ignoring it only over-counts demand.
       if (
-        !subscriber.backfilling &&
         !subscriber.socket.destroyed &&
         (filter.category === null || filter.category === "performance") &&
         (filter.deviceSessionUuid === null || filter.deviceSessionUuid === deviceSessionUuid)

@@ -165,7 +165,7 @@ animated highlight over its background and reads "Loading" to accessibility; it 
 - **Error:** \`visibleWhen: {key: "feedStatus", equals: "error"}\`, with a retry button that runs
   the request again.
 
-The rows themselves repeat over \`{path: "/feed"}\`. The iOS agent does not draw shimmer yet (#14689).
+The rows themselves repeat over \`{path: "/feed"}\`. The iOS agent draws shimmer too.
 
 ## Motion v2
 
@@ -960,5 +960,6 @@ existed alone. A failed reverse never fails the show; \`inspect\` reports it as 
 A port that is a binding (\`http://localhost:{port}/feed\`) cannot be reversed, because it is only
 known when the request runs. \`inspect\` lists such URLs as \`unreversiblePorts\`. Use \`via: "host"\` for
 those requests. A saved prototype launched with no host connected gets no reverse either.
-iOS simulators share the Mac's network, so nothing is reversed there.
+On iOS nothing is reversed, and \`localhost\`, \`127.0.0.1\` and \`[::1]\` are refused as
+\`blocked_destination\` for \`via: "device"\`: call a Mac-local service by the Mac's LAN address instead.
 `;

@@ -59,6 +59,8 @@ export class AppearanceSyncScheduler {
   private intervalHandle: NodeJS.Timeout | null = null;
   private lastAppliedModes = new Map<string, AppliedAppearance>();
   private readonly inFlightApplies = new Map<string, Promise<boolean>>();
+  // A claim that found an apply in flight on its device, re-run once that apply settles.
+  private readonly pendingClaims = new Map<string, AppearanceSyncTarget>();
   private pending: Promise<void> | null = null;
   private readonly timer: Timer;
   private readonly dependencies: AppearanceSyncDependencies;
@@ -98,22 +100,64 @@ export class AppearanceSyncScheduler {
     );
   }
 
+  /**
+   * Apply the holder's resolved mode when a session claims `device` (created on it, or rebound to
+   * it). An explicit light/dark is owed as much as a host-following one (#11363): the tick only
+   * re-applies a config that follows the host, so without this an observer's stored choice would
+   * never reach the device it claims. A config that neither follows the host nor applies on
+   * connect leaves the device as it is.
+   */
   async syncDevice(device: AppearanceSyncTarget): Promise<void> {
     if (this.stopped || !this.isEnabled() || device.platform !== "android") {
       return;
     }
     try {
       const config = await this.dependencies.getConfig(device.sessionKey);
-      if (!config.syncWithHost || this.stopped) {
+      if (!isOwedOnClaim(config) || this.stopped) {
         return;
       }
       const mode = await this.dependencies.resolveMode(config);
-      if (!this.stopped) {
-        await this.applyToDevice(device, mode, config);
+      if (this.stopped) {
+        return;
       }
+      const inFlight = this.inFlightApplies.get(device.deviceId);
+      if (inFlight) {
+        this.retryClaimAfter(inFlight, device);
+        return;
+      }
+      await this.applyToDevice(
+        device,
+        mode,
+        config,
+        (current) => isOwedOnClaim(current) && isSameDecision(current, config),
+      );
     } catch (error) {
-      logger.warn(`[Appearance] Failed to apply host sync mode to ${device.deviceId}: ${error}`);
+      logger.warn(
+        `[Appearance] Failed to apply appearance on claim to ${device.deviceId}: ${error}`,
+      );
     }
+  }
+
+  /**
+   * Re-runs a claim that found another apply in flight on its device once that apply settles
+   * (#11363). The in-flight apply may have been decided for the previous holder and refused once
+   * the device changed hands, and the tick never re-applies an explicit mode, so dropping the claim
+   * would leave the new holder's mode unapplied. Only the latest claim per device is re-run.
+   */
+  private retryClaimAfter(inFlight: Promise<boolean>, device: AppearanceSyncTarget): void {
+    const alreadyQueued = this.pendingClaims.has(device.deviceId);
+    this.pendingClaims.set(device.deviceId, device);
+    if (alreadyQueued) {
+      return;
+    }
+    const rerun = (): void => {
+      const latest = this.pendingClaims.get(device.deviceId);
+      this.pendingClaims.delete(device.deviceId);
+      if (latest && !this.stopped) {
+        void this.syncDevice(latest);
+      }
+    };
+    void inFlight.then(rerun, rerun);
   }
 
   async stop(): Promise<void> {
@@ -189,7 +233,7 @@ export class AppearanceSyncScheduler {
         if (this.isAlreadyApplied(device, mode)) {
           continue;
         }
-        await this.applyToDevice(device, mode, config);
+        await this.applyToDevice(device, mode, config, followsHostUnder(config));
       } catch (error) {
         logger.warn(`[Appearance] Failed to apply host sync mode to ${device.deviceId}: ${error}`);
       }
@@ -206,6 +250,7 @@ export class AppearanceSyncScheduler {
     device: AppearanceSyncTarget,
     mode: AppearanceMode,
     config: AppearanceConfig,
+    stillOwed: (current: AppearanceConfig) => boolean,
   ): Promise<void> {
     if (!this.isEnabled()) {
       return;
@@ -217,7 +262,7 @@ export class AppearanceSyncScheduler {
     }
 
     let timedOut = false;
-    const apply = this.applyIfStillOwed(device, mode, config);
+    const apply = this.applyIfStillOwed(device, mode, stillOwed);
     this.inFlightApplies.set(device.deviceId, apply);
     void apply.then(
       () => {
@@ -246,7 +291,7 @@ export class AppearanceSyncScheduler {
   /**
    * Resolves true when the device was written, false when the write was no longer owed: the
    * scheduler stopped, sync was switched off, the session the decision was made for no longer
-   * holds the device, or that session's config no longer asks for the same thing.
+   * holds the device, or that session's config no longer asks for the same thing (`stillOwed`).
    *
    * The config re-read is the last await. The stopped flag, the kill switch and the holder are
    * read after it and the write is issued in that same turn, with no awaited helper in between,
@@ -255,7 +300,7 @@ export class AppearanceSyncScheduler {
   private async applyIfStillOwed(
     device: AppearanceSyncTarget,
     mode: AppearanceMode,
-    decidedUnder: AppearanceConfig,
+    stillOwed: (current: AppearanceConfig) => boolean,
   ): Promise<boolean> {
     // beforeApply records the device's defaults for its holder: not for a device that has none.
     if (this.scope?.beforeApply && !this.skipReason(device)) {
@@ -266,9 +311,7 @@ export class AppearanceSyncScheduler {
       const config = await this.dependencies.getConfig(device.sessionKey);
       reason =
         this.skipReason(device) ??
-        (config.syncWithHost && config.defaultMode === decidedUnder.defaultMode
-          ? undefined
-          : "its holder's appearance config changed");
+        (stillOwed(config) ? undefined : "its holder's appearance config changed");
     }
     if (reason) {
       logger.debug(`[Appearance] Skipping ${device.deviceId}: ${reason} before the apply`);
@@ -311,6 +354,23 @@ export class AppearanceSyncScheduler {
   private ownTargets(): AppearanceSyncTarget[] {
     return this.dependencies.getTargets?.() ?? [];
   }
+}
+
+/** A claim applies the holder's mode when its config follows the host or applies on connect. */
+function isOwedOnClaim(config: AppearanceConfig): boolean {
+  return config.syncWithHost || config.applyOnConnect;
+}
+
+function isSameDecision(current: AppearanceConfig, decidedUnder: AppearanceConfig): boolean {
+  return (
+    current.syncWithHost === decidedUnder.syncWithHost &&
+    current.defaultMode === decidedUnder.defaultMode
+  );
+}
+
+/** The tick's write stays owed while the holder still follows the host under the same default. */
+function followsHostUnder(decidedUnder: AppearanceConfig): (current: AppearanceConfig) => boolean {
+  return (current) => current.syncWithHost && current.defaultMode === decidedUnder.defaultMode;
 }
 
 const scheduler = new AppearanceSyncScheduler();

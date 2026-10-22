@@ -43,12 +43,12 @@ async function harness() {
   await Promise.resolve();
   timer.advanceTime(123);
   client.connectionTestHooks.socket = socket;
-  client["supportedCommands"] = new Set([
+  client.connectionTestHooks.supportedCommands = new Set([
     "discover_keystore",
     "get_sdk_capabilities",
     SDK_CAPABILITIES_USER_ID_CAPABILITY,
   ]);
-  const manager = client["requestManager"];
+  const manager = client.connectionTestHooks.requestManager;
   const ids = new CountingIdGenerator("wire");
   manager.generateId = (prefix) => `${prefix}_${ids.next()}`;
   let connects = 0;
@@ -60,7 +60,7 @@ async function harness() {
   client["cancelScreenshotBackoff"] = () => {
     cancels++;
   };
-  const storage = client["storage"];
+  const storage = client.testHooks.storage();
   return {
     client,
     storage,
@@ -441,7 +441,7 @@ for (const advertised of [false, true]) {
   test(`SDK userId is omitted when ${advertised ? "unspecified" : "not advertised"}`, async () => {
     const h = await harness();
     if (!advertised) {
-      h.client["supportedCommands"]!.delete(SDK_CAPABILITIES_USER_ID_CAPABILITY);
+      h.client.connectionTestHooks.supportedCommands!.delete(SDK_CAPABILITIES_USER_ID_CAPABILITY);
     }
     const pending = h.storage.getSdkCapabilities("pkg", advertised ? undefined : 10, 50);
     await flushDispatch();
@@ -462,7 +462,7 @@ for (const advertised of [false, true]) {
 for (const operation of ["discoverKeystore", "getSdkCapabilities"] as const) {
   test(`${operation} keeps the advertised capability precheck`, async () => {
     const h = await harness();
-    h.client["supportedCommands"] = new Set();
+    h.client.connectionTestHooks.supportedCommands = new Set();
     const result = await h.storage[operation]("pkg");
     expect(result).toMatchObject(
       operation === "discoverKeystore"

@@ -6,6 +6,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { registerDeviceIncarnationListener } from "../../utils/deviceIncarnation";
 import type { SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { logger } from "../../utils/logger";
+import { looksLikeMissingIosDefault } from "../preferences/preferenceValues";
 
 /**
  * Accessibility display preferences that change layout and rendering beyond text size and theme:
@@ -403,12 +404,6 @@ function iosIncreaseContrast(simctl: SimctlRunner, udid: string): PreferenceSett
   };
 }
 
-function isMissingDefault(error: unknown): boolean {
-  const stderr =
-    typeof error === "object" && error !== null && "stderr" in error ? String(error.stderr) : "";
-  return /does not exist|could not find key/i.test(`${errorMessage(error)} ${stderr}`);
-}
-
 function iosAccessibilityDefault(
   simctl: SimctlRunner,
   udid: string,
@@ -430,7 +425,7 @@ function iosAccessibilityDefault(
         }
         return value;
       } catch (error) {
-        if (isMissingDefault(error)) {
+        if (looksLikeMissingIosDefault(error)) {
           // An absent Simulator default is off and must stay absent when restored.
           logger.debug(`[DisplayConfig] Simulator default ${key} is unset`, error);
           return null;

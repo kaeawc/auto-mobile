@@ -27,6 +27,13 @@ internal object SystemGlobalActions {
   private const val API_P = 28
   private const val API_S = 31
 
+  // Values of the API 28/31 AccessibilityService constants. Referencing the constants directly
+  // trips the InlinedApi lint check on the module's minSdk even though every use is gated by
+  // [Spec.minSdk], so the ids are spelled out here.
+  private const val GLOBAL_ACTION_LOCK_SCREEN = 8
+  private const val GLOBAL_ACTION_TAKE_SCREENSHOT = 9
+  private const val GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE = 15
+
   private fun flagFor(wireName: String) = "global_action_${wireName}_v1"
 
   internal val specs: List<Spec> =
@@ -55,19 +62,19 @@ internal object SystemGlobalActions {
       ),
       Spec(
         "lock_screen",
-        AccessibilityService.GLOBAL_ACTION_LOCK_SCREEN,
+        GLOBAL_ACTION_LOCK_SCREEN,
         API_P,
         flagFor("lock_screen"),
       ),
       Spec(
         "screenshot",
-        AccessibilityService.GLOBAL_ACTION_TAKE_SCREENSHOT,
+        GLOBAL_ACTION_TAKE_SCREENSHOT,
         API_P,
         flagFor("screenshot"),
       ),
       Spec(
         "dismiss_notification_shade",
-        AccessibilityService.GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE,
+        GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE,
         API_S,
         flagFor("dismiss_notification_shade"),
       ),

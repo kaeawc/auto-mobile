@@ -143,6 +143,8 @@ export interface BootedDeviceDiscoveryOptions {
   skipAndroidNameEnrichment?: boolean;
   /** Monitor discovery retains AVD identity but omits model, architecture and displays. */
   skipAndroidProfileEnrichment?: boolean;
+  /** Restrict Android enrichment to this serial; other attached devices are neither probed nor returned. */
+  androidTargetDeviceId?: string;
 }
 
 export interface DeviceImageDiscovery {

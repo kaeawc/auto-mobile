@@ -139,7 +139,11 @@ export interface OpenSessionBrokerServiceOptions {
   hostLock?: SessionBrokerHostLock;
   catalog?: (platform: "ios" | "android", signal?: AbortSignal) => Promise<SessionDeviceCatalog>;
   androidReset?: {
-    inventory(options?: { signal?: AbortSignal; timeoutMs?: number }): Promise<BootedDevice[]>;
+    inventory(options: {
+      signal?: AbortSignal;
+      timeoutMs: number;
+      targetDeviceId: string;
+    }): Promise<BootedDevice[]>;
     ctrlProxyReady: AndroidBaselineResetDependencies["ctrlProxyReady"];
     snapshot?: AndroidSnapshotReadiness;
   };
@@ -599,15 +603,15 @@ export function boundAndroidResetInventory(
   timer: Timer,
 ): NonNullable<OpenSessionBrokerServiceOptions["androidReset"]>["inventory"] {
   return (options) => {
-    options?.signal?.throwIfAborted();
+    options.signal?.throwIfAborted();
     const controller = new AbortController();
-    const signal = options?.signal
+    const signal = options.signal
       ? AbortSignal.any([options.signal, controller.signal])
       : controller.signal;
     return raceWithDeadline(() => inventory({ ...options, signal }), {
       timer,
-      timeoutMs: options?.timeoutMs ?? 2000,
-      signal: options?.signal,
+      timeoutMs: options.timeoutMs,
+      signal: options.signal,
       label: "Android baseline reset inventory",
       onTimeout: () => controller.abort(),
     });

@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { cleanAndroidBaseline } from "../../../src/daemon/sessionBroker/androidKeepBootedCleanup";
+import type { DeviceMutationInput } from "../../../src/daemon/sessionBroker/mutations/types";
 import { AndroidDeviceMutationResetPort } from "../../../src/daemon/sessionBroker/androidDeviceMutationResetPort";
 import { AndroidKeepBootedReset } from "../../../src/daemon/sessionBroker/androidKeepBootedReset";
 import { shellQuote } from "../../../src/utils/shellQuote";
@@ -52,6 +54,97 @@ async function rig(users: readonly number[] = [0], fallback?: AndroidResetStrate
 }
 
 describe("Android unconditional keep-booted cleaning", () => {
+  async function displayRig(verify = true) {
+    const { adb, reply } = androidBaselineRig();
+    reply("shell wm density", "Physical density: 420");
+    reply("shell cmd uimode night", "Night mode: no");
+    const context = {
+      scope: SCOPE,
+      signal: new AbortController().signal,
+      assertOwned: async () => {},
+    };
+    const port = new AndroidDeviceMutationResetPort(adb);
+    const baseline = await port.capture(context);
+    const reverted: DeviceMutationInput[] = [];
+    adb.clearHistory();
+    const clean = () =>
+      cleanAndroidBaseline(
+        baseline,
+        context,
+        async (command) => (await adb.executeCommand(command)).stdout.trim(),
+        async (mutation) => {
+          reverted.push(mutation);
+          await port.revert(mutation, context);
+          if (verify && mutation.key.startsWith("display:")) {
+            reply("shell wm density", "Physical density: 420");
+            reply("shell wm size", "Physical size: 1080x1920");
+            reply("shell cmd uimode night", "Night mode: no");
+          }
+        },
+      );
+    return { adb, reply, baseline, reverted, clean };
+  }
+
+  test("restores live density and night mode before settings rows", async () => {
+    const { adb, reply, reverted, clean } = await displayRig();
+    reply("shell wm density", "Physical density: 420\nOverride density: 480");
+    reply("shell cmd uimode night", "Night mode: yes");
+    reply("shell settings --user 0 list secure", "enabled_input_methods=\nlocation_mode=0");
+    await clean();
+    expect(reverted.slice(0, 2)).toEqual([
+      {
+        kind: "device-setting",
+        key: "display:density",
+        priorValue: { state: "absent" },
+        toolName: "keep-booted-cleaning",
+      },
+      {
+        kind: "device-setting",
+        key: "display:night-mode",
+        priorValue: { state: "present", value: "no" },
+        toolName: "keep-booted-cleaning",
+      },
+    ]);
+    expect(reverted[2]!.key).toBe("secure:location_mode");
+    expect(adb.getExecutedCommands()).toContain("shell wm density reset");
+    expect(adb.getExecutedCommands()).toContain("shell cmd uimode night no");
+  });
+
+  test("live display verification fails closed when overrides remain", async () => {
+    const { reply, clean } = await displayRig(false);
+    reply("shell wm density", "Physical density: 420\nOverride density: 480");
+    reply("shell cmd uimode night", "Night mode: yes");
+    await expect(clean()).rejects.toThrow(
+      "Android cleaning did not restore live display state: display:density, display:night-mode",
+    );
+  });
+
+  test("matching live display state needs no reversions", async () => {
+    const { adb, reverted, clean } = await displayRig();
+    await clean();
+    expect(reverted).toEqual([]);
+    expect(
+      adb.getExecutedCommands().filter((command) => command === "shell wm density"),
+    ).toHaveLength(2);
+  });
+
+  test("missing display observations are skipped", async () => {
+    const { baseline, reply, reverted, clean } = await displayRig();
+    baseline.observations = baseline.observations.filter(
+      (observation) => !observation.key.startsWith("display:"),
+    );
+    reply("shell wm density", "Physical density: 420\nOverride density: 480");
+    await clean();
+    expect(reverted).toEqual([]);
+  });
+
+  test("display restoration errors propagate", async () => {
+    const { adb, reply, clean } = await displayRig();
+    reply("shell wm density", "Physical density: 420\nOverride density: 480");
+    adb.setCommandError("shell wm density reset", new Error("display restore refused"));
+    await expect(clean()).rejects.toThrow();
+  });
+
   test.each(["android", "com.example.probe"])(
     "an absent-prior journal entry never dispatches uninstall for baseline package %s",
     async (packageName) => {

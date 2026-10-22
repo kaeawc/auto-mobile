@@ -1,3 +1,4 @@
+import type { BootedDeviceDiscoveryOptions } from "../../devices/deviceDiscoveryContracts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { IOSCtrlProxyManager } from "../../ctrlProxy/IOSCtrlProxyManager";
 import { RunnerReadinessService } from "../../ctrlProxy/RunnerReadinessService";
@@ -314,10 +315,15 @@ export class DeviceReadiness implements DeviceReadinessContract {
     return this.readinessSelection.detectConnectedPlatformsWithStatus(signal, options);
   }
 
-  public listBootedAndroidDevices(options?: { signal?: AbortSignal }): Promise<BootedDevice[]> {
+  public listBootedAndroidDevices(
+    options?: Pick<
+      BootedDeviceDiscoveryOptions,
+      "signal" | "androidTargetDeviceId" | "skipAndroidProfileEnrichment"
+    >,
+  ): Promise<BootedDevice[]> {
     return this.readinessSelection.listBootedAndroidDevicesForSelection({
+      ...options,
       bypassAndroidDeviceListCache: true,
-      signal: options?.signal,
     });
   }
 

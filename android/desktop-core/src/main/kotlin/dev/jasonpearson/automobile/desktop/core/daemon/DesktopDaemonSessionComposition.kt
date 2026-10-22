@@ -193,6 +193,11 @@ data class DesktopDaemonSessionState(
    * shows. Safe from any thread.
    */
   val reportHeldElsewhere: (String) -> Unit = {},
+  /**
+   * Counts the times the user's remembered appearance choice was re-sent under a session (#11363),
+   * so a view of the session's appearance config re-reads it after the restore.
+   */
+  val appearanceRestores: Int = 0,
 ) {
   val sessionUuidProvider: () -> String?
     get() = session?.sessionUuidProvider ?: { null }
@@ -279,6 +284,15 @@ data class DesktopDaemonSessionOptions(
   val bindRetryBackoff: BindRetryBackoff = BindRetryBackoff.Default,
   /** Monotonic milliseconds, for [HEARTBEAT_LAPSE_MS]; tests pass their virtual clock. */
   val monotonicClockMs: () -> Long = { System.nanoTime() / 1_000_000 },
+  /**
+   * The user's last appearance choice, re-sent under each session that registers (#11363). Null
+   * re-sends nothing.
+   */
+  val appearanceChoices: AppearanceChoiceMemory? = null,
+  /** The plain (non-allocating) appearance client a re-sent choice goes through. */
+  val appearanceClientFactory: (sessionUuidProvider: () -> String?) -> AppearanceClient = {
+    AppearanceSocketClient(sessionUuidProvider = it)
+  },
 )
 
 @Composable
@@ -313,7 +327,9 @@ fun rememberDesktopDaemonSession(options: DesktopDaemonSessionOptions): DesktopD
     else visiblePanes.firstOrNull { it.deviceId == state.inputDeviceId }
   state.CleanupEffect(options, session)
   state.BindingEffect(options, session, target)
-  return state.renderState(session, actions)
+  val registered = session?.isRegistered?.collectAsState()?.value ?: false
+  state.AppearanceRestoreEffect(options, session, registered)
+  return state.renderState(session, registered, actions)
 }
 
 internal class DesktopDaemonCompositionState {
@@ -328,6 +344,7 @@ internal class DesktopDaemonCompositionState {
   var carriedBindError by mutableStateOf<Pair<String, String>?>(null)
   var controlRequests by mutableStateOf(0)
   var hiddenPastGrace by mutableStateOf(false)
+  var appearanceRestores by mutableStateOf(0)
   val pendingRecoveryRefresh = AtomicBoolean(false)
   val heldDevice = AtomicReference<String?>(null)
   val gates = InputAllocationGates()
@@ -573,9 +590,9 @@ private fun DesktopDaemonCompositionState.BindingEffect(
 @Composable
 private fun DesktopDaemonCompositionState.renderState(
   session: DesktopDaemonSession?,
+  registered: Boolean,
   actions: DesktopSessionActions,
 ): DesktopDaemonSessionState {
-  val registered = session?.isRegistered?.collectAsState()?.value ?: false
   return DesktopDaemonSessionState(
     session = session,
     boundDeviceId = boundDeviceId,
@@ -589,5 +606,6 @@ private fun DesktopDaemonCompositionState.renderState(
     requestInput = actions.requestInput,
     inputAllocation = actions.inputAllocation,
     reportHeldElsewhere = actions.reportHeldElsewhere,
+    appearanceRestores = appearanceRestores,
   )
 }

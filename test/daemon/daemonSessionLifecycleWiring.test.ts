@@ -103,6 +103,8 @@ describe("wireSessionLifecycle", () => {
       "setExpiryReleaseExecutionCanceller",
       "setDeviceAcquisitionExecutionCanceller",
       "onSessionCreated",
+      "onSessionCreated",
+      "onDeviceOwnershipChange",
       "onSessionRelease",
       "onSessionRelease",
       "onSessionDeviceUnbound",

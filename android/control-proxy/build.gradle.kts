@@ -110,6 +110,8 @@ dependencies {
 
   // Embeddable prototype renderer; CtrlProxy adds the overlay host around it.
   implementation(projects.prototypeCompose)
+  // Saved-prototype store and device HTTP transport that the unprivileged ProtoViewer also links.
+  implementation(projects.prototypeSaved)
 
   // Compose BOM
   implementation(platform(libs.compose.bom))
@@ -146,6 +148,7 @@ dependencies {
 
   // Test dependencies
   testImplementation(projects.prototypeCompose)
+  testImplementation(projects.prototypeSaved)
   testImplementation(libs.bundles.unit.test)
   testImplementation(projects.junitRunner)
   testImplementation(libs.robolectric)
@@ -228,7 +231,8 @@ configurations
       incoming
         .artifactView {
           componentFilter { id ->
-            id is ProjectComponentIdentifier && id.buildTreePath == ":prototype-compose"
+            id is ProjectComponentIdentifier &&
+              (id.buildTreePath == ":prototype-compose" || id.buildTreePath == ":prototype-saved")
           }
           attributes.attribute(
             Attribute.of("artifactType", String::class.java),
@@ -245,5 +249,10 @@ configurations
 tasks
   .matching { it.name.startsWith("test") && it.name.endsWith("UnitTest") }
   .configureEach {
-    dependsOn(":prototype-compose:$name", ":prototype-compose:verifyRendererDependencies")
+    dependsOn(
+      ":prototype-compose:$name",
+      ":prototype-compose:verifyRendererDependencies",
+      ":prototype-saved:$name",
+      ":prototype-saved:verifySavedPrototypeDependencies",
+    )
   }

@@ -77,6 +77,7 @@ export class RecoveryCleanup {
         this.inFlight.delete(item.resourceId);
       });
     this.inFlight.set(item.resourceId, pending);
+    const timeout = new ActionableError("Recovery cleanup pass wait elapsed");
     try {
       // A deadline bounds only this pass's WAIT, never frees an occupied native slot. Later
       // passes skip the resource until the original work settles, including late failures.
@@ -85,8 +86,17 @@ export class RecoveryCleanup {
         timeoutMs: this.waitMs,
         signal,
         label: `Session resource ${item.resourceId} recovery cleanup`,
+        timeoutError: () => timeout,
       });
     } catch (error) {
+      if (error === timeout) {
+        // Native work keeps its slot; a later pass re-checks expected multi-second resets.
+        logger.debug(
+          `Session resource ${item.resourceId} cleanup wait ended: ${errorMessage(error)}`,
+          error,
+        );
+        return;
+      }
       // Shutdown cancels the wait; close separately aborts/joins the underlying owned work.
       logger.warn(
         `Session resource ${item.resourceId} cleanup wait ended: ${errorMessage(error)}`,

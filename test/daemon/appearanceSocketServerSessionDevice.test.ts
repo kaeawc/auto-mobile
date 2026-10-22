@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   AppearanceSocketServer,
+  defaultAppearanceDeviceSource,
   type AppearanceDeviceSource,
   type AppearanceSocketServerDependencies,
 } from "../../src/daemon/appearanceSocketServer";
@@ -62,9 +63,22 @@ function harness(auth: boolean, source?: AppearanceDeviceSource) {
 }
 
 describe("appearance socket session device targets", () => {
+  beforeEach(() => {
+    clearDirectSessionDevices();
+    DaemonState.getInstance().reset();
+  });
+
   afterEach(() => {
     clearDirectSessionDevices();
     DaemonState.getInstance().reset();
+  });
+
+  test("production direct-session lookups trim padded session IDs", () => {
+    registerDirectSessionDevice("requester", sessionDevice);
+    expect(defaultAppearanceDeviceSource.getSessionDevice(" requester ")).toEqual(sessionDevice);
+    expect(
+      defaultAppearanceDeviceSource.getSessionForDevice(sessionDevice.deviceId, " requester "),
+    ).toBe("requester");
   });
 
   for (const auth of [false, true]) {
@@ -82,6 +96,10 @@ describe("appearance socket session device targets", () => {
       await manager.createSession("other", pooled.deviceId, pooled.platform);
       await manager.createSession("caller", sessionDevice.deviceId, sessionDevice.platform);
       DaemonState.getInstance().initialize(manager, pool);
+      expect(defaultAppearanceDeviceSource.getSessionDevice(" caller ")).toEqual(sessionDevice);
+      expect(
+        defaultAppearanceDeviceSource.getSessionForDevice(sessionDevice.deviceId, " caller "),
+      ).toBe("caller");
       registerDirectSessionDevice("caller", oldCurrent);
       const { server, applied } = harness(auth);
       const result = await server.dispatch({

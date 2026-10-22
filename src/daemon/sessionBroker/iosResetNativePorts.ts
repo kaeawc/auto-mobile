@@ -9,6 +9,7 @@ import {
 } from "../../utils/ChildProcessTracker";
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { SimCtl, SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
+import { SimulatorTccSqliteClient } from "../../utils/ios-cmdline-tools/SimulatorTccSqliteClient";
 import type { Timer } from "../../utils/SystemTimer";
 import type { IosResetHealthPort } from "./iosKeepBootedReset";
 import { IosDeviceMutationResetPort } from "./mutations/iosResetPort";
@@ -19,9 +20,12 @@ export function nativeIosMutationResetPort(
   timer: Timer,
 ): IosDeviceMutationResetPort {
   const pending = new Set<string>();
+  const tcc = new SimulatorTccSqliteClient({ timer });
   return new IosDeviceMutationResetPort(
     {
       simctl,
+      privacyGrants: tcc,
+      trustStore: tcc,
       files: { realpath, remove: (path) => rm(path, { recursive: true, force: false }) },
       pasteboard: {
         assertSettled: (deviceId) => {

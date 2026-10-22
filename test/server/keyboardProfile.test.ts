@@ -4,6 +4,7 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { KeyboardProfileRestoreRegistry } from "../../src/features/utility/KeyboardProfileRestore";
 import type { BootedDevice } from "../../src/models";
 import { keyboardSchema } from "../../src/server/interactionTools";
+import { setKeyboardProfileRecorded } from "../../src/features/utility/KeyboardProfileRestore";
 import {
   createKeyboardHandler,
   listKeyboardProfilesForTool,
@@ -295,5 +296,26 @@ describe("keyboard setProfile in a daemon session (#14705)", () => {
       handler(androidDevice, { action: "setProfile", profile: "gboard", sessionUuid: "session-1" }),
     ).rejects.toThrow("Cannot change the keyboard profile");
     expect(proxy.writes).toEqual([]);
+  });
+  test("a session bound to another device is refused before anything changes", async () => {
+    await manager.createSession("session-1", "other-device", "android");
+    await expect(
+      handler(androidDevice, { action: "setProfile", profile: "gboard", sessionUuid: "session-1" }),
+    ).rejects.toThrow("Cannot change the keyboard profile");
+    expect(proxy.writes).toEqual([]);
+  });
+
+  test("an acquisition-time manufacturer-profile write is restored by the same release path", async () => {
+    await manager.createSession("session-1", androidDevice.deviceId, "android");
+    await setKeyboardProfileRecorded(androidDevice, "samsung", proxy, undefined, {
+      owner: "session-1",
+      registry,
+    });
+    expect(proxy.active).toBe("samsung");
+
+    await manager.releaseSession("session-1", "explicit-release");
+    await manager.getPendingDeviceCleanup(androidDevice.deviceId);
+    expect(proxy.active).toBe("direct");
+    expect(registry.pending(androidDevice.deviceId)).toBeUndefined();
   });
 });

@@ -43,7 +43,7 @@ internal object PrototypeSpecInput {
     }
     if (hasUnescapedControl(input)) return PrototypeSpecValidation.Failure(fail("", "Invalid JSON"))
     return try {
-      val element = json.parseToJsonElement(input)
+      val element = json.parseToJsonElement(PrototypeStrictJson.prepare(input))
       if (!validNumberTokens(element)) PrototypeSpecValidation.Failure(fail("", "Invalid JSON"))
       else validateElement(element, context)
     } catch (_: SerializationException) {
@@ -125,6 +125,7 @@ internal object PrototypeSpecInput {
       walk(value, definitions.getValue("spec").jsonObject, "", context, 0)
         ?: gridSpanErrors(context)
         ?: PrototypeRepeatValidator.validate(value, repeats)
+        ?: PrototypeStorageValidation.error(value.jsonObject)
         ?: dataActionErrors(context, value)
         ?: requestActionErrors(context)
         ?: nodeVocabularyErrors(value, context)

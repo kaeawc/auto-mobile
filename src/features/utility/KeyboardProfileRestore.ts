@@ -1,5 +1,7 @@
 import type { BootedDevice } from "../../models";
 import { withAndroidImeLock } from "../action/androidImeLock";
+import { setKeyboardProfile } from "../action/setKeyboardProfile";
+import type { KeyboardProfileId } from "../action/keyboardProfiles";
 import type { AndroidCtrlProxy } from "../observe/android";
 import { androidCtrlProxyClientFor } from "../observe/android/androidCtrlProxyClientFor";
 import { runOutsideRequestContext } from "../../utils/AbortContext";
@@ -135,4 +137,44 @@ export async function restoreOwnedKeyboardProfile(
     );
     return false;
   }
+}
+
+type KeyboardProfileWriteClient = Pick<AndroidCtrlProxy, "supportsCommand" | "setKeyboardProfile">;
+
+/**
+ * Write `profile` and record the profile active before the first change (#14705), inside the
+ * device's IME lock, so the owning session's release or a persona reset can put it back.
+ */
+export function setKeyboardProfileRecorded(
+  device: BootedDevice,
+  profile: KeyboardProfileId,
+  client: KeyboardProfileWriteClient | undefined,
+  signal: AbortSignal | undefined,
+  record: { owner?: string; registry?: KeyboardProfileRestoreRegistry } = {},
+): Promise<{ activeProfileId?: string; previousProfileId?: string }> {
+  const registry = record.registry ?? defaultKeyboardProfileRestoreRegistry;
+  return setKeyboardProfile(device, profile, client, signal, (previousProfileId) => {
+    if (previousProfileId !== undefined) {
+      registry.record(device, previousProfileId, record.owner);
+    }
+  });
+}
+
+/**
+ * Put back the keyboard profile recorded before the first change and forget it. With nothing
+ * recorded it changes nothing; a refused write stays recorded, so a later reset or the owning
+ * session's release retries it.
+ */
+export async function resetKeyboardProfileFromRecord(
+  device: BootedDevice,
+  client: KeyboardProfileWriteClient | undefined,
+  signal: AbortSignal | undefined,
+  registry: KeyboardProfileRestoreRegistry = defaultKeyboardProfileRestoreRegistry,
+): Promise<{ restoredProfileId?: string }> {
+  const profile = registry.pending(device.deviceId);
+  if (profile === undefined) {
+    return {};
+  }
+  await setKeyboardProfile(device, profile, client, signal, () => registry.forget(device.deviceId));
+  return { restoredProfileId: profile };
 }

@@ -367,3 +367,57 @@ describe("applyPersona / resetPersona (#14055)", () => {
     expect(executors.keyboardBefore).toBeUndefined();
   });
 });
+
+describe("acquisition-time manufacturer profiles (#14058)", () => {
+  let executors: FakePersonaFacetExecutors;
+  let registry: PersonaRestoreRegistry;
+
+  beforeEach(() => {
+    executors = new FakePersonaFacetExecutors();
+    registry = new PersonaRestoreRegistry();
+  });
+
+  test("deferKill reports the kill facet as deferred instead of refusing without an app", async () => {
+    const result = await applyPersona(
+      emulator,
+      "samsung-oneui",
+      { deferKill: true },
+      { executors, registry, owner: "session-1" },
+    );
+
+    expect(result).toMatchObject({ status: "applied" });
+    if (result.status === "route_to_real_device") {
+      throw new Error("unexpected route");
+    }
+    expect(result.facets.map((facet) => [facet.facet, facet.status])).toEqual([
+      ["keyboard", "applied"],
+      ["kill", "deferred"],
+      ["display", "applied"],
+    ]);
+    expect(executors.calls.some((call) => call.facet === "kill")).toBe(false);
+    expect(registry.get(emulator.deviceId)?.killAppIds).toEqual([]);
+  });
+
+  test("without deferKill a kill-bearing profile still needs appId", async () => {
+    await expect(
+      applyPersona(emulator, "samsung-oneui", {}, { executors, registry }),
+    ).rejects.toThrow("apply needs appId");
+  });
+
+  test("an acquisition-time apply names the owning session on the keyboard write, so its release restores it", async () => {
+    await applyPersona(
+      emulator,
+      "samsung-oneui",
+      { deferKill: true },
+      { executors, registry, owner: "session-1" },
+    );
+
+    expect(executors.calls).toContainEqual({
+      facet: "keyboard",
+      action: "set",
+      profile: "samsung",
+      owner: "session-1",
+    });
+    expect(registry.get(emulator.deviceId)?.keyboard).toBe(true);
+  });
+});

@@ -30,7 +30,6 @@ import {
   throwIfAborted,
   withIsErrorOnFailure,
 } from "../utils/toolUtils";
-import { withAndroidImeLock } from "../features/action/androidImeLock";
 import type {
   AcceptIosAppOpenAlertOptions,
   InteractionToolDependencies,
@@ -73,6 +72,8 @@ import { toActionableError } from "../models/ActionableError";
 import { HomeScreen } from "../features/action/HomeScreen";
 import {
   defaultKeyboardProfileRestoreRegistry,
+  resetKeyboardProfileFromRecord,
+  setKeyboardProfileRecorded,
   type KeyboardProfileRestoreRegistry,
 } from "../features/utility/KeyboardProfileRestore";
 import { defaultDaemonContext } from "../daemon/daemonContext";
@@ -84,46 +85,6 @@ export interface KeyboardProfileRecordOptions {
   /** The daemon session changing the profile, whose release restores it; none when sessionless. */
   owner?: string;
   registry?: KeyboardProfileRestoreRegistry;
-}
-
-/**
- * Write `profile` under the device's shared IME lock. `onWritten` runs inside the
- * lock, so a concurrent write cannot change the restore record in between.
- */
-async function writeKeyboardProfile(
-  device: BootedDevice,
-  profile: string,
-  client: KeyboardProfileWriteClient | undefined,
-  signal: AbortSignal | undefined,
-  onWritten?: (previousProfileId: string | undefined) => void,
-): Promise<{ activeProfileId?: string; previousProfileId?: string }> {
-  if (device.platform !== "android") {
-    throw new ActionableError("Keyboard profiles are Android-only; select an Android device.");
-  }
-  const profileClient = client ?? androidCtrlProxyClientFor(device);
-  const supported = await profileClient.supportsCommand("request_set_keyboard_profile");
-  throwIfAborted(signal);
-  if (!supported) {
-    throw new ActionableError(
-      "The installed control-proxy build does not support keyboard profiles; update/re-cut the APK.",
-    );
-  }
-  const result = await withAndroidImeLock(
-    device.deviceId,
-    async () => {
-      throwIfAborted(signal);
-      const written = await profileClient.setKeyboardProfile(profile);
-      if (written.success) {
-        onWritten?.(written.previousProfileId);
-      }
-      return written;
-    },
-    signal,
-  );
-  if (!result.success) {
-    throw new ActionableError(result.error ?? "Failed to set keyboard profile.");
-  }
-  return { activeProfileId: result.activeProfileId, previousProfileId: result.previousProfileId };
 }
 
 /**
@@ -144,10 +105,9 @@ export async function setKeyboardProfileForTool(
     );
   }
   const registry = record.registry ?? defaultKeyboardProfileRestoreRegistry;
-  return writeKeyboardProfile(device, profile, client, signal, (previousProfileId) => {
-    if (previousProfileId !== undefined) {
-      registry.record(device, previousProfileId, record.owner);
-    }
+  return setKeyboardProfileRecorded(device, profile, client, signal, {
+    owner: record.owner,
+    registry,
   });
 }
 
@@ -162,14 +122,7 @@ export async function resetKeyboardProfileForTool(
   signal?: AbortSignal,
   registry: KeyboardProfileRestoreRegistry = defaultKeyboardProfileRestoreRegistry,
 ): Promise<{ restoredProfileId?: string }> {
-  const profile = registry.pending(device.deviceId);
-  if (profile === undefined) {
-    return {};
-  }
-  await writeKeyboardProfile(device, profile, client, signal, () =>
-    registry.forget(device.deviceId),
-  );
-  return { restoredProfileId: profile };
+  return resetKeyboardProfileFromRecord(device, client, signal, registry);
 }
 
 export async function listKeyboardProfilesForTool(

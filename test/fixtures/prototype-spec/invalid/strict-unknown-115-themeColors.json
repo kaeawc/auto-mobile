@@ -1,0 +1,23 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "opacity": 100
+    },
+    "theme": {
+      "mode": "system",
+      "colors": {
+        "source": "device",
+        "zzzUnknown": true
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "x"
+    }
+  },
+  "expectedPath": "theme.colors.zzzUnknown"
+}

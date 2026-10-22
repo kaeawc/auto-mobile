@@ -5,7 +5,10 @@ import type { Timer } from "../../src/utils/SystemTimer";
 import { raceWithDeadline } from "../../src/utils/raceWithDeadline";
 import { readBrokerProtectedDevices } from "./brokerClientFiles";
 import { BrokerTransportError, type BrokerDaemonClient } from "./brokerDaemonClient";
-import type { SessionBrokerResult } from "../../src/devices/sessionBrokerResult";
+import {
+  SESSION_OWNER_EXITED_CODE,
+  type SessionBrokerResult,
+} from "../../src/devices/sessionBrokerResult";
 import { errorMessage } from "../../src/utils/describeUnknownError";
 import {
   matchesProtection,
@@ -286,6 +289,15 @@ export function leakReport(
     );
   });
 }
+/**
+ * A grant ended by a daemon restart or owner kill is terminal `failed/session_owner_exited` with
+ * its device destroyed by the broker (#14780). It is a receipt like `released`; the native-absence
+ * join below still decides whether the device is gone.
+ */
+function endedByOwnerExit(status: SessionBrokerResult): boolean {
+  return status.outcome === "failed" && status.failure?.code === SESSION_OWNER_EXITED_CODE;
+}
+
 /** Join released status with healthy inventory proving absence or a reusable pooled device. */
 export async function assertReleasedAndAbsent(options: {
   ledger: BrokerDeviceLedger;
@@ -339,7 +351,7 @@ export async function assertReleasedAndAbsent(options: {
             if (
               status?.sessionUuid === device.sessionUuid &&
               status.requestId === device.requestId &&
-              status.outcome === "released" &&
+              (status.outcome === "released" || endedByOwnerExit(status)) &&
               !status.cleanupPending
             ) {
               confirmed.set(device.sessionUuid, status);

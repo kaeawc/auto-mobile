@@ -10,11 +10,11 @@ SDUI spec.
 
 - Contract: `schemas/prototype-spec-contract.json` (limits, per-node field rules). Host validator
   and types: `src/features/prototype/prototypeSpec.ts` and `prototypeValidation.ts`. Kotlin twin:
-  `PrototypeSpecValidator` in `android/protocol`. Swift: `PrototypeSpec.swift` and
-  `PrototypeStateValidator.swift` in `ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore`
-  validate requests, data, size bounds, stacks, themes and menus, but there is no Swift twin of the
-  contract validator: unknown top-level keys are ignored and a malformed `storage` block is treated
-  as absent. Swift tests assert only a subset of `test/fixtures/prototype-spec/invalid`.
+  `PrototypeSpecValidator` in `android/protocol`. Swift's reject-only `PrototypeSpecStrictValidator`
+  extends the generated structural interpreter from #14803 in `AutoMobilePrototypeAgentCore`.
+  It composes the existing request, platform, state, check, repeat and resource-limit helpers with
+  located host semantics. Unknown keys and malformed storage reject the whole spec. All three
+  runtimes consume the complete shared valid/invalid corpus; there are no Swift exemptions.
 - Envelope: `{ id, window, data?, state?, motion?, storage?, theme?, root }`. There is **no
   `specVersion`**: the 2026-10-04 owner decision rejects older and newer shapes instead of migrating
   (see Owner decisions in [Android prototype specification](plat/android/prototype-ux.md)).
@@ -100,16 +100,42 @@ the same typed error as a blocked host. The validator rejects `window.layer: "sy
 
 Importing a prototype needs identical accept and reject behaviour on all three platforms:
 
-1. A hand-ported, reject-only Swift validator (`PrototypeSpecStrictValidator`): strict envelope and
-   keys at every level, duplicate JSON keys, `storage` shape, limits, capability computation and
-   privileged-window rejection. It returns accept or `(path, message)`; it does not need
-   Kotlin-identical message text or a render model.
-2. A shared corpus extending `test/fixtures/prototype-spec/{valid,invalid}` (no new directory).
-   Every invalid fixture is rejected by TS, Kotlin and Swift. The assertion is accept or reject plus
-   the error path, never message text. Differential cases cover unknown keys everywhere, duplicate
-   keys, numeric and encoding edge cases, deep nesting, reserved key names, id edge cases, URL
-   forms, forbidden headers, and every limit at the boundary and one past it (#13620).
-3. Import never partially renders: a spec that fails any check is not stored.
+1. `PrototypeSpecStrictValidator.validate(data:supportedCapabilities:library:)` accepts raw UTF-8
+   `Data` and returns normally or throws `PrototypeLoadError.invalidSpec(path:message:)`. It extends
+   `PrototypeContractValidator` and the generated `PrototypeSpecContractData.swift`; it does not
+   replace the interpreter or return a render model. Existing runtime helpers supply request,
+   platform, state binding, check grammar, repeat projection/binding and limit rules. Additional
+   strict checks retain authored paths for cross-node targets, charts, storage and template scope.
+2. All three corpus runners discover **every** `.json` in
+   `test/fixtures/prototype-spec/{valid,invalid}` and compare their lists with `corpus.json`.
+   The inventory also records TS-computed capabilities for every valid spec, asserted by all three.
+   An added fixture without a refreshed inventory fails the ratchet in each runner. Capture with
+   `bun scripts/capture-prototype-strict-fixtures.ts`: `expectedPath` comes from real TS output.
+   Assertions compare acceptance and error path, never message text. Unknown-key cases cover each
+   observed strict object rule; boundary cases exercise structural and data/expanded-tree budgets.
+3. Valid fixtures remain ordinary specs. An invalid envelope contains `spec` or, when JSON cannot
+   preserve the input, `rawJson` (duplicate keys, escaped surrogates, non-JSON tokens, nesting) or
+   `rawBytesBase64` (invalid UTF-8), plus `expectedPath`. Optional `options` supplies `library` and
+   `supportedCapabilities`. No additional fixture directory or binary assets are needed; the
+   existing `.gitattributes` JSON rule pins LF.
+4. Raw inputs allow one leading UTF-8 BOM. Duplicate keys (including escaped aliases), lone UTF-16
+   surrogates, invalid UTF-8, nonfinite numeric tokens and more than 128 JSON containers reject at
+   `$` before recursive decoding. The semantic tree/data depths remain 24/8. Finite numbers follow
+   TS double semantics, including `-0` and values above 2^53; IDs keep the existing TS grammar
+   without imposing an undocumented 256-character or Unicode-normalization restriction.
+5. Capability computation is independent of the agent's advertised renderer support; supplying a
+   capability set rejects missing features at `$`. `library: true` additionally rejects explicit
+   system windows and device persistence at their window paths. Host validation continues to accept
+   these options for CtrlProxy. Forbidden headers and literal CR/LF header values reject in every
+   mode. Network routing and secure-binding import policy in section 5 still require the import
+   boundary; this validator alone does not enable network access.
+6. Import never partially renders or stores a failed spec. Element anchors are structurally valid;
+   the existing embedded loader still requires host resolution to bounds (three corpus fixtures).
+   Storage version/key _shape_ and declarations are validated here; persisted-version mismatch
+   remains the existing storage restore/drop policy. Runtime-only caps (in-flight calls, response
+   bytes, stack navigation and patch operations) are tested at their runtime boundaries rather than
+   represented as invalid authored specs. The data-write pair is captured after a real TS write:
+   data fits its own budget but its repeat expansion exceeds the node budget.
 
 ### 3.3 Android app
 

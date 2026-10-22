@@ -133,7 +133,9 @@ function facetValue(persona: OemPersona, facet: PersonaFacet): string | DisplayP
 function evidenceFor(persona: OemPersona, facet: PersonaFacet): PersonaEvidence {
   const evidence = persona.evidence[facet];
   if (!evidence) {
-    throw new ActionableError(`Persona ${persona.id} has no evidence for its ${facet} facet.`);
+    throw new ActionableError(
+      `Manufacturer profile ${persona.id} has no evidence for its ${facet} facet.`,
+    );
   }
   return evidence;
 }
@@ -296,7 +298,7 @@ export async function applyPersona(
   }
   if (persona.killProfile && !options.appId) {
     throw new ActionableError(
-      `persona ${persona.id} sets kill profile ${persona.killProfile}; apply needs appId.`,
+      `manufacturer profile ${persona.id} sets kill profile ${persona.killProfile}; apply needs appId.`,
     );
   }
   const registry = deps.registry ?? defaultPersonaRestoreRegistry;
@@ -309,12 +311,12 @@ export async function applyPersona(
   const facets = await runFacets({ device, persona, appId: options.appId, deps, registry });
   if (!facets.some((facet) => facet.status === "applied" || facet.status === "partial")) {
     throw new ActionableError(
-      `persona ${persona.id} changed nothing on ${device.deviceId}: ${describeFacets(facets)}`,
+      `manufacturer profile ${persona.id} changed nothing on ${device.deviceId}: ${describeFacets(facets)}`,
     );
   }
   const status = outcomeOf(facets);
   return {
-    message: `Applied persona ${persona.id} v${persona.version} to ${device.deviceId} (${status}): ${describeFacets(facets)}`,
+    message: `Applied manufacturer profile ${persona.id} v${persona.version} to ${device.deviceId} (${status}): ${describeFacets(facets)}`,
     deviceId: device.deviceId,
     action: "apply",
     catalogVersion: OEM_PERSONA_CATALOG_VERSION,
@@ -413,10 +415,12 @@ export async function resetPersona(
   }
   registry.clearIfRestored(device.deviceId);
   if (failures.length > 0) {
-    throw new ActionableError(`persona reset on ${device.deviceId} failed: ${failures.join("; ")}`);
+    throw new ActionableError(
+      `manufacturer profile reset on ${device.deviceId} failed: ${failures.join("; ")}`,
+    );
   }
   return {
-    message: `Reset ${personaId ? `persona ${personaId}` : "personas"} on ${device.deviceId}: ${describeFacets(facets)}`,
+    message: `Reset ${personaId ? `manufacturer profile ${personaId}` : "manufacturer profiles"} on ${device.deviceId}: ${describeFacets(facets)}`,
     deviceId: device.deviceId,
     action: "reset",
     ...(personaId ? { personaId } : {}),

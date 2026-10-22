@@ -142,6 +142,21 @@ describe("plan device activity from execution leases", () => {
     expect(activity.hasPlanExecution("nested-device", "other")).toBe(false);
   });
 
+  test("loss cancels the captured invocation recorded under its derived label (#14443)", async () => {
+    const h = harness();
+    // Ingress recorded this label-routed plan under base:B; loss names its owner, base.
+    const plan = h.tracker.startExecution("executePlan", undefined, "base:B");
+    const sibling = h.tracker.startExecution("executePlan", undefined, "base:B");
+    h.tracker.bindDeviceExecution(sibling.id, "label-device");
+    h.plans[0] = { sessionUuid: "base:B", executionId: plan.id };
+    expect(await h.activity.cancelPlanExecutions("label-device", "base", "device lost")).toBe(1);
+    expect(plan.abortController.signal.aborted).toBe(true);
+    // Another base:B plan bound here is not this owner's invocation, so the owner filter spares it.
+    expect(sibling.abortController.signal.aborted).toBe(false);
+    // The captured invocation's binding is revoked too, so a later step cannot rebind to it.
+    expect(() => h.tracker.bindDeviceExecution(plan.id, "label-device")).toThrow();
+  });
+
   test("a sessionless lease protects its explicit device", () => {
     const h = harness();
     h.plans.splice(0, 1, { deviceId: "sessionless" });

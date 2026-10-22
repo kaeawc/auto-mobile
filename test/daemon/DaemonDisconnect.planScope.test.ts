@@ -279,6 +279,29 @@ describe("DaemonDisconnect per-device plan deferral", () => {
     }
   });
 
+  test("a plan recorded under its derived label is cancelled on confirmed loss (#14443)", async () => {
+    const h = harness();
+    // executePlan routed through base:B: ingress records the execution under base:B, while the
+    // loss monitor holds the base:B holder as its owner base.
+    h.session.sessionId = "base:B";
+    h.device.sessionId = "base:B";
+    h.daemon.getSessionManager().getDeviceLabels = (id) =>
+      id === "base" ? { A: "base", B: "base:B" } : undefined;
+    const { execution } = startLeasedPlan(h.device.id, "base:B");
+    const bystander = startPlan(h.device.id, "base:other");
+    try {
+      await h.tick();
+      expect(execution.abortController.signal.aborted).toBe(false);
+      await h.tick();
+      expect(h.losses).toEqual([h.device.id]);
+      expect(execution.abortController.signal.aborted).toBe(true);
+      expect(bystander.abortController.signal.aborted).toBe(false);
+      expect(h.released).toEqual([]);
+    } finally {
+      await h.daemon.disconnectMonitor?.stop();
+    }
+  });
+
   test("an unrelated plan does not hold deferred iOS recovery", async () => {
     const h = harness();
     startPlan(h.peer.id, "peer");

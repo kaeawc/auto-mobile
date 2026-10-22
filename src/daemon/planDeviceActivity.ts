@@ -1,6 +1,6 @@
 import { resolveOwnershipSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import { serverConfig } from "../utils/ServerConfig";
-import { executionTracker } from "./executionTracker";
+import { executionTracker, type ExecutionCancellationReason } from "./executionTracker";
 import type { SessionManager } from "./sessionManager";
 
 /** Lease registration precedes allocation/adb on both platforms. Resolve its
@@ -15,7 +15,7 @@ export class PlanDeviceActivity {
     private readonly plans: Pick<typeof serverConfig, "getActivePlanExecutions"> = serverConfig,
     private readonly executions: Pick<
       typeof executionTracker,
-      "hasActiveDeviceExecutions" | "bindDeviceExecution"
+      "hasActiveDeviceExecutions" | "bindDeviceExecution" | "cancelDeviceExecutions"
     > = executionTracker,
   ) {}
 
@@ -47,6 +47,23 @@ export class PlanDeviceActivity {
         this.executions.bindDeviceExecution(plan.executionId, deviceId, { skipRevoked: true });
       }
     }
+  }
+
+  /** Bind, then cancel, this device's plan invocations on confirmed loss. Their captured ids
+   * are cancelled directly (#14443): a plan routed through derived label base:B is recorded
+   * under base:B, so the owner filter alone never reaches it.
+   */
+  cancelPlanExecutions(
+    deviceId: string,
+    sessionUuid: string,
+    reason: ExecutionCancellationReason,
+  ): Promise<number> {
+    this.bindPlanExecutions(deviceId, sessionUuid);
+    return this.executions.cancelDeviceExecutions(deviceId, reason, {
+      onlySessionUuid: sessionUuid,
+      onlyToolName: "executePlan",
+      includeExecutionIds: this.getPlanExecutionIds(deviceId, sessionUuid),
+    });
   }
 
   private leasesForDevice(deviceId: string, sessionUuid?: string) {

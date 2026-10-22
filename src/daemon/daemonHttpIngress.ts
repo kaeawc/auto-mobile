@@ -381,7 +381,9 @@ export class DaemonHttpIngress {
   ): Promise<void> {
     if (
       !this.admitHttpRequest(req, res, allowedHosts) ||
-      !(await this.awaitHttpTokenPublication(res)) ||
+      // No microtask hop when the token is already published, so admission counting stays
+      // synchronous with the request event on the common path.
+      !(this.deps.httpToken().isPublished || (await this.awaitHttpTokenPublication(res))) ||
       !this.authenticateHttpRequest(req, res)
     ) {
       return;

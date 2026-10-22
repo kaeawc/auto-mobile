@@ -82,6 +82,19 @@ describe("displayConfig runtime geometry reads (#14101)", () => {
 });
 
 describe("displayConfig navigation mode and cutout (#14101)", () => {
+  test("overlay names that are not package-shaped never reach a shell command", async () => {
+    const { adb, mutations, config } = setup();
+    adb.overlays.push({
+      target: "android",
+      packageName: `${CUTOUT}evil;reboot`,
+      state: "disabled",
+    });
+    const result = await config.setConfig({ displayCutout: "hole" });
+    expect(result.success).toBe(true);
+    expect(adb.getAllCommands().some((command) => command.includes(";"))).toBe(false);
+    expect(mutations().join("\n")).not.toContain("evil");
+  });
+
   test("switches to three-button navigation and back, recording the original once", async () => {
     const { adb, registry, invalidations, config } = setup({ owner: "session-a" });
     const toThree = await config.setConfig({ navigationMode: "threeButton" });
@@ -219,6 +232,33 @@ describe("displayConfig runtime size (#14101)", () => {
       commands: ["shell wm size reset", "shell wm size reset -d 2"],
       scopes: ["0", "2"],
     });
+  });
+
+  test("reset on one display restores only that display and keeps the other recorded", async () => {
+    const first = setup({ owner: "session-a" });
+    const { adb, registry } = first;
+    adb.displays.set(2, { physical: "1920x1080" });
+    await first.config.setConfig({ size: { width: 720, height: 1600 } });
+    const second = new DisplayConfig(emulator, {
+      adbFactory: new FakeAdbClientFactory(adb),
+      themeBaselines: new Map(),
+      geometry: { registry, invalidate: () => {}, displayId: 2, owner: "session-a" },
+    });
+    await second.setConfig({ size: { width: 1280, height: 720 } });
+
+    const result = await second.setConfig({ reset: true });
+    expect(result.success).toBe(true);
+    expect(adb.displays.get(2)?.override).toBeUndefined();
+    expect(adb.displays.get(0)?.override).toBe("720x1600");
+    expect(recorded(registry, "screenSize")).toEqual({
+      facet: "screenSize",
+      commands: ["shell wm size reset"],
+      scopes: ["0"],
+    });
+
+    await first.config.setConfig({ reset: true });
+    expect(adb.displays.get(0)?.override).toBeUndefined();
+    expect(registry.pending(emulator.deviceId)).toEqual([]);
   });
 
   test.each([

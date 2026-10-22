@@ -117,6 +117,25 @@ export class DisplayProfileRestoreRegistry {
     }
   }
 
+  /**
+   * Drop the given displays from a command facet, keeping the commands and scopes of the rest
+   * (`commands[i]` restores `scopes[i]`); the facet goes when nothing remains.
+   */
+  forgetScopes(deviceId: string, facet: DisplayProfileFacet, scopes: readonly string[]): void {
+    const action = this.entries.get(deviceId)?.actions.get(facet);
+    if (!action || !("commands" in action)) {
+      return;
+    }
+    const recorded = action.scopes ?? [DEFAULT_DISPLAY_SCOPE];
+    const keep = recorded.flatMap((scope, index) => (scopes.includes(scope) ? [] : [index]));
+    if (keep.length === 0) {
+      this.forget(deviceId, facet);
+      return;
+    }
+    action.commands = keep.map((index) => action.commands[index]);
+    action.scopes = keep.map((index) => recorded[index]);
+  }
+
   /** What reset restores, latest-changed facet first. */
   pending(deviceId: string): DisplayProfileRestoreAction[] {
     return [...(this.entries.get(deviceId)?.actions.values() ?? [])].reverse();

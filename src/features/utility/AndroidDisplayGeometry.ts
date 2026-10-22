@@ -108,6 +108,8 @@ const GROUP_FACETS = { navigationMode: "navigationMode", displayCutout: "cutout"
 
 const DEFAULT_DISPLAY_SCOPE = "0";
 
+const SAFE_OVERLAY_NAME = /^[A-Za-z0-9_.:]+$/;
+
 const GEOMETRY_FACETS: readonly string[] = ["screenSize", "navigationMode", "cutout"];
 
 /** Listing the `android` target keeps the call small; it holds every navbar and cutout overlay. */
@@ -212,10 +214,10 @@ export class AndroidDisplayGeometry {
 
   /** Every overlay of the navbar and cutout groups; an empty listing is a failed read. */
   private async readOverlays(): Promise<OverlayEntry[]> {
-    const entries = parseOverlayList(await this.run(OVERLAY_LIST_COMMAND)).map((overlay) => ({
-      packageName: overlay.name,
-      enabled: overlay.enabled,
-    }));
+    // Names flow into shell commands: keep only package-shaped names (`user:pkg` included).
+    const entries = parseOverlayList(await this.run(OVERLAY_LIST_COMMAND))
+      .filter((overlay) => SAFE_OVERLAY_NAME.test(overlay.name))
+      .map((overlay) => ({ packageName: overlay.name, enabled: overlay.enabled }));
     if (entries.length === 0) {
       throw new Error("could not parse 'cmd overlay list' output");
     }
@@ -463,14 +465,24 @@ export class AndroidDisplayGeometry {
       .flatMap((action) =>
         "commands" in action && GEOMETRY_FACETS.includes(action.facet) ? [action] : [],
       );
-    const sizeRecorded = recorded.some(
-      (action) =>
-        action.facet === "screenSize" &&
-        (action.scopes ?? [DEFAULT_DISPLAY_SCOPE]).includes(String(this.displayId)),
-    );
+    const scope = String(this.displayId);
+    let sizeRecorded = false;
     for (const action of recorded) {
-      if (!(await this.runAll(action.commands, action.facet, errors))) {
-        this.registry.forget(this.device.deviceId, action.facet);
+      // A size record holds one command per display (`commands[i]` restores `scopes[i]`): only
+      // the targeted display is restored here, the others stay recorded for their own reset.
+      const scopes = action.scopes ?? [DEFAULT_DISPLAY_SCOPE];
+      const mine = action.facet === "screenSize" ? scopes.indexOf(scope) : -1;
+      if (action.facet === "screenSize" && mine < 0) {
+        continue;
+      }
+      sizeRecorded ||= action.facet === "screenSize";
+      const commands = action.facet === "screenSize" ? [action.commands[mine]] : action.commands;
+      if (!(await this.runAll(commands, action.facet, errors))) {
+        if (action.facet === "screenSize") {
+          this.registry.forgetScopes(this.device.deviceId, action.facet, [scope]);
+        } else {
+          this.registry.forget(this.device.deviceId, action.facet);
+        }
       }
     }
     if (!sizeRecorded) {

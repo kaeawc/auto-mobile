@@ -508,6 +508,44 @@ describe("DeviceReadiness", () => {
     expect(accessibilityManager.wasMethodCalled("setup")).toBe(false);
   });
 
+  test("checks the installed CtrlProxy APK content when the service is already enabled and connected (#15007)", async () => {
+    const accessibilityManager = new FakeCtrlProxyManager();
+    accessibilityManager.setInstalled(true);
+    accessibilityManager.setEnabled(true);
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {
+      window: fakeWindow,
+      ctrlProxyManager: accessibilityManager,
+      ctrlProxyClient: stubAndroidCtrlProxy({
+        isConnected: () => false,
+        waitForConnection: () => Promise.resolve(true),
+      }),
+    });
+    const manager = createTestSessionManager(provider);
+    await manager.ensureDeviceReady("android", "device-1");
+
+    expect(accessibilityManager.wasMethodCalled("ensureCompatibleVersion")).toBe(true);
+    expect(accessibilityManager.wasMethodCalled("setup")).toBe(false);
+  });
+
+  test("a stale CtrlProxy APK that was swapped is followed by a reconnect (#15007)", async () => {
+    const accessibilityManager = new FakeCtrlProxyManager();
+    accessibilityManager.setInstalled(true);
+    accessibilityManager.setEnabled(true);
+    accessibilityManager.setCompatibilityStatus("upgraded");
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {
+      window: fakeWindow,
+      ctrlProxyManager: accessibilityManager,
+      ctrlProxyClient: stubAndroidCtrlProxy({
+        isConnected: () => false,
+        waitForConnection: () => Promise.resolve(true),
+      }),
+    });
+    const manager = createTestSessionManager(provider);
+    await manager.ensureDeviceReady("android", "device-1");
+
+    expect(accessibilityManager.wasMethodCalled("setup")).toBe(true);
+  });
+
   test("should run setup when accessibility cache is stale (WebSocket fails)", async () => {
     const accessibilityManager = new FakeCtrlProxyManager();
     accessibilityManager.setInstalled(true);

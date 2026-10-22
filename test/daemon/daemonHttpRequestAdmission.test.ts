@@ -10,6 +10,7 @@ import { Daemon } from "../../src/daemon/daemon";
 import { FakeDaemonHttpTokenStore } from "../../src/daemon/daemonHttpToken";
 import { MCP_STREAMABLE_PATH } from "../../src/daemon/constants";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { PrivateDaemonOrphanWatchdog } from "../../src/daemon/privateDaemonOrphanWatchdog";
 import type { ObserverSessionRegistry } from "../../src/daemon/observerSessionRegistry";
 import type {
   HttpBodyRequest,
@@ -172,7 +173,7 @@ class FakeMcpServer implements StatelessMcpServer<McpIngressTransport> {
 async function harness(
   sessionManager?: SessionManager,
   observers?: ObserverSessionRegistry,
-  { startupComplete = true, timer = new FakeTimer() } = {},
+  { startupComplete = true, timer = new FakeTimer(), publishToken = true } = {},
 ): Promise<{ server: FakeHttpServer; transport: FakeTransport; daemon: Daemon }> {
   const server = new FakeHttpServer();
   const daemon = new Daemon(
@@ -186,7 +187,9 @@ async function harness(
   );
   const transport = new FakeTransport();
   const hooks = daemon.testHooks;
-  hooks.publishHttpToken();
+  if (publishToken) {
+    hooks.publishHttpToken();
+  }
   if (sessionManager) {
     hooks.replaceSessionManager(sessionManager);
   }
@@ -217,6 +220,117 @@ afterEach(() => {
 });
 
 describe("Daemon HTTP request admission", () => {
+  test.each([
+    ["wrong Host", { host: "evil.com" }, true, 403],
+    ["Origin present", { host: `localhost:${port}`, origin: "https://evil.com" }, true, 403],
+    ["unpublished token", { host: `localhost:${port}` }, false, 503],
+    ["missing token", { host: `localhost:${port}`, authorization: undefined }, true, 401],
+    ["wrong token", { host: `localhost:${port}`, authorization: "Bearer wrong" }, true, 401],
+  ] as const)(
+    "%s does not count as watchdog client activity",
+    async (_name, headers, publishToken, status) => {
+      const { server, daemon } = await harness(undefined, undefined, { publishToken });
+      const ingress = daemon.testHooks.httpIngress;
+      const response = await server.dispatch(headers);
+      expect(response.statusCode).toBe(status);
+      expect(ingress.requestsSeenCount()).toBe(0);
+      expect(ingress.openRequestCount()).toBe(0);
+      expect(response.listenerCount("close")).toBe(0);
+      response.emit("close");
+      expect(ingress.openRequestCount()).toBe(0);
+    },
+  );
+
+  test("counts an admitted request until its response closes", async () => {
+    const { server, daemon } = await harness();
+    const ingress = daemon.testHooks.httpIngress;
+    const request = new FakeRequest({
+      host: `localhost:${port}`,
+      authorization: `Bearer ${HTTP_TOKEN}`,
+    });
+    request.method = "OPTIONS";
+    const response = new FakeResponse();
+    const end = spyOn(response, "end").mockReturnValue(response);
+    try {
+      server.emit("request", request, response);
+      expect(response.writableEnded).toBe(false);
+      expect(ingress.requestsSeenCount()).toBe(1);
+      expect(ingress.openRequestCount()).toBe(1);
+      response.emit("close");
+      expect(ingress.openRequestCount()).toBe(0);
+      response.emit("close");
+      expect(ingress.openRequestCount()).toBe(0);
+      expect(ingress.requestsSeenCount()).toBe(1);
+    } finally {
+      end.mockRestore();
+    }
+  });
+
+  test.each(["evil.com", `localhost:${port}`])(
+    "preserves callback error handling for Host %s",
+    async (host) => {
+      const { server, daemon } = await harness();
+      const request = new FakeRequest({ host, authorization: `Bearer ${HTTP_TOKEN}` });
+      request.method = "OPTIONS";
+      const response = new FakeResponse();
+      const failure = new Error("response write failed");
+      const writeHead = spyOn(response, "writeHead").mockImplementationOnce(() => {
+        throw failure;
+      });
+      const warnings = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        server.emit("request", request, response);
+        await response.finished;
+        expect(response.statusCode).toBe(500);
+        expect(response.writableEnded).toBe(true);
+        expect(warnings).toHaveBeenCalledWith(
+          "HTTP request callback failed: response write failed",
+          failure,
+        );
+        expect(daemon.testHooks.httpIngress.requestsSeenCount()).toBe(host === "evil.com" ? 0 : 1);
+        response.emit("close");
+        expect(daemon.testHooks.httpIngress.openRequestCount()).toBe(0);
+      } finally {
+        writeHead.mockRestore();
+        warnings.mockRestore();
+      }
+    },
+  );
+
+  test("rejected requests do not reset the orphan watchdog idle timeout", async () => {
+    const timer = new FakeTimer();
+    const { server, daemon } = await harness(undefined, undefined, { timer });
+    const ingress = daemon.testHooks.httpIngress;
+    const shutdowns: string[] = [];
+    const watchdog = new PrivateDaemonOrphanWatchdog(
+      {
+        parentPid: () => 1,
+        launcherPid: () => 4242,
+        launcherIsExplicit: () => false,
+        isProcessRunning: () => false,
+        clientCount: () => ingress.openRequestCount(),
+        clientActivityCount: () => ingress.requestsSeenCount(),
+        liveSessionCount: () => 0,
+        shutdown: (reason) => {
+          shutdowns.push(reason);
+        },
+      },
+      1000,
+      timer,
+    );
+    expect(watchdog.check()).toBe(false);
+    timer.advanceTime(999);
+    const response = await server.dispatch({
+      host: `localhost:${port}`,
+      authorization: "Bearer wrong",
+    });
+    expect(response.statusCode).toBe(401);
+    expect(watchdog.check()).toBe(false);
+    timer.advanceTime(1);
+    expect(watchdog.check()).toBe(true);
+    expect(shutdowns).toHaveLength(1);
+  });
+
   test.each(["evil.com:41321", "127.0.0.1:41322", undefined])(
     "rejects a non-loopback or mismatched Host header %s before MCP transport",
     async (host) => {

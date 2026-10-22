@@ -170,6 +170,7 @@ struct PrototypeSpec: Decodable {
         try PrototypeRequestValidator.validate(raw, state: menuState)
         try PrototypeLimits.guardRepeatPathCells(raw, data: data)
         try PrototypeMenus.validateAuthoredText(raw)
+        try PrototypeLoadingStates.validate(raw)
         try PrototypeRepeat.validateEmitContexts(raw, data: data)
         try PrototypeLimits.guardSubstitutedText(raw, data: data)
         let resolved = PrototypeDataResolver.resolveRoot(raw, data: data)
@@ -442,6 +443,8 @@ struct Style: Decodable {
     let overflow: String?
     /// A Material 3 type role (`titleLarge`...) supplying size, weight, line height and spacing.
     let textStyle: String?
+    /// A box, row, column or card placeholder whose background a highlight sweeps (#14207).
+    let shimmer: Bool?
 
     /// Android's `mergedOver`: properties set on `prototype` win, unset ones keep this style's value.
     /// A present property replaces the base value as a whole (`padding` and `border` included).
@@ -480,7 +483,8 @@ struct Style: Decodable {
             textDecoration: prototype.textDecoration ?? textDecoration,
             fontStyle: prototype.fontStyle ?? fontStyle,
             overflow: prototype.overflow ?? overflow,
-            textStyle: prototype.textStyle ?? textStyle
+            textStyle: prototype.textStyle ?? textStyle,
+            shimmer: prototype.shimmer ?? shimmer
         )
     }
 

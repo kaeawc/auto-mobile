@@ -82,21 +82,22 @@ export interface Timer {
 /**
  * Whether `performance.now()` keeps running across a host suspend on `platform` (#10699 follow-up).
  *
- * Bun 1.3.x (the pinned runtime) reads every monotonic clock (`performance.now()`,
- * `process.hrtime`, `Bun.nanoseconds()`) from one Zig `std.time.Timer`, whose `Instant` uses:
+ * Bun 1.4.x (the pinned runtime) reads `performance.now()` from the VM's origin timer, a Rust
+ * `std::time::Instant` (`origin_timer` in `src/jsc/VirtualMachine.rs`), whose clock is:
  *
  * - darwin: `CLOCK_UPTIME_RAW`, which does not advance while the Mac sleeps;
+ * - linux: `CLOCK_MONOTONIC`, which does not advance during suspend either (Bun 1.3 used
+ *   `CLOCK_BOOTTIME` here, which does, so this entry flipped with the 1.4 pin, #14979);
  * - win32: `QueryPerformanceCounter`, which Microsoft documents as including standby, hibernate
- *   and connected standby;
- * - linux: `CLOCK_BOOTTIME`, which includes suspend (unlike `CLOCK_MONOTONIC`).
+ *   and connected standby.
  *
- * No runtime API exposes a suspend-excluding clock on Windows or Linux without native code
- * (`QueryUnbiasedInterruptTime` / `CLOCK_MONOTONIC`): `os.uptime()` and `process.uptime()` include
- * sleep too. So only darwin is trusted to measure sleep; everywhere else the heartbeat monitor
+ * No runtime API exposes a suspend-excluding clock on Windows without native code
+ * (`QueryUnbiasedInterruptTime`): `os.uptime()` and `process.uptime()` include sleep too. Other
+ * platforms are not verified and stay conservative. Where this returns true the heartbeat monitor
  * falls back to a length ceiling (see `SessionHeartbeatMonitorConfig.maxCredibleStallMs`).
  */
 export function monotonicClockIncludesHostSleep(platform: NodeJS.Platform): boolean {
-  return platform !== "darwin";
+  return platform !== "darwin" && platform !== "linux";
 }
 
 /**
@@ -105,7 +106,7 @@ export function monotonicClockIncludesHostSleep(platform: NodeJS.Platform): bool
  * inverting the sleep/stall judgement; `test/utils/SystemTimer.monotonicSleep.test.ts` fails when
  * the running or pinned Bun leaves this line, so a runtime upgrade re-verifies the table.
  */
-export const MONOTONIC_CLOCK_SEMANTICS_VERIFIED_BUN = "1.3";
+export const MONOTONIC_CLOCK_SEMANTICS_VERIFIED_BUN = "1.4";
 
 /**
  * A warning when the running Bun is not the release line the clock-semantics table was verified

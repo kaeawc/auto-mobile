@@ -55,10 +55,10 @@ export interface MeasureInputs {
 }
 
 const NOT_MEASURABLE =
-  "Whether a clock runs through host suspend (darwin CLOCK_UPTIME_RAW vs linux CLOCK_BOOTTIME vs " +
+  "Whether a clock runs through host suspend (darwin CLOCK_UPTIME_RAW vs linux CLOCK_MONOTONIC vs " +
   "win32 QueryPerformanceCounter) cannot be observed without suspending the host. Compare " +
-  "`elapsedMs` for agreement between clocks (shared source) and use the Bun 1.4 release notes / " +
-  "std.time.Timer source to confirm the underlying clock id before bumping the constant.";
+  "`elapsedMs` for agreement between clocks (shared source) and use the Bun release notes / " +
+  "runtime source to confirm the underlying clock id before bumping the constant.";
 
 function round(value: number): number {
   return Math.round(value * 1000) / 1000;

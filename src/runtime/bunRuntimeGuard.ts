@@ -17,7 +17,7 @@ export function unsupportedRuntimeMessage(versions: RuntimeGuardIo["versions"]):
   }
   const runtime = versions.node ? `Node.js ${versions.node}` : "this JavaScript runtime";
   return (
-    `auto-mobile requires the Bun runtime (>= 1.3.14), but it was started with ${runtime}.\n` +
+    `auto-mobile requires the Bun runtime (>= 1.4.4), but it was started with ${runtime}.\n` +
     "Run it with Bun instead:\n" +
     "  bun dist/src/index.js <args>\n" +
     "  bunx @kaeawc/auto-mobile@latest <args>\n" +

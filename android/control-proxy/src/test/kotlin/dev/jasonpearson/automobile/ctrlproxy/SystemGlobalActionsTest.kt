@@ -119,7 +119,8 @@ class SystemGlobalActionsTest {
 
   @Test
   fun `long-standing actions carry no capability flag`() {
-    val flagless = SystemGlobalActions.specs.filter { it.capabilityFlag == null }.map { it.wireName }
+    val flagless =
+      SystemGlobalActions.specs.filter { it.capabilityFlag == null }.map { it.wireName }
     assertEquals(listOf("back", "home", "recent", "notifications"), flagless)
   }
 }

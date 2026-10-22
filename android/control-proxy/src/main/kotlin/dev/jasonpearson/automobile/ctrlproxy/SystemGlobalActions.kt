@@ -94,7 +94,9 @@ internal object SystemGlobalActions {
 
   /** Capability flags to advertise on [sdkInt]: one per gated action the device can perform. */
   fun advertisedFlags(sdkInt: Int): List<String> =
-    specs.filter { it.capabilityFlag != null && sdkInt >= it.minSdk }.mapNotNull {
-      it.capabilityFlag
-    }
+    specs
+      .filter { it.capabilityFlag != null && sdkInt >= it.minSdk }
+      .mapNotNull {
+        it.capabilityFlag
+      }
 }

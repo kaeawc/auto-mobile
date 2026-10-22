@@ -1,5 +1,5 @@
 import { z } from "zod/v4";
-import { PLAN_SKELETON } from "./toolRegistryTypes";
+import { ANSWERS_SYSTEM_ALERTS, PLAN_SKELETON } from "./toolRegistryTypes";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { SwipeAtCoordinate } from "../features/action/SwipeAtCoordinate";
 import { RecompositionTracker } from "../features/performance/RecompositionTracker";
@@ -227,6 +227,7 @@ export function registerSwipeAtTools() {
     {
       defaultEnabled: false,
       supportsProgress: true,
+      ...ANSWERS_SYSTEM_ALERTS,
       outputSchema: swipeAtResultSchema,
       ...PLAN_SKELETON,
     },

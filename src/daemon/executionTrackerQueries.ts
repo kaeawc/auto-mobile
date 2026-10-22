@@ -102,6 +102,7 @@ export function sessionExecutionMetadataOf(execution: ActiveExecution): {
 /** How a session-bearing execution ended: whether it was ever admitted under its session. */
 export interface SessionExecutionEnd {
   admitted: boolean;
+  toolName: string;
 }
 
 export type SessionExecutionEndListener = (

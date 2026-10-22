@@ -41,7 +41,8 @@ internal object PrototypeValidationValues {
   fun validText(text: String?, rule: JsonObject): Boolean {
     if (text == null) return false
     return (rule.flag("empty") || text.isNotEmpty()) &&
-      (!rule.flag("nonblank") || !blankTextPattern.matches(text))
+      (!rule.flag("nonblank") || !blankTextPattern.matches(text)) &&
+      text.length <= rule.number("max", Double.POSITIVE_INFINITY)
   }
 
   fun isScalarPrimitive(value: JsonPrimitive?): Boolean =

@@ -40,6 +40,8 @@ export class FakeAndroidResetHost implements AndroidBaselineResetDependencies {
   installed = new Set(["com.automobile.ctrlproxy"]);
   commands: string[] = [];
   safe = true;
+  opaque = false;
+  hostSide = false;
   booted = true;
   bootId = "12345678-1234-1234-1234-123456789abc";
   healthy = true;
@@ -97,6 +99,8 @@ export class FakeAndroidResetHost implements AndroidBaselineResetDependencies {
   watchSession(_sessionId: string) {
     return {
       canReset: () => this.safe,
+      madeOpaquePersistentChanges: () => this.opaque,
+      madeHostSideChanges: () => this.hostSide,
       close: () => {
         this.closed++;
       },

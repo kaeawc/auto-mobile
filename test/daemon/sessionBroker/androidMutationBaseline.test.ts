@@ -191,6 +191,47 @@ describe("Android mutation baseline capture", () => {
     expect(observation(baseline, "device-setting", "secure:default_input_method")).toBeUndefined();
   });
 
+  test("captures and reverts stock API 37 secure settings whose keys contain a colon (#14945)", async () => {
+    const secure = readFileSync(
+      "test/fixtures/android-secure-settings/api37-google-apis-secure.list.txt",
+      "utf8",
+    );
+    const { port, context, reply, adb } = rig();
+    reply("shell settings --user 0 list secure", secure);
+    const baseline = await port.capture(context);
+    expect(observation(baseline, "device-setting", "secure:dropbox:data_app_anr")).toEqual({
+      state: "present",
+      value: "disabled",
+    });
+    expect(observation(baseline, "device-setting", "secure:backup_manager_constants")).toEqual({
+      state: "present",
+      value: "key_value_backup_interval_milliseconds=43200000",
+    });
+    reply("shell settings --user 0 list secure", secure.replace("anr=disabled", "anr=enabled"));
+    const diff = diffDeviceBaseline(baseline, await port.capture(context));
+    const changes = diff.changes.filter((change) => change.kind === "device-setting");
+    const plan = planDeviceMutationRevert([], { dirty: [], changes }, port);
+    if (plan.status !== "revertible") {
+      throw new Error("Expected a revertible colon-key plan");
+    }
+    adb.clearHistory();
+    for (const step of plan.steps) {
+      await port.revert(step.mutation, context);
+    }
+    expect(adb.getExecutedCommands()).toEqual([
+      "shell settings --user 0 put secure dropbox:data_app_anr 'disabled'",
+    ]);
+  });
+
+  test.each(["no_separator", "=empty_key", "dup=1\ndup=2"])(
+    "still rejects a malformed settings line %p",
+    async (line) => {
+      const { port, context, reply } = rig();
+      reply("shell settings --user 0 list secure", line);
+      await expect(port.capture(context)).rejects.toThrow("malformed");
+    },
+  );
+
   test("diffs unknown settings additions, removals and edits and plans put/delete restoration", async () => {
     const { port, context, reply, adb } = rig([0, 10]);
     reply("shell settings --user 10 list secure", "unknown=old\nremoved=prior");

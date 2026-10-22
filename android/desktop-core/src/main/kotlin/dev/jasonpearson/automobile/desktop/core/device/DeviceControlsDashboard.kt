@@ -31,11 +31,13 @@ import dev.jasonpearson.automobile.desktop.core.daemon.ActiveRecordingTracker
 import dev.jasonpearson.automobile.desktop.core.daemon.AppearanceClient
 import dev.jasonpearson.automobile.desktop.core.daemon.AppearanceConfig
 import dev.jasonpearson.automobile.desktop.core.daemon.AppearanceSyncMode
+import dev.jasonpearson.automobile.desktop.core.daemon.SessionReleaseReason
 import dev.jasonpearson.automobile.desktop.core.daemon.TrackedRecording
 import dev.jasonpearson.automobile.desktop.core.daemon.VideoRecordingActions
 import dev.jasonpearson.automobile.desktop.core.daemon.VideoRecordingArtifact
 import dev.jasonpearson.automobile.desktop.core.daemon.VideoRecordingConfig
 import dev.jasonpearson.automobile.desktop.core.daemon.VideoRecordingConfigClient
+import dev.jasonpearson.automobile.desktop.core.daemon.VideoRecordingStartResult
 import dev.jasonpearson.automobile.desktop.core.daemon.WebRtcStreamClient
 import dev.jasonpearson.automobile.desktop.core.daemon.WebRtcStreamDescriptor
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
@@ -43,6 +45,11 @@ import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 import kotlinx.coroutines.Dispatchers
 
 private val LOG = LoggerFactory.getLogger("DeviceControlsDashboard")
+
+/**
+ * The device the session released, and why (#11366): selecting another device is such a release.
+ */
+data class DeviceRelease(val deviceId: String, val reason: SessionReleaseReason? = null)
 
 /**
  * Device appearance, video recording, and screen sharing.
@@ -63,7 +70,7 @@ fun DeviceControlsDashboard(
   activeDeviceId: String?,
   modifier: Modifier = Modifier,
   activeRecordings: ActiveRecordingTracker = remember { ActiveRecordingTracker() },
-  releasedDeviceId: String? = null,
+  release: DeviceRelease? = null,
   options: DeviceControlsClients,
 ) {
   val memory = rememberDeviceControlsMemory()
@@ -92,11 +99,15 @@ fun DeviceControlsDashboard(
       }
 
       // The session released the recorded device: the daemon already stopped and finalized the
-      // recording, so show it as stopped by the release and offer its artifact.
-      LaunchedEffect(releasedDeviceId) {
+      // recording, so show it as stopped by the release and offer its artifact. Selecting another
+      // device is such a release too (owner decision 2026-10-10, #11366).
+      LaunchedEffect(release) {
         val tracked = activeRecordings.current
-        if (releasedDeviceId != null && tracked != null && tracked.deviceId == releasedDeviceId) {
-          run("Fetch recording") { finishRecording(tracked, "Stopped by release") }
+        if (release != null && tracked != null && tracked.deviceId == release.deviceId) {
+          val outcome =
+            if (release.reason == SessionReleaseReason.DEVICE_SWITCH) "Stopped by device switch"
+            else "Stopped by release"
+          run("Fetch recording") { finishRecording(tracked, outcome) }
         }
       }
 
@@ -144,7 +155,6 @@ data class DeviceControlsClients(
   val recordingActions: VideoRecordingActions?,
   val recordingConfigClient: VideoRecordingConfigClient?,
   val streamClient: WebRtcStreamClient?,
-  val sessionUuidProvider: () -> String? = { null },
   val ioDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO,
 )
 
@@ -411,11 +421,14 @@ private fun DeviceControlsClients.toggleRecording(
       run("Stop recording") { finishRecording(recording, "Stopped") }
     } else {
       val deviceId = activeDeviceId ?: return
-      val ownerSessionUuid = sessionUuidProvider()
       run("Start recording") {
-        val started = recordingActions?.startRecording(deviceId).orEmpty()
-        started.firstOrNull()?.let {
-          activeRecordings.begin(TrackedRecording(deviceId, it.recordingId, ownerSessionUuid))
+        // The owner is the session the start named, not a registration-gated read here: a stop
+        // after a rotation must still name it (#11366).
+        val started = recordingActions?.startRecording(deviceId) ?: VideoRecordingStartResult()
+        started.recordings.firstOrNull()?.let {
+          activeRecordings.begin(
+            TrackedRecording(deviceId, it.recordingId, started.ownerSessionUuid),
+          )
         }
         "Recording…"
       }

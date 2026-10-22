@@ -364,6 +364,8 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
           },
         );
         state.processExitError = null;
+        // Release a poller parked on this exit's settlement (#14430).
+        this.wakeReadinessWaiters(polling);
         continue;
       }
 
@@ -656,6 +658,10 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
     // schedules another cycle.
     await Promise.resolve();
     while (polling.active && !state.foundDeviceId) {
+      await this.awaitExitSettlement(context);
+      if (!polling.active) {
+        break;
+      }
       const cycle: ReadinessPollCycle = { correlatedTargetDeviceId: undefined };
       let outcome: ReadinessPollOutcome = "continue";
       try {
@@ -681,6 +687,26 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
     logger.debug(
       `Background polling stopped - pollingActive: ${polling.active}, foundDeviceId: ${state.foundDeviceId}`,
     );
+  }
+
+  /**
+   * Parks the poller while the main waiter settles an observed process exit (#14430).
+   * The exit wakes every readiness sleep, and the launcher's exit finalization can
+   * outlast a polling interval, so a cycle started in that window would leave the
+   * fatal path awaiting a scan or probe bounded only by the caller's signal. A fatal
+   * settlement stops polling; a non-fatal one clears the error and wakes the poller.
+   */
+  private async awaitExitSettlement(context: EmulatorReadinessContext): Promise<void> {
+    const { signal, startTime, timeoutMs, polling, state } = context;
+    while (polling.active && state.processExitError) {
+      const remainingMs = timeoutMs - (this.timer.now() - startTime);
+      if (remainingMs <= 0) {
+        polling.active = false;
+        return;
+      }
+      const delayMs = Math.min(remainingMs, MAX_POLLING_SLEEP_CHUNK_MS);
+      await this.waitForReadinessDelay(delayMs, signal, polling, startTime, timeoutMs);
+    }
   }
 
   /** One discovery-and-probe pass: "ready" ends polling successfully, "stop" ends it, else sleep. */

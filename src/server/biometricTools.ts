@@ -4,13 +4,16 @@ import { PLAN_SKELETON } from "./toolRegistryTypes";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { BiometricAuth } from "../features/action/BiometricAuth";
 import { ActionableError, BootedDevice } from "../models";
-import { createJSONToolResponse, createStructuredToolResponse } from "../utils/toolUtils";
+import { createStructuredToolResponse } from "../utils/toolUtils";
 import {
   addDeviceTargetingToSchema,
   addSessionUuidToSchema,
   responseShapeControlFields,
 } from "../utils/schemaHelpers";
-import { biometricAuthResultSchema } from "./biometricToolOutputSchemas";
+import {
+  biometricAuthResultSchema,
+  getIosSimulatorCapabilitiesResultSchema,
+} from "./biometricToolOutputSchemas";
 import { computeIosSimulatorCapabilities } from "../features/utility/iosSimulatorCapabilities";
 import { DeviceState, type BiometricEnrollment } from "../features/utility/DeviceState";
 import { defaultDaemonContext, type DaemonContext } from "../daemon/daemonContext";
@@ -99,6 +102,16 @@ async function captureBiometricEnrollment(
 /**
  * Register biometric authentication tools
  */
+export const getIosSimulatorCapabilitiesHandler = async (
+  args: Pick<z.infer<typeof getIosSimulatorCapabilitiesSchema>, "deviceType" | "runtime">,
+) =>
+  createStructuredToolResponse(
+    computeIosSimulatorCapabilities({
+      deviceType: args.deviceType,
+      runtime: args.runtime,
+    }),
+  );
+
 export function registerBiometricTools() {
   // Biometric auth handler
   const biometricAuthHandler = async (
@@ -141,22 +154,16 @@ export function registerBiometricTools() {
     }
   };
 
-  const getIosSimulatorCapabilitiesHandler = async (
-    args: z.infer<typeof getIosSimulatorCapabilitiesSchema>,
-  ) =>
-    createJSONToolResponse(
-      computeIosSimulatorCapabilities({
-        deviceType: args.deviceType,
-        runtime: args.runtime,
-      }),
-    );
-
   ToolRegistry.register(
     "getIosSimulatorCapabilities",
     "Discover biometric capabilities for a selected iOS Simulator device type and runtime.",
     getIosSimulatorCapabilitiesSchema,
     getIosSimulatorCapabilitiesHandler,
-    { defaultEnabled: false, readOnly: true },
+    {
+      defaultEnabled: false,
+      readOnly: true,
+      outputSchema: getIosSimulatorCapabilitiesResultSchema,
+    },
   );
 
   // Register the tool

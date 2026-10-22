@@ -27,7 +27,7 @@ describe("AndroidCtrlProxyClient input delivery", () => {
     });
     closedSpy = spyOn(client, "onConnectionClosed").mockImplementation(() => {});
     client.connectionTestHooks.socket = socket;
-    client["autoReconnectEnabled"] = false;
+    client.connectionTestHooks.autoReconnectEnabled = false;
     socket.on("message", (data: string) => {
       void client["handleMessage"](data);
     });

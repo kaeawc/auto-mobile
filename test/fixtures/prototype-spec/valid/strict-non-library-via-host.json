@@ -1,0 +1,9 @@
+{
+  "id": "non-library-host",
+  "window": { "placement": { "type": "fullscreen" } },
+  "root": {
+    "type": "button",
+    "label": "Load",
+    "onTap": [{ "type": "request", "url": "https://example.com", "via": "host" }]
+  }
+}

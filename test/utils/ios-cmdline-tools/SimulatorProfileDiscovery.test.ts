@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, spyOn, test } from "bun:test";
 import { SimCtlClient } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { SimCtlSimulatorDeviceTypeProfiles } from "../../../src/utils/ios-cmdline-tools/SimulatorDeviceTypeProfiles";
 import type { AppleDeviceType } from "../../../src/utils/ios-cmdline-tools/SimCtlSupport";
@@ -7,6 +7,7 @@ import { FakeSimulatorProfileStore } from "../../fakes/FakeSimulatorProfileStore
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { createExecResult } from "../../../src/utils/execResult";
 import { drainUntil } from "../../helpers/fakeTimerStepping";
+import { logger } from "../../../src/utils/logger";
 
 const type: AppleDeviceType = {
   identifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
@@ -112,6 +113,7 @@ test("a short caller deadline does not change shared read budget or poison persi
   expect(r.reads[0].timeoutMs).toBe(15_000);
   r.gate.resolve();
   expect(await second).toMatchObject({ pixelWidth: 1206 });
+  await r.profiles.flushPersistence();
   const restarted = rig(r.store);
   expect(await restarted.profiles.profileFor(type.identifier)).toMatchObject({ pixelWidth: 1206 });
   expect(restarted.counts).toEqual({ types: 0, plutil: 0 });
@@ -120,6 +122,7 @@ test("a short caller deadline does not change shared read budget or poison persi
 test("restart reuses both device types and profiles with zero spawns (formerly 1 + 1)", async () => {
   const first = rig();
   await first.profiles.profileFor(type.identifier);
+  await first.profiles.flushPersistence();
   expect(first.counts).toEqual({ types: 1, plutil: 1 });
   const restarted = rig(first.store);
   await restarted.profiles.prepare();
@@ -130,9 +133,11 @@ test("restart reuses both device types and profiles with zero spawns (formerly 1
 test("a stale Xcode key refreshes the list and profile", async () => {
   const first = rig();
   await first.profiles.profileFor(type.identifier);
+  await first.profiles.flushPersistence();
   first.store.key = "xcode-2";
   const restarted = rig(first.store);
   await restarted.profiles.profileFor(type.identifier);
+  await restarted.profiles.flushPersistence();
   expect(restarted.counts).toEqual({ types: 1, plutil: 1 });
   expect(JSON.parse(first.store.contents!).key).toBe("xcode-2");
 });
@@ -145,6 +150,7 @@ test.each(["{broken", '{"version":1,"key":"xcode-1","deviceTypes":[],"profiles":
     const r = rig(store);
     expect(await r.profiles.profileFor(type.identifier)).toMatchObject({ pixelWidth: 1206 });
     expect(r.counts).toEqual({ types: 1, plutil: 1 });
+    await r.profiles.flushPersistence();
     expect(JSON.parse(store.contents!).profiles[0].pixelWidth).toBe(1206);
   },
 );
@@ -174,6 +180,7 @@ test("completed failures are memoized locally but never persisted across restart
   expect(await first.profiles.profileFor(type.identifier)).toBeNull();
   expect(await first.profiles.profileFor(type.identifier)).toBeNull();
   expect(first.counts).toEqual({ types: 1, plutil: 1 });
+  await first.profiles.flushPersistence();
   const restarted = rig(first.store);
   expect(await restarted.profiles.profileFor(type.identifier)).toMatchObject({ pixelWidth: 1206 });
   expect(restarted.counts).toEqual({ types: 0, plutil: 1 });
@@ -186,6 +193,7 @@ test("shared plutil timeout is retried rather than memoized", async () => {
   r.fail();
   expect(await r.profiles.profileFor(type.identifier)).toMatchObject({ pixelWidth: 1206 });
   expect(r.counts).toEqual({ types: 1, plutil: 2 });
+  await r.profiles.flushPersistence();
   expect(JSON.parse(r.store.contents!).profiles[0].pixelWidth).toBe(1206);
 });
 
@@ -307,4 +315,73 @@ test("already cancelled or expired callers spawn nothing, including on a profile
   expect(r.counts).toEqual({ types: 0, plutil: 0 });
   await r.profiles.profileFor(type.identifier);
   expect(await r.profiles.profileFor(type.identifier, { signal: controller.signal })).toBeNull();
+});
+
+/** A store whose disk writes stall until released, recording every snapshot in arrival order. */
+class StalledSimulatorProfileStore extends FakeSimulatorProfileStore {
+  readonly started: string[] = [];
+  private readonly releases: (() => void)[] = [];
+
+  override async write(contents: string): Promise<void> {
+    this.started.push(contents);
+    await new Promise<void>((resolve) => this.releases.push(resolve));
+    await super.write(contents);
+  }
+
+  release(): void {
+    this.releases.shift()?.();
+  }
+}
+
+test.each([{}, { timeoutMs: 100 }])(
+  "a stalled cache write cannot hold back live discovery (%o)",
+  async (options) => {
+    const store = new StalledSimulatorProfileStore();
+    const r = rig(store);
+    let profile: unknown;
+    void r.profiles.profileFor(type.identifier, options).then((value) => {
+      profile = value;
+    });
+    await drainUntil(() => profile !== undefined, { description: "profile despite stalled write" });
+    expect(profile).toMatchObject({ pixelWidth: 1206 });
+    expect(r.counts).toEqual({ types: 1, plutil: 1 });
+    expect(store.writes).toBe(0);
+  },
+);
+
+test("queued cache writes stay serialized in snapshot order once storage recovers", async () => {
+  const store = new StalledSimulatorProfileStore();
+  const r = rig(store);
+  expect(await r.profiles.profileFor(type.identifier)).toMatchObject({ pixelWidth: 1206 });
+  // Only the device-list snapshot has reached storage; the profile snapshot waits behind it.
+  expect(store.started).toHaveLength(1);
+  expect(JSON.parse(store.started[0]).profiles).toEqual([]);
+  const flushed = r.profiles.flushPersistence();
+  store.release();
+  await drainUntil(() => store.started.length === 2, { description: "second queued write" });
+  store.release();
+  await flushed;
+  expect(store.writes).toBe(2);
+  expect(JSON.parse(store.contents!).profiles[0].pixelWidth).toBe(1206);
+});
+
+test("an unawaited failing cache write is contained and logged, never an unhandled rejection", async () => {
+  const warnings: string[] = [];
+  const warn = spyOn(logger, "warn").mockImplementation((message) => {
+    warnings.push(String(message));
+  });
+  try {
+    const r = rig();
+    r.store.writeError = new Error("disk full");
+    expect(await r.profiles.profileFor(type.identifier)).toMatchObject({ pixelWidth: 1206 });
+    // The queue resolves (never rejects) even though both snapshots failed.
+    await r.profiles.flushPersistence();
+    expect(r.store.contents).toBeNull();
+    expect(warnings).toEqual([
+      "Failed to persist simulator profiles: disk full",
+      "Failed to persist simulator profiles: disk full",
+    ]);
+  } finally {
+    warn.mockRestore();
+  }
 });

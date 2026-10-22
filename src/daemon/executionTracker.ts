@@ -521,7 +521,7 @@ export class ExecutionTracker {
     const admitted = execution.sessionAdmitted === true && !execution.readOnlySessionAccess;
     for (const listener of this.sessionExecutionEndListeners) {
       try {
-        listener(sessionUuids, { admitted });
+        listener(sessionUuids, { admitted, toolName: execution.toolName });
       } catch (error) {
         // A listener's failure must not stop the remaining listeners or the execution's teardown.
         logger.warn(

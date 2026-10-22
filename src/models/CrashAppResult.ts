@@ -21,6 +21,8 @@ export type CrashAppCrashReport =
   | {
       status: "found";
       source: "ios_ips" | "android_dropbox";
+      /** Id for the `crash-reports` session resource, which returns the full report body. */
+      reportId: string;
       reportPath: string;
       exceptionType: string;
       exceptionCode?: string;

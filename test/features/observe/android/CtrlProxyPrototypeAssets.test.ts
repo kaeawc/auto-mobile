@@ -107,7 +107,7 @@ describe("CtrlProxy prototype assets", () => {
       acknowledged: true,
       requestId: frames[0].requestId,
     });
-    expect(client["requestManager"].getPendingCount()).toBe(0);
+    expect(client.connectionTestHooks.requestManager.getPendingCount()).toBe(0);
   });
 
   test("put encodes only the view's bytes, not the pool behind it", async () => {
@@ -181,7 +181,7 @@ describe("CtrlProxy prototype assets", () => {
     expect(result).toMatchObject({ success: false, dispatched: true, acknowledged: false });
     expect(result.error).toContain("Upload of prototype asset 'hero' outcome is indeterminate");
     expect(result.error).toContain("timed out after 50ms");
-    expect(client["requestManager"].getPendingCount()).toBe(0);
+    expect(client.connectionTestHooks.requestManager.getPendingCount()).toBe(0);
   });
 
   test("abort after dispatch is indeterminate and clears the waiter", async () => {
@@ -195,7 +195,7 @@ describe("CtrlProxy prototype assets", () => {
     const result = await pending;
     expect(result).toMatchObject({ success: false, dispatched: true, acknowledged: false });
     expect(result.error).toContain("Removal of prototype asset 'hero' outcome is indeterminate");
-    expect(client["requestManager"].getPendingCount()).toBe(0);
+    expect(client.connectionTestHooks.requestManager.getPendingCount()).toBe(0);
   });
 
   test("abort before dispatch sends nothing and is not indeterminate", async () => {

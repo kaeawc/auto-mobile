@@ -337,12 +337,14 @@ export class Rotate extends BaseVisualChange {
   ): Promise<RotateResult> {
     throwIfAborted(signal);
     let previousObservation: ObserveResult | undefined;
+    let runner: IOSCtrlProxyClient | undefined;
     const result: RotateResult = await this.observedInteraction(
       async (observation) => {
         previousObservation = observation;
         try {
           throwIfAborted(signal);
           const client = IOSCtrlProxyClient.getInstance(this.device);
+          runner = client;
           const result = await perf.track("iOSRotation", () =>
             awaitWhileRequestIsLive(client.requestRotate(orientation, 5000, perf), signal),
           );
@@ -390,7 +392,13 @@ export class Rotate extends BaseVisualChange {
     const verified = verifyIosRotation(result, orientation, previousObservation);
     return verified.success
       ? verified
-      : await this.restoreIosOrientationAfterFailure(verified, previousObservation, perf, signal);
+      : await this.restoreIosOrientationAfterFailure(
+          verified,
+          runner,
+          previousObservation,
+          perf,
+          signal,
+        );
   }
 
   /**
@@ -399,17 +407,17 @@ export class Rotate extends BaseVisualChange {
    */
   private async restoreIosOrientationAfterFailure(
     failed: RotateResult,
+    client: Pick<IOSCtrlProxyClient, "requestRotate"> | undefined,
     previousObservation: ObserveResult | undefined,
     perf: ReturnType<typeof createGlobalPerformanceTracker>,
     signal?: AbortSignal,
   ): Promise<RotateResult> {
     const prior = observedIosOrientation(previousObservation);
-    if (prior === "unknown" || prior === failed.orientation) {
+    if (!client || prior === "unknown" || prior === failed.orientation) {
       return failed;
     }
     try {
       throwIfAborted(signal);
-      const client = IOSCtrlProxyClient.getInstance(this.device);
       const restored = await perf.track("iOSRotationRestore", () =>
         awaitWhileRequestIsLive(client.requestRotate(prior, 5000, perf), signal),
       );

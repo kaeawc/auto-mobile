@@ -64,31 +64,59 @@ async function remountWritable(adb: AdbExecutor, signal?: AbortSignal): Promise<
   }
 }
 
-async function plantArtifacts(adb: AdbExecutor, signal?: AbortSignal): Promise<void> {
-  for (const path of ROOT_ARTIFACT_PATHS) {
+async function plantArtifacts(
+  adb: AdbExecutor,
+  paths: readonly string[],
+  planted: Set<string>,
+  signal?: AbortSignal,
+): Promise<void> {
+  for (const path of paths) {
+    // Recorded before the write so a half-planted file is still removed by the rollback.
+    planted.add(path);
     // adb joins these with spaces for the device shell, so the script must be one quoted word.
     await shell(adb, ["printf", shellQuote(STUB_SCRIPT), ">", path], signal);
     await shell(adb, ["chmod", path.endsWith(".apk") ? "0644" : "06755", path], signal);
   }
 }
 
-async function removeArtifacts(adb: AdbExecutor, signal?: AbortSignal): Promise<void> {
-  await shell(adb, ["rm", "-f", ...ROOT_ARTIFACT_PATHS], signal);
+/**
+ * Which of `paths` exist. `ls` exits nonzero when ANY operand is missing even though it still
+ * lists the ones that exist, and the adb client rejects a nonzero exit, so `; true` keeps the
+ * partial listing. A failed read reads as "none exist".
+ */
+async function listExisting(
+  adb: AdbExecutor,
+  paths: readonly string[],
+  signal?: AbortSignal,
+): Promise<Set<string>> {
+  if (paths.length === 0) {
+    return new Set();
+  }
+  const out = await shell(adb, ["ls", ...paths, "2>/dev/null;", "true"], signal).catch(() => "");
+  return new Set(
+    out
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line !== ""),
+  );
 }
 
 const selinuxFlag = (mode: string): string => (/permissive/i.test(mode) ? "0" : "1");
 
 export function createRootStateInjector(adb: AdbExecutor): DeviceConditionInjector {
   let baselineSelinux = "Enforcing";
-  // True while this fixture is applied and its reset is owed. A repeat apply is then
-  // coalesced so the ORIGINAL SELinux baseline survives (a second capture would record
-  // the fixture's own Permissive as the baseline and restore the wrong state).
+  // The baseline is captured once and kept until a reset fully succeeds: recapturing it while
+  // anything is still owed would record the fixture's own Permissive as "the original".
+  let baselineCaptured = false;
+  let selinuxChanged = false;
+  // True while this fixture is applied and its reset is owed; a repeat apply is then coalesced.
   let active = false;
-  const artifactsPresent = async (signal?: AbortSignal): Promise<boolean> => {
-    const listing = await shell(adb, ["ls", ...ROOT_ARTIFACT_PATHS, "2>/dev/null"], signal).catch(
-      () => "",
-    );
-    return listing.trim() !== "";
+  // Only artifacts WE planted. A userdebug image ships a real su; it is never overwritten here
+  // and never deleted by reset.
+  const planted = new Set<string>();
+  const plantedStillThere = async (signal?: AbortSignal): Promise<boolean> => {
+    const existing = await listExisting(adb, [...planted], signal);
+    return [...planted].every((path) => existing.has(path));
   };
   return {
     key: "rootState",
@@ -97,29 +125,38 @@ export function createRootStateInjector(adb: AdbExecutor): DeviceConditionInject
         rejectValue("rootState", value, [ROOTED_DETECTABLE]);
       }
       await assertRootableImage(adb, signal);
-      if (active && (await artifactsPresent(signal))) {
+      if (active && (await plantedStillThere(signal))) {
         return { status: "unchanged", detail: "rooted-detectable fixture is already applied" };
       }
-      baselineSelinux = (await shell(adb, ["getenforce"], signal)) || "Enforcing";
-      let selinuxChanged = false;
+      if (!baselineCaptured) {
+        baselineSelinux = (await shell(adb, ["getenforce"], signal)) || "Enforcing";
+        baselineCaptured = true;
+      }
+      const existing = await listExisting(adb, ROOT_ARTIFACT_PATHS, signal);
+      const toPlant = ROOT_ARTIFACT_PATHS.filter((path) => !existing.has(path));
       // Defined before the first mutation (`adb root`) so every later failure can undo it.
       const reset = async (resetSignal?: AbortSignal): Promise<void> => {
         // Re-acquire the privileges the cleanup needs: an earlier reset (or a reboot) may
         // have un-rooted adbd. `adb root` is a no-op when it is already running as root.
         await adbCommand(adb, ["root"], resetSignal);
         await adbCommand(adb, ["wait-for-device"], resetSignal);
-        await removeArtifacts(adb, resetSignal);
+        if (planted.size > 0) {
+          await shell(adb, ["rm", "-f", ...planted], resetSignal);
+        }
         if (selinuxChanged) {
           await shell(adb, ["setenforce", selinuxFlag(baselineSelinux)], resetSignal);
         }
         await adbCommand(adb, ["unroot"], resetSignal);
+        planted.clear();
+        selinuxChanged = false;
+        baselineCaptured = false;
         active = false;
       };
       try {
         await remountWritable(adb, signal);
         selinuxChanged = true;
         await shell(adb, ["setenforce", "0"], signal);
-        await plantArtifacts(adb, signal);
+        await plantArtifacts(adb, toPlant, planted, signal);
       } catch (error) {
         try {
           await reset();
@@ -134,10 +171,18 @@ export function createRootStateInjector(adb: AdbExecutor): DeviceConditionInject
         throw error;
       }
       active = true;
-      return { status: "applied", detail: "rooted-detectable fixture planted", reset };
+      const kept = ROOT_ARTIFACT_PATHS.length - toPlant.length;
+      return {
+        status: "applied",
+        detail:
+          kept > 0
+            ? `rooted-detectable fixture planted (${kept} artifact(s) already present on the image were left as-is)`
+            : "rooted-detectable fixture planted",
+        reset,
+      };
     },
     async isClean(signal): Promise<boolean> {
-      if (await artifactsPresent(signal)) {
+      if (planted.size > 0 && (await listExisting(adb, [...planted], signal)).size > 0) {
         return false;
       }
       const mode = await shell(adb, ["getenforce"], signal);

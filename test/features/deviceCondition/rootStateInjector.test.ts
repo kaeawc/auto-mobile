@@ -35,6 +35,21 @@ const ROOTABLE = {
   remount: "remount succeeded",
 };
 
+const ALL_ARTIFACTS = ROOT_ARTIFACT_PATHS.join("\n");
+
+/** Make the first `times` executions whose command contains `pattern` throw, then behave normally. */
+function failFirst(adb: FakeAdbExecutor, pattern: string, times: number): void {
+  const real = adb.execute.bind(adb);
+  let remaining = times;
+  adb.execute = (args, options) => {
+    if (remaining > 0 && args.join(" ").includes(pattern)) {
+      remaining -= 1;
+      return Promise.reject(new Error("Read-only file system"));
+    }
+    return real(args, options);
+  };
+}
+
 describe("rootState injector (#14060)", () => {
   test("refuses a production (Play) image with guidance toward real root", async () => {
     const adb = adbWith({ "getprop ro.debuggable": "0", "getprop ro.build.type": "user" });
@@ -91,11 +106,18 @@ describe("rootState injector (#14060)", () => {
     expect(adb.getExecutedCommands()).toContain("unroot");
   });
 
-  test("isClean is false while artifacts exist and true once they are gone", async () => {
-    const dirty = adbWith({ ...ROOTABLE, "ls /system/xbin/su": "/system/xbin/su" });
-    expect(await createRootStateInjector(dirty).isClean()).toBe(false);
-    const clean = adbWith({ ...ROOTABLE, "ls /system/xbin/su": "" });
-    expect(await createRootStateInjector(clean).isClean()).toBe(true);
+  test("isClean is false while planted artifacts exist and true after reset", async () => {
+    const adb = adbWith(ROOTABLE);
+    // First listing: nothing pre-existing. Second: what we planted is still there.
+    adb.setCommandResponseSequence("ls /system/xbin/su", [
+      execResult(""),
+      execResult(ALL_ARTIFACTS),
+    ]);
+    const injector = createRootStateInjector(adb);
+    const outcome = await injector.apply("rooted-detectable");
+    expect(await injector.isClean()).toBe(false);
+    await outcome.reset?.();
+    expect(await injector.isClean()).toBe(true);
   });
 
   test("resolver only serves rootState on Android", () => {
@@ -154,7 +176,11 @@ describe("rootState injector (#14060)", () => {
   });
 
   test("a repeat apply on the same injector is coalesced and keeps the original baseline", async () => {
-    const adb = adbWith({ ...ROOTABLE, "ls /system/xbin/su": "/system/xbin/su" });
+    const adb = adbWith(ROOTABLE);
+    adb.setCommandResponseSequence("ls /system/xbin/su", [
+      execResult(""),
+      execResult(ALL_ARTIFACTS),
+    ]);
     const injector = createRootStateInjector(adb);
     const first = await injector.apply("rooted-detectable");
     expect(first.status).toBe("applied");
@@ -177,10 +203,10 @@ describe("rootState injector (#14060)", () => {
 
   test("applying twice through the controller registers one reset and restores cleanly", async () => {
     const adb = adbWith(ROOTABLE);
-    // The second apply finds the fixture still planted; the post-restore read finds it gone.
+    // The first listing finds nothing pre-existing; the second finds our planted files still there.
     adb.setCommandResponseSequence("ls /system/xbin/su", [
-      execResult("/system/xbin/su"),
       execResult(""),
+      execResult(ALL_ARTIFACTS),
     ]);
     const injector = createRootStateInjector(adb);
     const controller = new DeviceConditionController(() => injector);
@@ -189,5 +215,45 @@ describe("rootState injector (#14060)", () => {
     const report = await controller.restore();
     expect(report.failures).toEqual([]);
     expect(adb.getExecutedCommands().filter((c) => c === "unroot")).toHaveLength(1);
+  });
+
+  test("an artifact already on the image is left alone: not overwritten, not deleted on reset", async () => {
+    const adb = adbWith(ROOTABLE);
+    // A userdebug image ships a real su in /system/xbin.
+    adb.setCommandResponseSequence("ls /system/xbin/su", [execResult("/system/xbin/su")]);
+    const outcome = await createRootStateInjector(adb).apply("rooted-detectable");
+    const commands = adb.getExecutedCommands();
+    expect(commands.some((c) => c.includes("> /system/xbin/su"))).toBe(false);
+    expect(commands.some((c) => c.includes("> /system/bin/su"))).toBe(true);
+    expect(outcome.detail).toMatch(/already present on the image/);
+
+    await outcome.reset?.();
+    const rm = adb.getExecutedCommands().find((c) => c.startsWith("shell rm -f "));
+    expect(rm).toBeDefined();
+    expect(rm).not.toContain("/system/xbin/su ");
+    expect(rm?.endsWith("/system/xbin/su")).toBe(false);
+  });
+
+  test("a retry after a failed rollback keeps the original SELinux baseline", async () => {
+    const adb = adbWith(ROOTABLE);
+    // The first read is the real baseline; any later read would see the fixture's Permissive.
+    adb.setCommandResponseSequence("getenforce", [
+      execResult("Enforcing"),
+      execResult("Permissive"),
+      execResult("Permissive"),
+    ]);
+    failFirst(adb, "chmod", 1);
+    failFirst(adb, "rm -f", 1);
+    const injector = createRootStateInjector(adb);
+
+    await expect(injector.apply("rooted-detectable")).rejects.toBeInstanceOf(OwedResetError);
+    const retry = await injector.apply("rooted-detectable");
+    expect(retry.status).toBe("applied");
+    await retry.reset?.();
+
+    const commands = adb.getExecutedCommands();
+    const lastSetenforce = commands.filter((c) => c.startsWith("shell setenforce")).at(-1);
+    expect(lastSetenforce).toBe("shell setenforce 1");
+    expect(commands.filter((c) => c === "shell getenforce")).toHaveLength(1);
   });
 });

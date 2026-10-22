@@ -236,6 +236,19 @@ class LibraryRepositoryTest {
     )
   }
 
+  @Test
+  fun hostRequestsAreRejectedBeforeCommit() {
+    val spec =
+      """{"id":"host","window":{"placement":{"type":"fullscreen"}},"root":{"type":"button","label":"Load","onTap":[{"type":"request","url":"https://example.com","via":"host"}]}}"""
+    assertEquals(
+      LibraryResult.Failure(LibraryError.Invalid),
+      repository.add(
+        SavedPrototypeSaveRequest("ignored", "Example", spec, emptyList()),
+        LibrarySource.file,
+      ),
+    )
+  }
+
   private fun <T> success(result: LibraryResult<T>): T = (result as LibraryResult.Success).value
 
   companion object {

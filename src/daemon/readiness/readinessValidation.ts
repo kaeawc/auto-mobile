@@ -1,5 +1,8 @@
+import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import { errorMessage } from "../../utils/describeUnknownError";
 import type {
   DeviceClientProvider,
+  DeviceReadyOptions,
   DeviceClientSimctl,
   ResolvedDeviceIdentity,
 } from "./DeviceReadiness";
@@ -65,5 +68,41 @@ export function assertIosDeviceAvailable(
     throw new ActionableError(
       `iOS simulator ${deviceId} is not available (state: ${deviceInfo.state}). Please check simulator availability.`,
     );
+  }
+}
+
+async function isAndroidAsleep(
+  adbFactory: AdbClientFactory,
+  device: BootedDevice,
+): Promise<boolean> {
+  try {
+    return !(await adbFactory.create(device).isScreenOn());
+  } catch (error) {
+    // Unknown wakefulness keeps the original window failure.
+    logger.warn(`[DeviceReadiness] Could not read screen state of ${device.deviceId}`, error);
+    return false;
+  }
+}
+
+/** The device must show an active window; a sleeping device is exempt for booted-only callers. */
+export async function verifyAndroidWindow(
+  deps: { provider: DeviceClientProvider; adbFactory: AdbClientFactory },
+  device: BootedDevice,
+  resolvedIdentity: ResolvedDeviceIdentity | undefined,
+  options: DeviceReadyOptions | undefined,
+): Promise<void> {
+  const { deviceId } = device;
+  try {
+    logger.info(`[DeviceReadiness] Verifying Android device ${deviceId} readiness`);
+    const window = deps.provider.getWindow(androidReadinessWindowDevice(device, resolvedIdentity));
+    assertAndroidActiveWindow(deviceId, await window.getActive(true));
+  } catch (error) {
+    // An asleep device has no focused window to read; power faking and waking must reach it.
+    if (!(options?.readiness === "booted" && (await isAndroidAsleep(deps.adbFactory, device)))) {
+      throw new ActionableError(
+        `Failed to verify Android device ${deviceId} readiness: ${errorMessage(error)}`,
+      );
+    }
+    logger.info(`[DeviceReadiness] Android device ${deviceId} is asleep; booted readiness holds`);
   }
 }

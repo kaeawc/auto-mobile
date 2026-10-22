@@ -548,7 +548,7 @@
   },
   {
     "name": "appLifecycle",
-    "description": "State-preserving background-process kill for saved-state restoration tests.",
+    "description": "State-preserving background-process kill for saved-state restoration tests (background, killBackgrounded); trimMemory sends onTrimMemory(level) to the running app without killing it.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -561,7 +561,20 @@
         },
         "action": {
           "type": "string",
-          "enum": ["background", "killBackgrounded"]
+          "enum": ["background", "killBackgrounded", "trimMemory"]
+        },
+        "level": {
+          "description": "onTrimMemory level to send; required for trimMemory, rejected otherwise",
+          "type": "string",
+          "enum": [
+            "RUNNING_MODERATE",
+            "RUNNING_LOW",
+            "RUNNING_CRITICAL",
+            "UI_HIDDEN",
+            "BACKGROUND",
+            "MODERATE",
+            "COMPLETE"
+          ]
         },
         "platform": {
           "type": "string",
@@ -597,7 +610,7 @@
         },
         "action": {
           "type": "string",
-          "enum": ["background", "killBackgrounded"]
+          "enum": ["background", "killBackgrounded", "trimMemory"]
         },
         "platform": {
           "type": "string",
@@ -608,7 +621,19 @@
         },
         "mechanism": {
           "type": "string",
-          "enum": ["home", "am-kill", "unsupported"]
+          "enum": ["home", "am-kill", "am-send-trim-memory", "unsupported"]
+        },
+        "trimLevel": {
+          "type": "string",
+          "enum": [
+            "RUNNING_MODERATE",
+            "RUNNING_LOW",
+            "RUNNING_CRITICAL",
+            "UI_HIDDEN",
+            "BACKGROUND",
+            "MODERATE",
+            "COMPLETE"
+          ]
         },
         "userId": {
           "type": "integer",
@@ -648,7 +673,10 @@
             "background_not_verified",
             "kill_failed",
             "ambiguous_user",
-            "invalid_app_id"
+            "invalid_app_id",
+            "trim_level_required",
+            "trim_level_not_applicable",
+            "trim_failed"
           ]
         },
         "error": {
@@ -892,6 +920,324 @@
             }
           },
           "required": ["type", "severity", "fingerprint"],
+          "additionalProperties": {}
+        }
+      }
+    }
+  },
+  {
+    "name": "backgroundWork",
+    "description": "Android: read and trigger an app's background work without waiting hours. action \"list\" shows JobScheduler jobs (constraints, next run, WorkManager worker class); {runJob:{jobId|worker,force}} runs one now (cmd jobscheduler run); {workManagerDiagnostics:true} maps WorkManager jobs to worker classes; {listAlarms:true} shows pending alarms. Alarms cannot be fired without moving the clock: use setDeviceState clock.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "description": "Package whose background work to read or trigger",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "action": {
+          "description": "\"list\" the app's JobScheduler jobs; {runJob} run one now; {workManagerDiagnostics} map jobs to worker classes; {listAlarms} pending alarms",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "list"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "runJob": {
+                  "type": "object",
+                  "properties": {
+                    "jobId": {
+                      "description": "JobScheduler job id",
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 2147483647
+                    },
+                    "worker": {
+                      "description": "WorkManager worker class (or simple name, or tag) to run instead of a jobId",
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "force": {
+                      "description": "Run even if the job's constraints are not satisfied",
+                      "type": "boolean"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "required": ["runJob"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "workManagerDiagnostics": {
+                  "type": "boolean",
+                  "const": true
+                }
+              },
+              "required": ["workManagerDiagnostics"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "listAlarms": {
+                  "type": "boolean",
+                  "const": true
+                }
+              },
+              "required": ["listAlarms"],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "userId": {
+          "description": "Android user to run the job for (runJob)",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["appId", "action"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["ok", "failed", "unsupported"]
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "appId": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string",
+          "enum": ["list", "runJob", "workManagerDiagnostics", "listAlarms"]
+        },
+        "jobs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "jobId": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "userId": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "service": {
+                "type": "string"
+              },
+              "workManager": {
+                "type": "boolean"
+              },
+              "workerClass": {
+                "type": "string"
+              },
+              "workerClassSource": {
+                "type": "string",
+                "enum": ["diagnostics", "diagnostics-log"]
+              },
+              "periodic": {
+                "type": "boolean"
+              },
+              "intervalMs": {
+                "type": "number"
+              },
+              "flexMs": {
+                "type": "number"
+              },
+              "requiredConstraints": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "unsatisfiedConstraints": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "networkType": {
+                "type": "string"
+              },
+              "earliestRunInMs": {
+                "type": "number"
+              },
+              "latestRunInMs": {
+                "type": "number"
+              },
+              "pending": {
+                "type": "boolean"
+              },
+              "running": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "jobId",
+              "userId",
+              "service",
+              "workManager",
+              "periodic",
+              "requiredConstraints",
+              "unsatisfiedConstraints"
+            ],
+            "additionalProperties": {}
+          }
+        },
+        "ran": {
+          "type": "boolean"
+        },
+        "jobId": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "forced": {
+          "type": "boolean"
+        },
+        "worker": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "workers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        "alarms": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "packageName": {
+                "type": "string"
+              },
+              "alarmType": {
+                "type": "string"
+              },
+              "wakeup": {
+                "type": "boolean"
+              },
+              "tag": {
+                "type": "string"
+              },
+              "triggerInMs": {
+                "type": "number"
+              },
+              "windowMs": {
+                "type": "number"
+              },
+              "repeatIntervalMs": {
+                "type": "number"
+              },
+              "flags": {
+                "type": "number"
+              },
+              "operation": {
+                "type": "string"
+              }
+            },
+            "required": ["packageName", "alarmType", "wakeup"],
+            "additionalProperties": {}
+          }
+        },
+        "errorCode": {
+          "type": "string",
+          "enum": [
+            "package_not_found",
+            "job_not_found",
+            "job_not_ready",
+            "permission_denied",
+            "run_failed",
+            "dump_failed",
+            "diagnostics_failed",
+            "worker_not_found",
+            "ambiguous_worker",
+            "worker_not_scheduled"
+          ]
+        },
+        "error": {
+          "type": "string"
+        },
+        "output": {
+          "type": "string"
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "required": ["message", "success", "status", "deviceId", "appId", "action"],
+      "additionalProperties": {},
+      "$defs": {
+        "__schema0": {
+          "type": "object",
+          "properties": {
+            "workSpecId": {
+              "type": "string"
+            },
+            "workerClassName": {
+              "type": "string"
+            },
+            "systemJobId": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "state": {
+              "type": "string"
+            },
+            "uniqueName": {
+              "type": "string"
+            },
+            "tags": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": ["workSpecId", "workerClassName", "state", "tags"],
           "additionalProperties": {}
         }
       }
@@ -1768,6 +2114,9 @@
                   "type": "string",
                   "enum": ["ios_ips", "android_dropbox"]
                 },
+                "reportId": {
+                  "type": "string"
+                },
                 "reportPath": {
                   "type": "string"
                 },
@@ -1796,7 +2145,7 @@
                   "type": "string"
                 }
               },
-              "required": ["status", "source", "reportPath", "exceptionType", "frames"],
+              "required": ["status", "source", "reportId", "reportPath", "exceptionType", "frames"],
               "additionalProperties": false
             },
             {
@@ -2210,7 +2559,7 @@
   },
   {
     "name": "displayConfig",
-    "description": "Read or set the visual display configuration — font/text scale, effective display density, and light/dark (night mode) theme — for adaptive-layout and large-font accessibility testing. A call with no set field reads current values; providing fontScale, density, theme, or reset applies the change and returns applied + previous values so the client can restore. Android supports all three fields (density overrides are best-effort on physical devices); iOS supports theme (the Simulator via `simctl ui appearance`, physical devices through the CtrlProxy runner) and, on the Simulator only, font scale as a Dynamic Type category (via `simctl ui content_size`; fontScale maps to the nearest category and contentSize selects one exactly; reads report both). On Android, reset restores font scale and density to device defaults and restores night mode only to the value displayConfig replaced earlier in this process; otherwise night mode is left unchanged. Android reset never forces light mode. iOS Simulator reset restores light appearance and the content size category displayConfig replaced earlier in this process; physical iOS reset restores the appearance displayConfig first replaced there (light if none). The accessibility display preferences increaseContrast, reduceMotion and boldText are read and set on Android and the iOS Simulator, and colorInversion, colorCorrection, magnification, magnificationScale and extraDim (API 31+) on Android; `supported` reports each as true (proven by read-back), partial (stored setting reads back but running apps must relaunch; reason in supportNotes) or false, and reset restores the ones displayConfig changed.",
+    "description": "Read or set the visual display configuration — font/text scale, effective display density, light/dark (night mode) theme, and on Android the runtime screen size, navigation mode (gesture / 3-button / 2-button) and display-cutout emulation — for adaptive-layout, edge-to-edge and large-font accessibility testing. A call with no set field reads current values; providing fontScale, density, theme, size, navigationMode, displayCutout, or reset applies the change and returns applied + previous values so the client can restore. Android supports all three fields (density overrides are best-effort on physical devices); iOS supports theme (the Simulator via `simctl ui appearance`, physical devices through the CtrlProxy runner) and, on the Simulator only, font scale as a Dynamic Type category (via `simctl ui content_size`; fontScale maps to the nearest category and contentSize selects one exactly; reads report both). Android size, navigationMode and displayCutout use `wm size` and the system image's overlays; values the image does not ship are refused and `available` lists the ones it has; size, overlay and density changes invalidate cached observations and coordinates. On Android, reset restores font scale, density and screen size to device defaults, navigation mode and display cutout to the values recorded before they were first changed, and night mode only to the value displayConfig replaced earlier in this process; otherwise night mode is left unchanged. Releasing or rebinding the session that changed size, navigationMode or displayCutout restores them through the same record as displayProfile; sessionless changes persist until reset. Android reset never forces light mode. iOS Simulator reset restores light appearance and the content size category displayConfig replaced earlier in this process; physical iOS reset restores the appearance displayConfig first replaced there (light if none). The accessibility display preferences increaseContrast, reduceMotion and boldText are read and set on Android and the iOS Simulator, and colorInversion, colorCorrection, magnification, magnificationScale and extraDim (API 31+) on Android; `supported` reports each as true (proven by read-back), partial (stored setting reads back but running apps must relaunch; reason in supportNotes) or false, and reset restores the ones displayConfig changed.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -2266,6 +2615,46 @@
           "type": "string",
           "enum": ["light", "dark", "system", "custom"]
         },
+        "size": {
+          "description": "Android: override the screen size in pixels, natural orientation (`wm size WxH`), or 'default' to remove the override. Each side must be 200 px to twice the physical size. Best-effort on physical devices. Omit to leave unchanged.",
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "width": {
+                  "type": "integer",
+                  "minimum": 200,
+                  "maximum": 16384
+                },
+                "height": {
+                  "type": "integer",
+                  "minimum": 200,
+                  "maximum": 16384
+                }
+              },
+              "required": ["width", "height"],
+              "additionalProperties": false
+            },
+            {
+              "type": "string",
+              "const": "default"
+            }
+          ]
+        },
+        "navigationMode": {
+          "description": "Android: gesture, threeButton or twoButton navigation via the system image's navbar overlay (`cmd overlay enable-exclusive --category`); 'default' disables every navbar overlay. Values the image does not ship are refused; read `available`. Omit to leave unchanged.",
+          "type": "string",
+          "enum": ["gesture", "threeButton", "twoButton", "default"]
+        },
+        "displayCutout": {
+          "description": "Android: emulate a display cutout via the system image's cutout-emulation overlay, or 'none' to disable it. Values the image does not ship are refused; read `available`. Omit to leave unchanged.",
+          "type": "string",
+          "enum": ["none", "corner", "double", "hole", "tall", "waterfall"]
+        },
+        "display": {
+          "description": "Android panel key, role, or active that size reads and sets; the default display when omitted. navigationMode and displayCutout are device-wide.",
+          "type": "string"
+        },
         "increaseContrast": {
           "description": "Increase Contrast. Android: high-contrast text (secure high_text_contrast_enabled). iOS Simulator: `simctl ui increase_contrast`. Omit to leave unchanged.",
           "type": "boolean"
@@ -2302,7 +2691,7 @@
           "type": "boolean"
         },
         "reset": {
-          "description": "On Android, restore font scale and density to device defaults. Restore night mode only to the value displayConfig replaced earlier in this process; otherwise leave it unchanged. Android reset never forces light mode. On the iOS Simulator, reset restores light appearance and the content size category displayConfig replaced earlier in this process. On both, restore each accessibility display preference that displayConfig changed earlier in this process.",
+          "description": "On Android, restore font scale, density and screen size to device defaults, and navigation mode and display cutout to the values recorded before they were first changed. Restore night mode only to the value displayConfig replaced earlier in this process; otherwise leave it unchanged. Android reset never forces light mode. On the iOS Simulator, reset restores light appearance and the content size category displayConfig replaced earlier in this process. On both, restore each accessibility display preference that displayConfig changed earlier in this process.",
           "type": "boolean"
         },
         "platform": {
@@ -2358,6 +2747,15 @@
               ]
             },
             "theme": {
+              "type": "boolean"
+            },
+            "size": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "navigationMode": {
+              "type": "boolean"
+            },
+            "displayCutout": {
               "type": "boolean"
             },
             "increaseContrast": {
@@ -2416,6 +2814,25 @@
               "type": "string"
             }
           },
+          "additionalProperties": {}
+        },
+        "available": {
+          "type": "object",
+          "properties": {
+            "navigationMode": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "displayCutout": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": ["navigationMode", "displayCutout"],
           "additionalProperties": {}
         },
         "current": {
@@ -2477,6 +2894,35 @@
             "contentSize": {
               "type": "string"
             },
+            "size": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "width": {
+                      "type": "number"
+                    },
+                    "height": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["width", "height"],
+                  "additionalProperties": {}
+                },
+                {
+                  "type": "string",
+                  "const": "default"
+                }
+              ]
+            },
+            "navigationMode": {
+              "type": "string",
+              "enum": ["gesture", "threeButton", "twoButton", "default"]
+            },
+            "displayCutout": {
+              "type": "string",
+              "enum": ["none", "corner", "double", "hole", "tall", "waterfall"]
+            },
             "increaseContrast": {
               "type": "boolean"
             },
@@ -2515,6 +2961,9 @@
             "contentSize",
             "density",
             "theme",
+            "size",
+            "navigationMode",
+            "displayCutout",
             "increaseContrast",
             "reduceMotion",
             "boldText",
@@ -2530,7 +2979,7 @@
   },
   {
     "name": "displayProfile",
-    "description": "Android: apply an OEM-style display persona in one call (screen size, density, font scale, display-cutout and navigation-mode overlays, force dark, fold posture), composing displayConfig and setPosture. Each step reports applied | partial | unsupported | failed. The state before each facet's first change is recorded once; reset restores every recorded facet, and in a daemon session release or rebind does too. Approximates OEM look and geometry; it cannot reproduce OEM SystemUI.",
+    "description": "Android: apply an OEM-style display profile in one call (screen size, density, font scale, display-cutout and navigation-mode overlays, force dark, fold posture), composing displayConfig and setPosture. Each step reports applied | partial | unsupported | failed. The state before each facet's first change is recorded once; reset restores every recorded facet, and in a daemon session release or rebind does too. Approximates OEM look and geometry; it cannot reproduce OEM SystemUI.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -3710,6 +4159,7 @@
               "accessibilityFocus",
               "appLifecycle",
               "audit",
+              "backgroundWork",
               "biometricAuth",
               "changeLocalization",
               "clearKeyValueFile",
@@ -3857,6 +4307,7 @@
               "accessibilityFocus",
               "appLifecycle",
               "audit",
+              "backgroundWork",
               "biometricAuth",
               "changeLocalization",
               "clearKeyValueFile",
@@ -10510,7 +10961,7 @@
   },
   {
     "name": "manufacturerProfile",
-    "description": "Android: apply an OEM manufacturer profile (pixel-baseline, samsung-oneui, xiaomi-hyperos, oneplus-oxygenos, oppo-coloros, motorola) on a stock device by composing the keyboard profile, killProfile and displayProfile executors. describe reports every facet's evidence status (focused_trace | vendor_documented | cdd_derived | inferred | experimental) and the OEM capabilities that cannot be emulated; apply with requires naming one of those returns route_to_real_device and changes nothing. applying a different manufacturer profile resets the recorded one first; reset restores the display, kill and keyboard changes (display and device-wide kill state are shared with displayProfile and killProfile). The keyboard profile persists until reset, even across sessions. Simulates effects, not firmware.",
+    "description": "Android: apply an OEM manufacturer profile (pixel-baseline, samsung-oneui, xiaomi-hyperos, oneplus-oxygenos, oppo-coloros, motorola) on a stock device by composing the keyboard profile, killProfile and displayProfile executors. describe reports every facet's evidence status (focused_trace | vendor_documented | cdd_derived | inferred | experimental) and the OEM capabilities that cannot be emulated; apply with requires naming one of those returns route_to_real_device and changes nothing. applying a different manufacturer profile resets the recorded one first; reset restores the display, kill and keyboard changes (display, keyboard and device-wide kill state are shared with displayProfile, keyboard setProfile and killProfile, so reset also undoes their direct changes). In a daemon session, release or rebind restores all three. Simulates effects, not firmware.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -15633,7 +16084,7 @@
   },
   {
     "name": "pressButton",
-    "description": "Press a device or navigation button. On iOS simulators, volume_up, volume_down, and power use hardware-button events; menu is unsupported on iOS. action and camera are iOS-only (Action button, Camera Control) and return unsupported_button where the device lacks that hardware.",
+    "description": "Press a device or navigation button. On iOS simulators, volume_up, volume_down, and power use hardware-button events; menu is unsupported on iOS. action and camera are iOS-only (Action button, Camera Control) and return unsupported_button where the device lacks that hardware. Android-only system actions: lock, power_dialog, quick_settings, screenshot, split_screen (raw system toggle; windowMode places a chosen app) and dismiss_notification_shade; each needs the API level and CtrlProxy APK that supports it and otherwise returns unsupported_system_action. lock leaves the device locked (wakeAndUnlock); power_dialog and quick_settings stay open until back/home.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -15649,7 +16100,13 @@
             "volume_down",
             "recent",
             "action",
-            "camera"
+            "camera",
+            "lock",
+            "power_dialog",
+            "quick_settings",
+            "screenshot",
+            "split_screen",
+            "dismiss_notification_shade"
           ]
         },
         "platform": {
@@ -24287,6 +24744,43 @@
                         }
                       },
                       "additionalProperties": false
+                    },
+                    "deviceProfile": {
+                      "description": "Android: OEM manufacturer profile applied after automation readiness and reset when the session is released; the kill facet is deferred until an app is known (apply it with killProfile). Not the hardware deviceType. Requires boot=true and readiness=automation.",
+                      "type": "object",
+                      "properties": {
+                        "manufacturerProfile": {
+                          "description": "Manufacturer profile id, as listed by the manufacturerProfile tool",
+                          "type": "string",
+                          "enum": [
+                            "pixel-baseline",
+                            "samsung-oneui",
+                            "xiaomi-hyperos",
+                            "oneplus-oxygenos",
+                            "oppo-coloros",
+                            "motorola"
+                          ]
+                        },
+                        "requires": {
+                          "description": "OEM capabilities the task needs; one the manufacturer profile cannot emulate refuses with requires_real_device before anything is created",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "samsung-dex",
+                              "knox",
+                              "flip-cover-screen",
+                              "spen-air-actions",
+                              "oem-systemui",
+                              "oem-unused-app-triggers",
+                              "firmware-update-exemption-reset",
+                              "xiaomi-proprietary-appops"
+                            ]
+                          }
+                        }
+                      },
+                      "required": ["manufacturerProfile"],
+                      "additionalProperties": false
                     }
                   },
                   "required": ["runtime", "deviceType"],
@@ -24372,6 +24866,7 @@
               "accessibilityFocus",
               "appLifecycle",
               "audit",
+              "backgroundWork",
               "biometricAuth",
               "changeLocalization",
               "clearKeyValueFile",
@@ -31766,6 +32261,7 @@
             "accessibilityFocus",
             "appLifecycle",
             "audit",
+            "backgroundWork",
             "biometricAuth",
             "changeLocalization",
             "clearKeyValueFile",
@@ -31879,6 +32375,7 @@
               "accessibilityFocus",
               "appLifecycle",
               "audit",
+              "backgroundWork",
               "biometricAuth",
               "changeLocalization",
               "clearKeyValueFile",

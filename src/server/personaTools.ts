@@ -3,13 +3,10 @@ import { PLAN_RELEVANT } from "./toolRegistryTypes";
 import { defineDeviceTool, type DeviceToolHandler } from "./defineTool";
 import { personaResultSchema } from "./personaToolOutputSchemas";
 import { runSessionPersonaMutation, type SessionPersonaHost } from "./sessionPersona";
-import { changedSettings, type DisplayProfileToolDependencies } from "./displayProfileTools";
-import { setKeyboardProfileForTool } from "./interactionToolHandlers";
 import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
 import { defaultDaemonContext } from "../daemon/daemonContext";
 import { ActionableError } from "../models/ActionableError";
 import type { BootedDevice } from "../models";
-import { KEYBOARD_PROFILE_IDS, type KeyboardProfileId } from "../features/action/keyboardProfiles";
 import {
   NON_EMULATABLE_CAPABILITY_IDS,
   OEM_PERSONA_IDS,
@@ -29,15 +26,7 @@ import {
   defaultPersonaRestoreRegistry,
   type PersonaRestoreRegistry,
 } from "../features/utility/PersonaRestore";
-import { applyKillProfile, resetKillProfile } from "../features/utility/ApplyKillProfile";
-import {
-  defaultKillProfileRestoreRegistry,
-  defaultKillProfileShellFactory,
-} from "../features/utility/KillProfileRestore";
-import { applyDisplayProfile, resetDisplayProfile } from "../features/utility/DisplayProfile";
-import { defaultDisplayProfileRestoreRegistry } from "../features/utility/DisplayProfileRestore";
-import { defaultDisplayProfilePortsFactory } from "../features/utility/DisplayProfilePorts";
-import { recordDeviceSettingDefaultsBeforeChange } from "../features/utility/DeviceSettingDefaults";
+import { defaultPersonaExecutors } from "../features/utility/personaExecutors";
 
 const personaInput = z.object({
   action: z
@@ -77,56 +66,7 @@ export interface PersonaToolDependencies {
   registry?: PersonaRestoreRegistry;
 }
 
-function isKeyboardProfileId(value: string): value is KeyboardProfileId {
-  return (KEYBOARD_PROFILE_IDS as readonly string[]).includes(value);
-}
-
-/** The production executors: `keyboard setProfile`, `killProfile` and `displayProfile`. */
-export const defaultPersonaExecutors = (
-  device: BootedDevice,
-  signal: AbortSignal | undefined,
-  recordSettingDefaults: NonNullable<
-    DisplayProfileToolDependencies["recordSettingDefaults"]
-  > = recordDeviceSettingDefaultsBeforeChange,
-): PersonaFacetExecutors => {
-  const killDeps = (owner?: string) => ({
-    shell: defaultKillProfileShellFactory(device),
-    registry: defaultKillProfileRestoreRegistry,
-    owner,
-    signal,
-  });
-  const displayDeps = (owner?: string) => ({
-    ...defaultDisplayProfilePortsFactory(device),
-    registry: defaultDisplayProfileRestoreRegistry,
-    owner,
-    signal,
-  });
-  return {
-    keyboard: {
-      set: (profile, setSignal) => {
-        if (!isKeyboardProfileId(profile)) {
-          throw new ActionableError(`Unknown keyboard profile '${profile}'.`);
-        }
-        return setKeyboardProfileForTool(device, profile, undefined, setSignal);
-      },
-    },
-    kill: {
-      apply: (appId, profile, owner) => applyKillProfile(device, appId, profile, killDeps(owner)),
-      reset: (appId, owner) => resetKillProfile(device, appId, {}, killDeps(owner)),
-      hasPending: (appId) =>
-        defaultKillProfileRestoreRegistry
-          .pendingFor(device.deviceId, appId)
-          .some((action) => action.appId === appId),
-    },
-    display: {
-      apply: async (input, owner) => {
-        await recordSettingDefaults(device, changedSettings(input));
-        return applyDisplayProfile(device, input, displayDeps(owner));
-      },
-      reset: (owner) => resetDisplayProfile(device, displayDeps(owner)),
-    },
-  };
-};
+export { defaultPersonaExecutors };
 
 function requirePersona(args: PersonaArgs): OemPersonaId {
   if (!args.manufacturerProfile) {
@@ -141,7 +81,7 @@ function requirePersona(args: PersonaArgs): OemPersonaId {
  * The tool's public vocabulary is "manufacturer profile"; the catalog code keeps its persona
  * names. Rename the result keys at this boundary only.
  */
-function toToolResult<T extends object>(result: T): Record<string, unknown> {
+export function toManufacturerProfileResult<T extends object>(result: T): Record<string, unknown> {
   const renamed: Record<string, string> = {
     persona: "manufacturerProfile",
     personaId: "manufacturerProfileId",
@@ -155,13 +95,13 @@ function toToolResult<T extends object>(result: T): Record<string, unknown> {
 function readOnlyResult(device: BootedDevice, args: PersonaArgs) {
   if (args.action === "list") {
     const catalog = listPersonas();
-    return toToolResult({
+    return toManufacturerProfileResult({
       message: `${catalog.personas.length} manufacturer profiles`,
       ...catalog,
     });
   }
   const description = describePersona(requirePersona(args));
-  return toToolResult({
+  return toManufacturerProfileResult({
     message: `${description.persona.displayName} v${description.persona.version}: ${description.facets.length} facets`,
     ...description,
   });
@@ -207,7 +147,7 @@ export const createPersonaHandler =
     );
     const success = result.status !== "route_to_real_device";
     return withIsErrorOnFailure(
-      createStructuredToolResponse({ success, ...toToolResult(result) }),
+      createStructuredToolResponse({ success, ...toManufacturerProfileResult(result) }),
       success,
     );
   };
@@ -220,9 +160,10 @@ const personaTool = defineDeviceTool({
     "executors. describe reports every facet's evidence status (focused_trace | vendor_documented | cdd_derived | " +
     "inferred | experimental) and the OEM capabilities that cannot be emulated; apply with requires naming one of " +
     "those returns route_to_real_device and changes nothing. applying a different manufacturer profile resets the " +
-    "recorded one first; reset restores the display, kill and keyboard changes (display and device-wide kill state " +
-    "are shared with displayProfile and killProfile). The keyboard profile persists until reset, even across " +
-    "sessions. Simulates effects, not firmware.",
+    "recorded one first; reset restores the display, kill and keyboard changes (display, keyboard and " +
+    "device-wide kill state are shared with displayProfile, keyboard setProfile and killProfile, so reset also " +
+    "undoes their direct changes). In a daemon session, release or rebind restores all three. Simulates " +
+    "effects, not firmware.",
   input: personaInput,
   options: {
     ...PLAN_RELEVANT,

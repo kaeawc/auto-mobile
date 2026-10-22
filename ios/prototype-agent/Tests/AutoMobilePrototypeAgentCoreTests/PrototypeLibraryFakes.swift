@@ -8,6 +8,7 @@ final class PrototypeLibraryFakeFileSystem: PrototypeLibraryFileSystem {
     var sizes: [String: Int] = [:]
     var unreadable = Set<String>()
     var failWrite = false
+    var failRemove = Set<String>()
     var calls = 0
     private var stage = 0
 
@@ -71,6 +72,7 @@ final class PrototypeLibraryFakeFileSystem: PrototypeLibraryFileSystem {
     }
 
     func remove(_ path: URL) throws {
+        if failRemove.contains(path.path) { throw failure(path) }
         directories = directories.filter { $0 != path.path && !$0.hasPrefix(path.path + "/") }
         data = data.filter { $0.key != path.path && !$0.key.hasPrefix(path.path + "/") }
     }

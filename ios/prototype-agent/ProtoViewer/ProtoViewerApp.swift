@@ -1,26 +1,38 @@
+import OSLog
 import SwiftUI
+
+private let libraryLog = Logger(subsystem: "dev.jasonpearson.automobile.protoviewer", category: "library")
 
 @main
 @MainActor
 struct ProtoViewerApp: App {
-    private let library: Result<PrototypeLibraryStore, Error>
+    private let library: Result<(PrototypeLibraryStore, PrototypeLibraryImportService), Error>
 
     init() {
         library = Result {
             let support = try FileManager.default.url(
                 for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true
             ).appendingPathComponent("ProtoViewer", isDirectory: true)
-            return try PrototypeLibraryStore(
-                root: support.appendingPathComponent("library", isDirectory: true),
-                storageRoot: support.appendingPathComponent("storage", isDirectory: true)
-            )
+            let root = support.appendingPathComponent("library", isDirectory: true)
+            let storage = support.appendingPathComponent("storage", isDirectory: true)
+            let inbox = try FileManager.default.url(
+                for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true
+            ).appendingPathComponent("Inbox", isDirectory: true)
+            let store = try PrototypeLibraryStore(root: root, storageRoot: storage)
+            PrototypeLibraryStartupCleanup(
+                exporter: PrototypeLibraryExporter(store: store), inbox: PrototypeLibraryInbox(root: inbox)
+            ).run { libraryLog.error("\($0, privacy: .public)") }
+            let imports = PrototypeLibraryImportService(root: root, storageRoot: storage, inbox: inbox) {
+                libraryLog.error("\($0, privacy: .public)")
+            }
+            return (store, imports)
         }
     }
 
     var body: some Scene {
         WindowGroup {
             switch library {
-            case let .success(store): LibraryView(store: store)
+            case let .success((store, imports)): LibraryView(store: store, importService: imports)
             case let .failure(error): LibraryErrorView(error: error)
             }
         }

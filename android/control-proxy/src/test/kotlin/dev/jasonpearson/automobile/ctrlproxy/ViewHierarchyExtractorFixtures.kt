@@ -58,6 +58,7 @@ internal abstract class ViewHierarchyExtractorFixtures {
     val active: Boolean = false,
     val bounds: Rect? = null,
     val title: CharSequence? = null,
+    val accessibilityFocused: Boolean = false,
   )
 
   protected fun fakeWindow(
@@ -75,6 +76,7 @@ internal abstract class ViewHierarchyExtractorFixtures {
     shadow.setRoot(root)
     shadow.setFocused(state.focused)
     shadow.setActive(state.active)
+    shadow.setAccessibilityFocused(state.accessibilityFocused)
     shadow.setBoundsInScreen(
       state.bounds
         ?: Rect(0, 0, 1080, if (state.type == AccessibilityWindowInfo.TYPE_SYSTEM) 63 else 2400),

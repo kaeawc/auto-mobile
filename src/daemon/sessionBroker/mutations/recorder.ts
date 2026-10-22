@@ -24,6 +24,46 @@ export function brokerMutationIncarnation(
   return JSON.stringify([resourceId, assignmentGeneration]);
 }
 
+/**
+ * The incarnation an iOS pool entry's mutation journal rows and baseline share. A session's
+ * journal rows must carry the same incarnation as the keep-booted reset scope, or the reset reads
+ * an empty journal and never reverts what the session changed (#14790).
+ */
+export function iosMutationIncarnation(
+  scopeKey: string,
+  allocationIndex: number,
+  stableDeviceId: string,
+): string {
+  return JSON.stringify([scopeKey, allocationIndex, stableDeviceId]);
+}
+
+/** The scope a broker session's mutation recorder binds, per platform. */
+export function brokerSessionMutationScope(input: {
+  platform: string;
+  sessionUuid: string;
+  resource: { resourceId: string; scopeKey: string; allocationIndex: number };
+  stableDeviceId: string;
+  transportId?: string | null;
+  assignmentGeneration: number | null;
+}): DeviceMutationScope {
+  const { resource, stableDeviceId } = input;
+  return input.platform === "ios"
+    ? {
+        sessionUuid: input.sessionUuid,
+        deviceId: stableDeviceId,
+        incarnation: iosMutationIncarnation(
+          resource.scopeKey,
+          resource.allocationIndex,
+          stableDeviceId,
+        ),
+      }
+    : {
+        sessionUuid: input.sessionUuid,
+        deviceId: input.transportId ?? stableDeviceId,
+        incarnation: brokerMutationIncarnation(resource.resourceId, input.assignmentGeneration),
+      };
+}
+
 export interface MutationRecorder {
   readonly scope: Readonly<DeviceMutationScope>;
   record(mutation: DeviceMutationInput): Promise<void>;

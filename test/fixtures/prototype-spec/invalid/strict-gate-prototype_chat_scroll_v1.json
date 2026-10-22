@@ -1,0 +1,129 @@
+{
+  "spec": {
+    "id": "chat-scroll",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "atEnd": true,
+      "draft": ""
+    },
+    "data": {
+      "messages": [
+        {
+          "id": "m1",
+          "text": "Hi"
+        },
+        {
+          "id": "m2",
+          "text": "Hello"
+        }
+      ]
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "scroll",
+          "id": "chat",
+          "reverse": true,
+          "stickToEnd": true,
+          "atEndKey": "atEnd",
+          "onStartReached": [
+            {
+              "type": "emit",
+              "name": "load_older"
+            }
+          ],
+          "child": {
+            "type": "column",
+            "repeat": {
+              "items": {
+                "path": "/messages"
+              },
+              "as": "msg",
+              "key": "id"
+            },
+            "children": [
+              {
+                "type": "text",
+                "text": "{msg.text}"
+              }
+            ]
+          }
+        },
+        {
+          "type": "button",
+          "label": "New messages",
+          "visibleWhen": {
+            "key": "atEnd",
+            "equals": false
+          },
+          "onTap": [
+            {
+              "type": "scrollTo",
+              "scroll": "chat",
+              "to": "end",
+              "animated": true
+            }
+          ]
+        },
+        {
+          "type": "row",
+          "safeAreaPadding": {
+            "edges": ["bottom"],
+            "types": ["ime", "systemBars"]
+          },
+          "children": [
+            {
+              "type": "textField",
+              "stateKey": "draft",
+              "imeAction": "send",
+              "onSubmit": [
+                {
+                  "type": "appendData",
+                  "path": "/data/messages",
+                  "value": {
+                    "value": {
+                      "id": "m3",
+                      "text": "Sent"
+                    }
+                  }
+                },
+                {
+                  "type": "scrollTo",
+                  "scroll": "chat",
+                  "to": {
+                    "key": "m3"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "iconButton",
+              "icon": "send",
+              "onTap": [
+                {
+                  "type": "scrollTo",
+                  "scroll": "chat",
+                  "to": "start",
+                  "animated": false
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "options": {
+    "supportedCapabilities": [
+      "prototype_data_actions_v1",
+      "prototype_data_model_v1",
+      "prototype_text_field_actions_v1"
+    ]
+  },
+  "expectedPath": "$"
+}

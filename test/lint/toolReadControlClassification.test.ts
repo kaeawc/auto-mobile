@@ -90,8 +90,8 @@ const CLASSIFICATION: Classification = {
       reads: [{ action: "list" }],
       controls: [{ action: "apply" }, { action: "reset" }],
     },
-    persona: {
-      reads: [{ action: "list" }, { action: "describe", persona: "samsung-oneui" }],
+    manufacturerProfile: {
+      reads: [{ action: "list" }, { action: "describe", manufacturerProfile: "samsung-oneui" }],
       controls: [{ action: "apply" }, { action: "reset" }],
     },
     systemAlerts: {

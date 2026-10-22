@@ -509,6 +509,70 @@ function spyRestoreProof(sourceFile: ts.SourceFile): { sites: number; unproven: 
     }
     return undefined;
   };
+  // Like handle(), but an undeclared root is a global (console, process, Bun),
+  // so spy targets such as `console.log` get a stable key too.
+  const targetPath = (expression: ts.Expression): string | undefined => {
+    const node = unwrap(expression);
+    if (ts.isIdentifier(node)) {
+      return resolve(node) ? handle(node) : `global:${node.text}`;
+    }
+    if (ts.isPropertyAccessExpression(node)) {
+      const root = targetPath(node.expression);
+      return root && `${root}[${JSON.stringify(node.name.text)}]`;
+    }
+    if (
+      ts.isElementAccessExpression(node) &&
+      node.argumentExpression &&
+      (ts.isStringLiteralLike(node.argumentExpression) ||
+        ts.isNumericLiteral(node.argumentExpression))
+    ) {
+      const root = targetPath(node.expression);
+      return root && `${root}[${JSON.stringify(node.argumentExpression.text)}]`;
+    }
+    return undefined;
+  };
+  // A spy restored through one handle only in afterAll is safe when every install
+  // (each beforeEach run, test.each row, or test writing that handle) spies the
+  // same object and method (#14515): Bun's spyOn returns the existing spy for an
+  // already-spied method, so one restore puts the original back. A handle
+  // overwritten by a spy on another target loses the earlier spy, which then
+  // stays mocked for later files in the process. Invariant means a string-literal
+  // method name on a static path whose root is a global, an import binding, or a
+  // top-level const/function/class, with no write anywhere to that path or a prefix
+  // of it. Anything chosen per test (locals, `let`, computed keys, calls) fails.
+  const invariantTarget = (spy: ts.CallExpression): boolean => {
+    const [object, method] = spy.arguments;
+    if (!object || !method || !ts.isStringLiteralLike(method)) {
+      return false;
+    }
+    const path = targetPath(object);
+    let root = unwrap(object);
+    while (ts.isPropertyAccessExpression(root) || ts.isElementAccessExpression(root)) {
+      root = unwrap(root.expression);
+    }
+    if (!path || !ts.isIdentifier(root)) {
+      return false;
+    }
+    const declaration = resolve(root)?.parent;
+    const topLevel =
+      declaration === undefined ||
+      ts.isImportSpecifier(declaration) ||
+      ts.isNamespaceImport(declaration) ||
+      ts.isImportClause(declaration) ||
+      ((ts.isFunctionDeclaration(declaration) || ts.isClassDeclaration(declaration)) &&
+        declaration.parent === sourceFile) ||
+      (ts.isVariableDeclaration(declaration) &&
+        ts.isVariableDeclarationList(declaration.parent) &&
+        (declaration.parent.flags & ts.NodeFlags.BlockScoped) === ts.NodeFlags.Const &&
+        declaration.parent.parent.parent === sourceFile);
+    return (
+      topLevel &&
+      !writes.some((write) => {
+        const other = write.node === declaration ? undefined : targetPath(write.target);
+        return other !== undefined && (other === path || path.startsWith(`${other}[`));
+      })
+    );
+  };
   const registeredUnconditionally = (context: TestContext): boolean => {
     // Hook registration hidden in an if/loop is not a guaranteed cleanup.
     for (let current: ts.Node = context.callback.parent; current.parent; current = current.parent) {
@@ -747,7 +811,12 @@ function spyRestoreProof(sourceFile: ts.SourceFile): { sites: number; unproven: 
         cleanup.callback === install.callback &&
         install.kind !== "beforeEach" &&
         restore.pos > spy.pos;
-      const teardown = ["afterEach", "afterAll"].includes(cleanup.kind) && covers(cleanup, install);
+      // afterAll restores only the last spy held by this handle, after every
+      // beforeEach run, test.each row and test that wrote it, so it proves
+      // cleanup only when every install spied the same target (#14515).
+      const teardown =
+        (cleanup.kind === "afterEach" || (cleanup.kind === "afterAll" && invariantTarget(spy))) &&
+        covers(cleanup, install);
       if (!sameTest && !teardown) {
         return false;
       }
@@ -763,8 +832,9 @@ function spyRestoreProof(sourceFile: ts.SourceFile): { sites: number; unproven: 
         return false;
       }
       // Losing a handle to a reassignment cannot be repaired by restoring the
-      // replacement. Ignore writes in independent test callbacks and cleanup
-      // writes after this restore; otherwise fail closed on competing writes.
+      // replacement. Ignore writes in independent test callbacks (unless cleanup
+      // is afterAll) and cleanup writes after this restore; otherwise fail closed
+      // on competing writes.
       return !writes.some((write) => {
         const other = handle(write.target);
         if (
@@ -784,7 +854,14 @@ function spyRestoreProof(sourceFile: ts.SourceFile): { sites: number; unproven: 
             (!sameTest && write.node.pos > spy.pos)
           );
         }
-        if (context && ["test", "it"].includes(context.kind) && install.kind !== "beforeEach") {
+        // An afterAll restore runs after every test, so another test's write to
+        // this handle replaces the spy before it is restored (#14515).
+        if (
+          context &&
+          ["test", "it"].includes(context.kind) &&
+          install.kind !== "beforeEach" &&
+          cleanup.kind !== "afterAll"
+        ) {
           return false;
         }
         if (

@@ -1475,7 +1475,10 @@ CtrlProxy persists the active profile on the device. A change made under a daemo
 profile active before that session's first change, and release or rebind restores it before
 the next session can acquire the device; `restoresOnRelease` in the result says whether that
 will happen. A session that changes the profile after a sessionless change records the
-profile it found, so sessionless changes persist until a persona `reset`.
+profile it found, so sessionless changes persist until a persona `reset`. A sessionless
+change made while a session's change is recorded on the device is undone by that session's
+release, which returns the device to its profile from before the session; that call reports
+`restoresOnRelease: true`.
 
 `tapOn` and `tapAny` accept recursive `container` selectors. The outermost
 container resolves first; every inner container and the target must be strict

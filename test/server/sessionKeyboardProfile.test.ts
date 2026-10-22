@@ -128,6 +128,15 @@ describe("keyboard setProfile records the profile it replaced (#14705)", () => {
     expect(active).toBe("samsung");
   });
 
+  test("a sessionless change during a session is undone by that session's release, as it reports", async () => {
+    await manager.createSession("session-1", emulator.deviceId, "android");
+    await set("samsung", "session-1");
+    expect(await set("direct")).toMatchObject({ restoresOnRelease: true });
+    await manager.releaseSession("session-1");
+    await timer.resolveAll();
+    expect(active).toBe("gboard");
+  });
+
   test("a write that outlasts the release's setup drain is undone, not left behind", async () => {
     await manager.createSession("session-1", emulator.deviceId, "android");
     expect(await releaseDuring("samsung", outlastingSet(false))).toContain(

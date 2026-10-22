@@ -205,15 +205,11 @@ export class ProxyToolRouting {
         id !== this.runtime.terminalBoundSession?.sessionUuid &&
         id !== this.runtime.boundSessionUuid,
     );
-    if (
-      this.runtime.boundSessionUuid &&
-      this.runtime.boundSessionUuid !== this.runtime.terminalBoundSession?.sessionUuid &&
-      ((isSessionAcquisition && this.runtime.recoverableBoundSessionHandoffIsDeviceRestart) ||
-        this.runtime.boundSessionUuid !== this.runtime.recoverableBoundSessionHandoff)
-    ) {
+    const bound = this.restoredBoundSession(isSessionAcquisition);
+    if (bound !== undefined) {
       // Restoration uses the first "if-absent" attachment as the fresh socket's
       // default, so the current binding must precede older owned sessions.
-      retained.unshift(this.runtime.boundSessionUuid);
+      retained.unshift(bound);
     }
     // The owner token lets the daemon move ownership to this connection even while a stale
     // connection of this proxy still holds it; a bare UUID only restores an unowned session (#11107).
@@ -224,6 +220,28 @@ export class ProxyToolRouting {
           [DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM]: this.runtime.livenessOwnerToken,
         }
       : args;
+  }
+
+  /**
+   * The live binding a restoring call presents among its owned sessions, if any. Under a
+   * recoverable handoff of the binding, these arguments are built before
+   * `withRecoverableReconnect` reclaims it on a fresh connection and clears the marker, so they
+   * must already say what that reclaimed connection owns:
+   * - a daemon shutdown or restart handoff: the successor holds the session rehydrated, awaiting
+   *   this owner, and only the restore attaches it to the new connection. Without it the owner's
+   *   first selector call after a restart reaches the successor sessionless and is refused on its
+   *   own device (#14668). An acquisition keeps its existing wire.
+   * - a device-restart handoff: only an acquisition resumes the reserved session.
+   */
+  private restoredBoundSession(isSessionAcquisition: boolean): string | undefined {
+    const bound = this.runtime.boundSessionUuid;
+    if (!bound || bound === this.runtime.terminalBoundSession?.sessionUuid) {
+      return undefined;
+    }
+    const presented =
+      bound !== this.runtime.recoverableBoundSessionHandoff ||
+      this.runtime.recoverableBoundSessionHandoffIsDeviceRestart === isSessionAcquisition;
+    return presented ? bound : undefined;
   }
 
   rememberActiveDeviceSession(

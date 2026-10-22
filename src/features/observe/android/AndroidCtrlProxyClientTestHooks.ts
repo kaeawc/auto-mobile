@@ -2,6 +2,12 @@ import type { CtrlProxyGestures } from "./CtrlProxyGestures";
 import type { ForcedRestartBudget } from "../../../ctrlProxy/ForcedRestartBudget";
 import type { RequestManager } from "../../../utils/RequestManager";
 import type { CtrlProxyText } from "./CtrlProxyText";
+import type { CtrlProxyStorage } from "./CtrlProxyStorage";
+import type { CtrlProxyCertificates } from "./CtrlProxyCertificates";
+import type { CtrlProxyFocus } from "./CtrlProxyFocus";
+import type { CtrlProxyPackages } from "./CtrlProxyPackages";
+import type { CtrlProxyPrototypes } from "./CtrlProxyPrototypes";
+import type { CtrlProxyHighlights } from "./CtrlProxyHighlights";
 import type { CachedHierarchy } from "./types";
 
 /**
@@ -14,6 +20,12 @@ export interface AndroidCtrlProxyClientTestHooks {
   readonly forcedRestartBudget: ForcedRestartBudget;
   text(): CtrlProxyText;
   gestures(): CtrlProxyGestures;
+  storage(): CtrlProxyStorage;
+  certificates(): CtrlProxyCertificates;
+  focus(): CtrlProxyFocus;
+  packages(): CtrlProxyPackages;
+  prototypes(): CtrlProxyPrototypes;
+  highlights(): CtrlProxyHighlights;
   /** Own-property handler table keyed by wire message type. */
   webSocketMessageHandlers(): object;
   cachedHierarchy(): CachedHierarchy | null;

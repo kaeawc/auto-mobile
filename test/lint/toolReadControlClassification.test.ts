@@ -61,6 +61,14 @@ const CLASSIFICATION: Classification = {
   ],
   perArgs: {
     accessibility: { reads: [{}], controls: [{ talkback: true }, { voiceover: false }] },
+    backgroundWork: {
+      reads: [{ action: "list" }, { action: { listAlarms: true } }],
+      controls: [
+        { action: { runJob: { jobId: 7 } } },
+        { action: { runJob: { worker: "SyncWorker", force: true } } },
+        { action: { workManagerDiagnostics: true } },
+      ],
+    },
     clipboard: {
       reads: [{ action: "get" }],
       controls: [{ action: "copy", text: "x" }, { action: "paste" }, { action: "clear" }],
@@ -90,9 +98,13 @@ const CLASSIFICATION: Classification = {
       reads: [{ action: "list" }],
       controls: [{ action: "apply" }, { action: "reset" }],
     },
-    persona: {
-      reads: [{ action: "list" }, { action: "describe", persona: "samsung-oneui" }],
+    manufacturerProfile: {
+      reads: [{ action: "list" }, { action: "describe", manufacturerProfile: "samsung-oneui" }],
       controls: [{ action: "apply" }, { action: "reset" }],
+    },
+    systemAlerts: {
+      reads: [{ action: "get" }],
+      controls: [{ action: "setPolicy", policy: "allow" }, { action: "clear" }],
     },
     prototype: PROTOTYPE_ARGS,
     sqlQuery: {

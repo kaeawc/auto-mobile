@@ -1,0 +1,74 @@
+{
+  "spec": {
+    "id": "emit-context",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Emit",
+      "onTap": [
+        {
+          "type": "emit",
+          "name": "pick",
+          "context": {
+            "e00": {
+              "value": 0
+            },
+            "e01": {
+              "value": 1
+            },
+            "e02": {
+              "value": 2
+            },
+            "e03": {
+              "value": 3
+            },
+            "e04": {
+              "value": 4
+            },
+            "e05": {
+              "value": 5
+            },
+            "e06": {
+              "value": 6
+            },
+            "e07": {
+              "value": 7
+            },
+            "e08": {
+              "value": 8
+            },
+            "e09": {
+              "value": 9
+            },
+            "e10": {
+              "value": 10
+            },
+            "e11": {
+              "value": 11
+            },
+            "e12": {
+              "value": 12
+            },
+            "e13": {
+              "value": 13
+            },
+            "e14": {
+              "value": 14
+            },
+            "e15": {
+              "value": 15
+            }
+          }
+        }
+      ]
+    }
+  },
+  "options": {
+    "supportedCapabilities": []
+  },
+  "expectedPath": "$"
+}

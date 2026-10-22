@@ -87,28 +87,13 @@ import { DaemonReadiness, type DaemonReadinessHost } from "./manager/DaemonReadi
 export type { DaemonLaunchCommand, DaemonProcessSpawner } from "./DaemonLauncher";
 export { resolveExtractionRootForEntryScript, type ExtractionCleaner } from "./extractionCleaner";
 export type { DaemonManagerOptions } from "./managerOptions";
-export {
-  DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
-  PsDaemonProcessFinder,
-  WindowsDaemonProcessFinder,
-  createDefaultDaemonProcessFinder,
-  parseBusyBoxDaemonProcessTable,
-  parseDaemonProcessTable,
-  parseDarwinDaemonProcessTable,
-  parseWindowsDaemonProcessTable,
-  type DaemonProcessFinder,
-  type DaemonProcessLivenessChecker,
-  type DaemonProcessRecord,
-  type DaemonProcessSignaler,
+export type {
+  DaemonProcessFinder,
+  DaemonProcessLivenessChecker,
+  DaemonProcessRecord,
+  DaemonProcessSignaler,
 } from "./processTable";
-export { NetDaemonPortAvailabilityChecker } from "./portAvailability";
-export type { DaemonPortAvailabilityChecker, ProbeListener } from "./portAvailability";
-export { parseDaemonArgs } from "./cli/daemonArgs";
-export {
-  daemonBuildIdentityStatusLines,
-  daemonCommandOptions,
-  parseDaemonHeartbeatCommandArgs,
-} from "./cli/runDaemonCommand";
+export type { DaemonPortAvailabilityChecker } from "./portAvailability";
 export type { RunDaemonCommandOptions } from "./cli/runDaemonCommand";
 export type { DaemonRestartResult };
 export { relayDaemonStderr } from "./manager/DaemonLaunch";
@@ -387,7 +372,8 @@ export class DaemonManager implements DaemonManagerLike {
     return this.collaborators.daemonStart.inheritExitSettings(options);
   }
 
-  startUnlocked(
+  /** Requires the caller to hold the startup lock; collaborators reach it through the host. */
+  private startUnlocked(
     options: DaemonOptions,
     recoverySignal?: AbortSignal,
     inheritExitRecord: boolean = true,

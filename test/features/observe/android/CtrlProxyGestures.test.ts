@@ -1234,10 +1234,10 @@ it("atomic tap capability requires explicit advertisement even on legacy handsha
     },
   );
   for (const commands of [null, new Set<string>(), new Set(["full_command_set_v1"])]) {
-    client["supportedCommands"] = commands;
+    client.connectionTestHooks.supportedCommands = commands;
     expect(client["isCommandSupported"]("tap_double_v1")).toBe(false);
   }
-  client["supportedCommands"] = new Set(["tap_double_v1"]);
+  client.connectionTestHooks.supportedCommands = new Set(["tap_double_v1"]);
   expect(client["isCommandSupported"]("tap_double_v1")).toBe(true);
 });
 

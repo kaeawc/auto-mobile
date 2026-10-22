@@ -1,0 +1,5 @@
+﻿{
+  "id": "strict",
+  "window": { "placement": { "type": "fullscreen" } },
+  "root": { "type": "spacer" }
+}

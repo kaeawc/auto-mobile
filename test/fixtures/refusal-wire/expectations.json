@@ -100,6 +100,14 @@
         "acquireNewSession": false
       }
     },
+    "provision_device.requires_real_device": {
+      "expected": "fail",
+      "fields": {
+        "code": "requires_real_device",
+        "retryable": false,
+        "acquireNewSession": false
+      }
+    },
     "daemon_overloaded": {
       "expected": "retry",
       "fields": {

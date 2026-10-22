@@ -28,6 +28,8 @@ import {
 const ROOT = path.resolve(import.meta.dir, "../..");
 const SRC = path.join(ROOT, "src");
 const REGISTRY_FILE = "src/config/env.ts";
+/** The one module allowed raw name-based `process.env[name]` lookups (#14404). */
+const PROCESS_ENVIRONMENT_ADAPTER = "src/config/processEnvironment.ts";
 const DOCS = path.join(ROOT, "docs/using/environment-variables.md");
 const PRODUCT_NAME = /^(?:AUTOMOBILE_|AUTO_MOBILE_)[A-Z0-9_]+$/;
 /** The registry table itself (`ENV.DATA_DIR`) is not an environment object. */
@@ -201,7 +203,7 @@ function registeredNames(): Set<string> {
   );
 }
 
-/** Identifier keys hide constant names from the registered-name scan above. */
+/** Non-static keys hide constant names from the registered-name scan above. */
 function computedProcessEnvReads(file: string, source: string): string[] {
   const hits: string[] = [];
   const program = parseGuardSource(
@@ -262,9 +264,12 @@ function computedProcessEnvReads(file: string, source: string): string[] {
         !writes.has(node) &&
         isProcessEnv(node.object) &&
         node.computed &&
-        node.property.type === "Identifier"
+        node.property.type !== "Literal" &&
+        node.property.type !== "TemplateLiteral"
       ) {
-        hits.push(`${file}\tprocess.env[${node.property.name}]`);
+        // Any non-static key hides its name: an identifier, or a member such as
+        // `ENV.FOO.name` that the registered-name scan cannot resolve either (#14403).
+        hits.push(`${file}\tprocess.env[${source.slice(node.property.start, node.property.end)}]`);
       }
     },
   }).visit(program);
@@ -343,7 +348,7 @@ describe("environment variable registry", () => {
       .flatMap(([relative, source]) => rawProcessEnvReads(relative, source, registered))
       .sort();
     computedReads = [...files]
-      .filter(([relative]) => !relative.startsWith("src/config/"))
+      .filter(([relative]) => relative !== PROCESS_ENVIRONMENT_ADAPTER)
       .flatMap(([relative, source]) => computedProcessEnvReads(relative, source))
       .sort();
     const allowlisted = new Set(Object.keys(NON_ENV_LITERALS));
@@ -381,7 +386,7 @@ describe("environment variable registry", () => {
     ).toEqual(["x.ts\tHOME", "x.ts\tHOME"]);
   });
 
-  test("computed identifier reads use the environment registry outside src/config/", () => {
+  test("computed reads use the environment registry outside the process environment adapter", () => {
     expect(
       computedReads,
       "Use readEnvRaw/readEnvTrimmed with an ENV spec instead of process.env[identifier].",
@@ -396,6 +401,20 @@ describe("environment variable registry", () => {
          process.env["HOME"]; env[KEY]; process.env[\`DYNAMIC_\${platform}\`];`,
       ),
     ).toEqual(["x.ts\tprocess.env[KEY]", "x.ts\tprocess.env[KEY]"]);
+  });
+
+  test("computed process.env detector flags member-expression and other non-static keys (#14403)", () => {
+    expect(
+      computedProcessEnvReads(
+        "x.ts",
+        `process.env[WEBRTC_ENV.WHIP_ENDPOINT]; process.env[ENV.FOO.name];
+         process.env[keyFor("x")]; process.env["STATIC"]; process.env[\`STATIC\`];`,
+      ),
+    ).toEqual([
+      "x.ts\tprocess.env[WEBRTC_ENV.WHIP_ENDPOINT]",
+      "x.ts\tprocess.env[ENV.FOO.name]",
+      'x.ts\tprocess.env[keyFor("x")]',
+    ]);
   });
 
   test("computed process.env detector allows writes and deletes but checks their values", () => {

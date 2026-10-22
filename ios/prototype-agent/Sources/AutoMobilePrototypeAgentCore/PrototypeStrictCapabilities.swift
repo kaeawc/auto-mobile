@@ -1,0 +1,115 @@
+import Foundation
+
+/// Capability computation over authored vocabulary, including hidden and empty-template nodes.
+/// Data, literal values and emit payloads are opaque and cannot introduce capabilities.
+enum PrototypeStrictCapabilities {
+    static func required(_ spec: [String: JSONValue], includeAgentGates: Bool = false) -> Set<String> {
+        var result = Set<String>()
+        func need(_ feature: String) { result.insert("prototype_\(feature)_v1") }
+        if includeAgentGates {
+            if spec["theme"] != nil { need("theme_modes") }
+            if spec["window"]?.objectFields?["chrome"] != nil { need("window_chrome") }
+        }
+        if spec["data"] != nil { need("data_model") }
+        if spec["storage"] != nil { need("storage") }
+        if let colors = spec["theme"]?.objectFields?["colors"]?.objectFields,
+           colors["light"] != nil || colors["dark"] != nil { need("theme_modes") }
+        func scan(_ value: JSONValue, field: String = "") {
+            if case let .array(items) = value { for item in items {
+                scan(item)
+            }; return }
+            guard let fields = value.objectFields else { return }
+            if fields.count == 1, fields["value"] != nil { return }
+            func textBinding(_ text: String) {
+                if PrototypeDataText.substitutionLength(text, data: nil).recognized { need("data_model") }
+            }
+            var own = fields
+            PrototypeRepeat.bindTextFields(&own) { text in textBinding(text); return text }
+            let type = fields["type"]?.stringValue ?? ""
+            let types = [
+                "stack": "stack",
+                "flow": "flow_grid",
+                "grid": "flow_grid",
+                "carousel": "carousel",
+                "searchBar": "search_bar",
+                "chart": "chart",
+                "menu": "menus",
+                "select": "menus",
+                "scrollTo": "chat_scroll",
+            ]
+            if let feature = types[type] { need(feature) }
+            if includeAgentGates, type == "icon",
+               ["rounded", "sharp", "twoTone"].contains(fields["variant"]?.stringValue ?? "") { need("icon_variant") }
+            if type == "text", fields["spans"] != nil { need("rich_text") }
+            if type == "textField" {
+                if [
+                    "label",
+                    "variant",
+                    "supportingText",
+                    "keyboardType",
+                    "secure",
+                    "multiline",
+                    "minLines",
+                    "maxLines",
+                    "maxLength",
+                ].contains(where: { fields[$0] != nil }) { need("text_field_options") }
+                if ["trailingIcon", "imeAction", "onSubmit"]
+                    .contains(where: { fields[$0] != nil }) { need("text_field_actions") }
+                if fields["leadingIcon"] != nil { need("text_field_leading_icon") }
+            }
+            if type == "pager" {
+                if ["axis", "pageSpacing", "peek", "pageSize"]
+                    .contains(where: { fields[$0] != nil }) { need("pager_options") }
+                if fields["indicator"] != nil { need("carousel") }
+            }
+            if type == "scroll",
+               ["reverse", "stickToEnd", "atEndKey", "onStartReached"]
+               .contains(where: { fields[$0] != nil }) { need("chat_scroll") }
+            if type == "request" {
+                need("network")
+                if fields["via"] == .string("device") { need("network_device") }
+                if let url = fields["url"]?.stringValue { textBinding(url) }
+                for key in ["headers", "query"] {
+                    for value in (fields[key]?.objectFields ?? [:]).values {
+                        if let text = value.stringValue { textBinding(text) }
+                    }
+                }
+            }
+            if ["setData", "appendData", "removeData"].contains(type) { need("data_actions") }
+            if type == "emit", fields["context"] != nil { need("emit_context") }
+            if type == "platform" { need("platform") }
+            for (key, child) in fields {
+                if key == "payload" || (key == "value" && !["setData", "appendData"].contains(type)) { continue }
+                if key == "repeat" {
+                    if let repeatSpec = child.objectFields,
+                       repeatSpec["items"]?
+                       .objectFields != nil || repeatSpec["key"] != nil { need("data_model") }; continue
+                }
+                if ["checks", "validateOn", "enabledWhen", "valid", "requireValid"].contains(key) { need("checks") }
+                if ["onLongPress", "onDoubleTap"].contains(key) { need("gestures") }
+                if key == "swipeActions" { need("swipe_actions") }
+                if key == "refresh" { need("refresh") }
+                if key == "linkify" { need("linkify") }
+                if key == "empty" || key == "shimmer" { need("loading_states") }
+                if ["animate", "scale", "rotation", "zoomable"]
+                    .contains(key) ||
+                    (key == "transition" && ["slideStart", "slideEnd", "scale"].contains(child.stringValue ?? ""))
+                {
+                    result.insert("prototype_motion_v2")
+                }
+                if key == "data", child.stringValue != nil { need("data_model") }
+                if key == "light" || key == "dark", !field.isEmpty { need("theme_modes") }
+                if key != "linkify" && key != "series" { scan(child, field: key) }
+            }
+        }
+        if let root = spec["root"] { scan(root) }
+        if let scrim = spec["window"]?.objectFields?["placement"]?.objectFields?["scrim"],
+           scrim.objectFields != nil { need("theme_modes") }
+        if let requires = spec["requires"]?.objectFields {
+            for module in PrototypeContractValidator
+                .strings(requires["platform"]) { need("platform"); need("platform_\(module)") }
+        }
+        if spec["platform"] != nil { need("platform") }
+        return result
+    }
+}

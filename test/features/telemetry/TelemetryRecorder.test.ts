@@ -722,27 +722,44 @@ describe("TelemetryRecorder", () => {
       }
     }
 
-    it("never confirms buffered adds, including after a lost batch and a later successful flush", async () => {
+    it("confirms a buffered layout add only once its batch commits (#14625)", async () => {
+      const batchRepo = new FakeBatchRepo();
+      const buffer = new TelemetryEventBuffer(batchRepo, new FakeTimer());
+      const bufferedRecorder = new TelemetryRecorder(repo, () => pushTarget, undefined, buffer);
+      let settled: boolean | undefined;
+      const receipt = bufferedRecorder.recordLayoutEvent(layoutEvent).then((persisted) => {
+        settled = persisted;
+        return persisted;
+      });
+      await Promise.resolve();
+      // Pushed live immediately, but unconfirmed until the batch is flushed.
+      expect(pushTarget.pushedEvents.map((event) => event.category)).toEqual(["layout"]);
+      expect(settled).toBeUndefined();
+      expect(repo.layoutEvents).toHaveLength(0);
+
+      await bufferedRecorder.flushBuffer();
+
+      expect(await receipt).toBe(true);
+      expect(batchRepo.layoutBatches).toEqual([[expect.objectContaining({ timestamp: 7000 })]]);
+    });
+
+    it("resolves a buffered layout add false when its batch is lost, then true on a later success", async () => {
       const batchRepo = new FakeBatchRepo();
       const buffer = new TelemetryEventBuffer(batchRepo, new FakeTimer());
       const bufferedRecorder = new TelemetryRecorder(repo, () => pushTarget, undefined, buffer);
       const warning = spyOn(logger, "warn").mockImplementation(() => {});
       try {
-        expect(await bufferedRecorder.recordLayoutEvent(layoutEvent)).toBe(false);
-        expect(batchRepo.layoutBatches).toHaveLength(0);
         batchRepo.failLayout = true;
+        const lost = bufferedRecorder.recordLayoutEvent(layoutEvent);
         await bufferedRecorder.flushBuffer();
-        expect(batchRepo.layoutBatches).toHaveLength(0);
+        expect(await lost).toBe(false);
         expect(warning).toHaveBeenCalled();
+
         batchRepo.failLayout = false;
-        expect(await bufferedRecorder.recordLayoutEvent(layoutEvent)).toBe(false);
+        const kept = bufferedRecorder.recordLayoutEvent(layoutEvent);
         await bufferedRecorder.flushBuffer();
+        expect(await kept).toBe(true);
         expect(batchRepo.layoutBatches).toHaveLength(1);
-        expect(batchRepo.layoutBatches[0]).toHaveLength(1);
-        expect(pushTarget.pushedEvents.map((event) => event.category)).toEqual([
-          "layout",
-          "layout",
-        ]);
       } finally {
         warning.mockRestore();
       }

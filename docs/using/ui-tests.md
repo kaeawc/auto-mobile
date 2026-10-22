@@ -258,7 +258,8 @@ iOS, run the flow, and disable it afterward. Enabling TalkBack may leave a syste
 runtime permission prompt covering the screen. The result reports it through
 `warning` and `blockingPrompt` (`kind`, `package`, `activity`) when detected;
 AutoMobile does not dismiss it. Use `observe` to inspect it, then `tapOn` to
-answer the allow or deny button. Android also supports the
+answer the allow or deny button, or set a `systemAlerts` policy to answer
+permission prompts around each interaction. Android also supports the
 default-off debug tool `accessibilityFocus` for setting or clearing TalkBack
 focus. Check text alternatives, content descriptions or accessibility labels,
 focus order, contrast, and tap-target size as part of the assertions; support

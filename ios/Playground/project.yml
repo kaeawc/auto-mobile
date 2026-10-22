@@ -18,6 +18,8 @@ packages:
     path: ../highlight-core
   AutoMobileSDK:
     path: ../auto-mobile-sdk
+  AutoMobileSdkWire:
+    path: ../sdk-wire
 
 targets:
   Playground:
@@ -51,6 +53,7 @@ targets:
       - target: Playground
       - package: AutoMobileHighlightCore
       - package: AutoMobileSDK
+      - package: AutoMobileSdkWire
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.jasonpearson.automobile.PlaygroundTests

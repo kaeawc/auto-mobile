@@ -967,6 +967,10 @@ export class ToolRegistryClass {
     this.deviceReadiness = readiness;
   }
 
+  hasDeviceReadiness(): boolean {
+    return this.deviceReadiness !== undefined;
+  }
+
   setMutationRecording(recording: DeviceMutationRecording): void {
     this.mutationRecording = recording;
   }

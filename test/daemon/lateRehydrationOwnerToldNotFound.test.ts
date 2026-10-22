@@ -187,7 +187,7 @@ async function ownerOutcomeAfterRestart(recovery: "lands-before-owner" | "lands-
       terminal: manager.getTerminalReleaseSnapshot(SESSION)?.releaseReason,
     };
   } finally {
-    monitor?.stop();
+    void monitor?.stop();
     restarted?.stopCleanupTimer();
     await proxy.close();
   }

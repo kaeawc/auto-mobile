@@ -38,7 +38,7 @@ describe("FakeNavigationGraphManager graph-update listeners", () => {
       calls.push("second");
     });
 
-    fake.setCurrentApp("com.test.app");
+    void fake.setCurrentApp("com.test.app");
 
     expect(calls.sort()).toEqual(["first", "second"]);
   });
@@ -51,7 +51,7 @@ describe("FakeNavigationGraphManager graph-update listeners", () => {
     });
     fake.setGraphUpdateListener(null);
 
-    fake.setCurrentApp("com.test.app");
+    void fake.setCurrentApp("com.test.app");
 
     expect(calls).toEqual([]);
   });

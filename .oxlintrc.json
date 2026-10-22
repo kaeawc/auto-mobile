@@ -132,7 +132,8 @@
       "rules": {
         "no-unused-expressions": "off",
         "auto-mobile/no-bare-expect": "error",
-        "auto-mobile/no-as-any": "error"
+        "auto-mobile/no-as-any": "error",
+        "typescript/no-floating-promises": "error"
       }
     },
     {

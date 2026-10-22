@@ -617,7 +617,7 @@ describe("an undelivered rebind keeps the session's overrides on the device it g
       expect(sessions.hasDeviceCleanupInProgress(from)).toBe(true);
       expect(pool.getDevice(from)).toMatchObject({ sessionId: "held", status: "busy" });
       expect(restoredSettings).toEqual([]);
-      reservation!.release();
+      void reservation!.release();
       await expect(
         pool.bindOrReuseDeviceSession({ sessionId: "other", deviceId: from, platform }),
       ).rejects.toThrow();

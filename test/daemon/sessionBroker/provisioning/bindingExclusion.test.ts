@@ -63,6 +63,32 @@ describe("RegistryBindingExclusion", () => {
     }
   });
 
+  test("refuseUpgradePending refuses a pending upgrade retryably, then reads the upgraded registry", async () => {
+    let pending = true;
+    const exclusion = exclusionOver(async () => {
+      if (pending) {
+        throw new BindingRegistryUpgradePendingError("retirement refused");
+      }
+      return registry;
+    });
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      await expect(
+        exclusion.refresh({ fresh: true, refuseUpgradePending: true }),
+      ).rejects.toMatchObject({ code: BINDING_DISCOVERY_INCOMPLETE_CODE, retryable: true });
+      // A young pending-upgrade snapshot is still refused, never reused as "nothing managed".
+      await expect(
+        exclusion.refresh({ maxAgeMs: 60_000, refuseUpgradePending: true }),
+      ).rejects.toBeInstanceOf(BindingDiscoveryIncompleteError);
+      pending = false;
+      await assignBindingDevice(registry, "ios", "BROKER");
+      await exclusion.refresh({ fresh: true, refuseUpgradePending: true });
+      expect([...exclusion.stableIdsFor("ios")]).toEqual(["BROKER"]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   test("holds every assigned device, idle or not, by any of its stable ids", async () => {
     const binding = await assignBindingDevice(registry, "android", "binding-avd");
     const exclusion = exclusionOver(openFake);

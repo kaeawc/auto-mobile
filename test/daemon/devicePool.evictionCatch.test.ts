@@ -335,7 +335,7 @@ describe("device identity replacement IME quarantine", () => {
           "IME state is unknown",
         );
       } finally {
-        reservation.release();
+        void reservation.release();
       }
     },
   );

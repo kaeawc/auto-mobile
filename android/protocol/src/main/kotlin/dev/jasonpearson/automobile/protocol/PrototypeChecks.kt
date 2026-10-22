@@ -11,8 +11,11 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonPrimitive
 
-const val MAX_PROTOTYPE_CHECK_VALUE_LENGTH = 4096
+val MAX_PROTOTYPE_CHECK_VALUE_LENGTH =
+  PrototypeSpecContract.limits.getValue("MAX_PROTOTYPE_CHECK_VALUE_LENGTH").jsonPrimitive.int
 
 data class PrototypeCheckEvaluation(val valid: Boolean, val firstFailingMessage: String? = null)
 
@@ -20,10 +23,6 @@ data class PrototypeCheckEvaluation(val valid: Boolean, val firstFailingMessage:
 object PrototypeChecks {
   // ECMAScript whitespace for required and formats; portable pattern s is ASCII instead.
   // Keep these as literals so the source-level ICU guard can inspect each complete pattern.
-  private val blank =
-    Pattern.compile(
-      "[\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]*",
-    )
   private val formats =
     mapOf(
       PrototypeCheckFormat.EMAIL to
@@ -70,7 +69,8 @@ object PrototypeChecks {
       "switch" -> value?.isString == false && value.booleanOrNull == true
       "slider",
       "timePicker" -> value?.isString == false && value.doubleOrNull?.isFinite() == true
-      else -> value?.isString == true && !blank.matcher(value.content).matches()
+      else ->
+        value?.isString == true && !PrototypeSpecContract.blankTextPattern.matches(value.content)
     }
 
   private fun isAbsent(value: JsonElement?, primitive: JsonPrimitive?): Boolean =

@@ -28,13 +28,10 @@ extension PrototypeContractValidator {
         case "key": return PrototypeRepeat.isFieldName(text)
         case "boundKey": return boundKey(text)
         case "pointer": return PrototypeDataPointer.isValid(text)
-        case "color": return text.range(of: "^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$", options: .regularExpression) != nil
+        case "color": return matches("color", text)
         case "string":
-            // ECMAScript trim's whitespace set, including BOM and excluding U+0085.
-            let blank =
-                "^[\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]*$"
             return (rule["empty"] == .bool(true) || !text.isEmpty)
-                && (rule["nonblank"] != .bool(true) || text.range(of: blank, options: .regularExpression) == nil)
+                && (rule["nonblank"] != .bool(true) || !matches("blankText", text))
                 && Double(text.utf16.count) >= (rule["min"]?.numberValue ?? 0)
                 && Double(text.utf16.count) <= (rule["max"]?.numberValue ?? .infinity)
         default: return false

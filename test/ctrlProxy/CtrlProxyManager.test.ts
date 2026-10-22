@@ -2499,7 +2499,7 @@ describe("CtrlProxyManager", function () {
           },
         });
 
-        AndroidCtrlProxyManager.prefetchApk();
+        void AndroidCtrlProxyManager.prefetchApk();
         expect(await AndroidCtrlProxyManager.getPrefetchedApkPath()).toBeNull();
         expect(downloadCalls).toBe(0);
       } finally {
@@ -2529,7 +2529,7 @@ describe("CtrlProxyManager", function () {
         },
       });
 
-      AndroidCtrlProxyManager.prefetchApk();
+      void AndroidCtrlProxyManager.prefetchApk();
       expect(await AndroidCtrlProxyManager.getPrefetchedApkPath()).toBeNull();
       expect(failedDestination).not.toBeNull();
       // REWRITE-3: a bare rejects.toThrow() passes for ANY stat error. Pin the
@@ -2541,7 +2541,7 @@ describe("CtrlProxyManager", function () {
       );
       expect(statError?.code).toBe("ENOENT");
 
-      AndroidCtrlProxyManager.prefetchApk();
+      void AndroidCtrlProxyManager.prefetchApk();
       const retriedPath = await AndroidCtrlProxyManager.getPrefetchedApkPath();
 
       expect(downloadCalls).toBe(2);

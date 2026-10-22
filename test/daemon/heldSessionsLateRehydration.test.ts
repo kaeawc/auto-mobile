@@ -223,7 +223,7 @@ async function ownerOutcomeAfterRestart(reasonLookup: "works" | "fails at first"
       },
     };
   } finally {
-    monitor?.stop();
+    void monitor?.stop();
     restarted?.stopCleanupTimer();
     await proxy.close();
   }

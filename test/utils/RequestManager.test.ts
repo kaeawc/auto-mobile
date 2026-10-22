@@ -195,8 +195,8 @@ describe("RequestManager", () => {
     const id1 = manager.generateId("test1");
     const id2 = manager.generateId("test2");
 
-    manager.register(id1, "test1", 5000, () => ({}));
-    manager.register(id2, "test2", 5000, () => ({}));
+    void manager.register(id1, "test1", 5000, () => ({}));
+    void manager.register(id2, "test2", 5000, () => ({}));
 
     const pendingIds = manager.getPendingIds();
     expect(pendingIds).toContain(id1);
@@ -259,7 +259,7 @@ describe("RequestManager", () => {
 
   test("resolveError clears the pending timeout and removes the request", () => {
     const id = manager.generateId("test");
-    manager.register(
+    void manager.register(
       id,
       "test",
       5000,

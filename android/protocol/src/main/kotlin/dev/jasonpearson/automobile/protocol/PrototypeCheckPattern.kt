@@ -1,6 +1,8 @@
 package dev.jasonpearson.automobile.protocol
 
 import java.util.regex.Pattern
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * Portable regex grammar: a group repeated more than once must not transitively contain alternation
@@ -11,6 +13,15 @@ import java.util.regex.Pattern
 data class PrototypeCheckPatternResult(val ok: Boolean, val message: String? = null)
 
 object PrototypeCheckPattern {
+  private val maxLength = PrototypeSpecContract.checkPatternMaxLength
+  private val maxBound =
+    PrototypeSpecContract.limits.getValue("MAX_PROTOTYPE_CHECK_QUANTIFIER_BOUND").jsonPrimitive.int
+  private val maxVariable =
+    PrototypeSpecContract.limits
+      .getValue("MAX_PROTOTYPE_CHECK_VARIABLE_QUANTIFIERS")
+      .jsonPrimitive
+      .int
+
   fun parse(pattern: String): PrototypeCheckPatternResult = Parser(pattern).parse()
 
   fun matches(pattern: String, value: String): Boolean {
@@ -90,8 +101,8 @@ object PrototypeCheckPattern {
     var variable = false
 
     fun parse(): PrototypeCheckPatternResult {
-      if (source.length > 128)
-        return PrototypeCheckPatternResult(false, "Pattern exceeds 128 characters")
+      if (source.length > maxLength)
+        return PrototypeCheckPatternResult(false, "Pattern exceeds $maxLength characters")
       body(false)
       return PrototypeCheckPatternResult(error == null, error)
     }
@@ -222,8 +233,8 @@ object PrototypeCheckPattern {
           '{' -> boundedQuantifier()
           else -> null
         }
-      if (variable && ++variableQuantifiers > 2)
-        fail("pattern has too many variable quantifiers (max 2)")
+      if (variable && ++variableQuantifiers > maxVariable)
+        fail("pattern has too many variable quantifiers (max $maxVariable)")
       if (maximum != null)
         when (peek()) {
           '?' -> fail("Lazy quantifiers are not supported")
@@ -245,8 +256,8 @@ object PrototypeCheckPattern {
       val maximum =
         if (upper == null) minimum
         else if (upper.isEmpty()) Double.POSITIVE_INFINITY else upper.toDouble()
-      if (minimum > 100 || (maximum.isFinite() && maximum > 100))
-        fail("Quantifier bounds must be <=100")
+      if (minimum > maxBound || (maximum.isFinite() && maximum > maxBound))
+        fail("Quantifier bounds must be <=$maxBound")
       else if (minimum > maximum) fail("Quantifier minimum exceeds maximum")
       variable = maximum > minimum
       cursor += match.value.length

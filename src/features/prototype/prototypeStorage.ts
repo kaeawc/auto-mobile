@@ -1,3 +1,4 @@
+import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import { ActionableError } from "../../models/ActionableError";
 import { z } from "zod";
 import contract from "../../../schemas/prototype-spec-contract.json";
@@ -17,7 +18,7 @@ export const { MAX_PROTOTYPE_STORAGE_BYTES, MAX_PROTOTYPE_STORAGE_KEYS } = contr
 
 const STATE_PREFIX = "state:";
 const DATA_PREFIX = "data:";
-const STATE_KEY = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
+const STATE_KEY = prototypeContractPatterns.stateKey;
 
 export interface PrototypeStorageBlock {
   version: number;

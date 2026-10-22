@@ -35,6 +35,8 @@ dependencies {
 
   api(platform(libs.compose.bom))
   api(libs.compose.ui.core)
+  // PrototypeHttpRequest.body exposes JsonElement, so host transports compile against it.
+  api(libs.kotlinx.serialization)
   implementation(libs.androidx.core)
   implementation(libs.androidx.activity.compose)
   implementation(libs.compose.ui.util)
@@ -43,7 +45,6 @@ dependencies {
   implementation(libs.compose.material)
   implementation(libs.compose.material.icons.extended)
   implementation(libs.kotlinx.coroutines)
-  implementation(libs.kotlinx.serialization)
 
   testImplementation(libs.bundles.unit.test)
   testImplementation(libs.robolectric)

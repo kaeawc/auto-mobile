@@ -25,7 +25,10 @@ import {
   PROTOTYPE_NETWORK_CAPABILITY,
   PROTOTYPE_NETWORK_DEVICE_CAPABILITY,
   PROTOTYPE_PLATFORM_CAPABILITY,
+  PROTOTYPE_ANCHOR_CAPABILITY,
+  PROTOTYPE_WINDOW_CHROME_CAPABILITY,
 } from "../observe/android/ctrlProxyProtocol";
+import { hasPrototypeAnchors } from "./prototypeAnchors";
 import {
   PROTOTYPE_PLATFORM_MODULE_GATES,
   prototypePlatformFields,
@@ -254,7 +257,36 @@ export function prototypeRequiredCapabilities(spec: unknown): {
   });
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Capabilities the show preflight checks outside the gate table (#14536): any node anchor needs
+ * prototype_anchor_v1, and an explicitly chromeless fullscreen window needs
+ * prototype_window_chrome_v1 (the only chrome request the preflight refuses without it).
+ */
+function preflightCapabilities(spec: unknown): string[] {
+  if (!isRecord(spec)) {
+    return [];
+  }
+  const window = isRecord(spec.window) ? spec.window : {};
+  const fullscreen = isRecord(window.placement) && window.placement.type === "fullscreen";
+  return [
+    ...(hasPrototypeAnchors(spec) ? [PROTOTYPE_ANCHOR_CAPABILITY] : []),
+    ...(fullscreen && window.chrome === "none" ? [PROTOTYPE_WINDOW_CHROME_CAPABILITY] : []),
+  ];
+}
+
+/**
+ * Capability names required by the gate table alone: the set the native strict validators
+ * (Kotlin and Swift) compute and the shared corpus records.
+ */
+export function prototypeGateCapabilities(spec: unknown): string[] {
+  return [...new Set(prototypeRequiredCapabilities(spec).map((gate) => gate.capability))].sort();
+}
+
 /** Capability names required by a spec, for the native-code resource's renderer contract. */
 export function requiredPrototypeCapabilities(spec: unknown): string[] {
-  return [...new Set(prototypeRequiredCapabilities(spec).map((gate) => gate.capability))].sort();
+  return [...new Set([...prototypeGateCapabilities(spec), ...preflightCapabilities(spec)])].sort();
 }

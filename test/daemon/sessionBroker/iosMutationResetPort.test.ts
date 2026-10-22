@@ -50,6 +50,8 @@ function harness() {
   const state = {
     owned: true,
     privacyRows: [] as (TccPermissionRow[] | Error)[],
+    trustedCertificates: [] as { sha256: string }[],
+    trustStoreReads: [] as { deviceId: string; signal?: AbortSignal }[],
     privacyReads: [] as { deviceId: string; services: readonly string[]; signal?: AbortSignal }[],
     phases: [] as { phase: string; durationMs: number }[],
     groups: { "group.probe": GROUP } as Record<string, string>,
@@ -164,6 +166,13 @@ function harness() {
             throw rows;
           }
           return rows;
+        },
+      },
+      trustStore: {
+        readUserTrustedCertificates: async (deviceId, signal) => {
+          state.trustStoreReads.push({ deviceId, signal });
+          timer.advanceTime(3);
+          return state.trustedCertificates;
         },
       },
       files: {
@@ -616,6 +625,23 @@ describe("iOS mutation reset adapter", () => {
     );
     expect(rig.state.privacyReads).toHaveLength(2);
     expect(rig.state.commands.some((args) => args[0] === "ui")).toBe(false);
+  });
+
+  test("sanitation refuses a user-trusted root CA that keychain reset cannot remove, so erase runs (#14828)", async () => {
+    const rig = harness();
+    rig.state.trustedCertificates = [{ sha256: "AB".repeat(32) }];
+    await expect(rig.port.sanitize(rig.context)).rejects.toThrow(
+      "iOS reset cannot remove 1 user-trusted root certificate(s); erase required",
+    );
+    expect(rig.state.trustStoreReads).toEqual([{ deviceId: UDID, signal: rig.context.signal }]);
+    expect(rig.state.phases).toContainEqual({ phase: "trust-store:verify", durationMs: 3 });
+    expect(rig.state.commands.some((args) => args[0] === "ui")).toBe(false);
+  });
+
+  test("sanitation passes with an empty trust store", async () => {
+    const rig = harness();
+    await rig.port.sanitize(rig.context);
+    expect(rig.state.trustStoreReads).toHaveLength(1);
   });
 
   test("sanitation reads an empty privacy baseline exactly once without per-bundle resets", async () => {

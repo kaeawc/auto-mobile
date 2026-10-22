@@ -35,7 +35,7 @@ describe("AndroidCtrlProxyClient dependency options", () => {
     expect(client["forwardClientProbe"]).toBeInstanceOf(NoForwardClientConnectionProbe);
     expect(client["loggerInstance"]).toBe(logger);
     expect(client["transientObserver"]).toBe(false);
-    expect(client["autoReconnectEnabled"]).toBe(true);
+    expect(client.connectionTestHooks.autoReconnectEnabled).toBe(true);
   });
 
   test("options preserve late dependency slots and injected seams", () => {
@@ -70,7 +70,7 @@ describe("AndroidCtrlProxyClient dependency options", () => {
     expect(client["screenshotBackoffScheduler"]).toBe(screenshotBackoffScheduler);
     expect(client["forwardClientProbe"]).toBeInstanceOf(NoForwardClientConnectionProbe);
     expect(client["transientObserver"]).toBe(true);
-    expect(client["autoReconnectEnabled"]).toBe(false);
+    expect(client.connectionTestHooks.autoReconnectEnabled).toBe(false);
     expect(client["portAllocationId"]).toBe("client-deps:observer:observer-id");
   });
 

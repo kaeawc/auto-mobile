@@ -4,6 +4,7 @@ import path from "node:path";
 import { ActionableError } from "../../../src/models/ActionableError";
 import {
   prototypeAssetFileStem,
+  prototypeDirectoryName,
   prototypeHostTypeName,
   readNativePrototype,
   readNativePrototypeAsset,
@@ -197,8 +198,15 @@ describe("automobile:prototype/native", () => {
   });
 
   test("host type names are valid identifiers", () => {
-    expect(prototypeHostTypeName("checkout-flow")).toBe("CheckoutFlowPrototype");
-    expect(prototypeHostTypeName("2fa")).toBe("P2faPrototype");
+    expect(prototypeHostTypeName("checkout")).toBe("CheckoutPrototype");
+    expect(prototypeHostTypeName("checkout-flow")).toMatch(/^CheckoutFlowPrototype[0-9a-f]{8}$/);
+    expect(prototypeHostTypeName("2fa")).toMatch(/^P2faPrototype[0-9a-f]{8}$/);
+  });
+
+  test("ids that differ only in punctuation get distinct type names and directories", () => {
+    expect(prototypeHostTypeName("checkout-flow")).not.toBe(prototypeHostTypeName("checkout_flow"));
+    expect(prototypeDirectoryName("demo/a")).not.toBe(prototypeDirectoryName("demo?a"));
+    expect(prototypeDirectoryName("checkout")).toBe("checkout");
   });
 
   test("the pinned library version is the Android library's release version", () => {

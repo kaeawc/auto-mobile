@@ -89,8 +89,12 @@ function parsePlatform(value: string | undefined): NativePrototypePlatform | und
   throw new ActionableError(`Unsupported platform "${value}"; use android or ios.`);
 }
 
-/** A filesystem-safe directory name for a prototype id (the spec id stays unchanged inside). */
-export function prototypeDirectoryName(id: string): string {
+function shortHash(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex").slice(0, 8);
+}
+
+/** A filesystem-safe name for a prototype or asset id, without collision handling. */
+function sanitizedName(id: string): string {
   return id.replace(/[^A-Za-z0-9_-]/g, "_");
 }
 
@@ -99,19 +103,26 @@ export function prototypeDirectoryName(id: string): string {
  * short hash of the original id: `hero/a` and `hero?a` stay distinct, while safe ids stay readable.
  */
 export function prototypeAssetFileStem(id: string): string {
-  const safe = prototypeDirectoryName(id);
-  if (safe === id) {
-    return safe;
-  }
-  const hash = createHash("sha256").update(id, "utf8").digest("hex").slice(0, 8);
-  return `${safe}-${hash}`;
+  const safe = sanitizedName(id);
+  return safe === id ? safe : `${safe}-${shortHash(id)}`;
+}
+
+/**
+ * The directory holding a prototype's spec and assets. Like asset names, an id that needed
+ * sanitizing gets a short hash so separately exported prototypes never share a directory.
+ */
+export function prototypeDirectoryName(id: string): string {
+  return prototypeAssetFileStem(id);
 }
 
 /** A Kotlin/Swift type name for the host file: `checkout-flow` becomes `CheckoutFlowPrototype`. */
 export function prototypeHostTypeName(id: string): string {
   const words = id.split(/[^A-Za-z0-9]+/).filter((word) => word.length > 0);
   const name = words.map((word) => word[0].toUpperCase() + word.slice(1)).join("");
-  return `${/^[A-Za-z]/.test(name) ? name : `P${name}`}Prototype`;
+  const base = `${/^[A-Za-z]/.test(name) ? name : `P${name}`}Prototype`;
+  // Only a plain alphanumeric id maps back to one type name; any other (checkout-flow vs
+  // checkout_flow) gets a short hash so two prototypes in one app never share a host type.
+  return /^[A-Za-z][A-Za-z0-9]*$/.test(id) ? base : `${base}${shortHash(id)}`;
 }
 
 /** Asset ids a spec references, by kind, sorted (images first). */

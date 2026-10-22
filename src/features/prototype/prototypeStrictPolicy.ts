@@ -79,19 +79,19 @@ function secureLibraryError(spec: unknown): PrototypeValidationError | undefined
     });
   }
   fields.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  const inRequest = (path: string) =>
+    requests.some(
+      (at) =>
+        path === `${at}.url` ||
+        path === `${at}.body.state` ||
+        ["headers", "query"].some(
+          (name) => path.startsWith(`${at}.${name}.`) || path.startsWith(`${at}.${name}[`),
+        ),
+    );
   const sinkFields = fields.filter(
     (field) =>
       // mapBinding visits only the state key of request/data/emit/platform value bindings.
-      (field.key && field.path.endsWith(".state")) ||
-      requests.some(
-        (at) =>
-          field.path === `${at}.url` ||
-          field.path === `${at}.body.state` ||
-          ["headers", "query"].some(
-            (name) =>
-              field.path.startsWith(`${at}.${name}.`) || field.path.startsWith(`${at}.${name}[`),
-          ),
-      ),
+      (field.key && field.path.endsWith(".state")) || inRequest(field.path),
   );
   // Reuse the key binder for text too: repeat substitution has the same string grammar.
   const instances = repeatKeyInstances(
@@ -104,7 +104,12 @@ function secureLibraryError(spec: unknown): PrototypeValidationError | undefined
   for (const { value, located: field } of instances) {
     const text = String(value.stateKey);
     if (field.key ? secure.has(text) : [...secure].some((key) => text.includes(`{${key}}`))) {
-      return { path: field.path, message: "Secure value cannot be bound into a request" };
+      return {
+        path: field.path,
+        message: inRequest(field.path)
+          ? "Secure value cannot be bound into a request"
+          : "Secure value cannot be bound into an action payload",
+      };
     }
   }
   const keys = object(object(spec)?.storage)?.keys;

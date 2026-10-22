@@ -99,21 +99,27 @@ public enum PrototypeSpecStrictValidator {
         }.map { PrototypeLocatedValue(value: ["stateKey": $0.value["stateKey"] ?? .null], path: $0.path) }
         let secure = Set(repeats.bound(secureNodes).compactMap { $0.value["stateKey"]?.stringValue })
         guard !secure.isEmpty else { return }
-        var bindings: [(text: String, path: String, key: Bool)] = []
-        func append(_ raw: JSONValue?, path: String) {
-            if let text = raw?.stringValue { bindings.append((text, path, false)) }
-            if let key = raw?.objectFields?["state"]?.stringValue { bindings.append((key, "\(path).state", true)) }
+        var bindings: [(text: String, path: String, key: Bool, request: Bool)] = []
+        func append(_ raw: JSONValue?, path: String, request: Bool = false) {
+            if let text = raw?.stringValue { bindings.append((text, path, false, request)) }
+            if let key = raw?.objectFields?["state"]?.stringValue {
+                bindings.append((key, "\(path).state", true, request))
+            }
         }
         for action in actions {
             switch action.value["type"]?.stringValue {
             case "request":
-                append(action.value["url"], path: "\(action.path).url")
+                append(action.value["url"], path: "\(action.path).url", request: true)
                 for name in ["headers", "query"] {
                     for (key, value) in action.value[name]?.objectFields ?? [:] {
-                        append(value, path: PrototypeLimits.dataMemberPath("\(action.path).\(name)", key: key))
+                        append(
+                            value,
+                            path: PrototypeLimits.dataMemberPath("\(action.path).\(name)", key: key),
+                            request: true
+                        )
                     }
                 }
-                append(action.value["body"], path: "\(action.path).body")
+                append(action.value["body"], path: "\(action.path).body", request: true)
             case "setData", "appendData":
                 append(action.value["value"], path: "\(action.path).value")
             case "emit", "platform":
@@ -139,7 +145,12 @@ public enum PrototypeSpecStrictValidator {
             if texts.contains(where: { text in
                 binding.key ? secure.contains(text) : secure.contains { text.contains("{\($0)}") }
             }) {
-                throw PrototypeContractValidator.invalid(binding.path, "Secure value cannot be bound into a request")
+                throw PrototypeContractValidator.invalid(
+                    binding.path,
+                    binding.request
+                        ? "Secure value cannot be bound into a request"
+                        : "Secure value cannot be bound into an action payload"
+                )
             }
         }
         for (index, raw) in PrototypeStrictBindings.array(fields["storage"]?.objectFields?["keys"]).enumerated() {

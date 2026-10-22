@@ -9,6 +9,14 @@ final class PrototypeContractValidatorTests: XCTestCase {
             let fixture = try JSONDecoder().decode(InvalidFixture.self, from: Data(contentsOf: url))
             let data = try JSONEncoder().encode(XCTUnwrap(fixture.spec))
             XCTAssertNoThrow(try PrototypeSpecStrictValidator.validate(data: data), url.lastPathComponent)
+            // Message parity with TS and Kotlin: request sinks, action payloads and storage differ.
+            XCTAssertThrowsError(try PrototypeSpecStrictValidator.validate(data: data, library: true)) { error in
+                XCTAssertEqual(
+                    error as? PrototypeLoadError,
+                    .invalidSpec(path: fixture.expectedPath, message: fixture.expectedMessage ?? ""),
+                    url.lastPathComponent
+                )
+            }
         }
     }
 

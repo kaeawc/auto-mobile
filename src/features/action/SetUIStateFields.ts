@@ -14,6 +14,7 @@ import { getHierarchyNodeSource } from "../observe/output/elementProvenance";
 import { resolveViewHierarchyForSearch } from "../utility/viewHierarchySearch";
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 import { SearchableHierarchy } from "../utility/SearchableNode";
+import { readDropdownDescendantValue } from "./dropdownValue";
 import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import { findIosToggleControl } from "./iosToggleControl";
 import type { TapAtCoordinate } from "./TapAtCoordinate";
@@ -583,7 +584,7 @@ export class SetUIStateFields {
 
       case "dropdown":
         if (fieldSpec.value !== undefined) {
-          const currentValue = this.fieldTypeDetector.getTextValue(element);
+          const currentValue = this.readDropdownValue(element);
           return currentValue === fieldSpec.value;
         }
         return false;
@@ -591,6 +592,14 @@ export class SetUIStateFields {
       default:
         return false;
     }
+  }
+
+  private readDropdownValue(element: Element): string | undefined {
+    const ownValue = this.fieldTypeDetector.getTextValue(element);
+    if (ownValue) {
+      return ownValue;
+    }
+    return readDropdownDescendantValue(element);
   }
 
   /**
@@ -982,8 +991,11 @@ export class SetUIStateFields {
 
       case "dropdown":
         if (fieldSpec.value !== undefined) {
-          const currentValue = this.fieldTypeDetector.getTextValue(element);
-          return { verified: currentValue === fieldSpec.value, observation };
+          const observedValue = this.readDropdownValue(element);
+          if (observedValue === undefined) {
+            return { verified: false, observation, unverifiable: true };
+          }
+          return { verified: observedValue === fieldSpec.value, observation, observedValue };
         }
         return { verified: true, observation };
 

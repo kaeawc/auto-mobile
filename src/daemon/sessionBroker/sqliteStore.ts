@@ -660,6 +660,8 @@ export class SqliteSessionBrokerStore {
 
   /**
    * Recovery first takes durable ownership, fences the prior owner, and requires destruction.
+   * A relinquished release stays releasing until destruction confirms its released receipt;
+   * other interrupted requests fail with session_owner_exited.
    * A live or uncertain owner is retained. The caller must bound uncertainty and arrange another
    * recovery pass, never infer an idle device from process exit.
    */
@@ -680,15 +682,17 @@ export class SqliteSessionBrokerStore {
         const resource = await this.ownedResource(trx, request);
         if (resource.state !== "destroyed") {
           ticket = destructionTicket(
-            await this.updateResource(trx, resource, { state: "destroying" }),
+            request.state === "releasing" && resource.state === "destroying"
+              ? resource
+              : await this.updateResource(trx, resource, { state: "destroying" }),
           );
         }
       }
       await this.updateRequest(trx, requestId, {
         owner_json: JSON.stringify(owner),
-        state: "failed",
-        error: SESSION_OWNER_EXITED_MESSAGE,
-        error_code: SESSION_OWNER_EXITED_CODE,
+        state: request.state === "releasing" ? "releasing" : "failed",
+        error: request.state === "releasing" ? null : SESSION_OWNER_EXITED_MESSAGE,
+        error_code: request.state === "releasing" ? null : SESSION_OWNER_EXITED_CODE,
       });
       return ticket;
     });

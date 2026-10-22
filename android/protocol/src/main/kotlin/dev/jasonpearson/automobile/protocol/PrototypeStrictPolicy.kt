@@ -95,12 +95,11 @@ internal object PrototypeStrictPolicy {
     // The binding visitor exposes request/data/emit/platform state bindings as KEY fields.
     (field.key && field.path.endsWith(".state")) || inRequest(field.path, requests)
 
-  private fun inRequest(path: String, requests: List<String>): Boolean =
-    requests.any { at ->
-      path == "$at.url" ||
-        path == "$at.body.state" ||
-        listOf("headers", "query").any { path.startsWith("$at.$it.") || path.startsWith("$at.$it[") }
-    }
+  private fun inRequest(path: String, requests: List<String>): Boolean = requests.any { at ->
+    path == "$at.url" ||
+      path == "$at.body.state" ||
+      listOf("headers", "query").any { path.startsWith("$at.$it.") || path.startsWith("$at.$it[") }
+  }
 
   private fun bindsSecure(
     field: Field,

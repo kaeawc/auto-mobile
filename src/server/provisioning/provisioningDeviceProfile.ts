@@ -2,17 +2,13 @@ import type { BootedDevice } from "../../models";
 import { ProvisionDeviceError } from "../../devices/exactDeviceProvisioning";
 import type {
   DeviceToolsDependencies,
-  ManufacturerProfileApplier,
   ProvisionDeviceArgs,
 } from "../../features/deviceLifecycle/deviceLifecycleCore";
 import type { ProvisionDeviceProfile } from "../../features/deviceLifecycle/core/schemas";
-import {
-  applyPersona,
-  type ApplyPersonaResult,
-  type RoutePersonaResult,
-} from "../../features/utility/ApplyPersona";
+import type { ApplyPersonaResult, RoutePersonaResult } from "../../features/utility/ApplyPersona";
 import { NON_EMULATABLE_CAPABILITIES, OEM_PERSONAS } from "../../features/utility/OemPersonas";
-import { defaultPersonaExecutors, toManufacturerProfileResult } from "../personaTools";
+import { toManufacturerProfileResult } from "../personaTools";
+import { defaultManufacturerProfileApplier } from "../../features/utility/personaExecutors";
 
 /** The requested manufacturer profile, when the request is Android and names one. */
 export function requestedDeviceProfile(
@@ -57,22 +53,6 @@ export function assertDeviceProfileEmulatable(args: ProvisionDeviceArgs): void {
     { capabilities: blocked.map((id) => ({ id, note: NON_EMULATABLE_CAPABILITIES[id] })) },
   );
 }
-
-/** The production applier: the manufacturerProfile tool's executors, kill deferred. */
-export const defaultManufacturerProfileApplier: ManufacturerProfileApplier = {
-  apply: (device, profile, sessionId, signal) =>
-    applyPersona(
-      device,
-      profile.manufacturerProfile,
-      { requires: profile.requires, deferKill: true },
-      {
-        executors: defaultPersonaExecutors(device, signal),
-        owner: sessionId,
-        restoreKeyboardOnRelease: true,
-        signal,
-      },
-    ),
-};
 
 /**
  * Apply the requested manufacturer profile to the bound session's ready device. Its release

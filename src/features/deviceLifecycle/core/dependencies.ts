@@ -69,8 +69,9 @@ import { getPerformanceMonitor } from "../../performance/PerformanceMonitor";
 import { DeviceTeardownService } from "../../../devices/deviceTeardownService";
 import { mergeDeviceToolsDependencies } from "../deviceLifecycleDependencyOverrides";
 import { executionTracker } from "../../../daemon/executionTracker";
-import type { ApplyPersonaResult, RoutePersonaResult } from "../../utility/ApplyPersona";
-import type { ProvisionDeviceProfile } from "./schemas";
+import type { ManufacturerProfileApplier } from "../../utility/personaExecutors";
+
+export type { ManufacturerProfileApplier };
 
 export function initializedDevicePool(): DevicePool | undefined {
   return defaultDaemonContext.fullDevicePool();
@@ -86,16 +87,6 @@ export async function assertNotBindingDeviceForAdoption(device: {
     deviceId: device.stableId,
     platform: device.platform,
   });
-}
-
-/** Applies an OEM manufacturer profile to a provisioned device for its owning session. */
-export interface ManufacturerProfileApplier {
-  apply(
-    device: BootedDevice,
-    profile: ProvisionDeviceProfile,
-    sessionId: string,
-    signal?: AbortSignal,
-  ): Promise<ApplyPersonaResult | RoutePersonaResult>;
 }
 
 export interface DeviceToolsDependencies {

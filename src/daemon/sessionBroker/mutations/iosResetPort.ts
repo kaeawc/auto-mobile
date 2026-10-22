@@ -7,6 +7,11 @@ import { classifyCleanReleaseError } from "../cleanReleaseFailure";
 import type { Timer } from "../../../utils/SystemTimer";
 import type { SimCtl } from "../../../utils/ios-cmdline-tools/SimCtlClient";
 import type { SimCtlClient } from "../../../utils/ios-cmdline-tools/SimCtlClient";
+import {
+  SIMCTL_PRIVACY_TCC_SERVICES,
+  type TccServiceRowReader,
+} from "../../../utils/ios-cmdline-tools/SimulatorTccSqliteClient";
+import type { UserTrustStoreReader } from "../../../utils/ios-cmdline-tools/SimulatorTccSqliteClient";
 import { isProcessAlreadyGoneError } from "../../../utils/ios-cmdline-tools/iosProcessErrors";
 import { getIosInstalledAppBundleId } from "../../../utils/ios-cmdline-tools/iosInstalledApp";
 import { parsePlist } from "../../../utils/ios-cmdline-tools/XctestrunPlist";
@@ -172,6 +177,8 @@ export interface IosMutationResetDependencies {
   simctl: Pick<SimCtl, "executeCommandArgs"> & Pick<SimCtlClient, "listAppsOrThrow">;
   files: IosResetFiles;
   pasteboard: IosResetPasteboard;
+  privacyGrants: Pick<TccServiceRowReader, "readServiceRows">;
+  trustStore: UserTrustStoreReader;
 }
 
 interface IosAppGroupCleanup {
@@ -504,7 +511,80 @@ export class IosDeviceMutationResetPort implements DeviceMutationResetPort {
         context,
       );
     }
+    await this.resetSurvivingPrivacyGrants(context);
+    await this.assertNoUserTrustedCertificates(context);
     await this.restoreSettings(context);
+  }
+
+  /**
+   * `simctl keychain reset` leaves the user trust settings alone and nothing else here removes a
+   * trusted root, so one that survives would let the next session's TLS traffic be intercepted.
+   * Pool-entry simulators are created with no user-trusted roots, so any row means the session
+   * added it: refuse the keep-booted reset so the erase fallback wipes it (#14828).
+   */
+  private async assertNoUserTrustedCertificates(
+    context: DeviceMutationResetContext,
+  ): Promise<void> {
+    await context.assertOwned();
+    context.signal.throwIfAborted();
+    const started = this.timer.now();
+    try {
+      const certificates = await this.dependencies.trustStore.readUserTrustedCertificates(
+        context.scope.deviceId,
+        context.signal,
+      );
+      await context.assertOwned();
+      context.signal.throwIfAborted();
+      if (certificates.length > 0) {
+        throw new ActionableError(
+          `iOS reset cannot remove ${certificates.length} user-trusted root certificate(s); erase required`,
+        );
+      }
+    } finally {
+      context.recordPhase?.("trust-store:verify", this.timer.now() - started);
+    }
+  }
+
+  private async resetSurvivingPrivacyGrants(context: DeviceMutationResetContext): Promise<void> {
+    const udid = context.scope.deviceId;
+    const readRows = async () => {
+      await context.assertOwned();
+      context.signal.throwIfAborted();
+      const started = this.timer.now();
+      try {
+        return await this.dependencies.privacyGrants.readServiceRows(
+          udid,
+          SIMCTL_PRIVACY_TCC_SERVICES,
+          context.signal,
+        );
+      } catch (error) {
+        throw toActionableError(error, "iOS privacy grant verification failed");
+      } finally {
+        context.recordPhase?.("tcc:privacy-verify", this.timer.now() - started);
+      }
+    };
+    const rows = await readRows();
+    await context.assertOwned();
+    context.signal.throwIfAborted();
+    if (rows.length === 0) {
+      return;
+    }
+    const clients = [...new Set(rows.map((row) => row.client))].sort();
+    logger.warn(
+      `iOS privacy grants survived global reset; resetting clients: ${clients.join(", ")}`,
+    );
+    for (const client of clients) {
+      await this.command(context, ["privacy", udid, "reset", "all", client]);
+    }
+    const remaining = await readRows();
+    await context.assertOwned();
+    context.signal.throwIfAborted();
+    if (remaining.length > 0) {
+      throw new ActionableError(
+        "iOS privacy grants survived reset: " +
+          remaining.map((row) => `${row.service}:${row.client}`).join(", "),
+      );
+    }
   }
 
   private async restoreSettings(context: DeviceMutationResetContext): Promise<void> {

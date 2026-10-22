@@ -36,6 +36,8 @@ function harness(
           };
         },
       },
+      privacyGrants: { readServiceRows: async () => [] },
+      trustStore: { readUserTrustedCertificates: async () => [] },
       files: { realpath: async (path) => path, remove: async () => {} },
       pasteboard: { assertSettled: () => {}, write: async () => {} },
     },
@@ -143,6 +145,8 @@ describe("iOS baseline setting contracts", () => {
             };
           },
         },
+        privacyGrants: { readServiceRows: async () => [] },
+        trustStore: { readUserTrustedCertificates: async () => [] },
         files: { realpath: async (path) => path, remove: async () => {} },
         pasteboard: { assertSettled: () => {}, write: async () => {} },
       },

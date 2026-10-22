@@ -1,0 +1,9 @@
+android
+[x] com.android.internal.display.cutout.emulation.hole
+--- com.android.internal.systemui.navbar.twobutton
+[ ] com.android.internal.systemui.navbar.threebutton
+[ ] com.android.theme.font.notoserifsource
+
+com.android.settings
+[ ] com.android.shell:com.android.settings.fabricated_accent
+

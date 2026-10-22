@@ -31,6 +31,10 @@ import type { BrokerProvisionRequest } from "../../../src/daemon/sessionBroker/p
 import type { BindingsResult } from "../../../src/daemon/sessionBroker/provisioning/acquisitionResult";
 import { FakeBindingRegistry } from "../../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import type {
+  TaskLeaseKeepalive,
+  TaskLeaseHoldRequest,
+} from "../../../src/daemon/tasks/taskLeaseKeepalive";
 import { FakeDeviceMutationJournal } from "../../fakes/FakeDeviceMutationJournal";
 import { drainUntilQuiescent } from "../../helpers/fakeTimerStepping";
 import type { DeviceMutationScope } from "../../../src/daemon/sessionBroker/mutations/types";
@@ -169,8 +173,110 @@ function acquisition(
   return { acquire: run };
 }
 
+class RecordingLeaseKeepalive implements TaskLeaseKeepalive {
+  readonly requests: TaskLeaseHoldRequest[] = [];
+  held = false;
+  releases = 0;
+
+  hold(request: TaskLeaseHoldRequest): () => void {
+    this.requests.push(request);
+    this.held = true;
+    return () => {
+      this.held = false;
+      this.releases++;
+    };
+  }
+}
+
 describe("ManagedDevicePort preparation and release", () => {
-  test("binds the exact broker mutation scope before returning a ready session", async () => {
+  test("does not hold a lease when acquisition throws before the session is ready", async () => {
+    const leaseKeepalive = new RecordingLeaseKeepalive();
+    const dependencies: ManagedDevicePortDependencies = {
+      scope: SCOPE,
+      timer: new FakeTimer(),
+      leaseKeepalive,
+      brokerDeviceAcquisition: acquisition(async () => {
+        throw new Error("acquisition failed");
+      }),
+      brokerExecutionRelease: { releaseExecution: async (id) => releaseResult(id) },
+      registry: new FakeBindingRegistry(new FakeTimer()),
+      bindingJournal: {
+        owner: OWNER,
+        redriveBinding: async () => ({ kind: "clear", redriven: [] }),
+      },
+    };
+    await expect(
+      new ManagedDevicePort(dependencies).prepare(resource(), { livenessOwnerToken: "token" }),
+    ).rejects.toThrow("acquisition failed");
+    expect(leaseKeepalive.requests).toEqual([]);
+    expect(leaseKeepalive.releases).toBe(0);
+  });
+
+  test.each(["success", "optional failure", "deadline failure"])(
+    "holds the lease during Android baseline capture and releases after %s",
+    async (outcome) => {
+      const leaseKeepalive = new RecordingLeaseKeepalive();
+      const timer = new FakeTimer();
+      const captureError = new Error("snapshot save failed");
+      let heldDuringCapture = false;
+      const dependencies: ManagedDevicePortDependencies = {
+        scope: SCOPE,
+        timer,
+        leaseKeepalive,
+        brokerDeviceAcquisition: acquisition(async (config) => readyResult(config)),
+        brokerExecutionRelease: { releaseExecution: async (id) => releaseResult(id) },
+        registry: new FakeBindingRegistry(timer),
+        bindingJournal: {
+          owner: OWNER,
+          redriveBinding: async () => ({ kind: "clear", redriven: [] }),
+        },
+        resetBaseline: {
+          android: {
+            canCapture: true,
+            capture: async () => {
+              heldDuringCapture = leaseKeepalive.held;
+              if (outcome === "deadline failure") {
+                timer.advanceTime(1000);
+              }
+              if (outcome !== "success") {
+                throw captureError;
+              }
+            },
+            forget: async () => {},
+            reset: async () => "clean",
+          },
+        },
+      };
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const preparation = new ManagedDevicePort(dependencies).prepare(resource(ANDROID), {
+          livenessOwnerToken: "token",
+          preparationTimeoutMs: 1000,
+        });
+        if (outcome === "deadline failure") {
+          await expect(preparation).rejects.toThrow("exceeded preparation deadline");
+        } else {
+          expect((await preparation).sessionId).toBe("session-1");
+        }
+        expect(heldDuringCapture).toBe(true);
+        expect(leaseKeepalive.requests).toEqual([
+          { taskId: "request-1", ownerKey: "session-broker", sessionUuid: "session-1" },
+        ]);
+        expect(leaseKeepalive.held).toBe(false);
+        expect(leaseKeepalive.releases).toBe(1);
+        if (outcome === "optional failure") {
+          expect(warn).toHaveBeenCalledWith(
+            expect.stringContaining(captureError.message),
+            captureError,
+          );
+        }
+      } finally {
+        warn.mockRestore();
+      }
+    },
+  );
+
+  test("binds the exact broker mutation scope, shared with the iOS reset scope, before returning a ready session", async () => {
     const scopes: DeviceMutationScope[] = [];
     const port = new ManagedDevicePort({
       scope: SCOPE,
@@ -190,7 +296,11 @@ describe("ManagedDevicePort preparation and release", () => {
       sessionId: "session-1",
     });
     expect(scopes).toEqual([
-      { sessionUuid: "session-1", deviceId: "transport-1", incarnation: '["resource-1",1]' },
+      {
+        sessionUuid: "session-1",
+        deviceId: "device-1",
+        incarnation: JSON.stringify([SCOPE_KEY, 7, "device-1"]),
+      },
     ]);
   });
 
@@ -417,10 +527,70 @@ describe("ManagedDevicePort preparation and release", () => {
     expect(configs).toHaveLength(1);
   });
 
-  test("rejects a non-ready acquisition and drains any session it returned", async () => {
-    const releases: string[] = [];
+  test("applies a requested manufacturer profile to the prepared session's device (#14058)", async () => {
+    const applied: unknown[] = [];
+    let routed = false;
     const port = new ManagedDevicePort({
       scope: SCOPE,
+      brokerDeviceAcquisition: acquisition(async (config) => readyResult(config)),
+      brokerExecutionRelease: { releaseExecution: async (sessionId) => releaseResult(sessionId) },
+      registry: {} as never,
+      bindingJournal: {
+        owner: OWNER,
+        redriveBinding: async () => ({ kind: "clear", redriven: [] }),
+      },
+      manufacturerProfileApplier: {
+        apply: async (device, profile, sessionId) => {
+          applied.push({ device, profile, sessionId });
+          const summary = { id: profile.manufacturerProfile, version: 1, displayName: "Samsung" };
+          return routed
+            ? {
+                message: "route",
+                deviceId: device.deviceId,
+                action: "apply",
+                catalogVersion: 1,
+                persona: summary,
+                status: "route_to_real_device",
+                capabilities: [],
+              }
+            : {
+                message: "applied",
+                deviceId: device.deviceId,
+                action: "apply",
+                catalogVersion: 1,
+                persona: summary,
+                status: "applied",
+                facets: [],
+                nonEmulatable: [],
+              };
+        },
+      },
+    });
+    const deviceProfile = { manufacturerProfile: "samsung-oneui" } as const;
+
+    await port.prepare(resource(ANDROID), { livenessOwnerToken: "token", deviceProfile });
+    expect(applied).toEqual([
+      {
+        device: { platform: "android", name: "device-1", deviceId: "transport-1" },
+        profile: deviceProfile,
+        sessionId: "session-1",
+      },
+    ]);
+    await port.prepare(resource(ANDROID), { livenessOwnerToken: "token" });
+    expect(applied).toHaveLength(1);
+
+    routed = true;
+    await expect(
+      port.prepare(resource(ANDROID), { livenessOwnerToken: "token", deviceProfile }),
+    ).rejects.toThrow("route");
+  });
+
+  test("rejects a non-ready acquisition and drains any session it returned", async () => {
+    const releases: string[] = [];
+    const leaseKeepalive = new RecordingLeaseKeepalive();
+    const port = new ManagedDevicePort({
+      scope: SCOPE,
+      leaseKeepalive,
       brokerDeviceAcquisition: acquisition(async (config) =>
         readyResult(config, { readiness: { mode: "automation", status: "booted" } }),
       ),
@@ -441,6 +611,8 @@ describe("ManagedDevicePort preparation and release", () => {
       port.prepare(resource(), { livenessOwnerToken: "consumer-liveness" }),
     ).rejects.toThrow("did not return an automation-ready session");
     expect(releases).toEqual(["session-1"]);
+    expect(leaseKeepalive.requests).toEqual([]);
+    expect(leaseKeepalive.releases).toBe(0);
   });
 
   test("reports settled only for confirmed release with no bookkeeping failures", async () => {
@@ -598,6 +770,7 @@ describe("ManagedDevicePort clean-reset ownership", () => {
 
   test("pool-entry baseline capture runs before exposing the owned execution session", async () => {
     const rig = await destructionRig();
+    const leaseKeepalive = new RecordingLeaseKeepalive();
     const assignment = await rig.registry.getAssignment(rig.key);
     if (!assignment) {
       throw new Error("Missing binding");
@@ -612,6 +785,7 @@ describe("ManagedDevicePort clean-reset ownership", () => {
       brokerDeviceAcquisition: acquisition(async (config) => readyResult(config)),
       brokerExecutionRelease: { releaseExecution: async (id) => releaseResult(id) },
       captureIosBaseline: async (context) => {
+        expect(leaseKeepalive.held).toBe(true);
         await context.assertOwned();
         captures++;
         expect(context.scope).toEqual({
@@ -620,16 +794,24 @@ describe("ManagedDevicePort clean-reset ownership", () => {
           sessionUuid: "session-1",
         });
       },
+      leaseKeepalive,
     });
     expect(
       (await port.prepare({ ...rig.resource, state: "reserved" }, { livenessOwnerToken: "token" }))
         .sessionId,
     ).toBe("session-1");
     expect(captures).toBe(1);
+    expect(leaseKeepalive.requests).toEqual([
+      { taskId: "request-1", ownerKey: "session-broker", sessionUuid: "session-1" },
+    ]);
+    expect(leaseKeepalive.held).toBe(false);
+    expect(leaseKeepalive.releases).toBe(1);
   });
 
   test("a failed optional baseline capture does not release the acquired session", async () => {
     const rig = await destructionRig();
+    const leaseKeepalive = new RecordingLeaseKeepalive();
+    let heldDuringCapture = false;
     const assignment = await rig.registry.getAssignment(rig.key);
     if (!assignment) {
       throw new Error("Missing binding");
@@ -649,8 +831,10 @@ describe("ManagedDevicePort clean-reset ownership", () => {
         },
       },
       captureIosBaseline: async () => {
+        heldDuringCapture = leaseKeepalive.held;
         throw new DOMException("inventory timed out", "TimeoutError");
       },
+      leaseKeepalive,
     });
     expect(
       (
@@ -661,6 +845,9 @@ describe("ManagedDevicePort clean-reset ownership", () => {
       ).sessionId,
     ).toBe("session-1");
     expect(releases).toBe(0);
+    expect(heldDuringCapture).toBe(true);
+    expect(leaseKeepalive.held).toBe(false);
+    expect(leaseKeepalive.releases).toBe(1);
   });
 
   test("the captured baseline survives a settling generation bump but not a replacement UDID", async () => {

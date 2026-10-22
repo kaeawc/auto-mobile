@@ -1,0 +1,55 @@
+{
+  "id": "secure",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "secret": "",
+    "password": "",
+    "public": "ok"
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "textField",
+        "stateKey": "secret",
+        "secure": true
+      },
+      {
+        "type": "textField",
+        "stateKey": "password",
+        "keyboardType": "password"
+      },
+      {
+        "type": "button",
+        "label": "Send",
+        "onTap": [
+          {
+            "type": "request",
+            "url": "https://example.com/{secret}",
+            "via": "device",
+            "method": "POST",
+            "headers": {
+              "X-Secret": {
+                "state": "password"
+              }
+            },
+            "query": {
+              "q": "{password}"
+            },
+            "body": {
+              "state": "secret"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "storage": {
+    "version": 1,
+    "keys": ["state:secret", "state:password"]
+  }
+}

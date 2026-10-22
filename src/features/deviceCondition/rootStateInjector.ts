@@ -123,13 +123,22 @@ export function createRootStateInjector(adb: AdbExecutor): DeviceConditionInject
     // have un-rooted adbd. `adb root` is a no-op when it is already running as root.
     await adbCommand(adb, ["root"], resetSignal);
     await adbCommand(adb, ["wait-for-device"], resetSignal);
+    let remaining = new Set<string>();
     if (planted.size > 0) {
       await shell(adb, ["rm", "-f", ...planted], resetSignal);
+      // Confirm the removal; `planted` is only cleared once the files are really gone.
+      remaining = await listExisting(adb, [...planted], resetSignal);
     }
     if (selinuxChanged) {
       await shell(adb, ["setenforce", selinuxFlag(baselineSelinux)], resetSignal);
     }
     await adbCommand(adb, ["unroot"], resetSignal);
+    if (remaining.size > 0) {
+      // Everything else is restored, but the reset stays owed so release retries and reports it.
+      throw new ActionableError(
+        `rootState reset left artifacts on the device: ${[...remaining].join(", ")}`,
+      );
+    }
     planted.clear();
     selinuxChanged = false;
     baselineCaptured = false;

@@ -108,10 +108,11 @@ describe("rootState injector (#14060)", () => {
 
   test("isClean is false while planted artifacts exist and true after reset", async () => {
     const adb = adbWith(ROOTABLE);
-    // First listing: nothing pre-existing. Second: what we planted is still there.
+    // Listings: nothing pre-existing; planted files present; then gone on the reset's readback.
     adb.setCommandResponseSequence("ls /system/xbin/su", [
       execResult(""),
       execResult(ALL_ARTIFACTS),
+      execResult(""),
     ]);
     const injector = createRootStateInjector(adb);
     const outcome = await injector.apply("rooted-detectable");
@@ -207,10 +208,11 @@ describe("rootState injector (#14060)", () => {
 
   test("applying twice through the controller registers one reset and restores cleanly", async () => {
     const adb = adbWith(ROOTABLE);
-    // The first listing finds nothing pre-existing; the second finds our planted files still there.
+    // Nothing pre-existing; our planted files still there on the repeat apply; gone after reset.
     adb.setCommandResponseSequence("ls /system/xbin/su", [
       execResult(""),
       execResult(ALL_ARTIFACTS),
+      execResult(""),
     ]);
     adb.setCommandResponseSequence("getenforce", [
       execResult("Enforcing"),
@@ -316,5 +318,23 @@ describe("rootState injector (#14060)", () => {
       .filter((c) => c.startsWith("shell setenforce"))
       .at(-1);
     expect(lastSetenforce).toBe("shell setenforce 1");
+  });
+
+  test("a reset that cannot confirm the artifacts are gone stays owed and reports them", async () => {
+    const adb = adbWith(ROOTABLE);
+    // Pre-existing listing: none. The reset's readback and the clean check both still see the files.
+    adb.setCommandResponseSequence("ls /system/xbin/su", [
+      execResult(""),
+      execResult(ALL_ARTIFACTS),
+      execResult(ALL_ARTIFACTS),
+    ]);
+    const injector = createRootStateInjector(adb);
+    const outcome = await injector.apply("rooted-detectable");
+
+    await expect(outcome.reset?.()).rejects.toThrow(/left artifacts on the device/);
+    // SELinux was still restored and adbd un-rooted despite the failed removal check.
+    expect(adb.getExecutedCommands()).toContain("unroot");
+    // Nothing was forgotten: the device is not reported clean.
+    expect(await injector.isClean()).toBe(false);
   });
 });

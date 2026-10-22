@@ -265,10 +265,7 @@ export class AndroidKeepBootedReset implements AndroidResetStrategy {
     };
     try {
       await fence();
-      const reason =
-        session.uses >= this.maxUses
-          ? "maxUses retirement"
-          : await this.cleanWithDeadline(port, mutationContext, context, phases);
+      const reason = await this.escalationReason(session, port, mutationContext, context, phases);
       await fence();
       if (reason) {
         fallbackReason = reason;
@@ -376,6 +373,22 @@ export class AndroidKeepBootedReset implements AndroidResetStrategy {
       logger.warn(`Android keep-booted reset failed: ${errorMessage(error)}`, error);
       throw this.resetFailure(error, phases, fallbackTiming, fallbackReason);
     }
+  }
+
+  private async escalationReason(
+    session: AndroidKeepBootedSession,
+    port: AndroidKeepBootedResetPort,
+    mutationContext: DeviceMutationResetContext,
+    context: AndroidResetSessionContext,
+    phases: Record<string, number>,
+  ): Promise<string | undefined> {
+    if (session.uses >= this.maxUses) {
+      return "maxUses retirement";
+    }
+    if (context.opaquePersistentChanges) {
+      return "opaque persistent changes (deviceSnapshot) cannot be journal-reverted";
+    }
+    return this.cleanWithDeadline(port, mutationContext, context, phases);
   }
 
   private resetFailure(

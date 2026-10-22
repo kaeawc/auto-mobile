@@ -1748,7 +1748,10 @@ internal constructor(
       element.checkable == "true" ||
       element.checked == "true" ||
       element.selected == "true" ||
-      element.longClickable == "true"
+      element.longClickable == "true" ||
+      // The TalkBack cursor is semantic even on a node exposing only baseline focus actions, so
+      // pruning must keep it for findAccessibilityFocusedElement (#14384).
+      element.isAccessibilityFocused
   }
 
   private fun hasAccessibilityFeatures(element: UIElementInfo): Boolean {

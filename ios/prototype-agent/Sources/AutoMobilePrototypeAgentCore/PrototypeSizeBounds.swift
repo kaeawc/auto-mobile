@@ -83,7 +83,8 @@ enum PrototypeSizeBounds {
     private static let childGroups: [String: [String: String]] = [
         "spec": ["root": "node", "window": "window"],
         "node": ["child": "node", "children": "node", "style": "style", "spans": "textSpan",
-                 "styleWhen": "styleWhen", "animate": "animate", "zoomable": "zoomable", "anchor": "anchor", "detents": "detent"],
+                 "styleWhen": "styleWhen", "animate": "animate", "zoomable": "zoomable",
+                 "anchor": "anchor", "detents": "detent"],
         "styleWhen": ["style": "style"],
         "textSpan": ["style": "textSpanStyle"],
         "anchor": ["bounds": "bounds", "offset": "offset"],

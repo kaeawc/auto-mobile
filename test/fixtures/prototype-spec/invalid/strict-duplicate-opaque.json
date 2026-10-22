@@ -1,0 +1,4 @@
+{
+  "rawJson": "{\"id\":\"strict\",\"window\":{\"placement\":{\"type\":\"fullscreen\"}},\"root\":{\"type\":\"spacer\",\"onTap\":[{\"type\":\"emit\",\"name\":\"a\",\"payload\":{\"k\":0,\"k\":1}}]}}",
+  "expectedPath": "$"
+}

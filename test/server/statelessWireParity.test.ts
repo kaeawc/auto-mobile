@@ -302,6 +302,8 @@ describe("desktop handshake against the real daemon streamable endpoint", () => 
       captured = await captureHandshake();
     } finally {
       PlatformDeviceManagerFactory.reset();
+      DaemonState.getInstance().reset();
+      ToolRegistry.clearTools();
     }
   });
 

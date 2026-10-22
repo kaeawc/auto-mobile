@@ -1,5 +1,5 @@
 import { z } from "zod/v4";
-import { PLAN_SKELETON } from "./toolRegistryTypes";
+import { ANSWERS_SYSTEM_ALERTS, PLAN_SKELETON } from "./toolRegistryTypes";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { MultiTouchGesture } from "../features/action/MultiTouchGesture";
 import {
@@ -182,6 +182,7 @@ export function registerMultiTouchTools() {
     {
       defaultEnabled: false,
       supportsProgress: true,
+      ...ANSWERS_SYSTEM_ALERTS,
       outputSchema: multiTouchResultSchema,
       ...PLAN_SKELETON,
     },

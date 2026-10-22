@@ -241,6 +241,11 @@ describe("root SPM toolchain floor workflow", () => {
     expect(desktopCleanup?.run).toContain(
       'rm -rf -- "$RUNNER_TEMP/desktop-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"',
     );
+    // A daemon still flushing after --stop makes rm fail with "Directory not empty".
+    expect(desktopCleanup?.run).toContain("for attempt in 1 2 3 4; do");
+    expect(desktopCleanup?.run).toMatch(
+      /rm -rf -- "\$RUNNER_TEMP\/desktop-home-[^"]+" 2>\/dev\/null && exit 0\n\s*sleep "\$attempt"\n\s*done\n\s*rm -rf -- "\$RUNNER_TEMP\/desktop-home-[^"]+"\n?$/,
+    );
   });
 
   test("cancels superseded PR runs at workflow scope", () => {

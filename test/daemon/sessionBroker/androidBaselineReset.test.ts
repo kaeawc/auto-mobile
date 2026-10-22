@@ -13,6 +13,154 @@ import {
   FakeAndroidResetHost,
 } from "./fixtures/androidReset";
 describe("AndroidBaselineReset", () => {
+  test("reset ownership, incarnation rebinding and health accept a pending inventory name", async () => {
+    const host = new FakeAndroidResetHost();
+    host.strategy = {
+      handlesSessionMutations: true,
+      reset: async (_device, _packages, assertOwned, context) => {
+        await assertOwned();
+        host.bootId = "87654321-4321-4321-4321-cba987654321";
+        await context.rebindIncarnation?.();
+      },
+    };
+    const baseline = new AndroidBaselineReset(host);
+    await baseline.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-a", {
+      timer: new FakeTimer(),
+    });
+    host.devices = [
+      {
+        ...ANDROID_RESET_DEVICE,
+        name: `Unknown (${ANDROID_RESET_DEVICE.deviceId})`,
+        isRunning: true,
+      },
+    ];
+    await expect(
+      baseline.reset("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, async () => {}),
+    ).resolves.toBe("clean");
+  });
+
+  test("capture accepts a pending inventory name only inside the strategy ownership check", async () => {
+    const host = new FakeAndroidResetHost();
+    host.strategy = {
+      handlesSessionMutations: true,
+      capture: async (_device, context) => {
+        host.devices = [
+          {
+            ...ANDROID_RESET_DEVICE,
+            name: `Unknown (${ANDROID_RESET_DEVICE.deviceId})`,
+            isRunning: true,
+          },
+        ];
+        await context.assertOwned();
+      },
+      reset: async () => {},
+    };
+    const baseline = new AndroidBaselineReset(host);
+    await baseline.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-a", {
+      timer: new FakeTimer(),
+    });
+    expect(host.closed).toBe(0);
+    expect(
+      host.commands.filter((command) => command === "shell cat /proc/sys/kernel/random/boot_id"),
+    ).toHaveLength(2);
+  });
+
+  test.each([
+    "foreign serial",
+    "foreign placeholder",
+    "real name",
+    "offline",
+    "unknown running state",
+    "duplicate",
+    "boot",
+    "boot identity",
+  ])("capture rejects %s during the strategy ownership check", async (failure) => {
+    const host = new FakeAndroidResetHost();
+    host.strategy = {
+      handlesSessionMutations: true,
+      capture: async (_device, context) => {
+        host.devices = [
+          {
+            ...ANDROID_RESET_DEVICE,
+            name: `Unknown (${ANDROID_RESET_DEVICE.deviceId})`,
+            isRunning: true,
+          },
+        ];
+        const target = host.devices[0]!;
+        if (failure === "foreign serial") {
+          target.deviceId = "emulator-5556";
+        }
+        if (failure === "foreign placeholder") {
+          target.name = "Unknown (emulator-5556)";
+        }
+        if (failure === "real name") {
+          target.name = "different-avd";
+        }
+        if (failure === "offline") {
+          target.isRunning = false;
+        }
+        if (failure === "unknown running state") {
+          target.isRunningStateKnown = false;
+        }
+        if (failure === "duplicate") {
+          host.devices.push({ ...target });
+        }
+        if (failure === "boot") {
+          host.booted = false;
+        }
+        if (failure === "boot identity") {
+          host.bootId = "87654321-4321-4321-4321-cba987654321";
+        }
+        await context.assertOwned();
+      },
+      reset: async () => {},
+    };
+    const message =
+      failure === "boot"
+        ? "has not completed boot"
+        : failure === "boot identity"
+          ? "changed emulator boot identity"
+          : "exact online reset target";
+    await expect(
+      new AndroidBaselineReset(host).capture(
+        "resource-a",
+        ANDROID_RESET_DEVICE,
+        ANDROID_RESET_PROFILE,
+        "session-a",
+        { timer: new FakeTimer() },
+      ),
+    ).rejects.toThrow(message);
+    expect(host.closed).toBe(1);
+  });
+
+  test("pre-capture inventory requires the full profile even for the same serial placeholder", async () => {
+    const host = new FakeAndroidResetHost();
+    host.devices = [
+      {
+        ...ANDROID_RESET_DEVICE,
+        name: `Unknown (${ANDROID_RESET_DEVICE.deviceId})`,
+        isRunning: true,
+      },
+    ];
+    let captured = false;
+    host.strategy = {
+      capture: async () => {
+        captured = true;
+      },
+      reset: async () => {},
+    };
+    await expect(
+      new AndroidBaselineReset(host).capture(
+        "resource-a",
+        ANDROID_RESET_DEVICE,
+        ANDROID_RESET_PROFILE,
+        "session-a",
+        { timer: new FakeTimer() },
+      ),
+    ).rejects.toThrow("exact online reset target");
+    expect(captured).toBe(false);
+  });
+
   test("default reset budget accommodates a cold boot beyond the old two-minute cutoff", async () => {
     const timer = new FakeTimer();
     const host = new FakeAndroidResetHost();
@@ -122,6 +270,79 @@ describe("AndroidBaselineReset", () => {
       reset.capture("resource-b", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-b"),
     ).rejects.toThrow("original capture failure");
     expect(host.closed).toBe(2);
+  });
+
+  test("activity guard marks only a user snapshot capture as opaque persistent", () => {
+    const tracker = new ExecutionTracker(new FakeTimer(), new CountingIdGenerator("execution"));
+    const activity = watchAndroidResetSession(tracker, "session-a");
+    const run = (toolName: string) => {
+      const execution = tracker.startExecution(toolName, undefined, "session-a");
+      tracker.markSessionAdmitted(execution.id);
+      tracker.endExecution(execution.id);
+    };
+    run("displayConfig");
+    run("installApp");
+    expect(activity.canReset()).toBe(false);
+    expect(activity.madeOpaquePersistentChanges()).toBe(false);
+    expect(activity.madeHostSideChanges()).toBe(false);
+    run("setDeviceResources");
+    expect(activity.madeHostSideChanges()).toBe(true);
+    run("deviceSnapshot");
+    expect(activity.madeOpaquePersistentChanges()).toBe(true);
+    activity.close();
+  });
+
+  test("a capture step that times out is retried inside the preparation deadline (#14956)", async () => {
+    const host = new FakeAndroidResetHost();
+    host.strategy = { reset: async () => {} };
+    let calls = 0;
+    host.onInventory = () => {
+      if (++calls === 1) {
+        throw new Error("Android baseline reset inventory timed out after 2000ms");
+      }
+    };
+    await new AndroidBaselineReset(host).capture(
+      "resource-a",
+      ANDROID_RESET_DEVICE,
+      ANDROID_RESET_PROFILE,
+      "session-a",
+      { timer: new FakeTimer(), timeoutMs: 30_000 },
+    );
+    expect(host.inventoryCalls).toBeGreaterThan(1);
+    expect(host.closed).toBe(0);
+  });
+
+  test("a capture step that keeps timing out fails after bounded attempts, other errors are not retried", async () => {
+    const timedOut = new FakeAndroidResetHost();
+    timedOut.strategy = { reset: async () => {} };
+    timedOut.onInventory = () => {
+      throw new Error("Android baseline reset inventory timed out after 2000ms");
+    };
+    await expect(
+      new AndroidBaselineReset(timedOut).capture(
+        "resource-a",
+        ANDROID_RESET_DEVICE,
+        ANDROID_RESET_PROFILE,
+        "session-a",
+        { timer: new FakeTimer(), timeoutMs: 30_000 },
+      ),
+    ).rejects.toThrow("timed out after 2000ms");
+    expect(timedOut.inventoryCalls).toBe(3);
+    const broken = new FakeAndroidResetHost();
+    broken.strategy = { reset: async () => {} };
+    broken.onInventory = () => {
+      throw new Error("adb exploded");
+    };
+    await expect(
+      new AndroidBaselineReset(broken).capture(
+        "resource-a",
+        ANDROID_RESET_DEVICE,
+        ANDROID_RESET_PROFILE,
+        "session-a",
+        { timer: new FakeTimer(), timeoutMs: 30_000 },
+      ),
+    ).rejects.toThrow("adb exploded");
+    expect(broken.inventoryCalls).toBe(1);
   });
 
   test("native activity guard ignores reads and foreign sessions but rejects admitted session use", () => {

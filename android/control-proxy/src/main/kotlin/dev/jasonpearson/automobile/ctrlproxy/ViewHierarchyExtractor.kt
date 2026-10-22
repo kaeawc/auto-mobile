@@ -1753,7 +1753,8 @@ internal constructor(
 
   private fun hasAccessibilityFeatures(element: UIElementInfo): Boolean {
     // Accessibility feature criteria
-    return !element.liveRegion.isNullOrBlank() ||
+    return (pruneBaselineWrappers && element.accessibilityFocused == "true") ||
+      !element.liveRegion.isNullOrBlank() ||
       !element.collectionInfo.isNullOrBlank() ||
       !element.collectionItemInfo.isNullOrBlank() ||
       !element.rangeInfo.isNullOrBlank() ||

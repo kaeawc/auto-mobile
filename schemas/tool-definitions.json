@@ -24285,6 +24285,43 @@
                         }
                       },
                       "additionalProperties": false
+                    },
+                    "deviceProfile": {
+                      "description": "Android: OEM manufacturer profile applied after automation readiness and reset when the session is released; the kill facet is deferred until an app is known (apply it with killProfile). Not the hardware deviceType. Requires boot=true and readiness=automation.",
+                      "type": "object",
+                      "properties": {
+                        "manufacturerProfile": {
+                          "description": "Manufacturer profile id, as listed by the manufacturerProfile tool",
+                          "type": "string",
+                          "enum": [
+                            "pixel-baseline",
+                            "samsung-oneui",
+                            "xiaomi-hyperos",
+                            "oneplus-oxygenos",
+                            "oppo-coloros",
+                            "motorola"
+                          ]
+                        },
+                        "requires": {
+                          "description": "OEM capabilities the task needs; one the manufacturer profile cannot emulate refuses with requires_real_device before anything is created",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "samsung-dex",
+                              "knox",
+                              "flip-cover-screen",
+                              "spen-air-actions",
+                              "oem-systemui",
+                              "oem-unused-app-triggers",
+                              "firmware-update-exemption-reset",
+                              "xiaomi-proprietary-appops"
+                            ]
+                          }
+                        }
+                      },
+                      "required": ["manufacturerProfile"],
+                      "additionalProperties": false
                     }
                   },
                   "required": ["runtime", "deviceType"],

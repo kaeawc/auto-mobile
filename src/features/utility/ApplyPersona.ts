@@ -54,10 +54,16 @@ export interface PersonaDependencies {
   registry?: PersonaRestoreRegistry;
   /** The daemon session applying, whose release restores the kill and display facets. */
   owner?: string;
+  /**
+   * Also restore the keyboard when `owner` is released (#14058): a manufacturer profile a session
+   * acquired its device with is that session's, so the next session gets the device at baseline.
+   */
+  restoreKeyboardOnRelease?: boolean;
   signal?: AbortSignal;
 }
 
-export type PersonaFacetStatus = "applied" | "partial" | "unsupported" | "failed";
+/** `deferred`: not applied yet because it needs input the caller does not have, such as an app. */
+export type PersonaFacetStatus = "applied" | "partial" | "unsupported" | "failed" | "deferred";
 
 export interface PersonaFacetResult {
   facet: PersonaFacet;
@@ -171,6 +177,7 @@ interface ApplyContext {
   device: BootedDevice;
   persona: OemPersona;
   appId?: string;
+  deferKill?: boolean;
   deps: PersonaDependencies;
   registry: PersonaRestoreRegistry;
 }
@@ -187,10 +194,19 @@ async function runFacet(
       const result = await deps.executors.keyboard.set(persona.keyboardProfileId, deps.signal);
       registry.recordApply(device.deviceId, persona.id, {
         keyboardProfileBefore: result.previousProfileId,
+        ...(deps.restoreKeyboardOnRelease && deps.owner
+          ? { releaseOwner: { sessionId: deps.owner, device } }
+          : {}),
       });
       return { status: "applied", detail: `keyboard profile ${persona.keyboardProfileId}` };
     }
     case "kill": {
+      if (context.deferKill && !context.appId) {
+        return {
+          status: "deferred",
+          detail: `kill profile ${persona.killProfile} needs the app it targets; apply it with killProfile once known`,
+        };
+      }
       const appId = context.appId as string;
       const profile = persona.killProfile as KillProfileId;
       // Recorded before the write so an apply interrupted midway is still reset.
@@ -218,7 +234,8 @@ async function runFacet(
 }
 
 function outcomeOf(facets: readonly PersonaFacetResult[]): PersonaOutcome {
-  if (facets.every((facet) => facet.status === "applied")) {
+  // A deferred facet is reported on its own; it neither completes nor degrades the apply.
+  if (facets.every((facet) => facet.status === "applied" || facet.status === "deferred")) {
     return "applied";
   }
   return facets.some((facet) => facet.status === "applied" || facet.status === "partial")
@@ -288,7 +305,12 @@ async function runFacets(context: ApplyContext): Promise<PersonaFacetResult[]> {
 export async function applyPersona(
   device: BootedDevice,
   personaId: OemPersonaId,
-  options: { appId?: string; requires?: readonly NonEmulatableCapability[] },
+  options: {
+    appId?: string;
+    requires?: readonly NonEmulatableCapability[];
+    /** Report the kill facet as `deferred` instead of refusing when no `appId` is given. */
+    deferKill?: boolean;
+  },
   deps: PersonaDependencies,
 ): Promise<ApplyPersonaResult | RoutePersonaResult> {
   const persona = OEM_PERSONAS[personaId];
@@ -296,7 +318,7 @@ export async function applyPersona(
   if (route) {
     return route;
   }
-  if (persona.killProfile && !options.appId) {
+  if (persona.killProfile && !options.appId && !options.deferKill) {
     throw new ActionableError(
       `manufacturer profile ${persona.id} sets kill profile ${persona.killProfile}; apply needs appId.`,
     );
@@ -308,7 +330,14 @@ export async function applyPersona(
     // Personas replace one another: facets the new persona does not set must not linger.
     await resetPersona(device, {}, deps);
   }
-  const facets = await runFacets({ device, persona, appId: options.appId, deps, registry });
+  const facets = await runFacets({
+    device,
+    persona,
+    appId: options.appId,
+    deferKill: options.deferKill,
+    deps,
+    registry,
+  });
   if (!facets.some((facet) => facet.status === "applied" || facet.status === "partial")) {
     throw new ActionableError(
       `manufacturer profile ${persona.id} changed nothing on ${device.deviceId}: ${describeFacets(facets)}`,

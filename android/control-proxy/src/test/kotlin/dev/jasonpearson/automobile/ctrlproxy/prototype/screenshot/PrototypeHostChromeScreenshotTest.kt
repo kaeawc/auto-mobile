@@ -1,7 +1,10 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype.screenshot
 
 import android.app.Application
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeEscapeState
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeInsetFloor
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypePlacement
@@ -85,7 +88,7 @@ class PrototypeHostChromeScreenshotTest {
   ) = prototypeScreenshotTest(name, pending) { renderPrototypeChrome(name, dark, fullscreen) }
 }
 
-/** Renders `PrototypeWindowContent` around the `doc-example-3` styled box. */
+/** Renders `PrototypeWindowContent` around the `doc-example-3` styled box, on the full surface. */
 internal fun renderPrototypeChrome(
   name: String,
   dark: Boolean,
@@ -104,8 +107,12 @@ internal fun renderPrototypeChrome(
       content = { PrototypeSpecContent(model.root, theme = model.theme) },
     )
   val escape = PrototypeEscapeState().apply { if (revealed) reveal() }
+  // The floating Close-control box wraps only the button and the spec's anchored box draws outside
+  // it, so capture the whole surface rather than that wrap-content view (#14588).
   val content: @Composable () -> Unit = {
-    PrototypeWindowContent(request, escape) { PrototypeInsetFloor.None }
+    Box(Modifier.fillMaxSize()) {
+      PrototypeWindowContent(request, escape) { PrototypeInsetFloor.None }
+    }
   }
   return renderComposable(name, content)
 }

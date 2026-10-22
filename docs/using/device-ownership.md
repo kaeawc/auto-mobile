@@ -1050,6 +1050,24 @@ device (owner decision 2026-10-09, #11145):
   another session tries again. A failed reset does not quarantine the device.
 - Records are stored in the daemon database, so they survive a daemon restart.
 
+The runtime screen size, navigation mode and display-cutout emulation that
+`displayConfig` sets on Android (#14101) are different: they are restored when
+the session that changed them releases the device or rebinds to another one. A
+leftover `wm size` override would break every later session on the device.
+
+- Before displayConfig first changes the size of a display, or the enabled
+  navigation-bar or cutout overlays, it records the original. Later changes keep
+  the first recorded value.
+- A session that changes any of them takes over the device's record, including
+  originals a sessionless call recorded first. Its release writes every original
+  back as pending device cleanup, so the next session cannot acquire the device
+  mid-restore, and then invalidates cached observations and coordinates.
+- The record is the one `displayProfile` uses, so a profile reset restores these
+  too, and `displayConfig` `reset` restores what a profile recorded.
+- A record only sessionless calls wrote stays until `reset`. Records are in
+  memory only: a daemon restart loses them, and `reset` then clears a leftover
+  size override on the target display regardless.
+
 ## Transient Android transport failures
 
 For a session-owned Android device whose loss is not confirmed, an ADB transport

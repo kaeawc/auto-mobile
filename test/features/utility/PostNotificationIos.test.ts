@@ -1,5 +1,7 @@
 import { loggerCallsWithPrefix } from "../../helpers/loggerCallsWithPrefix";
 import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { PostNotification } from "../../../src/features/utility/PostNotification";
 import { BootedDevice } from "../../../src/models";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
@@ -99,19 +101,20 @@ describe("PostNotification - iOS Simulator", () => {
   });
 
   test("an image is forwarded for the app's service extension with a warning (#14097)", async () => {
+    const imagePath = "/fake-host/images/x.png";
     const result = await make(SIM_UDID).execute({
       title: "t",
       body: "b",
       appId: "com.x",
       imageType: "bigPicture",
-      imagePath: "/fake-host/images/x.png",
+      imagePath,
     });
     expect(result.success).toBe(true);
     expect(result.warning).toContain("Notification Service Extension");
     expect(pushCalls()).toHaveLength(1);
     const payload = JSON.parse(String(pushCalls()[0].payloadJson));
     expect(payload.aps["mutable-content"]).toBe(1);
-    expect(payload["automobile-image-url"]).toBe("file:///fake-host/images/x.png");
+    expect(payload["automobile-image-url"]).toBe(pathToFileURL(resolve(imagePath)).href);
   });
 
   test("category and a raw payload reach simctl push (#14097)", async () => {

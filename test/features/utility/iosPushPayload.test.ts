@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   buildIosPushPayload,
   IOS_PUSH_IMAGE_URL_KEY,
@@ -56,8 +58,10 @@ describe("buildIosPushPayload", () => {
   });
 
   test("an absolute host image path becomes a file URL", () => {
-    expect(parsed({ imagePath: "/tmp/images/a b.png" })[IOS_PUSH_IMAGE_URL_KEY]).toBe(
-      "file:///tmp/images/a%20b.png",
+    // The payload resolves the path on the host, so a Windows host adds a drive letter.
+    const imagePath = "/tmp/images/a b.png";
+    expect(parsed({ imagePath })[IOS_PUSH_IMAGE_URL_KEY]).toBe(
+      pathToFileURL(resolve(imagePath)).href,
     );
   });
 

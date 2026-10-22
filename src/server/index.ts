@@ -1,4 +1,4 @@
-import type { DeviceReadiness } from "../daemon/readiness/DeviceReadiness";
+import { DeviceReadiness } from "../daemon/readiness/DeviceReadiness";
 import type { ListToolsResult, McpServer } from "@modelcontextprotocol/server";
 import { createSdkMcpServer } from "./sdkMcpServer";
 import { installDefaultProvisionedDeviceTransportFence } from "../db/createDefaultProvisionedDeviceTransportFence";
@@ -319,15 +319,23 @@ function resolveBindingStore(options: McpServerOptions): {
   return { store: createReleaseSubscribedBindingStore(), owned: true };
 }
 
+function installDeviceReadiness(options: McpServerOptions): void {
+  if (options.deviceReadiness) {
+    ToolRegistry.setDeviceReadiness(options.deviceReadiness);
+  } else if (!options.daemonMode && !ToolRegistry.hasDeviceReadiness()) {
+    // An embedded direct-mode server that injects none still needs one for setActiveDevice and
+    // device tools; the daemon and the stdio entrypoint install their own (#14843).
+    ToolRegistry.setDeviceReadiness(DeviceReadiness.createInstance());
+  }
+}
+
 export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   ToolRegistry.setMutationRecording(
     createRecording(defaultDaemonContext, {
       keyboardProfilesFor: (device) => AndroidCtrlProxyClient.getInstance(device),
     }),
   );
-  if (options.deviceReadiness) {
-    ToolRegistry.setDeviceReadiness(options.deviceReadiness);
-  }
+  installDeviceReadiness(options);
   const bindingStore = resolveBindingStore(options);
   const sessionToolBinding = new SessionToolBinding(
     options.sessionContext?.initialSessionToolBinding,

@@ -2210,7 +2210,7 @@
   },
   {
     "name": "displayConfig",
-    "description": "Read or set the visual display configuration — font/text scale, effective display density, and light/dark (night mode) theme — for adaptive-layout and large-font accessibility testing. A call with no set field reads current values; providing fontScale, density, theme, or reset applies the change and returns applied + previous values so the client can restore. Android supports all three fields (density overrides are best-effort on physical devices); iOS supports theme (the Simulator via `simctl ui appearance`, physical devices through the CtrlProxy runner) and, on the Simulator only, font scale as a Dynamic Type category (via `simctl ui content_size`; fontScale maps to the nearest category and contentSize selects one exactly; reads report both). On Android, reset restores font scale and density to device defaults and restores night mode only to the value displayConfig replaced earlier in this process; otherwise night mode is left unchanged. Android reset never forces light mode. iOS Simulator reset restores light appearance and the content size category displayConfig replaced earlier in this process; physical iOS reset restores the appearance displayConfig first replaced there (light if none). The accessibility display preferences increaseContrast, reduceMotion and boldText are read and set on Android and the iOS Simulator, and colorInversion, colorCorrection, magnification, magnificationScale and extraDim (API 31+) on Android; `supported` reports each as true (proven by read-back), partial (stored setting reads back but running apps must relaunch; reason in supportNotes) or false, and reset restores the ones displayConfig changed.",
+    "description": "Read or set the visual display configuration — font/text scale, effective display density, light/dark (night mode) theme, and on Android the runtime screen size, navigation mode (gesture / 3-button / 2-button) and display-cutout emulation — for adaptive-layout, edge-to-edge and large-font accessibility testing. A call with no set field reads current values; providing fontScale, density, theme, size, navigationMode, displayCutout, or reset applies the change and returns applied + previous values so the client can restore. Android supports all three fields (density overrides are best-effort on physical devices); iOS supports theme (the Simulator via `simctl ui appearance`, physical devices through the CtrlProxy runner) and, on the Simulator only, font scale as a Dynamic Type category (via `simctl ui content_size`; fontScale maps to the nearest category and contentSize selects one exactly; reads report both). Android size, navigationMode and displayCutout use `wm size` and the system image's overlays; values the image does not ship are refused and `available` lists the ones it has; size, overlay and density changes invalidate cached observations and coordinates. On Android, reset restores font scale, density and screen size to device defaults, navigation mode and display cutout to the values recorded before they were first changed, and night mode only to the value displayConfig replaced earlier in this process; otherwise night mode is left unchanged. Releasing or rebinding the session that changed size, navigationMode or displayCutout restores them through the same record as displayProfile; sessionless changes persist until reset. Android reset never forces light mode. iOS Simulator reset restores light appearance and the content size category displayConfig replaced earlier in this process; physical iOS reset restores the appearance displayConfig first replaced there (light if none). The accessibility display preferences increaseContrast, reduceMotion and boldText are read and set on Android and the iOS Simulator, and colorInversion, colorCorrection, magnification, magnificationScale and extraDim (API 31+) on Android; `supported` reports each as true (proven by read-back), partial (stored setting reads back but running apps must relaunch; reason in supportNotes) or false, and reset restores the ones displayConfig changed.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -2266,6 +2266,46 @@
           "type": "string",
           "enum": ["light", "dark", "system", "custom"]
         },
+        "size": {
+          "description": "Android: override the screen size in pixels, natural orientation (`wm size WxH`), or 'default' to remove the override. Each side must be 200 px to twice the physical size. Best-effort on physical devices. Omit to leave unchanged.",
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "width": {
+                  "type": "integer",
+                  "minimum": 200,
+                  "maximum": 16384
+                },
+                "height": {
+                  "type": "integer",
+                  "minimum": 200,
+                  "maximum": 16384
+                }
+              },
+              "required": ["width", "height"],
+              "additionalProperties": false
+            },
+            {
+              "type": "string",
+              "const": "default"
+            }
+          ]
+        },
+        "navigationMode": {
+          "description": "Android: gesture, threeButton or twoButton navigation via the system image's navbar overlay (`cmd overlay enable-exclusive --category`); 'default' disables every navbar overlay. Values the image does not ship are refused; read `available`. Omit to leave unchanged.",
+          "type": "string",
+          "enum": ["gesture", "threeButton", "twoButton", "default"]
+        },
+        "displayCutout": {
+          "description": "Android: emulate a display cutout via the system image's cutout-emulation overlay, or 'none' to disable it. Values the image does not ship are refused; read `available`. Omit to leave unchanged.",
+          "type": "string",
+          "enum": ["none", "corner", "double", "hole", "tall", "waterfall"]
+        },
+        "display": {
+          "description": "Android panel key, role, or active that size reads and sets; the default display when omitted. navigationMode and displayCutout are device-wide.",
+          "type": "string"
+        },
         "increaseContrast": {
           "description": "Increase Contrast. Android: high-contrast text (secure high_text_contrast_enabled). iOS Simulator: `simctl ui increase_contrast`. Omit to leave unchanged.",
           "type": "boolean"
@@ -2302,7 +2342,7 @@
           "type": "boolean"
         },
         "reset": {
-          "description": "On Android, restore font scale and density to device defaults. Restore night mode only to the value displayConfig replaced earlier in this process; otherwise leave it unchanged. Android reset never forces light mode. On the iOS Simulator, reset restores light appearance and the content size category displayConfig replaced earlier in this process. On both, restore each accessibility display preference that displayConfig changed earlier in this process.",
+          "description": "On Android, restore font scale, density and screen size to device defaults, and navigation mode and display cutout to the values recorded before they were first changed. Restore night mode only to the value displayConfig replaced earlier in this process; otherwise leave it unchanged. Android reset never forces light mode. On the iOS Simulator, reset restores light appearance and the content size category displayConfig replaced earlier in this process. On both, restore each accessibility display preference that displayConfig changed earlier in this process.",
           "type": "boolean"
         },
         "platform": {
@@ -2358,6 +2398,15 @@
               ]
             },
             "theme": {
+              "type": "boolean"
+            },
+            "size": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "navigationMode": {
+              "type": "boolean"
+            },
+            "displayCutout": {
               "type": "boolean"
             },
             "increaseContrast": {
@@ -2416,6 +2465,25 @@
               "type": "string"
             }
           },
+          "additionalProperties": {}
+        },
+        "available": {
+          "type": "object",
+          "properties": {
+            "navigationMode": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "displayCutout": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": ["navigationMode", "displayCutout"],
           "additionalProperties": {}
         },
         "current": {
@@ -2477,6 +2545,35 @@
             "contentSize": {
               "type": "string"
             },
+            "size": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "width": {
+                      "type": "number"
+                    },
+                    "height": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["width", "height"],
+                  "additionalProperties": {}
+                },
+                {
+                  "type": "string",
+                  "const": "default"
+                }
+              ]
+            },
+            "navigationMode": {
+              "type": "string",
+              "enum": ["gesture", "threeButton", "twoButton", "default"]
+            },
+            "displayCutout": {
+              "type": "string",
+              "enum": ["none", "corner", "double", "hole", "tall", "waterfall"]
+            },
             "increaseContrast": {
               "type": "boolean"
             },
@@ -2515,6 +2612,9 @@
             "contentSize",
             "density",
             "theme",
+            "size",
+            "navigationMode",
+            "displayCutout",
             "increaseContrast",
             "reduceMotion",
             "boldText",

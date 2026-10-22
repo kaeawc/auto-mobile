@@ -1,0 +1,18 @@
+{
+  "id": "strict",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "button",
+    "label": "Go",
+    "onTap": [
+      {
+        "type": "request",
+        "url": " \thttps://example.com/\n"
+      }
+    ]
+  }
+}

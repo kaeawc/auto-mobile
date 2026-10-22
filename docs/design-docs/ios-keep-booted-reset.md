@@ -70,7 +70,11 @@ Each release that is not due for maxUses erase runs:
 4. Unconditionally run `simctl keychain <udid> reset`,
    `simctl privacy <udid> reset all`, `simctl location <udid> clear`, and
    `simctl status_bar <udid> clear`. Clear the pasteboard with empty `pbcopy`
-   input, including previous non-text content.
+   input, including previous non-text content. Then read the simulator TCC.db
+   for rows in simctl-managed privacy services. Reset each surviving client with
+   `simctl privacy <udid> reset all <bundle>`: a bundle-less reset left a
+   preinstalled app's grant on iOS 27 (#14787). Rows remaining after the per-bundle
+   resets, or a failed read, are a cleaning failure and fall back to erase.
 5. Restore appearance, content size, increase contrast and global locale/language
    preferences, including calendar and 12/24-hour overrides, from the baseline.
    Without a valid captured value, use light appearance, large content size,

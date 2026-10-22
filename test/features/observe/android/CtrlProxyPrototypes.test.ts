@@ -130,7 +130,7 @@ describe("saved prototype host recorder", () => {
     let reply: PrototypeResult = { success: true, error: null };
     const send = spyOn(socket, "send").mockImplementation((data) => {
       const message: { requestId: string } = JSON.parse(String(data));
-      client["requestManager"].resolve(message.requestId, reply);
+      client.connectionTestHooks.requestManager.resolve(message.requestId, reply);
     });
     return {
       delegate,
@@ -538,7 +538,7 @@ describe("CtrlProxy prototypes", () => {
           success: false,
           error: "prototype host not wired",
         });
-        expect(client["requestManager"].getPendingCount()).toBe(0);
+        expect(client.connectionTestHooks.requestManager.getPendingCount()).toBe(0);
       } finally {
         send.mockRestore();
       }
@@ -787,7 +787,7 @@ describe("CtrlProxy prototypes", () => {
       }
       expect(result).toMatchObject({ success: false, error, totalTimeMs: 0 });
       await pending;
-      expect(client["requestManager"].getPendingCount()).toBe(0);
+      expect(client.connectionTestHooks.requestManager.getPendingCount()).toBe(0);
       if (!unknown) {
         send.mockImplementation((data) => {
           void receive({
@@ -1136,7 +1136,7 @@ describe("CtrlProxy prototypes", () => {
         success: false,
         error: "prototype_result timed out after 50ms",
       });
-      expect(client["requestManager"].getPendingCount()).toBe(0);
+      expect(client.connectionTestHooks.requestManager.getPendingCount()).toBe(0);
     } finally {
       send.mockRestore();
     }
@@ -1188,7 +1188,7 @@ describe("CtrlProxy patch transport", () => {
           timer.advanceTime(50);
         }
         if (outcome === "close") {
-          client["requestManager"].cancelAll(new Error("socket closed"));
+          client.connectionTestHooks.requestManager.cancelAll(new Error("socket closed"));
         }
         expect(await pending).toMatchObject({
           success: false,
@@ -1197,7 +1197,7 @@ describe("CtrlProxy patch transport", () => {
         if (outcome === "notConnected") {
           expect(send).not.toHaveBeenCalled();
         }
-        expect(client["requestManager"].getPendingCount()).toBe(0);
+        expect(client.connectionTestHooks.requestManager.getPendingCount()).toBe(0);
       } finally {
         send.mockRestore();
       }

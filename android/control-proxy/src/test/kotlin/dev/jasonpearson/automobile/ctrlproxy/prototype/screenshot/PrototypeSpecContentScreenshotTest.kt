@@ -90,9 +90,7 @@ class PrototypeSpecContentScreenshotTest {
       pending = true,
     )
 
-  @Test
-  fun flowBasic() =
-    prototypeScreenshotTest("flow_basic", validPrototypeFixture("flow-basic"))
+  @Test fun flowBasic() = prototypeScreenshotTest("flow_basic", validPrototypeFixture("flow-basic"))
 
   @Test
   fun flowMaxLinesRepeat() =

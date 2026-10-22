@@ -33,6 +33,7 @@ import dev.jasonpearson.automobile.desktop.core.connection.DaemonConnectionMonit
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.platform.uncaughtUiErrorMessage
+import dev.jasonpearson.automobile.desktop.core.shell.MacOSTitleBarConfig
 import dev.jasonpearson.automobile.desktop.core.shell.MenuBarActions
 import dev.jasonpearson.automobile.desktop.core.workspace.isCommandPaletteShortcut
 import dev.jasonpearson.automobile.desktop.di.AutoMobileGraph
@@ -96,11 +97,8 @@ fun main() {
   // Force dark window decorations on macOS
   System.setProperty("apple.awt.application.appearance", "NSAppearanceNameDarkAqua")
 
-  // Enable macOS native transparent title bar
-  if (System.getProperty("os.name")?.lowercase()?.contains("mac") == true) {
-    System.setProperty("apple.awt.fullWindowContent", "true")
-    System.setProperty("apple.awt.transparentTitleBar", "true")
-  }
+  // Enable macOS native transparent title bar (no-op on other platforms)
+  MacOSTitleBarConfig.configure()
 
   // Set the macOS Dock icon. Runs after apple.awt.application.name is set above, since
   // Taskbar.getTaskbar() initializes the AWT toolkit.

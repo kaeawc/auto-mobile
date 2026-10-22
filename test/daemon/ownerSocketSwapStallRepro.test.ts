@@ -115,11 +115,14 @@ async function setUp(activeControl = false) {
     timer.advanceTimeAsync(ms, () => drainMicrotasks(FAKE_TIMER_QUIET_TURNS));
   const jump = (ms: number) => timer.setCurrentTime(timer.getCurrentTime() + ms);
   const close = () => pool.releaseMcpSessionBindings(OLD);
-  // McpBindings.restoreSelectorSessions runs before the heartbeat request handler.
-  const reclaim = async () => {
+  // ProxyLiveness.runRecoveryAttempt sends daemon/heartbeat first, and SocketAdmission answers
+  // daemon/* before the tools/call-only selector restoration (#14510): the heartbeat neither
+  // makes NEW a connection owner nor cancels the pending OwnerDisconnectRelease.
+  const reclaim = () => heartbeat();
+  // McpBindings.restoreSelectorSessions, as the next tools/call on the replacement socket runs it.
+  const restore = async () => {
     pool.declareMcpSessionLivenessOwnerToken(NEW, TOKEN);
-    expect(await pool.restoreOwnedDeviceSessionsForMcpSession([ID], NEW, TOKEN)).toEqual([]);
-    return await heartbeat();
+    return await pool.restoreOwnedDeviceSessionsForMcpSession([ID], NEW, TOKEN);
   };
   const r = {
     timer,
@@ -135,6 +138,7 @@ async function setUp(activeControl = false) {
     jump,
     close,
     reclaim,
+    restore,
     stop: async () => {
       await monitor.stop();
       manager.stopCleanupTimer();
@@ -187,10 +191,28 @@ describe("unmodified main: production-order socket swap starvation (#11992)", ()
     stalledClose(r);
     await r.settle(1_000);
     expect((await r.reclaim()).success).toBe(true);
+    // The recovery heartbeat alone leaves the old close's release armed and NEW unowned.
+    expect(r.pool.isSessionOwnedByConnection(ID, NEW)).toBe(false);
+    expect(r.pool.testHooks.ownerDisconnectRelease.isPending(ID)).toBe(true);
+    // The next tools/call on the replacement socket restores the selector session.
+    expect(await r.restore()).toEqual([]);
     expect(r.pool.isSessionOwnedByConnection(ID, NEW)).toBe(true);
     expect(r.pool.testHooks.ownerDisconnectRelease.isPending(ID)).toBe(false);
     await r.settle(8_000);
     // No subsequent heartbeat: a fresh lease's inclusive grace lasts exactly 8 s.
+    expect(r.releases).toEqual([]);
+  });
+
+  test("A: with no tool call after the reclaim, the armed release lapses at close + 8 s unreleased", async () => {
+    const r = await setUp();
+    const closedAt = stalledClose(r);
+    await r.settle(1_000);
+    expect((await r.reclaim()).success).toBe(true);
+    await r.settle(closedAt + 8_000 - 1 - r.manager.sessionNow());
+    expect(r.pool.testHooks.ownerDisconnectRelease.isPending(ID)).toBe(true);
+    await r.settle(1);
+    expect(r.pool.testHooks.ownerDisconnectRelease.isPending(ID)).toBe(false);
+    expect(r.pool.isSessionOwnedByConnection(ID, NEW)).toBe(false);
     expect(r.releases).toEqual([]);
   });
 
@@ -271,8 +293,7 @@ describe("unmodified main: production-order socket swap starvation (#11992)", ()
     r.close();
     expect(r.session.stallForgivenAt).toBe(r.heartbeatAt + 60_000);
     r.jump(60_000);
-    r.pool.declareMcpSessionLivenessOwnerToken(NEW, TOKEN);
-    await r.pool.restoreOwnedDeviceSessionsForMcpSession([ID], NEW, TOKEN);
+    await r.restore();
     expect(r.pool.isSessionOwnedByConnection(ID, NEW)).toBe(true);
     expect(r.session.stallForgivenAt).toBe(r.heartbeatAt + 60_000);
     await r.monitor.tick();

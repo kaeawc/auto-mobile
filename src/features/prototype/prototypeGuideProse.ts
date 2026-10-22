@@ -194,7 +194,7 @@ series' latest value against it. The chart is one accessible node labelled with 
 "Line chart, Heart rate, 24 points, min 58, max 141, latest 72" or "Ring chart, Steps, 6500 of
 10000"; \`observe\` reports it, and an authored \`contentDescription\` replaces it. A literal path that
 does not resolve to an array, a point that is not an object, or a point whose \`y\` is not a number
-fails at \`<path>.series[i].path\` or \`.y\`. The iOS agent does not draw charts yet (#14679).
+fails at \`<path>.series[i].path\` or \`.y\`. The iOS agent draws charts with Swift Charts.
 
 ## Rich text
 
@@ -960,5 +960,6 @@ existed alone. A failed reverse never fails the show; \`inspect\` reports it as 
 A port that is a binding (\`http://localhost:{port}/feed\`) cannot be reversed, because it is only
 known when the request runs. \`inspect\` lists such URLs as \`unreversiblePorts\`. Use \`via: "host"\` for
 those requests. A saved prototype launched with no host connected gets no reverse either.
-iOS simulators share the Mac's network, so nothing is reversed there.
+On iOS nothing is reversed, and \`localhost\`, \`127.0.0.1\` and \`[::1]\` are refused as
+\`blocked_destination\` for \`via: "device"\`: call a Mac-local service by the Mac's LAN address instead.
 `;

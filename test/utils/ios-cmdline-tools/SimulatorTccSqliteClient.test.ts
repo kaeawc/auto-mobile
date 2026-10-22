@@ -8,6 +8,7 @@ import type {
 } from "../../../src/utils/HostCommandExecutor";
 import {
   SimulatorTccSqliteClient,
+  SIMCTL_PRIVACY_TCC_SERVICES,
   permissionForTccService,
   tccServiceForPermission,
   type TccDatabaseFileSystem,
@@ -69,6 +70,91 @@ class FakeSqliteExecutor implements HostCommandExecutor {
 }
 
 describe("SimulatorTccSqliteClient", () => {
+  test("exports the deduplicated simctl-managed services without system-only services", () => {
+    expect(SIMCTL_PRIVACY_TCC_SERVICES).toHaveLength(12);
+    expect(new Set(SIMCTL_PRIVACY_TCC_SERVICES).size).toBe(SIMCTL_PRIVACY_TCC_SERVICES.length);
+    expect(SIMCTL_PRIVACY_TCC_SERVICES).toContain("kTCCServiceAddressBook");
+    expect(SIMCTL_PRIVACY_TCC_SERVICES).not.toContain("kTCCServiceLiverpool");
+    expect(SIMCTL_PRIVACY_TCC_SERVICES).not.toContain("kTCCServiceUbiquity");
+  });
+
+  test("readServiceRows binds services and parses rows across clients without an auth filter", async () => {
+    const executor = new FakeSqliteExecutor();
+    const rows = [
+      { service: "kTCCServiceAddressBook", client: "com.apple.mobilesafari", auth_value: 2 },
+      { service: 'service"quoted', client: "com.example.app", auth_value: 0 },
+    ];
+    executor.onExecute = async () =>
+      executor.calls.at(-1)?.args.at(-1) === "pragma table_info(access);"
+        ? result(JSON.stringify([{ name: "service" }, { name: "client" }, { name: "auth_value" }]))
+        : result(JSON.stringify(rows));
+    const client = new SimulatorTccSqliteClient({
+      timer: new FakeTimer(),
+      executor,
+      fileSystem: new FakeTccFileSystem(),
+      environment: {},
+      homeDirectory: "/Users/tester",
+    });
+    const signal = new AbortController().signal;
+    await expect(
+      client.readServiceRows(DEVICE_ID, ["kTCCServiceAddressBook", 'service"quoted'], signal),
+    ).resolves.toEqual(rows);
+    expect(executor.calls).toHaveLength(2);
+    expect(executor.calls[1]?.args).toEqual([
+      "-readonly",
+      "-json",
+      "-cmd",
+      ".parameter init",
+      "-cmd",
+      '.parameter set :service0 "kTCCServiceAddressBook"',
+      "-cmd",
+      '.parameter set :service1 "service\\\"quoted"',
+      join(
+        "/Users/tester/Library/Developer/CoreSimulator/Devices",
+        DEVICE_ID,
+        "data/Library/TCC/TCC.db",
+      ),
+      "select service, client, auth_value\nfrom access\nwhere service in (:service0, :service1);",
+    ]);
+    expect(executor.calls.every((call) => call.options?.signal instanceof AbortSignal)).toBe(true);
+  });
+
+  test("readServiceRows with no services returns no rows without sqlite or filesystem calls", async () => {
+    const executor = new FakeSqliteExecutor();
+    const fileSystem = new FakeTccFileSystem();
+    const client = new SimulatorTccSqliteClient({
+      timer: new FakeTimer(),
+      executor,
+      fileSystem,
+      environment: {},
+    });
+    await expect(client.readServiceRows(DEVICE_ID, [])).resolves.toEqual([]);
+    expect(executor.calls).toEqual([]);
+    expect(fileSystem.paths).toEqual([]);
+  });
+
+  test.each(["service", "client"])(
+    "readServiceRows rejects a schema missing %s",
+    async (missing) => {
+      const executor = new FakeSqliteExecutor();
+      executor.response = result(
+        JSON.stringify(
+          ["service", "client"].filter((column) => column !== missing).map((name) => ({ name })),
+        ),
+      );
+      const client = new SimulatorTccSqliteClient({
+        timer: new FakeTimer(),
+        executor,
+        fileSystem: new FakeTccFileSystem(),
+        environment: {},
+      });
+      await expect(client.readServiceRows(DEVICE_ID, ["kTCCServiceAddressBook"])).rejects.toThrow(
+        `missing required access columns: ${missing}`,
+      );
+      expect(executor.calls).toHaveLength(1);
+    },
+  );
+
   test("parses both full2 captured rows and ignores extra sqlite columns", async () => {
     const { rows } = await loadPhotosTccCase("full2");
     expect(rows).toEqual([
@@ -489,5 +575,73 @@ describe("SimulatorTccSqliteClient", () => {
     await expect(client.readPermissions(DEVICE_ID, "com.example.app")).rejects.toThrow(
       /locked|busy/i,
     );
+  });
+
+  describe("readUserTrustedCertificates (#14828)", () => {
+    const DATABASE = join(
+      "/devices",
+      DEVICE_ID,
+      "data/private/var/protected/trustd/private/TrustStore.sqlite3",
+    );
+
+    function trustRig(response = "[]") {
+      const executor = new FakeSqliteExecutor();
+      executor.response = result(response);
+      const fileSystem = new FakeTccFileSystem();
+      const client = new SimulatorTccSqliteClient({
+        timer: new FakeTimer(),
+        executor,
+        fileSystem,
+        environment: {},
+        deviceSetRoot: "/devices",
+      });
+      return { client, executor, fileSystem };
+    }
+
+    test("reads the user trust settings read-only from the simulator's trustd database", async () => {
+      const { client, executor, fileSystem } = trustRig('[{"sha256":"ABCD"},{"sha256":"EF01"}]');
+      const signal = new AbortController().signal;
+      expect(await client.readUserTrustedCertificates(DEVICE_ID, signal)).toEqual([
+        { sha256: "ABCD" },
+        { sha256: "EF01" },
+      ]);
+      expect(fileSystem.paths).toEqual([DATABASE]);
+      expect(executor.calls).toHaveLength(1);
+      expect(executor.calls[0]?.file).toBe("sqlite3");
+      expect(executor.calls[0]?.args).toEqual([
+        "-readonly",
+        "-json",
+        DATABASE,
+        "select hex(sha256) as sha256 from tsettings;",
+      ]);
+      expect(executor.calls[0]?.options?.signal).toBeInstanceOf(AbortSignal);
+    });
+
+    test("an empty result set means no trusted certificates, but an absent database fails closed", async () => {
+      expect(await trustRig("").client.readUserTrustedCertificates(DEVICE_ID)).toEqual([]);
+      const missing = trustRig();
+      missing.fileSystem.error = Object.assign(new Error("gone"), { code: "ENOENT" });
+      await expect(missing.client.readUserTrustedCertificates(DEVICE_ID)).rejects.toThrow(
+        "Simulator trust store is unavailable",
+      );
+      expect(missing.executor.calls).toEqual([]);
+    });
+
+    test("an unreadable database, a failed query and malformed output are errors, never an empty store", async () => {
+      const denied = trustRig();
+      denied.fileSystem.error = Object.assign(new Error("denied"), { code: "EACCES" });
+      await expect(denied.client.readUserTrustedCertificates(DEVICE_ID)).rejects.toThrow(
+        "Simulator trust store is unavailable",
+      );
+      const locked = trustRig();
+      locked.executor.error = new Error("database is locked");
+      await expect(locked.client.readUserTrustedCertificates(DEVICE_ID)).rejects.toThrow(/locked/);
+      await expect(
+        trustRig('[{"nope":1}]').client.readUserTrustedCertificates(DEVICE_ID),
+      ).rejects.toThrow("without sha256");
+      await expect(
+        trustRig().client.readUserTrustedCertificates("physical-device"),
+      ).rejects.toThrow("requires a simulator UDID");
+    });
   });
 });

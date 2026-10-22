@@ -1,4 +1,4 @@
-import { object, type PrototypeValidationError } from "./prototypeBindingValidation";
+import { object, type Located, type PrototypeValidationError } from "./prototypeBindingValidation";
 
 export interface PrototypeStrictOptions {
   supportedCapabilities?: readonly string[];
@@ -14,6 +14,7 @@ export interface PrototypeStrictOptions {
 export function prototypeStrictPolicyError(
   spec: unknown,
   options: PrototypeStrictOptions,
+  actions: readonly Located[],
 ): PrototypeValidationError | undefined {
   if (options.supportedCapabilities !== undefined && options.requiredCapabilities !== undefined) {
     const missing = options
@@ -30,6 +31,11 @@ export function prototypeStrictPolicyError(
     }
     if (window?.persistence === "device") {
       return { path: "window.persistence", message: "Privileged window persistence" };
+    }
+    // Located actions exclude opaque data, request bodies and emit payloads.
+    const host = actions.find(({ value }) => value.type === "request" && value.via === "host");
+    if (host) {
+      return { path: `${host.path}.via`, message: "Host requests are unavailable in a library" };
     }
   }
   return undefined;

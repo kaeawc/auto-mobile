@@ -80,6 +80,10 @@ const selinuxFlag = (mode: string): string => (/permissive/i.test(mode) ? "0" : 
 
 export function createRootStateInjector(adb: AdbExecutor): DeviceConditionInjector {
   let baselineSelinux = "Enforcing";
+  // True while this fixture is applied and its reset is owed. A repeat apply is then
+  // coalesced so the ORIGINAL SELinux baseline survives (a second capture would record
+  // the fixture's own Permissive as the baseline and restore the wrong state).
+  let active = false;
   const artifactsPresent = async (signal?: AbortSignal): Promise<boolean> => {
     const listing = await shell(adb, ["ls", ...ROOT_ARTIFACT_PATHS, "2>/dev/null"], signal).catch(
       () => "",
@@ -93,15 +97,23 @@ export function createRootStateInjector(adb: AdbExecutor): DeviceConditionInject
         rejectValue("rootState", value, [ROOTED_DETECTABLE]);
       }
       await assertRootableImage(adb, signal);
+      if (active && (await artifactsPresent(signal))) {
+        return { status: "unchanged", detail: "rooted-detectable fixture is already applied" };
+      }
       baselineSelinux = (await shell(adb, ["getenforce"], signal)) || "Enforcing";
       let selinuxChanged = false;
       // Defined before the first mutation (`adb root`) so every later failure can undo it.
       const reset = async (resetSignal?: AbortSignal): Promise<void> => {
+        // Re-acquire the privileges the cleanup needs: an earlier reset (or a reboot) may
+        // have un-rooted adbd. `adb root` is a no-op when it is already running as root.
+        await adbCommand(adb, ["root"], resetSignal);
+        await adbCommand(adb, ["wait-for-device"], resetSignal);
         await removeArtifacts(adb, resetSignal);
         if (selinuxChanged) {
           await shell(adb, ["setenforce", selinuxFlag(baselineSelinux)], resetSignal);
         }
         await adbCommand(adb, ["unroot"], resetSignal);
+        active = false;
       };
       try {
         await remountWritable(adb, signal);
@@ -121,6 +133,7 @@ export function createRootStateInjector(adb: AdbExecutor): DeviceConditionInject
         }
         throw error;
       }
+      active = true;
       return { status: "applied", detail: "rooted-detectable fixture planted", reset };
     },
     async isClean(signal): Promise<boolean> {
@@ -133,14 +146,26 @@ export function createRootStateInjector(adb: AdbExecutor): DeviceConditionInject
   };
 }
 
-/** The `rootState` injector for an Android device, or undefined for any other key or platform. */
+/** One injector per device, so repeat applies share the baseline and the applied flag. */
+const injectorsByDevice = new Map<string, DeviceConditionInjector>();
+
+/**
+ * The `rootState` injector for an Android device, or undefined for any other key or
+ * platform. The same instance serves every apply on a device; tests pass their own cache.
+ */
 export function resolveRootStateInjector(
   device: BootedDevice,
   key: DeviceConditionKey,
   adbFactory: AdbClientFactory = defaultAdbClientFactory,
+  cache: Map<string, DeviceConditionInjector> = injectorsByDevice,
 ): DeviceConditionInjector | undefined {
   if (device.platform !== "android" || key !== "rootState") {
     return undefined;
   }
-  return createRootStateInjector(adbFactory.create(device));
+  let injector = cache.get(device.deviceId);
+  if (!injector) {
+    injector = createRootStateInjector(adbFactory.create(device));
+    cache.set(device.deviceId, injector);
+  }
+  return injector;
 }

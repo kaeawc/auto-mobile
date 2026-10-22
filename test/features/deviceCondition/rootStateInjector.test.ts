@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import type { BootedDevice, ExecResult } from "../../../src/models";
+import { DeviceConditionController } from "../../../src/features/deviceCondition/DeviceConditionController";
+import type { DeviceConditionInjector } from "../../../src/features/deviceCondition/DeviceConditionController";
 import { OwedResetError } from "../../../src/features/deviceCondition/OwedResetError";
 import {
   ROOT_ARTIFACT_PATHS,
@@ -137,5 +139,55 @@ describe("rootState injector (#14060)", () => {
       );
     expect(error).toBeInstanceOf(OwedResetError);
     expect((error as OwedResetError).message).toMatch(/Cleanup also failed/);
+  });
+
+  test("reset re-acquires root before touching /system", async () => {
+    const adb = adbWith(ROOTABLE);
+    const outcome = await createRootStateInjector(adb).apply("rooted-detectable");
+    const before = adb.getExecutedCommands().length;
+    await outcome.reset?.();
+    const resetCommands = adb.getExecutedCommands().slice(before);
+    expect(resetCommands.indexOf("root")).toBeGreaterThanOrEqual(0);
+    expect(resetCommands.indexOf("root")).toBeLessThan(
+      resetCommands.findIndex((c) => c.startsWith("shell rm -f")),
+    );
+  });
+
+  test("a repeat apply on the same injector is coalesced and keeps the original baseline", async () => {
+    const adb = adbWith({ ...ROOTABLE, "ls /system/xbin/su": "/system/xbin/su" });
+    const injector = createRootStateInjector(adb);
+    const first = await injector.apply("rooted-detectable");
+    expect(first.status).toBe("applied");
+    const second = await injector.apply("rooted-detectable");
+    expect(second.status).toBe("unchanged");
+    expect(second.reset).toBeUndefined();
+    // The second apply must not re-capture the fixture's own SELinux mode as the baseline.
+    expect(adb.getExecutedCommands().filter((c) => c === "shell getenforce")).toHaveLength(1);
+  });
+
+  test("the resolver hands back one injector per device so applies share state", () => {
+    const android: BootedDevice = { name: "e", platform: "android", deviceId: "emulator-5554" };
+    const other: BootedDevice = { name: "f", platform: "android", deviceId: "emulator-5556" };
+    const cache = new Map<string, DeviceConditionInjector>();
+    const factory = { create: () => adbWith(ROOTABLE) };
+    const a = resolveRootStateInjector(android, "rootState", factory, cache);
+    expect(resolveRootStateInjector(android, "rootState", factory, cache)).toBe(a);
+    expect(resolveRootStateInjector(other, "rootState", factory, cache)).not.toBe(a);
+  });
+
+  test("applying twice through the controller registers one reset and restores cleanly", async () => {
+    const adb = adbWith(ROOTABLE);
+    // The second apply finds the fixture still planted; the post-restore read finds it gone.
+    adb.setCommandResponseSequence("ls /system/xbin/su", [
+      execResult("/system/xbin/su"),
+      execResult(""),
+    ]);
+    const injector = createRootStateInjector(adb);
+    const controller = new DeviceConditionController(() => injector);
+    await controller.apply({ rootState: "rooted-detectable" });
+    await controller.apply({ rootState: "rooted-detectable" });
+    const report = await controller.restore();
+    expect(report.failures).toEqual([]);
+    expect(adb.getExecutedCommands().filter((c) => c === "unroot")).toHaveLength(1);
   });
 });

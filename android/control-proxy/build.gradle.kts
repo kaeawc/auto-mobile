@@ -212,6 +212,10 @@ tasks.withType<Test>().configureEach {
   screenshotProperties.forEach { key ->
     System.getProperty(key)?.let { value -> systemProperty(key, value) }
   }
+  // The prototype screenshot harness pins the date picker's "today" by statically mocking
+  // LocalDate.now(); MockK then calls LocalDate's other (private) statics reflectively, which
+  // needs java.time opened to the test classpath.
+  jvmArgs("--add-opens=java.base/java.time=ALL-UNNAMED")
   // A preview reads spec files Gradle does not track, so never reuse an up-to-date or cached
   // result.
   if (System.getProperty("prototype.preview.spec") != null) {

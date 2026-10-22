@@ -92,7 +92,7 @@ leases.
 ## The lease conflict
 
 atc decides a device is occupied only from its own `state.json` (`getOccupyingLease`
-in `src/cli.mjs`). An emulator AutoMobile booted and is driving looks **idle** to atc.
+in atc's `cli.mjs`). An emulator AutoMobile booted and is driving looks **idle** to atc.
 With the default config, another agent's `atc claim` can then:
 
 1. **Hand it out** as a warm idle match (Tier 0), so two agents drive one device.

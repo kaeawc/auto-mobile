@@ -30,9 +30,23 @@ internal object PrototypeObjectRules {
     val fields = rule.getValue("fields").jsonObject
     if (data.text("type") == "searchBar" && "child" in data && "activeKey" !in data)
       return fail("$path.child", "Search bar child requires activeKey")
-    // `empty` tests a `/data` value (#14207); state key and `/platform` conditions have no emptiness.
+    // `empty` tests a `/data` value (#14207); state key and `/platform` conditions have no
+    // emptiness.
     if ("empty" in data && ("key" in data || "platform" in data))
       return fail("$path.empty", "empty applies only to data conditions")
+    walkFields(data, fields, path, context, depth)?.let {
+      return it
+    }
+    return objectConstraint(data, rule, path)
+  }
+
+  private fun walkFields(
+    data: JsonObject,
+    fields: JsonObject,
+    path: String,
+    context: Context,
+    depth: Int,
+  ): PrototypeSpecError? {
     for (key in (data.keys + fields.keys).sorted()) {
       val childPath = keyPath(path, key)
       val field = fields[key] as? JsonObject ?: return fail(childPath, "Unknown property")
@@ -44,7 +58,7 @@ internal object PrototypeObjectRules {
       val error = walk(child, field.getValue("rule").jsonObject, childPath, context, depth)
       if (error != null) return error
     }
-    return objectConstraint(data, rule, path)
+    return null
   }
 
   fun textConstraint(data: JsonObject, rule: JsonObject, path: String): PrototypeSpecError? {

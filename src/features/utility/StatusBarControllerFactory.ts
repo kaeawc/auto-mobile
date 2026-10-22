@@ -11,7 +11,10 @@ export type StatusBarControllerFactory = (device: BootedDevice) => StatusBarCont
 
 export const defaultStatusBarControllerFactory: StatusBarControllerFactory = (device) => {
   if (device.platform === "android") {
-    return new AndroidDemoModeStatusBarController(defaultAdbClientFactory.create(device));
+    return new AndroidDemoModeStatusBarController(
+      defaultAdbClientFactory.create(device),
+      device.deviceId,
+    );
   }
   if (isIosSimulatorDevice(device)) {
     return new SimctlStatusBarController(device, new SimCtlClient(device));

@@ -58,7 +58,9 @@ export class FakeAndroidResetHost implements AndroidBaselineResetDependencies {
   commandOptions: Array<AdbExecuteOptions | undefined> = [];
   healthOptions: Parameters<AndroidBaselineResetDependencies["ctrlProxyReady"]>[1];
 
-  async inventory(options?: { signal?: AbortSignal }): Promise<DeviceInfo[]> {
+  async inventory(
+    options: Parameters<AndroidBaselineResetDependencies["inventory"]>[0],
+  ): Promise<DeviceInfo[]> {
     this.inventoryCalls++;
     this.lastInventorySignal = options?.signal;
     this.onInventory?.();

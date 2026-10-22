@@ -343,15 +343,25 @@ describe("session broker service lifecycle", () => {
 
   test("Android reset inventory honors its timeout and abort signal", async () => {
     const timer = new FakeTimer();
-    const inventoryOptions: Array<{ signal?: AbortSignal; timeoutMs?: number }> = [];
+    const inventoryOptions: Array<{
+      signal?: AbortSignal;
+      timeoutMs: number;
+      targetDeviceId: string;
+    }> = [];
     const inventory = boundAndroidResetInventory((inventoryOption) => {
-      inventoryOptions.push(inventoryOption ?? {});
+      inventoryOptions.push(inventoryOption);
       return new Promise<BootedDevice[]>(() => {});
     }, timer);
     const controller = new AbortController();
-    const pending = inventory({ signal: controller.signal, timeoutMs: 317 });
+    const pending = inventory({
+      signal: controller.signal,
+      timeoutMs: 317,
+      targetDeviceId: "emulator-5554",
+    });
 
-    expect(inventoryOptions).toEqual([{ signal: expect.any(AbortSignal), timeoutMs: 317 }]);
+    expect(inventoryOptions).toEqual([
+      { signal: expect.any(AbortSignal), timeoutMs: 317, targetDeviceId: "emulator-5554" },
+    ]);
     expect(inventoryOptions[0]!.signal).not.toBe(controller.signal);
     expect(timer.getPendingTimeouts()).toEqual([317]);
     timer.advanceTime(316);
@@ -360,18 +370,11 @@ describe("session broker service lifecycle", () => {
     expect(inventoryOptions[0]!.signal?.aborted).toBe(true);
     expect(timer.getPendingTimeoutCount()).toBe(0);
 
-    const timeoutPending = inventory({ timeoutMs: 91 });
+    const timeoutPending = inventory({ timeoutMs: 91, targetDeviceId: "emulator-5554" });
     expect(timer.getPendingTimeouts()).toEqual([91]);
     timer.advanceTime(91);
     await expect(timeoutPending).rejects.toThrow("timed out after 91ms");
     expect(inventoryOptions[1]!.signal?.aborted).toBe(true);
-    expect(timer.getPendingTimeoutCount()).toBe(0);
-
-    const defaultTimeoutPending = inventory();
-    expect(timer.getPendingTimeouts()).toEqual([2000]);
-    timer.advanceTime(2000);
-    await expect(defaultTimeoutPending).rejects.toThrow("timed out after 2000ms");
-    expect(inventoryOptions[2]!.signal?.aborted).toBe(true);
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
@@ -397,7 +400,11 @@ describe("session broker service lifecycle", () => {
         }),
       timer,
     );
-    const pending = inventory({ signal: controller.signal, timeoutMs: 91 });
+    const pending = inventory({
+      signal: controller.signal,
+      timeoutMs: 91,
+      targetDeviceId: "emulator-5554",
+    });
 
     expect(innerAborted).toBe(false);
     timer.advanceTime(91);

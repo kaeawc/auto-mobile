@@ -29,12 +29,18 @@ describe("DaemonBroker Android reset readiness wiring", () => {
     const ports = sessionBrokerAndroidResetPorts(getReadiness);
     const signal = new AbortController().signal;
 
-    await expect(ports.inventory({ signal, timeoutMs: 847 })).resolves.toEqual([androidDevice]);
+    await expect(
+      ports.inventory({ signal, timeoutMs: 847, targetDeviceId: "emulator-5554" }),
+    ).resolves.toEqual([androidDevice]);
     await expect(
       ports.ctrlProxyReady(androidDevice, { signal, timeoutMs: 847, noRetry: true }),
     ).resolves.toBe(true);
     expect(getReadiness).toHaveBeenCalledTimes(2);
-    expect(inventory).toHaveBeenCalledWith({ signal, timeoutMs: 847 });
+    expect(inventory).toHaveBeenCalledWith({
+      signal,
+      androidTargetDeviceId: "emulator-5554",
+      skipAndroidProfileEnrichment: true,
+    });
     expect(ctrlProxyReady).toHaveBeenCalledWith(androidDevice, {
       signal,
       timeoutMs: 847,

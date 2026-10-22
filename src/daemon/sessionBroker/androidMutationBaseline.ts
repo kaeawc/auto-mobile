@@ -143,12 +143,11 @@ async function captureDisplay(
     "display:size",
     parseDisplayOverride(await command("shell wm size"), "size"),
   );
-  const nightMode = await command("shell cmd uimode night");
-  const night = /^Night mode: (yes|no|auto|custom)$/.exec(nightMode);
-  if (!night?.[1]) {
-    throw new ActionableError("Android baseline night mode is unreadable");
-  }
-  observe("device-setting", "display:night-mode", night[1]);
+  observe(
+    "device-setting",
+    "display:night-mode",
+    parseNightMode(await command("shell cmd uimode night")),
+  );
 }
 
 async function captureFiles(
@@ -295,7 +294,7 @@ async function capturePackageState(
   }
 }
 
-function parseDisplayOverride(output: string, type: "density" | "size"): string | null {
+export function parseDisplayOverride(output: string, type: "density" | "size"): string | null {
   const lines = output.split("\n");
   const valuePattern = type === "density" ? "[0-9]+" : "[0-9]+x[0-9]+";
   const physical = new RegExp(`^Physical ${type}: ${valuePattern}$`);
@@ -311,4 +310,12 @@ function parseDisplayOverride(output: string, type: "density" | "size"): string 
     throw new ActionableError(`Android baseline display ${type} is unreadable`);
   }
   return match[1];
+}
+
+export function parseNightMode(output: string): string {
+  const night = /^Night mode: (yes|no|auto|custom)$/.exec(output);
+  if (!night?.[1]) {
+    throw new ActionableError("Android baseline night mode is unreadable");
+  }
+  return night[1];
 }

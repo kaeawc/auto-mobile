@@ -9,6 +9,8 @@ import {
   isAndroidResetFile,
   observeSettings,
   parseAndroidBaselinePackages,
+  parseDisplayOverride,
+  parseNightMode,
   type AndroidBaselineCommand,
 } from "./androidMutationBaseline";
 import type { DeviceMutationResetContext } from "./mutations/reset";
@@ -53,12 +55,49 @@ class AndroidBaselineCleaner {
   async clean(): Promise<void> {
     const users = await captureAndroidUsers(this.command);
     await this.cleanPackages(users);
+    await this.cleanDisplay();
     for (const namespace of ["global", "system", "secure"]) {
       for (const user of namespace === "global" ? [0] : users) {
         await this.cleanSettings(namespace, user);
       }
     }
     await this.cleanFiles();
+  }
+
+  private async readDisplay(): Promise<ReadonlyMap<string, MutationValue>> {
+    const density = parseDisplayOverride(await this.command("shell wm density"), "density");
+    const size = parseDisplayOverride(await this.command("shell wm size"), "size");
+    const night = parseNightMode(await this.command("shell cmd uimode night"));
+    return new Map<string, MutationValue>([
+      [
+        "display:density",
+        density === null ? { state: "absent" } : { state: "present", value: density },
+      ],
+      ["display:size", size === null ? { state: "absent" } : { state: "present", value: size }],
+      ["display:night-mode", { state: "present", value: night }],
+    ]);
+  }
+
+  private async cleanDisplay(): Promise<void> {
+    const current = await this.readDisplay();
+    // Display commands rewrite settings rows, which the subsequent settings pass restores.
+    for (const [key, value] of current) {
+      const prior = this.prior.get(`device-setting:${key}`);
+      if (prior && !isDeepStrictEqual(value, prior)) {
+        await this.restore("device-setting", key, prior);
+      }
+    }
+    const mismatches = [...(await this.readDisplay())]
+      .filter(([key, value]) => {
+        const prior = this.prior.get(`device-setting:${key}`);
+        return prior && !isDeepStrictEqual(value, prior);
+      })
+      .map(([key]) => key);
+    if (mismatches.length > 0) {
+      throw new ActionableError(
+        `Android cleaning did not restore live display state: ${mismatches.join(", ")}`,
+      );
+    }
   }
 
   private async cleanPackages(users: readonly number[]): Promise<void> {

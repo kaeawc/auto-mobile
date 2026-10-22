@@ -608,6 +608,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
             bypassDeviceListCache: options.bypassAndroidDeviceListCache,
             skipNameEnrichment: options.skipAndroidNameEnrichment,
             skipProfileEnrichment: options.skipAndroidProfileEnrichment,
+            targetDeviceId: options.androidTargetDeviceId,
           },
           signal,
         ),

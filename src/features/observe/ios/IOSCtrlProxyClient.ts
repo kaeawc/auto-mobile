@@ -113,6 +113,7 @@ import type {
   WebSocketMessage,
   XCTestHierarchy,
 } from "./types";
+import { isSdkAppActivity } from "./sdkAppActivity";
 
 /**
  * IOSCtrlProxyClient - WebSocket client for iOS CtrlProxy
@@ -865,11 +866,7 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
   protected handleMessage(data: WebSocket.Data): void {
     try {
       const message = JSON.parse(data.toString()) as WebSocketMessage;
-      // Only app activity resets backoff; runner metrics and handshakes do not.
-      if (
-        message.type === "hierarchy_update" ||
-        (message.requestId && message.type !== "performance_update" && message.type !== "connected")
-      ) {
+      if (isSdkAppActivity(message)) {
         this.sdkEvents.noteSdkEventPollWsActivity();
       }
       this.processMessage(message);

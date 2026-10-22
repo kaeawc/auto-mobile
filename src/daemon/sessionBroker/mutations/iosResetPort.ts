@@ -103,6 +103,18 @@ function iosAccessibilityDefaultKey(key: string): string | undefined {
   return Object.entries(IOS_ACCESSIBILITY_DEFAULT_KEYS).find(([setting]) => setting === key)?.[1];
 }
 
+function accessibilityDefaultCommand(udid: string, key: string, prior: unknown): string[] {
+  return [
+    "spawn",
+    udid,
+    "defaults",
+    prior === undefined ? "delete" : "write",
+    "com.apple.Accessibility",
+    key,
+    ...(prior === undefined ? [] : ["-bool", prior === "1" ? "YES" : "NO"]),
+  ];
+}
+
 function iosGlobalSettingKey(key: string): string | undefined {
   return Object.entries(IOS_GLOBAL_SETTING_KEYS).find(([setting]) => setting === key)?.[1];
 }
@@ -404,15 +416,7 @@ export class IosDeviceMutationResetPort implements DeviceMutationResetPort {
     }
     const accessibilityKey = iosAccessibilityDefaultKey(mutation.key);
     if (accessibilityKey) {
-      return [
-        "spawn",
-        udid,
-        "defaults",
-        prior === undefined ? "delete" : "write",
-        "com.apple.Accessibility",
-        accessibilityKey,
-        ...(prior === undefined ? [] : ["-bool", prior === "1" ? "YES" : "NO"]),
-      ];
+      return accessibilityDefaultCommand(udid, accessibilityKey, prior);
     }
     const preference = iosGlobalSettingKey(mutation.key);
     if (!preference) {

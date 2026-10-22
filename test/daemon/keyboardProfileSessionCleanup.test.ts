@@ -124,6 +124,16 @@ describe("KeyboardProfileRestoreRegistry (#14705)", () => {
     expect(registry.takeOwnedBy(emulator.deviceId, "session-1")?.before).toBe("samsung");
   });
 
+  test("a session with an unknown before-profile does not take over a sessionless entry", () => {
+    const registry = new KeyboardProfileRestoreRegistry();
+    registry.record(emulator, "gboard", undefined);
+    registry.record(emulator, undefined, "session-1");
+    registry.record(emulator, "honeyboard", "session-1");
+    expect(registry.restoresOnRelease(emulator.deviceId)).toBe(false);
+    expect(registry.takeOwnedBy(emulator.deviceId, "session-1")).toBeUndefined();
+    expect(registry.recorded(emulator.deviceId)).toBe("gboard");
+  });
+
   test("an unknown or missing previous profile records nothing", () => {
     const registry = new KeyboardProfileRestoreRegistry();
     registry.record(emulator, undefined, "session-1");

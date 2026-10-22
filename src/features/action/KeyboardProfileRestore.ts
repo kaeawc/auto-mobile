@@ -56,8 +56,9 @@ export class KeyboardProfileRestoreRegistry {
     const existing = this.entries.get(device.deviceId);
     const known = before !== undefined && isKeyboardProfileId(before) ? before : undefined;
     if (existing && !(existing.owner === undefined && owner !== undefined && known)) {
+      // Keep the owner: a session must not take over a sessionless entry without its own
+      // before-profile, or its release would undo the sessionless change.
       existing.device = device;
-      existing.owner = owner ?? existing.owner;
       return;
     }
     // A session taking over a sessionless entry records its own before-profile, so its

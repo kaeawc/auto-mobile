@@ -5,7 +5,10 @@ import type { Timer } from "../../src/utils/SystemTimer";
 import { raceWithDeadline } from "../../src/utils/raceWithDeadline";
 import { readBrokerProtectedDevices } from "./brokerClientFiles";
 import { BrokerTransportError, type BrokerDaemonClient } from "./brokerDaemonClient";
-import type { SessionBrokerResult } from "../../src/devices/sessionBrokerResult";
+import {
+  SESSION_OWNER_EXITED_CODE,
+  type SessionBrokerResult,
+} from "../../src/devices/sessionBrokerResult";
 import { errorMessage } from "../../src/utils/describeUnknownError";
 import {
   matchesProtection,
@@ -287,6 +290,29 @@ export function leakReport(
   });
 }
 /** Join released status with healthy inventory proving absence or a reusable pooled device. */
+/**
+ * A settled terminal receipt for a grant: a client release, or the broker ending it because its
+ * owner exited (#14780). An owner-exited device is destroyed, so only native absence verifies it.
+ */
+function settledReceipt(
+  device: BrokerLedgerEntry,
+  status: SessionBrokerResult | undefined,
+): "released" | "owner-exited" | undefined {
+  if (
+    status?.sessionUuid !== device.sessionUuid ||
+    status.requestId !== device.requestId ||
+    status.cleanupPending
+  ) {
+    return undefined;
+  }
+  if (status.outcome === "released") {
+    return "released";
+  }
+  return status.outcome === "failed" && status.failure?.code === SESSION_OWNER_EXITED_CODE
+    ? "owner-exited"
+    : undefined;
+}
+
 export async function assertReleasedAndAbsent(options: {
   ledger: BrokerDeviceLedger;
   devicesView(): Promise<LedgerDevicesView>;
@@ -311,6 +337,7 @@ export async function assertReleasedAndAbsent(options: {
       async () => {
         while (active && timer.now() < deadline) {
           const confirmed = new Map<string, SessionBrokerResult>();
+          const ownerExited = new Set<string>();
           const devices = ledger.devices();
           let transportFailed = false;
           for (const device of devices) {
@@ -336,12 +363,11 @@ export async function assertReleasedAndAbsent(options: {
             if (!active) {
               return;
             }
-            if (
-              status?.sessionUuid === device.sessionUuid &&
-              status.requestId === device.requestId &&
-              status.outcome === "released" &&
-              !status.cleanupPending
-            ) {
+            const receipt = settledReceipt(device, status);
+            if (receipt === "owner-exited") {
+              ownerExited.add(device.sessionUuid);
+            }
+            if (receipt && status) {
               confirmed.set(device.sessionUuid, status);
               if (!ledger.hasEvent(device, "released")) {
                 ledger.record("released", device);
@@ -367,6 +393,9 @@ export async function assertReleasedAndAbsent(options: {
                 if (!ledger.hasEvent(device, "absent")) {
                   ledger.record("absent", device);
                 }
+                continue;
+              }
+              if (ownerExited.has(device.sessionUuid)) {
                 continue;
               }
               const latest = devices.findLast(

@@ -459,7 +459,10 @@ execution through product lifecycle operations. Under zero pooling the product
 destroys the device; release does not retain an assignment. A receipt alone is
 not native absence proof: batch teardown joins `cleanupPending: false` with a
 healthy native inventory and records `released` and `absent` (or `leaked`) in
-the ledger. An info-less grant with a settled released receipt is recorded as
+the ledger. A settled `failed` receipt with code `session_owner_exited` (the broker
+ended the grant because its owner exited, for example across a daemon restart)
+counts the same way, but only native absence verifies it: its device is
+destroyed, never pooled. An info-less grant with a settled released receipt is recorded as
 `released` with `absence: not-verifiable`; teardown can finish and later runs
 can proceed, without claiming native absence. A dead daemon or unavailable
 inventory cannot prove absence.

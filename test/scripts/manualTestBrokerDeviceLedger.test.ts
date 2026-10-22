@@ -242,6 +242,60 @@ test.each([
   f.timer.reset();
 });
 
+test("an owner-exited receipt with native absence verifies the grant (#14780)", async () => {
+  const f = fixture();
+  f.bind();
+  f.broker.statusResults = [
+    {
+      ...f.released,
+      outcome: "failed",
+      failure: { code: "session_owner_exited", retryable: false, message: "owner exited" },
+    },
+  ];
+  await assertReleasedAndAbsent({
+    ledger: f.ledger,
+    daemonClient: f.broker,
+    timer: f.timer,
+    budgetMs: 1000,
+    devicesView: async () => f.view,
+  });
+  expect(f.ledger.entries.map((row) => row.kind)).toEqual([
+    "acquired",
+    "info",
+    "released",
+    "absent",
+  ]);
+  expect(f.ledger.releaseComplete(f.ledger.devices()[0]!)).toBe(true);
+});
+
+test.each([
+  ["an owner-exited grant whose device remains", "session_owner_exited", true],
+  ["another terminal failure", "session_preparation_failed", false],
+] as const)("%s is not verified", async (_label, code, present) => {
+  const f = fixture();
+  f.bind();
+  f.broker.statusResults = [
+    { ...f.released, outcome: "failed", failure: { code, retryable: false, message: code } },
+  ];
+  const result = assertReleasedAndAbsent({
+    ledger: f.ledger,
+    daemonClient: f.broker,
+    timer: f.timer,
+    budgetMs: 500,
+    devicesView: async () => ({ ...f.view, devices: present ? [device] : [] }),
+  }).then(
+    () => null,
+    (error: unknown) => error,
+  );
+  await drainUntilQuiescent(f.timer);
+  f.timer.advanceTime(500);
+  expect(await result).toBeInstanceOf(Error);
+  expect(f.ledger.entries.some((row) => row.kind === "absent" || row.kind === "pooled")).toBe(
+    false,
+  );
+  f.timer.reset();
+});
+
 test("empty evidence never proves absence", async () => {
   const f = fixture();
   await expect(

@@ -49,8 +49,8 @@ Use `broker1 up` to run strict preflight, probe `session-broker/v1`, and gate
 acquisitions by host load and boot permits; it finishes planned ready clients
 before capacity-refusal clients. `--clients a,b` or `--all`, `--stagger-ms N`
 (default 0), and `--max-devices N` are `up` options. `status` reports all clients;
-`down` closes them in reverse start order and verifies released receipts plus
-native absence (240 s); info-less grants with settled release receipts instead
+`down` closes them in reverse start order and verifies released (or settled
+`session_owner_exited`) receipts plus native absence (240 s); info-less grants with settled release receipts instead
 record `released` with `absence: not-verifiable`, allowing subsequent runs without
 claiming absence. `up` captures info best-effort with a 5-second bound. `report`
 writes `evidence/broker-report.json`.

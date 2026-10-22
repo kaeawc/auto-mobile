@@ -1,4 +1,7 @@
 import { object, type PrototypeValidationError } from "./prototypeBindingValidation";
+import { walkPrototypeNodes } from "./prototypeNodeChildren";
+import { repeatKeyInstances } from "./prototypeRepeat";
+import { mapBindableFields } from "./prototypeTemplate";
 
 export interface PrototypeStrictOptions {
   supportedCapabilities?: readonly string[];
@@ -30,6 +33,78 @@ export function prototypeStrictPolicyError(
     }
     if (window?.persistence === "device") {
       return { path: "window.persistence", message: "Privileged window persistence" };
+    }
+    return secureLibraryError(spec);
+  }
+  return undefined;
+}
+
+function secureLibraryError(spec: unknown): PrototypeValidationError | undefined {
+  const nodes: { value: Record<string, unknown>; path: string }[] = [];
+  walkPrototypeNodes(spec, (value, path) => nodes.push({ value, path }));
+  const secure = new Set(
+    repeatKeyInstances(
+      spec,
+      nodes
+        .filter(
+          ({ value }) =>
+            value.type === "textField" &&
+            (value.secure === true || value.keyboardType === "password"),
+        )
+        .map(({ value, path }) => ({ value: { stateKey: value.stateKey }, path })),
+    )
+      .map(({ value }) => value)
+      .map((node) => String(node.stateKey)),
+  );
+  if (!secure.size) {
+    return undefined;
+  }
+  const requests: string[] = [];
+  const fields: { text: string; path: string; key: boolean }[] = [];
+  for (const { value, path } of nodes) {
+    mapBindableFields(value, path, (raw, at, kind) => {
+      if (kind === "request") {
+        requests.push(at);
+      }
+      if (typeof raw === "string" && (kind === "text" || kind === "key")) {
+        fields.push({ text: raw, path: at, key: kind === "key" });
+      }
+      return raw;
+    });
+  }
+  fields.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  const requestFields = fields.filter((field) =>
+    requests.some(
+      (at) =>
+        field.path === `${at}.url` ||
+        field.path === `${at}.body.state` ||
+        ["headers", "query"].some(
+          (name) =>
+            field.path.startsWith(`${at}.${name}.`) || field.path.startsWith(`${at}.${name}[`),
+        ),
+    ),
+  );
+  // Reuse the key binder for text too: repeat substitution has the same string grammar.
+  const instances = repeatKeyInstances(
+    spec,
+    requestFields.map((field) => ({
+      ...field,
+      value: { stateKey: field.text },
+    })),
+  );
+  for (const { value, located: field } of instances) {
+    const text = String(value.stateKey);
+    if (field.key ? secure.has(text) : [...secure].some((key) => text.includes(`{${key}}`))) {
+      return { path: field.path, message: "Secure value cannot be bound into a request" };
+    }
+  }
+  const keys = object(object(spec)?.storage)?.keys;
+  if (Array.isArray(keys)) {
+    const index = keys.findIndex(
+      (key) => typeof key === "string" && key.startsWith("state:") && secure.has(key.slice(6)),
+    );
+    if (index >= 0) {
+      return { path: `storage.keys[${index}]`, message: "Secure value cannot be persisted" };
     }
   }
   return undefined;

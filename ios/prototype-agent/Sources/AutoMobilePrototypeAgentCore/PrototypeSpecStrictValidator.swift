@@ -59,6 +59,7 @@ public enum PrototypeSpecStrictValidator {
                     throw PrototypeContractValidator.invalid("window.persistence", "Privileged window")
                 }
             }
+            if library { try secureLibrary(fields, nodes: nodes, actions: context.actions, repeats: repeats) }
         } catch let error as PrototypeLoadError { throw error }
         catch let DecodingError.dataCorrupted(context) {
             if let separator = context.debugDescription.range(of: ": ") {
@@ -69,5 +70,57 @@ public enum PrototypeSpecStrictValidator {
             }
             throw PrototypeContractValidator.invalid("$", context.debugDescription)
         } catch { throw PrototypeContractValidator.invalid("$", error.localizedDescription) }
+    }
+
+    private static func secureLibrary(
+        _ fields: [String: JSONValue], nodes: [PrototypeLocatedValue],
+        actions: [PrototypeLocatedValue], repeats: PrototypeStrictRepeats
+    )
+        throws
+    {
+        let secure = Set(nodes.compactMap { node -> String? in
+            let value = node.value
+            guard value["type"] == .string("textField"),
+                  value["secure"] == .bool(true) || value["keyboardType"] == .string("password")
+            else { return nil }
+            return value["stateKey"]?.stringValue
+        })
+        guard !secure.isEmpty else { return }
+        var bindings: [(text: String, path: String, key: Bool)] = []
+        func append(_ raw: JSONValue?, path: String) {
+            if let text = raw?.stringValue { bindings.append((text, path, false)) }
+            if let key = raw?.objectFields?["state"]?.stringValue { bindings.append((key, "\(path).state", true)) }
+        }
+        for action in actions where action.value["type"] == .string("request") {
+            append(action.value["url"], path: "\(action.path).url")
+            for name in ["headers", "query"] {
+                for (key, value) in action.value[name]?.objectFields ?? [:] {
+                    append(value, path: PrototypeLimits.dataMemberPath("\(action.path).\(name)", key: key))
+                }
+            }
+            append(action.value["body"], path: "\(action.path).body")
+        }
+        for binding in bindings.sorted(by: { $0.path.utf16.lexicographicallyPrecedes($1.path.utf16) }) {
+            let scope = repeats.scopes.first {
+                binding.path.hasPrefix("\($0.path).children[") && PrototypeRepeat
+                    .segments(binding.text, alias: $0.alias)
+                    .contains { if case .literal = $0 { return false }; return true }
+            }
+            let texts = scope.map { scope in
+                scope.items.enumerated().map { index, item in
+                    PrototypeRepeatInstance(alias: scope.alias, item: item, index: index).interpolate(binding.text)
+                }
+            } ?? [binding.text]
+            if texts.contains(where: { text in
+                binding.key ? secure.contains(text) : secure.contains { text.contains("{\($0)}") }
+            }) {
+                throw PrototypeContractValidator.invalid(binding.path, "Secure value cannot be bound into a request")
+            }
+        }
+        for (index, raw) in PrototypeStrictBindings.array(fields["storage"]?.objectFields?["keys"]).enumerated() {
+            if let key = raw.stringValue, key.hasPrefix("state:"), secure.contains(String(key.dropFirst(6))) {
+                throw PrototypeContractValidator.invalid("storage.keys[\(index)]", "Secure value cannot be persisted")
+            }
+        }
     }
 }

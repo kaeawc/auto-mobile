@@ -5,7 +5,12 @@ import kotlinx.serialization.json.*
 
 /** Additional unprivileged-import and negotiated-capability checks after full validation. */
 internal object PrototypeStrictPolicy {
-  fun error(spec: JsonObject, supported: Set<String>?, library: Boolean): PrototypeSpecError? {
+  fun error(
+    spec: JsonObject,
+    supported: Set<String>?,
+    library: Boolean,
+    context: PrototypeStateChecks.Context,
+  ): PrototypeSpecError? {
     if (supported != null && !supported.containsAll(required(spec))) {
       return PrototypeSpecError("$", "Unsupported capabilities")
     }
@@ -14,7 +19,81 @@ internal object PrototypeStrictPolicy {
       return PrototypeSpecError("window.layer", "Privileged window")
     if (library && window?.text("persistence") == "device")
       return PrototypeSpecError("window.persistence", "Privileged window")
-    return null
+    return if (library) secureLibraryError(spec, context) else null
+  }
+
+  private fun secureLibraryError(
+    spec: JsonObject,
+    context: PrototypeStateChecks.Context,
+  ): PrototypeSpecError? {
+    val scopes = PrototypeRepeatValidator.scopes(spec)
+    val secure =
+      context.nodes
+        .filter {
+          it.value.text("type") == "textField" &&
+            (it.value["secure"] == JsonPrimitive(true) ||
+              it.value.text("keyboardType") == "password")
+        }
+        .flatMap { node ->
+          PrototypeRepeatValidator.keyInstances(
+              scopes,
+              JsonObject(mapOf("stateKey" to node.value.getValue("stateKey"))),
+              node.path,
+            )
+            .mapNotNull { (value, _) -> value.text("stateKey") }
+        }
+        .toSet()
+    if (secure.isEmpty()) return null
+    val requests = context.actions.filter { it.value.text("type") == "request" }.map { it.path }
+    data class Field(val text: String, val path: String, val key: Boolean)
+    val fields = mutableListOf<Field>()
+    for (node in context.nodes) {
+      PrototypeBindableFields.first<Boolean>(node.value, node.path) { raw, at, kind ->
+        val text = (raw as? JsonPrimitive)?.takeIf { it.isString }?.content
+        if (
+          text != null &&
+            kind in listOf(PrototypeBindableKind.REQUEST_TEXT, PrototypeBindableKind.KEY)
+        )
+          fields.add(Field(text, at, kind == PrototypeBindableKind.KEY))
+        null
+      }
+    }
+    for (field in fields.sortedBy { it.path }) {
+      if (
+        !requests.any { at ->
+          field.path == "$at.url" ||
+            field.path == "$at.body.state" ||
+            listOf("headers", "query").any {
+              field.path.startsWith("$at.$it.") || field.path.startsWith("$at.$it[")
+            }
+        }
+      )
+        continue
+      val scope = scopes.firstOrNull { field.path.startsWith("${it.path}.children[") }
+      val texts =
+        if (scope == null || !PrototypeRepeatFields.hasPlaceholder(field.text, scope.alias))
+          listOf(field.text)
+        else
+          scope.items.mapIndexed { index, item ->
+            PrototypeRepeatTemplate.bind(field.text, scope.alias, item, index)
+          }
+      if (
+        texts.any { text ->
+          if (field.key) text in secure else secure.any { text.contains("{$it}") }
+        }
+      )
+        return PrototypeSpecError(field.path, "Secure value cannot be bound into a request")
+    }
+    val keys = (spec["storage"] as? JsonObject)?.get("keys") as? JsonArray
+    val index =
+      keys?.indexOfFirst {
+        (it as? JsonPrimitive)?.content?.let { key ->
+          key.startsWith("state:") && key.removePrefix("state:") in secure
+        } == true
+      } ?: -1
+    return if (index >= 0)
+      PrototypeSpecError("storage.keys[$index]", "Secure value cannot be persisted")
+    else null
   }
 
   fun required(spec: JsonObject): Set<String> {

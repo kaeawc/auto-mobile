@@ -1423,6 +1423,56 @@ describe("Keyboard", () => {
     }
   });
 
+  test("ios close is a no-op success when the runner fails but no software keyboard is visible (#14953)", async () => {
+    fakeHierarchy.setDefaultResult(iosKeyboardMinimizedHierarchy);
+    const spy = spyOnIosClientInstance({
+      requestKeyboard: async () => ({
+        success: false,
+        open: true,
+        totalTimeMs: 4500,
+        error: "Failed to scroll to visible Button 'Go'",
+      }),
+    });
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const result = await new Keyboard(iosDevice, {
+        adbFactory: fakeAdbFactory,
+        hierarchyProvider: fakeHierarchy,
+        timer: fakeTimer,
+      }).execute("close");
+      expect(result).toEqual({
+        success: true,
+        open: false,
+        message: "Keyboard is closed (no visible on-screen software keyboard)",
+      });
+    } finally {
+      spy.mockRestore();
+      warning.mockRestore();
+    }
+  });
+
+  test("ios close still fails when the runner fails and a software keyboard is visible", async () => {
+    fakeHierarchy.setDefaultResult(iosKeyboardVisibleHierarchy);
+    const spy = spyOnIosClientInstance({
+      requestKeyboard: async () => ({
+        success: false,
+        open: true,
+        totalTimeMs: 10,
+        error: "no dismiss key",
+      }),
+    });
+    try {
+      const result = await new Keyboard(iosDevice, {
+        adbFactory: fakeAdbFactory,
+        hierarchyProvider: fakeHierarchy,
+        timer: fakeTimer,
+      }).execute("close");
+      expect(result).toMatchObject({ success: false, error: "no dismiss key" });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   test("ios close timeout succeeds if one bounded detect confirms closed", async () => {
     const calls: Array<{ action: string; timeoutMs?: number }> = [];
     const getInstanceSpy = spyOnIosClientInstance({

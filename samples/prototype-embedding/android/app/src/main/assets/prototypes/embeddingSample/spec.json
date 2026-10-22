@@ -1,0 +1,70 @@
+{
+  "id": "embeddingSample",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    },
+    "opacity": 100
+  },
+  "data": {
+    "greeting": {
+      "text": "Hello from a prototype"
+    }
+  },
+  "state": {
+    "visits": 0,
+    "status": "idle"
+  },
+  "storage": {
+    "version": 1,
+    "keys": [
+      "state:visits"
+    ]
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "image",
+        "asset": "hero"
+      },
+      {
+        "type": "text",
+        "text": "{data:/greeting/text}"
+      },
+      {
+        "type": "text",
+        "text": "Visits: {visits}"
+      },
+      {
+        "onTap": [
+          {
+            "type": "increment",
+            "key": "visits"
+          },
+          {
+            "type": "setData",
+            "path": "/data/greeting/text",
+            "value": {
+              "value": "Welcome back"
+            }
+          }
+        ],
+        "type": "button",
+        "label": "Visit"
+      },
+      {
+        "onTap": [
+          {
+            "type": "request",
+            "url": "http://10.0.2.2:8080/greeting",
+            "into": "/data/greeting",
+            "statusKey": "status"
+          }
+        ],
+        "type": "button",
+        "label": "Load"
+      }
+    ]
+  }
+}

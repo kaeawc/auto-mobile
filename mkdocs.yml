@@ -128,6 +128,7 @@ nav:
       - "Session Downloads fixtures": using/session-downloads.md
       - "Storage capabilities": using/storage-capabilities.md
       - "SDK capabilities": using/sdk-capabilities.md
+      - "Embedding prototypes in an app": using/prototype-embedding.md
       - "Live device acceptance": using/live-device-acceptance.md
       - "Manual-test harness": using/manual-test-harness.md
       - "Dynamic Tools": using/dynamic-tools.md

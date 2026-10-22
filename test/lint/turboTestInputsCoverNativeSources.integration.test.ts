@@ -53,6 +53,10 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     "android/build-logic/src/main/kotlin/dev/jasonpearson/automobile/buildlogic/apisignature/ApiSignatureTasks.kt",
     // nativePrototype.test.ts pins the renderer library version to VERSION_NAME (#13729).
     "android/gradle.properties",
+    // nativePrototypeSamples.test.ts compares the committed embedding samples with the
+    // resource output (#13732).
+    "samples/prototype-embedding/**",
+    "ios/prototype-agent/Fixtures/EmbedConsumer/Sources/**",
     "ios/auto-mobile-sdk/api/auto-mobile-sdk.api",
     // validToolsRegistryParity.test.ts reads the Kotlin plan-tool allowlist.
     "android/test-plan-validation/src/main/kotlin/dev/jasonpearson/automobile/validation/ValidTools.kt",

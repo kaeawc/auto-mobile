@@ -160,11 +160,12 @@ export function createDeviceGestureRecordingDeviceResolution(
   return {
     selectDevice: (deviceId, platform, sessionUuid) => {
       const deviceReadiness = deviceSessions();
+      const normalizedSessionUuid = sessionUuid?.trim() || undefined;
       return resolveDeviceGestureRecordingDevice(
         deviceReadiness.getPlatformDeviceManager(),
         deviceId,
         platform,
-        () => sessionDeviceId(sessionUuid),
+        () => sessionDeviceId(normalizedSessionUuid),
       );
     },
     // Readiness for an already-selected, already-admitted device: the same

@@ -64,7 +64,7 @@ interface AppearanceTarget {
   execution?: ActiveExecution;
 }
 
-const defaultDeviceSource: AppearanceDeviceSource = {
+export const defaultAppearanceDeviceSource: AppearanceDeviceSource = {
   getPooledDevices: () => {
     const pool = defaultDaemonContext.devicePool();
     if (!pool) {
@@ -77,14 +77,15 @@ const defaultDeviceSource: AppearanceDeviceSource = {
     }));
   },
   getSessionDevice: (sessionUuid) => {
-    if (!sessionUuid) {
+    const normalizedSessionUuid = sessionUuid?.trim();
+    if (!normalizedSessionUuid) {
       return undefined;
     }
     const manager = defaultDaemonContext.sessionManager();
     if (!manager) {
-      return resolveDirectSessionDevice(sessionUuid)?.device;
+      return resolveDirectSessionDevice(normalizedSessionUuid)?.device;
     }
-    const deviceId = manager.getDeviceForSession(sessionUuid);
+    const deviceId = manager.getDeviceForSession(normalizedSessionUuid);
     const device = deviceId ? defaultDaemonContext.devicePool()?.getDevice(deviceId) : undefined;
     return device
       ? { deviceId: device.id, name: device.name, platform: device.platform }
@@ -95,7 +96,10 @@ const defaultDeviceSource: AppearanceDeviceSource = {
     if (manager) {
       return manager.getSessionForDevice(deviceId);
     }
-    const direct = sessionUuid ? resolveDirectSessionDevice(sessionUuid) : undefined;
+    const normalizedSessionUuid = sessionUuid?.trim();
+    const direct = normalizedSessionUuid
+      ? resolveDirectSessionDevice(normalizedSessionUuid)
+      : undefined;
     return direct?.device.deviceId === deviceId ? direct.sessionUuid : null;
   },
   getSessionManager: () => defaultDaemonContext.sessionManager(),
@@ -139,7 +143,7 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
       // An observer may store its own config; it applies once the observer holds a device (#10976).
       { allowObserverSessions: true },
     ),
-    private readonly deviceSource: AppearanceDeviceSource = defaultDeviceSource,
+    private readonly deviceSource: AppearanceDeviceSource = defaultAppearanceDeviceSource,
     private readonly dependencies: AppearanceSocketServerDependencies = defaultDependencies,
   ) {
     super(socketPath, timer, "Appearance");

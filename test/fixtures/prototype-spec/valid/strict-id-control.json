@@ -1,0 +1,11 @@
+{
+  "id": "a\u0001b",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "spacer"
+  }
+}

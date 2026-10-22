@@ -1762,7 +1762,9 @@ ignored.
 - A saved prototype launched with no host connected has no host to run `adb reverse`, so its
   `via: "device"` requests to localhost fail until a host shows or re-shows it. Use a reachable
   address (or `via: "host"` while a host is attached) for prototypes meant to run unattended.
-- iOS simulators share the Mac's network, so nothing is reversed there.
+- iOS simulators share the Mac's network, so nothing is reversed there. The iOS agent refuses
+  loopback destinations for `via: "device"`; see the iOS
+  [destination policy](../ios/prototype-agent.md#destination-policy-13815).
 
 ## Data, storage and network (#12531)
 
@@ -1811,7 +1813,8 @@ prototype cancels its requests. Each finished request is a `prototype_request` e
 - `via: "device"`: the device runs the request itself. On Android `localhost` is the device, so the
   host runs `adb reverse` for each loopback port it finds in the shown spec (see
   [Loopback requests from the device](#loopback-requests-from-the-device-12530)); on an iOS
-  simulator `localhost` is the Mac, which shares its loopback, and nothing is reversed.
+  simulator nothing is reversed and the agent refuses loopback destinations (see the iOS
+  [destination policy](../ios/prototype-agent.md#destination-policy-13815)).
 
 **Host egress policy.** Host requests refuse localhost names, loopback, unspecified and link-local
 addresses, emulator host aliases, and IPv6 forms embedding those IPv4 destinations.
@@ -1837,8 +1840,8 @@ headers omit content-encoding and content-length because they describe the encod
 
 **Cleartext and transport security.** CtrlProxy declares `INTERNET` and a `network_security_config`
 with cleartext permitted, so `http://` works for `via: "device"` on Android. On iOS, `via: "device"`
-runs inside the target app and obeys its App Transport Security: `localhost` and IP addresses are
-exempt, other cleartext hosts fail with `network` and a message pointing to `via: "host"` or `https://`.
+runs inside the target app and obeys its App Transport Security: IP addresses are exempt (`localhost`
+is too, but the agent's destination policy refuses it), other cleartext hosts fail with `network` and a message pointing to `via: "host"` or `https://`.
 `via: "host"` is not subject to ATS.
 
 **Saved prototypes.** A saved Android prototype (see
@@ -2471,9 +2474,10 @@ from the current `/data` on every mapping pass, so a data action, request or pat
 a later write broke (a non-object, a non-numeric `y`) are skipped rather than failing the frame. The
 chart is one accessibility node labelled with its summary ("Line chart, Heart rate, 24 points, min
 58, max 141, latest 72"; "Ring chart, Steps today, 6500 of 10000"); an authored
-`contentDescription` replaces it, and `observe` reports it. The x labels are visual only. iOS
-rendering with Swift Charts and `AXChartDescriptor` is #14679; until then the iOS agent does not
-advertise the capability and the host refuses chart specs there.
+`contentDescription` replaces it, and `observe` reports it. The x labels are visual only. The iOS
+agent advertises the capability too (#14679): it draws the same four variants with Swift Charts and
+describes line, area and bar charts to VoiceOver with an `AXChartDescriptor`; its summary text is
+checked against the shared `chart-variants.json` fixture.
 
 ## Rich text
 

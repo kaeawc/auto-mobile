@@ -108,6 +108,12 @@ export const SESSION_OWNER_EXITED_CODE = "session_owner_exited";
 export const SESSION_OWNER_EXITED_MESSAGE =
   "Session owner exited before relinquishing its device; cleanup remains owned by the broker";
 
+/**
+ * The `timeout` failure's reason when no preparation budget remained to send
+ * `daemon/prepareSession` at all: no request was made, so there is no receipt to clean up.
+ */
+export const NO_PREPARATION_BUDGET_REASON = "No preparation budget remains";
+
 /** Why a release call ends a session; absent for an ordinary client release. */
 export type SessionBrokerReleaseReason = typeof SESSION_OWNER_EXITED_CODE;
 

@@ -74,8 +74,8 @@ export function buildHandlerParams(plan: InvocationPlan): Record<string, unknown
     // internal budget, can recover it: this value plus `execution.startTime` is
     // the absolute wall-clock deadline of the current request. Only present on
     // a daemon-forwarded call; absent on a direct call, which a handler must
-    // treat as "no transport deadline known" (issue #6222 P1,
-    // `setUIStateHandler` is the first consumer).
+    // treat as "no transport deadline known" (issue #6222 P1; the handler
+    // built by `createSetUIStateHandler` is the first consumer).
     ...(context.requestTimeoutMs !== undefined
       ? { [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: context.requestTimeoutMs }
       : {}),
@@ -86,8 +86,8 @@ export function buildHandlerParams(plan: InvocationPlan): Record<string, unknown
     ...(context.requestDeadlineMs !== undefined
       ? { [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: context.requestDeadlineMs }
       : {}),
-    // Same daemon-only provenance as `requestTimeoutMs`: lets `setUIStateHandler`
-    // resolve the LIVE (possibly progress-extended) deadline via
+    // Same daemon-only provenance as `requestTimeoutMs`: lets the
+    // `createSetUIStateHandler` handler resolve the LIVE (possibly progress-extended) deadline via
     // `liveDeadlineRegistry` instead of only this frozen snapshot (issue #6222).
     ...(context.requestLiveDeadlineKey !== undefined
       ? { [INTERNAL_LIVE_DEADLINE_KEY_PARAM]: context.requestLiveDeadlineKey }

@@ -81,7 +81,7 @@ export interface SessionBrokerFailure {
   /**
    * Set when a retry only succeeds under a fresh request ID: this request ID's terminal refusal
    * is stored and replays byte-identically, so resending it can never succeed.
-   * Retryable `eviction_pending` receipts set `retryRequires: "new_request_id"` too.
+   * Retryable `eviction_pending` and `session_broker_stopping` receipts set it too.
    */
   retryRequires?: "new_request_id";
 }

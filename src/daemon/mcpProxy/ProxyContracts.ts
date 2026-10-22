@@ -188,6 +188,8 @@ export interface DaemonMcpProxyConfig {
   buildIdentity?: BuildIdentity;
   /** This client's version for the daemon version gate (defaults to DAEMON_VERSION; injectable for testing) */
   clientVersion?: string;
+  /** Version a daemon started from this checkout would report now; null when unknown. */
+  readCheckoutVersion?: () => Promise<string | null>;
   /** Existing device-pool session bound before the first discovery request. */
   initialSessionUuid?: string;
   /**

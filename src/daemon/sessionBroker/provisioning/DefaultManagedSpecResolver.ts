@@ -29,18 +29,18 @@ import { type BindingRequestedSpec } from "./DefaultManagedSpecMatcher";
  * Declarative spec reconciler for one managed device binding (#11175, epic #11172).
  *
  * Given a scoped binding, a requested spec, the host-wide binding registry and the device inventory, it
- * decides between four dispositions and carries the decision out:
+ * decides between three dispositions and carries the decision out:
  *
  * - `reused`: the binding's assigned device satisfies the spec; it gets a fresh session.
- * - `adopted`: an empty binding takes a matching device that no valid binding holds (the free pool of
- *   invalidated scopes, or this binding's own uncommitted leftover from an interrupted create).
  * - `created`: no eligible device; a new one is provisioned under a generated name.
- * - `replaced`: the assigned device does not satisfy the spec; it is deleted, its absence is
- *   verified, a new one is created, and the result is committed into the same binding.
+ * - `replaced`: an assigned device does not satisfy the spec, or an empty binding reclaims its
+ *   unheld orphan. A journaled deletion verifies absence before a fresh create in the same binding
+ *   (#14788). Orphans are never handed out unreset; `adopted` remains a wire-compatible type only.
  *
  * Safety rules:
  * - Omitted spec fields are unconstrained (owner decision Q4); the resolved spec is recorded.
- * - Only this binding's own assigned device is ever deleted, and only after the spec is resolved,
+ * - Only this binding's own assigned device or unheld, same-name-suffix orphan is deleted, after
+ *   the deletion is journaled together with its assignment and the spec is resolved,
  *   discovery is complete, no live owner or claim holds it and the binding binding still holds.
  * - Partial inventory or an unreadable device configuration is never authoritative absence or
  *   mismatch; it fails retryable `discovery_incomplete` without destructive work.
@@ -102,7 +102,7 @@ export interface ManagedSpecResolver {
     spec: BindingRequestedSpec,
     options: { signal?: AbortSignal },
   ): Promise<ManagedSpecResolution>;
-  /** Checks creation-only prerequisites without blocking reuse or adoption. */
+  /** Checks creation-only prerequisites without blocking reuse. */
   checkCreatable?(
     platform: BindingPlatform,
     resolvedSpec: ResolvedExactDeviceSpecification,

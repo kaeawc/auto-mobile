@@ -122,7 +122,12 @@ enum class SessionReleaseReason {
   /** The daemon restarted (or the device restarted) and did not restore the session. */
   DAEMON_RESTARTED,
   /** The daemon no longer had the session's hold, for a reason it did not say. */
-  DAEMON_RELEASED;
+  DAEMON_RELEASED,
+  /**
+   * The user selected another device while recording this one (owner decision 2026-10-10, #11366):
+   * its pane closed, which releases it and finalizes the recording.
+   */
+  DEVICE_SWITCH;
 
   companion object {
     /** Maps the daemon's `releaseReason` string (`src/daemon/sessionManager.ts`) to a notice. */
@@ -310,7 +315,7 @@ fun rememberDesktopDaemonSession(options: DesktopDaemonSessionOptions): DesktopD
   val visiblePanes = options.panes.value
   state.currentPanes = visiblePanes
   state.HostVisibilityEffect(options, activeRecordings)
-  state.VisiblePanesEffect(options, visiblePanes)
+  state.VisiblePanesEffect(options, visiblePanes, activeRecordings)
   val requestInput = state.rememberRequestInput(options)
   val inputAllocation = state.rememberInputAllocation(options, requestInput)
   val requestControl = state.rememberRequestControl(options)
@@ -394,10 +399,19 @@ private fun DesktopDaemonCompositionState.HostVisibilityEffect(
 private fun DesktopDaemonCompositionState.VisiblePanesEffect(
   options: DesktopDaemonSessionOptions,
   visiblePanes: List<DesktopDaemonSessionBinding>,
+  activeRecordings: ActiveRecordingTracker,
 ) {
   with(options) {
     LaunchedEffect(visiblePanes) {
       val visible = visiblePanes.map { it.deviceId }.toSet()
+      inputDeviceId
+        ?.takeIf { it !in visible && activeRecordings.isRecordingOn(it) }
+        ?.let { recorded ->
+          // Leaving a recorded device releases it and finalizes the recording (#11366): mark it
+          // released, as an idle release does, so the dashboard fetches the artifact, drops Stop.
+          idleReleasedDeviceId = recorded
+          releaseReason = SessionReleaseReason.DEVICE_SWITCH
+        }
       if (inputDeviceId != null && inputDeviceId !in visible) inputDeviceId = null
       if (heldElsewhereDeviceId != null && heldElsewhereDeviceId !in visible) {
         heldElsewhereDeviceId = null

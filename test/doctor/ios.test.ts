@@ -1918,7 +1918,7 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
       expect(client.getCachedSupportedCommands()).toBeNull();
       expect(client.getCachedSupportedFeatures()).toBeNull();
       expect(client.isConnected()).toBe(false);
-      expect(client["autoReconnectEnabled"]).toBe(true);
+      expect(client.connectionTestHooks.autoReconnectEnabled).toBe(true);
       reachable = false;
       expect((await runner.inspectBootedRunners())[0]).toMatchObject({
         running: false,
@@ -1930,8 +1930,8 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
         hierarchyError: "iOS CtrlProxy runner is not running or unreachable",
       });
       expect(dials).toBe(4);
-      expect(client["connectionAttempts"]).toBe(0);
-      expect(client["autoReconnectEnabled"]).toBe(true);
+      expect(client.connectionTestHooks.connectionAttempts).toBe(0);
+      expect(client.connectionTestHooks.autoReconnectEnabled).toBe(true);
       expect(
         manager
           .getExecutedOperations()

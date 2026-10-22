@@ -34,7 +34,7 @@ async function realHarness(replies: AndroidCtrlProxyReplies): Promise<AndroidCtr
   );
   // The client's own tests drive the same private seams: an open socket, no reconnect, no redial.
   client.connectionTestHooks.socket = socket;
-  client["autoReconnectEnabled"] = false;
+  client.connectionTestHooks.autoReconnectEnabled = false;
   client["connectWebSocket"] = async () => true;
   client["onConnectionClosed"] = () => {};
   socket.on("message", (data: string) => {

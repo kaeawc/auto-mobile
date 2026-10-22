@@ -92,6 +92,7 @@ import dev.jasonpearson.automobile.desktop.core.datasource.InstalledApp
 import dev.jasonpearson.automobile.desktop.core.datasource.Result
 import dev.jasonpearson.automobile.desktop.core.device.DeviceControlsClients
 import dev.jasonpearson.automobile.desktop.core.device.DeviceControlsDashboard
+import dev.jasonpearson.automobile.desktop.core.device.DeviceRelease
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.diagnostics.DiagnosticsDashboard
 import dev.jasonpearson.automobile.desktop.core.failures.DateRange
@@ -2204,14 +2205,16 @@ fun AutoMobileContent(options: AutoMobileContentOptions = AutoMobileContentOptio
                         DeviceControlsDashboard(
                           activeDeviceId = activeDeviceId,
                           activeRecordings = activeRecordings,
-                          releasedDeviceId = desktopSessionState.idleReleasedDeviceId,
+                          release =
+                            desktopSessionState.idleReleasedDeviceId?.let {
+                              DeviceRelease(it, desktopSessionState.releaseReason)
+                            },
                           options =
                             DeviceControlsClients(
                               appearanceClient = appearanceClient,
                               recordingActions = recordingActions,
                               recordingConfigClient = recordingConfigClient,
                               streamClient = webRtcStreamClient,
-                              sessionUuidProvider = desktopSessionState.sessionUuidProvider,
                             ),
                         )
                       "diagnostics" ->

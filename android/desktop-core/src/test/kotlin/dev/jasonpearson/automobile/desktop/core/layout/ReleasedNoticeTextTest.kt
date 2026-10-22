@@ -28,6 +28,10 @@ class ReleasedNoticeTextTest {
     assertTrue(releasedNoticeText(SessionReleaseReason.IDLE).contains("2 minutes of inactivity"))
     assertTrue(releasedNoticeText(SessionReleaseReason.HEARTBEAT_LAPSED).contains("lost contact"))
     assertTrue(releasedNoticeText(SessionReleaseReason.DAEMON_RESTARTED).contains("restarted"))
+    assertTrue(
+      releasedNoticeText(SessionReleaseReason.DEVICE_SWITCH)
+        .contains("another device was selected"),
+    )
   }
 
   @Test

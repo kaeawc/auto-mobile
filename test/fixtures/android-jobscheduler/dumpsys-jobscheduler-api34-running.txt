@@ -1,0 +1,62 @@
+JOB SCHEDULER MANAGER (jobscheduler)
+
+Current JobScheduler state:
+
+  Settings:
+    Quota controller settings: ...
+
+  Started users: u0
+  Registered 3 jobs:
+  JOB #u0a123/7: 1a2b3c4 dev.example.playground/androidx.work.impl.background.systemjob.SystemJobService
+    u0a123 tag=*job*/dev.example.playground/androidx.work.impl.background.systemjob.SystemJobService
+    Source: uid=u0a123 user=0 pkg=dev.example.playground
+    JobInfo:
+      Service: dev.example.playground/androidx.work.impl.background.systemjob.SystemJobService
+      PERIODIC: interval=+15m0s0ms flex=+15m0s0ms
+      Requires: charging=false batteryNotLow=true deviceIdle=false
+      Extras: mParcelledData.dataSize=92
+      Network type: 1
+      Backoff: policy=1 initial=+30s0ms
+      Has early constraint
+      Has late constraint
+      Expedited: false
+    Required constraints: BATTERY_NOT_LOW CONNECTIVITY TIMING_DELAY DEADLINE [0x14a00000]
+    Satisfied constraints: CONNECTIVITY DEADLINE BATTERY_NOT_LOW DEVICE_NOT_DOZING BACKGROUND_NOT_RESTRICTED [0x12900000]
+    Unsatisfied constraints: TIMING_DELAY [0x80000000]
+    Tracking: BATTERY CONNECTIVITY TIME
+    Enqueue time: -1m40s302ms
+    Run time: earliest=+13m19s698ms, latest=+28m19s698ms, original latest=+28m19s698ms
+    Last successful run time: 0
+    Last failed run time: 0
+  JOB #u0a123/9: 5d6e7f8 dev.example.playground/androidx.work.impl.background.systemjob.SystemJobService
+    u0a123 tag=*job*/dev.example.playground/androidx.work.impl.background.systemjob.SystemJobService
+    Source: uid=u0a123 user=0 pkg=dev.example.playground
+    JobInfo:
+      Service: dev.example.playground/androidx.work.impl.background.systemjob.SystemJobService
+      Requires: charging=false batteryNotLow=false deviceIdle=false
+      Extras: mParcelledData.dataSize=92
+      Expedited: false
+    Required constraints: CONNECTIVITY [0x10000000]
+    Satisfied constraints: CONNECTIVITY DEVICE_NOT_DOZING BACKGROUND_NOT_RESTRICTED [0x12900000]
+    Unsatisfied constraints: [0x0]
+    Enqueue time: -9s12ms
+    Run time: earliest=none, latest=none, original latest=none
+  JOB #u0a456/3: 7f8a9b0 dev.example.other/dev.example.other.UploadJobService
+    u0a456 tag=*job*/dev.example.other/dev.example.other.UploadJobService
+    Source: uid=u0a456 user=0 pkg=dev.example.other
+    JobInfo:
+      Service: dev.example.other/dev.example.other.UploadJobService
+      Requires: charging=true batteryNotLow=false deviceIdle=false
+    Required constraints: CHARGING [0x1]
+    Unsatisfied constraints: CHARGING [0x1]
+    Run time: earliest=none, latest=none, original latest=none
+
+  Pending queue:
+    Pending #0: JOB #u0a123/9: 5d6e7f8 dev.example.playground/androidx.work.impl.background.systemjob.SystemJobService
+      Source: uid=u0a123 user=0 pkg=dev.example.playground
+  Active jobs:
+    Slot #0: 5d6e7f8
+      Running for: +2s100ms
+      JOB #u0a123/9: 5d6e7f8 dev.example.playground/androidx.work.impl.background.systemjob.SystemJobService
+        Source: uid=u0a123 user=0 pkg=dev.example.playground
+  Ready queue:

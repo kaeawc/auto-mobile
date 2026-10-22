@@ -1,0 +1,12 @@
+{
+  "id": "strict",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "text",
+    "text": "{data:not-a-pointer}"
+  }
+}

@@ -1,7 +1,7 @@
-# OEM personas
+# Manufacturer profiles
 
-The `persona` tool (#14055) approximates an OEM device on a stock Android emulator or device.
-A persona is a named, versioned bundle of facets. Each facet is applied by an existing tool:
+The `manufacturerProfile` tool (#14055) approximates an OEM device on a stock Android emulator
+or device. A manufacturer profile is a named, versioned bundle of facets. Each facet is applied by an existing tool:
 
 | Facet      | Executor                | What it changes                                               |
 | ---------- | ----------------------- | ------------------------------------------------------------- |
@@ -9,13 +9,13 @@ A persona is a named, versioned bundle of facets. Each facet is applied by an ex
 | `kill`     | `killProfile`           | Standby bucket, appops, Doze and force-stop for one package   |
 | `display`  | `displayProfile`        | Display cutout and navigation-mode overlays, density and more |
 
-## Personas simulate effects, not firmware
+## Manufacturer profiles simulate effects, not firmware
 
-A persona reproduces what an app **observes** on an OEM's devices: its process killed in the
+A manufacturer profile reproduces what an app **observes** on an OEM's devices: its process killed in the
 background, a punch-hole cutout, three-button navigation, a different typing behaviour. It does
 not install or imitate the OEM's firmware. One UI, HyperOS, OxygenOS and ColorOS SystemUI,
 vendor services and the triggers that decide when an OEM restricts an app are not present, so a
-passing test under a persona is evidence about the app's handling of those effects, not about
+passing test under a manufacturer profile is evidence about the app's handling of those effects, not about
 behaviour on the real device.
 
 Every facet carries its evidence:
@@ -26,11 +26,12 @@ Every facet carries its evidence:
 - `inferred`: approximated from community reports or common hardware.
 - `experimental`: an AutoMobile model not yet checked against the real component.
 
-`persona` `describe` reports the status, note and source of each facet of a persona.
+`manufacturerProfile` `describe` reports the status, note and source of each facet of a
+manufacturer profile.
 
 ## Starter catalog
 
-| Persona            | Keyboard  | Kill profile                | Display                       |
+| Profile            | Keyboard  | Kill profile                | Display                       |
 | ------------------ | --------- | --------------------------- | ----------------------------- |
 | `pixel-baseline`   | `gboard`  | none                        | none                          |
 | `samsung-oneui`    | `samsung` | `samsung-sleeping`          | hole cutout, three-button nav |
@@ -39,7 +40,7 @@ Every facet carries its evidence:
 | `oppo-coloros`     | `gboard`  | `recents-swipe-force-stop`  | hole cutout                   |
 | `motorola`         | `gboard`  | `motorola-adaptive`         | none                          |
 
-The catalog has a `catalogVersion`, and each persona a `version` that changes whenever one of
+The catalog has a `catalogVersion`, and each manufacturer profile a `version` that changes whenever one of
 its facets does, so a result names exactly what it applied.
 
 Facets follow the ICSME 2024 taxonomy of OEM compatibility issues
@@ -49,13 +50,13 @@ Facets follow the ICSME 2024 taxonomy of OEM compatibility issues
 
 ## Applying, switching and resetting
 
-- `apply` runs the keyboard, kill and display facets in that order. A persona with a kill
-  profile needs the `appId` it targets.
-- Personas replace one another. Applying a persona other than the one recorded on the device
+- `apply` runs the keyboard, kill and display facets in that order. A manufacturer profile
+  with a kill profile needs the `appId` it targets.
+- Manufacturer profiles replace one another. Applying one other than the one recorded on the device
   first resets the recorded one, so its facets do not linger; the result names it as
   `replaced`.
-- `reset` restores the display facets, the kill facet of every package a persona changed, and
-  the keyboard profile that was active before the first persona. The display and kill records
+- `reset` restores the display facets, the kill facet of every package a manufacturer profile changed, and
+  the keyboard profile that was active before the first manufacturer profile. The display and kill records
   are shared with `displayProfile` and `killProfile`, so reset also undoes their direct changes
   on the device.
 - In a daemon session, release or rebind restores the kill and display facets. The keyboard
@@ -63,8 +64,8 @@ Facets follow the ICSME 2024 taxonomy of OEM compatibility issues
 
 ## What cannot be emulated
 
-Each persona lists the OEM capabilities no stock device provides, for example Samsung DeX, Knox,
+Each manufacturer profile lists the OEM capabilities no stock device provides, for example Samsung DeX, Knox,
 the Galaxy Z Flip cover screen, S Pen Air actions, the OEM's own SystemUI and Xiaomi's
-proprietary AppOps. Pass the capabilities a task needs as `requires`; when the persona cannot
-emulate one, `apply` returns `status: "route_to_real_device"` and changes nothing, so the task
+proprietary AppOps. Pass the capabilities a task needs as `requires`; when the manufacturer
+profile cannot emulate one, `apply` returns `status: "route_to_real_device"` and changes nothing, so the task
 can be routed to real hardware instead of passing silently.

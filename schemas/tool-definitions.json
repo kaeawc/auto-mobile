@@ -3750,6 +3750,7 @@
               "listDataStores",
               "listDeviceImages",
               "listDevices",
+              "manufacturerProfile",
               "measureStartup",
               "mediaSession",
               "mockNetwork",
@@ -3759,7 +3760,6 @@
               "observe",
               "openLink",
               "performanceTrace",
-              "persona",
               "phoneCall",
               "pinchOn",
               "postNotification",
@@ -3896,6 +3896,7 @@
               "listDataStores",
               "listDeviceImages",
               "listDevices",
+              "manufacturerProfile",
               "measureStartup",
               "mediaSession",
               "mockNetwork",
@@ -3905,7 +3906,6 @@
               "observe",
               "openLink",
               "performanceTrace",
-              "persona",
               "phoneCall",
               "pinchOn",
               "postNotification",
@@ -10507,6 +10507,264 @@
     }
   },
   {
+    "name": "manufacturerProfile",
+    "description": "Android: apply an OEM manufacturer profile (pixel-baseline, samsung-oneui, xiaomi-hyperos, oneplus-oxygenos, oppo-coloros, motorola) on a stock device by composing the keyboard profile, killProfile and displayProfile executors. describe reports every facet's evidence status (focused_trace | vendor_documented | cdd_derived | inferred | experimental) and the OEM capabilities that cannot be emulated; apply with requires naming one of those returns route_to_real_device and changes nothing. applying a different manufacturer profile resets the recorded one first; reset restores the display, kill and keyboard changes (display and device-wide kill state are shared with displayProfile and killProfile). The keyboard profile persists until reset, even across sessions. Simulates effects, not firmware.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "list the catalog or describe one manufacturer profile (no device change), apply one, or reset what manufacturer profiles changed",
+          "type": "string",
+          "enum": ["list", "describe", "apply", "reset"]
+        },
+        "manufacturerProfile": {
+          "description": "Manufacturer profile id; required for describe and apply",
+          "type": "string",
+          "enum": [
+            "pixel-baseline",
+            "samsung-oneui",
+            "xiaomi-hyperos",
+            "oneplus-oxygenos",
+            "oppo-coloros",
+            "motorola"
+          ]
+        },
+        "appId": {
+          "description": "Android package the kill facet targets; required to apply a manufacturer profile with a kill profile",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "requires": {
+          "description": "apply only: OEM capabilities the task needs; one the manufacturer profile cannot emulate returns route_to_real_device and changes nothing",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "samsung-dex",
+              "knox",
+              "flip-cover-screen",
+              "spen-air-actions",
+              "oem-systemui",
+              "oem-unused-app-triggers",
+              "firmware-update-exemption-reset",
+              "xiaomi-proprietary-appops"
+            ]
+          }
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["action"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string",
+          "enum": ["list", "describe", "apply", "reset"]
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "catalogVersion": {
+          "type": "number"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["applied", "partial", "unsupported", "route_to_real_device"]
+        },
+        "manufacturerProfile": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "manufacturerProfileId": {
+          "type": "string",
+          "enum": [
+            "pixel-baseline",
+            "samsung-oneui",
+            "xiaomi-hyperos",
+            "oneplus-oxygenos",
+            "oppo-coloros",
+            "motorola"
+          ]
+        },
+        "replaced": {
+          "type": "string",
+          "enum": [
+            "pixel-baseline",
+            "samsung-oneui",
+            "xiaomi-hyperos",
+            "oneplus-oxygenos",
+            "oppo-coloros",
+            "motorola"
+          ]
+        },
+        "manufacturerProfiles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        "evidenceStatuses": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "focused_trace",
+              "vendor_documented",
+              "cdd_derived",
+              "inferred",
+              "experimental"
+            ]
+          }
+        },
+        "facets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "facet": {
+                "type": "string",
+                "enum": ["keyboard", "kill", "display"]
+              },
+              "category": {
+                "type": "string",
+                "enum": ["functionalityBreak", "oemFeature"]
+              },
+              "status": {
+                "type": "string",
+                "enum": ["applied", "partial", "unsupported", "failed"]
+              },
+              "evidence": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "focused_trace",
+                      "vendor_documented",
+                      "cdd_derived",
+                      "inferred",
+                      "experimental"
+                    ]
+                  },
+                  "note": {
+                    "type": "string"
+                  },
+                  "source": {
+                    "type": "string"
+                  }
+                },
+                "required": ["status", "note"],
+                "additionalProperties": {}
+              },
+              "value": {},
+              "detail": {
+                "type": "string"
+              }
+            },
+            "required": ["facet"],
+            "additionalProperties": {}
+          }
+        },
+        "nonEmulatable": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema1"
+          }
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema1"
+          }
+        }
+      },
+      "required": ["success", "message", "action", "deviceId"],
+      "additionalProperties": {},
+      "$defs": {
+        "__schema0": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "enum": [
+                "pixel-baseline",
+                "samsung-oneui",
+                "xiaomi-hyperos",
+                "oneplus-oxygenos",
+                "oppo-coloros",
+                "motorola"
+              ]
+            },
+            "version": {
+              "type": "number"
+            },
+            "displayName": {
+              "type": "string"
+            }
+          },
+          "required": ["id", "version", "displayName"],
+          "additionalProperties": {}
+        },
+        "__schema1": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "enum": [
+                "samsung-dex",
+                "knox",
+                "flip-cover-screen",
+                "spen-air-actions",
+                "oem-systemui",
+                "oem-unused-app-triggers",
+                "firmware-update-exemption-reset",
+                "xiaomi-proprietary-appops"
+              ]
+            },
+            "note": {
+              "type": "string"
+            }
+          },
+          "required": ["id", "note"],
+          "additionalProperties": {}
+        }
+      }
+    },
+    "_meta": {
+      "automobile/deviceReadOnlyArgs": [
+        {
+          "argument": "action",
+          "values": ["list", "describe"]
+        }
+      ]
+    }
+  },
+  {
     "name": "measureStartup",
     "description": "Android: measure cold/warm/hot app startup over N launches; TTID/TTFD percentiles, stored in performance results.",
     "inputSchema": {
@@ -15033,264 +15291,6 @@
         "warnings"
       ],
       "additionalProperties": false
-    }
-  },
-  {
-    "name": "persona",
-    "description": "Android: apply an OEM persona (pixel-baseline, samsung-oneui, xiaomi-hyperos, oneplus-oxygenos, oppo-coloros, motorola) on a stock device by composing the keyboard profile, killProfile and displayProfile executors. describe reports every facet's evidence status (focused_trace | vendor_documented | cdd_derived | inferred | experimental) and the OEM capabilities that cannot be emulated; apply with requires naming one of those returns route_to_real_device and changes nothing. applying a different persona resets the recorded one first; reset restores the display, kill and keyboard changes (display and device-wide kill state are shared with displayProfile and killProfile). The keyboard profile persists until reset, even across sessions. Simulates effects, not firmware.",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "properties": {
-        "action": {
-          "description": "list the catalog or describe one persona (no device change), apply a persona, or reset what personas changed",
-          "type": "string",
-          "enum": ["list", "describe", "apply", "reset"]
-        },
-        "persona": {
-          "description": "Persona id; required for describe and apply",
-          "type": "string",
-          "enum": [
-            "pixel-baseline",
-            "samsung-oneui",
-            "xiaomi-hyperos",
-            "oneplus-oxygenos",
-            "oppo-coloros",
-            "motorola"
-          ]
-        },
-        "appId": {
-          "description": "Android package the kill facet targets; required to apply a persona with a kill profile",
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256,
-          "pattern": "^[A-Za-z0-9._-]+$"
-        },
-        "requires": {
-          "description": "apply only: OEM capabilities the task needs; one the persona cannot emulate returns route_to_real_device and changes nothing",
-          "type": "array",
-          "items": {
-            "type": "string",
-            "enum": [
-              "samsung-dex",
-              "knox",
-              "flip-cover-screen",
-              "spen-air-actions",
-              "oem-systemui",
-              "oem-unused-app-triggers",
-              "firmware-update-exemption-reset",
-              "xiaomi-proprietary-appops"
-            ]
-          }
-        },
-        "platform": {
-          "type": "string",
-          "enum": ["android", "ios"]
-        },
-        "sessionUuid": {
-          "description": "Session",
-          "type": "string"
-        },
-        "keepScreenAwake": {
-          "type": "boolean"
-        },
-        "device": {
-          "description": "Device label",
-          "type": "string"
-        }
-      },
-      "required": ["action"],
-      "additionalProperties": false
-    },
-    "outputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "properties": {
-        "success": {
-          "type": "boolean"
-        },
-        "message": {
-          "type": "string"
-        },
-        "action": {
-          "type": "string",
-          "enum": ["list", "describe", "apply", "reset"]
-        },
-        "deviceId": {
-          "type": "string"
-        },
-        "catalogVersion": {
-          "type": "number"
-        },
-        "status": {
-          "type": "string",
-          "enum": ["applied", "partial", "unsupported", "route_to_real_device"]
-        },
-        "persona": {
-          "$ref": "#/$defs/__schema0"
-        },
-        "personaId": {
-          "type": "string",
-          "enum": [
-            "pixel-baseline",
-            "samsung-oneui",
-            "xiaomi-hyperos",
-            "oneplus-oxygenos",
-            "oppo-coloros",
-            "motorola"
-          ]
-        },
-        "replaced": {
-          "type": "string",
-          "enum": [
-            "pixel-baseline",
-            "samsung-oneui",
-            "xiaomi-hyperos",
-            "oneplus-oxygenos",
-            "oppo-coloros",
-            "motorola"
-          ]
-        },
-        "personas": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/__schema0"
-          }
-        },
-        "evidenceStatuses": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "enum": [
-              "focused_trace",
-              "vendor_documented",
-              "cdd_derived",
-              "inferred",
-              "experimental"
-            ]
-          }
-        },
-        "facets": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "facet": {
-                "type": "string",
-                "enum": ["keyboard", "kill", "display"]
-              },
-              "category": {
-                "type": "string",
-                "enum": ["functionalityBreak", "oemFeature"]
-              },
-              "status": {
-                "type": "string",
-                "enum": ["applied", "partial", "unsupported", "failed"]
-              },
-              "evidence": {
-                "type": "object",
-                "properties": {
-                  "status": {
-                    "type": "string",
-                    "enum": [
-                      "focused_trace",
-                      "vendor_documented",
-                      "cdd_derived",
-                      "inferred",
-                      "experimental"
-                    ]
-                  },
-                  "note": {
-                    "type": "string"
-                  },
-                  "source": {
-                    "type": "string"
-                  }
-                },
-                "required": ["status", "note"],
-                "additionalProperties": {}
-              },
-              "value": {},
-              "detail": {
-                "type": "string"
-              }
-            },
-            "required": ["facet"],
-            "additionalProperties": {}
-          }
-        },
-        "nonEmulatable": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/__schema1"
-          }
-        },
-        "capabilities": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/__schema1"
-          }
-        }
-      },
-      "required": ["success", "message", "action", "deviceId"],
-      "additionalProperties": {},
-      "$defs": {
-        "__schema0": {
-          "type": "object",
-          "properties": {
-            "id": {
-              "type": "string",
-              "enum": [
-                "pixel-baseline",
-                "samsung-oneui",
-                "xiaomi-hyperos",
-                "oneplus-oxygenos",
-                "oppo-coloros",
-                "motorola"
-              ]
-            },
-            "version": {
-              "type": "number"
-            },
-            "displayName": {
-              "type": "string"
-            }
-          },
-          "required": ["id", "version", "displayName"],
-          "additionalProperties": {}
-        },
-        "__schema1": {
-          "type": "object",
-          "properties": {
-            "id": {
-              "type": "string",
-              "enum": [
-                "samsung-dex",
-                "knox",
-                "flip-cover-screen",
-                "spen-air-actions",
-                "oem-systemui",
-                "oem-unused-app-triggers",
-                "firmware-update-exemption-reset",
-                "xiaomi-proprietary-appops"
-              ]
-            },
-            "note": {
-              "type": "string"
-            }
-          },
-          "required": ["id", "note"],
-          "additionalProperties": {}
-        }
-      }
-    },
-    "_meta": {
-      "automobile/deviceReadOnlyArgs": [
-        {
-          "argument": "action",
-          "values": ["list", "describe"]
-        }
-      ]
     }
   },
   {
@@ -24410,6 +24410,7 @@
               "listDataStores",
               "listDeviceImages",
               "listDevices",
+              "manufacturerProfile",
               "measureStartup",
               "mediaSession",
               "mockNetwork",
@@ -24419,7 +24420,6 @@
               "observe",
               "openLink",
               "performanceTrace",
-              "persona",
               "phoneCall",
               "pinchOn",
               "postNotification",
@@ -31803,6 +31803,7 @@
             "listDataStores",
             "listDeviceImages",
             "listDevices",
+            "manufacturerProfile",
             "measureStartup",
             "mediaSession",
             "mockNetwork",
@@ -31812,7 +31813,6 @@
             "observe",
             "openLink",
             "performanceTrace",
-            "persona",
             "phoneCall",
             "pinchOn",
             "postNotification",
@@ -31915,6 +31915,7 @@
               "listDataStores",
               "listDeviceImages",
               "listDevices",
+              "manufacturerProfile",
               "measureStartup",
               "mediaSession",
               "mockNetwork",
@@ -31924,7 +31925,6 @@
               "observe",
               "openLink",
               "performanceTrace",
-              "persona",
               "phoneCall",
               "pinchOn",
               "postNotification",

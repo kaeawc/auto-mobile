@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.protoviewer
 
 import android.content.ClipData
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
@@ -22,9 +23,11 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,6 +50,8 @@ class LibraryActivity : ComponentActivity() {
 
   private var entries by mutableStateOf<LibraryResult<List<LibraryEntry>>?>(null)
   private var actionFailed by mutableStateOf(false)
+  private var localNetworkDenied by mutableStateOf(false)
+  private lateinit var networkSettings: NetworkSettings
 
   private var pendingExport: LibraryShareExport? by mutableStateOf(null)
   private var sharedName: String? = null
@@ -59,14 +64,35 @@ class LibraryActivity : ComponentActivity() {
   override fun onSaveInstanceState(outState: Bundle) {
     super.onSaveInstanceState(outState)
     outState.putString("sharedExport", sharedName)
+    outState.putBoolean("localNetworkDenied", localNetworkDenied)
   }
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     sharedName = savedInstanceState?.getString("sharedExport")
+    localNetworkDenied = savedInstanceState?.getBoolean("localNetworkDenied") ?: false
+    networkSettings =
+      NetworkSettings(
+        services.settings,
+        services.localNetworkPermission(this) { granted -> localNetworkDenied = !granted },
+        Build.VERSION.SDK_INT,
+      )
     setContent {
       ProtoViewerTheme {
-        LibraryScreen(entries, actionFailed, ::open, ::share, ::delete)
+        val allowNetwork by services.settings.allowNetwork.collectAsState()
+        LibraryScreen(
+          entries,
+          actionFailed,
+          ::open,
+          ::share,
+          ::delete,
+          allowNetwork = allowNetwork,
+          localNetworkDenied = localNetworkDenied,
+          setAllowNetwork = { enabled ->
+            localNetworkDenied = false
+            networkSettings.setEnabled(enabled)
+          },
+        )
         pendingExport?.let { exported ->
           AlertDialog(
             onDismissRequest = { cancelShare() },
@@ -193,15 +219,35 @@ class LibraryActivity : ComponentActivity() {
 }
 
 @Composable
+@Suppress("LongParameterList") // Independent library actions and explicit settings UI state.
 internal fun LibraryScreen(
   result: LibraryResult<List<LibraryEntry>>?,
   actionFailed: Boolean,
   open: (LibraryEntry, Boolean, Boolean) -> Unit,
   share: (LibraryEntry) -> Unit = {},
   delete: (LibraryEntry) -> Unit = {},
+  allowNetwork: Boolean = false,
+  localNetworkDenied: Boolean = false,
+  setAllowNetwork: (Boolean) -> Unit = {},
 ) {
   Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).padding(16.dp)) {
     Text(stringResource(R.string.app_name))
+    val networkLabel = stringResource(R.string.allow_network)
+    ListItem(
+      headlineContent = { Text(networkLabel) },
+      supportingContent = { Text(stringResource(R.string.allow_network_explanation)) },
+      trailingContent = {
+        Switch(
+          checked = allowNetwork,
+          onCheckedChange = setAllowNetwork,
+          modifier =
+            Modifier.testTag("allow-network").semantics {
+              contentDescription = networkLabel
+            },
+        )
+      },
+    )
+    if (allowNetwork && localNetworkDenied) Text(stringResource(R.string.local_network_denied))
     if (actionFailed) Text(stringResource(R.string.action_error))
     when (result) {
       null -> Text(stringResource(R.string.loading))

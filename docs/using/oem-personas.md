@@ -62,6 +62,41 @@ Facets follow the ICSME 2024 taxonomy of OEM compatibility issues
 - In a daemon session, release or rebind restores the kill and display facets. The keyboard
   profile stays until `reset`, including for the device's next session.
 
+## Acquiring a device with a manufacturer profile
+
+`provisionDevice` takes an Android `device.spec.deviceProfile` (#14058):
+
+```ts
+provisionDevice({
+  device: {
+    platform: "android",
+    name: "phone-api-36",
+    spec: {
+      runtime: "system-images;android-36;google_apis;x86_64",
+      deviceType: "pixel_9",
+      deviceProfile: { manufacturerProfile: "samsung-oneui", requires: ["knox"] },
+    },
+  },
+});
+```
+
+- It needs `boot: true` and `readiness: "automation"`. It is applied after the automation runner
+  is ready, to the session the call returns, and the result reports it as `manufacturerProfile`.
+- It is not the AVD hardware profile (`deviceType`) and is never part of the AVD definition, so
+  it does not change which device is created or adopted.
+- The kill facet needs the app it targets, which acquisition does not know, so it is reported as
+  `deferred`. Apply it with `killProfile` once the app is installed.
+- When `requires` names a capability the profile cannot emulate, the call fails with
+  non-retryable `requires_real_device` and its `capabilities` before anything is created or
+  booted.
+- Releasing that session restores everything the profile changed, including the keyboard
+  profile, so the device's next session starts from baseline.
+
+A session broker request takes the same selector in its Android device requirement
+(`device.deviceProfile`, see [session requirements](../design-docs/session-requirements.md)).
+The broker applies it to the prepared session's device after the reset baseline is captured,
+so a keep-booted reset returns the device to its pre-profile state.
+
 ## What cannot be emulated
 
 Each manufacturer profile lists the OEM capabilities no stock device provides, for example Samsung DeX, Knox,

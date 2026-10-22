@@ -26,12 +26,17 @@ fun CheckoutPrototype(
   onDismiss: (PrototypeDismissReason) -> Unit = {},
 ) {
   val context = LocalContext.current
-  val read = { path: String -> context.assets.open(path).use { it.readBytes() } }
-  val spec = remember(context) { read("prototypes/checkout/spec.json").decodeToString() }
+  // A missing file reads as null: assets fall back, and an empty spec shows the load-error view.
+  val read = { path: String ->
+    runCatching { context.assets.open(path).use { it.readBytes() } }.getOrNull()
+  }
+  val spec = remember(context) {
+    read("prototypes/checkout/spec.json")?.decodeToString().orEmpty()
+  }
   val assets = remember(context) {
     PrototypeAssets(
-      images = mapOf("hero" to read("prototypes/checkout/hero.png")),
-      fonts = mapOf("brand" to read("prototypes/checkout/brand.ttf")),
+      images = listOfNotNull(read("prototypes/checkout/hero.png")?.let { "hero" to it }).toMap(),
+      fonts = listOfNotNull(read("prototypes/checkout/brand.ttf")?.let { "brand" to it }).toMap(),
     )
   }
   AutoMobilePrototype(
@@ -59,10 +64,14 @@ struct CheckoutPrototype: View {
     var onEvent: @MainActor (PrototypeEvent) -> Void = { _ in }
     var onDismiss: @MainActor (PrototypeDismissReason) -> Void = { _ in }
 
+    // Read once per process, not on every body evaluation.
+    private static let spec = resource("spec.json")
+    private static let assets = PrototypeAssets(images: ["hero": resource("hero.png")], fonts: ["brand": resource("brand.ttf")])
+
     var body: some View {
         AutoMobilePrototypeView(
-            spec: Self.resource("spec.json"),
-            assets: PrototypeAssets(images: ["hero": Self.resource("hero.png")], fonts: ["brand": Self.resource("brand.ttf")]),
+            spec: Self.spec,
+            assets: Self.assets,
             storage: .fileBacked,
             network: network,
             onEvent: onEvent,

@@ -18,13 +18,39 @@ export interface HostFileInput {
   storage: boolean;
 }
 
-/** A Kotlin or Swift string literal (JSON escaping is valid in both for these characters). */
+/**
+ * A double-quoted string literal that compiles in both Kotlin and Swift: printable ASCII passes
+ * through (with the quote, backslash and Kotlin's `$` escaped), everything else is a Unicode
+ * escape in the target language's own form. Lone surrogates have no scalar and become U+FFFD.
+ */
+function stringLiteral(value: string, language: "kotlin" | "swift"): string {
+  const escaped = [...value.toWellFormed()]
+    .map((char) => {
+      if (char === '"' || char === "\\" || (char === "$" && language === "kotlin")) {
+        return `\\${char}`;
+      }
+      const code = char.codePointAt(0) ?? 0;
+      if (code >= 0x20 && code < 0x7f) {
+        return char;
+      }
+      if (language === "swift") {
+        return `\\u{${code.toString(16)}}`;
+      }
+      // Kotlin's \uXXXX takes UTF-16 code units, so astral characters become surrogate pairs.
+      return [...Array.from({ length: char.length }, (_, i) => char.charCodeAt(i))]
+        .map((unit) => `\\u${unit.toString(16).padStart(4, "0")}`)
+        .join("");
+    })
+    .join("");
+  return `"${escaped}"`;
+}
+
 function literal(value: string): string {
-  return JSON.stringify(value).replace(/\$/g, "\\$");
+  return stringLiteral(value, "kotlin");
 }
 
 function swiftLiteral(value: string): string {
-  return JSON.stringify(value);
+  return stringLiteral(value, "swift");
 }
 
 function fileName(path: string): string {
@@ -39,11 +65,12 @@ function kotlinAssetMap(assets: readonly HostFileAsset[], directory: string): st
   if (assets.length === 0) {
     return "emptyMap()";
   }
+  // A missing file reads as null and is left out, so the renderer uses its missing-asset fallback.
   const entries = assets.map(
     (asset) =>
-      `${literal(asset.id)} to read(${literal(`prototypes/${directory}/${fileName(asset.path)}`)})`,
+      `read(${literal(`prototypes/${directory}/${fileName(asset.path)}`)})?.let { ${literal(asset.id)} to it }`,
   );
-  return `mapOf(${entries.join(", ")})`;
+  return `listOfNotNull(${entries.join(", ")}).toMap()`;
 }
 
 export function renderComposeHostFile(input: HostFileInput): string {
@@ -77,8 +104,13 @@ fun ${input.typeName}(
   onDismiss: (PrototypeDismissReason) -> Unit = {},
 ) {
   val context = LocalContext.current
-  val read = { path: String -> context.assets.open(path).use { it.readBytes() } }
-  val spec = remember(context) { read(${literal(`prototypes/${input.directory}/spec.json`)}).decodeToString() }
+  // A missing file reads as null: assets fall back, and an empty spec shows the load-error view.
+  val read = { path: String ->
+    runCatching { context.assets.open(path).use { it.readBytes() } }.getOrNull()
+  }
+  val spec = remember(context) {
+    read(${literal(`prototypes/${input.directory}/spec.json`)})?.decodeToString().orEmpty()
+  }
   val assets = remember(context) {
     PrototypeAssets(
       images = ${kotlinAssetMap(images, input.directory)},
@@ -103,7 +135,7 @@ function swiftAssetMap(assets: readonly HostFileAsset[]): string {
     return "[:]";
   }
   const entries = assets.map(
-    (asset) => `${swiftLiteral(asset.id)}: Self.resource(${swiftLiteral(fileName(asset.path))})`,
+    (asset) => `${swiftLiteral(asset.id)}: resource(${swiftLiteral(fileName(asset.path))})`,
   );
   return `[${entries.join(", ")}]`;
 }
@@ -122,10 +154,14 @@ struct ${input.typeName}: View {
     var onEvent: @MainActor (PrototypeEvent) -> Void = { _ in }
     var onDismiss: @MainActor (PrototypeDismissReason) -> Void = { _ in }
 
+    // Read once per process, not on every body evaluation.
+    private static let spec = resource("spec.json")
+    private static let assets = PrototypeAssets(images: ${swiftAssetMap(images)}, fonts: ${swiftAssetMap(fonts)})
+
     var body: some View {
         AutoMobilePrototypeView(
-            spec: Self.resource("spec.json"),
-            assets: PrototypeAssets(images: ${swiftAssetMap(images)}, fonts: ${swiftAssetMap(fonts)}),
+            spec: Self.spec,
+            assets: Self.assets,
             storage: ${input.storage ? ".fileBacked" : ".none"},
             network: network,
             onEvent: onEvent,

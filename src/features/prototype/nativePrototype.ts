@@ -145,13 +145,14 @@ async function resolvePrototype(
   if (shown.kind === "known") {
     return { deviceId, spec: shown.spec, saved };
   }
-  if (saved) {
-    return { deviceId, spec: saved.spec as ShownSpecJson, saved };
-  }
+  // A show in flight may replace the saved version, so never serve the saved spec meanwhile.
   if (shown.kind === "busy") {
     throw new ActionableError(
       `A prototype show is in flight on ${deviceId}; read ${PROTOTYPE_NATIVE_URI} again once it finishes.`,
     );
+  }
+  if (saved) {
+    return { deviceId, spec: saved.spec as ShownSpecJson, saved };
   }
   throw new ActionableError(
     `Unknown prototype "${id}" on ${deviceId}: it is neither shown nor saved there.`,
@@ -266,7 +267,9 @@ function hostFiles(
           content: renderComposeHostFile(input),
         },
       ]
-    : [specFile, { path: `Prototypes/${typeName}.swift`, content: renderSwiftUiHostFile(input) }];
+    : // Outside the Prototypes folder reference: Xcode copies that folder as resources and never
+      // compiles a Swift file inside it.
+      [specFile, { path: `${typeName}.swift`, content: renderSwiftUiHostFile(input) }];
 }
 
 /** Builds the native-code payload for one prototype. */

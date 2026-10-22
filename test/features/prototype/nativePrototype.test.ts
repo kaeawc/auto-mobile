@@ -116,7 +116,8 @@ describe("automobile:prototype/native", () => {
     });
     expect(native.files.map((file) => file.path)).toEqual([
       "Prototypes/checkout/spec.json",
-      "Prototypes/CheckoutPrototype.swift",
+      // Outside the Prototypes folder reference, which Xcode copies as resources without compiling.
+      "CheckoutPrototype.swift",
     ]);
     expect(native.assets[0]).toEqual({
       id: "hero",
@@ -178,6 +179,14 @@ describe("automobile:prototype/native", () => {
     );
   });
 
+  test("a show in flight is not answered with a stale saved spec", async () => {
+    const fake = sources({ saved: { serial: [savedCheckout()] } });
+    const busy: NativePrototypeSources = { ...fake, shownSpec: () => ({ kind: "busy" }) };
+    await expect(
+      readNativePrototype({ id: "checkout", deviceId: "serial", platform: "android" }, busy),
+    ).rejects.toThrow("in flight");
+  });
+
   test("host type names are valid identifiers", () => {
     expect(prototypeHostTypeName("checkout-flow")).toBe("CheckoutFlowPrototype");
     expect(prototypeHostTypeName("2fa")).toBe("P2faPrototype");
@@ -211,6 +220,24 @@ describe("native host file templates", () => {
 
   test("SwiftUI host file", () => {
     expect(renderSwiftUiHostFile(input)).toMatchSnapshot();
+  });
+
+  test("asset ids with quotes, dollars and non-ASCII become valid literals in each language", () => {
+    const odd = {
+      ...input,
+      assets: [{ id: 'a"$\\\f\u00e9\u{1F600}', kind: "image" as const, path: "x/checkout/a.png" }],
+    };
+    const kotlin = renderComposeHostFile(odd);
+    const swift = renderSwiftUiHostFile(odd);
+    expect(kotlin).toContain('"a\\"\\$\\\\\\u000c\\u00e9\\ud83d\\ude00"');
+    expect(swift).toContain('"a\\"$\\\\\\u{c}\\u{e9}\\u{1f600}"');
+  });
+
+  test("Android reads tolerate missing files instead of crashing composition", () => {
+    const kotlin = renderComposeHostFile(input);
+    expect(kotlin).toContain("runCatching {");
+    expect(kotlin).toContain(".orEmpty()");
+    expect(kotlin).toContain("listOfNotNull(");
   });
 
   test("without assets or storage the templates use the library defaults", () => {

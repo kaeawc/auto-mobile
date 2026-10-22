@@ -197,6 +197,27 @@ describe("automobile:prototype/native", () => {
     expect(prototypeAssetFileStem("hero/a")).toMatch(/^hero_a-[0-9a-f]{8}$/);
   });
 
+  test("canonically equivalent asset ids are refused for iOS, where Swift treats them as one key", async () => {
+    const spec = {
+      id: "accents",
+      window: { placement: { type: "fullscreen" } },
+      root: {
+        type: "column",
+        children: [
+          { type: "image", asset: "caf\u00e9" },
+          { type: "image", asset: "cafe\u0301" },
+        ],
+      },
+    };
+    const fake = sources({ shown: { sim: spec }, platforms: { sim: "ios" } });
+    await expect(readNativePrototype({ id: "accents" }, fake)).rejects.toThrow(
+      "canonically equivalent",
+    );
+    // Android keys are plain JVM strings, so both ids stay distinct there.
+    const android = await readNativePrototype({ id: "accents", platform: "android" }, fake);
+    expect(android.assets).toHaveLength(2);
+  });
+
   test("host type names are valid identifiers", () => {
     expect(prototypeHostTypeName("checkout")).toBe("CheckoutPrototype");
     expect(prototypeHostTypeName("checkout-flow")).toMatch(/^CheckoutFlowPrototype[0-9a-f]{8}$/);

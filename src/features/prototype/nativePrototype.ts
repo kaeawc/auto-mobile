@@ -300,6 +300,24 @@ function hostFiles(
       [specFile, { path: `${typeName}.swift`, content: renderSwiftUiHostFile(input) }];
 }
 
+/**
+ * Swift compares strings by Unicode canonical equivalence, so ids like "é" and "e\u0301" are one
+ * key there and the generated dictionary literal would trap at launch. Refuse them instead.
+ */
+function rejectSwiftEquivalentIds(assets: readonly NativePrototypeAsset[]): void {
+  const seen = new Map<string, string>();
+  for (const asset of assets) {
+    const key = `${asset.kind}:${asset.id.normalize("NFC")}`;
+    const previous = seen.get(key);
+    if (previous !== undefined) {
+      throw new ActionableError(
+        `Asset ids ${JSON.stringify(previous)} and ${JSON.stringify(asset.id)} are the same string in Swift (canonically equivalent); rename one before exporting for iOS.`,
+      );
+    }
+    seen.set(key, asset.id);
+  }
+}
+
 /** Builds the native-code payload for one prototype. */
 export async function readNativePrototype(
   params: Record<string, string | undefined>,
@@ -312,6 +330,9 @@ export async function readNativePrototype(
   const version = sources.libraryVersion();
   const capabilities = requiredPrototypeCapabilities(resolved.spec);
   const assets = nativeAssets(platform, id, resolved);
+  if (platform === "ios") {
+    rejectSwiftEquivalentIds(assets);
+  }
   return {
     id,
     platform,

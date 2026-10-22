@@ -13,7 +13,7 @@ the exact arguments supported by your connection.
 
 The following tools expose `sessionUuid` and `keepScreenAwake`:
 
-`accessibility`, `accessibilityAction`, `accessibilityAudit`, `accessibilityFocus`, `appLifecycle`, `audit`, `barrier`, `biometricAuth`,
+`accessibility`, `accessibilityAction`, `accessibilityAudit`, `accessibilityFocus`, `appLifecycle`, `audit`, `backgroundWork`, `barrier`, `biometricAuth`,
 `changeLocalization`, `clearKeyValueFile`, `clearMockNetwork`, `clipboard`, `crashApp`,
 `changeLocalization`, `clearKeyValueFile`, `clearMockNetwork`, `clipboard`,
 `compareScreenshot`, `crashApp`,
@@ -1903,7 +1903,7 @@ subtree, or the whole active-window tree when owner-less.
 | 🚀 <code>launchApp</code>                                                                        | Launches an app by package name. On iOS, optional `launchArguments` start a fresh process and pass argv after the bundle ID. DEBUG storage writes require a launch-scoped mutation token; the daemon supplies it when `--allow-storage-mutations` is present. Android rejects launch arguments and takes an `intent` instead; an app already in the foreground is a success flagged `alreadyForeground` unless an `intent` was given. On iOS simulators, `prototype: true` relaunches the app with the prototype agent injected (state is lost); physical iOS, Android and `com.apple.*` apps reject it. |
 | ❌ <code>terminateApp</code>                                                                     | Terminates an app by package name.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | 💥 <code>crashApp</code>                                                                         | Intentionally crashes a running app through the platform crash path.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| ♻️ <code>appLifecycle</code>                                                                     | State-preserving background-process kill for saved-state restoration tests (Android only).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ♻️ <code>appLifecycle</code>                                                                     | State-preserving background-process kill for saved-state restoration tests, and `onTrimMemory` delivery with `trimMemory` (Android only).                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | 📦 <code>installApp</code>                                                                       | Installs an APK, app bundle, or IPA.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | 🗑️ <code>uninstallApp</code>                                                                     | Uninstalls an app by package name or bundle identifier.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | 🔏 <code>inspectPackageSigning</code>                                                            | Fresh read of an app's presence (`installed`, `absent`, `unknown`) and signing. Android: one user's SHA-256 signer set and rotation history. iOS Simulator and physical: team, signing identity, CDHash, entitlements and the embedded provisioning profile. Never cached.                                                                                                                                                                                                                                                                                                                               |
@@ -1920,6 +1920,7 @@ subtree, or the whole active-window tree when owner-less.
 | ⏱️ <code>measureStartup</code>                                                                   | Android: launches an app N times cold, warm or hot and reports time-to-initial-display (TTID) and, when the app calls `reportFullyDrawn`, time-to-full-display (TTFD) percentiles. Stored in `automobile:performance-results`.                                                                                                                                                                                                                                                                                                                                                                           |
 | 📜 <code>getLogs</code>                                                                          | Reads filtered device logs: Android logcat for every process of an app (crashes survive process death), with tag, priority, regex and buffer filters, since the last action or session start; iOS Simulator unified log by app subsystem.                                                                                                                                                                                                                                                                                                                                                                |
 | 📡 <code>sendBroadcast</code>                                                                    | Android: sends an explicit broadcast with a typed intent to the app under test and reports the ordered-broadcast result.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ⏳ <code>backgroundWork</code>                                                                   | Android: lists an app's JobScheduler jobs (WorkManager worker class, constraints, next run) and pending alarms, and runs a job now (`runJob`, optionally forced) or by worker name, so periodic and deferred work can be tested without waiting. `list` and `listAlarms` are reads; `runJob` and `workManagerDiagnostics` are control.                                                                                                                                                                                                                                                                   |
 
 <details class="note" markdown="1">
 <summary>Measuring startup with measureStartup</summary>
@@ -1963,6 +1964,16 @@ tests. Call it with <code>appId</code> and <code>action: "background"</code>, th
 <code>action: "killBackgrounded"</code>, and relaunch with <code>launchApp</code>.
 A foreground app is refused by <code>killBackgrounded</code>: background it first.
 An already backgrounded app does not receive a Home press.
+
+<code>action: "trimMemory"</code> with a <code>level</code> (<code>RUNNING_MODERATE</code>,
+<code>RUNNING_LOW</code>, <code>RUNNING_CRITICAL</code>, <code>UI_HIDDEN</code>,
+<code>BACKGROUND</code>, <code>MODERATE</code>, <code>COMPLETE</code>) delivers
+<code>onTrimMemory(level)</code> to the running app with <code>am send-trim-memory</code> (the
+shell spells <code>UI_HIDDEN</code> as <code>HIDDEN</code>) without ending the process, so
+saved-state and cache-release code can be exercised short of a kill (#14090). The app need not be
+backgrounded. <code>level</code> is required for <code>trimMemory</code> and rejected for the other
+actions. <code>am</code> prints nothing on success, so a success means the command was accepted: read
+the app's own log lines with <code>getLogs</code> to see how it reacted.
 
 <code>processReclaimed</code> is true only from PID evidence: the old PID must be
 gone from all package-owned processes in the selected Android user. A restarted
@@ -2038,6 +2049,48 @@ It is Android-only; iOS returns `status: "unsupported"`.
   not send, fails with `errorCode: "protected_broadcast"`. Other refusals report
   `permission_denied`, and output with no completion line reports
   `broadcast_failed`.
+
+### backgroundWork
+
+`backgroundWork` reads and triggers the work an app defers to the system, so a test does not wait
+minutes or hours for it (#14090). It is Android-only; iOS returns `status: "unsupported"`. `appId`
+must be a package name. `action` is one of:
+
+- `"list"`: runs `dumpsys jobscheduler <pkg>` and returns `jobs`: `jobId`, `userId`, `service`,
+  `periodic` with `intervalMs`/`flexMs`, `requiredConstraints`, `unsatisfiedConstraints`,
+  `networkType`, `earliestRunInMs`/`latestRunInMs` (relative to the dump; negative is overdue) and
+  `pending`/`running`. A job whose service is WorkManager's `SystemJobService` has
+  `workManager: true`. A read.
+- `{ listAlarms: true }`: runs `dumpsys alarm` and returns the app's pending `alarms`:
+  `alarmType`, `wakeup`, `tag`, `triggerInMs`, `windowMs`, `repeatIntervalMs`, `flags` and
+  `operation`. A read.
+- `{ runJob: { jobId, force? } }`: runs `cmd jobscheduler run [-f] <pkg> <jobId>`. Without `force`
+  the job must have its constraints satisfied; `force: true` bypasses them. The result has
+  `ran: true` once the job is started; it runs asynchronously, so check its side effect
+  afterwards. Instead of `jobId`, pass `worker` (a worker class, its simple name, or a WorkManager
+  tag) to resolve the job through fresh WorkManager diagnostics. Running a job executes the
+  app's own work, and nothing can undo it: no restore receipt is returned. `userId` runs the job
+  for another Android user. Refusals report `job_not_found`, `job_not_ready`, `package_not_found`,
+  `permission_denied`, `worker_not_found`, `worker_not_scheduled` (WorkManager registers a job only
+  for enqueued work) or `ambiguous_worker`.
+- `{ workManagerDiagnostics: true }`: broadcasts `androidx.work.diagnostics.REQUEST_DIAGNOSTICS`
+  to the package (through the same explicit-broadcast path as `sendBroadcast`) and reads the
+  `WM-DiagnosticsWrkr` logcat output WorkManager writes, returning `workers`: `workSpecId`,
+  `workerClassName`, `systemJobId` (the JobScheduler job id), `state`, `uniqueName` and `tags`.
+  This is the only place the worker class is exposed: `dumpsys jobscheduler` shows just the
+  service and an opaque extras size. It needs WorkManager 2.4+ and an enabled
+  `DiagnosticsReceiver`; with neither, `workers` is empty and a note says so. Control, because the
+  broadcast starts a one-time worker in the app.
+
+`list` fills `workerClass` (with `workerClassSource: "diagnostics-log"`) from diagnostics already in
+logcat. That can be stale after the app's data is cleared; call `workManagerDiagnostics` to refresh.
+
+Alarms cannot be fired on their own without changing the clock. Advance the device clock with
+`setDeviceState` `clock: { mode: "advance", byMs }` (rootable emulators only; see the clock notes
+below) and read `listAlarms` again.
+
+The dumpsys parsers are tested against hand-reconstructed fixtures for API 29 and 34, not device
+captures (`test/fixtures/android-jobscheduler/README.md`).
 
 ### App launch, installation, links, and storage options
 

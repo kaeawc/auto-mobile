@@ -7,6 +7,12 @@
 import type { KeyboardProfileId } from "../action/keyboardProfiles";
 import type { DisplayProfileInput } from "./DisplayProfile";
 import { KILL_PROFILE_NON_EMULATABLE, KILL_PROFILES, type KillProfileId } from "./KillProfiles";
+import {
+  MANUFACTURER_PROFILE_IDS,
+  NON_EMULATABLE_CAPABILITY_IDS,
+  type ManufacturerProfileId,
+  type NonEmulatableCapability,
+} from "../../models/ManufacturerProfileIds";
 
 /** Increment when the catalog response shape or its shared semantics change. */
 export const OEM_PERSONA_CATALOG_VERSION = 1;
@@ -65,25 +71,13 @@ export const NON_EMULATABLE_CAPABILITIES = {
     "firmware-update-exemption-reset",
   ),
   "xiaomi-proprietary-appops": killProfileNonEmulatableNote("xiaomi-proprietary-appops"),
-} as const satisfies Record<string, string>;
+} as const satisfies Record<NonEmulatableCapability, string>;
 
-export type NonEmulatableCapability = keyof typeof NON_EMULATABLE_CAPABILITIES;
+export { NON_EMULATABLE_CAPABILITY_IDS, type NonEmulatableCapability };
 
-export const NON_EMULATABLE_CAPABILITY_IDS = Object.keys(NON_EMULATABLE_CAPABILITIES) as [
-  NonEmulatableCapability,
-  ...NonEmulatableCapability[],
-];
+export const OEM_PERSONA_IDS = MANUFACTURER_PROFILE_IDS;
 
-export const OEM_PERSONA_IDS = [
-  "pixel-baseline",
-  "samsung-oneui",
-  "xiaomi-hyperos",
-  "oneplus-oxygenos",
-  "oppo-coloros",
-  "motorola",
-] as const;
-
-export type OemPersonaId = (typeof OEM_PERSONA_IDS)[number];
+export type OemPersonaId = ManufacturerProfileId;
 
 export interface OemPersona {
   id: OemPersonaId;

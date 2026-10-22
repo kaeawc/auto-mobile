@@ -20,10 +20,12 @@ export function nativeIosMutationResetPort(
   timer: Timer,
 ): IosDeviceMutationResetPort {
   const pending = new Set<string>();
+  const tcc = new SimulatorTccSqliteClient({ timer });
   return new IosDeviceMutationResetPort(
     {
       simctl,
-      privacyGrants: new SimulatorTccSqliteClient({ timer }),
+      privacyGrants: tcc,
+      trustStore: tcc,
       files: { realpath, remove: (path) => rm(path, { recursive: true, force: false }) },
       pasteboard: {
         assertSettled: (deviceId) => {

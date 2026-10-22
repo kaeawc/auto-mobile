@@ -116,10 +116,33 @@ export function createRootStateInjector(adb: AdbExecutor): DeviceConditionInject
   // Only artifacts WE planted. A userdebug image ships a real su; it is never overwritten here
   // and never deleted by reset.
   const planted = new Set<string>();
+  // One reset serves every apply, so repeat applies never stack separate cleanups. It is
+  // defined here, before any mutation, so every later failure can undo it.
+  const reset = async (resetSignal?: AbortSignal): Promise<void> => {
+    // Re-acquire the privileges the cleanup needs: an earlier reset (or a reboot) may
+    // have un-rooted adbd. `adb root` is a no-op when it is already running as root.
+    await adbCommand(adb, ["root"], resetSignal);
+    await adbCommand(adb, ["wait-for-device"], resetSignal);
+    if (planted.size > 0) {
+      await shell(adb, ["rm", "-f", ...planted], resetSignal);
+    }
+    if (selinuxChanged) {
+      await shell(adb, ["setenforce", selinuxFlag(baselineSelinux)], resetSignal);
+    }
+    await adbCommand(adb, ["unroot"], resetSignal);
+    planted.clear();
+    selinuxChanged = false;
+    baselineCaptured = false;
+    active = false;
+  };
   const plantedStillThere = async (signal?: AbortSignal): Promise<boolean> => {
     const existing = await listExisting(adb, [...planted], signal);
     return [...planted].every((path) => existing.has(path));
   };
+  // After a reboot that keeps the modified system image the files survive but SELinux is back
+  // to Enforcing, so "already applied" has to check the mode as well as the files.
+  const selinuxStillPermissive = async (signal?: AbortSignal): Promise<boolean> =>
+    !selinuxChanged || /permissive/i.test(await shell(adb, ["getenforce"], signal));
   return {
     key: "rootState",
     async apply(value, signal): Promise<DeviceConditionApplyOutcome> {
@@ -127,7 +150,12 @@ export function createRootStateInjector(adb: AdbExecutor): DeviceConditionInject
         rejectValue("rootState", value, [ROOTED_DETECTABLE]);
       }
       await assertRootableImage(adb, signal);
-      if (active && (await plantedStillThere(signal))) {
+      const wasActive = active;
+      if (
+        wasActive &&
+        (await plantedStillThere(signal)) &&
+        (await selinuxStillPermissive(signal))
+      ) {
         return { status: "unchanged", detail: "rooted-detectable fixture is already applied" };
       }
       // Both reads happen before the first mutation, so a failed probe changes nothing.
@@ -137,24 +165,6 @@ export function createRootStateInjector(adb: AdbExecutor): DeviceConditionInject
         baselineCaptured = true;
       }
       const toPlant = ROOT_ARTIFACT_PATHS.filter((path) => !existing.has(path));
-      // Defined before the first mutation (`adb root`) so every later failure can undo it.
-      const reset = async (resetSignal?: AbortSignal): Promise<void> => {
-        // Re-acquire the privileges the cleanup needs: an earlier reset (or a reboot) may
-        // have un-rooted adbd. `adb root` is a no-op when it is already running as root.
-        await adbCommand(adb, ["root"], resetSignal);
-        await adbCommand(adb, ["wait-for-device"], resetSignal);
-        if (planted.size > 0) {
-          await shell(adb, ["rm", "-f", ...planted], resetSignal);
-        }
-        if (selinuxChanged) {
-          await shell(adb, ["setenforce", selinuxFlag(baselineSelinux)], resetSignal);
-        }
-        await adbCommand(adb, ["unroot"], resetSignal);
-        planted.clear();
-        selinuxChanged = false;
-        baselineCaptured = false;
-        active = false;
-      };
       try {
         await remountWritable(adb, signal);
         selinuxChanged = true;
@@ -174,6 +184,10 @@ export function createRootStateInjector(adb: AdbExecutor): DeviceConditionInject
         throw error;
       }
       active = true;
+      if (wasActive) {
+        // The reset registered by the original apply still covers this fixture.
+        return { status: "applied", detail: "rooted-detectable fixture re-applied after drift" };
+      }
       const kept = ROOT_ARTIFACT_PATHS.length - toPlant.length;
       return {
         status: "applied",

@@ -181,14 +181,18 @@ describe("rootState injector (#14060)", () => {
       execResult(""),
       execResult(ALL_ARTIFACTS),
     ]);
+    adb.setCommandResponseSequence("getenforce", [
+      execResult("Enforcing"),
+      execResult("Permissive"),
+    ]);
     const injector = createRootStateInjector(adb);
     const first = await injector.apply("rooted-detectable");
     expect(first.status).toBe("applied");
     const second = await injector.apply("rooted-detectable");
     expect(second.status).toBe("unchanged");
     expect(second.reset).toBeUndefined();
-    // The second apply must not re-capture the fixture's own SELinux mode as the baseline.
-    expect(adb.getExecutedCommands().filter((c) => c === "shell getenforce")).toHaveLength(1);
+    // Nothing was re-applied, so SELinux was only switched once.
+    expect(adb.getExecutedCommands().filter((c) => c === "shell setenforce 0")).toHaveLength(1);
   });
 
   test("the resolver hands back one injector per device so applies share state", () => {
@@ -207,6 +211,11 @@ describe("rootState injector (#14060)", () => {
     adb.setCommandResponseSequence("ls /system/xbin/su", [
       execResult(""),
       execResult(ALL_ARTIFACTS),
+    ]);
+    adb.setCommandResponseSequence("getenforce", [
+      execResult("Enforcing"),
+      execResult("Permissive"),
+      execResult("Enforcing"),
     ]);
     const injector = createRootStateInjector(adb);
     const controller = new DeviceConditionController(() => injector);
@@ -277,5 +286,35 @@ describe("rootState injector (#14060)", () => {
     await injector.apply("rooted-detectable");
     failFirst(adb, "ls ", 1);
     expect(await injector.isClean()).toBe(false);
+  });
+
+  test("a repeat apply re-applies SELinux when only the mode drifted, keeping one reset and the baseline", async () => {
+    const adb = adbWith(ROOTABLE);
+    adb.setCommandResponseSequence("ls /system/xbin/su", [
+      execResult(""),
+      execResult(ALL_ARTIFACTS),
+      execResult(""),
+    ]);
+    // Baseline Enforcing; after a reboot the files are still there but SELinux is Enforcing again.
+    adb.setCommandResponseSequence("getenforce", [
+      execResult("Enforcing"),
+      execResult("Enforcing"),
+      execResult("Permissive"),
+    ]);
+    const injector = createRootStateInjector(adb);
+    const first = await injector.apply("rooted-detectable");
+    expect(first.reset).toBeDefined();
+
+    const second = await injector.apply("rooted-detectable");
+    expect(second.status).toBe("applied");
+    expect(second.reset).toBeUndefined();
+    expect(adb.getExecutedCommands().filter((c) => c === "shell setenforce 0")).toHaveLength(2);
+
+    await first.reset?.();
+    const lastSetenforce = adb
+      .getExecutedCommands()
+      .filter((c) => c.startsWith("shell setenforce"))
+      .at(-1);
+    expect(lastSetenforce).toBe("shell setenforce 1");
   });
 });

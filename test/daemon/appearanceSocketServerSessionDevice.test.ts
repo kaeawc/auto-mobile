@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   AppearanceSocketServer,
   defaultAppearanceDeviceSource,
@@ -63,6 +63,11 @@ function harness(auth: boolean, source?: AppearanceDeviceSource) {
 }
 
 describe("appearance socket session device targets", () => {
+  beforeEach(() => {
+    clearDirectSessionDevices();
+    DaemonState.getInstance().reset();
+  });
+
   afterEach(() => {
     clearDirectSessionDevices();
     DaemonState.getInstance().reset();

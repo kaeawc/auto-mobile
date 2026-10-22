@@ -2,8 +2,10 @@ import { expect, test } from "bun:test";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import {
+  PROTOTYPE_ANCHOR_CAPABILITY,
   PROTOTYPE_NETWORK_CAPABILITY,
   PROTOTYPE_NETWORK_DEVICE_CAPABILITY,
+  PROTOTYPE_WINDOW_CHROME_CAPABILITY,
 } from "../../../src/features/observe/android/ctrlProxyProtocol";
 import {
   PROTOTYPE_SPEC_CAPABILITY_GATES,
@@ -16,7 +18,11 @@ const validFixtureDirectory = join(fixtures, "prototype-spec/valid");
 // exceeds the 100 ms unit budget. Keep sampled fixtures in separate tests as well.
 const validFixtureFiles = readdirSync(validFixtureDirectory).sort();
 const sampledValidFixtureFiles = validFixtureFiles.filter((_, index) => index % 4 === 0);
-const knownCapabilities = new Set(PROTOTYPE_SPEC_CAPABILITY_GATES.map((gate) => gate.capability));
+const knownCapabilities = new Set([
+  ...PROTOTYPE_SPEC_CAPABILITY_GATES.map((gate) => gate.capability),
+  PROTOTYPE_ANCHOR_CAPABILITY,
+  PROTOTYPE_WINDOW_CHROME_CAPABILITY,
+]);
 const deviceRequestSpec = {
   root: {
     type: "button",
@@ -52,6 +58,33 @@ test("capability names are sorted and unique across repeated feature uses", () =
   expect(capabilities.length).toBeGreaterThan(1);
   expect(capabilities).toEqual([...capabilities].sort());
   expect(capabilities.length).toBe(new Set(capabilities).size);
+});
+
+test("anchors and an explicitly chromeless fullscreen window add their preflight capabilities (#14536)", () => {
+  const anchored = {
+    window: { placement: { type: "floating" } },
+    root: {
+      type: "column",
+      children: [{ type: "text", text: "Tip", anchor: { type: "bounds", x: 0, y: 0 } }],
+    },
+  };
+  expect(requiredPrototypeCapabilities(anchored)).toEqual([PROTOTYPE_ANCHOR_CAPABILITY]);
+
+  const chromeless = (placement: string) => ({
+    window: { placement: { type: placement }, chrome: "none" },
+    root: { type: "text", text: "Hello" },
+  });
+  expect(requiredPrototypeCapabilities(chromeless("fullscreen"))).toEqual([
+    PROTOTYPE_WINDOW_CHROME_CAPABILITY,
+  ]);
+  // Chrome on another placement is refused outright rather than gated, and a bar needs nothing.
+  expect(requiredPrototypeCapabilities(chromeless("sheet"))).toEqual([]);
+  expect(
+    requiredPrototypeCapabilities({
+      window: { placement: { type: "fullscreen" }, chrome: "bar" },
+      root: { type: "text", text: "Hello" },
+    }),
+  ).toEqual([]);
 });
 
 test("valid spec fixtures are present", () => {

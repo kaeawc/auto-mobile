@@ -9,6 +9,8 @@ import { DAEMON_ONESHOT_CLIENT_MAX_FRAME_BYTES } from "../../src/daemon/socketSe
 import { defaultIdGenerator, type IdGenerator } from "../../src/utils/IdGenerator";
 import { defaultTimer, type Timer } from "../../src/utils/SystemTimer";
 import { raceWithDeadline } from "../../src/utils/raceWithDeadline";
+import { errorMessage } from "../../src/utils/describeUnknownError";
+import { logger } from "../../src/utils/logger";
 import { connectFrameSocket } from "./daemon-frame";
 import {
   encodeDaemonFrame,
@@ -25,6 +27,12 @@ export interface BrokerDaemonClient {
   capabilities(): Promise<readonly string[]>;
 }
 export const BROKER_CLEANUP_TIMEOUT_MS = 240_000;
+export class BrokerTransportError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "BrokerTransportError";
+  }
+}
 const responseSchema = z.object({
   id: z.string(),
   success: z.boolean(),
@@ -70,7 +78,14 @@ export function createFrameBrokerDaemonClient(options: {
     try {
       return await raceWithDeadline(
         async () => {
-          const opened = await connect(options.socketPath);
+          let opened: FrameConnection;
+          try {
+            opened = await connect(options.socketPath);
+          } catch (error) {
+            throw new BrokerTransportError(`Broker connection failed: ${errorMessage(error)}`, {
+              cause: error,
+            });
+          }
           if (finished) {
             opened.destroy();
             throw new Error("Broker connection arrived after its deadline.");
@@ -80,7 +95,11 @@ export function createFrameBrokerDaemonClient(options: {
           const decoder = new LineDecoder(DAEMON_ONESHOT_CLIENT_MAX_FRAME_BYTES, "Broker response");
           return new Promise<z.infer<typeof responseSchema>>((resolve, reject) => {
             opened.onClose((error) =>
-              reject(error ?? new Error("Broker socket closed without a response.")),
+              reject(
+                new BrokerTransportError("Broker socket closed without a response.", {
+                  cause: error,
+                }),
+              ),
             );
             opened.onData((chunk) => {
               try {
@@ -228,13 +247,30 @@ export async function waitForBrokerRelease(options: {
   /** Returned at once when the daemon holds no receipt for the request (it never became one). */
   missingReceipt?: SessionBrokerResult;
   timeoutMs?: number;
+  log?: (message: string) => void;
 }): Promise<SessionBrokerResult> {
   const timeoutMs = options.timeoutMs ?? BROKER_CLEANUP_TIMEOUT_MS;
   const deadline = options.timer.now() + timeoutMs;
   return raceWithDeadline(
     async () => {
       while (options.timer.now() < deadline) {
-        const status = await options.client.status(options.requestId, options.token);
+        let status: SessionBrokerResult | undefined;
+        try {
+          status = await options.client.status(options.requestId, options.token);
+        } catch (error) {
+          if (!(error instanceof BrokerTransportError)) {
+            throw error;
+          }
+          // A daemon restart can drop this read; retry within the same cleanup deadline.
+          const message = `Broker release status transport retry: ${errorMessage(error)}`;
+          if (options.log) {
+            options.log(message);
+          } else {
+            logger.debug(message, error);
+          }
+          await options.timer.sleep(Math.min(1000, Math.max(0, deadline - options.timer.now())));
+          continue;
+        }
         if (!status && options.missingReceipt) {
           return options.missingReceipt;
         }

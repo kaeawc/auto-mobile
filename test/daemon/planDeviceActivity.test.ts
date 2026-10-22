@@ -5,10 +5,15 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { createFakeSession } from "./helpers/inputSocketHarness";
 import type { PlanExecutionTarget } from "../../src/utils/ServerConfig";
 
+const LABELS = ["base", "base:B"];
+
 function harness() {
   const session = createFakeSession("base", "old", "ios");
   const label = createFakeSession("base:B", "label-device", "android");
-  const plans: PlanExecutionTarget[] = [{ sessionUuid: "base", deviceId: "old" }];
+  // A labeled plan: its lease names the label sessions it allocates.
+  const plans: PlanExecutionTarget[] = [
+    { sessionUuid: "base", deviceId: "old", labelSessionUuids: LABELS },
+  ];
   const tracker = new ExecutionTracker(new FakeTimer());
   const activity = new PlanDeviceActivity(
     {
@@ -83,12 +88,31 @@ describe("plan device activity from execution leases", () => {
     const h = harness();
     // Broker allocation uses the existing base:B holder and publishes this same
     // label map before its allocation promise resolves; it mints no new session.
-    h.plans[0] = { sessionUuid: "base", executionId: "broker-plan" };
+    h.plans[0] = { sessionUuid: "base", executionId: "broker-plan", labelSessionUuids: LABELS };
     expect(h.activity.hasPlanExecution(h.label.assignedDevice!, "base")).toBe(true);
     expect(h.activity.getPlanExecutionIds(h.label.assignedDevice!, "base")).toEqual([
       "broker-plan",
     ]);
     expect(h.activity.hasPlanExecution(h.label.assignedDevice!, "other")).toBe(false);
+  });
+
+  test("a single-device plan on A is not active on an unused sibling label B (#14444)", async () => {
+    const h = harness();
+    // The broker map {A: base, B: base:B} is published, but this invocation declared no labels:
+    // it runs on A only, so B's loss must neither defer through it nor cancel it.
+    const plan = h.tracker.startExecution("executePlan", undefined, "base");
+    h.plans[0] = { sessionUuid: "base", deviceId: "old", executionId: plan.id };
+    h.tracker.bindDeviceExecution(plan.id, "old");
+    expect(h.activity.hasPlanExecution("old", "base")).toBe(true);
+    expect(h.activity.hasPlanExecution("label-device")).toBe(false);
+    expect(h.activity.hasPlanExecution("label-device", "base")).toBe(false);
+    expect(h.activity.getPlanExecutionIds("label-device", "base")).toEqual([]);
+    h.activity.bindPlanExecutions("label-device", "base");
+    await h.tracker.cancelDeviceExecutions("label-device", "device lost", {
+      onlySessionUuid: "base",
+      onlyToolName: "executePlan",
+    });
+    expect(plan.abortController.signal.aborted).toBe(false);
   });
 
   test("a sessionless lease protects its explicit device", () => {

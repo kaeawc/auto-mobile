@@ -5,6 +5,8 @@ import type { SessionManager } from "./sessionManager";
 
 /** Lease registration precedes allocation/adb on both platforms. Resolve its
  * sessions on every read so label allocation and mid-step device switches count.
+ * A lease's sessions are its own and the labels it allocates (#14444), never every
+ * sibling published under the same base.
  * Keep adb bindings too: they fence work still draining on an earlier device.
  */
 export class PlanDeviceActivity {
@@ -48,16 +50,21 @@ export class PlanDeviceActivity {
   }
 
   private leasesForDevice(deviceId: string, sessionUuid?: string) {
-    const holders = this.sessions
-      .getAllSessions()
-      .filter((session) => session.assignedDevice === deviceId)
-      .map((session) => this.baseSession(session.sessionId));
+    const holders = new Set(
+      this.sessions
+        .getAllSessions()
+        .filter((session) => session.assignedDevice === deviceId)
+        .map((session) => session.sessionId),
+    );
     return this.plans.getActivePlanExecutions().filter((plan) => {
       if (!plan.sessionUuid) {
         return sessionUuid === undefined && plan.deviceId === deviceId;
       }
-      const base = this.baseSession(plan.sessionUuid);
-      return (sessionUuid === undefined || base === sessionUuid) && holders.includes(base);
+      const uses = [plan.sessionUuid, ...(plan.labelSessionUuids ?? [])];
+      return (
+        (sessionUuid === undefined || this.baseSession(plan.sessionUuid) === sessionUuid) &&
+        uses.some((member) => holders.has(member))
+      );
     });
   }
 

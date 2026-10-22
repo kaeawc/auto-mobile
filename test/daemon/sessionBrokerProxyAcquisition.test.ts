@@ -77,6 +77,75 @@ function rig(
 }
 
 describe("session broker proxy acquisition", () => {
+  test("T4: lost prepare reply reconnects for status and returns stopping receipt without resending", async () => {
+    const receipt: SessionBrokerResult = {
+      ...ready,
+      outcome: "failed",
+      sessionUuid: null,
+      profile: null,
+      cleanupPending: true,
+      failure: {
+        code: "session_broker_stopping",
+        message: "Session preparation was interrupted because the session broker is stopping.",
+        retryable: true,
+        retryAfterMs: SESSION_BROKER_RETRY_AFTER_MS,
+        retryRequires: "new_request_id",
+      },
+    };
+    let connections = 0;
+    const connectionsAtPoll: number[] = [];
+    const { ports, calls, held } = rig((method) => {
+      if (method === "daemon/capabilities") {
+        return { capabilities: ["session-broker/v1"] };
+      }
+      if (method === DAEMON_PREPARE_SESSION_METHOD) {
+        throw new Error("prepare reply lost");
+      }
+      connectionsAtPoll.push(connections);
+      if (connectionsAtPoll.length === 1) {
+        throw new Error("client gone");
+      }
+      return receipt;
+    });
+    ports.ensureConnected = async () => {
+      connections++;
+    };
+
+    expect(await acquireSessionThroughDaemon(config, ports)).toEqual(receipt);
+    expect(connectionsAtPoll).toEqual([2, 3]);
+    expect(calls.filter(({ method }) => method === DAEMON_PREPARE_SESSION_METHOD)).toHaveLength(1);
+    expect(held).toEqual([]);
+  });
+
+  test("T5: status reconnect retries through daemon restart and holds the successor's ready session", async () => {
+    let connections = 0;
+    const { ports, calls, held, timer } = rig((method) => {
+      if (method === "daemon/capabilities") {
+        return { capabilities: ["session-broker/v1"] };
+      }
+      if (method === DAEMON_PREPARE_SESSION_METHOD) {
+        throw new Error("prepare reply lost");
+      }
+      expect(connections).toBe(4);
+      return ready;
+    });
+    ports.ensureConnected = async () => {
+      connections++;
+      if (connections === 2 || connections === 3) {
+        throw new Error("daemon restarting");
+      }
+    };
+
+    expect(await acquireSessionThroughDaemon(config, ports)).toEqual(ready);
+    expect(connections).toBe(4);
+    expect(timer.now()).toBe(500);
+    expect(
+      calls.filter(({ method }) => method === DAEMON_SESSION_REQUEST_STATUS_METHOD),
+    ).toHaveLength(1);
+    expect(calls.filter(({ method }) => method === DAEMON_PREPARE_SESSION_METHOD)).toHaveLength(1);
+    expect(held).toEqual([{ requestId: config.requestId, sessionUuid: ready.sessionUuid! }]);
+  });
+
   test.each([false, true])(
     "preserves transient failure retryability through lost reply=%s",
     async (lostReply) => {

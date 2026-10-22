@@ -6,6 +6,8 @@ import {
   readGitVersion,
   releaseVersion,
   resolveMcpServerVersion,
+  withoutDirtyStamp,
+  probeCheckoutMcpServerVersion,
   type GitVersionInfo,
   type McpVersionDeps,
 } from "../../src/utils/mcpVersion";
@@ -22,8 +24,36 @@ import { FakeGitMetadataReader } from "../fakes/FakeFileSystem";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { logger } from "../../src/utils/logger";
 import { defaultTimer } from "../../src/utils/SystemTimer";
+import * as env from "../../src/config/env";
 
 const versionModulePath = "../../src/utils/mcpVersion.ts";
+
+test("checkout probes resolve fresh inputs rather than reusing a cached stamp", async () => {
+  const read = spyOn(env, "readEnvRaw").mockReturnValue("0.0.87+gabc");
+  try {
+    expect(await probeCheckoutMcpServerVersion()).toBe("0.0.87+gabc");
+    read.mockReturnValue("0.0.87+gabc.dirty.47e2");
+    expect(await probeCheckoutMcpServerVersion()).toBe("0.0.87+gabc.dirty.47e2");
+  } finally {
+    read.mockRestore();
+  }
+});
+
+describe("withoutDirtyStamp", () => {
+  test.each([
+    ["0.0.87+gabc.dirty.47e2", "0.0.87+gabc"],
+    ["0.0.87+gabc.dirty", "0.0.87+gabc"],
+    ["0.0.87+gabc", "0.0.87+gabc"],
+    ["0.0.87", "0.0.87"],
+    ["0.0.87-dirty", "0.0.87-dirty"],
+    ["0.0.87.dirty", "0.0.87.dirty"],
+    ["0.0.87+other.dirty.47e2", "0.0.87+other.dirty.47e2"],
+    ["0.0.87+gabc.dirty.nothex", "0.0.87+gabc.dirty.nothex"],
+    ["0.0.87+gabc.dirty.47e2.more", "0.0.87+gabc.dirty.47e2.more"],
+  ])("%s -> %s", (version, expected) => {
+    expect(withoutDirtyStamp(version)).toBe(expected);
+  });
+});
 
 describe("getMcpServerVersion laziness", () => {
   test("import and the first getter never spawn status/diff, then cache the stamp", async () => {

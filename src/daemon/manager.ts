@@ -372,7 +372,8 @@ export class DaemonManager implements DaemonManagerLike {
     return this.collaborators.daemonStart.inheritExitSettings(options);
   }
 
-  startUnlocked(
+  /** Requires the caller to hold the startup lock; collaborators reach it through the host. */
+  private startUnlocked(
     options: DaemonOptions,
     recoverySignal?: AbortSignal,
     inheritExitRecord: boolean = true,

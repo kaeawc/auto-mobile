@@ -112,21 +112,17 @@
         }
 
         /// Grouped bars: one slot per point index, one bar per series within it, rising from zero.
+        /// Each bar is a numeric rectangle from `PrototypeChartModel.bars`: `BarMark.position(by:)`
+        /// over an `Int` series drew no bars at all on iOS 27 (#14679).
         private func bars(_ chart: PrototypeChartModel) -> some View {
-            let slots = chart.series.map(\.points.count).max() ?? 0
-            let base = clamp(0, chart)
+            let drawn = chart.bars(fill: barFill)
             return Chart {
-                ForEach(Array(chart.series.enumerated()), id: \.offset) { seriesIndex, series in
-                    ForEach(Array(series.points.enumerated()), id: \.offset) { index, point in
-                        barMark(
-                            chart, seriesIndex: seriesIndex, label: series.label, index: index,
-                            y: point.y, base: base
-                        )
-                    }
+                ForEach(Array(drawn.enumerated()), id: \.offset) { _, bar in
+                    barMark(chart, bar)
                 }
                 goalRule(chart)
             }
-            .chartXScale(domain: (0 ..< slots).map { String($0) })
+            .chartXScale(domain: 0 ... Double(Swift.max(chart.barSlots, 1)), range: .plotDimension(padding: 0))
             .chartYScale(domain: chart.yMin ... chart.yMax, range: .plotDimension(padding: 0))
             .chartXAxis(.hidden)
             .chartYAxis(.hidden)
@@ -135,20 +131,14 @@
         }
 
         @ChartContentBuilder
-        private func barMark(
-            _ chart: PrototypeChartModel, seriesIndex: Int, label: String, index: Int, y: Double, base: Double
-        )
-            -> some ChartContent
-        {
-            let drawn: Double = clamp(y, chart)
-            BarMark(
-                x: .value("Index", String(index)),
-                yStart: .value("Base", base),
-                yEnd: .value(label, drawn),
-                width: .ratio(barFill)
+        private func barMark(_ chart: PrototypeChartModel, _ bar: PrototypeChartBar) -> some ChartContent {
+            RectangleMark(
+                xStart: .value("Start", bar.xStart),
+                xEnd: .value("End", bar.xEnd),
+                yStart: .value("Base", bar.yStart),
+                yEnd: .value(chart.series[bar.seriesIndex].label, bar.yEnd)
             )
-            .position(by: .value("Series", seriesIndex))
-            .foregroundStyle(color(chart, seriesIndex))
+            .foregroundStyle(color(chart, bar.seriesIndex))
             .cornerRadius(2)
         }
 

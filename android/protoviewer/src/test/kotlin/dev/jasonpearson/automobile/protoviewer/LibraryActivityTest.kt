@@ -26,6 +26,8 @@ import org.robolectric.shadows.ShadowAppTask
 class LibraryActivityTest {
   @get:Rule val compose = createComposeRule()
   private val repository = FakeLibraryRepository()
+  private val exports = FakeExportFiles()
+  private val sharer = CanonicalLibrarySharer(repository, exports, IdGenerator { SECOND })
   private var controller: ActivityController<LibraryActivity>? = null
 
   @Before
@@ -36,6 +38,7 @@ class LibraryActivityTest {
         LibraryStorage(FakePrototypeStorage()),
         UnconfinedTestDispatcher(),
         LibraryClock { 42 },
+        sharer = sharer,
       )
     }
   }
@@ -133,6 +136,58 @@ class LibraryActivityTest {
       FIRST,
       shadowOf(activity).nextStartedActivity.getStringExtra(ViewerLaunch.LIBRARY_ID),
     )
+  }
+
+  @Test
+  fun deleteRequiresConfirmationAndRemovesEntry() {
+    repository.prototypes[FIRST] = Fixtures.prototype()
+    val activity = launch()
+    val task = existingTask(activity, FIRST)
+    compose
+      .onNodeWithContentDescription("More options for ${Fixtures.entry().label}")
+      .performClick()
+    compose.onNodeWithText("Delete").performClick()
+    compose.onNodeWithText("Delete prototype?").assertIsDisplayed()
+    assertTrue(repository.prototypes.containsKey(FIRST))
+    compose.onNodeWithTag("confirm-delete").performClick()
+    compose.waitForIdle()
+    assertFalse(repository.prototypes.containsKey(FIRST))
+    assertTrue(shadowOf(task).isFinishedAndRemoved)
+  }
+
+  @Test
+  fun shareGrantsOnlyReadAccessToScopedCanonicalExportAndCleansOnReturn() {
+    repository.prototypes[FIRST] = Fixtures.prototype()
+    val activity = launch()
+    compose
+      .onNodeWithContentDescription("More options for ${Fixtures.entry().label}")
+      .performClick()
+    compose.onNodeWithText("Share").performClick()
+    val chooser = shadowOf(activity).nextStartedActivity
+    assertEquals(Intent.ACTION_CHOOSER, chooser.action)
+    val send =
+      androidx.core.content.IntentCompat.getParcelableExtra(
+        chooser,
+        Intent.EXTRA_INTENT,
+        Intent::class.java,
+      )!!
+    assertEquals(Intent.ACTION_SEND, send.action)
+    assertEquals(PROTOTYPE_BUNDLE_MIME, send.type)
+    assertEquals(Intent.FLAG_GRANT_READ_URI_PERMISSION, send.flags)
+    val uri =
+      androidx.core.content.IntentCompat.getParcelableExtra(
+        send,
+        Intent.EXTRA_STREAM,
+        android.net.Uri::class.java,
+      )!!
+    assertEquals("${activity.packageName}.exports", uri.authority)
+    assertTrue(uri.path!!.startsWith("/prototype_exports/"))
+    assertEquals(uri, send.clipData!!.getItemAt(0).uri)
+    assertTrue(exports.files.isNotEmpty())
+    shadowOf(activity).receiveResult(chooser, android.app.Activity.RESULT_OK, Intent())
+    compose.waitForIdle()
+    // Cleanup outlives the Activity and executes on the injected immediate I/O dispatcher.
+    assertTrue(exports.files.isEmpty())
   }
 
   private fun existingTask(activity: LibraryActivity, id: String): ActivityManager.AppTask {

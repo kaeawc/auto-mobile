@@ -15,6 +15,7 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 const val MAX_LIBRARY_PROTOTYPES = 200
+const val MAX_LIBRARY_BYTES = 100L * 1024 * 1024
 val libraryLimits = SavedPrototypeLimits(maxSavedPrototypes = MAX_LIBRARY_PROTOTYPES)
 
 fun interface IdGenerator {
@@ -62,9 +63,7 @@ sealed interface LibraryResult<out T> {
 
 data class LibraryPrototype(val entry: LibraryEntry, val saved: SavedPrototypeLoadResult.Loaded)
 
-/**
- * Synchronous storage boundary; callers use their injected I/O dispatcher. No delete in slice 1.
- */
+/** Synchronous storage boundary; callers use their injected I/O dispatcher. */
 interface LibraryRepository {
   fun list(): LibraryResult<List<LibraryEntry>>
 
@@ -73,6 +72,8 @@ interface LibraryRepository {
   fun markOpened(libraryId: String): LibraryResult<Unit>
 
   fun resetStorage(libraryId: String): LibraryResult<Unit>
+
+  fun delete(libraryId: String): LibraryResult<Unit>
 }
 
 /** Only app-owned importing code constructs source/metadata; never deserialize it from a bundle. */
@@ -140,7 +141,18 @@ class DirectoryLibraryRepository(
     return storageResult { storage.reset(libraryId) }
   }
 
-  /** Internal commit seam for the next slice; no import activity or untrusted metadata input. */
+  @Synchronized
+  override fun delete(libraryId: String): LibraryResult<Unit> {
+    if (readEntry(libraryId) == null) return LibraryResult.Failure(LibraryError.NotFound)
+    return storageResult {
+      // Metadata is the visibility marker: drop it first so a later failure leaves no listed entry.
+      files.delete(libraryId)
+      storage.reset(libraryId)
+      check(store.delete(libraryId)) { "Cannot delete saved prototype" }
+    }
+  }
+
+  /** App-owned source and identity; metadata is the final visibility marker. */
   @Synchronized
   fun add(
     request: SavedPrototypeSaveRequest,
@@ -156,6 +168,12 @@ class DirectoryLibraryRepository(
     if ((listed as LibraryResult.Success).value.size >= MAX_LIBRARY_PROTOTYPES)
       return LibraryResult.Failure(LibraryError.Limit)
     val result = storageResult {
+      val incomingBytes =
+        request.specJson.toByteArray(Charsets.UTF_8).size.toLong() +
+          request.assets.sumOf { it.bytes.size.toLong() }
+      // Reserve the maximum metadata size before any save or id allocation.
+      if (files.sizeBytes() + incomingBytes + 65_536 > MAX_LIBRARY_BYTES)
+        return@storageResult LibraryResult.Failure(LibraryError.Limit)
       val id = ids.newId()
       check(validLibraryId(id) && store.load(id) == SavedPrototypeLoadResult.NotFound) {
         "Library id collision"
@@ -201,6 +219,9 @@ class DirectoryLibraryRepository(
     }
   }
 
+  @Suppress(
+    "TooGenericExceptionCaught",
+  ) // Corrupt metadata and arbitrary injected file failures skip this entry.
   private fun readEntry(id: String): LibraryEntry? =
     if (!validLibraryId(id)) null
     else
@@ -213,7 +234,9 @@ class DirectoryLibraryRepository(
             it.lastOpenedAt >= 0 &&
             Regex("[a-f0-9]{64}").matches(it.specSha256)
         }
-      } catch (_: Exception) {
+      } catch (error: Exception) {
+        java.util.logging.Logger.getLogger("ProtoViewerLibrary")
+          .log(java.util.logging.Level.WARNING, "Skipping unreadable library metadata", error)
         // A damaged or unreadable entry never prevents the remaining library from opening.
         null
       }
@@ -227,10 +250,15 @@ internal fun validLibraryId(id: String): Boolean = runCatching {
 }
   .getOrDefault(false)
 
+@Suppress(
+  "TooGenericExceptionCaught",
+) // Convert arbitrary injected storage errors at the repository boundary.
 internal fun <T> storageResult(block: () -> T): LibraryResult<T> =
   try {
     LibraryResult.Success(block())
-  } catch (_: Exception) {
+  } catch (error: Exception) {
+    java.util.logging.Logger.getLogger("ProtoViewerLibrary")
+      .log(java.util.logging.Level.WARNING, "Library storage failed", error)
     // File/security/serialization failures are typed; raw exception details never become UI text.
     LibraryResult.Failure(LibraryError.Storage)
   }

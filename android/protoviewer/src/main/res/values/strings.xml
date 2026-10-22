@@ -11,5 +11,10 @@
   <string name="more">More options for %1$s</string>
   <string name="reset_title">Reset prototype?</string>
   <string name="reset_body">Clear this prototype’s saved values and start again?</string>
-  <string name="action_error">Unable to reset this prototype.</string>
+  <string name="action_error">Unable to complete this prototype action.</string>
+  <string name="share">Share</string>
+  <string name="share_warning_title">Review sensitive prototype data</string>
+  <string name="delete">Delete</string>
+  <string name="delete_title">Delete prototype?</string>
+  <string name="delete_body">Permanently remove this prototype, its assets and saved values?</string>
 </resources>

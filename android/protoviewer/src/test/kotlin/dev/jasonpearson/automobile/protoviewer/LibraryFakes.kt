@@ -45,6 +45,12 @@ internal class FakeLibraryFiles : LibraryFileOperations {
   val documents = mutableMapOf<String, String>()
   val unreadable = mutableSetOf<String>()
   var fail = false
+  var usedBytes = 0L
+
+  override fun sizeBytes(): Long {
+    checkStorage()
+    return usedBytes
+  }
 
   override fun ids(): List<String> {
     checkStorage()
@@ -60,6 +66,11 @@ internal class FakeLibraryFiles : LibraryFileOperations {
   override fun write(id: String, text: String) {
     checkStorage()
     documents[id] = text
+  }
+
+  override fun delete(id: String) {
+    checkStorage()
+    documents.remove(id)
   }
 
   fun put(entry: LibraryEntry) {
@@ -126,6 +137,11 @@ internal class FakeLibraryRepository : LibraryRepository {
     error?.let { LibraryResult.Failure(it) }
       ?: prototypes[libraryId]?.let { LibraryResult.Success(it) }
       ?: LibraryResult.Failure(LibraryError.NotFound)
+
+  override fun delete(libraryId: String): LibraryResult<Unit> {
+    prototypes.remove(libraryId)
+    return LibraryResult.Success(Unit)
+  }
 
   override fun markOpened(libraryId: String): LibraryResult<Unit> {
     opened += libraryId

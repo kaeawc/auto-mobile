@@ -11,6 +11,8 @@ plugins {
 android {
   namespace = "dev.jasonpearson.automobile.protoviewer"
   defaultConfig {
+    // Bundle commit uses java.nio NOFOLLOW checks and same-volume atomic moves (API 26).
+    minSdk = 26
     applicationId = "dev.jasonpearson.automobile.protoviewer"
     versionCode = 1
   }

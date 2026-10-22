@@ -142,7 +142,10 @@ export interface ToolTraits {
   stopsApp?: boolean;
   /** Replaces a process without naming the app in its args (`installApp`): all remembered screens go. */
   replacesProcess?: boolean;
-  /** A UI interaction that may cause in-app navigation; excludes lifecycle tools (not replayable paths). */
+  /**
+   * A UI interaction that may cause in-app navigation; excludes lifecycle tools (not replayable
+   * paths). It also answers the device's `systemAlerts` policy before dispatch (#14106).
+   */
   recordsNavigation?: boolean;
   /** Read-only: nothing happened on the device, so an artifact write failure stays loud. */
   loudArtifactWrites?: boolean;

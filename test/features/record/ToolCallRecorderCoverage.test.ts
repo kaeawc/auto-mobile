@@ -151,6 +151,7 @@ const FORMER_PLAN_RELEVANT_TOOLS = [
   "statusBar",
   "swipeAt",
   "swipeOn",
+  "systemAlerts",
   "systemTray",
   "tapAny",
   "tapAt",

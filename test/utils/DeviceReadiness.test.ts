@@ -5,6 +5,8 @@ import {
 } from "../../src/daemon/readiness/DeviceReadiness";
 import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { FakeAdbClient } from "../fakes/FakeAdbClient";
+import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
 import { FakeCtrlProxyManager } from "../fakes/FakeCtrlProxyManager";
@@ -481,10 +483,27 @@ describe("DeviceReadiness", () => {
     const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {
       window: notReadyWindow,
     });
-    const manager = createTestSessionManager(provider);
+    const manager = createTestSessionManager(provider, new FakeAdbClientFactory());
 
     await expect(
       manager.verifyAndroidDevice(device.deviceId, { readiness: "booted" }),
+    ).rejects.toThrow("Failed to verify Android device device-1 readiness");
+  });
+
+  test("booted Android readiness accepts an asleep device that has no focused window", async () => {
+    const notReadyWindow = new FakeWindow();
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {
+      window: notReadyWindow,
+    });
+    const asleep = new FakeAdbClient();
+    asleep.setScreenState(false, "Asleep");
+    const manager = createTestSessionManager(provider, new FakeAdbClientFactory(asleep));
+
+    await expect(
+      manager.verifyAndroidDevice(device.deviceId, { readiness: "booted" }),
+    ).resolves.toBeUndefined();
+    await expect(
+      manager.verifyAndroidDevice(device.deviceId, { readiness: "automationReady" }),
     ).rejects.toThrow("Failed to verify Android device device-1 readiness");
   });
 

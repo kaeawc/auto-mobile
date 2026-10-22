@@ -20,10 +20,18 @@ export class FakePowerAdb extends FakeAdbExecutor implements AdbExecutor {
   inactive = new Map<string, boolean>();
   /** Android switches battery saver off while a charger is connected (as BatterySaverStateMachine does). */
   saverOffWhileCharging = false;
+  /** `unforce` leaves a forced idle state in place until the screen wakes. */
+  idleLingersWhileAsleep = false;
+  private awake = true;
   /** Commands (joined argv) containing any of these substrings fail with a device error. */
   failing = new Set<string>();
   /** Keep a command failing only this many more times (default: forever). */
   failTimes = new Map<string, number>();
+
+  override setScreenState(isOn: boolean, wakefulness?: "Awake" | "Asleep" | "Dozing"): void {
+    super.setScreenState(isOn, wakefulness);
+    this.awake = isOn;
+  }
 
   override async execute(args: string[], options: AdbExecuteOptions = {}): Promise<ExecResult> {
     await super.execute(args, options);
@@ -67,6 +75,7 @@ export class FakePowerAdb extends FakeAdbExecutor implements AdbExecutor {
     }
     if (cmd === "input" && rest[0] === "KEYCODE_WAKEUP") {
       this.setScreenState(true);
+      this.leaveIdle();
     }
     return "";
   }
@@ -133,10 +142,21 @@ export class FakePowerAdb extends FakeAdbExecutor implements AdbExecutor {
       return `Now forced in to ${kind} idle mode\n`;
     }
     if (rest[0] === "unforce") {
-      this.deep = "ACTIVE";
-      this.light = "ACTIVE";
+      this.leaveIdle();
     }
     return "";
+  }
+
+  /**
+   * An emulator keeps a forced idle state after `unforce` until the screen wakes (#15006
+   * evidence); `idleLingersWhileAsleep` reproduces that.
+   */
+  private leaveIdle(): void {
+    if (this.idleLingersWhileAsleep && !this.awake) {
+      return;
+    }
+    this.deep = "ACTIVE";
+    this.light = "ACTIVE";
   }
 
   private runSettings(sub: string | undefined, rest: string[]): string {

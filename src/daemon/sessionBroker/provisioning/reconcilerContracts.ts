@@ -279,6 +279,12 @@ export interface BindingReconcileRequest {
   priorDeviceHint?: { stableId: string };
   /** Absolute deadline on the timer's clock for the whole preparation. */
   deadlineMs: number;
+  /**
+   * Earlier absolute deadline for creating a device into an empty binding, leaving the caller a
+   * warm readiness retry window. Adoption and reuse keep `deadlineMs`, so the reserve is spent
+   * only once the create path is actually chosen.
+   */
+  createDeadlineMs?: number;
   signal?: AbortSignal;
   /**
    * The execution the prepared device is for. When set, the reconciler claims the binding for it

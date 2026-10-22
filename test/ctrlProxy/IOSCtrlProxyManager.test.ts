@@ -390,7 +390,7 @@ describe("IOSCtrlProxyManager", function () {
   });
 
   // #6415: checkHealthEndpoint() (the gate behind isRunning()/start()'s
-  // short-circuit/waitForHealthEndpoint/isCtrlProxyProcessAlive) must reject a
+  // short-circuit/waitForHealthEndpoint/checkCtrlProxyProcessLiveness) must reject a
   // foreign responder on the service port rather than treating any "ok"/"healthy"
   // body as proof this device's runner is up.
   describe("device-identity gate on the health probe (#6415)", function () {

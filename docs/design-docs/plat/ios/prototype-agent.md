@@ -15,6 +15,19 @@ screenshots (#10943, #10988) and the renderer and accessibility fixes that follo
 #10498, and the decisions listed under [Open decisions](#open-decisions).
 `scripts/ios/prototype-agent-demo.ts` is a standalone driver that launches with a fresh port and token.
 
+## Embedded input validation
+
+The embedded/serverless API validates raw JSON against the compiled structural contract before
+`PrototypeSpec` decoding (#14482). Unknown fields and node types, malformed storage, invalid values,
+unions and structural budgets produce `PrototypeLoadError.invalidSpec(path:message:)` with host-style
+JSON paths. The generated contract has no resource-bundle dependency and a Bun drift test guards it.
+The Viewer/file loader retains its existing behavior. Host-only checks remain for state/action
+bindings, repeat expansion and substituted-text budgets, cross-node targets, component/ancestor
+combinations, check pattern grammar, chart data semantics, emit/link scope and platform registries;
+the Swift fixture test names each exemption and rejects stale exemptions. Element anchors still need
+host resolution to bounds (three structurally valid fixtures retain this diagnostic). Foundation
+rejects lone UTF-16 surrogates before constructing a JSON tree, so those parse failures report `$`.
+
 ## Feature support
 
 | Feature                                                                               | iOS simulator                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |

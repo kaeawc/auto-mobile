@@ -93,6 +93,7 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     // Prototype icon tests read the Swift capability declaration, generated symbol data and doc.
     "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeAgentProtocol.swift",
     "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeIconSymbolData.swift",
+    "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeSpecContractData.swift",
     "ios/prototype-agent/ICON-SYMBOLS.md",
   ] as const;
 

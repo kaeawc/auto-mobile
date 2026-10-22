@@ -45,7 +45,7 @@ interface AndroidSpecFields {
   configuration?: { memoryMb?: number };
 }
 
-function refineAndroidSpec(spec: AndroidSpecFields, context: z.RefinementCtx): void {
+export function refineAndroidSpec(spec: AndroidSpecFields, context: z.RefinementCtx): void {
   if (spec.runtime.startsWith(CORE_SIMULATOR_IDENTIFIER_PREFIX)) {
     context.addIssue({
       code: "custom",
@@ -99,13 +99,16 @@ function refineIosSpec(
   }
 }
 
+/** The AVD-defining fields of an Android provisionDevice spec, for schemas that add to it. */
+export const androidProvisionDeviceSpecFields = {
+  runtime: androidRuntimeSchema,
+  deviceType: androidDeviceTypeSchema,
+  displayCutout: displayCutoutSchema,
+  configuration: androidAvdConfigurationSchema.optional(),
+};
+
 export const androidProvisionDeviceSpecSchema = z
-  .object({
-    runtime: androidRuntimeSchema,
-    deviceType: androidDeviceTypeSchema,
-    displayCutout: displayCutoutSchema,
-    configuration: androidAvdConfigurationSchema.optional(),
-  })
+  .object(androidProvisionDeviceSpecFields)
   .strict()
   .superRefine(refineAndroidSpec);
 

@@ -401,6 +401,11 @@ class WebSocketServer(
     // lists the node's available actions in a refusal (#14077). Older APKs refuse them as
     // unsupported, so hosts require this flag before sending one.
     add("semantic_node_actions_v1")
+    // request_global_action accepts the system actions beyond back/home/recent/notifications
+    // (power_dialog, quick_settings, split_screen, lock_screen, screenshot,
+    // dismiss_notification_shade). Each flag is advertised only when the device API level can
+    // perform it (#14095), so a host needs one check to cover both the APK and the API level.
+    addAll(SystemGlobalActions.advertisedFlags(options.sdkInt()))
     add("full_command_set_v1")
     // Every response to a request carrying requestId echoes it, including hierarchy_update for
     // request_hierarchy. Unsolicited pushes remain id-less; older hosts ignore unknown flags.

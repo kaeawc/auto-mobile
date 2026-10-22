@@ -86,7 +86,7 @@ test("tapOn text selection dispatches the derived right-hand target's centre wit
   const tap = new TapOnElement(selectionFixtureDevice(), new FakeAdbExecutor(), {
     timer,
     hierarchyCapture: new FakeHierarchyCapture(() => hierarchy, "ios"),
-    tapStrategy: new FakeTapStrategy(),
+    tapStrategy: FakeTapStrategy.ios(),
     selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
   });
   const observation: ObserveResult = buildObserveResult({

@@ -59,12 +59,14 @@ import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbCl
 import { FileAvdConfigReader } from "../../utils/android-cmdline-tools/AvdConfigReader";
 import { executionTracker } from "../executionTracker";
 import type { Session } from "../sessionManager/sessionTypes";
+import { HeartbeatTaskLeaseKeepalive } from "../tasks/taskLeaseKeepalive";
 import {
-  brokerMutationIncarnation,
+  brokerSessionMutationScope,
   SessionMutationRecorder,
   type MutationRecorder,
 } from "./mutations/recorder";
 import type { DeviceMutationScope } from "./mutations/types";
+import { nativeProfile } from "./profile";
 import { readFile, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { AndroidEmulatorClient } from "../../utils/android-cmdline-tools/AndroidEmulatorClient";
@@ -115,7 +117,11 @@ export interface OpenSessionBrokerServiceOptions {
   mutationSessions?: {
     peekSession(
       sessionUuid: string,
-    ): Pick<Session, "sessionId" | "assignedDevice" | "stableDeviceId" | "mutationRecorder"> | null;
+    ): Pick<
+      Session,
+      "sessionId" | "assignedDevice" | "stableDeviceId" | "mutationRecorder" | "heartbeatTimeoutMs"
+    > | null;
+    recordHeartbeat(sessionId: string): void;
   };
   /** Daemon startup starts the loop explicitly after binding its control socket. */
   deferStart?: boolean;
@@ -243,6 +249,7 @@ export async function openSessionBrokerService(
     const devices = new ManagedDevicePort({
       scope: SESSION_BROKER_SCOPE,
       timer: options.timer,
+      leaseKeepalive: preparationLeaseKeepalive(options),
       brokerDeviceAcquisition: options.acquisition,
       brokerExecutionRelease: options.release,
       registry: options.registry,
@@ -363,12 +370,30 @@ async function recoverSessionMutationRecorder(
     sessionUuid,
     session.stableDeviceId ?? session.assignedDevice,
   );
-  bindMutationRecorder({
-    sessionUuid,
-    deviceId: session.assignedDevice,
-    incarnation: brokerMutationIncarnation(request.resourceId, assignment.generation),
-  });
+  bindMutationRecorder(
+    recoveredMutationScope(sessionUuid, session.assignedDevice, resource, assignment),
+  );
   return options.mutationSessions.peekSession(sessionUuid)?.mutationRecorder;
+}
+
+/** An iOS journal shares the reset scope's incarnation, or the keep-booted reset cannot find it. */
+function recoveredMutationScope(
+  sessionUuid: string,
+  assignedDevice: string,
+  resource: BrokerResourceRecord | null | undefined,
+  assignment: BindingAssignmentRecord,
+): DeviceMutationScope {
+  if (!resource) {
+    throw new ActionableError("Recovered broker session has no resource");
+  }
+  return brokerSessionMutationScope({
+    platform: nativeProfile(resource).platform,
+    sessionUuid,
+    resource,
+    stableDeviceId: assignment.stableDeviceId ?? assignedDevice,
+    transportId: assignedDevice,
+    assignmentGeneration: assignment.generation,
+  });
 }
 
 function assertRecoveredMutationAssignment(
@@ -776,4 +801,13 @@ export class SessionBrokerService {
       };
     });
   }
+}
+
+function preparationLeaseKeepalive(
+  options: Pick<OpenSessionBrokerServiceOptions, "mutationSessions" | "timer">,
+): HeartbeatTaskLeaseKeepalive | undefined {
+  const { mutationSessions, timer } = options;
+  return mutationSessions
+    ? new HeartbeatTaskLeaseKeepalive({ sessions: () => mutationSessions, timer })
+    : undefined;
 }

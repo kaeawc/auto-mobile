@@ -1,0 +1,130 @@
+{
+  "spec": {
+    "id": "chart-variants",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "opacity": 100
+    },
+    "data": {
+      "heart": [
+        {
+          "t": "6:00",
+          "bpm": 58
+        },
+        {
+          "t": "9:00",
+          "bpm": 96
+        },
+        {
+          "t": "12:00",
+          "bpm": 141
+        },
+        {
+          "t": "15:00",
+          "bpm": 88
+        },
+        {
+          "t": "18:00",
+          "bpm": 72
+        }
+      ],
+      "steps": [
+        {
+          "day": "Mon",
+          "count": 6200
+        },
+        {
+          "day": "Tue",
+          "count": 8100
+        },
+        {
+          "day": "Wed",
+          "count": 10400
+        }
+      ],
+      "today": [
+        {
+          "count": 6500
+        }
+      ]
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "id": "heart",
+          "type": "chart",
+          "variant": "line",
+          "series": [
+            {
+              "path": "/heart",
+              "x": "t",
+              "y": "bpm",
+              "label": "Heart rate"
+            }
+          ],
+          "yRange": {
+            "min": 40,
+            "max": 160,
+            "zzzUnknown": true
+          },
+          "xLabels": "ends"
+        },
+        {
+          "type": "chart",
+          "variant": "area",
+          "series": [
+            {
+              "path": "/heart",
+              "x": "t",
+              "y": "bpm",
+              "label": "Heart rate",
+              "color": "tertiary"
+            }
+          ],
+          "goal": 100
+        },
+        {
+          "type": "chart",
+          "variant": "bar",
+          "series": [
+            {
+              "path": "/steps",
+              "x": "day",
+              "y": "count",
+              "label": "Steps"
+            },
+            {
+              "path": "/steps",
+              "x": "day",
+              "y": "count",
+              "label": "Goal pace",
+              "color": {
+                "light": "#FF6D00",
+                "dark": "#FFAB40"
+              }
+            }
+          ],
+          "xLabels": "all",
+          "goal": 10000
+        },
+        {
+          "contentDescription": "Steps today, 6500 of 10000",
+          "type": "chart",
+          "variant": "ring",
+          "series": [
+            {
+              "path": "/today",
+              "y": "count",
+              "label": "Steps today"
+            }
+          ],
+          "goal": 10000
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].yRange.zzzUnknown"
+}

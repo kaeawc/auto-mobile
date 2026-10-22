@@ -149,3 +149,16 @@ teardown() {
 
   [ "$status" -eq 0 ]
 }
+
+@test "fast validation registers the prototype model drift check" {
+  run "$ABS_SCRIPT" --list-checks
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *$'prototype-spec-models\tscripts/prototype/generate-prototype-spec-models.ts'* ]]
+}
+
+@test "pull_request Fast Validation runs the prototype model drift check" {
+  run grep -E -- '--only .*(^|,)prototype-spec-models(,|[[:space:]])' .github/workflows/pull_request.yml
+
+  [ "$status" -eq 0 ]
+}

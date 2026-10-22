@@ -1,0 +1,42 @@
+{
+  "spec": {
+    "id": "carousel",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "carousel",
+      "variant": "hero",
+      "itemWidth": 280,
+      "repeat": {
+        "as": "item",
+        "items": [
+          {
+            "title": "A"
+          },
+          {
+            "title": "B"
+          }
+        ]
+      },
+      "children": [
+        {
+          "type": "card",
+          "testTag": "slide",
+          "children": [
+            {
+              "type": "text",
+              "text": "{item.title}"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "options": {
+    "supportedCapabilities": []
+  },
+  "expectedPath": "$"
+}

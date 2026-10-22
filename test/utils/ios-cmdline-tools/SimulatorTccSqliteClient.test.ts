@@ -576,4 +576,72 @@ describe("SimulatorTccSqliteClient", () => {
       /locked|busy/i,
     );
   });
+
+  describe("readUserTrustedCertificates (#14828)", () => {
+    const DATABASE = join(
+      "/devices",
+      DEVICE_ID,
+      "data/private/var/protected/trustd/private/TrustStore.sqlite3",
+    );
+
+    function trustRig(response = "[]") {
+      const executor = new FakeSqliteExecutor();
+      executor.response = result(response);
+      const fileSystem = new FakeTccFileSystem();
+      const client = new SimulatorTccSqliteClient({
+        timer: new FakeTimer(),
+        executor,
+        fileSystem,
+        environment: {},
+        deviceSetRoot: "/devices",
+      });
+      return { client, executor, fileSystem };
+    }
+
+    test("reads the user trust settings read-only from the simulator's trustd database", async () => {
+      const { client, executor, fileSystem } = trustRig('[{"sha256":"ABCD"},{"sha256":"EF01"}]');
+      const signal = new AbortController().signal;
+      expect(await client.readUserTrustedCertificates(DEVICE_ID, signal)).toEqual([
+        { sha256: "ABCD" },
+        { sha256: "EF01" },
+      ]);
+      expect(fileSystem.paths).toEqual([DATABASE]);
+      expect(executor.calls).toHaveLength(1);
+      expect(executor.calls[0]?.file).toBe("sqlite3");
+      expect(executor.calls[0]?.args).toEqual([
+        "-readonly",
+        "-json",
+        DATABASE,
+        "select hex(sha256) as sha256 from tsettings;",
+      ]);
+      expect(executor.calls[0]?.options?.signal).toBeInstanceOf(AbortSignal);
+    });
+
+    test("an empty result set means no trusted certificates, but an absent database fails closed", async () => {
+      expect(await trustRig("").client.readUserTrustedCertificates(DEVICE_ID)).toEqual([]);
+      const missing = trustRig();
+      missing.fileSystem.error = Object.assign(new Error("gone"), { code: "ENOENT" });
+      await expect(missing.client.readUserTrustedCertificates(DEVICE_ID)).rejects.toThrow(
+        "Simulator trust store is unavailable",
+      );
+      expect(missing.executor.calls).toEqual([]);
+    });
+
+    test("an unreadable database, a failed query and malformed output are errors, never an empty store", async () => {
+      const denied = trustRig();
+      denied.fileSystem.error = Object.assign(new Error("denied"), { code: "EACCES" });
+      await expect(denied.client.readUserTrustedCertificates(DEVICE_ID)).rejects.toThrow(
+        "Simulator trust store is unavailable",
+      );
+      const locked = trustRig();
+      locked.executor.error = new Error("database is locked");
+      await expect(locked.client.readUserTrustedCertificates(DEVICE_ID)).rejects.toThrow(/locked/);
+      await expect(
+        trustRig('[{"nope":1}]').client.readUserTrustedCertificates(DEVICE_ID),
+      ).rejects.toThrow("without sha256");
+      await expect(
+        trustRig().client.readUserTrustedCertificates("physical-device"),
+      ).rejects.toThrow("requires a simulator UDID");
+    });
+  });
 });

@@ -1,0 +1,6 @@
+{
+  "id": "strict",
+  "window": { "placement": { "type": "fullscreen" } },
+  "root": { "type": "spacer" },
+  "state": { "n": 9007199254740993 }
+}

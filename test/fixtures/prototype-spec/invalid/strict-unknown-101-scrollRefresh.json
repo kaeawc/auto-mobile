@@ -1,0 +1,42 @@
+{
+  "spec": {
+    "id": "refresh",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "opacity": 100
+    },
+    "state": {
+      "refreshing": false
+    },
+    "root": {
+      "type": "scroll",
+      "axis": "vertical",
+      "refresh": {
+        "stateKey": "refreshing",
+        "onRefresh": [
+          {
+            "type": "emit",
+            "name": "refresh"
+          }
+        ],
+        "zzzUnknown": true
+      },
+      "child": {
+        "type": "column",
+        "children": [
+          {
+            "type": "text",
+            "text": "Orders"
+          },
+          {
+            "type": "text",
+            "text": "Latte"
+          }
+        ]
+      }
+    }
+  },
+  "expectedPath": "root.refresh.zzzUnknown"
+}

@@ -12,7 +12,8 @@ import type { DisplayProfileResult } from "../../src/features/utility/DisplayPro
 import { KILL_PROFILES } from "../../src/features/utility/KillProfiles";
 
 export type FakeFacetCall =
-  | { facet: "keyboard"; action: "set"; profile: string }
+  | { facet: "keyboard"; action: "set"; profile: string; owner?: string }
+  | { facet: "keyboard"; action: "reset"; profile?: string }
   | { facet: "kill"; action: "apply"; appId: string; profile: string; owner?: string }
   | { facet: "kill"; action: "reset"; appId: string; owner?: string }
   | { facet: "display"; action: "apply"; input: object; owner?: string }
@@ -23,6 +24,8 @@ export class FakePersonaFacetExecutors implements PersonaFacetExecutors {
   readonly calls: FakeFacetCall[] = [];
   /** The profile the fake keyboard reports as active before each set. */
   activeKeyboardProfile = "gboard";
+  /** The fake keyboard record: the profile active before the first set, until reset. */
+  keyboardBefore?: string;
   keyboardError?: Error;
   killError?: Error;
   displayError?: Error;
@@ -32,14 +35,27 @@ export class FakePersonaFacetExecutors implements PersonaFacetExecutors {
   displayStatus: DisplayProfileResult["status"] = "applied";
 
   readonly keyboard: PersonaKeyboardExecutor = {
-    set: async (profile) => {
-      this.calls.push({ facet: "keyboard", action: "set", profile });
+    set: async (profile, owner) => {
+      this.calls.push({ facet: "keyboard", action: "set", profile, owner });
       if (this.keyboardError) {
         throw this.keyboardError;
       }
       const previousProfileId = this.activeKeyboardProfile;
+      this.keyboardBefore ??= previousProfileId;
       this.activeKeyboardProfile = profile;
       return { previousProfileId };
+    },
+    pending: () => this.keyboardBefore,
+    reset: async () => {
+      const profile = this.keyboardBefore;
+      this.calls.push({ facet: "keyboard", action: "reset", profile });
+      if (this.keyboardError) {
+        throw this.keyboardError;
+      }
+      if (profile !== undefined) {
+        this.activeKeyboardProfile = profile;
+        this.keyboardBefore = undefined;
+      }
     },
   };
 

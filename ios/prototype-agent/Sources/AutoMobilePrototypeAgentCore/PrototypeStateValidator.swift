@@ -13,6 +13,11 @@ import Foundation
 /// raw bytes). The static slider, chip, fab, progress and radio rules are kept: they live in the
 /// same Android functions and cost nothing.
 enum PrototypeStateValidator {
+    struct BindingRejection {
+        let field: String
+        let message: String
+    }
+
     private static func actionRejection(_ actions: [PrototypeAction], state: [String: JSONValue]) -> String? {
         for action in actions {
             if let message = stateActionError(action, state) { return message }
@@ -31,16 +36,16 @@ enum PrototypeStateValidator {
         // A request's onSuccess / onError lists run state actions too.
         actions = actions.flatMap(\.flattened)
         for node in nodes {
-            if let message = bindingError(node, state) { return message }
+            if let rejection = bindingRejection(node, state) { return rejection.message }
         }
         for node in nodes {
-            if let message = trailingError(node, state) { return message }
+            if let rejection = trailingError(node, state) { return rejection.message }
         }
         for node in nodes {
-            if let message = openWhenError(node, state) { return message }
+            if let rejection = openWhenError(node, state) { return rejection.message }
         }
         for node in nodes {
-            if let message = refreshError(node, state) { return message }
+            if let rejection = refreshError(node, state) { return rejection.message }
         }
         return actionRejection(actions, state: state)
     }
@@ -85,55 +90,99 @@ enum PrototypeStateValidator {
 
     // MARK: Binding rules
 
-    private static func bindingError(_ node: PrototypeNode, _ state: [String: JSONValue]) -> String? {
+    static func bindingRejection(_ node: PrototypeNode, _ state: [String: JSONValue]) -> BindingRejection? {
         if let message = componentError(node, state) { return message }
         guard let key = node.stateKey else {
-            return node.type == "searchBar" ? "Text field requires a string state key" : nil
+            return node
+                .type == "searchBar" ? .init(field: "stateKey", message: "Text field requires a string state key") : nil
         }
         let stored = state[key]
         switch node.type {
         case "textField", "searchBar":
-            if stored?.stringValue == nil { return "Text field requires a string state key" }
+            if stored?.stringValue == nil { return .init(
+                field: "stateKey",
+                message: "Text field requires a string state key"
+            ) }
             if node.type == "searchBar", let activeKey = node.activeKey, state[activeKey]?.boolValue == nil {
-                return "Search bar requires a boolean active key"
+                return .init(field: "activeKey", message: "Search bar requires a boolean active key")
             }
             return nil
         case "switch", "checkbox":
-            return stored?.boolValue == nil ? "Toggle control requires a boolean state key" : nil
+            return stored?.boolValue == nil ? .init(
+                field: "stateKey",
+                message: "Toggle control requires a boolean state key"
+            ) : nil
         case "radioGroup", "segmentedButton", "select":
             return radioGroupError(node, stored)
         case "tabBar", "bottomNav":
             guard let number = stored?.numberValue, number.isFinite, number >= 0,
                   number.truncatingRemainder(dividingBy: 1) == 0
-            else { return "Selection requires a nonnegative integer state key" }
+            else { return .init(field: "stateKey", message: "Selection requires a nonnegative integer state key")
+            }
             return nil
         default:
             return nil
         }
     }
 
-    private static func componentError(_ node: PrototypeNode, _ state: [String: JSONValue]) -> String? {
+    private static func componentError(_ node: PrototypeNode, _ state: [String: JSONValue]) -> BindingRejection? {
         let stored = node.stateKey.flatMap { state[$0] }
         switch node.type {
+        case "textField": return textFieldError(node, stored)
         case "slider": return sliderError(node, stored)
         case "chip": return chipError(node, stored)
         case "fab":
-            return node.label != nil && node.size != nil ? "Extended FAB cannot set size" : nil
+            return node.label != nil && node.size != nil ? .init(
+                field: "size",
+                message: "Extended FAB cannot set size"
+            ) : nil
         case "progress": return progressError(node, stored)
         case "timePicker": return timePickerError(node, state)
         case "datePicker":
-            return isDate(stored?.stringValue) ? nil : "Date picker requires a YYYY-MM-DD state key in 1900..2100"
+            return isDate(stored?.stringValue) ? nil : .init(
+                field: "stateKey",
+                message: "Date picker requires a YYYY-MM-DD state key in 1900..2100"
+            )
         default: return nil
         }
     }
 
-    private static func sliderError(_ node: PrototypeNode, _ stored: JSONValue?) -> String? {
-        guard let min = node.min, let max = node.max, min < max else { return "Slider max must be greater than min" }
+    private static func textFieldError(_ node: PrototypeNode, _ stored: JSONValue?) -> BindingRejection? {
+        guard let text = stored?.stringValue else { return .init(
+            field: "stateKey",
+            message: "Text field requires a string state key"
+        ) }
+        if node.multiline != true {
+            if node.minLines != nil { return .init(field: "minLines", message: "Requires multiline: true") }
+            if node.maxLines != nil { return .init(field: "maxLines", message: "Requires multiline: true") }
+        } else {
+            if node.secure == true || node
+                .keyboardType ==
+                "password" { return .init(field: "multiline", message: "Multiline text cannot be secure") }
+            if node.imeAction != nil { return .init(field: "imeAction", message: "Multiline text has no IME action") }
+            if node.onSubmit != nil { return .init(field: "onSubmit", message: "Multiline text has no IME action") }
+        }
+        if let min = node.minLines, let max = node.maxLines, min > max { return .init(
+            field: "minLines",
+            message: "minLines cannot exceed maxLines"
+        ) }
+        if let max = node.maxLength, text.utf16.count > max { return .init(
+            field: "stateKey",
+            message: "Text field value exceeds maxLength"
+        ) }
+        return nil
+    }
+
+    private static func sliderError(_ node: PrototypeNode, _ stored: JSONValue?) -> BindingRejection? {
+        guard let min = node.min, let max = node.max, min < max else { return .init(
+            field: "max",
+            message: "Slider max must be greater than min"
+        ) }
         if let step = node.step, !stepFitsRange(step, max - min) {
-            return "Slider step must be positive and divide the range evenly"
+            return .init(field: "step", message: "Slider step must be positive and divide the range evenly")
         }
         guard let number = stored?.numberValue, number.isFinite, number >= min, number <= max else {
-            return "Slider requires a numeric state key within min and max"
+            return .init(field: "stateKey", message: "Slider requires a numeric state key within min and max")
         }
         return nil
     }
@@ -143,47 +192,65 @@ enum PrototypeStateValidator {
         return step > 0 && count >= 1 && abs(count - (count + 0.5).rounded(.down)) < 1e-9
     }
 
-    private static func chipError(_ node: PrototypeNode, _ stored: JSONValue?) -> String? {
+    private static func chipError(_ node: PrototypeNode, _ stored: JSONValue?) -> BindingRejection? {
         let bound = node.stateKey != nil
-        if node.variant == "filter", !bound { return "Filter chip requires a boolean state key" }
-        if let variant = node.variant, variant != "filter", bound { return "Only a filter chip can bind a state key" }
-        if bound, stored?.boolValue == nil { return "Filter chip requires a boolean state key" }
+        if node.variant == "filter",
+           !bound { return .init(field: "stateKey", message: "Filter chip requires a boolean state key") }
+        if let variant = node.variant, variant != "filter",
+           bound { return .init(field: "stateKey", message: "Only a filter chip can bind a state key") }
+        if bound, stored?.boolValue == nil { return .init(
+            field: "stateKey",
+            message: "Filter chip requires a boolean state key"
+        ) }
         return nil
     }
 
     /// A bound progress indicator is determinate over 0..max (default 1); unbound is indeterminate.
-    private static func progressError(_ node: PrototypeNode, _ stored: JSONValue?) -> String? {
-        guard node.stateKey != nil else { return node.max != nil ? "Requires stateKey" : nil }
+    private static func progressError(_ node: PrototypeNode, _ stored: JSONValue?) -> BindingRejection? {
+        guard node.stateKey != nil
+        else { return node.max != nil ? .init(field: "max", message: "Requires stateKey") : nil }
         let max = node.max ?? 1
-        if max <= 0 { return "Progress max must be greater than 0" }
+        if max <= 0 { return .init(field: "max", message: "Progress max must be greater than 0") }
         guard let number = stored?.numberValue, number.isFinite, number >= 0, number <= max else {
-            return "Progress requires a numeric state key within 0 and max"
+            return .init(field: "stateKey", message: "Progress requires a numeric state key within 0 and max")
         }
         return nil
     }
 
     /// A time picker binds two distinct integer keys: hour 0..23 and minute 0..59.
-    private static func timePickerError(_ node: PrototypeNode, _ state: [String: JSONValue]) -> String? {
+    private static func timePickerError(_ node: PrototypeNode, _ state: [String: JSONValue]) -> BindingRejection? {
         for (key, upper, unit) in [(node.hourKey, 23.0, "hour"), (node.minuteKey, 59.0, "minute")] {
             guard let number = key.flatMap({ state[$0] })?.numberValue,
                   number.truncatingRemainder(dividingBy: 1) == 0, number >= 0, number <= upper
-            else { return "Time picker \(unit) requires an integer 0..\(Int(upper)) state key" }
+            else { return .init(
+                field: unit + "Key",
+                message: "Time picker \(unit) requires an integer 0..\(Int(upper)) state key"
+            ) }
         }
-        return node.hourKey == node.minuteKey ? "Time picker hour and minute keys must differ" : nil
+        return node.hourKey == node.minuteKey ? .init(
+            field: "minuteKey",
+            message: "Time picker hour and minute keys must differ"
+        ) : nil
     }
 
-    private static func radioGroupError(_ node: PrototypeNode, _ stored: JSONValue?) -> String? {
+    private static func radioGroupError(_ node: PrototypeNode, _ stored: JSONValue?) -> BindingRejection? {
         let name = node.type == "select" ? "Select" : node
             .type == "segmentedButton" ? "Segmented button" : "Radio group"
-        guard stored?.stringValue != nil else { return "\(name) requires a string state key" }
+        guard stored?.stringValue != nil else { return .init(
+            field: "stateKey",
+            message: "\(name) requires a string state key"
+        ) }
         var values = Set<String>()
         var selectValues = Set<[UInt16]>()
-        for option in node.options ?? [] {
+        for (index, option) in (node.options ?? []).enumerated() {
             let inserted = node.type == "select"
                 ? selectValues.insert(Array(option.value.utf16)).inserted
                 : values.insert(option.value).inserted
             if !inserted {
-                return node.type == "select" ? "Duplicate select option value" : "Duplicate radio option value"
+                return node
+                    .type == "select" ?
+                    .init(field: "options[\(index)].value", message: "Duplicate select option value") :
+                    .init(field: "options[\(index)].value", message: "Duplicate radio option value")
             }
         }
         return nil
@@ -206,22 +273,29 @@ enum PrototypeStateValidator {
     // MARK: Other bound keys
 
     /// A list item's trailing switch or checkbox binds a boolean, like the standalone controls.
-    private static func trailingError(_ node: PrototypeNode, _ state: [String: JSONValue]) -> String? {
+    static func trailingError(_ node: PrototypeNode, _ state: [String: JSONValue]) -> BindingRejection? {
         guard node.type == "listItem", let key = node.trailing?.stateKey else { return nil }
-        return state[key]?.boolValue == nil ? "Toggle control requires a boolean state key" : nil
+        return state[key]?.boolValue == nil ? .init(
+            field: "trailing.stateKey",
+            message: "Toggle control requires a boolean state key"
+        ) : nil
     }
 
     /// Nodes opened by a boolean `openWhen` key; an existing key must hold a boolean.
-    private static func openWhenError(_ node: PrototypeNode, _ state: [String: JSONValue]) -> String? {
+    static func openWhenError(_ node: PrototypeNode, _ state: [String: JSONValue]) -> BindingRejection? {
         let names = ["bottomSheet": "Sheet", "dialog": "Dialog", "snackbar": "Snackbar", "menu": "Menu"]
         guard let name = names[node.type], let key = node.openWhen?.key, let stored = state[key] else { return nil }
-        return stored.boolValue == nil ? "\(name) requires a boolean state key" : nil
+        return stored
+            .boolValue == nil ? .init(field: "openWhen.key", message: "\(name) requires a boolean state key") : nil
     }
 
     /// Pull-to-refresh binds a boolean key, like the other controls.
-    private static func refreshError(_ node: PrototypeNode, _ state: [String: JSONValue]) -> String? {
+    static func refreshError(_ node: PrototypeNode, _ state: [String: JSONValue]) -> BindingRejection? {
         guard node.type == "scroll", let key = node.refresh?.stateKey, let stored = state[key] else { return nil }
-        return stored.boolValue == nil ? "Refresh requires a boolean state key" : nil
+        return stored.boolValue == nil ? .init(
+            field: "refresh.stateKey",
+            message: "Refresh requires a boolean state key"
+        ) : nil
     }
 
     // MARK: State actions

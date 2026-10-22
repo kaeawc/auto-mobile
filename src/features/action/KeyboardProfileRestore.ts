@@ -76,6 +76,12 @@ export class KeyboardProfileRestoreRegistry {
     return this.entries.get(deviceId)?.before;
   }
 
+  /** The profile `sessionId`'s release will restore on `deviceId`, if it owns the entry. */
+  ownedRestoreTarget(deviceId: string, sessionId: string): KeyboardProfileId | undefined {
+    const entry = this.entries.get(deviceId);
+    return entry?.owner === sessionId ? entry.before : undefined;
+  }
+
   /** Whether a session release will restore this device's recorded profile. */
   restoresOnRelease(deviceId: string): boolean {
     return this.entries.get(deviceId)?.owner !== undefined;

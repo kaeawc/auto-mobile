@@ -105,6 +105,8 @@ describe("KeyboardProfileRestoreRegistry (#14705)", () => {
     registry.record(emulator, "samsung", "session-1");
     registry.record(emulator, "direct", undefined);
     expect(registry.recorded(emulator.deviceId)).toBe("gboard");
+    expect(registry.ownedRestoreTarget(emulator.deviceId, "session-1")).toBe("gboard");
+    expect(registry.ownedRestoreTarget(emulator.deviceId, "session-2")).toBeUndefined();
     expect(registry.takeOwnedBy(emulator.deviceId, "session-2")).toBeUndefined();
     expect(registry.takeOwnedBy(emulator.deviceId, "session-1")).toEqual({
       device: emulator,

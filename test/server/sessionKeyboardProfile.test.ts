@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { registerKeyboardProfileSessionCleanup } from "../../src/daemon/keyboardProfileSessionCleanup";
-import { KeyboardProfileRestoreRegistry } from "../../src/features/action/KeyboardProfileRestore";
+import {
+  KEYBOARD_PROFILE_RESTORE_TIMEOUT_MS,
+  KeyboardProfileRestoreRegistry,
+} from "../../src/features/action/KeyboardProfileRestore";
 import type { KeyboardProfileId } from "../../src/features/action/keyboardProfiles";
 import type { BootedDevice } from "../../src/models";
 import { setKeyboardProfileForSession } from "../../src/server/sessionKeyboardProfile";
@@ -33,7 +36,45 @@ describe("keyboard setProfile records the profile it replaced (#14705)", () => {
       sessionManager: () => manager,
       registry,
       setProfile,
+      timer,
     });
+
+  /** A write that sleeps past the release drain; `landFirst` applies it before sleeping. */
+  const outlastingSet = (landFirst: boolean) => {
+    let slow = true;
+    return async (device: BootedDevice, profile: KeyboardProfileId | undefined) => {
+      if (!slow) {
+        return setProfile(device, profile);
+      }
+      slow = false;
+      const landed = landFirst ? await setProfile(device, profile) : undefined;
+      await timer.sleep(SESSION_SETUP_DRAIN_TIMEOUT_MS * 2);
+      return landed ?? setProfile(device, profile);
+    };
+  };
+
+  /** Run `profile` with `write` for session-1 while session-1 is released mid-write. */
+  const releaseDuring = async (
+    profile: KeyboardProfileId,
+    write: typeof setProfile,
+  ): Promise<string> => {
+    const outcome = setKeyboardProfileForSession(emulator, profile, "session-1", {
+      sessionManager: () => manager,
+      registry,
+      setProfile: write,
+      timer,
+    }).then(
+      () => "resolved",
+      (error: unknown) => String(error),
+    );
+    const release = manager.releaseSession("session-1");
+    // Fires the drain timeout, then the write's sleep, then any undo deadline.
+    await timer.advanceTimeAsync(
+      SESSION_SETUP_DRAIN_TIMEOUT_MS * 2 + KEYBOARD_PROFILE_RESTORE_TIMEOUT_MS,
+    );
+    await release;
+    return outcome;
+  };
 
   beforeEach(() => {
     timer = new FakeTimer();
@@ -89,30 +130,38 @@ describe("keyboard setProfile records the profile it replaced (#14705)", () => {
 
   test("a write that outlasts the release's setup drain is undone, not left behind", async () => {
     await manager.createSession("session-1", emulator.deviceId, "android");
-    let slow = true;
-    const slowSet = async (device: BootedDevice, profile: KeyboardProfileId | undefined) => {
-      if (slow) {
-        slow = false;
-        await timer.sleep(SESSION_SETUP_DRAIN_TIMEOUT_MS * 2);
-      }
-      return setProfile(device, profile);
-    };
-    const pending = setKeyboardProfileForSession(emulator, "samsung", "session-1", {
-      sessionManager: () => manager,
-      registry,
-      setProfile: slowSet,
-    });
-    const outcome = pending.then(
-      () => "resolved",
-      (error: unknown) => String(error),
+    expect(await releaseDuring("samsung", outlastingSet(false))).toContain(
+      "was released or rebound while the keyboard profile changed; restored 'gboard'",
     );
-    const release = manager.releaseSession("session-1");
-    timer.advanceTime(SESSION_SETUP_DRAIN_TIMEOUT_MS);
-    await release;
-    timer.advanceTime(SESSION_SETUP_DRAIN_TIMEOUT_MS);
-    expect(await outcome).toContain("was released or rebound while the keyboard profile changed");
     expect(active).toBe("gboard");
     expect(registry.recorded(emulator.deviceId)).toBeUndefined();
+  });
+
+  for (const landFirst of [false, true]) {
+    test(`a late second write converges on the session's first before-profile (lands ${landFirst ? "before" : "after"} the release restore)`, async () => {
+      await manager.createSession("session-1", emulator.deviceId, "android");
+      await set("samsung", "session-1");
+      // Undoing to the intermediate 'samsung' would overwrite the release's restore.
+      expect(await releaseDuring("direct", outlastingSet(landFirst))).toContain(
+        "restored 'gboard'",
+      );
+      expect(active).toBe("gboard");
+      expect(registry.recorded(emulator.deviceId)).toBeUndefined();
+    });
+  }
+
+  test("an undo that never answers is bounded and reported as not restored", async () => {
+    await manager.createSession("session-1", emulator.deviceId, "android");
+    let writes = 0;
+    const hangingUndo = async (device: BootedDevice, profile: KeyboardProfileId | undefined) => {
+      writes += 1;
+      if (writes > 1) {
+        return new Promise<never>(() => {});
+      }
+      await timer.sleep(SESSION_SETUP_DRAIN_TIMEOUT_MS * 2);
+      return setProfile(device, profile);
+    };
+    expect(await releaseDuring("samsung", hangingUndo)).toContain("failed to restore 'gboard'");
   });
 
   test("a session bound to another device is refused before anything changes", async () => {

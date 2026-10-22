@@ -7,8 +7,10 @@ import type { KeyboardProfileId } from "../features/action/keyboardProfiles";
 import {
   defaultKeyboardProfileRestoreRegistry,
   isKeyboardProfileId,
+  restoreKeyboardProfileAfterRelease,
   type KeyboardProfileRestoreRegistry,
 } from "../features/action/KeyboardProfileRestore";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
 
 /** The slice of the session manager a tracked keyboard-profile write needs. */
 export type SessionKeyboardProfileHost = Pick<
@@ -60,6 +62,7 @@ export interface SessionKeyboardProfileDependencies {
   sessionManager?: () => SessionKeyboardProfileHost | undefined;
   registry?: KeyboardProfileRestoreRegistry;
   setProfile?: typeof setKeyboardProfileForTool;
+  timer?: Pick<Timer, "setTimeout" | "clearTimeout">;
 }
 
 /** Whether `sessionId` still holds `deviceId` for automation after an awaited write. */
@@ -74,6 +77,30 @@ function stillHoldsDevice(
     sessionManager.isAdmittedForAutomation(session) &&
     session.assignedDevice === deviceId
   );
+}
+
+/**
+ * Undo a write whose session lost the device mid-write. When the session already
+ * owned a restore entry, its release took that entry and restores the profile from
+ * before the session's first change; undo to that same profile, not to the
+ * intermediate one this write replaced, so the two converge in either order.
+ * Bounded like the release restore so a wedged IME lock cannot hold the caller.
+ */
+async function undoLostOwnershipWrite(
+  device: BootedDevice,
+  target: string | undefined,
+  setProfile: typeof setKeyboardProfileForTool,
+  timer: Pick<Timer, "setTimeout" | "clearTimeout">,
+): Promise<string> {
+  if (target === undefined || !isKeyboardProfileId(target)) {
+    return `the previous profile '${target}' is unknown and was not restored`;
+  }
+  const restored = await restoreKeyboardProfileAfterRelease(
+    { device, before: target },
+    (restoreDevice, id, restoreSignal) => setProfile(restoreDevice, id, undefined, restoreSignal),
+    timer,
+  );
+  return restored ? `restored '${target}'` : `failed to restore '${target}'`;
 }
 
 /**
@@ -98,16 +125,20 @@ export async function setKeyboardProfileForSession(
     sessionUuid,
     device.deviceId,
     async (owner) => {
+      const ownedTarget = owner ? registry.ownedRestoreTarget(device.deviceId, owner) : undefined;
       const result = await setProfile(device, profile, undefined, signal);
       const before = result.previousProfileId;
       if (owner && sessionManager && !stillHoldsDevice(sessionManager, owner, device.deviceId)) {
         // Release waits for tracked setup only so long; one that outran this write already
-        // ran its cleanup. Undo the write now, while the device is still gated on this setup.
-        if (before !== undefined && isKeyboardProfileId(before)) {
-          await setProfile(device, before);
-        }
+        // ran its cleanup without this write's record. Undo the write now.
+        const outcome = await undoLostOwnershipWrite(
+          device,
+          ownedTarget ?? before,
+          setProfile,
+          deps.timer ?? defaultTimer,
+        );
         throw new ActionableError(
-          `Session ${owner} was released or rebound while the keyboard profile changed; restored '${before}'.`,
+          `Session ${owner} was released or rebound while the keyboard profile changed; ${outcome}.`,
         );
       }
       registry.record(device, before, owner);

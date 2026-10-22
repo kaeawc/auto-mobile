@@ -13,6 +13,154 @@ import {
   FakeAndroidResetHost,
 } from "./fixtures/androidReset";
 describe("AndroidBaselineReset", () => {
+  test("reset ownership, incarnation rebinding and health accept a pending inventory name", async () => {
+    const host = new FakeAndroidResetHost();
+    host.strategy = {
+      handlesSessionMutations: true,
+      reset: async (_device, _packages, assertOwned, context) => {
+        await assertOwned();
+        host.bootId = "87654321-4321-4321-4321-cba987654321";
+        await context.rebindIncarnation?.();
+      },
+    };
+    const baseline = new AndroidBaselineReset(host);
+    await baseline.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-a", {
+      timer: new FakeTimer(),
+    });
+    host.devices = [
+      {
+        ...ANDROID_RESET_DEVICE,
+        name: `Unknown (${ANDROID_RESET_DEVICE.deviceId})`,
+        isRunning: true,
+      },
+    ];
+    await expect(
+      baseline.reset("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, async () => {}),
+    ).resolves.toBe("clean");
+  });
+
+  test("capture accepts a pending inventory name only inside the strategy ownership check", async () => {
+    const host = new FakeAndroidResetHost();
+    host.strategy = {
+      handlesSessionMutations: true,
+      capture: async (_device, context) => {
+        host.devices = [
+          {
+            ...ANDROID_RESET_DEVICE,
+            name: `Unknown (${ANDROID_RESET_DEVICE.deviceId})`,
+            isRunning: true,
+          },
+        ];
+        await context.assertOwned();
+      },
+      reset: async () => {},
+    };
+    const baseline = new AndroidBaselineReset(host);
+    await baseline.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-a", {
+      timer: new FakeTimer(),
+    });
+    expect(host.closed).toBe(0);
+    expect(
+      host.commands.filter((command) => command === "shell cat /proc/sys/kernel/random/boot_id"),
+    ).toHaveLength(2);
+  });
+
+  test.each([
+    "foreign serial",
+    "foreign placeholder",
+    "real name",
+    "offline",
+    "unknown running state",
+    "duplicate",
+    "boot",
+    "boot identity",
+  ])("capture rejects %s during the strategy ownership check", async (failure) => {
+    const host = new FakeAndroidResetHost();
+    host.strategy = {
+      handlesSessionMutations: true,
+      capture: async (_device, context) => {
+        host.devices = [
+          {
+            ...ANDROID_RESET_DEVICE,
+            name: `Unknown (${ANDROID_RESET_DEVICE.deviceId})`,
+            isRunning: true,
+          },
+        ];
+        const target = host.devices[0]!;
+        if (failure === "foreign serial") {
+          target.deviceId = "emulator-5556";
+        }
+        if (failure === "foreign placeholder") {
+          target.name = "Unknown (emulator-5556)";
+        }
+        if (failure === "real name") {
+          target.name = "different-avd";
+        }
+        if (failure === "offline") {
+          target.isRunning = false;
+        }
+        if (failure === "unknown running state") {
+          target.isRunningStateKnown = false;
+        }
+        if (failure === "duplicate") {
+          host.devices.push({ ...target });
+        }
+        if (failure === "boot") {
+          host.booted = false;
+        }
+        if (failure === "boot identity") {
+          host.bootId = "87654321-4321-4321-4321-cba987654321";
+        }
+        await context.assertOwned();
+      },
+      reset: async () => {},
+    };
+    const message =
+      failure === "boot"
+        ? "has not completed boot"
+        : failure === "boot identity"
+          ? "changed emulator boot identity"
+          : "exact online reset target";
+    await expect(
+      new AndroidBaselineReset(host).capture(
+        "resource-a",
+        ANDROID_RESET_DEVICE,
+        ANDROID_RESET_PROFILE,
+        "session-a",
+        { timer: new FakeTimer() },
+      ),
+    ).rejects.toThrow(message);
+    expect(host.closed).toBe(1);
+  });
+
+  test("pre-capture inventory requires the full profile even for the same serial placeholder", async () => {
+    const host = new FakeAndroidResetHost();
+    host.devices = [
+      {
+        ...ANDROID_RESET_DEVICE,
+        name: `Unknown (${ANDROID_RESET_DEVICE.deviceId})`,
+        isRunning: true,
+      },
+    ];
+    let captured = false;
+    host.strategy = {
+      capture: async () => {
+        captured = true;
+      },
+      reset: async () => {},
+    };
+    await expect(
+      new AndroidBaselineReset(host).capture(
+        "resource-a",
+        ANDROID_RESET_DEVICE,
+        ANDROID_RESET_PROFILE,
+        "session-a",
+        { timer: new FakeTimer() },
+      ),
+    ).rejects.toThrow("exact online reset target");
+    expect(captured).toBe(false);
+  });
+
   test("default reset budget accommodates a cold boot beyond the old two-minute cutoff", async () => {
     const timer = new FakeTimer();
     const host = new FakeAndroidResetHost();

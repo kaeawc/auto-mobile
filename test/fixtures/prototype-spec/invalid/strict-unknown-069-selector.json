@@ -1,0 +1,43 @@
+{
+  "spec": {
+    "id": "button-preview",
+    "window": {
+      "placement": {
+        "type": "floating",
+        "gravity": "topStart",
+        "offset": {
+          "x": 24,
+          "y": 120
+        }
+      },
+      "opacity": 50
+    },
+    "root": {
+      "style": {
+        "background": "#2255CC",
+        "cornerRadius": 12
+      },
+      "anchor": {
+        "type": "element",
+        "selector": {
+          "testTag": "buy",
+          "zzzUnknown": true
+        },
+        "alignment": "cover"
+      },
+      "type": "box",
+      "children": [
+        {
+          "onTap": [
+            {
+              "type": "dismiss"
+            }
+          ],
+          "type": "text",
+          "text": "Buy now"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.anchor.selector.zzzUnknown"
+}

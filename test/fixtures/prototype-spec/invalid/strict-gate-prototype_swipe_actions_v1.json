@@ -1,0 +1,76 @@
+{
+  "spec": {
+    "id": "swipe",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "column",
+      "repeat": {
+        "as": "order",
+        "items": [
+          {
+            "id": "a",
+            "title": "Latte"
+          },
+          {
+            "id": "b",
+            "title": "Mocha"
+          }
+        ]
+      },
+      "children": [
+        {
+          "type": "listItem",
+          "testTag": "order_{order.id}",
+          "headline": "{order.title}",
+          "swipeActions": {
+            "start": [
+              {
+                "label": "Pin {order.title}",
+                "icon": "favorite",
+                "onTap": [
+                  {
+                    "type": "emit",
+                    "name": "pin_{order.id}"
+                  }
+                ]
+              }
+            ],
+            "end": [
+              {
+                "label": "Delete",
+                "icon": "delete",
+                "role": "destructive",
+                "onTap": [
+                  {
+                    "type": "emit",
+                    "name": "delete_{order.id}"
+                  }
+                ]
+              },
+              {
+                "label": "Archive",
+                "icon": "check",
+                "color": "tertiary",
+                "onTap": [
+                  {
+                    "type": "emit",
+                    "name": "archive_{order.id}"
+                  }
+                ]
+              }
+            ],
+            "fullSwipe": true
+          }
+        }
+      ]
+    }
+  },
+  "options": {
+    "supportedCapabilities": []
+  },
+  "expectedPath": "$"
+}

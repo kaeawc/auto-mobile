@@ -1,0 +1,37 @@
+{
+  "spec": {
+    "id": "flow-grid",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "opacity": 100
+    },
+    "root": {
+      "repeat": {
+        "items": [
+          {
+            "name": "One"
+          },
+          {
+            "name": "Two"
+          }
+        ],
+        "as": "item"
+      },
+      "type": "grid",
+      "columns": {
+        "minWidth": 100
+      },
+      "children": [
+        {
+          "span": 12,
+          "type": "text",
+          "text": "{item.name}"
+        }
+      ],
+      "zzzUnknown": true
+    }
+  },
+  "expectedPath": "root.zzzUnknown"
+}

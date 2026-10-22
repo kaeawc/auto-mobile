@@ -444,9 +444,13 @@ describe("session broker service lifecycle", () => {
         scopeKey: BROKER_SCOPE_KEY,
         bindingIndex: resource.allocationIndex,
       }))!;
-      const session: Pick<Session, "sessionId" | "assignedDevice" | "mutationRecorder"> = {
+      const session: Pick<
+        Session,
+        "sessionId" | "assignedDevice" | "mutationRecorder" | "heartbeatTimeoutMs"
+      > = {
         sessionId: result.sessionUuid,
         assignedDevice: assignment.stableDeviceId!,
+        heartbeatTimeoutMs: 4000,
       };
       const scope = {
         sessionUuid: session.sessionId,
@@ -471,6 +475,7 @@ describe("session broker service lifecycle", () => {
         deferStart: true,
         mutationSessions: {
           peekSession: (uuid) => (visible && uuid === session.sessionId ? session : null),
+          recordHeartbeat: () => {},
         },
         liveSessionIds: () => (visible ? [session.sessionId] : []),
       });

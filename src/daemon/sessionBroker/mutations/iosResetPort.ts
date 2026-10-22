@@ -7,6 +7,10 @@ import { classifyCleanReleaseError } from "../cleanReleaseFailure";
 import type { Timer } from "../../../utils/SystemTimer";
 import type { SimCtl } from "../../../utils/ios-cmdline-tools/SimCtlClient";
 import type { SimCtlClient } from "../../../utils/ios-cmdline-tools/SimCtlClient";
+import {
+  SIMCTL_PRIVACY_TCC_SERVICES,
+  type TccServiceRowReader,
+} from "../../../utils/ios-cmdline-tools/SimulatorTccSqliteClient";
 import { isProcessAlreadyGoneError } from "../../../utils/ios-cmdline-tools/iosProcessErrors";
 import { getIosInstalledAppBundleId } from "../../../utils/ios-cmdline-tools/iosInstalledApp";
 import { parsePlist } from "../../../utils/ios-cmdline-tools/XctestrunPlist";
@@ -33,6 +37,9 @@ const IOS_SETTING_VALUE_SCHEMAS = {
     "accessibility-extra-extra-extra-large",
   ]),
   "increase-contrast": z.enum(["enabled", "disabled"]),
+  // `com.apple.Accessibility` defaults, as the displayConfig prior read returns them.
+  reduceMotion: z.enum(["0", "1"]),
+  boldText: z.enum(["0", "1"]),
   locale: z.string().min(1),
   language: z.array(z.string().min(1)).min(1),
   calendarSystem: z.string().min(1),
@@ -77,6 +84,41 @@ export const IOS_UNOBSERVABLE_BASELINE_REASONS = {
   account: "simctl cannot inventory and restore all provider and system accounts.",
 } as const;
 
+/**
+ * The journal records display settings under their displayConfig names; the baseline
+ * observes the simctl-vocabulary ones. Both revert the same simulator setting.
+ */
+const IOS_JOURNAL_SETTING_ALIASES: Readonly<Record<string, string>> = {
+  contentSize: "content-size",
+  increaseContrast: "increase-contrast",
+};
+
+/** Accessibility defaults with no simctl subcommand, reverted through `defaults`. */
+const IOS_ACCESSIBILITY_DEFAULT_KEYS = {
+  reduceMotion: "ReduceMotionEnabled",
+  boldText: "EnhancedTextLegibilityEnabled",
+} as const;
+
+function iosSettingKey(key: string): string {
+  return Object.hasOwn(IOS_JOURNAL_SETTING_ALIASES, key) ? IOS_JOURNAL_SETTING_ALIASES[key]! : key;
+}
+
+function iosAccessibilityDefaultKey(key: string): string | undefined {
+  return Object.entries(IOS_ACCESSIBILITY_DEFAULT_KEYS).find(([setting]) => setting === key)?.[1];
+}
+
+function accessibilityDefaultCommand(udid: string, key: string, prior: unknown): string[] {
+  return [
+    "spawn",
+    udid,
+    "defaults",
+    prior === undefined ? "delete" : "write",
+    "com.apple.Accessibility",
+    key,
+    ...(prior === undefined ? [] : ["-bool", prior === "1" ? "YES" : "NO"]),
+  ];
+}
+
 function iosGlobalSettingKey(key: string): string | undefined {
   return Object.entries(IOS_GLOBAL_SETTING_KEYS).find(([setting]) => setting === key)?.[1];
 }
@@ -100,11 +142,15 @@ async function iosGlobalSettingObservations(xml: string): Promise<DeviceBaseline
 function canRestoreIosSetting(mutation: DeviceMutationInput): boolean {
   const prior = mutation.priorValue;
   if (prior.state !== "present") {
-    return prior.state === "absent" && iosGlobalSettingKey(mutation.key) !== undefined;
+    // An absent Simulator accessibility default is off, and a restore deletes it again.
+    return (
+      prior.state === "absent" &&
+      (iosGlobalSettingKey(mutation.key) !== undefined ||
+        iosAccessibilityDefaultKey(mutation.key) !== undefined)
+    );
   }
-  const schema = Object.entries(IOS_SETTING_VALUE_SCHEMAS).find(
-    ([key]) => key === mutation.key,
-  )?.[1];
+  const settingKey = iosSettingKey(mutation.key);
+  const schema = Object.entries(IOS_SETTING_VALUE_SCHEMAS).find(([key]) => key === settingKey)?.[1];
   return schema?.safeParse(prior.value).success ?? false;
 }
 
@@ -130,6 +176,7 @@ export interface IosMutationResetDependencies {
   simctl: Pick<SimCtl, "executeCommandArgs"> & Pick<SimCtlClient, "listAppsOrThrow">;
   files: IosResetFiles;
   pasteboard: IosResetPasteboard;
+  privacyGrants: Pick<TccServiceRowReader, "readServiceRows">;
 }
 
 interface IosAppGroupCleanup {
@@ -359,17 +406,22 @@ export class IosDeviceMutationResetPort implements DeviceMutationResetPort {
 
   private settingCommand(mutation: DeviceMutationInput, udid: string): string[] {
     const prior = mutation.priorValue.state === "present" ? mutation.priorValue.value : undefined;
-    if (["appearance", "nightMode", "content-size", "increase-contrast"].includes(mutation.key)) {
+    const settingKey = iosSettingKey(mutation.key);
+    if (["appearance", "nightMode", "content-size", "increase-contrast"].includes(settingKey)) {
       return [
         "ui",
         udid,
-        mutation.key === "content-size"
+        settingKey === "content-size"
           ? "content_size"
-          : mutation.key === "increase-contrast"
+          : settingKey === "increase-contrast"
             ? "increase_contrast"
             : "appearance",
         String(prior),
       ];
+    }
+    const accessibilityKey = iosAccessibilityDefaultKey(mutation.key);
+    if (accessibilityKey) {
+      return accessibilityDefaultCommand(udid, accessibilityKey, prior);
     }
     const preference = iosGlobalSettingKey(mutation.key);
     if (!preference) {
@@ -457,7 +509,50 @@ export class IosDeviceMutationResetPort implements DeviceMutationResetPort {
         context,
       );
     }
+    await this.resetSurvivingPrivacyGrants(context);
     await this.restoreSettings(context);
+  }
+
+  private async resetSurvivingPrivacyGrants(context: DeviceMutationResetContext): Promise<void> {
+    const udid = context.scope.deviceId;
+    const readRows = async () => {
+      await context.assertOwned();
+      context.signal.throwIfAborted();
+      const started = this.timer.now();
+      try {
+        return await this.dependencies.privacyGrants.readServiceRows(
+          udid,
+          SIMCTL_PRIVACY_TCC_SERVICES,
+          context.signal,
+        );
+      } catch (error) {
+        throw toActionableError(error, "iOS privacy grant verification failed");
+      } finally {
+        context.recordPhase?.("tcc:privacy-verify", this.timer.now() - started);
+      }
+    };
+    const rows = await readRows();
+    await context.assertOwned();
+    context.signal.throwIfAborted();
+    if (rows.length === 0) {
+      return;
+    }
+    const clients = [...new Set(rows.map((row) => row.client))].sort();
+    logger.warn(
+      `iOS privacy grants survived global reset; resetting clients: ${clients.join(", ")}`,
+    );
+    for (const client of clients) {
+      await this.command(context, ["privacy", udid, "reset", "all", client]);
+    }
+    const remaining = await readRows();
+    await context.assertOwned();
+    context.signal.throwIfAborted();
+    if (remaining.length > 0) {
+      throw new ActionableError(
+        "iOS privacy grants survived reset: " +
+          remaining.map((row) => `${row.service}:${row.client}`).join(", "),
+      );
+    }
   }
 
   private async restoreSettings(context: DeviceMutationResetContext): Promise<void> {

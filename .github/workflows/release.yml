@@ -534,7 +534,7 @@ jobs:
             -PVERSION_NAME=${{ steps.version.outputs.version }} \
             --no-configuration-cache \
             -Dorg.gradle.unsafe.isolated-projects=false
-          ./gradlew :junit-runner:publish :auto-mobile-sdk:publish \
+          ./gradlew :junit-runner:publish :auto-mobile-sdk:publish :prototype-compose:publish \
             -PVERSION_NAME=${{ steps.version.outputs.version }} \
             --no-configuration-cache \
             -Dorg.gradle.unsafe.isolated-projects=false

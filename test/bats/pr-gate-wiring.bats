@@ -566,11 +566,14 @@ wiring_requires_yq() {
   [[ "$checks" == *":junitRunner:assemble"* ]]
   [[ "$checks" == *"validate-sdk-debug-inspector-consumer.sh"* ]]
   [[ "$checks" == *"validate-junit-runner-kotlin-consumer.sh"* ]]
+  # The prototype renderer's publication, API check and minified consumer (#13727).
+  [[ "$checks" == *":prototype-compose:publishToMavenLocal :prototype-compose:apiCheck"* ]]
+  [[ "$checks" == *"validate-prototype-compose-consumer.sh --skip-publish"* ]]
   # A failed check must not skip the checks after it.
   run yq -r '.jobs."node-checks".steps[] | select(.name == "Run Memory Leak Detection" or .name == "Run MCP Benchmarks" or .name == "Verify pinned runtime dependency graph (#5421)") | .if' "$WF"
   [ "$(grep -c '!cancelled()' <<< "$output")" -eq 3 ]
-  run yq -r '.jobs."jvm-consumer-checks".steps[] | select(.name == "Validate Kotlin 2.2 consumer compatibility" or .name == "Publish SDK and check its public API") | .if' "$WF"
-  [ "$(grep -c '!cancelled()' <<< "$output")" -eq 2 ]
+  run yq -r '.jobs."jvm-consumer-checks".steps[] | select(.name == "Validate Kotlin 2.2 consumer compatibility" or .name == "Publish SDK and check its public API" or .name == "Publish prototype renderer and check its public API" or .name == "Verify the published prototype renderer from a minified consumer") | .if' "$WF"
+  [ "$(grep -c '!cancelled()' <<< "$output")" -eq 4 ]
   run yq -r '.jobs."mcp-build-and-test".steps[] | select(.name == "Run complete unit lane" or .name == "Run host integration lane" or .name == "Run stress lane") | .if' "$WF"
   [ "$(grep -c "!cancelled() && steps.mcp-build.outcome == 'success'" <<< "$output")" -eq 3 ]
 }

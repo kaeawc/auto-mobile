@@ -40,6 +40,7 @@ MAVEN_ARTIFACTS=(
   auto-mobile-test-plan-validation
   auto-mobile-junit-runner
   auto-mobile-sdk
+  auto-mobile-prototype-compose
 )
 MCP_SERVER_NAME="dev.jasonpearson/auto-mobile"
 
@@ -109,7 +110,7 @@ check_maven() {
     return 0
   fi
 
-  # All four modules publish in one step, so a split result means that step died
+  # All five modules publish in one release step, so a split result means that step died
   # midway. Republishing would 409 on the ones that landed; skipping would leave
   # the rest missing forever. Neither is safe to pick automatically.
   echo "ERROR: Maven Central has ${found} of ${total} artifacts at ${version}." >&2

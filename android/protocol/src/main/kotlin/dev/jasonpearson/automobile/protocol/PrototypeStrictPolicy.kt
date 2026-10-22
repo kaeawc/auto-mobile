@@ -42,9 +42,11 @@ internal object PrototypeStrictPolicy {
     if (secure.isEmpty()) return null
     val requests = context.actions.filter { it.value.text("type") == "request" }.map { it.path }
     val leaked =
-      requestFields(context).sortedBy { it.path }.firstOrNull { field ->
-        isRequestBinding(field, requests) && bindsSecure(field, scopes, secure)
-      }
+      requestFields(context)
+        .sortedBy { it.path }
+        .firstOrNull { field ->
+          isRequestBinding(field, requests) && bindsSecure(field, scopes, secure)
+        }
     if (leaked != null)
       return PrototypeSpecError(leaked.path, "Secure value cannot be bound into a request")
     return persistedSecureError(spec, secure)

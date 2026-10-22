@@ -28,6 +28,7 @@
 		72CDA6DB361FDC97490C3C2C /* AutoMobileHighlightCore in Frameworks */ = {isa = PBXBuildFile; productRef = 6F8D59223D0149A0731816E3 /* AutoMobileHighlightCore */; };
 		7C8CF515031B975C05FA2AD2 /* PlaygroundThemeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBFA8ECD2DC59DBF8A6FBBF3 /* PlaygroundThemeTests.swift */; };
 		7FDB62C4B6F0092619122928 /* SemanticLinksDemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAF63AC7E447335C9A68A4F7 /* SemanticLinksDemo.swift */; };
+		8BABD5EAF292349273BC02E7 /* AutoMobileSdkWire in Frameworks */ = {isa = PBXBuildFile; productRef = 22380480854B815D50B735C4 /* AutoMobileSdkWire */; };
 		95CF2D08679D32C4A9966ACD /* CrayonSketchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11B156E0FBE749405E1F2D0D /* CrayonSketchTests.swift */; };
 		97CA6F2DE628A139094EF72D /* Colors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B46870C2DDF4A2F73A5778B /* Colors.swift */; };
 		B29A9C90738A612625E68F3A /* CrayonGrainTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B440AFD2C3249329A0069BD6 /* CrayonGrainTests.swift */; };
@@ -86,6 +87,7 @@
 		C6EA6F80147865B6F32DD526 /* PlaygroundApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaygroundApp.swift; sourceTree = "<group>"; };
 		CAC67DC1CDDC454A7BB7870A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Assets.xcassets; path = Sources/Assets.xcassets; sourceTree = SOURCE_ROOT; };
 		CAF63AC7E447335C9A68A4F7 /* SemanticLinksDemo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SemanticLinksDemo.swift; sourceTree = "<group>"; };
+		CB8CEBCB5DB7B3A6DD611AD3 /* sdk-wire */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "sdk-wire"; path = "../sdk-wire"; sourceTree = SOURCE_ROOT; };
 		CBBA4475C2A7A68AE3987086 /* PlaygroundTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PlaygroundTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		CC01FB9ECFD3E67A88850123 /* PhotosAuthorizationProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosAuthorizationProbe.swift; sourceTree = "<group>"; };
 		D01BCE22E951887741F32904 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -115,6 +117,7 @@
 			files = (
 				72CDA6DB361FDC97490C3C2C /* AutoMobileHighlightCore in Frameworks */,
 				22E39FE3242348ED7A4EBEAC /* AutoMobileSDK in Frameworks */,
+				8BABD5EAF292349273BC02E7 /* AutoMobileSdkWire in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -159,6 +162,7 @@
 			children = (
 				AA0EB8290A6E5436B2C8CE6F /* auto-mobile-sdk */,
 				24F5CDEF4DC174B7ACDBB1C8 /* highlight-core */,
+				CB8CEBCB5DB7B3A6DD611AD3 /* sdk-wire */,
 			);
 			name = Packages;
 			sourceTree = "<group>";
@@ -265,6 +269,7 @@
 			packageProductDependencies = (
 				6F8D59223D0149A0731816E3 /* AutoMobileHighlightCore */,
 				3137B15D8D485C363DB78A3E /* AutoMobileSDK */,
+				22380480854B815D50B735C4 /* AutoMobileSdkWire */,
 			);
 			productName = PlaygroundTests;
 			productReference = CBBA4475C2A7A68AE3987086 /* PlaygroundTests.xctest */;
@@ -341,6 +346,7 @@
 			packageReferences = (
 				ED405DCADB445BA8869F435F /* XCLocalSwiftPackageReference "../highlight-core" */,
 				A0A6301668FFF52D74D2CC20 /* XCLocalSwiftPackageReference "../auto-mobile-sdk" */,
+				18E5C5CE997F4C6D861BADC1 /* XCLocalSwiftPackageReference "../sdk-wire" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 3F6B916872C30820F6241E84 /* Products */;
@@ -692,6 +698,10 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
+		18E5C5CE997F4C6D861BADC1 /* XCLocalSwiftPackageReference "../sdk-wire" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "../sdk-wire";
+		};
 		A0A6301668FFF52D74D2CC20 /* XCLocalSwiftPackageReference "../auto-mobile-sdk" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = "../auto-mobile-sdk";
@@ -703,6 +713,10 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		22380480854B815D50B735C4 /* AutoMobileSdkWire */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AutoMobileSdkWire;
+		};
 		3137B15D8D485C363DB78A3E /* AutoMobileSDK */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = AutoMobileSDK;

@@ -1,6 +1,7 @@
 import { isExplicitPin, resolveAssetVersion, resolvePinnedVersion } from "../../constants/release";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
+import { probeCheckoutMcpServerVersion } from "../../utils/mcpVersion";
 import { SingleFlightInterval } from "../SingleFlightInterval";
 import { getCurrentBuildIdentity, type BuildIdentity } from "../buildIdentity";
 import { DaemonClient, type DaemonClientFactory, type DaemonClientLike } from "../client";
@@ -103,6 +104,8 @@ export class ProxyRuntime {
   clientFactory!: DaemonClientFactory;
 
   daemonStatusProbe?: () => Promise<DaemonStatus>;
+
+  readCheckoutVersion?: () => Promise<string | null>;
 
   daemonAvailabilityProbe!: (socketPath: string) => Promise<boolean>;
 
@@ -599,6 +602,11 @@ export class ProxyRuntime {
       this.port.createLifecycleReconcilerDeps(),
     );
     this.daemonStatusProbe = this.port.createStatusProbe(config);
+    this.readCheckoutVersion =
+      config.readCheckoutVersion ??
+      (config.clientVersion === undefined && config.buildIdentity === undefined
+        ? probeCheckoutMcpServerVersion
+        : undefined);
     this.daemonAvailabilityProbe = daemonAvailabilityProbe(config);
     this.timer = config.timer ?? defaultTimer;
     this.listPoller = new ToolListPoller({

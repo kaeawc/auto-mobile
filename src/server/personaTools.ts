@@ -43,24 +43,24 @@ const personaInput = z.object({
   action: z
     .enum(["list", "describe", "apply", "reset"])
     .describe(
-      "list the catalog or describe one persona (no device change), apply a persona, or reset what personas changed",
+      "list the catalog or describe one manufacturer profile (no device change), apply one, or reset what manufacturer profiles changed",
     ),
-  persona: z
+  manufacturerProfile: z
     .enum(OEM_PERSONA_IDS)
     .optional()
-    .describe("Persona id; required for describe and apply"),
+    .describe("Manufacturer profile id; required for describe and apply"),
   appId: z
     .string()
     .min(1)
     .optional()
     .describe(
-      "Android package the kill facet targets; required to apply a persona with a kill profile",
+      "Android package the kill facet targets; required to apply a manufacturer profile with a kill profile",
     ),
   requires: z
     .array(z.enum(NON_EMULATABLE_CAPABILITY_IDS))
     .optional()
     .describe(
-      "apply only: OEM capabilities the task needs; one the persona cannot emulate returns route_to_real_device and changes nothing",
+      "apply only: OEM capabilities the task needs; one the manufacturer profile cannot emulate returns route_to_real_device and changes nothing",
     ),
 });
 
@@ -129,24 +129,42 @@ export const defaultPersonaExecutors = (
 };
 
 function requirePersona(args: PersonaArgs): OemPersonaId {
-  if (!args.persona) {
+  if (!args.manufacturerProfile) {
     throw new ActionableError(
-      `persona ${args.action} needs persona; list the ids with action: list.`,
+      `manufacturerProfile ${args.action} needs manufacturerProfile; list the ids with action: list.`,
     );
   }
-  return args.persona;
+  return args.manufacturerProfile;
+}
+
+/**
+ * The tool's public vocabulary is "manufacturer profile"; the catalog code keeps its persona
+ * names. Rename the result keys at this boundary only.
+ */
+function toToolResult<T extends object>(result: T): Record<string, unknown> {
+  const renamed: Record<string, string> = {
+    persona: "manufacturerProfile",
+    personaId: "manufacturerProfileId",
+    personas: "manufacturerProfiles",
+  };
+  return Object.fromEntries(
+    Object.entries(result).map(([key, value]) => [renamed[key] ?? key, value]),
+  );
 }
 
 function readOnlyResult(device: BootedDevice, args: PersonaArgs) {
   if (args.action === "list") {
     const catalog = listPersonas();
-    return { message: `${catalog.personas.length} OEM personas`, ...catalog };
+    return toToolResult({
+      message: `${catalog.personas.length} manufacturer profiles`,
+      ...catalog,
+    });
   }
   const description = describePersona(requirePersona(args));
-  return {
+  return toToolResult({
     message: `${description.persona.displayName} v${description.persona.version}: ${description.facets.length} facets`,
     ...description,
-  };
+  });
 }
 
 export const createPersonaHandler =
@@ -162,7 +180,7 @@ export const createPersonaHandler =
     }
     if (device.platform !== "android") {
       throw new ActionableError(
-        "persona apply and reset are Android-only; select an Android device.",
+        "manufacturerProfile apply and reset are Android-only; select an Android device.",
       );
     }
     const personaId = args.action === "apply" ? requirePersona(args) : undefined;
@@ -188,20 +206,23 @@ export const createPersonaHandler =
       },
     );
     const success = result.status !== "route_to_real_device";
-    return withIsErrorOnFailure(createStructuredToolResponse({ success, ...result }), success);
+    return withIsErrorOnFailure(
+      createStructuredToolResponse({ success, ...toToolResult(result) }),
+      success,
+    );
   };
 
 const personaTool = defineDeviceTool({
-  name: "persona",
+  name: "manufacturerProfile",
   description:
-    "Android: apply an OEM persona (pixel-baseline, samsung-oneui, xiaomi-hyperos, oneplus-oxygenos, oppo-coloros, " +
-    "motorola) on a stock device by composing the keyboard profile, killProfile and displayProfile executors. " +
-    "describe reports every facet's evidence status (focused_trace | vendor_documented | cdd_derived | inferred | " +
-    "experimental) and the OEM capabilities that cannot be emulated; apply with requires naming one of those " +
-    "returns route_to_real_device and changes nothing. applying a different persona resets the recorded one first; reset restores the display, kill " +
-    "and keyboard changes (display and device-wide kill state are shared with displayProfile and killProfile). " +
-    "The keyboard profile persists until reset, even across sessions. Simulates effects, " +
-    "not firmware.",
+    "Android: apply an OEM manufacturer profile (pixel-baseline, samsung-oneui, xiaomi-hyperos, oneplus-oxygenos, " +
+    "oppo-coloros, motorola) on a stock device by composing the keyboard profile, killProfile and displayProfile " +
+    "executors. describe reports every facet's evidence status (focused_trace | vendor_documented | cdd_derived | " +
+    "inferred | experimental) and the OEM capabilities that cannot be emulated; apply with requires naming one of " +
+    "those returns route_to_real_device and changes nothing. applying a different manufacturer profile resets the " +
+    "recorded one first; reset restores the display, kill and keyboard changes (display and device-wide kill state " +
+    "are shared with displayProfile and killProfile). The keyboard profile persists until reset, even across " +
+    "sessions. Simulates effects, not firmware.",
   input: personaInput,
   options: {
     ...PLAN_RELEVANT,

@@ -73,21 +73,24 @@ function secureLibraryError(spec: unknown): PrototypeValidationError | undefined
     });
   }
   fields.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-  const requestFields = fields.filter((field) =>
-    requests.some(
-      (at) =>
-        field.path === `${at}.url` ||
-        field.path === `${at}.body.state` ||
-        ["headers", "query"].some(
-          (name) =>
-            field.path.startsWith(`${at}.${name}.`) || field.path.startsWith(`${at}.${name}[`),
-        ),
-    ),
+  const sinkFields = fields.filter(
+    (field) =>
+      // mapBinding visits only the state key of request/data/emit/platform value bindings.
+      (field.key && field.path.endsWith(".state")) ||
+      requests.some(
+        (at) =>
+          field.path === `${at}.url` ||
+          field.path === `${at}.body.state` ||
+          ["headers", "query"].some(
+            (name) =>
+              field.path.startsWith(`${at}.${name}.`) || field.path.startsWith(`${at}.${name}[`),
+          ),
+      ),
   );
   // Reuse the key binder for text too: repeat substitution has the same string grammar.
   const instances = repeatKeyInstances(
     spec,
-    requestFields.map((field) => ({
+    sinkFields.map((field) => ({
       ...field,
       value: { stateKey: field.text },
     })),

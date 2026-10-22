@@ -60,13 +60,15 @@ internal object PrototypeStrictPolicy {
     }
     for (field in fields.sortedBy { it.path }) {
       if (
-        !requests.any { at ->
-          field.path == "$at.url" ||
-            field.path == "$at.body.state" ||
-            listOf("headers", "query").any {
-              field.path.startsWith("$at.$it.") || field.path.startsWith("$at.$it[")
-            }
-        }
+        // The binding visitor exposes request/data/emit/platform state bindings as KEY fields.
+        !(field.key && field.path.endsWith(".state")) &&
+          !requests.any { at ->
+            field.path == "$at.url" ||
+              field.path == "$at.body.state" ||
+              listOf("headers", "query").any {
+                field.path.startsWith("$at.$it.") || field.path.startsWith("$at.$it[")
+              }
+          }
       )
         continue
       val scope = scopes.firstOrNull { field.path.startsWith("${it.path}.children[") }

@@ -523,14 +523,13 @@ export class Rotate extends BaseVisualChange {
     const error = `${cause} The device is in ${actual} at the time the call returned. Pass lockOrientation: true, or use a device session, to keep the requested orientation.`;
     // The sensor undid the rotation, so the user_rotation this call wrote would only flip the
     // screen the next time rotation is locked (#14955): put the prior value back.
-    const rollbackWarning =
-      settings?.started && actual !== "unknown"
-        ? await this.store.rollbackUserRotation({
-            previous: settings.previousUserRotation,
-            written: settings.writtenUserRotation,
-            signal,
-          })
-        : undefined;
+    const rollbackWarning = settings?.started
+      ? await this.store.rollbackUserRotation({
+          previous: settings.previousUserRotation,
+          written: settings.writtenUserRotation,
+          signal,
+        })
+      : undefined;
     const warning = [result.warning, rollbackWarning].filter(Boolean).join(" ") || undefined;
     return {
       ...result,

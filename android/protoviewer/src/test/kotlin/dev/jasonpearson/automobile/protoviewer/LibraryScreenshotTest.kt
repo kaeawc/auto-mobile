@@ -29,6 +29,7 @@ class LibraryScreenshotTest {
         LibraryStorage(FakePrototypeStorage()),
         UnconfinedTestDispatcher(),
         LibraryClock { 42 },
+        settings = FakeSettingsStore(),
       )
     }
     val controller = Robolectric.buildActivity(LibraryActivity::class.java).setup()

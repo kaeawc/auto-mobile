@@ -24,6 +24,7 @@ import org.robolectric.android.controller.ActivityController
 class ViewerActivityTest {
   @get:Rule val compose = createComposeRule()
   private val repository = FakeLibraryRepository()
+  private val settings = FakeSettingsStore()
   private var controller: ActivityController<ViewerActivity>? = null
 
   @Before
@@ -35,6 +36,7 @@ class ViewerActivityTest {
         LibraryStorage(FakePrototypeStorage()),
         UnconfinedTestDispatcher(),
         LibraryClock { 42 },
+        settings = settings,
       )
     }
   }
@@ -105,6 +107,20 @@ class ViewerActivityTest {
     compose.waitForIdle()
     assertEquals(listOf(FIRST), repository.resets)
     assertTrue(activity.isFinishing)
+  }
+
+  @Test
+  fun provenanceTracksLiveSettingAndRemainsOutsidePrototypeBounds() {
+    launch()
+    compose.onNodeWithTag("network-provenance").assertDoesNotExist()
+    compose.runOnIdle { settings.setAllowNetwork(true) }
+    val indicator =
+      compose.onNodeWithTag("network-provenance").assertIsDisplayed().getUnclippedBoundsInRoot()
+    val content = compose.onNodeWithTag("viewer-content").getUnclippedBoundsInRoot()
+    assertTrue(indicator.bottom > indicator.top)
+    assertTrue(indicator.bottom <= content.top)
+    compose.runOnIdle { settings.setAllowNetwork(false) }
+    compose.onNodeWithTag("network-provenance").assertDoesNotExist()
   }
 
   @Test

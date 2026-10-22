@@ -17,7 +17,10 @@ class ManifestTest {
     val context = ApplicationProvider.getApplicationContext<Context>()
     val info =
       context.packageManager.getPackageInfo(context.packageName, PackageManager.GET_PERMISSIONS)
-    assertEquals(setOf("android.permission.INTERNET"), info.requestedPermissions.orEmpty().toSet())
+    assertEquals(
+      setOf("android.permission.INTERNET", "android.permission.ACCESS_LOCAL_NETWORK"),
+      info.requestedPermissions.orEmpty().toSet(),
+    )
     val viewer =
       context.packageManager.getActivityInfo(ComponentName(context, ViewerActivity::class.java), 0)
     val importer =

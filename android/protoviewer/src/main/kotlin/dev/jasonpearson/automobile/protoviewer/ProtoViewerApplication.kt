@@ -1,7 +1,11 @@
 package dev.jasonpearson.automobile.protoviewer
 
 import android.app.Application
+import androidx.activity.ComponentActivity
 import androidx.core.net.toUri
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeEgressPolicy
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpClient
+import dev.jasonpearson.automobile.ctrlproxy.prototype.RetrofitPrototypeHttpClient
 import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeDirectoryStore
 import dev.jasonpearson.automobile.protocol.PrototypeBundleDirectoryFileSystem
 import dev.jasonpearson.automobile.prototype.AutoMobilePrototype
@@ -14,6 +18,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import okhttp3.OkHttpClient
 
 /** Per-process shared ownership: all document tasks use the same repository/storage locks. */
 class ProtoViewerApplication : Application() {
@@ -56,6 +61,7 @@ class ProtoViewerApplication : Application() {
           ),
         ),
       sharer = sharer,
+      settings = SharedPreferencesSettingsStore(app.getSharedPreferences("settings", MODE_PRIVATE)),
     )
   }
   val services: ProtoViewerServices by lazy {
@@ -65,6 +71,8 @@ class ProtoViewerApplication : Application() {
   }
 }
 
+// Application composition root: keep independent dependencies explicit for constructor injection.
+@Suppress("LongParameterList")
 class ProtoViewerServices(
   val repository: LibraryRepository,
   val storage: LibraryStorage,
@@ -72,7 +80,15 @@ class ProtoViewerServices(
   val clock: LibraryClock = LibraryClock(System::currentTimeMillis),
   val importer: LibraryImporter? = null,
   val sharer: LibrarySharer? = null,
+  val settings: SettingsStore,
+  allowedClient: () -> PrototypeHttpClient = {
+    RetrofitPrototypeHttpClient(OkHttpClient(), policy = PrototypeEgressPolicy())
+  },
+  val localNetworkPermission: (ComponentActivity, (Boolean) -> Unit) -> LocalNetworkPermission =
+    ::AndroidLocalNetworkPermission,
 ) {
+  val networkClient = SettingsPrototypeHttpClient(settings, allowedClient)
+
   // Outlives activities so a stop/destroy still finishes the renderer's pending disk flush.
   val flushScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
   private var exportsCleared = false

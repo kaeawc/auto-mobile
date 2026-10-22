@@ -1411,23 +1411,23 @@ settled screenshot is eligible.
 
 ## Interact with the UI
 
-| Tool                          | What it does                                                                                                                                                        |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 📍 <code>tapAt</code>         | Taps screen coordinates or a point measured in an observation image; supports long press and double tap, and a stylus `pointer` on Android 12+.                     |
-| 👆 <code>tapOn</code>         | Taps by text, content description, resource ID, or Android test tag; supports nested containers and first/random/unique selection; can ensure toggle state.         |
-| 🎯 <code>tapAny</code>        | Taps any clickable element, optionally scoped to nested containers; supports first/random/unique selection.                                                         |
-| 👉 <code>swipeOn</code>       | Swipes or scrolls the screen or an element; container and lookFor support nested scopes and first/random/unique selection.                                          |
-| ↗️ <code>swipeAt</code>       | Swipes between two screen points, including diagonals, optionally with a stylus `pointer` on Android 12+; opt-in with `setToolEnabled`.                             |
-| ↔️ <code>dragAndDrop</code>   | Drags one element to another; each endpoint supports nested containers and first/random/unique selection.                                                           |
-| ✍️ <code>dragPath</code>      | Drags one finger along a polyline with per-segment timing, an initial hold and a release hold (Android and iOS).                                                    |
-| 🤏 <code>pinchOn</code>       | Pinches to zoom, optionally scoped by nested containers.                                                                                                            |
-| 🖐️ <code>multiTouch</code>    | Simultaneous 2-5 finger tap, long press, or swipe: `action`, `fingers`, `x`/`y`/`coordinateSpace`, `direction`, `distance`, `fingerSpacing`, `durationMs`, `layer`. |
-| ⌨️ <code>sendKeys</code>      | Runs ordered text, clear, raw-key, and semantic-key commands.                                                                                                       |
-| 🧩 <code>setUIState</code>    | Sets multiple form fields to a desired state.                                                                                                                       |
-| ✨ <code>selectAllText</code> | Selects all text in the focused input.                                                                                                                              |
-| 🔘 <code>pressButton</code>   | Presses a device or navigation button. iOS simulators support volume and power; iOS does not support menu.                                                          |
-| ⌨️ <code>keyboard</code>      | Opens, closes, or detects the keyboard; selects AutoMobile profiles or installed Android IMEs.                                                                      |
-| 📋 <code>clipboard</code>     | Copies, pastes, clears, or reads the clipboard.                                                                                                                     |
+| Tool                          | What it does                                                                                                                                                                                                                                                                                                               |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 📍 <code>tapAt</code>         | Taps screen coordinates or a point measured in an observation image; supports long press and double tap, and a stylus `pointer` on Android 12+.                                                                                                                                                                            |
+| 👆 <code>tapOn</code>         | Taps by text, content description, resource ID, or Android test tag; supports nested containers and first/random/unique selection; can ensure toggle state.                                                                                                                                                                |
+| 🎯 <code>tapAny</code>        | Taps any clickable element, optionally scoped to nested containers; supports first/random/unique selection.                                                                                                                                                                                                                |
+| 👉 <code>swipeOn</code>       | Swipes or scrolls the screen or an element; container and lookFor support nested scopes and first/random/unique selection.                                                                                                                                                                                                 |
+| ↗️ <code>swipeAt</code>       | Swipes between two screen points, including diagonals, optionally with a stylus `pointer` on Android 12+; opt-in with `setToolEnabled`.                                                                                                                                                                                    |
+| ↔️ <code>dragAndDrop</code>   | Drags one element to another; each endpoint supports nested containers and first/random/unique selection.                                                                                                                                                                                                                  |
+| ✍️ <code>dragPath</code>      | Drags one finger along a polyline with per-segment timing, an initial hold and a release hold (Android and iOS).                                                                                                                                                                                                           |
+| 🤏 <code>pinchOn</code>       | Pinches to zoom, optionally scoped by nested containers.                                                                                                                                                                                                                                                                   |
+| 🖐️ <code>multiTouch</code>    | Simultaneous 2-5 finger tap, long press, or swipe: `action`, `fingers`, `x`/`y`/`coordinateSpace`, `direction`, `distance`, `fingerSpacing`, `durationMs`, `layer`.                                                                                                                                                        |
+| ⌨️ <code>sendKeys</code>      | Runs ordered text, clear, raw-key, and semantic-key commands.                                                                                                                                                                                                                                                              |
+| 🧩 <code>setUIState</code>    | Sets multiple form fields to a desired state.                                                                                                                                                                                                                                                                              |
+| ✨ <code>selectAllText</code> | Selects all text in the focused input.                                                                                                                                                                                                                                                                                     |
+| 🔘 <code>pressButton</code>   | Presses a device or navigation button. iOS simulators support volume and power; iOS does not support menu. Android also has `lock`, `power_dialog`, `quick_settings`, `screenshot`, `split_screen` and `dismiss_notification_shade` system actions, refused with `unsupported_system_action` on an older APK or API level. |
+| ⌨️ <code>keyboard</code>      | Opens, closes, or detects the keyboard; selects AutoMobile profiles or installed Android IMEs.                                                                                                                                                                                                                             |
+| 📋 <code>clipboard</code>     | Copies, pastes, clears, or reads the clipboard.                                                                                                                                                                                                                                                                            |
 
 ### Tap, swipe, and form search options
 
@@ -4076,6 +4076,44 @@ simulators whose runtime does not report it return `code: "unsupported_button"`
 with `retryable: false`. Android has no equivalent and refuses both with the same
 code. A press can launch the app or shortcut the user bound to the button, so
 both count as navigation buttons.
+
+#### Android system actions
+
+`pressButton` also reaches six Android system actions that CtrlProxy performs as
+accessibility global actions (#14095). They are Android-only (iOS refuses them with
+`unsupported_button`), count as navigation buttons, and have no ADB fallback.
+
+| `button`                     | Global action                              | Min API | Notes                                                              |
+| ---------------------------- | ------------------------------------------ | ------- | ------------------------------------------------------------------ |
+| `lock`                       | `GLOBAL_ACTION_LOCK_SCREEN`                | 28      | Pairs with `wakeAndUnlock`.                                        |
+| `power_dialog`               | `GLOBAL_ACTION_POWER_DIALOG`               | 21      | The power menu stays open.                                         |
+| `quick_settings`             | `GLOBAL_ACTION_QUICK_SETTINGS`             | 21      | The panel stays open.                                              |
+| `screenshot`                 | `GLOBAL_ACTION_TAKE_SCREENSHOT`            | 28      | A system screenshot; apps see their screenshot callback (API 34+). |
+| `split_screen`               | `GLOBAL_ACTION_TOGGLE_SPLIT_SCREEN`        | 24      | Raw system toggle; see below.                                      |
+| `dismiss_notification_shade` | `GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE` | 31      | Closes the shade or Quick Settings panel.                          |
+
+- **Refusal.** A CtrlProxy advertises `global_action_<action>_v1` (`global_action_lock_screen_v1`,
+  `global_action_power_dialog_v1`, `global_action_quick_settings_v1`,
+  `global_action_screenshot_v1`, `global_action_split_screen_v1`,
+  `global_action_dismiss_notification_shade_v1`) only when it knows the action and the device
+  API level can perform it, so the host makes one capability check. When the flag is missing
+  (an older APK, or a device below the minimum API) nothing is sent and the result is
+  `success: false` with `code: "unsupported_system_action"`, `retryable: false` and an error
+  naming the API level and flag. A device-side refusal returns `code: "system_action_failed"`.
+  A dispatched press that gets no acknowledgement is reported as indeterminate and must be
+  observed before retrying. The older `power_dialog` and `lock_screen` wire actions worked
+  without a flag; the host now requires the flag for them too.
+- **Open UI stays open.** `power_dialog` and `quick_settings` leave their UI on screen. The
+  success result carries a `warnings` note to dismiss it with `back`, `home` or (API 31+)
+  `dismiss_notification_shade`.
+- **`lock` is not restorable.** It changes device state that session cleanup and restore
+  receipts do not undo. Call `wakeAndUnlock` to unlock; the lock-state signal is tracked in
+  #4235.
+- **`split_screen` vs `windowMode`.** `split_screen` is the raw system toggle on the current
+  task, with no say over the second app and no restore receipt. Use `windowMode` to put a
+  chosen app into split screen and read the resulting bounds.
+- **Not covered.** Listing and toggling individual Quick Settings tiles by label (a
+  `systemTray` action) is a follow-up.
 
 `launchApp` reports `success` and `packageName`, with optional `activityName`,
 `userId`, `pid`, `alreadyForeground`, `foregroundActivityPackage`, `verifiedBy`,

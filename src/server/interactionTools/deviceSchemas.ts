@@ -107,6 +107,13 @@ export const pressButtonInput = z.object({
     "recent",
     "action",
     "camera",
+    // Android system actions (#14095); a CtrlProxy/API that lacks one refuses it.
+    "lock",
+    "power_dialog",
+    "quick_settings",
+    "screenshot",
+    "split_screen",
+    "dismiss_notification_shade",
   ]),
   // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
   // not required — a device handle from getAndroid/getApple is sufficient on

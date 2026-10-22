@@ -50,6 +50,12 @@ Available buttons:
 - `volume_up`: Increase volume
 - `volume_down`: Decrease volume
 - `recent`: Open recent apps
+- `lock`: Lock the screen (Android 9+; use `wakeAndUnlock` to unlock)
+- `power_dialog`: Open the power menu (Android; stays open, dismiss with `back`)
+- `quick_settings`: Open Quick Settings (Android; stays open, dismiss with `back`)
+- `screenshot`: Take a system screenshot (Android 9+)
+- `split_screen`: Toggle the raw system split screen (Android; `windowMode` picks the second app)
+- `dismiss_notification_shade`: Close the notification shade (Android 12+)
 
 ## Key Press
 

@@ -17,6 +17,12 @@ import { AndroidCtrlProxyClient } from "../observe/android";
 import { logger } from "../../utils/logger";
 import { resolveIosHomeBackend } from "../../utils/ios-cmdline-tools/IosHomeBackend";
 import { isNavigationPressButton, resolveAndroidKeyCode } from "./pressButtonPolicy";
+import {
+  androidSystemActionRefusal,
+  isAndroidSystemActionButton,
+  resolveAndroidSystemAction,
+  type AndroidSystemAction,
+} from "./androidSystemActions";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { combineWithAmbientAbort } from "../../utils/AbortContext";
 import { HomeScreen } from "./HomeScreen";
@@ -46,11 +52,30 @@ export function unsupportedIosButtonResult(button: string, error: string): Press
 export interface PressButtonCtrlProxyOverrides {
   globalActionClient?: Pick<AndroidCtrlProxyClient, "requestGlobalAction">;
   frameContextClient?: Pick<AndroidCtrlProxyClient, "validateFrameContext">;
+  /** Capability check plus global-action dispatch for the Android system actions (#14095). */
+  systemActionClient?: Pick<AndroidCtrlProxyClient, "requestGlobalAction" | "supportsCommand">;
+}
+
+/** A dispatched press whose outcome was never confirmed: replaying it could apply it twice. */
+function indeterminatePressResult(
+  button: string,
+  keyCode: number,
+  reason: string | undefined,
+): PressButtonResult {
+  return {
+    success: false,
+    button,
+    keyCode,
+    code: "indeterminate_outcome",
+    retryable: false,
+    error: `Button press outcome is indeterminate: the request was dispatched but no result was confirmed (${reason ?? "unknown error"}). The press may have been applied. Do not retry automatically. Observe before retrying.`,
+  };
 }
 
 export class PressButton extends BaseVisualChange {
   private readonly globalActionClient?: PressButtonCtrlProxyOverrides["globalActionClient"];
   private readonly frameContextClient?: PressButtonCtrlProxyOverrides["frameContextClient"];
+  private readonly systemActionClient?: PressButtonCtrlProxyOverrides["systemActionClient"];
 
   constructor(
     device: BootedDevice,
@@ -64,18 +89,25 @@ export class PressButton extends BaseVisualChange {
     this.device = device;
     this.globalActionClient = collaborators.globalActionClient;
     this.frameContextClient = collaborators.frameContextClient;
+    this.systemActionClient = collaborators.systemActionClient;
+  }
+
+  private defaultCtrlProxyClient(): ReturnType<typeof AndroidCtrlProxyClient.getInstance> {
+    return AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
+  }
+
+  private systemActionTransport(): NonNullable<
+    PressButtonCtrlProxyOverrides["systemActionClient"]
+  > {
+    return this.systemActionClient ?? this.defaultCtrlProxyClient();
   }
 
   private globalActionTransport(): Pick<AndroidCtrlProxyClient, "requestGlobalAction"> {
-    return (
-      this.globalActionClient ?? AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory)
-    );
+    return this.globalActionClient ?? this.defaultCtrlProxyClient();
   }
 
   private frameContextTransport(): Pick<AndroidCtrlProxyClient, "validateFrameContext"> {
-    return (
-      this.frameContextClient ?? AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory)
-    );
+    return this.frameContextClient ?? this.defaultCtrlProxyClient();
   }
 
   /** Typed test view so tests can drive the deadline gate and the per-platform dispatch without a full press. */
@@ -259,6 +291,17 @@ export class PressButton extends BaseVisualChange {
         `"${normalized}" is an iOS-only hardware button (Action button / Camera Control); Android has no equivalent in pressButton.`,
       );
     }
+    const systemAction = resolveAndroidSystemAction(normalized);
+    if (systemAction) {
+      return this.executeAndroidSystemAction(
+        button,
+        systemAction,
+        timeoutMs,
+        frameContext,
+        signal,
+        onDispatch,
+      );
+    }
     const keyCode = resolveAndroidKeyCode(normalized);
     if (keyCode === undefined) {
       return {
@@ -383,6 +426,83 @@ export class PressButton extends BaseVisualChange {
     return { success: true, button, keyCode };
   }
 
+  /**
+   * Android system actions (#14095): lock, power dialog, Quick Settings, screenshot, split screen
+   * and notification-shade dismissal. They exist only as CtrlProxy global actions, so a missing
+   * capability is a typed refusal and there is no ADB fallback.
+   */
+  private async executeAndroidSystemAction(
+    button: string,
+    action: AndroidSystemAction,
+    timeoutMs: number | undefined,
+    frameContext: string | undefined,
+    signal: AbortSignal | undefined,
+    onDispatch: (() => void) | undefined,
+  ): Promise<PressButtonResult> {
+    throwIfAborted(signal);
+    const client = this.systemActionTransport();
+    if (!(await client.supportsCommand(action.capability))) {
+      return {
+        success: false,
+        button,
+        keyCode: -1,
+        code: "unsupported_system_action",
+        retryable: false,
+        error: androidSystemActionRefusal(button, action),
+      };
+    }
+    const budget = timeoutMs ?? PressButton.GLOBAL_ACTION_TIMEOUT_MS;
+    let dispatched = false;
+    try {
+      const result = await this.awaitDispatchedRequest(
+        signal,
+        budget,
+        (fenced, markDispatch) =>
+          client.requestGlobalAction(
+            action.wireAction,
+            budget,
+            undefined,
+            frameContext,
+            fenced,
+            markDispatch,
+          ),
+        () => {
+          dispatched = true;
+          onDispatch?.();
+        },
+        true,
+      );
+      throwIfAborted(signal);
+      if (result.success) {
+        return {
+          success: true,
+          button,
+          keyCode: -1,
+          ...(action.successWarning ? { warnings: [action.successWarning] } : {}),
+        };
+      }
+      if (dispatched && !result.acknowledged) {
+        return indeterminatePressResult(button, -1, result.error);
+      }
+      return {
+        success: false,
+        button,
+        keyCode: -1,
+        code: "system_action_failed",
+        retryable: false,
+        error: `The device refused ${button}: ${result.error ?? "unknown error"}`,
+      };
+    } catch (error) {
+      throwIfAborted(signal);
+      if (dispatched) {
+        logger.warn(`[PRESS_BUTTON] System action ${button} threw after dispatch`, error);
+        return indeterminatePressResult(button, -1, errorMessage(error));
+      }
+      // Nothing was sent, so the shared press_failed result built by execute() is accurate.
+      throw error;
+    }
+  }
+
   private async tryAndroidGlobalAction(
     button: string,
     normalized: string,
@@ -404,14 +524,8 @@ export class PressButton extends BaseVisualChange {
         ? PressButton.GLOBAL_ACTION_TIMEOUT_MS
         : Math.min(PressButton.GLOBAL_ACTION_TIMEOUT_MS, budget);
     let dispatched = false;
-    const indeterminateResult = (reason: string | undefined): PressButtonResult => ({
-      success: false,
-      button,
-      keyCode,
-      code: "indeterminate_outcome",
-      retryable: false,
-      error: `Button press outcome is indeterminate: the request was dispatched but no result was confirmed (${reason ?? "unknown error"}). The press may have been applied. Do not retry automatically. Observe before retrying.`,
-    });
+    const indeterminateResult = (reason: string | undefined): PressButtonResult =>
+      indeterminatePressResult(button, keyCode, reason);
     try {
       throwIfAborted(signal);
       const client = this.globalActionTransport();
@@ -558,6 +672,12 @@ export class PressButton extends BaseVisualChange {
 
     if (normalizedButton === "menu") {
       return unsupportedIosButtonResult(button, "iOS has no menu hardware button");
+    }
+    if (isAndroidSystemActionButton(normalizedButton)) {
+      return unsupportedIosButtonResult(
+        button,
+        `"${normalizedButton}" is an Android-only system action; iOS has no equivalent in pressButton.`,
+      );
     }
 
     return unsupportedIosButtonResult(button, `Unsupported iOS button: ${button}`);

@@ -567,6 +567,30 @@ describe("session broker durable admission", () => {
     expect((await store.getRequest("second"))?.timing?.reset?.outcome).toBe("destroyed");
   });
 
+  test.each([false, true])(
+    "recovery preserves a relinquished release and its destruction ticket (destroying=%s)",
+    async (destroying) => {
+      const first = await prepare("first");
+      await store.beginRelease(first.sessionId, OWNER);
+      const previous = destroying ? await store.releaseByDestruction("first", OWNER) : undefined;
+      livePids.delete(OWNER.pid);
+      const ticket = await store.recoverRequest("first", SUCCESSOR);
+      expect(await store.getRequest("first")).toMatchObject({
+        state: "releasing",
+        owner: SUCCESSOR,
+        error: null,
+        errorCode: null,
+      });
+      expect(await store.getResource(first.resource.resourceId)).toMatchObject({
+        state: "destroying",
+      });
+      expect(ticket).toBeDefined();
+      if (destroying) {
+        expect(ticket).toEqual(previous);
+      }
+    },
+  );
+
   test("recovery retains uncertain live owners, then fences dead owners without freeing capacity", async () => {
     await store.admit(input("crashed", { limits: { totalDeviceCap: 1 } }));
     expect(await store.recoverRequest("crashed", SUCCESSOR)).toBeUndefined();

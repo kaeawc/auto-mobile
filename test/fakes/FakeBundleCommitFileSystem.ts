@@ -1,10 +1,16 @@
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import type { BundleCommitFileSystem } from "../../src/features/prototype/prototypeBundle";
+
+/**
+ * The library root, resolved the way `commitBundleToDirectory` resolves its destination, so the
+ * fake's paths match on Windows (`D:\library`) as well as POSIX (`/library`).
+ */
+export const FAKE_BUNDLE_LIBRARY = resolve("/library");
 
 export class FakeBundleCommitFileSystem implements BundleCommitFileSystem {
   readonly operations: string[] = [];
   readonly files = new Map<string, Uint8Array>();
-  readonly directories = new Set(["/library"]);
+  readonly directories = new Set([FAKE_BUNDLE_LIBRARY]);
   readonly symlinks = new Set<string>();
   failOn: string | undefined;
   private operation(value: string): void {
@@ -48,13 +54,13 @@ export class FakeBundleCommitFileSystem implements BundleCommitFileSystem {
   async rename(from: string, to: string): Promise<void> {
     this.operation(`rename ${from} ${to}`);
     for (const path of [...this.directories]) {
-      if (path === from || path.startsWith(`${from}/`)) {
+      if (path === from || path.startsWith(`${from}${sep}`)) {
         this.directories.delete(path);
         this.directories.add(to + path.slice(from.length));
       }
     }
     for (const [path, bytes] of [...this.files]) {
-      if (path.startsWith(`${from}/`)) {
+      if (path.startsWith(`${from}${sep}`)) {
         this.files.delete(path);
         this.files.set(to + path.slice(from.length), bytes);
       }
@@ -63,12 +69,12 @@ export class FakeBundleCommitFileSystem implements BundleCommitFileSystem {
   async remove(path: string): Promise<void> {
     this.operation(`remove ${path}`);
     for (const item of [...this.files.keys()]) {
-      if (item.startsWith(`${path}/`)) {
+      if (item.startsWith(`${path}${sep}`)) {
         this.files.delete(item);
       }
     }
     for (const item of [...this.directories]) {
-      if (item === path || item.startsWith(`${path}/`)) {
+      if (item === path || item.startsWith(`${path}${sep}`)) {
         this.directories.delete(item);
       }
     }

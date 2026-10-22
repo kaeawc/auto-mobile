@@ -2120,6 +2120,34 @@ This is Android only. The iOS agent does not lift a sheet above the keyboard, an
 rely on UIKit keyboard avoidance or match this behaviour is an open decision (see
 [iOS prototype agent](../ios/prototype-agent.md#open-decisions)).
 
+## Accessibility lint (#14126)
+
+A successful `show` or `patch` returns `accessibilityFindings`: an advisory, host-only lint of the
+component-expanded spec sent to the device. It never refuses a show and needs no device capability.
+Each finding names a `rule`, the node `path` and a `detail`. The output keeps 50 findings, and
+`accessibilityFindingsTotal` reports the full count when it is capped.
+
+| Rule                   | Finds                                                                                                                                                                                                                                                                                                                                                                 |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `unlabeled-control`    | A node with `onTap`, `onLongPress` or `onDoubleTap`, or an `iconButton`, `fab`, `switch`, `checkbox`, `slider` or `select`, with no `contentDescription`, `label`, `text`, `spans`, `headline` or `title` on itself or a descendant.                                                                                                                                  |
+| `unlabeled-image`      | An `image` or `icon` with a `testTag` but no `contentDescription`. An untagged, non-tappable one without a description is decorative: the renderers hide it from accessibility, so it is not reported.                                                                                                                                                                |
+| `unlabeled-text-field` | A `textField` or `searchBar` with no `label`, `placeholder` or `contentDescription`.                                                                                                                                                                                                                                                                                  |
+| `low-contrast`         | A `text` node with an authored `style.color` below WCAG AA against the nearest background the host can resolve: 4.5:1, or 3:1 for large text (`textSize` 24 or more, 18.66 or more at `fontWeight` 700, or a `display`/`headline` `textStyle`). It is checked in light and dark, or only the mode `theme.mode` pins; `mode` names the failing one, `value` the ratio. |
+| `small-touch-target`   | A tappable node or control whose authored `width`, `height`, `maxWidth` or `maxHeight` is under 48dp (44pt on iOS); `value` is the smallest side. Sizes left to layout are not checked.                                                                                                                                                                               |
+
+Colours resolve on the host as the renderers do: a hex value, a `{light, dark}` pair, or a role
+from the Material 3 baseline scheme with `theme.colors` overrides (flat, then per mode). A
+`theme.colors.seed` or `source: device` makes the device derive its own scheme, so only the roles
+the spec overrides are known then, and text using any other role is not checked. The background
+starts at the `surface` role and follows authored `style.background` values, compositing
+translucent ones. Under a `gradient`, a `style.alpha`, or a component that paints its own surface
+(`card`, `dialog`, `bottomSheet`, `snackbar`, `topAppBar`, `bottomNav`, `tabBar`, `button`, `fab`,
+`chip`) the background is unknown and contrast is not checked. `styleWhen` overrides are not
+evaluated.
+
+The on-device audit of a shown prototype, a `pseudoLocale` option and the RTL check that #14126
+also proposes are not implemented yet.
+
 ## Rejection paths and deterministic first error
 
 Paths omit a leading `$` for ordinary root members: `root.children[1].style.color`.

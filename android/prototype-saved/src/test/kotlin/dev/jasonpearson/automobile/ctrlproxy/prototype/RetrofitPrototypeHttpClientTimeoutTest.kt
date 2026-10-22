@@ -43,16 +43,16 @@ class RetrofitPrototypeHttpClientTimeoutTest {
       MockResponse.Builder()
         .body("{}")
         .addHeader("Content-Type", "application/json")
-        .headersDelay(400, TimeUnit.MILLISECONDS)
+        .headersDelay(HEADERS_DELAY_MS, TimeUnit.MILLISECONDS)
         .build(),
     )
     val shortReadTimeouts =
       RetrofitPrototypeHttpClient(
         OkHttpClient.Builder()
           .dns(loopbackDns)
-          .connectTimeout(100, TimeUnit.MILLISECONDS)
-          .readTimeout(100, TimeUnit.MILLISECONDS)
-          .writeTimeout(100, TimeUnit.MILLISECONDS)
+          .connectTimeout(CLIENT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+          .readTimeout(CLIENT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+          .writeTimeout(CLIENT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
           .build(),
         policy = permissivePolicy,
         clock = { 0L },
@@ -74,5 +74,14 @@ class RetrofitPrototypeHttpClientTimeoutTest {
     val received =
       response as? PrototypeRequestResponse.Received ?: error("Expected a response: $response")
     assertEquals(200, received.status)
+  }
+
+  private companion object {
+    /**
+     * The client's own timeouts are far below the headers delay, so the old behaviour fails on the
+     * read timeout; both stay small so the test fits the unit-test time budget (#14466).
+     */
+    const val CLIENT_TIMEOUT_MS = 1L
+    const val HEADERS_DELAY_MS = 25L
   }
 }

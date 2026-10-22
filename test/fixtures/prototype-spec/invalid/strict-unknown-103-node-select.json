@@ -1,0 +1,42 @@
+{
+  "spec": {
+    "id": "menus",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "opacity": 100
+    },
+    "state": {
+      "open": false,
+      "choice": "a"
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "testTag": "choice",
+          "type": "select",
+          "stateKey": "choice",
+          "label": "Choice",
+          "options": [
+            {
+              "value": "a",
+              "label": "A"
+            },
+            {
+              "value": "b",
+              "label": "B"
+            }
+          ],
+          "zzzUnknown": true
+        },
+        {
+          "type": "text",
+          "text": "Selected: {choice}"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].zzzUnknown"
+}

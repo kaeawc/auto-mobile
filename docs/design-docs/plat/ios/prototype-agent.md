@@ -761,7 +761,10 @@ Android uses Material `PullToRefreshBox`.
 `prototype_text_field_actions_v1` gates textField `trailingIcon {icon, label, onTap?}`, `imeAction`
 (`done`, `next`, `search`, `send`, `go`) and `onSubmit` (1-32 actions); multiline text has no IME
 action, so the host refuses them with `multiline: true`. iOS maps `imeAction` to `submitLabel` (done
-when only `onSubmit` is authored) and runs `onSubmit` from `onSubmit`; the trailing icon is an SF
+when only `onSubmit` is authored) and runs `onSubmit` from `onSubmit`. The number, decimal and
+phone pads have no Return key, so while such a field is focused a keyboard toolbar shows a button
+named for the action (Done, Next, Search, Send or Go) that runs `onSubmit` and dismisses the pad
+(#12998). The trailing icon is an SF
 Symbol button beside the field (a plain glyph without `onTap`), named by `label`, with the
 accessibility identifier `<testTag>.trailingIcon` that `tapOn` can target. Android draws an
 `IconButton` in the field's trailing slot and uses Compose `ImeAction` with `KeyboardActions`.

@@ -49,7 +49,7 @@ function createTap(
   return new TapOnElement(device(platform, panels), new FakeAdbExecutor(), {
     timer,
     hierarchyCapture: new FakeHierarchyCapture(() => hierarchy, platform),
-    tapStrategy: new FakeTapStrategy(),
+    tapStrategy: platform === "ios" ? FakeTapStrategy.ios() : new FakeTapStrategy(),
     selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
   });
 }
@@ -226,7 +226,7 @@ describe("tapOn iOS multi-panel screen size", () => {
       timer,
       elementSelector: selector,
       hierarchyCapture: new FakeHierarchyCapture(() => hierarchy, "ios"),
-      tapStrategy: new FakeTapStrategy(),
+      tapStrategy: FakeTapStrategy.ios(),
       selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
     });
     const observation = replace(tap, hierarchy);

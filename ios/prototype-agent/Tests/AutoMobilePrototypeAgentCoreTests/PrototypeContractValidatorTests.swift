@@ -2,6 +2,16 @@
 import XCTest
 
 final class PrototypeContractValidatorTests: XCTestCase {
+    func testSecureLibraryPolicyPreservesNonlibraryAndOpaqueLiterals() throws {
+        let unbound = fixtures.appendingPathComponent("valid/strict-library-secure-unbound.json")
+        XCTAssertNoThrow(try PrototypeSpecStrictValidator.validate(data: Data(contentsOf: unbound), library: true))
+        for url in try files("invalid") where url.lastPathComponent.hasPrefix("strict-library-secure-") {
+            let fixture = try JSONDecoder().decode(InvalidFixture.self, from: Data(contentsOf: url))
+            let data = try JSONEncoder().encode(XCTUnwrap(fixture.spec))
+            XCTAssertNoThrow(try PrototypeSpecStrictValidator.validate(data: data), url.lastPathComponent)
+        }
+    }
+
     private var fixtures: URL {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()

@@ -4247,6 +4247,7 @@
               "statusBar",
               "swipeAt",
               "swipeOn",
+              "systemAlerts",
               "systemTray",
               "tapAny",
               "tapAt",
@@ -4394,6 +4395,7 @@
               "statusBar",
               "swipeAt",
               "swipeOn",
+              "systemAlerts",
               "systemTray",
               "tapAny",
               "tapAt",
@@ -25027,6 +25029,7 @@
               "statusBar",
               "swipeAt",
               "swipeOn",
+              "systemAlerts",
               "systemTray",
               "tapAny",
               "tapAt",
@@ -32421,6 +32424,7 @@
             "statusBar",
             "swipeAt",
             "swipeOn",
+            "systemAlerts",
             "systemTray",
             "tapAny",
             "tapAt",
@@ -32534,6 +32538,7 @@
               "statusBar",
               "swipeAt",
               "swipeOn",
+              "systemAlerts",
               "systemTray",
               "tapAny",
               "tapAt",
@@ -34183,6 +34188,163 @@
           ]
         }
       }
+    }
+  },
+  {
+    "name": "systemAlerts",
+    "description": "Set how OS permission and system alerts are handled before and after each UI interaction (tapOn, tapAt, tapAny, swipeOn, swipeAt, sendKeys, pressButton, dragAndDrop, dragPath, pinchOn, multiTouch) on this device, including executePlan steps. iOS: SpringBoard permission prompts; Android: permission-controller grant dialogs. report (default) never taps and surfaces the alert in the action's warnings; allow, deny and allowOnce tap that button; match names a button by label for localized or app-specific alerts. Every alert seen or answered is reported in the action's warnings. A policy set in a daemon session clears when the session is released.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "setPolicy for this device, clear it, or get the current policy",
+          "type": "string",
+          "enum": ["setPolicy", "clear", "get"]
+        },
+        "policy": {
+          "description": "setPolicy only, default report. report never taps and surfaces the alert in the action result; allow, deny and allowOnce tap that button",
+          "type": "string",
+          "enum": ["report", "allow", "deny", "allowOnce"]
+        },
+        "match": {
+          "description": "setPolicy only: answer specific alerts by button label, e.g. a localized or app-specific alert the built-in permission labels do not cover",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "textContains": {
+                "description": "Answer only an alert whose text contains this (case-insensitive)",
+                "type": "string",
+                "minLength": 1
+              },
+              "buttonText": {
+                "description": "Tap the button with exactly this label (case-insensitive), in any language",
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": ["buttonText"],
+            "additionalProperties": false
+          }
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["action"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "action": {
+          "type": "string",
+          "enum": ["setPolicy", "clear", "get"]
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "active": {
+          "description": "Whether a policy is set for this device",
+          "type": "boolean"
+        },
+        "policy": {
+          "type": "string",
+          "enum": ["report", "allow", "deny", "allowOnce"]
+        },
+        "match": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "textContains": {
+                "type": "string"
+              },
+              "buttonText": {
+                "type": "string"
+              }
+            },
+            "required": ["buttonText"],
+            "additionalProperties": false
+          }
+        },
+        "clearsOnRelease": {
+          "description": "Whether the owning daemon session's release clears it",
+          "type": "boolean"
+        },
+        "cleared": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string"
+        },
+        "artifact": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "format": {
+              "type": "string",
+              "const": "json"
+            },
+            "payload": {
+              "type": "string"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "tool": {
+              "type": "string"
+            },
+            "resourceUri": {
+              "description": "automobile: resource URI to fetch this artifact's JSON in-band",
+              "type": "string"
+            }
+          },
+          "required": ["path", "format", "payload", "bytes", "tool"],
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "success",
+        "action",
+        "deviceId",
+        "active",
+        "policy",
+        "match",
+        "clearsOnRelease",
+        "message"
+      ],
+      "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/deviceReadOnlyArgs": [
+        {
+          "argument": "action",
+          "values": ["get"]
+        }
+      ]
     }
   },
   {

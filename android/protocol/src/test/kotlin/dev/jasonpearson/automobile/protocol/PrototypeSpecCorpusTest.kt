@@ -15,6 +15,22 @@ import org.junit.jupiter.api.TestFactory
 
 class PrototypeSpecCorpusTest {
   @Test
+  fun `secure library policy preserves nonlibrary and opaque literal bindings`() {
+    val unbound = valid.first { it.name == "strict-library-secure-unbound.json" }
+    assertTrue(
+      PrototypeSpecValidator.validate(validJson.getValue(unbound), library = true)
+        is PrototypeSpecValidation.Success,
+    )
+    for (file in invalid.filter { it.name.startsWith("strict-library-secure-") }) {
+      assertTrue(
+        PrototypeSpecValidator.validate(invalidSpec.getValue(file))
+          is PrototypeSpecValidation.Success,
+        file.name,
+      )
+    }
+  }
+
+  @Test
   fun `all three corpus runners consume the complete captured inventory`() {
     val inventory =
       Json.parseToJsonElement(File(fixtureDirectory(), "corpus.json").readText()).jsonObject

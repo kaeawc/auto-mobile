@@ -102,6 +102,7 @@ export function sessionExecutionMetadataOf(execution: ActiveExecution): {
 /** How a session-bearing execution ended: whether it was ever admitted under its session. */
 export interface SessionExecutionEnd {
   admitted: boolean;
+  toolName: string;
 }
 
 export type SessionExecutionEndListener = (
@@ -131,6 +132,12 @@ export interface ExecutionCancellationOptions {
    * another session's or a sessionless call on the same device is left alone.
    */
   onlySessionUuid?: string;
+  /**
+   * Executions that pass {@link onlySessionUuid} whatever session they were recorded under
+   * (#14443): ingress records a label-routed executePlan under its derived session (base:B),
+   * while plan-time loss names its owner (base) and the captured invocation ids.
+   */
+  includeExecutionIds?: readonly string[];
 }
 
 export type ExecutionCancellationReason = string | Error;

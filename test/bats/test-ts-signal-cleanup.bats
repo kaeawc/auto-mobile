@@ -73,13 +73,18 @@ signal_lane() {
 }
 
 @test "group and chunk loops stop before launching another chunk after lane owner dies" {
-  local helper owner result
+  local helper owner supervisor result
   for helper in groups chunks; do
     : > "$STUB_CALLS"
-    # Not a child of this shell: a killed child lingers as a zombie until reaped, and kill -0
-    # succeeds on a zombie, so the helper under test could still see its owner as alive.
-    owner="$(bash -c 'sleep 60 > /dev/null 2>&1 3>&- & echo $!')"
-    owned_pids+=("$owner")
+    # kill -0 succeeds on a zombie, so the owner needs a parent that reaps it the moment it
+    # dies. A supervisor that waits on it does, whatever the container's PID 1 does with
+    # orphans (#14407); this shell is not that parent, so the owner is not its child.
+    rm -f "$BATS_TEST_TMPDIR/owner.pid"
+    bash -c 'sleep 60 > /dev/null 2>&1 & echo $! > "$1"; wait "$!"' _ "$BATS_TEST_TMPDIR/owner.pid" 3>&- &
+    supervisor=$!
+    until [[ -s "$BATS_TEST_TMPDIR/owner.pid" ]]; do /bin/sleep 0.01; done
+    owner="$(cat "$BATS_TEST_TMPDIR/owner.pid")"
+    owned_pids+=("$owner" "$supervisor")
     export AUTOMOBILE_TEST_TS_PARENT_PID="$owner"
     export STUB_KILL_PARENT=1 AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE=1
     result=0
@@ -88,7 +93,7 @@ signal_lane() {
     else
       bash scripts/lib/bun-unit-chunks.sh "$PWD" Linux 1 '' 0 test/a.test.ts test/b.test.ts || result=$?
     fi
-    wait "$owner" 2>/dev/null || true
+    wait "$supervisor" 2>/dev/null || true
     [[ "$result" -ne 0 ]]
     [[ "$(wc -l < "$STUB_CALLS")" -eq 1 ]]
   done

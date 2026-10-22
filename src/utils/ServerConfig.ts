@@ -19,6 +19,12 @@ export interface PlanExecutionTarget {
   readonly sessionUuid?: string;
   readonly deviceId?: string;
   readonly executionId?: string;
+  /**
+   * The device-label sessions this invocation allocates (#14444). A sessionful lease uses only the
+   * devices held by its own session and these: a sibling label that a broker binding or an earlier
+   * run published under the same base is not this invocation's device.
+   */
+  readonly labelSessionUuids?: readonly string[];
 }
 
 /**

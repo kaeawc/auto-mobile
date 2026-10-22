@@ -1790,6 +1790,104 @@ describe("RunnerReadinessService", () => {
     },
   );
 
+  test("post-setup probes a supervisor replacement instead of restarting it for the old exit (#14513)", async () => {
+    const iosClient = new FakeReadinessClient();
+    iosClient.connected = false;
+    iosClient.healthResults = [false, true];
+    const { service, iosManager, timer } = createService({ iosClient });
+    const original: { exitCode: number | null; signalCode: NodeJS.Signals | null } = {
+      exitCode: null,
+      signalCode: null,
+    };
+    iosManager.runnerChild = original;
+    iosClient.onHealth = async (timeoutMs) => {
+      if (iosClient.healthCalls === 1) {
+        // The tracked child exits; the supervisor clears it and completes its
+        // auto-restart while the first slow snapshot is still pending.
+        original.exitCode = 65;
+        iosManager.runnerChild = null;
+        await timer.sleep(2_000);
+        iosManager.runnerChild = { exitCode: null, signalCode: null };
+        await timer.sleep((timeoutMs ?? 0) - 2_000);
+      }
+    };
+
+    await service.ensureReady({
+      device: iosDevice,
+      requestedIdentity: "post-setup supervisor replacement",
+      totalDeadlineMs: 180_000,
+      readinessTimeoutMs: 30_000,
+    });
+
+    expect(iosManager.forceRestartCalls).toBe(0);
+    expect(iosClient.healthCalls).toBe(2);
+    expect(iosManager.endpointHealthCalls).toBe(1);
+  });
+
+  test.each([5_000, 10_000])(
+    "post-setup restarts when a slow probe exhausts a %dms health window (#14512)",
+    async (readinessTimeoutMs) => {
+      const iosClient = new FakeReadinessClient();
+      iosClient.connected = false;
+      iosClient.healthResults = [false, false];
+      const { service, iosManager, timer } = createService({ iosClient });
+      let probesBeforeRestart = 0;
+      iosManager.onForceRestart = async () => {
+        probesBeforeRestart = iosClient.healthCalls;
+        iosClient.healthResults = [true];
+      };
+      iosClient.onHealth = async (timeoutMs) => {
+        if (iosManager.forceRestartCalls === 0) {
+          await timer.sleep(timeoutMs ?? 0);
+        }
+      };
+
+      await service.ensureReady({
+        device: iosDevice,
+        requestedIdentity: "post-setup short health window",
+        totalDeadlineMs: 180_000,
+        readinessTimeoutMs,
+      });
+
+      expect(iosManager.forceRestartCalls).toBe(1);
+      expect(iosManager.forceRestartOptions?.minimumHealthPollDurationMs).toBe(
+        180_000 - readinessTimeoutMs,
+      );
+      expect(probesBeforeRestart).toBe(readinessTimeoutMs === 5_000 ? 1 : 2);
+      expect(iosClient.healthCalls).toBe(probesBeforeRestart + 1);
+      expect(timer.now()).toBe(readinessTimeoutMs);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    },
+  );
+
+  test("post-setup slow probe at the total deadline still fails as a timeout without restart", async () => {
+    const iosClient = new FakeReadinessClient();
+    iosClient.connected = false;
+    iosClient.healthResults = [false];
+    const { service, iosManager, timer } = createService({ iosClient });
+    iosClient.onHealth = async (timeoutMs) => {
+      await timer.sleep(timeoutMs ?? 0);
+    };
+
+    const error = await service
+      .ensureReady({
+        device: iosDevice,
+        requestedIdentity: "post-setup exhausted total budget",
+        totalDeadlineMs: 5_000,
+        readinessTimeoutMs: 5_000,
+      })
+      .catch((thrown: unknown) => thrown);
+
+    expect(error).toBeInstanceOf(RunnerReadinessError);
+    if (!(error instanceof RunnerReadinessError)) {
+      throw new Error("Expected a runner readiness deadline failure");
+    }
+    expect(error.phase).toBe("runner-health");
+    expect(error.deadlineExhausted).toBe(true);
+    expect(iosManager.forceRestartCalls).toBe(0);
+    expect(timer.now()).toBe(5_000);
+  });
+
   test.each(["timeout", "reset", "unhealthy", "unknown"] as const)(
     "post-setup tolerates one %s health result and an untracked child",
     async (reason) => {

@@ -73,7 +73,7 @@ function harness(tool: "tapOn" | "tapAny", freshLeft: number | null = 10) {
     converter.convertToViewHierarchyResult(value),
   );
   const sync = spyOn(client, "requestHierarchySync");
-  const strategy = new FakeTapStrategy();
+  const strategy = FakeTapStrategy.ios();
   const detector = new FakeIosVoiceOverDetector();
   const tap =
     tool === "tapOn"

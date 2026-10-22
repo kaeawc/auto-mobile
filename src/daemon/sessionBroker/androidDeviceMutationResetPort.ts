@@ -267,7 +267,9 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
     const prior = priorValue.state === "present" ? priorValue.value : undefined;
     const absent = priorValue.state === "absent";
     const setting =
-      /^(global|secure|system):(?:(?:user:(\d+)):)?([A-Za-z0-9_][A-Za-z0-9_.-]*)$/.exec(key);
+      /^(global|secure|system):(?:(?:user:(\d+)):)?(?!user:)([A-Za-z0-9_][A-Za-z0-9_.:-]*)$/.exec(
+        key,
+      );
     if (!setting || (!absent && typeof prior !== "string")) {
       return null;
     }

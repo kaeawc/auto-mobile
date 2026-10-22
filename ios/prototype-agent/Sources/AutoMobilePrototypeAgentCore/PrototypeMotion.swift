@@ -119,7 +119,12 @@ protocol PrototypeTimerHandle: AnyObject {
 
 /// Wall-clock timers behind an interface so snackbar timeouts run without real time in tests.
 protocol PrototypeClock {
+    var nowMilliseconds: Int { get }
     func schedule(afterMilliseconds: Int, _ fire: @escaping () -> Void) -> PrototypeTimerHandle
+}
+
+extension PrototypeClock {
+    var nowMilliseconds: Int { Int(Date().timeIntervalSince1970 * 1000) }
 }
 
 /// Fires on the main queue, where the prototype model lives. A plain timer: neither the reduce-motion

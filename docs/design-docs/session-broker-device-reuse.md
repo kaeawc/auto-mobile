@@ -234,7 +234,7 @@ fallback. On iOS, a re-run after a recorded failure also skips cleaning.
   eligible for idle reuse; failed fallback leaves it unavailable or destroys it.
 
 Reset timings identify the work performed. iOS records journal, preflight
-inventory, individual revert, sanitize, health and health-probe phases; native
+inventory, individual revert, sanitize (including `trust-store:verify`), health and health-probe phases; native
 commands are bounded at 10 seconds, the health HTTP probe at 5 seconds, and
 reset steps default to 30 seconds.
 Android keep-booted records journal, clean and health phases, with a default
@@ -255,6 +255,9 @@ do not mean the device is equivalent to a freshly erased or wiped device.
 - **iOS:** Photos, Contacts and Calendar additions are not removed. Baseline app
   data is not reset, and baseline app-group data can persist where shared
   containers are retained. Other unsupported or out-of-band state may remain.
+  A user-trusted root certificate is never left behind: `simctl keychain reset`
+  does not clear the trust store, so the reset checks it and falls back to erase
+  when it holds any user trust setting (#14828).
 - **Android:** Accounts are not removed, and baseline apps' data is not reset
   (there is no default `pm clear`). Existing baseline files that were
   overwritten or deleted are not restored; added files are only removed under the

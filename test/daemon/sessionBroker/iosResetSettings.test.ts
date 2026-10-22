@@ -1,10 +1,14 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { IosDeviceMutationResetPort } from "../../../src/daemon/sessionBroker/mutations/iosResetPort";
 import type { DeviceMutationResetContext } from "../../../src/daemon/sessionBroker/mutations/reset";
 import type { MutationValue } from "../../../src/daemon/sessionBroker/mutations/types";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
-function harness(globals = '<plist version="1.0"><dict/></plist>') {
+function harness(
+  globals = '<plist version="1.0"><dict/></plist>',
+  commandError?: (args: string[]) => Error | undefined,
+) {
   const commands: string[][] = [];
   const ui: Record<string, string> = {
     appearance: "light",
@@ -17,6 +21,10 @@ function harness(globals = '<plist version="1.0"><dict/></plist>') {
         listAppsOrThrow: async () => [],
         executeCommandArgs: async (args) => {
           commands.push(args);
+          const error = commandError?.(args);
+          if (error) {
+            throw error;
+          }
           const stdout =
             args[0] === "ui" ? `${ui[args[2]]}\n` : args[3] === "export" ? globals : "";
           return {
@@ -28,6 +36,8 @@ function harness(globals = '<plist version="1.0"><dict/></plist>') {
           };
         },
       },
+      privacyGrants: { readServiceRows: async () => [] },
+      trustStore: { readUserTrustedCertificates: async () => [] },
       files: { realpath: async (path) => path, remove: async () => {} },
       pasteboard: { assertSettled: () => {}, write: async () => {} },
     },
@@ -135,6 +145,8 @@ describe("iOS baseline setting contracts", () => {
             };
           },
         },
+        privacyGrants: { readServiceRows: async () => [] },
+        trustStore: { readUserTrustedCertificates: async () => [] },
         files: { realpath: async (path) => path, remove: async () => {} },
         pasteboard: { assertSettled: () => {}, write: async () => {} },
       },
@@ -174,5 +186,90 @@ describe("iOS baseline setting contracts", () => {
       );
       expect(commands.at(-1)).toEqual(["spawn", "UDID", "defaults", ...entry.args]);
     }
+  });
+});
+
+describe("iOS journaled display setting reverts (#14790)", () => {
+  const present = (value: string): MutationValue => ({ state: "present", value });
+  const mutation = (key: string, priorValue: MutationValue) => ({
+    kind: "device-setting",
+    key,
+    priorValue,
+    toolName: "displayConfig",
+  });
+
+  test.each([
+    ["increaseContrast", present("disabled"), ["ui", "UDID", "increase_contrast", "disabled"]],
+    ["contentSize", present("large"), ["ui", "UDID", "content_size", "large"]],
+    ["nightMode", present("light"), ["ui", "UDID", "appearance", "light"]],
+    [
+      "reduceMotion",
+      present("1"),
+      [
+        "spawn",
+        "UDID",
+        "defaults",
+        "write",
+        "com.apple.Accessibility",
+        "ReduceMotionEnabled",
+        "-bool",
+        "YES",
+      ],
+    ],
+    [
+      "boldText",
+      present("0"),
+      [
+        "spawn",
+        "UDID",
+        "defaults",
+        "write",
+        "com.apple.Accessibility",
+        "EnhancedTextLegibilityEnabled",
+        "-bool",
+        "NO",
+      ],
+    ],
+    [
+      "reduceMotion",
+      { state: "absent" } as MutationValue,
+      ["spawn", "UDID", "defaults", "delete", "com.apple.Accessibility", "ReduceMotionEnabled"],
+    ],
+  ] as const)("%s reverts to its recorded prior value", async (key, priorValue, expected) => {
+    const rig = harness();
+    expect(rig.port.canRevert(mutation(key, priorValue))).toBe(true);
+    await rig.port.revert(mutation(key, priorValue), rig.context);
+    expect(rig.commands).toEqual([[...expected]]);
+  });
+
+  test.each(["reduceMotion", "boldText"])(
+    "%s revert to an absent prior is a no-op when iOS 27 reports the key already absent",
+    async (key) => {
+      // Captured iOS 27 `defaults delete` absent-key error (#14786).
+      const absent = new Error(
+        readFileSync(
+          `${import.meta.dir}/../../fixtures/ios-simctl/defaults-delete-absent-key-ios27.txt`,
+          "utf8",
+        ),
+      );
+      const rig = harness(undefined, (args) => (args[3] === "delete" ? absent : undefined));
+      await expect(
+        rig.port.revert(mutation(key, { state: "absent" }), rig.context),
+      ).resolves.toBeUndefined();
+      expect(rig.commands[0]?.slice(2, 5)).toEqual([
+        "defaults",
+        "delete",
+        "com.apple.Accessibility",
+      ]);
+    },
+  );
+
+  test("values the recorded setting cannot take are refused", () => {
+    const rig = harness();
+    expect(rig.port.canRevert(mutation("increaseContrast", present("true")))).toBe(false);
+    expect(rig.port.canRevert(mutation("contentSize", present("huge")))).toBe(false);
+    expect(rig.port.canRevert(mutation("boldText", present("yes")))).toBe(false);
+    expect(rig.port.canRevert(mutation("increaseContrast", { state: "absent" }))).toBe(false);
+    expect(rig.port.canRevert(mutation("fontScale", present("1.2")))).toBe(false);
   });
 });

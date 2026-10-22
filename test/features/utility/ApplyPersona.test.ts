@@ -330,3 +330,68 @@ describe("applyPersona / resetPersona (#14055)", () => {
     expect(registry.get(emulator.deviceId)?.keyboardProfileBefore).toBeUndefined();
   });
 });
+
+describe("acquisition-time manufacturer profiles (#14058)", () => {
+  let executors: FakePersonaFacetExecutors;
+  let registry: PersonaRestoreRegistry;
+
+  beforeEach(() => {
+    executors = new FakePersonaFacetExecutors();
+    registry = new PersonaRestoreRegistry();
+  });
+
+  test("deferKill reports the kill facet as deferred instead of refusing without an app", async () => {
+    const result = await applyPersona(
+      emulator,
+      "samsung-oneui",
+      { deferKill: true },
+      { executors, registry, owner: "session-1" },
+    );
+
+    expect(result).toMatchObject({ status: "applied" });
+    if (result.status === "route_to_real_device") {
+      throw new Error("unexpected route");
+    }
+    expect(result.facets.map((facet) => [facet.facet, facet.status])).toEqual([
+      ["keyboard", "applied"],
+      ["kill", "deferred"],
+      ["display", "applied"],
+    ]);
+    expect(executors.calls.some((call) => call.facet === "kill")).toBe(false);
+    expect(registry.get(emulator.deviceId)?.killAppIds).toEqual([]);
+  });
+
+  test("without deferKill a kill-bearing profile still needs appId", async () => {
+    await expect(
+      applyPersona(emulator, "samsung-oneui", {}, { executors, registry }),
+    ).rejects.toThrow("apply needs appId");
+  });
+
+  test("restoreKeyboardOnRelease hands the keyboard restore to the owning session once", async () => {
+    await applyPersona(
+      emulator,
+      "samsung-oneui",
+      { deferKill: true },
+      { executors, registry, owner: "session-1", restoreKeyboardOnRelease: true },
+    );
+
+    expect(registry.takeKeyboardOwnedBy(emulator.deviceId, "session-2")).toBeUndefined();
+    expect(registry.takeKeyboardOwnedBy(emulator.deviceId, "session-1")).toEqual({
+      device: emulator,
+      keyboardProfileBefore: "gboard",
+    });
+    expect(registry.takeKeyboardOwnedBy(emulator.deviceId, "session-1")).toBeUndefined();
+    expect(registry.get(emulator.deviceId)).toBeUndefined();
+  });
+
+  test("a tool-path apply in a session leaves the keyboard to reset, as before", async () => {
+    await applyPersona(
+      emulator,
+      "samsung-oneui",
+      { appId: APP },
+      { executors, registry, owner: "session-1" },
+    );
+    expect(registry.takeKeyboardOwnedBy(emulator.deviceId, "session-1")).toBeUndefined();
+    expect(registry.get(emulator.deviceId)?.keyboardProfileBefore).toBe("gboard");
+  });
+});

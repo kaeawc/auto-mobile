@@ -172,7 +172,7 @@ describe("Android creation profile is validated before binding mutation", () => 
     await h.expectIntact();
   });
 
-  test("empty iOS binding adopts an Android leftover without reading an unreadable catalog", async () => {
+  test("empty iOS binding refuses orphan reclamation when the creation catalog is unreadable", async () => {
     const h = await harness({}, true);
     spyOn(h.registry, "openBindingJournal");
     const name = bindingDeviceName(h.key, 3, "leftover");
@@ -187,14 +187,12 @@ describe("Android creation profile is validated before binding mutation", () => 
       throw new Error("catalog read failed");
     };
     expect(await h.acquire({ runtime: RUNTIME })).toMatchObject({
-      outcome: "ready",
-      disposition: "adopted",
-      assignment: { platform: "android", stableDeviceId: name },
+      outcome: "failed",
+      failure: { code: "discovery_incomplete" },
     });
-    expect(h.profiles.calls).toEqual([]);
-    expect(h.provisioner.created()).toEqual([]);
-    expect(h.deleter.calls).toEqual([]);
-    expect(await h.registry.getAssignment(h.key)).toMatchObject({ platform: "android" });
+    expect(h.profiles.calls).toHaveLength(1);
+    expect(h.inventory.has(name)).toBe(true);
+    await h.expectIntact();
   });
 
   test("valid default profile creates on Android in an empty iOS binding", async () => {
@@ -368,7 +366,7 @@ describe("Android creation profile is validated before binding mutation", () => 
     },
   );
 
-  test("adopting a matching leftover does not read the catalog", async () => {
+  test("reclaiming a matching orphan validates the creation catalog before deletion", async () => {
     const h = await harness({ androidDefaultDeviceType: UNKNOWN });
     spyOn(h.registry, "openBindingJournal");
     await h.registry.commitBinding(
@@ -387,9 +385,12 @@ describe("Android creation profile is validated before binding mutation", () => 
       throw new Error("unreadable");
     };
     const result = await h.acquire({ runtime: RUNTIME });
-    expect(result).toMatchObject({ outcome: "ready", disposition: "adopted" });
-    expect(h.profiles.calls).toEqual([]);
-    expect(h.provisioner.created()).toEqual([]);
+    expect(result).toMatchObject({ outcome: "failed", failure: { code: "discovery_incomplete" } });
+    expect(h.profiles.calls).toHaveLength(1);
+    expect(h.inventory.has(bindingDeviceName(h.key, 3, "leftover"))).toBe(true);
+    expect(h.deleter.calls).toEqual([]);
+    expect(h.provisioner.calls).toEqual([]);
+    expect(h.journal).not.toHaveBeenCalled();
   });
 
   test("a resolver without a profile catalog retains legacy creation behavior", async () => {

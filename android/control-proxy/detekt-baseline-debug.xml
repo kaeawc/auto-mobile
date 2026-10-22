@@ -5,7 +5,6 @@
     <ID>ComplexCondition:PrototypeController.kt:PrototypeController$!surface.host.isShowing || surface.request.layer != PrototypeWindowLayer.APP || surface.foreground.suspended || surface.host.isHiddenForCapture</ID>
     <ID>ComplexCondition:PrototypeController.kt:PrototypeController$!surface.runtime.persistent &amp;&amp; count == 0 &amp;&amp; (observerSession == null || observerSession == surface.observerSession)</ID>
     <ID>ComplexCondition:PrototypeController.kt:PrototypeController$count == 0 &amp;&amp; surfaces.isEmpty() &amp;&amp; (observerSession == null || observerSession == lifecycle.observerSession())</ID>
-    <ID>ComplexCondition:SavedPrototypeDirectoryStore.kt:SavedPrototypeDirectoryStore$manifest.specFile != "spec.json" || manifest.id.isEmpty() || manifest.id.length &gt; limits.assets.maxIdLength || manifest.label.isEmpty() || manifest.label.length &gt; limits.maxLabelLength</ID>
     <ID>CyclomaticComplexMethod:CtrlProxy.kt:CtrlProxy$override fun onAccessibilityEvent</ID>
     <ID>CyclomaticComplexMethod:CtrlProxy.kt:CtrlProxy$override fun onDestroy</ID>
     <ID>CyclomaticComplexMethod:CtrlProxy.kt:CtrlProxy$override fun onServiceConnected</ID>
@@ -13,9 +12,6 @@
     <ID>CyclomaticComplexMethod:PrototypeLayoutParams.kt:@SuppressLint("NewApi") fun prototypeLayoutParams: WindowManager.LayoutParams</ID>
     <ID>CyclomaticComplexMethod:SavedPrototypeActivity.kt:@Composable private fun SavedPrototypeStatus</ID>
     <ID>CyclomaticComplexMethod:SavedPrototypeController.kt:internal fun SavedPrototypeRejection.errorCode: SavedPrototypeErrorCode</ID>
-    <ID>CyclomaticComplexMethod:SavedPrototypeDirectoryStore.kt:SavedPrototypeDirectoryStore$override fun save: SavedPrototypeSaveResult</ID>
-    <ID>CyclomaticComplexMethod:SavedPrototypeDirectoryStore.kt:SavedPrototypeDirectoryStore$private fun read: SavedPrototypeLoadResult</ID>
-    <ID>CyclomaticComplexMethod:SavedPrototypeDirectoryStore.kt:SavedPrototypeDirectoryStore$private fun validate: SavedPrototypeSaveResult.Rejected?</ID>
     <ID>InjectDispatcher:CtrlProxy.kt:CtrlProxy$IO</ID>
     <ID>InjectDispatcher:SavedPrototypeActivityDependencies.kt:SavedPrototypeActivityDependencies$Default</ID>
     <ID>InjectDispatcher:SavedPrototypeActivityDependencies.kt:SavedPrototypeActivityDependencies$IO</ID>
@@ -29,8 +25,6 @@
     <ID>LongMethod:CtrlProxy.kt:CtrlProxy$override fun onDestroy</ID>
     <ID>LongMethod:CtrlProxy.kt:CtrlProxy$override fun onServiceConnected</ID>
     <ID>LongMethod:PrototypeController.kt:PrototypeController$private suspend fun display: Surface</ID>
-    <ID>LongMethod:SavedPrototypeDirectoryStore.kt:SavedPrototypeDirectoryStore$override fun save: SavedPrototypeSaveResult</ID>
-    <ID>LongMethod:SavedPrototypeDirectoryStore.kt:SavedPrototypeDirectoryStore$private fun read: SavedPrototypeLoadResult</ID>
     <ID>LongMethod:WebSocketServer.kt:WebSocketServer.Companion$internal fun correlationRequestId: String?</ID>
     <ID>LongParameterList:CtrlProxy.kt:CtrlProxy$private suspend fun broadcastActionResult</ID>
     <ID>LongParameterList:CtrlProxy.kt:internal fun crashEventResponse: CrashEvent</ID>
@@ -46,15 +40,11 @@
     <ID>LongParameterList:PrototypeLayoutParams.kt:@SuppressLint("NewApi") fun prototypeLayoutParams: WindowManager.LayoutParams</ID>
     <ID>LongParameterList:ResultFrames.kt:internal fun prototypeResultFrame: String</ID>
     <ID>LongParameterList:SavedPrototypeController.kt:SavedPrototypeController</ID>
-    <ID>LongParameterList:SavedPrototypeDirectoryStore.kt:SavedPrototypeDirectoryStore</ID>
-    <ID>LongParameterList:SavedPrototypeStore.kt:SavedPrototypeLoadResult.Loaded</ID>
     <ID>NestedBlockDepth:PinnedPrototypeShortcuts.kt:PinnedPrototypeShortcuts$override fun pin: PinOutcome</ID>
-    <ID>RedundantSuspendModifier:SavedPrototypeScreenState.kt:suspend</ID>
     <ID>RedundantSuspendModifier:WebSocketServer.kt:WebSocketServer$suspend</ID>
     <ID>SwallowedException:PinnedPrototypeShortcuts.kt:PinnedPrototypeShortcuts$error: Exception</ID>
     <ID>SwallowedException:PinnedPrototypeShortcuts.kt:PinnedPrototypeShortcuts$error: IllegalStateException</ID>
     <ID>SwallowedException:PrototypeAssetController.kt:PrototypeAssetController$error: IllegalArgumentException</ID>
-    <ID>SwallowedException:RetrofitPrototypeHttpClient.kt:RetrofitPrototypeHttpClient$error: ConnectException</ID>
     <ID>TooGenericExceptionCaught:AndroidPinnedShortcutPlatform.kt:AndroidPinnedShortcutPlatform$error: Exception</ID>
     <ID>TooGenericExceptionCaught:CommandReceivers.kt:CommandReceiver$e: Exception</ID>
     <ID>TooGenericExceptionCaught:CorrelatedErrorReporter.kt:CorrelatedErrorReporter$e: Exception</ID>
@@ -80,7 +70,6 @@
     <ID>TooGenericExceptionCaught:SavedPrototypeActivityDependencies.kt:SavedPrototypeEvents$error: Exception</ID>
     <ID>TooGenericExceptionCaught:SavedPrototypeController.kt:SavedPrototypeController$error: Exception</ID>
     <ID>TooGenericExceptionCaught:SavedPrototypeController.kt:SavedPrototypeController$error: Throwable</ID>
-    <ID>TooGenericExceptionCaught:SavedPrototypeScreenState.kt:error: Exception</ID>
     <ID>TooGenericExceptionCaught:SavedPrototypeShortcuts.kt:AndroidSavedPrototypeShortcuts$error: Exception</ID>
     <ID>TooGenericExceptionCaught:SdkBatchReceivers.kt:AnrReceiver$e: Exception</ID>
     <ID>TooGenericExceptionCaught:SdkBatchReceivers.kt:EventBatchReceiver$e: Exception</ID>
@@ -100,7 +89,6 @@
     <ID>TooManyFunctions:PrototypeHost.kt:DefaultPrototypeHost : PrototypeHost</ID>
     <ID>TooManyFunctions:PrototypeHost.kt:dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHost.kt</ID>
     <ID>TooManyFunctions:PrototypeResultBroadcaster.kt:PrototypeResultBroadcaster : PrototypeResultSink</ID>
-    <ID>TooManyFunctions:SavedPrototypeDirectoryStore.kt:SavedPrototypeDirectoryStore : SavedPrototypeStore</ID>
     <ID>TooManyFunctions:StorageSubscriptionManager.kt:StorageSubscriptionManager</ID>
     <ID>TooManyFunctions:TextInputController.kt:TextInputController</ID>
     <ID>TooManyFunctions:ViewHierarchyExtractor.kt:ViewHierarchyExtractor</ID>

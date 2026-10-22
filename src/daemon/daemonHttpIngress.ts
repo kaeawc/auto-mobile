@@ -141,9 +141,9 @@ export class DaemonHttpIngress {
         ? new DaemonHandoffInterruptionError(DAEMON_HANDOFF_INTERRUPTED_MESSAGE)
         : "streamable_http_onclose",
   });
-  /** HTTP requests whose response is still open (SSE streams included). */
+  /** Admitted HTTP requests whose response is still open (SSE streams included). */
   private openHttpRequests = 0;
-  /** HTTP requests ever received. */
+  /** Admitted HTTP requests ever received. */
   private httpRequestsSeen = 0;
   private acceptingHttpSessions = false;
   /** Set once start() finished, so admitted HTTP requests skip the startup wait. */
@@ -156,12 +156,12 @@ export class DaemonHttpIngress {
     return this.httpServer;
   }
 
-  /** Open request count, for the orphaned private-daemon watchdog (#10497). */
+  /** Open admitted request count, for the orphaned private-daemon watchdog (#10497). */
   get openRequestCount(): number {
     return this.openHttpRequests;
   }
 
-  /** Requests ever received, for the orphaned private-daemon watchdog. */
+  /** Admitted requests ever received, for the orphaned private-daemon watchdog. */
   get requestsSeenCount(): number {
     return this.httpRequestsSeen;
   }
@@ -173,6 +173,8 @@ export class DaemonHttpIngress {
   /** @internal Typed view of private state for unit tests; not part of the public API. */
   get testHooks() {
     return {
+      openRequestCount: (): number => this.openRequestCount,
+      requestsSeenCount: (): number => this.requestsSeenCount,
       setHttpServer: (server: HttpListener | null): void => {
         this.httpServer = server;
       },
@@ -254,13 +256,6 @@ export class DaemonHttpIngress {
     const handleRequest = (req: IncomingMessage, res: ServerResponse): Promise<void> =>
       this.handleHttpRequest(req, res, allowedHosts);
     server.on("request", (req, res) => {
-      // Counted for the orphaned private-daemon watchdog (#10497): an open
-      // request is a connected client.
-      this.openHttpRequests++;
-      this.httpRequestsSeen++;
-      res.once("close", () => {
-        this.openHttpRequests--;
-      });
       handleRequest(req, res).catch((error) => {
         logger.warn(`HTTP request callback failed: ${errorMessage(error)}`, error);
         if (!res.headersSent) {
@@ -330,12 +325,34 @@ export class DaemonHttpIngress {
       return false;
     }
 
-    if (!this.deps.httpToken().isPublished) {
-      res.writeHead(503, { "Content-Type": "application/json", "Retry-After": "1" });
-      res.end(JSON.stringify({ error: "Service unavailable" }));
-      return false;
-    }
+    return true;
+  }
 
+  /**
+   * Hold a request that reaches the listener before this daemon publishes its token
+   * on the bounded startup wait, instead of refusing it outright: the port is
+   * discoverable from the early owner record well before publication, longer than
+   * the clients' own 503 retry budgets (#14424). A client holding a predecessor's
+   * token then gets 401, and every client re-reads the published token once on 401.
+   */
+  private async awaitHttpTokenPublication(res: McpHttpResponseLike): Promise<boolean> {
+    if (this.deps.httpToken().isPublished) {
+      return true;
+    }
+    if (this.acceptingHttpSessions && !this.startupCompleted) {
+      if (!(await this.awaitStartupAdmission(res))) {
+        return false;
+      }
+      if (this.deps.httpToken().isPublished) {
+        return true;
+      }
+    }
+    res.writeHead(503, { "Content-Type": "application/json", "Retry-After": "1" });
+    res.end(JSON.stringify({ error: "Service unavailable" }));
+    return false;
+  }
+
+  private authenticateHttpRequest(req: IncomingMessage, res: ServerResponse): boolean {
     const authorization = req.headers.authorization;
     // Drop credentials from both Node header views before any downstream code runs.
     delete req.headers.authorization;
@@ -362,9 +379,22 @@ export class DaemonHttpIngress {
     res: ServerResponse,
     allowedHosts: string[],
   ): Promise<void> {
-    if (!this.admitHttpRequest(req, res, allowedHosts)) {
+    if (
+      !this.admitHttpRequest(req, res, allowedHosts) ||
+      // No microtask hop when the token is already published, so admission counting stays
+      // synchronous with the request event on the common path.
+      !(this.deps.httpToken().isPublished || (await this.awaitHttpTokenPublication(res))) ||
+      !this.authenticateHttpRequest(req, res)
+    ) {
       return;
     }
+
+    // Only admitted requests count as clients for the orphaned private-daemon watchdog.
+    this.openHttpRequests++;
+    this.httpRequestsSeen++;
+    res.once("close", () => {
+      this.openHttpRequests--;
+    });
 
     if (req.method === "OPTIONS") {
       res.writeHead(200);
@@ -431,6 +461,14 @@ export class DaemonHttpIngress {
       res.end(JSON.stringify({ error: "Daemon is shutting down" }));
       return false;
     }
+    return this.awaitStartupAdmission(res);
+  }
+
+  /**
+   * Wait (bounded) for startup to finish. Returns false after answering 503 when
+   * shutdown began during the wait, or startup outlived the bound or failed.
+   */
+  private async awaitStartupAdmission(res: McpHttpResponseLike): Promise<boolean> {
     if (this.startupCompleted) {
       return true;
     }

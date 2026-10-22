@@ -27,6 +27,8 @@ const INTERNAL: Record<string, string> = {
   AUTOMOBILE_DAEMON_LAUNCH_CWD:
     "Manager-injected caller working directory for child path resolution.",
   AUTOMOBILE_DAEMON_LAUNCH_LOG_PATH: "Manager-injected child launch log ownership marker.",
+  AUTOMOBILE_DAEMON_LAUNCH_NONCE:
+    "Manager-injected per-launch nonce that readiness matches against the answering daemon.",
   AUTOMOBILE_STARTUP_BENCHMARK: "Startup benchmark harness activation.",
   AUTO_MOBILE_STARTUP_BENCHMARK: "Legacy startup benchmark harness activation.",
   AUTOMOBILE_STARTUP_BENCHMARK_OUTPUT: "Startup benchmark harness output file.",

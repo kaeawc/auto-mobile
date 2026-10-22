@@ -18,6 +18,19 @@ describe("pressButtonPolicy", () => {
   });
 
   test.each([
+    "lock",
+    "power_dialog",
+    "quick_settings",
+    "screenshot",
+    "split_screen",
+    "dismiss_notification_shade",
+  ])("%s is an Android system action with no keycode (#14095)", (button) => {
+    expect(isNavigationPressButton(button)).toBe(true);
+    expect(isNavigationPressButton(button.toUpperCase())).toBe(true);
+    expect(resolveAndroidKeyCode(button)).toBeUndefined();
+  });
+
+  test.each([
     ["home", 3],
     ["back", 4],
     ["menu", 82],

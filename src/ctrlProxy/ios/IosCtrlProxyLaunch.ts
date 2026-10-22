@@ -1,4 +1,5 @@
 import type { IosCtrlProxyRuntime } from "./IosCtrlProxyRuntime";
+import type { RunnerLaunchProvenance } from "./IosCtrlProxyLifecycleSteps";
 import { runnerQueryTimeoutEnv } from "./runnerQueryTimeoutEnv";
 import { runnerHierarchyPairCaptureEnv } from "./runnerHierarchyPairCaptureEnv";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -151,7 +152,7 @@ export class IosCtrlProxyLaunch {
     throw startupAbort.reason ?? new Error("iOS CtrlProxy startup was cancelled by stop()");
   }
 
-  async startOnSimulator(): Promise<void> {
+  async startOnSimulator(): Promise<RunnerLaunchProvenance> {
     logger.info("[IOSCtrlProxy] Starting CtrlProxy on simulator");
 
     if (this.host.useRemoteRunner()) {
@@ -172,7 +173,7 @@ export class IosCtrlProxyLaunch {
         );
         this.host.adoptServicePort(existingServicePort);
         this.trackLaunchedRunner(existingProcess.data.pid ?? null, null);
-        return;
+        return "adopted";
       }
 
       await this.host.ensureRemoteServicePortAvailable();
@@ -195,7 +196,7 @@ export class IosCtrlProxyLaunch {
       if (typeof result.data.port === "number") {
         this.host.adoptServicePort(result.data.port);
       }
-      return;
+      return "spawned";
     }
 
     // Use xcodebuild test-without-building (same approach as physical devices).
@@ -302,6 +303,7 @@ export class IosCtrlProxyLaunch {
     });
 
     this.host.trackStartedXcodebuild(child);
+    return "spawned";
   }
 
   // Runner-identification predicates (hasDeviceIdentity, isCtrlProxyRunnerCommand,
@@ -311,7 +313,7 @@ export class IosCtrlProxyLaunch {
   // (#6372 follow-up); callers in this file delegate to `this.processClient` /
   // `IosCtrlProxyProcessClient` instead.
 
-  async startOnDevice(): Promise<void> {
+  async startOnDevice(): Promise<RunnerLaunchProvenance> {
     logger.info("[IOSCtrlProxy] Starting CtrlProxy on physical device");
 
     if (this.host.useRemoteRunner()) {
@@ -329,7 +331,7 @@ export class IosCtrlProxyLaunch {
         );
         this.trackLaunchedRunner(existingProcess.data.pid ?? null, null);
         await this.host.startIproxyTunnel({ devicePort: existingDevicePort });
-        return;
+        return "adopted";
       }
 
       const xctestrunPath = await this.state.builder.getXctestrunPath("device");
@@ -360,7 +362,7 @@ export class IosCtrlProxyLaunch {
         await this.host.stopIproxyTunnel();
         await this.host.startIproxyTunnel({ devicePort: resultDevicePort });
       }
-      return;
+      return "spawned";
     }
 
     // For physical devices, we need to use iproxy for port forwarding
@@ -473,6 +475,7 @@ export class IosCtrlProxyLaunch {
     });
 
     this.host.trackStartedXcodebuild(child);
+    return "spawned";
   }
 
   /**

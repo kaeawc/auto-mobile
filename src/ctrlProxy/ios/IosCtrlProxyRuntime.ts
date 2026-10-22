@@ -6,6 +6,7 @@ import { IosDeviceDetector } from "./IosDeviceDetector";
 import type {
   IosCtrlProxyLifecycleSteps,
   IosCtrlProxyStepOverrides,
+  RunnerLaunchProvenance,
   SharedCtrlProxyStart,
 } from "./IosCtrlProxyLifecycleSteps";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -56,8 +57,8 @@ interface IosCtrlProxyRuntimeHost {
   startInternal(sharedStart: SharedCtrlProxyStart): Promise<void>;
   waitForNonJoinableStart(signal: AbortSignal | undefined): Promise<SharedCtrlProxyStart | null>;
   retireRunnerAfterFinalSharedStartCancellation(sharedStart: SharedCtrlProxyStart): Promise<void>;
-  startOnSimulator(): Promise<void>;
-  startOnDevice(): Promise<void>;
+  startOnSimulator(): Promise<RunnerLaunchProvenance>;
+  startOnDevice(): Promise<RunnerLaunchProvenance>;
   waitForHealthEndpoint(
     sharedStart: SharedCtrlProxyStart,
     perf: PerformanceTracker,

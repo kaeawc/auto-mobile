@@ -699,7 +699,7 @@ describe("CtrlProxyCertificates (Android)", function () {
         expect(first?.requestId).toBeDefined();
         expect(second?.requestId).toBeDefined();
         expect(first?.requestId).not.toBe(second?.requestId);
-        expect(client["requestManager"].getPendingCount()).toBe(2);
+        expect(client.connectionTestHooks.requestManager.getPendingCount()).toBe(2);
 
         socket.simulateMessage(
           JSON.stringify({
@@ -725,7 +725,7 @@ describe("CtrlProxyCertificates (Android)", function () {
         const [firstResult, secondResult] = await Promise.all([firstPromise, secondPromise]);
         expect(firstResult.alias).toBe("first-alias");
         expect(secondResult.alias).toBe("second-alias");
-        expect(client["requestManager"].getPendingCount()).toBe(0);
+        expect(client.connectionTestHooks.requestManager.getPendingCount()).toBe(0);
       } finally {
         await client.close();
       }
@@ -743,13 +743,13 @@ describe("CtrlProxyCertificates (Android)", function () {
           .map((raw) => JSON.parse(raw) as { type?: string; alias?: string; requestId?: string })
           .filter((message) => message.type === "remove_ca_cert");
         const live = sent.find((message) => message.alias === "long-timeout");
-        expect(client["requestManager"].getPendingCount()).toBe(2);
+        expect(client.connectionTestHooks.requestManager.getPendingCount()).toBe(2);
 
         fakeTimer.advanceTime(100);
         const timedOut = await timedOutPromise;
         expect(timedOut.success).toBe(false);
         expect(timedOut.error).toContain("timeout after 100ms");
-        expect(client["requestManager"].getPendingCount()).toBe(1);
+        expect(client.connectionTestHooks.requestManager.getPendingCount()).toBe(1);
 
         socket.simulateMessage(
           JSON.stringify({
@@ -764,7 +764,7 @@ describe("CtrlProxyCertificates (Android)", function () {
         const liveResult = await livePromise;
         expect(liveResult.success).toBe(true);
         expect(liveResult.alias).toBe("long-timeout");
-        expect(client["requestManager"].getPendingCount()).toBe(0);
+        expect(client.connectionTestHooks.requestManager.getPendingCount()).toBe(0);
       } finally {
         await client.close();
       }

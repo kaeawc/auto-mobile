@@ -107,6 +107,10 @@ also reads pen data (**Source**):
   `BTN_TOOL_RUBBER`, `BTN_TOUCH`, `BTN_STYLUS`/`BTN_STYLUS2`, `ABS_TILT_X`/`ABS_TILT_Y` and
   `ABS_DISTANCE`/`ABS_MT_DISTANCE`. A pen in range without contact is hover and never
   becomes a tap or swipe.
+- **Pressure axes.** A touch node reports `ABS_MT_PRESSURE`; a single-touch pen node
+  reports the non-multitouch `ABS_PRESSURE` instead. Discovery reads each node's axis range
+  from `getevent -p`, and the raw values are scaled to 0-1 against it; without a usable
+  range the raw values are kept and `pressure.normalized` is false.
 - **Gesture fields.** `GestureEvent` carries optional `toolType` (`stylus`/`eraser`),
   `pressure` (min, max and mean, normalized when the axis range is known) and `buttons`.
   Exported plan steps are unchanged, so a recorded stylus stroke still replays as a finger

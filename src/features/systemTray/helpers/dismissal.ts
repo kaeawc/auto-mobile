@@ -459,7 +459,11 @@ export interface ClearAllDrainResult {
   observation?: ObserveResult;
 }
 
-/** Android drain: confirm each dismissal, bounded by inventory or the safety cap. */
+/**
+ * Android drain: readiness, each iteration's group expansion, and each post-swipe
+ * verification get separate awaitTimeoutMs budgets. Confirmed dismissals renew
+ * the next iteration's budget; inventory or the safety cap bounds the drain.
+ */
 export const clearMatchingSystemTrayNotifications = async (
   device: BootedDevice,
   criteria: SystemTrayNotificationArgs,
@@ -472,7 +476,6 @@ export const clearMatchingSystemTrayNotifications = async (
     return { swipeCount: 0, dismissedCount: 0, stalled: false };
   }
   const { timer } = getSystemTrayDependencies();
-  let deadlineMs = timer.now() + awaitTimeoutMs;
   let current = await waitForReadableClearAllMatch(
     device,
     criteria,
@@ -480,6 +483,7 @@ export const clearMatchingSystemTrayNotifications = async (
     awaitTimeoutMs,
     { progress, signal },
   );
+  let deadlineMs = timer.now() + awaitTimeoutMs;
   // The initial app inventory includes rows below the viewport that move into
   // view as siblings leave. Without it, drain newly visible matches up to the cap.
   const maxSwipes = Math.min(
@@ -512,6 +516,7 @@ export const clearMatchingSystemTrayNotifications = async (
       appMatchTexts,
     );
     await swipeElement(device, swipeTarget, signal);
+    deadlineMs = timer.now() + awaitTimeoutMs;
     swipeCount++;
     const verified = await waitForClearAllDismissal(
       device,

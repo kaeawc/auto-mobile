@@ -1,5 +1,6 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { SessionBroker } from "../../../src/daemon/sessionBroker/broker";
+import { SessionBroker, type SessionBrokerOptions } from "../../../src/daemon/sessionBroker/broker";
+import { SessionBrokerFailureError } from "../../../src/daemon/sessionBroker/devicePort";
 import { SessionBrokerService } from "../../../src/daemon/sessionBroker/service";
 import {
   openSqliteBindingRegistry,
@@ -57,16 +58,21 @@ describe("preparations crossing restart handoff", () => {
     }
     store = registry.sessionBrokerStore(scope.scope.scopeKey, new CountingIdGenerator("resource"));
     devices = new FakeNativePort(registry);
-    broker = new SessionBroker({
+    broker = newBroker();
+  });
+
+  function newBroker(catalog: SessionBrokerOptions["catalog"] = async () => iosCatalog()) {
+    return new SessionBroker({
       store,
       devices,
       owner: FAKE_BROKER_OWNER,
       limits: { totalDeviceCap: 2, sessionCap: 2, idlePoolCap: 0 },
-      catalog: async () => iosCatalog(),
+      catalog,
       defaults: () => iosDefaults(),
       sessionDisposition: () => "live",
+      timer,
     });
-  });
+  }
 
   afterEach(async () => {
     await broker.close();
@@ -81,6 +87,84 @@ describe("preparations crossing restart handoff", () => {
       timer,
     );
   }
+
+  async function stopNativePreparation(requestId: string) {
+    const entered = Promise.withResolvers<void>();
+    devices.prepareHook = async ({ signal }) => {
+      const aborted = Promise.withResolvers<void>();
+      signal!.addEventListener("abort", () => aborted.resolve(), { once: true });
+      entered.resolve();
+      await aborted.promise;
+      throw new SessionBrokerFailureError({
+        code: "provision_failed",
+        retryable: false,
+        message:
+          "provisionDevice request was cancelled by the caller; its provisioning work was cancelled too.",
+      });
+    };
+    const preparing = broker.prepare(config(requestId), "owner");
+    await entered.promise;
+    await broker.close();
+    return preparing;
+  }
+
+  test("T1: broker shutdown preserves stopping retryability through native provision failure", async () => {
+    expect(await stopNativePreparation("stop-mid-provision")).toMatchObject({
+      outcome: "failed",
+      failure: {
+        code: "session_broker_stopping",
+        retryable: true,
+        retryAfterMs: 5_000,
+        retryRequires: "new_request_id",
+      },
+    });
+    expect(await store.getRequest("stop-mid-provision")).toMatchObject({
+      errorCode: "session_broker_stopping",
+      retryable: true,
+    });
+  });
+
+  test.each([false, true])(
+    "T2: successor replays identical stopping failure with cleanupPending=%s",
+    async (cleanupPending) => {
+      devices.canDestroy = !cleanupPending;
+      const initial = await stopNativePreparation("stop-replay");
+      expect(initial.cleanupPending).toBe(cleanupPending);
+      broker = newBroker();
+      const replay = await broker.prepare(config("stop-replay"), "owner");
+      expect(replay.failure).toEqual(initial.failure);
+      expect(replay).toMatchObject({
+        outcome: "failed",
+        cleanupPending,
+        failure: {
+          code: "session_broker_stopping",
+          retryable: true,
+          retryAfterMs: 5_000,
+          retryRequires: "new_request_id",
+        },
+      });
+      expect(devices.prepared).toHaveLength(1);
+    },
+  );
+
+  test("T3: shutdown before admission refuses without storing a receipt", async () => {
+    const entered = Promise.withResolvers<void>();
+    broker = newBroker(async (_platform, signal) => {
+      const aborted = Promise.withResolvers<void>();
+      signal!.addEventListener("abort", () => aborted.resolve(), { once: true });
+      entered.resolve();
+      await aborted.promise;
+      throw signal!.reason;
+    });
+    const preparing = broker.prepare(config("stop-before-admission"), "owner");
+    const settled = Promise.allSettled([preparing]);
+    await entered.promise;
+    await broker.markRestartHandoff();
+    await settled;
+    await expect(preparing).rejects.toBeInstanceOf(SessionBrokerStoppingError);
+    expect(await store.getRequest("stop-before-admission")).toBeUndefined();
+    expect(devices.prepared).toEqual([]);
+  });
 
   test.each(["prepare", "abandon"] as const)(
     "stopping refuses %s before touching durable request identity",
@@ -145,8 +229,13 @@ describe("preparations crossing restart handoff", () => {
       finishPreparation.resolve();
       expect(await preparing).toMatchObject({
         outcome: "failed",
-        // Shutdown aborts the preparation; the receipt is a typed retryable cancellation (#13800).
-        failure: { code: "cancelled", retryable: true },
+        // Shutdown stores a stopping receipt requiring a fresh request identity.
+        failure: {
+          code: "session_broker_stopping",
+          retryable: true,
+          retryAfterMs: 5_000,
+          retryRequires: "new_request_id",
+        },
       });
       expect(closed).toBe(false);
       finishRelease.resolve();

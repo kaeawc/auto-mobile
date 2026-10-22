@@ -1,0 +1,90 @@
+{
+  "spec": {
+    "id": "stack-demo",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "opacity": 100
+    },
+    "state": {
+      "open": true
+    },
+    "root": {
+      "id": "nav",
+      "style": {
+        "width": {
+          "dp": 320
+        },
+        "height": {
+          "dp": 480
+        }
+      },
+      "visibleWhen": {
+        "key": "open",
+        "equals": true
+      },
+      "type": "stack",
+      "start": "home",
+      "screens": {
+        "home": {
+          "type": "column",
+          "children": [
+            {
+              "onTap": [
+                {
+                  "type": "push",
+                  "stack": "nav",
+                  "screen": "detail"
+                }
+              ],
+              "type": "button",
+              "label": "push"
+            },
+            {
+              "onTap": [
+                {
+                  "type": "pop",
+                  "stack": "nav",
+                  "zzzUnknown": true
+                }
+              ],
+              "type": "button",
+              "label": "pop"
+            },
+            {
+              "onTap": [
+                {
+                  "type": "popToRoot",
+                  "stack": "nav"
+                }
+              ],
+              "type": "button",
+              "label": "popToRoot"
+            },
+            {
+              "onTap": [
+                {
+                  "type": "replace",
+                  "stack": "nav",
+                  "screen": "detail"
+                }
+              ],
+              "type": "button",
+              "label": "replace"
+            }
+          ]
+        },
+        "detail": {
+          "type": "text",
+          "text": "Screen"
+        },
+        "third": {
+          "type": "text",
+          "text": "Third"
+        }
+      }
+    }
+  },
+  "expectedPath": "root.screens[\"home\"].children[1].onTap[0].zzzUnknown"
+}

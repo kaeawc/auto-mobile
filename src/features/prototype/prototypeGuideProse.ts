@@ -194,7 +194,7 @@ series' latest value against it. The chart is one accessible node labelled with 
 "Line chart, Heart rate, 24 points, min 58, max 141, latest 72" or "Ring chart, Steps, 6500 of
 10000"; \`observe\` reports it, and an authored \`contentDescription\` replaces it. A literal path that
 does not resolve to an array, a point that is not an object, or a point whose \`y\` is not a number
-fails at \`<path>.series[i].path\` or \`.y\`. The iOS agent does not draw charts yet (#14679).
+fails at \`<path>.series[i].path\` or \`.y\`. The iOS agent draws charts with Swift Charts.
 
 ## Rich text
 

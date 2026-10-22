@@ -210,12 +210,19 @@ describe("legacy product inventory through broker lifecycle", () => {
       const name = legacyDevice(platform);
       const result = await broker.prepare(config("upgrade", platform), "consumer");
       expect(result.outcome).toBe("ready");
-      expect(provisioner.calls).toMatchObject([{ mode: "adopt", name }]);
+      expect(provisioner.calls).toMatchObject([{ mode: "create" }]);
+      expect(provisioner.calls[0]?.name).not.toBe(name);
+      const freshName = provisioner.calls[0]!.name;
       expect(await broker.release(result.sessionUuid!)).toMatchObject({ outcome: "released" });
       expect(releases).toContain(result.sessionUuid!);
       expect(deletions).toMatchObject([
         {
           target: { platform, stableName: name },
+          mode: "destroy",
+          verifyAbsence: true,
+        },
+        {
+          target: { platform, stableName: freshName },
           mode: "destroy",
           verifyAbsence: true,
         },
@@ -228,7 +235,7 @@ describe("legacy product inventory through broker lifecycle", () => {
     },
   );
 
-  test("cache eviction destroys a legacy simulator before creating a new broker AVD", async () => {
+  test("cache eviction destroys a reclaimed legacy simulator before creating a new broker AVD", async () => {
     const name = legacyDevice("ios");
     // Enable qualified reuse with a fake baseline, then request an incompatible platform.
     const store = registry.sessionBrokerStore(scopeKey, new CountingIdGenerator("cache-resource"));
@@ -246,13 +253,19 @@ describe("legacy product inventory through broker lifecycle", () => {
       expect(first.outcome).toBe("ready");
       expect(await cachedBroker.release(first.sessionUuid!)).toMatchObject({ outcome: "released" });
       expect((await store.listResources())[0].state).toBe("idle");
-      expect(deletions).toEqual([]);
+      const freshName = provisioner.created()[0]!.name;
+      expect(freshName).not.toBe(name);
+      expect(deletions).toMatchObject([
+        { target: { stableName: name }, mode: "destroy", verifyAbsence: true },
+      ]);
       const second = await cachedBroker.prepare(config("replacement", "android"), "consumer");
       expect(second.outcome).toBe("ready");
       expect(deletions).toMatchObject([
         { target: { stableName: name }, mode: "destroy", verifyAbsence: true },
+        { target: { stableName: freshName }, mode: "destroy", verifyAbsence: true },
       ]);
       expect(provisioner.created()).toMatchObject([
+        { platform: "ios", name: freshName },
         { platform: "android", name: expect.stringContaining("ambroker-") },
       ]);
       expect((await store.listResources())[0].state).toBe("destroyed");

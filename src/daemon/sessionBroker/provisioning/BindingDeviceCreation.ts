@@ -21,6 +21,7 @@ import {
   type BindingAssignmentRecord,
   type BindingJournalEntry,
 } from "../registry/bindingRegistry";
+import { deviceStableId } from "../registry/deviceIdentity";
 import { provisionableSpec } from "./DefaultManagedSpecResolver";
 import { ReconcileAbort, type BindingReconcileFailure } from "./ReconcileAbort";
 import type {
@@ -613,6 +614,55 @@ export class BindingDeviceCreation {
 
   // --- replace ---------------------------------------------------------------------------------
 
+  /** Reclaim an unheld orphan atomically with its deletion journal; never expose it unreset. */
+  async replaceOrphan(
+    context: ReconcileContext,
+    assignment: BindingAssignmentRecord,
+    device: DeviceInfo,
+  ): Promise<ReadyResult> {
+    const { request } = context;
+    await this.assertCreatable(context);
+    this.host.checkBudget(request);
+    const reservation = await this.reserveReplacement(request, assignment, device);
+    try {
+      this.host.checkBudget(request);
+      const next = {
+        stableDeviceId: deviceStableId(device)!,
+        deviceName: device.name,
+        requestedSpec: request.requestedSpec,
+        resolvedSpec: context.resolvedSpec,
+        specFingerprint: encodeManagedSpecFingerprint(context.fingerprint),
+        state: "replacing" as const,
+      };
+      const opened = await this.deps.registry.openBindingJournal(request.key, {
+        kind: "replace",
+        phase: "deleting",
+        owner: this.deps.journal.owner,
+        target: {
+          ...this.journalTarget(context, assignment, null),
+          oldStableId: next.stableDeviceId,
+          oldName: device.name,
+        },
+        assignment: { kind: "commit", expected: expectationOf(assignment), next },
+      });
+      if (opened.kind === "journal_open") {
+        throw new ReconcileAbort(
+          failure(
+            "reconcile_in_progress",
+            `Binding ${request.key.bindingIndex} has unfinished work.`,
+          ),
+        );
+      }
+      if (opened.kind !== "opened") {
+        throw new ReconcileAbort(claimFailure(opened, "reclaim"));
+      }
+      context.evidence.adoptedFrom = "orphan";
+      return await this.finishReplacement(context, opened.entry, device, reservation);
+    } finally {
+      reservation?.release();
+    }
+  }
+
   async replaceAssigned(
     context: ReconcileContext,
     assignment: BindingAssignmentRecord,
@@ -638,8 +688,7 @@ export class BindingDeviceCreation {
     device: DeviceInfo,
     reservation: BootSlotReservation | undefined,
   ): Promise<ReadyResult> {
-    const { request, evidence } = context;
-    const oldId = assignment.stableDeviceId!;
+    const { request } = context;
     // Journal the accepted deletion together with `replacing`: from here on, an interruption is
     // redriven against this exact device and binding.
     const opened = await this.deps.registry.openBindingJournal(request.key, {
@@ -661,12 +710,23 @@ export class BindingDeviceCreation {
       // A live execution (or another attempt's reservation) claimed the device after our checks.
       throw new ReconcileAbort(claimFailure(opened, "replace"));
     }
-    this.noteJournal(context, opened.entry);
-    this.deps.journal.inFlight.add(opened.entry.id);
+    return await this.finishReplacement(context, opened.entry, device, reservation);
+  }
+
+  private async finishReplacement(
+    context: ReconcileContext,
+    entry: BindingJournalEntry,
+    device: DeviceInfo,
+    reservation: BootSlotReservation | undefined,
+  ): Promise<ReadyResult> {
+    const { request, evidence } = context;
+    const oldId = entry.target.oldStableId!;
+    this.noteJournal(context, entry);
+    this.deps.journal.inFlight.add(entry.id);
     let deletedEntry: BindingJournalEntry;
     let emptied: BindingAssignmentRecord;
     try {
-      const deletion = await this.deps.journal.driveDeletion(opened.entry, {
+      const deletion = await this.deps.journal.driveDeletion(entry, {
         device,
         deadlineMs: request.deadlineMs,
         signal: request.signal,
@@ -690,7 +750,7 @@ export class BindingDeviceCreation {
       emptied = deletion.assignment;
       reservation?.markReplacedDeviceGone();
     } finally {
-      this.deps.journal.inFlight.delete(opened.entry.id);
+      this.deps.journal.inFlight.delete(entry.id);
     }
     return await this.createAndCommit(context, emptied, "replaced", deletedEntry, {
       bootReservation: reservation,
@@ -800,7 +860,7 @@ export class BindingDeviceCreation {
     const { request } = context;
     const result = await this.deps.resolver.checkCreatable?.(
       request.platform,
-      // Creation paths retain resolve()'s exact spec; only reuse/adopt can widen this type.
+      // Creation paths retain resolve()'s exact spec; only reuse can widen this type.
       context.resolvedSpec as ResolvedExactDeviceSpecification,
       { signal: request.signal },
     );

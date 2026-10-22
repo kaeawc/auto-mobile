@@ -148,6 +148,37 @@ describe("reset readiness", () => {
     expect(await context.readiness.snapshot(() => false)).toBeUndefined();
   });
 
+  test("cold-create break-even includes the readiness phase observed on device (#14791)", async () => {
+    const context = harness();
+    // Measured batch 20261022a: create 5.6 s, boot 27-49 s, readiness 60-70 s, total 111-123 s;
+    // erase resets 54-60 s. The third acquisition began shortly after release (about 50 s of reset remain).
+    const acquisition = context.store.samples[0].timing.acquisition!;
+    const cold = (createMs: number, bootMs: number, automationReadyMs: number, totalMs: number) =>
+      ({
+        profile: PROFILE,
+        timing: { acquisition: { ...acquisition, createMs, bootMs, automationReadyMs, totalMs } },
+      }) satisfies BrokerTimingSample;
+    const reset = (totalMs: number) =>
+      ({
+        profile: PROFILE,
+        timing: {
+          reset: { ...context.store.samples[0].timing.reset!, phases: {}, totalMs },
+        },
+      }) satisfies BrokerTimingSample;
+    context.store.samples = [
+      cold(5_569, 49_184, 68_000, 123_433),
+      cold(900, 38_000, 65_000, 110_992),
+      reset(60_500),
+      reset(56_500),
+    ];
+    context.timer.advanceTime(10_000);
+    context.store.request.timing!.reset!.startedAtMs = 1000;
+    const snapshot = (await context.readiness.snapshot(() => true))!;
+    expect(snapshot.thresholdMs).toBeGreaterThanOrEqual(110_992);
+    // About 50 s of reset remain: far cheaper than a 111-123 s cold create, so wait.
+    expect(snapshot.expectedReadyMs.get("resource")).toBeLessThanOrEqual(snapshot.thresholdMs);
+  });
+
   test("parked and failed pending resets never offer readiness", async () => {
     const context = harness();
     context.readiness.setResetActive("resource", false);
@@ -299,8 +330,10 @@ describe("reset readiness", () => {
     );
     try {
       await drainUntilQuiescent(context.timer);
+      context.readiness.setResetActive("resource", false);
       context.timer.advanceTime(600);
       await entered.promise;
+      context.readiness.setResetActive("resource", true);
       expect(await context.readiness.snapshot(() => true)).toBeDefined();
       continued.resolve();
       expect(await pending).toMatchObject({
@@ -312,6 +345,110 @@ describe("reset readiness", () => {
       continued.resolve();
       continuation.mockRestore();
     }
+  });
+
+  test("reset completing just AFTER the initial wait expires is reused, not created", async () => {
+    const context = harness();
+    const pending = context.readiness.continueAfterWait(
+      context.admission,
+      context.input,
+      5000,
+      context.controller.signal,
+    );
+    await drainUntilQuiescent(context.timer);
+    context.timer.advanceTime(600);
+    await drainUntilQuiescent(context.timer);
+    expect(context.store.continuations).toBe(0);
+    expect(context.timer.getPendingTimeoutCount()).toBe(1);
+    context.timer.advanceTime(400);
+    context.store.resource.state = "idle";
+    context.readiness.notify("resource");
+    expect((await pending).admission.kind).toBe("reuse");
+    expect(context.store.continuations).toBe(1);
+    expect(context.timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("reset completing just BEFORE the initial wait expires is reused without extension", async () => {
+    const context = harness();
+    const pending = context.readiness.continueAfterWait(
+      context.admission,
+      context.input,
+      5000,
+      context.controller.signal,
+    );
+    await drainUntilQuiescent(context.timer);
+    context.timer.advanceTime(599);
+    context.store.resource.state = "idle";
+    context.readiness.notify("resource");
+    expect((await pending).admission.kind).toBe("reuse");
+    expect(context.store.continuations).toBe(1);
+    expect(context.timer.now()).toBe(1599);
+    expect(context.timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("a reset still running after the extension falls back to create", async () => {
+    const context = harness();
+    const pending = context.readiness.continueAfterWait(
+      context.admission,
+      context.input,
+      5000,
+      context.controller.signal,
+    );
+    await drainUntilQuiescent(context.timer);
+    context.timer.advanceTime(600);
+    await drainUntilQuiescent(context.timer);
+    expect(context.store.continuations).toBe(0);
+    context.timer.advanceTime(600);
+    expect(await pending).toMatchObject({
+      admission: { kind: "create" },
+      preparationTimeoutMs: 3800,
+    });
+    expect(context.store.continuations).toBe(1);
+    expect(context.timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("the extension never outlives the preparation deadline", async () => {
+    const context = harness();
+    const pending = context.readiness.continueAfterWait(
+      context.admission,
+      context.input,
+      900,
+      context.controller.signal,
+    );
+    const rejected = pending.catch((error: unknown) => error);
+    await drainUntilQuiescent(context.timer);
+    context.timer.advanceTime(600);
+    await drainUntilQuiescent(context.timer);
+    expect(context.store.continuations).toBe(0);
+    expect(context.timer.getPendingTimeouts()).toEqual([300]);
+    context.timer.advanceTime(300);
+    expect(await rejected).toMatchObject({ message: expect.stringContaining("deadline expired") });
+    expect(context.store.continuations).toBe(0);
+    expect(context.timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("a waiter holds its reservation across the extension", async () => {
+    const context = harness();
+    const readiness = (await context.readiness.snapshot(() => true))!;
+    readiness.reserveWait!(context.input.requestId, "resource");
+    context.input.resetReadiness = readiness;
+    const pending = context.readiness.continueAfterWait(
+      context.admission,
+      context.input,
+      5000,
+      context.controller.signal,
+    );
+    await drainUntilQuiescent(context.timer);
+    context.timer.advanceTime(600);
+    await drainUntilQuiescent(context.timer);
+    expect(await context.readiness.snapshot(() => true)).toBeUndefined();
+    expect(readiness.canWait!("resource")).toBe(false);
+    context.timer.advanceTime(400);
+    context.store.resource.state = "idle";
+    context.readiness.notify("resource");
+    expect((await pending).admission.kind).toBe("reuse");
+    expect(readiness.canWait!("resource")).toBe(true);
+    expect(context.timer.getPendingTimeoutCount()).toBe(0);
   });
 
   test("the caller deadline ends waiting without starting creation", async () => {

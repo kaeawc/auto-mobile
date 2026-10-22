@@ -72,11 +72,15 @@ enum PrototypeRepeat {
     }
 
     /// `key` is accepted but rows keep positional identity until keyed patching (#11675).
-    private static func instances(of spec: [String: JSONValue]) -> [Instance] {
+    private static func instances(of spec: [String: JSONValue]) -> [PrototypeRepeatInstance] {
         guard case let .string(alias)? = spec["as"], case let .array(items)? = spec["items"] else { return [] }
         return items.enumerated().map { index, item in
-            guard case let .object(fields) = item else { return Instance(alias: alias, item: [:], index: index) }
-            return Instance(alias: alias, item: fields, index: index)
+            guard case let .object(fields) = item else { return PrototypeRepeatInstance(
+                alias: alias,
+                item: [:],
+                index: index
+            ) }
+            return PrototypeRepeatInstance(alias: alias, item: fields, index: index)
         }
     }
 
@@ -333,7 +337,7 @@ extension PrototypeRepeat {
     }
 }
 
-private struct Instance {
+struct PrototypeRepeatInstance {
     let alias: String
     let item: [String: JSONValue]
     let index: Int
@@ -398,6 +402,9 @@ private struct Instance {
             if case let .array(actions)? = fields["onSubmit"] {
                 fields["onSubmit"] = .array(actions.map(bindAction))
             }
+        case "chart":
+            // A repeat-bound series path takes the row's placeholders, as Android's repeat does.
+            bindList("series", in: &fields) { bindString("path", in: &$0) }
         case "menu":
             bindList("items", in: &fields) { bindPartFields(&$0) }
         case "dialog":
@@ -413,7 +420,7 @@ private struct Instance {
     /// State-key fields bind to text (#11051): the node's own keys, a list item's trailing control
     /// and a sheet, dialog or snackbar `openWhen`. Condition and action keys bind with their owners.
     private func bindStateKeys(_ fields: inout [String: JSONValue]) {
-        for key in ["stateKey", "hourKey", "minuteKey", "activeKey"] {
+        for key in ["stateKey", "hourKey", "minuteKey", "activeKey", "atEndKey"] {
             bindString(key, in: &fields)
         }
         for (part, key) in [("trailing", "stateKey"), ("openWhen", "key"), ("refresh", "stateKey")] {
@@ -473,7 +480,7 @@ private struct Instance {
         if case let .object(binding)? = fields["value"] { fields["value"] = bindDataValue(binding) }
     }
 
-    private func bindAction(_ action: JSONValue) -> JSONValue {
+    func bindAction(_ action: JSONValue) -> JSONValue {
         guard case var .object(fields) = action else { return action }
         switch fields["type"] {
         case .string("setState")?:
@@ -570,7 +577,7 @@ private struct Instance {
     }
 
     /// Unknown fields cannot occur after validation; they are left as their literal placeholder.
-    private func interpolate(_ text: String) -> String {
+    func interpolate(_ text: String) -> String {
         PrototypeRepeat.segments(text, alias: alias).map { segment in
             switch segment {
             case let .literal(literal): literal

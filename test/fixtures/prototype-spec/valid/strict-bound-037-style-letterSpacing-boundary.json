@@ -1,0 +1,73 @@
+{
+  "id": "prototype",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    },
+    "opacity": 100
+  },
+  "state": {
+    "on": true
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "style": {
+          "width": {
+            "dp": 120
+          },
+          "height": {
+            "dp": 48
+          },
+          "background": "surfaceContainer",
+          "cornerRadius": {
+            "topStart": 16,
+            "topEnd": 16
+          },
+          "elevation": 6,
+          "shadowColor": "primary",
+          "offset": {
+            "x": 4,
+            "y": -2
+          }
+        },
+        "type": "box",
+        "children": []
+      },
+      {
+        "style": {
+          "shadowColor": "#80000000",
+          "maxLines": 1,
+          "lineHeight": 28,
+          "letterSpacing": 1000,
+          "textDecoration": "underlineLineThrough",
+          "fontStyle": "italic",
+          "overflow": "ellipsis"
+        },
+        "type": "text",
+        "text": "Polished heading that may be long"
+      },
+      {
+        "styleWhen": [
+          {
+            "when": {
+              "key": "on",
+              "equals": true
+            },
+            "style": {
+              "cornerRadius": {
+                "bottomStart": 8
+              },
+              "textDecoration": "none",
+              "fontStyle": "normal",
+              "overflow": "visible"
+            }
+          }
+        ],
+        "type": "text",
+        "text": "x"
+      }
+    ]
+  }
+}

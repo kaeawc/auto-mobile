@@ -61,7 +61,9 @@ test("valid spec fixtures are present", () => {
 test.each(sampledValidFixtureFiles)(
   "sampled valid spec fixture %s requires only registered gate capabilities",
   (file) => {
-    const spec: unknown = JSON.parse(readFileSync(join(validFixtureDirectory, file), "utf8"));
+    const spec: unknown = JSON.parse(
+      readFileSync(join(validFixtureDirectory, file), "utf8").replace(/^\uFEFF/, ""),
+    );
     const capabilities = requiredPrototypeCapabilities(spec);
     expect(
       capabilities.filter((capability) => !knownCapabilities.has(capability)),

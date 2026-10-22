@@ -1876,7 +1876,7 @@ describe("IOSCtrlProxyManager simulator start", function () {
       });
 
       try {
-        IOSCtrlProxyManager.startOrphanRunnerReapOnStartup();
+        void IOSCtrlProxyManager.startOrphanRunnerReapOnStartup();
         const start = manager.start();
         await Promise.resolve();
 
@@ -1908,7 +1908,7 @@ describe("IOSCtrlProxyManager simulator start", function () {
       });
 
       try {
-        IOSCtrlProxyManager.startOrphanRunnerReapOnStartup(undefined, fakeTimer);
+        void IOSCtrlProxyManager.startOrphanRunnerReapOnStartup(undefined, fakeTimer);
         const start = manager.start();
         await Promise.resolve();
 

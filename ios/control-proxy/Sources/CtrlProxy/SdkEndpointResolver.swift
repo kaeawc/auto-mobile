@@ -27,6 +27,13 @@ actor SdkEndpointResolver {
     private var negativeUntil: TimeInterval?
     private var lastForegroundBundle: String?
     private var warnedAboutLegacy = false
+    /// Bumped by every foreground-bundle or lifecycle change: a discovery that began before one
+    /// must not cache its failure for the new app (#14398).
+    private var discoveryGeneration = 0
+    /// Bumped by a foreground-bundle change; the unavailable warning is reported once per bundle,
+    /// independent of the negative-cache TTL (#14399).
+    private var bundleGeneration = 0
+    private var unavailableReportedBundleGeneration: Int?
 
     /// Failed discovery costs 7–9 loopback probes. Verify 20261021a observed a 4 s
     /// agent cadence, so the default 30 s negative window covers about seven observes.
@@ -69,6 +76,7 @@ actor SdkEndpointResolver {
         if let negativeUntil, now() < negativeUntil {
             throw SdkEndpointError.unavailableCached(unavailableMessage)
         }
+        let generations = (discovery: discoveryGeneration, bundle: bundleGeneration)
         for attempt in 0 ..< SdkSimulatorPort.probeCount {
             let url = loopbackBaseURL(port: SdkSimulatorPort.simulatorPort(udid: udid, attempt: attempt))
             // A collision, refused connection, or old SDK on a derived port is expected.
@@ -83,8 +91,7 @@ actor SdkEndpointResolver {
         }
         let url = loopbackBaseURL(port: legacyPort)
         guard let info = try await health(at: url) else {
-            negativeUntil = now() + negativeTTL
-            throw SdkEndpointError.unavailable(unavailableMessage)
+            throw unavailable(unavailableMessage, startedAt: generations)
         }
         if let actual = info.simulatorUdid {
             guard actual.lowercased() == udid.lowercased() else {
@@ -102,16 +109,34 @@ actor SdkEndpointResolver {
         return url
     }
 
+    /// Caches a failed discovery only while no bundle or lifecycle change happened during its
+    /// probes, and reports it as `.unavailable` once for the bundle it was started for.
+    private func unavailable(
+        _ message: String, startedAt generations: (discovery: Int, bundle: Int)
+    ) -> SdkEndpointError {
+        if generations.discovery == discoveryGeneration {
+            negativeUntil = now() + negativeTTL
+        }
+        if unavailableReportedBundleGeneration == generations.bundle {
+            return .unavailableCached(message)
+        }
+        unavailableReportedBundleGeneration = generations.bundle
+        return .unavailable(message)
+    }
+
     /// A newly foregrounded app may expose an SDK even during a negative window.
     func noteForegroundBundle(_ bundleId: String?) {
         guard bundleId != lastForegroundBundle else { return }
         lastForegroundBundle = bundleId
         negativeUntil = nil
+        discoveryGeneration += 1
+        bundleGeneration += 1
     }
 
     /// Runner-managed app lifecycle changes may expose an SDK in the same bundle.
     func noteAppLifecycleEvent() {
         negativeUntil = nil
+        discoveryGeneration += 1
     }
 
     /// One request path supplies the identity header and rejects wrong-simulator
@@ -200,7 +225,8 @@ actor SdkEndpointResolver {
 
 enum SdkEndpointError: LocalizedError, Sendable {
     case unavailable(String)
-    /// Discovery already failed in this window; callers should not repeat its warning.
+    /// Discovery already failed in this window, or was already reported for this foreground
+    /// bundle; callers should not repeat its warning.
     case unavailableCached(String)
     case wrongSimulator(expectedUdid: String, actualUdid: String)
 

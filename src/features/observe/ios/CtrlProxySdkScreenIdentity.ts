@@ -42,7 +42,12 @@ export class CtrlProxySdkScreenIdentity {
     return applicationId ? this.sdkScreenIdentitiesByApplicationId.get(applicationId) : undefined;
   }
 
-  /** Whether the last accepted navigation event covers this device-clock capture. */
+  /**
+   * Whether the last accepted navigation event covers this device-clock capture.
+   * Only a strictly later event orders after the capture: both are truncated to
+   * whole epoch milliseconds, so an equal timestamp carries no ordering evidence
+   * and an older event in the capture's millisecond must keep the retry (#14433).
+   */
   hasSdkScreenIdentityForCapture(applicationId?: string, capturedAt?: number): boolean {
     const timestamp = applicationId
       ? this.sdkScreenIdentityOrdersByApplicationId.get(applicationId)?.timestamp
@@ -51,7 +56,7 @@ export class CtrlProxySdkScreenIdentity {
       capturedAt !== undefined &&
       Number.isFinite(capturedAt) &&
       timestamp !== undefined &&
-      capturedAt <= timestamp
+      capturedAt < timestamp
     );
   }
 

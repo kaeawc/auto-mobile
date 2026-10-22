@@ -1311,11 +1311,11 @@ describe("iOS shared capture frame-rate raise (#10711)", () => {
   test("a raise before the creator starts replaces the unstarted source once", async () => {
     const h = iosHarness();
     const gate = Promise.withResolvers<void>();
-    h.gateCreate(gate.promise);
+    void h.gateCreate(gate.promise);
     const relay = h.join(5, "relay");
     const webrtc = h.join(15, "webrtc");
     const starts = Promise.all([relay.handle.start(), webrtc.handle.start()]);
-    h.gateCreate(null);
+    void h.gateCreate(null);
     gate.resolve();
     await starts;
     expect(h.events).toEqual(["create1@5", "stop1", "create2@15", "start2"]);

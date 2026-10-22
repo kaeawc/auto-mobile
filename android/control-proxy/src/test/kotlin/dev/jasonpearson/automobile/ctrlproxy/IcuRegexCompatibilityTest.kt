@@ -126,11 +126,13 @@ class IcuRegexCompatibilityTest {
         .bufferedReader()
         .use { it.readText() }
     val patterns = Json.parseToJsonElement(text).jsonObject.getValue("patterns").jsonObject
-    assertTrue("contract defines no patterns; the guard would pass vacuously", patterns.isNotEmpty())
-    val violations =
-      patterns.flatMap { (name, value) ->
-        IcuRegexSyntax.problems(value.jsonPrimitive.content).map { "$name: $it" }
-      }
+    assertTrue(
+      "contract defines no patterns; the guard would pass vacuously",
+      patterns.isNotEmpty(),
+    )
+    val violations = patterns.flatMap { (name, value) ->
+      IcuRegexSyntax.problems(value.jsonPrimitive.content).map { "$name: $it" }
+    }
     assertTrue(
       "Contract patterns that Android's ICU engine may reject:\n" + violations.joinToString("\n"),
       violations.isEmpty(),

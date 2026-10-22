@@ -1,4 +1,5 @@
 import { z } from "zod/v4";
+import { APP_TRIM_MEMORY_LEVELS } from "../models/AppLifecycleResult";
 import {
   addDeviceTargetingToSchema,
   responseShapeControlFields,
@@ -55,7 +56,11 @@ export const appLifecycleSchema = withAppIdAliases(
     z
       .object({
         appId: z.string().trim().min(1),
-        action: z.enum(["background", "killBackgrounded"]),
+        action: z.enum(["background", "killBackgrounded", "trimMemory"]),
+        level: z
+          .enum(APP_TRIM_MEMORY_LEVELS)
+          .optional()
+          .describe("onTrimMemory level to send; required for trimMemory, rejected otherwise"),
       })
       .strict(),
   ),

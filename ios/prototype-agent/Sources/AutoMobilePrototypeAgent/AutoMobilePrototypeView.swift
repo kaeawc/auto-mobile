@@ -6,7 +6,7 @@
     /// Spec, asset, or storage changes replace the presentation; callback and network changes retain its state.
     @MainActor
     public struct AutoMobilePrototypeView: View {
-        private let renderer: PrototypeEmbeddedRenderer
+        private var renderer: PrototypeEmbeddedRenderer
         private let identity: PrototypeEmbeddedIdentity
 
         /// Decodes and validates the complete spec before rendering. Invalid or unsupported specs
@@ -27,6 +27,13 @@
                 onEvent: onEvent, onDismiss: onDismiss, onLoadError: onLoadError
             )
             identity = PrototypeEmbeddedIdentity(spec: spec, assets: assets, storage: storage)
+        }
+
+        /// Internal lifecycle seam for app hosts that must reset storage after the final flush.
+        func onStopped(_ action: @escaping @MainActor () -> Void) -> Self {
+            var view = self
+            view.renderer.onStop = action
+            return view
         }
 
         /// The embedded renderer or a diagnostic covering the entire presentation.
@@ -58,6 +65,15 @@
         let onEvent: @MainActor (PrototypeEvent) -> Void
         let onDismiss: @MainActor (PrototypeDismissReason) -> Void
         let onLoadError: @MainActor (PrototypeLoadError) -> Void
+        var onStop: @MainActor () -> Void = {}
+
+        @MainActor
+        final class Coordinator {
+            var onStop: @MainActor () -> Void
+            init(onStop: @escaping @MainActor () -> Void) { self.onStop = onStop }
+        }
+
+        func makeCoordinator() -> Coordinator { Coordinator(onStop: onStop) }
 
         func makeUIViewController(context _: Context) -> PrototypeEmbeddedController {
             PrototypeEmbeddedController(
@@ -66,14 +82,17 @@
             )
         }
 
-        func updateUIViewController(_ controller: PrototypeEmbeddedController, context _: Context) {
+        func updateUIViewController(_ controller: PrototypeEmbeddedController, context: Context) {
+            context.coordinator.onStop = onStop
             controller.updateNetwork(network)
             controller.updateCallbacks(onEvent: onEvent, onDismiss: onDismiss, onLoadError: onLoadError)
             controller.syncAppearance()
         }
 
-        static func dismantleUIViewController(_ controller: PrototypeEmbeddedController, coordinator _: ()) {
+        static func dismantleUIViewController(_ controller: PrototypeEmbeddedController, coordinator: Coordinator) {
             controller.stop()
+            let stopped = coordinator.onStop
+            Task { @MainActor in stopped() }
         }
     }
 

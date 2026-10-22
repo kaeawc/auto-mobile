@@ -4,7 +4,10 @@ import {
   capLayoutWarnings,
   MAX_LAYOUT_WARNINGS,
 } from "../../../../src/features/observe/audits/SafeAreaAuditor";
-import { BASELINE_ACCESSIBILITY_ACTIONS } from "../../../../src/features/observe/audits/accessibilityActions";
+import {
+  BASELINE_ACCESSIBILITY_ACTIONS,
+  hasInteractionAction,
+} from "../../../../src/features/observe/audits/accessibilityActions";
 import type { LayoutWarning, ObserveResult } from "../../../../src/models";
 import {
   capturedFlatNodeForTest,
@@ -82,12 +85,26 @@ describe("SafeAreaAuditor", () => {
       return result;
     }
 
-    test.each([...BASELINE_ACCESSIBILITY_ACTIONS])(
-      "does not treat baseline action %s as interaction",
+    test.each([
+      ["accessibility_focus"],
+      ["clear_accessibility_focus"],
+      ["select", "clear_selection"],
+      [...BASELINE_ACCESSIBILITY_ACTIONS],
+    ])("does not treat baseline signature %p as interaction", (...actions) => {
+      expect(new SafeAreaAuditor().inspect(gestureObservation({ actions }))).toEqual([]);
+    });
+
+    test.each(["select", "clear_selection"])(
+      "warns on a node whose only interaction is standalone %s (#14435)",
       (action) => {
-        expect(new SafeAreaAuditor().inspect(gestureObservation({ actions: [action] }))).toEqual(
-          [],
-        );
+        for (const actions of [
+          [action],
+          [action, "accessibility_focus", "clear_accessibility_focus"],
+        ]) {
+          expect(new SafeAreaAuditor().inspect(gestureObservation({ actions }))).toMatchObject([
+            { type: "interaction-in-system-gesture-region", categories: ["interaction"] },
+          ]);
+        }
       },
     );
 
@@ -198,9 +215,7 @@ describe("SafeAreaAuditor", () => {
         const hasFlag = [node?.clickable, node?.["long-clickable"], node?.checkable].some(
           (value) => (typeof value === "boolean" || typeof value === "string") && isTruthy(value),
         );
-        const hasAction =
-          Array.isArray(node?.actions) &&
-          node.actions.some((action) => !BASELINE_ACCESSIBILITY_ACTIONS.has(action));
+        const hasAction = Array.isArray(node?.actions) && hasInteractionAction(node.actions);
         expect(hasFlag || hasAction).toBe(true);
       }
     });

@@ -1,0 +1,15 @@
+android
+[ ] com.android.internal.display.cutout.emulation.corner
+[ ] com.android.internal.display.cutout.emulation.double
+[ ] com.android.internal.display.cutout.emulation.hole
+[ ] com.android.internal.display.cutout.emulation.tall
+[ ] com.android.internal.display.cutout.emulation.waterfall
+[x] com.android.internal.systemui.navbar.gestural
+[ ] com.android.internal.systemui.navbar.gestural_extra_wide_back
+[ ] com.android.internal.systemui.navbar.gestural_narrow_back
+[ ] com.android.internal.systemui.navbar.gestural_wide_back
+[ ] com.android.internal.systemui.navbar.threebutton
+
+com.android.systemui
+[x] com.android.systemui.auto_generated_rro_vendor__
+

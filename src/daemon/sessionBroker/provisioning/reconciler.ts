@@ -543,7 +543,7 @@ export class BindingReconciler {
     // The binding's own device is excluded from every other caller and the registry records no live
     // execution, so any session on it is an earlier execution's leftover, unless this daemon still
     // holds it as a live execution (#11275), which refuses with binding_in_use instead.
-    const provisioned = await this.provisionExisting(context, device, { releaseStale: true });
+    const provisioned = await this.provisionExisting(context, device);
     return await this.readyOrReleaseOnBusy(provisioned, async () => {
       const expected = expectationOf(assignment);
       const fingerprint = encodeManagedSpecFingerprint(context.fingerprint);
@@ -631,7 +631,7 @@ export class BindingReconciler {
     }
   }
 
-  // --- empty binding: adopt or create -------------------------------------------------------------
+  // --- empty binding: journaled orphan reclaim or create (#14788) ---------------------------------
 
   private async fillEmptyBinding(
     context: ReconcileContext,
@@ -640,15 +640,15 @@ export class BindingReconciler {
   ): Promise<ReadyResult> {
     const candidate = await this.withEmptyBindingCleanup(context, assignment, async () => {
       if (!inventory.complete) {
-        // Without complete discovery we can neither find adoptable devices nor rule out a
+        // Without complete discovery we can neither find reclaimable orphans nor rule out a
         // leftover of this binding, so do nothing rather than create a duplicate.
         throw new ReconcileAbort(
           failure("discovery_incomplete", "Device discovery was incomplete for an empty binding."),
         );
       }
       const candidate = await this.findAdoptionCandidate(context, inventory.devices);
-      // Validate creation before moving an empty binding; adoption needs no creation catalog.
-      if (assignment.platform !== context.request.platform && !candidate) {
+      // Both fresh creation and orphan reclamation require a creatable resolved spec.
+      if (assignment.platform !== context.request.platform) {
         await this.assertCreatable(context);
       }
       return candidate;
@@ -657,7 +657,7 @@ export class BindingReconciler {
       assignment = await this.emptyOnRequestedPlatform(context, assignment);
     }
     if (candidate) {
-      return await this.adopt(context, assignment, candidate.device, candidate.source);
+      return await this.creation.replaceOrphan(context, assignment, candidate);
     }
     return await this.createAndCommit(withCreateDeadline(context), assignment, "created");
   }
@@ -665,7 +665,7 @@ export class BindingReconciler {
   private async findAdoptionCandidate(
     context: ReconcileContext,
     devices: DeviceInfo[],
-  ): Promise<{ device: DeviceInfo; source: "orphan" } | undefined> {
+  ): Promise<DeviceInfo | undefined> {
     const { request } = context;
     const suffix = bindingDeviceNameSuffix(request.key);
     const hint = request.priorDeviceHint?.stableId;
@@ -679,74 +679,28 @@ export class BindingReconciler {
           a.stableId.localeCompare(b.stableId),
       );
     for (const { device, stableId } of listed) {
-      // Preserve the binding-specific adoption fence across both product name generations.
-      const source =
-        isProductBrokerDevice(device.name) &&
-        device.name.slice(device.name.indexOf("-") + 1).startsWith(suffix)
-          ? "orphan"
-          : undefined;
-      if (!source) {
+      // Preserve the binding-specific orphan fence across both product name generations.
+      if (
+        !isProductBrokerDevice(device.name) ||
+        !device.name.slice(device.name.indexOf("-") + 1).startsWith(suffix)
+      ) {
         continue;
       }
-      if (source === "orphan") {
-        // A leftover of this binding's interrupted create is adoptable only if nobody holds it: no
-        // binding, and no session (product names are excluded from generic clients).
-        const holder = await this.deps.registry.findDeviceHolder(request.platform, stableId);
-        if (holder || this.sessionsOn(device).length > 0) {
-          continue;
-        }
+      // Reclaim only an unheld orphan: no registry binding, local session or external claim.
+      // Unknown claim ownership must never authorize deletion.
+      const holder = await this.deps.registry.findDeviceHolder(request.platform, stableId);
+      if (
+        holder ||
+        this.sessionsOn(device).length > 0 ||
+        (await this.deps.claims.describe(device)).kind !== "free"
+      ) {
+        continue;
       }
       if ((await this.deps.matcher.matches(device, request.requestedSpec)) === "match") {
-        return { device, source };
+        return device;
       }
     }
     return undefined;
-  }
-
-  private async adopt(
-    context: ReconcileContext,
-    assignment: BindingAssignmentRecord,
-    device: DeviceInfo,
-    source: "orphan",
-  ): Promise<ReadyResult> {
-    context = { ...context, resolvedSpec: await this.existingSpec(device) };
-    const { request } = context;
-    const stableId = deviceStableId(device)!;
-    // Commit first: the CAS atomically takes the device out of the free pool and reserves it,
-    // so a failed provision leaves the binding bound (`provisioning`) and the next attempt reuses.
-    const reserved = await this.deps.registry.commitBinding(
-      request.key,
-      expectationOf(assignment),
-      {
-        stableDeviceId: stableId,
-        deviceName: device.name,
-        requestedSpec: request.requestedSpec,
-        resolvedSpec: context.resolvedSpec,
-        specFingerprint: encodeManagedSpecFingerprint(context.fingerprint),
-        state: "provisioning",
-      },
-    );
-    if (reserved.kind !== "committed") {
-      throw new ReconcileAbort(casFailure(reserved, "adoption"));
-    }
-    context.evidence.adoptedFrom = source;
-    // A free-pool device is excluded from generic clients, so a session on it is a leftover
-    // managed execution; an orphan's is not ours to end.
-    const provisioned = await this.provisionExisting(context, device, {
-      releaseStale: false,
-    });
-    return await this.readyOrReleaseOnBusy(provisioned, async () => {
-      const ready = await this.deps.registry.updateBindingState(
-        request.key,
-        expectationOf(reserved.assignment),
-        "ready",
-      );
-      if (ready.kind !== "updated") {
-        await this.releaseSession(provisioned.sessionUuid);
-        throw new ReconcileAbort(claimFailure(ready, "adoption"));
-      }
-      return await this.claimAndReady(context, "adopted", ready.assignment, provisioned, undefined);
-    });
   }
 
   private async existingSpec(device: DeviceInfo): Promise<BindingResolvedSpec> {
@@ -808,19 +762,10 @@ export class BindingReconciler {
   private async releaseStaleSessions(
     context: ReconcileContext,
     device: DeviceInfo,
-    releaseStale: boolean,
   ): Promise<ReadonlySet<string>> {
     const stale = this.sessionsOn(device);
     if (stale.length === 0) {
       return new Set();
-    }
-    if (!releaseStale) {
-      throw new ReconcileAbort(
-        failure(
-          "device_busy",
-          `Device '${device.name}' is held by session(s) ${stale.join(", ")}.`,
-        ),
-      );
     }
     this.assertNoLiveExecutionOn(context, device, stale);
     try {
@@ -866,10 +811,9 @@ export class BindingReconciler {
   private async provisionExisting(
     context: ReconcileContext,
     device: DeviceInfo,
-    options: { releaseStale: boolean },
   ): Promise<BindingProvisionedDevice> {
     const { request } = context;
-    const stale = await this.releaseStaleSessions(context, device, options.releaseStale);
+    const stale = await this.releaseStaleSessions(context, device);
     let provisioned: BindingProvisionedDevice;
     try {
       provisioned = await this.deps.provisioner.provision({

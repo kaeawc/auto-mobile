@@ -38,9 +38,14 @@ import {
   linuxProcessGenerationToken,
 } from "../../src/daemon/processGeneration";
 import { DaemonLauncher } from "../../src/daemon/DaemonLauncher";
+import { spyOnPrivate } from "../helpers/spyOnPrivate";
 import type { BuildIdentity } from "../../src/daemon/buildIdentity";
 import type { DaemonOptions, DaemonStatus } from "../../src/daemon/types";
-import type { DaemonProcessSpawner, ExtractionCleaner } from "../../src/daemon/manager";
+import type {
+  DaemonProcessSpawner,
+  DaemonStartResult,
+  ExtractionCleaner,
+} from "../../src/daemon/manager";
 import type { DaemonLaunchedProcess } from "../../src/daemon/DaemonLauncher";
 import type { DaemonStateLike } from "../../src/daemon/daemonState";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
@@ -78,6 +83,13 @@ import {
   CLI_SESSION_LIVENESS_POLICY,
   getCliSessionIdleTimeoutMs,
 } from "../../src/daemon/constants";
+
+/** `startUnlocked` is private: it requires the caller to already hold the startup lock. */
+const spyOnStartUnlocked = (manager: object) =>
+  spyOnPrivate<[DaemonOptions, AbortSignal?, boolean?], Promise<DaemonStartResult>>(
+    manager,
+    "startUnlocked",
+  );
 
 function writeStopPidFile(
   pidFilePath: string,
@@ -606,7 +618,7 @@ describe("DaemonManager restart", () => {
       startedAt: 100,
       socketPath,
     });
-    const startSpy = spyOn(manager, "startUnlocked").mockImplementation(async () => {
+    const startSpy = spyOnStartUnlocked(manager).mockImplementation(async () => {
       expect(contender.acquireLock()).toBe(false);
       expect(existsSync(pidFilePath)).toBe(false);
       expect(existsSync(socketPath)).toBe(false);
@@ -784,7 +796,7 @@ describe("DaemonManager acceptance-session restart", () => {
       buildId: "acceptance-build",
       entryScript: "/acceptance/dist/src/index.js",
     });
-    const startSpy = spyOn(manager, "startUnlocked").mockResolvedValue("started");
+    const startSpy = spyOnStartUnlocked(manager).mockResolvedValue("started");
 
     try {
       await expect(
@@ -884,7 +896,7 @@ describe("DaemonManager acceptance-session restart", () => {
       entryScript: "/acceptance/dist/src/index.js",
       socketPath,
     });
-    const startSpy = spyOn(manager, "startUnlocked").mockImplementation(async () => {
+    const startSpy = spyOnStartUnlocked(manager).mockImplementation(async () => {
       expect(existsSync(lockPath)).toBe(true);
       return "started";
     });
@@ -987,7 +999,7 @@ describe("DaemonManager acceptance-session restart", () => {
       entryScript: "/acceptance/dist/src/index.js",
       socketPath,
     });
-    const startSpy = spyOn(manager, "startUnlocked").mockResolvedValue("started");
+    const startSpy = spyOnStartUnlocked(manager).mockResolvedValue("started");
 
     try {
       await expect(
@@ -1091,7 +1103,7 @@ describe("DaemonManager control-state recovery", () => {
       processGenerationToken: "old-generation",
       entryScript: "/old/dist/src/index.js",
     });
-    const startSpy = spyOn(manager, "startUnlocked").mockResolvedValue("started");
+    const startSpy = spyOnStartUnlocked(manager).mockResolvedValue("started");
 
     try {
       await expect(manager.recoverControlState({}, async () => false)).resolves.toBe("restarted");

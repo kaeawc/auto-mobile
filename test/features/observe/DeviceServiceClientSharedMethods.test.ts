@@ -97,8 +97,8 @@ describe("DeviceServiceClient shared methods", () => {
     const timer = new FakeTimer();
     const [android, ios] = createClients(timer);
     try {
-      android["supportedCommands"] = new Set(["request_hierarchy"]);
-      ios["supportedCommands"] = new Set(["request_hierarchy"]);
+      android.connectionTestHooks.supportedCommands = new Set(["request_hierarchy"]);
+      ios.connectionTestHooks.supportedCommands = new Set(["request_hierarchy"]);
       const controller = new AbortController();
       const reason = new Error("already cancelled");
       controller.abort(reason);
@@ -149,9 +149,9 @@ describe("DeviceServiceClient shared methods", () => {
         client.fail();
         expect(client.triggers).toBe(Math.floor(attempt / 3));
       }
-      client["autoReconnectEnabled"] = false;
+      client.connectionTestHooks.autoReconnectEnabled = false;
       client.fail();
-      client["autoReconnectEnabled"] = true;
+      client.connectionTestHooks.autoReconnectEnabled = true;
       client["closed"] = true;
       client.fail();
       expect(client["consecutiveConnectionFailures"]).toBe(6);

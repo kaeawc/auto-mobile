@@ -22,7 +22,8 @@ export type ProvisionDeviceFailureCode =
   | "unsupported"
   | "platform_command_failed"
   | "resource_profile_unproven"
-  | "runtime_incompatible";
+  | "runtime_incompatible"
+  | "requires_real_device";
 
 export const DEFAULT_PROVISION_DEVICE_RETRYABILITY: Readonly<
   Record<ProvisionDeviceFailureCode, boolean>
@@ -53,6 +54,8 @@ export const DEFAULT_PROVISION_DEVICE_RETRYABILITY: Readonly<
   resource_profile_unproven: false,
   // A proven model/runtime mismatch is a property of the request; only a different pair can succeed.
   runtime_incompatible: false,
+  // The request needs an OEM capability no emulator provides; only real hardware can serve it.
+  requires_real_device: false,
 };
 
 export interface ProvisionDeviceErrorDiagnostics {
@@ -75,6 +78,8 @@ export interface ProvisionDeviceErrorDiagnostics {
   recovery?: ProvisionDeviceRecoveryEvidence;
   /** The broker binding holding the device (`device_assigned_to_binding`); no credentials. */
   binding?: { scopeKey: string; declaredBinding: number | null; stableId: string };
+  /** OEM capabilities a manufacturer profile cannot emulate (`requires_real_device`, #14058). */
+  capabilities?: Array<{ id: string; note: string }>;
   /** Boot-capacity refusal details (`capacity_exhausted`, #11236). */
   capacity?: ProvisionDeviceCapacityDetails;
 }

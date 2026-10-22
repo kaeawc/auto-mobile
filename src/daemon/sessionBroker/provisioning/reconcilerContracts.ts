@@ -39,6 +39,7 @@ import {
 import { type BindingReconcileFailure } from "./ReconcileAbort";
 import type { BindingResourceBudget } from "./resourceBudget";
 
+/** `adopted` is retained for wire compatibility; orphans are journaled replacements (#14788). */
 export type BindingDisposition = "reused" | "adopted" | "created" | "replaced";
 
 /** Known device metadata; an Android AVD may have no configured hardware profile. */
@@ -82,7 +83,7 @@ export interface BindingProvisionRequest {
   platform: BindingPlatform;
   /** Android: the AVD name (stable id). iOS: the simulator name. */
   name: string;
-  /** iOS UDID of an existing simulator to adopt. */
+  /** iOS UDID of an assigned simulator to reuse. */
   deviceId?: string;
   /**
    * `create` always carries a concrete `deviceType` (the resolved model). `adopt` carries the
@@ -91,7 +92,10 @@ export interface BindingProvisionRequest {
    * provisioning, and the provisionDevice schema accepts configuration fields only.
    */
   spec: BindingRequestedSpec;
-  /** `adopt` must never create; `create` provisions a new device under `name`. */
+  /**
+   * `adopt` reuses an assigned device and must never create; `create` provisions under `name`.
+   * Unheld orphans are instead reclaimed by journaled delete-and-recreate (#14788), never unreset.
+   */
   mode: "adopt" | "create";
   deadlineMs: number;
   signal?: AbortSignal;
@@ -271,7 +275,7 @@ export interface BindingReconcileRequest {
   role: string;
   platform: BindingPlatform;
   requestedSpec: BindingRequestedSpec;
-  /** Non-authoritative: preferred among adoption candidates, never trusted for deletion. */
+  /** Non-authoritative: preferred among orphan reclaim candidates, never trusted for deletion. */
   priorDeviceHint?: { stableId: string };
   /** Absolute deadline on the timer's clock for the whole preparation. */
   deadlineMs: number;
@@ -298,6 +302,7 @@ export interface BindingReconcileEvidence {
   /** Match verdict for the assigned device, when one was present. */
   assignedMatch?: ManagedSpecMatch;
   assignedMissing?: boolean;
+  /** The replacement reclaimed an orphan by journaled delete-and-recreate (#14788). */
   adoptedFrom?: "orphan";
   createdName?: string;
   deletedStableId?: string;

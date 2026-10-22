@@ -113,15 +113,18 @@ export function observeSettings(
 ): void {
   const keys = new Set<string>();
   for (const line of output.split("\n").filter(Boolean)) {
-    const match = /^([A-Za-z0-9_][A-Za-z0-9_.-]*)=(.*)$/.exec(line);
-    if (!match?.[1] || keys.has(match[1])) {
+    // The settings provider stores any key (stock images write `dropbox:data_app_anr`), so
+    // split on the first `=` rather than whitelisting key characters.
+    const separator = line.indexOf("=");
+    const key = line.slice(0, separator);
+    if (separator < 1 || !/^[A-Za-z0-9_]\S*$/.test(key) || keys.has(key)) {
       throw new ActionableError(`Android baseline ${namespace} settings inventory is malformed`);
     }
-    keys.add(match[1]);
+    keys.add(key);
     observe(
       "device-setting",
-      user === 0 ? `${namespace}:${match[1]}` : `${namespace}:user:${user}:${match[1]}`,
-      match[2]!,
+      user === 0 ? `${namespace}:${key}` : `${namespace}:user:${user}:${key}`,
+      line.slice(separator + 1),
     );
   }
 }

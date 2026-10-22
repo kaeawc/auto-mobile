@@ -1,0 +1,18 @@
+{
+  "spec": {
+    "id": "strict",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "persistence": "device"
+    },
+    "root": {
+      "type": "spacer"
+    }
+  },
+  "options": {
+    "library": true
+  },
+  "expectedPath": "window.persistence"
+}

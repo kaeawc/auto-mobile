@@ -373,7 +373,9 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
     );
   }
 
-  private getTargets(sessionUuid: string | undefined): BootedDevice[] {
+  private getTargets(requestedSessionUuid: string | undefined): BootedDevice[] {
+    // The stream authenticator accepts a padded UUID; look it up as it authorized it (#14379).
+    const sessionUuid = requestedSessionUuid?.trim() || undefined;
     const targets = new Map<string, BootedDevice>();
 
     for (const device of this.deviceSource.getPooledDevices()) {

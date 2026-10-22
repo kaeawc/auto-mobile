@@ -177,6 +177,18 @@ export function createDeviceGestureRecordingDeviceResolution(
   };
 }
 
+/**
+ * The stream authenticator trims the session UUID it authorizes, so every lookup uses the same
+ * trimmed UUID; a derived `base:label` suffix is kept (#14378).
+ */
+function withTrimmedSessionUuid(
+  request: DeviceGestureRecordingCommand,
+): DeviceGestureRecordingCommand {
+  return typeof request?.sessionUuid === "string"
+    ? { ...request, sessionUuid: request.sessionUuid.trim() || undefined }
+    : request;
+}
+
 const ensurePlatform = (value: unknown): Platform | undefined => {
   if (value === undefined) {
     return undefined;
@@ -224,8 +236,9 @@ export class DeviceGestureRecordingSocketServer extends RequestResponseSocketSer
   }
 
   protected async handleRequest(
-    request: DeviceGestureRecordingCommand,
+    received: DeviceGestureRecordingCommand,
   ): Promise<DeviceGestureRecordingResponse> {
+    const request = withTrimmedSessionUuid(received);
     const command = request?.command;
     if (!command) {
       throw new Error("Request missing command field.");

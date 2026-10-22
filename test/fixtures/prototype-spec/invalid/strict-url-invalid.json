@@ -1,0 +1,21 @@
+{
+  "spec": {
+    "id": "strict",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "button",
+      "label": "Go",
+      "onTap": [
+        {
+          "type": "request",
+          "url": "https://[::1"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].url"
+}

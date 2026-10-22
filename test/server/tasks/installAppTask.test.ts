@@ -37,8 +37,17 @@ describe("installApp as an MCP task (#13089)", () => {
   let install: (signal: AbortSignal | undefined) => Promise<Record<string, unknown>>;
   let installSignals: Array<AbortSignal | undefined>;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     restoreHermetic = installHermeticServerFixture();
+    // The first createMcpServer registers every real tool; pay that one-time cost here, outside
+    // the timed tests, so the first test stays inside the unit-test budget.
+    const warm = await connect({
+      requestMcpSessionId: KEY,
+      taskManager: new FakeTaskManager({ timer: new FakeTimer() }),
+      taskEligibleTools: TASK_ELIGIBILITY,
+      taskLeaseKeepalive: { hold: () => () => {} },
+    });
+    await warm.close();
   });
   afterAll(() => restoreHermetic());
 

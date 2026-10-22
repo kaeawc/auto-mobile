@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { isMutationQuery, isReadOnlySqlQuery } from "../../src/server/databaseTools";
+import {
+  isMutationQuery,
+  isReadOnlySqlQuery,
+} from "../../src/features/database/sqlQueryClassification";
 
 describe("isMutationQuery", () => {
   test("classifies plain mutations", () => {

@@ -16,23 +16,29 @@ testing with automatic refresh when screen content changes.
 
 ### Optional Hierarchy Debug Dump
 
-The dump is off by default. Enable it by creating a marker in the app's files directory:
+The dump is off by default. Enable it by creating a marker in the app's files directory.
+The service reads its own user's files directory, and `run-as` without `--user` targets user 0,
+so pass the foreground user on a device with a work profile or secondary user:
 
 ```bash
-adb shell run-as dev.jasonpearson.automobile.ctrlproxy touch files/dump_hierarchy
+CTRL_PROXY_USER=$(adb shell am get-current-user | tr -d '\r')
+adb shell run-as dev.jasonpearson.automobile.ctrlproxy --user "$CTRL_PROXY_USER" touch files/dump_hierarchy
 ```
+
+On a single-user device `CTRL_PROXY_USER` is `0`, which matches plain `run-as`. The commands
+below reuse it.
 
 Use the WebSocket `request_hierarchy` request or the daemon's `observe` to request a fresh
 hierarchy. After delivery completes, read the dump:
 
 ```bash
-adb shell run-as dev.jasonpearson.automobile.ctrlproxy cat files/latest_hierarchy.json
+adb shell run-as dev.jasonpearson.automobile.ctrlproxy --user "$CTRL_PROXY_USER" cat files/latest_hierarchy.json
 ```
 
 Disable further writes by removing the marker (the last dump remains on disk):
 
 ```bash
-adb shell run-as dev.jasonpearson.automobile.ctrlproxy rm files/dump_hierarchy
+adb shell run-as dev.jasonpearson.automobile.ctrlproxy --user "$CTRL_PROXY_USER" rm files/dump_hierarchy
 ```
 
 **Debugging commands if the above doesn't work:**
@@ -45,7 +51,7 @@ adb shell pm list packages | grep dev.jasonpearson.automobile.ctrlproxy
 adb shell settings get secure enabled_accessibility_services
 
 # Check if the file exists in app storage
-adb shell run-as dev.jasonpearson.automobile.ctrlproxy ls -la files/
+adb shell run-as dev.jasonpearson.automobile.ctrlproxy --user "$CTRL_PROXY_USER" ls -la files/
 
 # Check recent logs for both receiver and service
 adb logcat -s AccessibilityCommandReceiver CtrlProxy
@@ -118,9 +124,10 @@ For errors (via broadcasts):
 ```bash
 #!/bin/bash
 # Enable the dump, then request a hierarchy via WebSocket request_hierarchy or daemon observe.
-adb shell run-as dev.jasonpearson.automobile.ctrlproxy touch files/dump_hierarchy
+CTRL_PROXY_USER=$(adb shell am get-current-user | tr -d '\r')
+adb shell run-as dev.jasonpearson.automobile.ctrlproxy --user "$CTRL_PROXY_USER" touch files/dump_hierarchy
 # After delivery completes:
-HIERARCHY=$(adb shell run-as dev.jasonpearson.automobile.ctrlproxy cat files/latest_hierarchy.json)
+HIERARCHY=$(adb shell run-as dev.jasonpearson.automobile.ctrlproxy --user "$CTRL_PROXY_USER" cat files/latest_hierarchy.json)
 echo "Current screen hierarchy: $HIERARCHY"
 ```
 
@@ -132,9 +139,12 @@ import json
 def get_view_hierarchy():
     # Enable files/dump_hierarchy first (see above), then request a hierarchy via
     # WebSocket request_hierarchy or daemon observe and wait for delivery before calling.
-    # Read the latest debug dump.
+    # Read the latest debug dump from the foreground user's files directory.
+    user = subprocess.run(
+        ['adb', 'shell', 'am', 'get-current-user'], capture_output=True, text=True
+    ).stdout.strip()
     result = subprocess.run([
-        'adb', 'shell', 'run-as', 'dev.jasonpearson.automobile.ctrlproxy', 
+        'adb', 'shell', 'run-as', 'dev.jasonpearson.automobile.ctrlproxy', '--user', user,
         'cat', 'files/latest_hierarchy.json'
     ], capture_output=True, text=True)
     
@@ -171,7 +181,8 @@ context.registerReceiver(receiver, filter)
 - **Package Name**: `dev.jasonpearson.automobile.ctrlproxy`
 - **Hierarchy File Location**: `files/latest_hierarchy.json` (within app's private directory;
   written only while `files/dump_hierarchy` exists)
-- **ADB Access**: Use `run-as dev.jasonpearson.automobile.ctrlproxy` to access app-scoped files
+- **ADB Access**: Use `run-as dev.jasonpearson.automobile.ctrlproxy --user <current user>` to access
+  app-scoped files
 
 ## How It Works
 

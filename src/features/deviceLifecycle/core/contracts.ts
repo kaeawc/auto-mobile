@@ -2,6 +2,7 @@ import { type FormFactor, type DeviceMatchCriteria } from "../../../models/Devic
 import { type ExactDeviceSpecification } from "../../../devices/exactDeviceProvisioning";
 import { type DeviceResourceConfiguration } from "../../../models/DeviceResourceConfiguration";
 import { BootedDevice, Platform } from "../../../models";
+import type { ProvisionDeviceProfile } from "./schemas";
 
 // Export interfaces for type safety
 export interface StartDeviceArgs {
@@ -60,7 +61,8 @@ export interface ProvisionDeviceArgs {
     platform: "android" | "ios";
     name: string;
     deviceId?: string;
-    spec: ExactDeviceSpecification;
+    /** Android may also name a `deviceProfile`, applied after boot and never provisioned (#14058). */
+    spec: ExactDeviceSpecification & { deviceProfile?: ProvisionDeviceProfile };
   };
   boot: boolean;
   readiness: "automation" | "none";

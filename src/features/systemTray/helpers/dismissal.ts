@@ -46,6 +46,9 @@ const NOTIFICATION_ROW_RESOURCE_ID = "com.android.systemui:id/expandableNotifica
 // clearAll takes between swipes.
 const SYSTEM_TRAY_DISMISS_SETTLE_MS = SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS + 100;
 
+// A row still present after this many consecutive verified swipes is not swipe-missed.
+const SYSTEM_TRAY_CLEAR_MAX_MISSED_SWIPES = 1;
+
 // A row's relative timestamp ("now", "1 min") and its expand/collapse affordance
 // ("Expand" / "Collapse") change while the shade settles, so neither is part of
 // the row's identity.
@@ -227,7 +230,7 @@ const classifyNotificationDismissal = (
   criteria: SystemTrayNotificationArgs,
   appMatchTexts: string[],
   candidate: ObserveResult,
-): "dismissed" | "present" | "indeterminate" => {
+): "dismissed" | "present" | "snapped-back" | "indeterminate" => {
   const hierarchy = candidate.viewHierarchy;
   if (!hierarchy || !detector.isTrayOpen(hierarchy)) {
     return "indeterminate";
@@ -248,7 +251,7 @@ const classifyNotificationDismissal = (
   // No row reads exactly as the swiped one did, but an ongoing notification
   // snaps back with new body text: it is still the same notification when a
   // row with its title and app label remains at its position.
-  return hasTextChangedSurvivor(hierarchy, swiped.footprint) ? "present" : "dismissed";
+  return hasTextChangedSurvivor(hierarchy, swiped.footprint) ? "snapped-back" : "dismissed";
 };
 
 /**
@@ -271,7 +274,7 @@ export const verifyNotificationDismissed = async (
   const detector = getDetector(device, signal);
   let verified = observation;
   let outcome = classifyNotificationDismissal(detector, swiped, criteria, appMatchTexts, verified);
-  if (outcome === "present") {
+  if (outcome === "present" || outcome === "snapped-back") {
     await sleep(SYSTEM_TRAY_DISMISS_SETTLE_MS, signal);
     throwIfAborted(signal);
     verified = await awaitWhileRequestIsLive(
@@ -285,7 +288,7 @@ export const verifyNotificationDismissed = async (
     );
     outcome = classifyNotificationDismissal(detector, swiped, criteria, appMatchTexts, verified);
   }
-  if (outcome === "present") {
+  if (outcome === "present" || outcome === "snapped-back") {
     return {
       outcome: "still-present",
       observation: verified,
@@ -293,6 +296,50 @@ export const verifyNotificationDismissed = async (
     };
   }
   return { outcome, observation: verified };
+};
+
+/**
+ * Reopen a closed post-swipe shade within one attempt budget. The reopen's
+ * first observation runs before `waitForSystemTrayOpen` checks its polling
+ * budget, so only this race caps a hung one; on timeout the attempt is
+ * aborted and `current` returned so the caller keeps recovering (#14532).
+ */
+const reopenClearAllShade = async (
+  device: BootedDevice,
+  current: { observation: ObserveResult; minTimestamp: number },
+  remainingMs: number,
+  signal: AbortSignal,
+): Promise<{ observation: ObserveResult; minTimestamp: number }> => {
+  const { timer } = getSystemTrayDependencies();
+  const attempt = new AbortController();
+  const attemptSignal = AbortSignal.any([signal, attempt.signal]);
+  const budgetMs = Math.min(SYSTEM_TRAY_POLL_INTERVAL_MS, remainingMs);
+  const attemptTimeout = new ActionableError("Notification shade reopen timed out.");
+  try {
+    const reopened = await raceWithDeadline(
+      () => ensureSystemTrayOpen(device, budgetMs, undefined, attemptSignal, current.observation),
+      {
+        timer,
+        signal,
+        timeoutMs: budgetMs,
+        label: "Notification shade reopen",
+        timeoutError: () => attemptTimeout,
+        onTimeout: () => attempt.abort(),
+      },
+    );
+    return {
+      observation: reopened.observation ?? current.observation,
+      minTimestamp: reopened.minTimestamp,
+    };
+  } catch (error) {
+    if (error !== attemptTimeout) {
+      throw error;
+    }
+    // Only this attempt timed out; the caller re-reads and may reopen again
+    // before its own deadline, so the abandoned reopen is not a failure.
+    logger.debug(`[systemTray] Shade reopen exceeded its ${budgetMs}ms attempt budget.`);
+    return current;
+  }
 };
 
 /** Re-read after a swipe until its row leaves, without swiping that row again. */
@@ -307,7 +354,7 @@ const waitForClearAllDismissal = async (
     reexpandState: { lastAttemptAtMs: number };
     signal?: AbortSignal;
   },
-): Promise<{ observation: ObserveResult; dismissed: boolean }> => {
+): Promise<{ observation: ObserveResult; dismissed: boolean; missedSwipe: boolean }> => {
   const { timer, observeScreenFactory } = getSystemTrayDependencies();
   const { signal: requestSignal, reexpandState } = options;
   const controller = new AbortController();
@@ -318,7 +365,7 @@ const waitForClearAllDismissal = async (
   const observer = observeScreenFactory(device);
   const deadlineMs = timer.now() + awaitTimeoutMs;
   const timeoutError = new ActionableError(
-    "Could not verify notification dismissal: shade read or reopen timed out.",
+    "Could not verify notification dismissal: shade read timed out.",
   );
   const raceOptions = () => ({
     timer,
@@ -329,6 +376,8 @@ const waitForClearAllDismissal = async (
     onTimeout: () => controller.abort(),
   });
   let observation = options.observation;
+  // The last fresh, readable read showed the swiped row exactly as before the swipe.
+  let missedSwipe = false;
   try {
     let minTimestamp = await raceWithDeadline(
       () => detector.getObservationTimestamp(),
@@ -347,8 +396,9 @@ const waitForClearAllDismissal = async (
         ? classifyNotificationDismissal(detector, swiped, criteria, appMatchTexts, observation)
         : "indeterminate";
       if (outcome === "dismissed") {
-        return { observation, dismissed: true };
+        return { observation, dismissed: true, missedSwipe: false };
       }
+      missedSwipe = outcome === "present";
       const remainingMs = deadlineMs - timer.now();
       if (remainingMs <= 0) {
         break;
@@ -358,19 +408,12 @@ const waitForClearAllDismissal = async (
         timer.now() - reexpandState.lastAttemptAtMs >= SYSTEM_TRAY_REEXPAND_INTERVAL_MS
       ) {
         reexpandState.lastAttemptAtMs = timer.now();
-        const reopened = await raceWithDeadline(
-          () =>
-            ensureSystemTrayOpen(
-              device,
-              Math.min(SYSTEM_TRAY_POLL_INTERVAL_MS, remainingMs),
-              undefined,
-              signal,
-              observation,
-            ),
-          raceOptions(),
-        );
-        observation = reopened.observation ?? observation;
-        minTimestamp = reopened.minTimestamp;
+        ({ observation, minTimestamp } = await reopenClearAllShade(
+          device,
+          { observation, minTimestamp },
+          remainingMs,
+          signal,
+        ));
         continue;
       }
       await sleep(Math.min(SYSTEM_TRAY_POLL_INTERVAL_MS, remainingMs), signal);
@@ -381,14 +424,14 @@ const waitForClearAllDismissal = async (
         "[systemTray] Shade unreadable at the clearAll deadline; returning partial counts.",
       );
     }
-    return { observation, dismissed: false };
+    return { observation, dismissed: false, missedSwipe };
   } catch (error) {
     if (error !== timeoutError) {
       throw error;
     }
     throwIfAborted(requestSignal);
     logger.warn("[systemTray] Dismissal verification timed out; returning partial counts.", error);
-    return { observation, dismissed: false };
+    return { observation, dismissed: false, missedSwipe };
   }
 };
 
@@ -451,6 +494,20 @@ const waitForReadableClearAllMatch = async (
   }
 };
 
+/**
+ * A fresh read showing the row exactly as before means the swipe itself missed (it landed on a
+ * moving row), so swipe it again rather than abandon the drain (#13810). A snapped-back ongoing
+ * row, an unread shade, or a row without a dismiss action cannot be helped by a second swipe.
+ */
+const shouldRetryMissedSwipe = (
+  verified: { dismissed: boolean; missedSwipe: boolean },
+  missedSwipes: number,
+  match: SystemTrayNotificationMatch,
+): boolean =>
+  verified.missedSwipe &&
+  missedSwipes < SYSTEM_TRAY_CLEAR_MAX_MISSED_SWIPES &&
+  !isRowWithoutDismissAction(match.candidate.node);
+
 /** A clearAll drain's counts; Android also returns the last shade observation it read. */
 export interface ClearAllDrainResult {
   swipeCount: number;
@@ -492,6 +549,7 @@ export const clearMatchingSystemTrayNotifications = async (
   );
   let swipeCount = 0;
   let dismissedCount = 0;
+  let missedSwipes = 0;
   // Keep reopen attempts throttled across consecutive rows.
   const reexpandState = { lastAttemptAtMs: Number.NEGATIVE_INFINITY };
   while (current.match && swipeCount < maxSwipes && timer.now() < deadlineMs) {
@@ -526,10 +584,14 @@ export const clearMatchingSystemTrayNotifications = async (
       Math.max(0, deadlineMs - timer.now()),
       { observation: expanded.observation, reexpandState, signal },
     );
-    if (!verified.dismissed) {
+    if (verified.dismissed) {
+      dismissedCount++;
+      missedSwipes = 0;
+    } else if (shouldRetryMissedSwipe(verified, missedSwipes, expanded.match)) {
+      missedSwipes++;
+    } else {
       return { swipeCount, dismissedCount, stalled: true, observation: verified.observation };
     }
-    dismissedCount++;
     deadlineMs = timer.now() + awaitTimeoutMs;
     current = {
       observation: verified.observation,

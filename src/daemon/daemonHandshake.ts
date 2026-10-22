@@ -1,4 +1,4 @@
-import { releaseVersion } from "../utils/mcpVersion";
+import { releaseVersion, withoutDirtyStamp } from "../utils/mcpVersion";
 import { z } from "zod";
 import { type BuildIdentity, buildIdentitiesMatch, describeBuildIdentity } from "./buildIdentity";
 
@@ -158,7 +158,7 @@ export function evaluateClientHandshake(
     // build id*, so a matching local build is not rejected over a spurious plain-vs-stamped diff.
     const clientDeclaresFullVersion = releaseVersion(clientVersion) !== clientVersion;
     const versionsDiffer = clientDeclaresFullVersion
-      ? daemonFull.length > 0 && daemonFull !== clientVersion
+      ? daemonFull.length > 0 && withoutDirtyStamp(daemonFull) !== withoutDirtyStamp(clientVersion)
       : (() => {
           const clientBase = releaseVersion(clientVersion);
           const daemonBase = releaseVersion(daemonFull);

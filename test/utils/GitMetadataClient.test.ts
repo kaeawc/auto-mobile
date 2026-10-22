@@ -337,7 +337,7 @@ describe("DefaultGitMetadataClient", () => {
         },
       );
       expect(read(`${WORK}/src`)).toEqual(CLEAN);
-      expect(roots).toEqual([WORK]);
+      expect(roots).toEqual([resolve(WORK)]);
       expect(calls).toEqual([]);
     });
 
@@ -391,7 +391,7 @@ describe("DefaultGitMetadataClient", () => {
           return "some-host-app";
         }),
       ).toBeNull();
-      expect(roots).toEqual([WORK]);
+      expect(roots).toEqual([resolve(WORK)]);
       expect(calls).toEqual([]);
     });
 

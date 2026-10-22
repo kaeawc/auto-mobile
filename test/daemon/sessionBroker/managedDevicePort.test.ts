@@ -170,7 +170,7 @@ function acquisition(
 }
 
 describe("ManagedDevicePort preparation and release", () => {
-  test("binds the exact broker mutation scope before returning a ready session", async () => {
+  test("binds the exact broker mutation scope, shared with the iOS reset scope, before returning a ready session", async () => {
     const scopes: DeviceMutationScope[] = [];
     const port = new ManagedDevicePort({
       scope: SCOPE,
@@ -190,7 +190,11 @@ describe("ManagedDevicePort preparation and release", () => {
       sessionId: "session-1",
     });
     expect(scopes).toEqual([
-      { sessionUuid: "session-1", deviceId: "transport-1", incarnation: '["resource-1",1]' },
+      {
+        sessionUuid: "session-1",
+        deviceId: "device-1",
+        incarnation: JSON.stringify([SCOPE_KEY, 7, "device-1"]),
+      },
     ]);
   });
 

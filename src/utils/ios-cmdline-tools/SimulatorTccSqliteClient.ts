@@ -1,5 +1,6 @@
 import { customSimulatorDeviceSetPath } from "./simctlArgs";
 import { errorMessage } from "../describeUnknownError";
+import { logger } from "../logger";
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -58,6 +59,19 @@ export interface TccServiceRowReader {
     services: readonly string[],
     signal?: AbortSignal,
   ): Promise<TccPermissionRow[]>;
+}
+
+/** A user trust setting row: the SHA-256 (hex) of a certificate the user trusts explicitly. */
+export interface UserTrustedCertificate {
+  sha256: string;
+}
+
+export interface UserTrustStoreReader {
+  /** Certificates in the simulator's user trust settings (`tsettings`); empty when none. */
+  readUserTrustedCertificates(
+    deviceId: string,
+    signal?: AbortSignal,
+  ): Promise<UserTrustedCertificate[]>;
 }
 
 export interface TccDatabaseFileSystem {
@@ -240,7 +254,9 @@ function parsePermissionRows(output: string, deviceId: string): TccPermissionRow
  * database path, argv construction, schema handling, timeout, and error
  * classification together so permission actions never invoke sqlite directly.
  */
-export class SimulatorTccSqliteClient implements TccPermissionReader, TccServiceRowReader {
+export class SimulatorTccSqliteClient
+  implements TccPermissionReader, TccServiceRowReader, UserTrustStoreReader
+{
   private readonly resolveKind: typeof resolveIosDeviceKind;
   private readonly executor: HostCommandExecutor;
   private readonly fileSystem: TccDatabaseFileSystem;
@@ -332,6 +348,55 @@ export class SimulatorTccSqliteClient implements TccPermissionReader, TccService
       signal,
     );
     return parsePermissionRows(result.stdout, deviceId);
+  }
+
+  /**
+   * Reads the simulator's user trust settings from trustd's database. `simctl keychain reset`
+   * leaves them alone, so a root CA trusted during a session survives it (#14828).
+   */
+  async readUserTrustedCertificates(
+    deviceId: string,
+    signal?: AbortSignal,
+  ): Promise<UserTrustedCertificate[]> {
+    const udid = deviceId.trim();
+    if (!udid || this.resolveKind({ deviceId: udid }) === "physical") {
+      throw new ActionableError(`Trust store lookup requires a simulator UDID, received ${udid}`);
+    }
+    const databasePath = join(
+      this.deviceSetRoot,
+      udid,
+      "data",
+      "private",
+      "var",
+      "protected",
+      "trustd",
+      "private",
+      "TrustStore.sqlite3",
+    );
+    try {
+      await this.fileSystem.stat(databasePath);
+    } catch (error) {
+      if (hasErrorCode(error, "ENOENT")) {
+        // trustd creates the database on first use, so a simulator without one trusts nothing.
+        logger.debug(`simulator ${udid} has no trust store database`);
+        return [];
+      }
+      throw new ActionableError(
+        `Simulator trust store is unavailable for ${udid}: ${sqliteErrorDetail(error)}`,
+      );
+    }
+    const result = await this.execute(
+      ["-json", databasePath, "select hex(sha256) as sha256 from tsettings;"],
+      databasePath,
+      udid,
+      signal,
+    );
+    return parseJsonArray(result.stdout, `simulator trust store for ${udid}`).map((row) => {
+      if (typeof row.sha256 !== "string") {
+        throw new ActionableError(`sqlite3 returned a trust setting without sha256 for ${udid}`);
+      }
+      return { sha256: row.sha256 };
+    });
   }
 
   private async readPermissionColumns(

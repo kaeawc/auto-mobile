@@ -60,11 +60,12 @@ import { FileAvdConfigReader } from "../../utils/android-cmdline-tools/AvdConfig
 import { executionTracker } from "../executionTracker";
 import type { Session } from "../sessionManager/sessionTypes";
 import {
-  brokerMutationIncarnation,
+  brokerSessionMutationScope,
   SessionMutationRecorder,
   type MutationRecorder,
 } from "./mutations/recorder";
 import type { DeviceMutationScope } from "./mutations/types";
+import { nativeProfile } from "./profile";
 import { readFile, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { AndroidEmulatorClient } from "../../utils/android-cmdline-tools/AndroidEmulatorClient";
@@ -363,12 +364,30 @@ async function recoverSessionMutationRecorder(
     sessionUuid,
     session.stableDeviceId ?? session.assignedDevice,
   );
-  bindMutationRecorder({
-    sessionUuid,
-    deviceId: session.assignedDevice,
-    incarnation: brokerMutationIncarnation(request.resourceId, assignment.generation),
-  });
+  bindMutationRecorder(
+    recoveredMutationScope(sessionUuid, session.assignedDevice, resource, assignment),
+  );
   return options.mutationSessions.peekSession(sessionUuid)?.mutationRecorder;
+}
+
+/** An iOS journal shares the reset scope's incarnation, or the keep-booted reset cannot find it. */
+function recoveredMutationScope(
+  sessionUuid: string,
+  assignedDevice: string,
+  resource: BrokerResourceRecord | null | undefined,
+  assignment: BindingAssignmentRecord,
+): DeviceMutationScope {
+  if (!resource) {
+    throw new ActionableError("Recovered broker session has no resource");
+  }
+  return brokerSessionMutationScope({
+    platform: nativeProfile(resource).platform,
+    sessionUuid,
+    resource,
+    stableDeviceId: assignment.stableDeviceId ?? assignedDevice,
+    transportId: assignedDevice,
+    assignmentGeneration: assignment.generation,
+  });
 }
 
 function assertRecoveredMutationAssignment(

@@ -87,9 +87,8 @@ internal fun validPrototypeFixture(
   edit: ((JsonObject) -> JsonObject)? = null,
 ): PrototypeSpec {
   val file = validPrototypeFixtureFile(name)
-  if (!resolveElementAnchors && stateOverrides.isEmpty() && themeFrom == null && edit == null) {
-    return loadPrototypeSpec(file)
-  }
+  val unedited = !resolveElementAnchors && stateOverrides.isEmpty()
+  if (unedited && themeFrom == null && edit == null) return loadPrototypeSpec(file)
   var edited = Json.parseToJsonElement(file.readText())
   if (resolveElementAnchors) edited = resolveElementAnchors(edited)
   if (stateOverrides.isNotEmpty()) edited = overrideInitialState(edited, stateOverrides)

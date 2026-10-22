@@ -176,3 +176,66 @@ describe("iOS baseline setting contracts", () => {
     }
   });
 });
+
+describe("iOS journaled display setting reverts (#14790)", () => {
+  const present = (value: string): MutationValue => ({ state: "present", value });
+  const mutation = (key: string, priorValue: MutationValue) => ({
+    kind: "device-setting",
+    key,
+    priorValue,
+    toolName: "displayConfig",
+  });
+
+  test.each([
+    ["increaseContrast", present("disabled"), ["ui", "UDID", "increase_contrast", "disabled"]],
+    ["contentSize", present("large"), ["ui", "UDID", "content_size", "large"]],
+    ["nightMode", present("light"), ["ui", "UDID", "appearance", "light"]],
+    [
+      "reduceMotion",
+      present("1"),
+      [
+        "spawn",
+        "UDID",
+        "defaults",
+        "write",
+        "com.apple.Accessibility",
+        "ReduceMotionEnabled",
+        "-bool",
+        "YES",
+      ],
+    ],
+    [
+      "boldText",
+      present("0"),
+      [
+        "spawn",
+        "UDID",
+        "defaults",
+        "write",
+        "com.apple.Accessibility",
+        "EnhancedTextLegibilityEnabled",
+        "-bool",
+        "NO",
+      ],
+    ],
+    [
+      "reduceMotion",
+      { state: "absent" } as MutationValue,
+      ["spawn", "UDID", "defaults", "delete", "com.apple.Accessibility", "ReduceMotionEnabled"],
+    ],
+  ] as const)("%s reverts to its recorded prior value", async (key, priorValue, expected) => {
+    const rig = harness();
+    expect(rig.port.canRevert(mutation(key, priorValue))).toBe(true);
+    await rig.port.revert(mutation(key, priorValue), rig.context);
+    expect(rig.commands).toEqual([[...expected]]);
+  });
+
+  test("values the recorded setting cannot take are refused", () => {
+    const rig = harness();
+    expect(rig.port.canRevert(mutation("increaseContrast", present("true")))).toBe(false);
+    expect(rig.port.canRevert(mutation("contentSize", present("huge")))).toBe(false);
+    expect(rig.port.canRevert(mutation("boldText", present("yes")))).toBe(false);
+    expect(rig.port.canRevert(mutation("increaseContrast", { state: "absent" }))).toBe(false);
+    expect(rig.port.canRevert(mutation("fontScale", present("1.2")))).toBe(false);
+  });
+});

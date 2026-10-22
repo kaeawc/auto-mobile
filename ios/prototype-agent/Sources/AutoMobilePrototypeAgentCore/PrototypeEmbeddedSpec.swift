@@ -3,7 +3,7 @@ import Foundation
 /// A failure that prevents the entire embedded screen from being presented.
 /// This enum may gain cases; include a default branch when switching over it.
 public enum PrototypeLoadError: Error, Equatable, Sendable, LocalizedError {
-    /// A validation diagnostic with the same JSON path and message as the Viewer file loader.
+    /// A validation diagnostic using the shared structural contract's JSON paths.
     case invalidSpec(path: String, message: String)
     /// Required capabilities absent from `AutoMobilePrototypeCapabilities.supported`, sorted by name.
     case unsupportedCapabilities([String])
@@ -29,6 +29,7 @@ enum PrototypeEmbeddedSpec {
     )
         throws -> (spec: PrototypeSpec, bytes: Int)
     {
+        try PrototypeContractValidator.validate(data: data)
         switch PrototypeViewerSpecLoader.load(data: data) {
         case let .invalid(path, message): throw PrototypeLoadError.invalidSpec(path: path, message: message)
         case let .loaded(spec, bytes):

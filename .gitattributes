@@ -200,3 +200,4 @@ test/fixtures/docs-site/*.html text eol=lf
 test/fixtures/android-pin-dialog/*.json text eol=lf
 test/fixtures/android-pin-dialog/*.xml text eol=lf
 test/fixtures/android-pin-dialog/*.md text eol=lf
+ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeSpecContractData.swift text eol=lf

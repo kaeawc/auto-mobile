@@ -69,6 +69,9 @@ import { getPerformanceMonitor } from "../../performance/PerformanceMonitor";
 import { DeviceTeardownService } from "../../../devices/deviceTeardownService";
 import { mergeDeviceToolsDependencies } from "../deviceLifecycleDependencyOverrides";
 import { executionTracker } from "../../../daemon/executionTracker";
+import type { ManufacturerProfileApplier } from "../../utility/personaExecutors";
+
+export type { ManufacturerProfileApplier };
 
 export function initializedDevicePool(): DevicePool | undefined {
   return defaultDaemonContext.fullDevicePool();
@@ -117,6 +120,11 @@ export interface DeviceToolsDependencies {
   checkBootCapacity?: (platform: Platform, signal?: AbortSignal) => Promise<void>;
   /** Delay between bounded discovery retries when an existing AVD might already be running. */
   provisionAndroidIdentityBackoff?: BackoffPolicy;
+  /**
+   * Applies a provisionDevice `deviceProfile` to the bound session's ready device (#14058);
+   * defaults to the manufacturerProfile tool's executors.
+   */
+  manufacturerProfileApplier?: ManufacturerProfileApplier;
   /**
    * Per-platform boot capacity reporters the `listDevices` `capacity` field samples; defaults to
    * the process-wide admission gates, which probe adb/simctl/ps. Injected by the benchmark so the

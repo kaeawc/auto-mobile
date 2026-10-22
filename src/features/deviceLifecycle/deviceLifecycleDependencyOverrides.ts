@@ -8,9 +8,14 @@ export function provisionDeviceDependencyOverrides(
   currentDeps: DeviceToolsDependencies,
 ): Pick<
   DeviceToolsDependencies,
-  "exactDeviceProvisionerFactory" | "checkBootCapacity" | "provisionAndroidIdentityBackoff"
+  | "exactDeviceProvisionerFactory"
+  | "checkBootCapacity"
+  | "provisionAndroidIdentityBackoff"
+  | "manufacturerProfileApplier"
 > {
   return {
+    manufacturerProfileApplier:
+      deps.manufacturerProfileApplier ?? currentDeps.manufacturerProfileApplier,
     exactDeviceProvisionerFactory:
       deps.exactDeviceProvisionerFactory ?? currentDeps.exactDeviceProvisionerFactory,
     checkBootCapacity: deps.checkBootCapacity ?? currentDeps.checkBootCapacity,

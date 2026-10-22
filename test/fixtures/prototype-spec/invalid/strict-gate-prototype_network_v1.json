@@ -1,0 +1,121 @@
+{
+  "spec": {
+    "id": "request-actions",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "query": "cats",
+      "draft": "hello",
+      "feedStatus": "idle",
+      "postStatus": "idle",
+      "loaded": false
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "Loading",
+          "visibleWhen": {
+            "key": "feedStatus",
+            "equals": "loading"
+          }
+        },
+        {
+          "type": "text",
+          "text": "Could not load the feed",
+          "visibleWhen": {
+            "key": "feedStatus",
+            "equals": "error"
+          }
+        },
+        {
+          "type": "button",
+          "label": "Load feed",
+          "onTap": [
+            {
+              "type": "request",
+              "method": "GET",
+              "url": "http://localhost:8080/feed",
+              "headers": {
+                "Accept": "application/json",
+                "X-Title": {
+                  "data": "/title"
+                }
+              },
+              "query": {
+                "q": {
+                  "state": "query"
+                },
+                "limit": {
+                  "value": "20"
+                }
+              },
+              "into": "/data/feed",
+              "statusKey": "feedStatus",
+              "via": "host",
+              "timeoutMs": 5000,
+              "onSuccess": [
+                {
+                  "type": "setState",
+                  "key": "loaded",
+                  "value": true
+                },
+                {
+                  "type": "request",
+                  "url": "https://example.com/seen",
+                  "method": "POST",
+                  "body": {
+                    "value": {
+                      "seen": true
+                    }
+                  }
+                }
+              ],
+              "onError": [
+                {
+                  "type": "emit",
+                  "name": "feed_failed"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Send draft",
+          "onTap": [
+            {
+              "type": "request",
+              "method": "POST",
+              "url": "http://localhost:8080/items/{postStatus}",
+              "body": {
+                "state": "draft"
+              },
+              "into": "/data/created",
+              "statusKey": "postStatus",
+              "via": "device",
+              "onError": [
+                {
+                  "type": "setState",
+                  "key": "loaded",
+                  "value": false
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "data": {
+      "title": "Feed"
+    }
+  },
+  "options": {
+    "supportedCapabilities": ["prototype_data_model_v1", "prototype_network_device_v1"]
+  },
+  "expectedPath": "$"
+}

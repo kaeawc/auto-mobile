@@ -3,10 +3,15 @@ package dev.jasonpearson.automobile.protoviewer
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpRequest
 import dev.jasonpearson.automobile.protocol.PrototypeRequestErrorCode
 import dev.jasonpearson.automobile.protocol.PrototypeRequestResponse
+import android.content.Context
+import androidx.test.core.app.ApplicationProvider
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
+@RunWith(RobolectricTestRunner::class)
 class NetworkSettingsTest {
   private val settings = FakeSettingsStore()
   private val permission = FakeLocalNetworkPermission()
@@ -93,6 +98,29 @@ class NetworkSettingsTest {
       controller.setEnabled(false)
     }
     assertEquals(2, permission.requests)
+  }
+
+  @Test
+  fun revokedGrantTurnsEnabledSwitchOffAndReportsRevocation() {
+    val grant = FakeLocalNetworkGrant(granted = false)
+    settings.setAllowNetwork(true)
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    assertTrue(revokeNetworkIfLocalNetworkLost(settings, grant, context))
+    assertFalse(settings.allowNetwork.value)
+    assertEquals(1L, settings.networkRevocations.value)
+  }
+
+  @Test
+  fun grantedOrAlreadyOffLeavesSettingsUntouched() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    settings.setAllowNetwork(true)
+    assertFalse(revokeNetworkIfLocalNetworkLost(settings, FakeLocalNetworkGrant(true), context))
+    assertTrue(settings.allowNetwork.value)
+    settings.setAllowNetwork(false)
+    val denied = FakeLocalNetworkGrant(false)
+    assertFalse(revokeNetworkIfLocalNetworkLost(settings, denied, context))
+    assertFalse(settings.allowNetwork.value)
+    assertEquals(0, denied.checks) // Nothing to revoke: no platform query while the switch is off.
   }
 
   private companion object {

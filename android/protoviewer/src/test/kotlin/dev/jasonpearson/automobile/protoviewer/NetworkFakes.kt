@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.protoviewer
 
+import android.content.Context
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpClient
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpRequest
 import dev.jasonpearson.automobile.protocol.PrototypeRequestResponse
@@ -25,6 +26,15 @@ internal class FakeLocalNetworkPermission(var granted: Boolean = false) : LocalN
   override fun request() {
     requests++
     result(granted)
+  }
+}
+
+internal class FakeLocalNetworkGrant(var granted: Boolean = true) : LocalNetworkGrant {
+  var checks = 0
+
+  override fun isGranted(context: Context): Boolean {
+    checks++
+    return granted
   }
 }
 

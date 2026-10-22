@@ -162,9 +162,18 @@
                     draft.endEditing(stored: model.state[key]?.displayString ?? "")
                 }
             }
-            .onSubmit {
-                draft.endEditing(stored: model.state[key]?.displayString ?? "")
-                if node.type == "searchBar" || node.type == "textField" { model.run(node.onSubmit ?? []) }
+            .onSubmit { submit() }
+            .toolbar {
+                if focused, let title = options.submitAccessoryTitle {
+                    ToolbarItemGroup(placement: .keyboard) {
+                        Spacer()
+                        // Submit, then dismiss the pad, in the Return key's order.
+                        Button(title) {
+                            submit()
+                            focused = false
+                        }
+                    }
+                }
             }
             .onChange(of: stored) { _, value in
                 draft.storedChanged(to: value)
@@ -172,6 +181,13 @@
             .onChange(of: model.showRevision) { _, _ in
                 draft.endEditing(stored: model.state[key]?.displayString ?? "")
             }
+        }
+
+        /// The Return key, or the keyboard toolbar button on pads without one, ends editing and runs
+        /// `onSubmit`.
+        private func submit() {
+            draft.endEditing(stored: model.state[node.stateKey ?? ""]?.displayString ?? "")
+            if node.type == "searchBar" || node.type == "textField" { model.run(node.onSubmit ?? []) }
         }
 
         private var textBinding: Binding<String> {

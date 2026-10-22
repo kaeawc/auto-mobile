@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialogDefaults
 import androidx.compose.material3.Badge
 import androidx.compose.material3.CenterAlignedTopAppBar
@@ -328,7 +330,7 @@ internal fun RenderPrototypeDialog(
     )
     Surface(
       modifier
-        .padding(horizontal = 24.dp)
+        .padding(horizontal = 24.dp, vertical = 24.dp)
         .widthIn(min = 280.dp, max = 560.dp)
         // Consume body taps so they never reach the scrim; the node's own onTap runs instead.
         .clickable(remember { MutableInteractionSource() }, indication = null) {
@@ -362,7 +364,13 @@ internal fun RenderPrototypeDialog(
             style = MaterialTheme.typography.bodyMedium,
           )
         }
-        content()
+        // Custom content scrolls between the header and the buttons, as a Material alert dialog's
+        // body does, so a tall child (time and date pickers) never pushes the actions off (#14584).
+        Column(
+          Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
+          verticalArrangement = Arrangement.spacedBy(16.dp),
+          content = content,
+        )
         Row(
           Modifier.fillMaxWidth(),
           horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),

@@ -1,0 +1,38 @@
+{
+  "spec": {
+    "id": "checks",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "opacity": 100
+    },
+    "state": {
+      "value": ""
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "checks": [
+            {
+              "message": "Required",
+              "required": true
+            }
+          ],
+          "type": "textField",
+          "stateKey": "value"
+        },
+        {
+          "enabledWhen": {
+            "valid": "value"
+          },
+          "type": "listItem",
+          "headline": "Save",
+          "zzzUnknown": true
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[1].zzzUnknown"
+}

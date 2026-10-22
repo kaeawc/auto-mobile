@@ -10,6 +10,20 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.add
 
 internal object PrototypeRequestRules {
+  private val forbiddenHeaders =
+    setOf(
+      "host",
+      "connection",
+      "upgrade",
+      "transfer-encoding",
+      "content-length",
+      "te",
+      "trailer",
+      "keep-alive",
+      "cookie",
+      "origin",
+      "expect",
+    )
   val headerNamePattern = Regex("^[!#$%&'*+\\-.^_`|~0-9A-Za-z]+$")
 
   /**
@@ -81,6 +95,12 @@ internal object PrototypeRequestRules {
     val seenHeaders = HashSet<String>()
     for ((name, value) in (entries as? JsonObject).orEmpty()) {
       val entryPath = keyPath("$at.$field", name)
+      if (
+        field == "headers" &&
+          (name.lowercase() in forbiddenHeaders || name.startsWith("proxy-", ignoreCase = true))
+      ) {
+        return fail(entryPath, "Forbidden request header")
+      }
       if (field == "headers" && !headerNamePattern.matches(name)) {
         return fail(entryPath, "Invalid header name")
       }
@@ -89,6 +109,10 @@ internal object PrototypeRequestRules {
         return fail(entryPath, "Duplicate header name (names are case-insensitive)")
       }
       val literal = (value as? JsonObject)?.get("value")
+      val text = ((literal ?: value) as? kotlinx.serialization.json.JsonPrimitive)?.content
+      if (field == "headers" && text != null && text.any { it == '\r' || it == '\n' }) {
+        return fail(entryPath, "CR/LF in header value")
+      }
       if (literal != null && !isValidLiteral(literal)) {
         return fail(
           "$entryPath.value",

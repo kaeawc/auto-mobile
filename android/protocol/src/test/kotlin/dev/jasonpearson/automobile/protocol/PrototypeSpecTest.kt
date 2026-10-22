@@ -54,6 +54,35 @@ class PrototypeSpecTest {
     }
   }
 
+  @Test
+  fun `all three corpus runners consume the complete captured inventory`() {
+    val inventory =
+      Json.parseToJsonElement(File(fixtureDirectory(), "corpus.json").readText()).jsonObject
+    assertEquals(
+      inventory.getValue("valid").jsonArray.map { it.jsonPrimitive.content },
+      valid.map { it.name },
+    )
+    assertEquals(
+      inventory.getValue("invalid").jsonArray.map { it.jsonPrimitive.content },
+      invalid.map { it.name },
+    )
+    for (file in valid) {
+      val spec =
+        Json.parseToJsonElement(PrototypeStrictJson.prepare(validJson.getValue(file))).jsonObject
+      assertEquals(
+        inventory
+          .getValue("validCapabilities")
+          .jsonObject
+          .getValue(file.name)
+          .jsonArray
+          .map { it.jsonPrimitive.content }
+          .toSet(),
+        PrototypeStrictPolicy.required(spec),
+        file.name,
+      )
+    }
+  }
+
   @TestFactory
   fun validFixtures(): List<DynamicTest> = valid.map { file ->
     DynamicTest.dynamicTest("decode ${file.name}") {
@@ -69,15 +98,26 @@ class PrototypeSpecTest {
   fun invalidFixtures(): List<DynamicTest> = invalid.map { file ->
     val fixture = invalidJson.getValue(file)
     DynamicTest.dynamicTest("reject ${file.name}") {
-      val result = PrototypeSpecValidator.validate(invalidSpec.getValue(file))
+      val options = fixture["options"] as? JsonObject
+      val supported =
+        (options?.get("supportedCapabilities") as? JsonArray)
+          ?.map { it.jsonPrimitive.content }
+          ?.toSet()
+      val library = options?.get("library")?.jsonPrimitive?.booleanOrNull ?: false
+      val result =
+        if (fixture["rawBytesBase64"] != null) {
+          PrototypeSpecValidator.validate(
+            java.util.Base64.getDecoder()
+              .decode(fixture.getValue("rawBytesBase64").jsonPrimitive.content),
+            supported,
+            library,
+          )
+        } else PrototypeSpecValidator.validate(invalidSpec.getValue(file), supported, library)
       assertTrue(result is PrototypeSpecValidation.Failure, result.toString())
       assertEquals(
         fixture.getValue("expectedPath").jsonPrimitive.content,
         (result as PrototypeSpecValidation.Failure).error.path,
       )
-      fixture["expectedMessage"]?.let { expected ->
-        assertEquals(expected.jsonPrimitive.content, result.error.message)
-      }
     }
   }
 
@@ -140,7 +180,10 @@ class PrototypeSpecTest {
     assertTrue(valid.isNotEmpty())
     assertTrue(invalid.isNotEmpty())
     val tags = mutableSetOf<String>()
-    for (file in valid) collectTags(Json.parseToJsonElement(validJson.getValue(file)), tags)
+    for (file in valid) collectTags(
+      Json.parseToJsonElement(PrototypeStrictJson.prepare(validJson.getValue(file))),
+      tags,
+    )
     for (type in
       PrototypeSpecValidator.nodeTypes +
         PrototypeSpecValidator.actionTypes +
@@ -636,7 +679,9 @@ class PrototypeSpecTest {
           .sortedBy { it.name }
       validJson = valid.associateWith { it.readText() }
       invalidJson = invalid.associateWith { Json.parseToJsonElement(it.readText()).jsonObject }
-      invalidSpec = invalidJson.mapValues { it.value.getValue("spec").toString() }
+      invalidSpec = invalidJson.mapValues {
+        it.value["rawJson"]?.jsonPrimitive?.content ?: it.value["spec"]?.toString() ?: "null"
+      }
       // Materialize every lazy serializer before JUnit starts measuring each test.
       for (input in validJson.values) {
         val decoded = PrototypeSpecValidator.validate(input)

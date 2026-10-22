@@ -17,16 +17,32 @@ screenshots (#10943, #10988) and the renderer and accessibility fixes that follo
 
 ## Embedded input validation
 
-The embedded/serverless API validates raw JSON against the compiled structural contract before
-`PrototypeSpec` decoding (#14482). Unknown fields and node types, malformed storage, invalid values,
-unions and structural budgets produce `PrototypeLoadError.invalidSpec(path:message:)` with host-style
-JSON paths. The generated contract has no resource-bundle dependency and a Bun drift test guards it.
-The Viewer/file loader retains its existing behavior. Host-only checks remain for state/action
-bindings, repeat expansion and substituted-text budgets, cross-node targets, component/ancestor
-combinations, check pattern grammar, chart data semantics, emit/link scope and platform registries;
-the Swift fixture test names each exemption and rejects stale exemptions. Element anchors still need
-host resolution to bounds (three structurally valid fixtures retain this diagnostic). Foundation
-rejects lone UTF-16 surrogates before constructing a JSON tree, so those parse failures report `$`.
+`PrototypeSpecStrictValidator.validate(data:supportedCapabilities:library:)` is the reject-only
+raw-byte entry point (#13620). It extends the generated structural interpreter from #14803 and
+composes the existing request/platform validators, state binding rules, portable check grammar,
+repeat tokenizer/binder/data projection and resource guards. Located checks cover charts, storage
+cross-references, template scope and cross-node targets. Success returns no render model; failures
+throw `PrototypeLoadError.invalidSpec(path:message:)` before rendering, storage or networking.
+The embedded/serverless loader runs this boundary before its existing decoder/capability checks.
+The Viewer/file loader retains its existing behavior. The generated contract remains bundle-free
+and protected by its Bun drift test.
+
+The shared corpus runner has no exemptions: every valid spec is accepted and every invalid fixture
+is rejected at the TS-captured path. `corpus.json` ratchets the complete file inventory and TS-computed
+capabilities in TS, Kotlin and Swift. Regenerate with
+`bun scripts/capture-prototype-strict-fixtures.ts`. Invalid envelopes can use `rawJson` or
+`rawBytesBase64` where an ordinary `spec` would erase duplicate keys or invalid encoding. Message
+parity is not required. The existing LF attribute covers these JSON fixtures.
+
+The byte boundary strips one BOM, rejects duplicate keys, invalid UTF-8, lone surrogates and
+nonfinite tokens at `$`, and limits JSON container depth to 128 before Foundation decoding. Semantic
+limits are unchanged. IDs and finite numbers retain TS semantics, including Unicode form, control
+characters escaped in JSON, negative zero and double precision above 2^53. Supplying
+`supportedCapabilities` checks authored features (including hidden and empty-template nodes).
+`library: true` rejects explicit system windows/device persistence; other import network/secret
+policies are applied by the importing app. Forbidden headers and literal CR/LF reject in either mode.
+Element anchors still need host resolution to bounds: three valid fixtures retain that loader
+diagnostic. Validation does not imply that the iOS renderer advertises every capability.
 
 ## Feature support
 
@@ -308,7 +324,7 @@ on it closes the sheet by writing `!equals` to its `openWhen` key, as on Android
 when the asset is uploaded, then its `icon`, then a placeholder square. Both ids of a pair are
 reported in `missingAssets` until they are uploaded.
 
-**Malformed values.** The agent has no copy of the host validator. For the forms this capability
+**Malformed values.** The strict input boundary validates the shared host contract and semantics. For the forms this capability
 added it checks them while decoding, and a malformed one fails `show_prototype` with
 `Invalid prototype spec: <path>: ...`, leaving the shown prototype untouched: a pair that is not
 exactly `{light, dark}` strings, a pair side or a gradient stop or a scrim that is neither a hex
@@ -521,8 +537,8 @@ Data stays agent-owned and read-only except through the data actions below; insp
 it next to state.
 Two data keys that are canonically equivalent Unicode strings collapse into one on iOS because
 Swift dictionary keys compare by canonical equivalence, unlike the host and Android.
-The agent re-checks data depth and array limits in the host's traversal order. It does not duplicate
-the host validator's data byte-cost rule at show; the existing 1 MiB whole-spec byte cap still bounds input.
+The agent re-checks data depth and array limits in the host's traversal order. The strict input
+boundary also enforces the host data byte-cost rule at show.
 
 ## Data actions capability
 

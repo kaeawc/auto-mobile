@@ -4807,7 +4807,7 @@ describe("Android systemTray clearAll post-swipe recovery", () => {
     expect(timer.now()).toBeLessThan(3125);
   });
 
-  test("bounds a hung reopen by the post-swipe deadline and cancels its pending work", async () => {
+  test("bounds a hung reopen and its follow-up reads by the post-swipe deadline", async () => {
     const { observer, swipes, timer, reopenTimes, drain } = setup();
     const execute = observer.execute.bind(observer);
     let reopenSignal: AbortSignal | undefined;
@@ -4827,6 +4827,31 @@ describe("Android systemTray clearAll post-swipe recovery", () => {
     expect(timer.now()).toBe(EXPAND_GROUP_SETTLE_MS + 3125);
     expect(reopenTimes).toHaveLength(1);
     expect(reopenSignal?.aborted).toBe(true);
+  });
+
+  test("caps a hung reopen at its attempt budget and keeps recovering (#14532)", async () => {
+    const { observer, swipes, timer, reopenTimes, drain } = setup();
+    const execute = observer.execute.bind(observer);
+    let hungSignal: AbortSignal | undefined;
+    spyOn(observer, "execute").mockImplementation((options) => {
+      if (swipes().length === 0) {
+        return execute(options);
+      }
+      if (reopenTimes.length === 0) {
+        return Promise.resolve(createObservation());
+      }
+      if (!hungSignal) {
+        // The reopen's first post-expand observation never resolves.
+        hungSignal = options?.signal;
+        return new Promise<ObserveResult>(() => {});
+      }
+      return Promise.resolve(createEmptyTrayObservation());
+    });
+
+    expect(await drain()).toMatchObject({ swipeCount: 1, dismissedCount: 1, stalled: false });
+    expect(reopenTimes).toHaveLength(1);
+    expect(hungSignal?.aborted).toBe(true);
+    expect(timer.now() - reopenTimes[0]).toBeLessThanOrEqual(500);
   });
 
   test("propagates cancellation while reopening the post-swipe shade", async () => {
@@ -5040,6 +5065,14 @@ describe("Android systemTray clearAll progress budget", () => {
     const { swipes, drain } = setup(3, 2);
 
     expect(await drain()).toMatchObject({ swipeCount: 4, dismissedCount: 3, stalled: false });
+    expect(swipes()).toHaveLength(4);
+  });
+
+  test("a retried swipe does not spend the inventory cap, so the last row is not left behind (#13810)", async () => {
+    // clearAll passes the notification inventory (3 here) as maxSwipes: the retry is a 4th swipe.
+    const { swipes, drain } = setup(3, 2);
+
+    expect(await drain(3)).toMatchObject({ swipeCount: 4, dismissedCount: 3, stalled: false });
     expect(swipes()).toHaveLength(4);
   });
 

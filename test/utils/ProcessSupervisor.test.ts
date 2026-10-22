@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { DefaultProcessSupervisor } from "../../src/utils/ProcessSupervisor";
+import { DefaultProcessSupervisor, type LivenessProbe } from "../../src/utils/ProcessSupervisor";
 import { sequenceBackoff } from "../../src/utils/Backoff";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -366,6 +366,41 @@ describe("DefaultProcessSupervisor", function () {
     expect(timer.getPendingTimeoutCount()).toBe(0);
     expect(timer.getPendingIntervals()).toEqual([250]);
   });
+
+  test.each(["start", "stop", "exit"] as const)(
+    "a probe stops being current once %s opens a new supervision epoch",
+    async function (transition) {
+      const timer = new FakeTimer();
+      const probes: LivenessProbe[] = [];
+      const supervisor = new DefaultProcessSupervisor({
+        name: "test-process",
+        timer,
+        monitorIntervalMs: 250,
+        restartBackoff: sequenceBackoff([100]),
+        restart: async () => {},
+        isAlive: async (probe) => {
+          probes.push(probe);
+          return true;
+        },
+      });
+
+      await supervisor.start();
+      timer.advanceTime(250);
+      await flushMicrotasks();
+      expect(probes).toHaveLength(1);
+      expect(probes[0].isCurrent()).toBe(true);
+
+      if (transition === "start") {
+        await supervisor.start();
+      } else if (transition === "stop") {
+        supervisor.stop();
+      } else {
+        supervisor.processExited();
+      }
+      expect(probes[0].isCurrent()).toBe(false);
+      supervisor.stop();
+    },
+  );
 
   test("reports liveness through the injected liveness check", async function () {
     const timer = new FakeTimer();

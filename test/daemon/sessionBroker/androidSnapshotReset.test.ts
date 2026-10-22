@@ -452,7 +452,7 @@ test("full snapshot strategy restores added packages only when the activity veto
   expect(host.closed).toBe(1);
 });
 
-test("snapshot baseline never bypasses opaque, emulator-process or host-side activity veto", async () => {
+async function capturedSnapshotRig() {
   const { strategy, port, timer } = rig();
   const host = new FakeAndroidResetHost();
   host.strategy = strategy;
@@ -464,12 +464,38 @@ test("snapshot baseline never bypasses opaque, emulator-process or host-side act
     timeoutMs: 30_000,
     assertOwned: async () => {},
   });
+  const reset = () =>
+    baseline.reset("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, async () => {});
+  return { host, port, reset };
+}
+
+test("a session that made mutating tool calls resets by snapshot load, not destroy (#14952)", async () => {
+  const { host, port, reset } = await capturedSnapshotRig();
   host.safe = false;
-  await expect(
-    baseline.reset("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, async () => {}),
-  ).rejects.toThrow("mutations cannot be restored");
+  await expect(reset()).resolves.toMatchObject({ outcome: "clean", mode: "snapshot" });
+  expect(port.calls).toContain("load");
+  expect(port.calls).not.toContain("launch");
+});
+
+test("a session that changed host-side state still destroys rather than reusing the device", async () => {
+  const { host, port, reset } = await capturedSnapshotRig();
+  host.safe = false;
+  host.hostSide = true;
+  await expect(reset()).rejects.toThrow("mutations cannot be restored");
   expect(port.calls).not.toContain("load");
   expect(port.calls).not.toContain("launch");
+});
+
+test("a session with opaque persistent changes skips the load and takes wipe-data (#14952)", async () => {
+  const { host, port, reset } = await capturedSnapshotRig();
+  host.safe = false;
+  host.opaque = true;
+  await expect(reset()).resolves.toMatchObject({
+    outcome: "fallback:wipe-data",
+    mode: "wipe-data",
+    fallbackReason: expect.stringContaining("opaque persistent changes"),
+  });
+  expect(port.calls).not.toContain("load");
 });
 
 test("successful wipe-data reset leaves the replacement launch signal live and captures only once on reacquisition", async () => {

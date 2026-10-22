@@ -59,7 +59,7 @@ describe("recordDeviceGestures tool", () => {
   });
 
   afterAll(() => {
-    mock.module("../../src/daemon/deviceGestureRecordingManager", () => ({
+    void mock.module("../../src/daemon/deviceGestureRecordingManager", () => ({
       startDeviceGestureRecording: realStartDeviceGestureRecording,
       stopDeviceGestureRecording: realStopDeviceGestureRecording,
       getDeviceGestureRecordingStatus: realGetDeviceGestureRecordingStatus,
@@ -76,7 +76,7 @@ describe("recordDeviceGestures tool", () => {
   });
 
   test("successfully starts a new recording", async () => {
-    mock.module("../../src/daemon/deviceGestureRecordingManager", () => ({
+    void mock.module("../../src/daemon/deviceGestureRecordingManager", () => ({
       startDeviceGestureRecording: mockStartDeviceGestureRecording,
       stopDeviceGestureRecording: mock(() => Promise.resolve({})),
       getDeviceGestureRecordingStatus: mock(() => null),
@@ -104,7 +104,7 @@ describe("recordDeviceGestures tool", () => {
       platform: "android",
     };
 
-    mock.module("../../src/daemon/deviceGestureRecordingManager", () => ({
+    void mock.module("../../src/daemon/deviceGestureRecordingManager", () => ({
       startDeviceGestureRecording: mock(() => Promise.resolve(existingSession)),
       stopDeviceGestureRecording: mock(() => Promise.resolve({})),
       getDeviceGestureRecordingStatus: mock(() => existingSession),
@@ -122,7 +122,7 @@ describe("recordDeviceGestures tool", () => {
   });
 
   test("returns error when recording fails to start", async () => {
-    mock.module("../../src/daemon/deviceGestureRecordingManager", () => ({
+    void mock.module("../../src/daemon/deviceGestureRecordingManager", () => ({
       startDeviceGestureRecording: mock(() =>
         Promise.reject(new Error("Unable to connect to accessibility service")),
       ),
@@ -148,7 +148,7 @@ describe("recordDeviceGestures tool", () => {
       status: "booted" as const,
     };
 
-    mock.module("../../src/daemon/deviceGestureRecordingManager", () => ({
+    void mock.module("../../src/daemon/deviceGestureRecordingManager", () => ({
       startDeviceGestureRecording: mock(() =>
         Promise.reject(
           new Error(

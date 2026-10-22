@@ -28,6 +28,7 @@ import {
 } from "../../utils/ios-cmdline-tools/IosHomeBackend";
 import { SimctlCommandTimeoutError } from "../../utils/ios-cmdline-tools/SimctlCommandTimeoutError";
 import { IosHomeLaunchTimeoutError } from "../../models/IosHomeLaunchTimeoutError";
+import { IosHomeNotForegroundError } from "../../models/IosHomeNotForegroundError";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import type { SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { sequenceBackoff, type BackoffPolicy } from "../../utils/Backoff";
@@ -59,6 +60,11 @@ const ANDROID_LAUNCHER_OVERLAY_MARKERS = [
  * (issue #6147) rather than trusting either dispatch method's self-reported
  * result.
  */
+const SPOTLIGHT_BUNDLE_ID = "com.apple.Spotlight";
+
+/** The runner's one-shot foreground check failure; keep in sync with CommandHandler+TextInput.swift. */
+const RUNNER_HOME_NOT_FOREGROUND_ERROR = "Home press did not bring SpringBoard to the foreground";
+
 export class HomeScreen extends BaseVisualChange {
   /**
    * Deadline for the ADB `KEYCODE_HOME` fallback keyevent. Without a bound a
@@ -373,14 +379,26 @@ export class HomeScreen extends BaseVisualChange {
 
     try {
       const client = this.iosClient();
-      await this.verifyIosHomeForeground(
-        client,
-        perf,
-        HomeScreen.IOS_SIMULATOR_RETRY_DELAYS_MS,
-        this.iosHomeRemainingMs(deadline),
-        HomeScreen.IOS_SIMULATOR_READ_TIMEOUT_MS,
-        { pollUntilDeadline: true, signal },
-      );
+      try {
+        await this.verifyIosHomeForeground(
+          client,
+          perf,
+          HomeScreen.IOS_SIMULATOR_RETRY_DELAYS_MS,
+          this.iosHomeRemainingMs(deadline),
+          HomeScreen.IOS_SIMULATOR_READ_TIMEOUT_MS,
+          { pollUntilDeadline: true, signal },
+        );
+      } catch (error) {
+        // simctl's SpringBoard launch does not dismiss Spotlight on iOS 27 (#14827); the runner's
+        // hardware Home press does, so retry once through it and verify again.
+        if (
+          !(error instanceof IosHomeNotForegroundError) ||
+          error.foregroundApp !== SPOTLIGHT_BUNDLE_ID
+        ) {
+          throw error;
+        }
+        await this.pressRunnerHomeThenVerify(client, perf, signal, onDispatch);
+      }
     } catch (error) {
       throwIfAborted(signal);
       throw new ActionableError(
@@ -388,6 +406,32 @@ export class HomeScreen extends BaseVisualChange {
         { cause: error },
       );
     }
+  }
+
+  private async pressRunnerHomeThenVerify(
+    client: IOSCtrlProxyClient,
+    perf: PerformanceTracker | undefined,
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<void> {
+    const pressError = await awaitWhileRequestIsLive(
+      this.tryIosRunnerHome(client, 5000, perf, undefined, { signal, onDispatch }),
+      signal,
+    );
+    // The runner checks the foreground once, right after the press, and SpringBoard can take
+    // about a second to settle after Spotlight (#14827). That error means "sent, unverified", so
+    // fall through to the polling check instead of failing before it runs.
+    if (pressError && pressError !== RUNNER_HOME_NOT_FOREGROUND_ERROR) {
+      throw new ActionableError(pressError);
+    }
+    await this.verifyIosHomeForeground(
+      client,
+      perf,
+      HomeScreen.IOS_SIMULATOR_RETRY_DELAYS_MS,
+      undefined,
+      HomeScreen.IOS_SIMULATOR_READ_TIMEOUT_MS,
+      { pollUntilDeadline: true, signal },
+    );
   }
 
   /** The device's runner client, resolved at each use so a retired client is never reused. */
@@ -594,6 +638,9 @@ export class HomeScreen extends BaseVisualChange {
     if (foregroundApp === "unknown app") {
       throw new ActionableError("Home press did not bring SpringBoard to the foreground");
     }
-    throw new ActionableError(`Home press did not background ${foregroundApp}${alert}`);
+    throw new IosHomeNotForegroundError(
+      `Home press did not background ${foregroundApp}${alert}`,
+      foregroundApp,
+    );
   }
 }

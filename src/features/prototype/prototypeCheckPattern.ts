@@ -9,6 +9,12 @@
  * space, tab, CR, LF, FF and VT. Dot excludes CR, LF, U+2028 and U+2029.
  * Standard RegExp cannot enforce this grammar, and no installed parser implements this subset.
  */
+import contract from "../../../schemas/prototype-spec-contract.json";
+
+const maxLength = contract.definitions.check.fields.pattern.rule.max;
+const maxBound = contract.limits.MAX_PROTOTYPE_CHECK_QUANTIFIER_BOUND;
+const maxVariable = contract.limits.MAX_PROTOTYPE_CHECK_VARIABLE_QUANTIFIERS;
+
 export type CheckPatternResult = { ok: true } | { ok: false; message: string };
 interface Body {
   variable: boolean;
@@ -24,8 +30,8 @@ class PatternParser {
   constructor(private readonly source: string) {}
 
   parse(): CheckPatternResult {
-    if (this.source.length > 128) {
-      return { ok: false, message: "Pattern exceeds 128 characters" };
+    if (this.source.length > maxLength) {
+      return { ok: false, message: `Pattern exceeds ${maxLength} characters` };
     }
     this.body(false);
     return this.error ? { ok: false, message: this.error } : { ok: true };
@@ -193,8 +199,8 @@ class PatternParser {
     return max;
   }
   private countVariableQuantifier(): void {
-    if (this.variable && ++this.variableQuantifiers > 2) {
-      this.fail("pattern has too many variable quantifiers (max 2)");
+    if (this.variable && ++this.variableQuantifiers > maxVariable) {
+      this.fail(`pattern has too many variable quantifiers (max ${maxVariable})`);
     }
   }
   private boundedQuantifier(): number | undefined {
@@ -205,8 +211,8 @@ class PatternParser {
     }
     const min = Number(match[1]);
     const max = match[2] === undefined ? min : match[2] === "" ? Infinity : Number(match[2]);
-    if (min > 100 || (max !== Infinity && max > 100)) {
-      this.fail("Quantifier bounds must be <=100");
+    if (min > maxBound || (max !== Infinity && max > maxBound)) {
+      this.fail(`Quantifier bounds must be <=${maxBound}`);
     } else if (min > max) {
       this.fail("Quantifier minimum exceeds maximum");
     }

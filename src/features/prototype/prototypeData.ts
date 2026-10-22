@@ -1,3 +1,4 @@
+import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import { prototypeNodeChildren, prototypeSpecNodeRoots } from "./prototypeNodeChildren";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import {
@@ -13,7 +14,7 @@ export function isPrototypeDataPointer(value: unknown): value is string {
     typeof value === "string" &&
     value.length > 0 &&
     value.length <= contract.limits.MAX_PROTOTYPE_DATA_POINTER_LENGTH &&
-    /^(?:\/(?:[^~\/]|~[01])*)+$/.test(value)
+    prototypeContractPatterns.pointer.test(value)
   );
 }
 

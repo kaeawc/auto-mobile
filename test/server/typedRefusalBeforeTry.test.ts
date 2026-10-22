@@ -198,7 +198,7 @@ describe("typed refusals thrown before executeToolCall's try (#11292)", () => {
       });
       expect(routedSessionUuidFromResult(result)).toBeUndefined();
       expect(result).not.toHaveProperty("_meta");
-      expect(ends).toEqual([{ admitted: false }]);
+      expect(ends.map(({ admitted }) => admitted)).toEqual([false]);
       expect(wire(result)).toMatchObject({
         success: false,
         code: "session_released_during_creation",
@@ -273,7 +273,7 @@ describe("typed refusals thrown before executeToolCall's try (#11292)", () => {
       });
       expect(routedSessionUuidFromResult(result)).toBeUndefined();
       expect(result).not.toHaveProperty("_meta");
-      expect(ends).toEqual([{ admitted: false }]);
+      expect(ends.map(({ admitted }) => admitted)).toEqual([false]);
     } finally {
       assign.mockRestore();
       admission.mockRestore();

@@ -97,9 +97,8 @@ ANGLE-indirect path.
 The emulator documentation deprecates `swiftshader_indirect`,
 `swangle_indirect` and `guest` (36.4.9) and `angle_indirect` (34.2.14). The
 current software modes are `software`, `swiftshader`, `lavapipe` and `swangle`.
-CI still passes the deprecated `swiftshader_indirect`
-(`.github/actions/android-emulator/action.yml`); the emulator maps it to
-`swiftshader` today, but a later release may drop it.
+CI (`.github/actions/android-emulator/action.yml`) passes `-gpu swiftshader`,
+the mode the deprecated `swiftshader_indirect` already mapped to.
 
 Linux configuration guidance until the cause is known:
 

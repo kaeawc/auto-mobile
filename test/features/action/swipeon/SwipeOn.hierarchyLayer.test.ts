@@ -1,6 +1,5 @@
-import { beforeEach, afterEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { SwipeOn } from "../../../../src/features/action/swipeon/SwipeOn";
-import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import type { ObserveResult, SwipeOnOptions } from "../../../../src/models";
 import type { ViewHierarchyResult } from "../../../../src/models/ViewHierarchyResult";
 import { FakeAccessibilityDetector } from "../../../fakes/FakeAccessibilityDetector";
@@ -38,8 +37,6 @@ function harness(
 ) {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
-  const ctrl = new FakeCtrlProxy(timer);
-  clientSpy.mockReturnValue(ctrl);
   const gesture = new FakeGestureExecutor();
   const observe = new FakeObserveScreen();
   const observation = deviceObservation(hierarchy, screenSize);
@@ -49,6 +46,7 @@ function harness(
     new FakeAdbClient(),
     {
       timer,
+      accessibilityService: new FakeCtrlProxy(timer),
       awaitIdle: new FakeAwaitIdle(),
       window: new FakeWindow(),
       observeScreen: observe,
@@ -67,16 +65,11 @@ const insidePrototype = (point: { x: number; y: number }) =>
 
 const swipe = (options: SwipeOnOptions): SwipeOnOptions => options;
 
-afterEach(() => mock.restore());
-
 describe("swipeOn layer (#9305)", () => {
-  // Warm the resolver once after the per-test spy has been installed.
-  let warmed = false;
-  beforeEach(async () => {
-    if (warmed) {
-      return;
-    }
-    warmed = true;
+  // CI's per-test time excludes only beforeAll: one throwaway swipe pays the resolver's one-time
+  // module/JIT cost over the captured hierarchy here, not in the first timed test. The CtrlProxy
+  // fake is injected, so no spy is installed and the file stays shared-safe (#14473).
+  beforeAll(async () => {
     const { action } = harness();
     await action.execute(
       swipe({ direction: "up", container: { elementId: "coverBox" }, layer: "app" }),
@@ -213,9 +206,4 @@ describe("swipeOn layer (#9305)", () => {
     expect(result.error).toContain("layer is not supported with `display`");
     expect(gesture.getSwipeCalls()).toEqual([]);
   });
-});
-
-let clientSpy: ReturnType<typeof spyOn<typeof AndroidCtrlProxyClient, "getInstance">>;
-beforeEach(() => {
-  clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance");
 });

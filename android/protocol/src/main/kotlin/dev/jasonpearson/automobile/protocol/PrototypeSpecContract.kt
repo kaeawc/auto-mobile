@@ -3,17 +3,11 @@ package dev.jasonpearson.automobile.protocol
 import dev.jasonpearson.automobile.protocol.PrototypeSpecContract.json
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 internal object PrototypeSpecContract {
-  val pathKeyPattern = Regex("^[A-Za-z_][A-Za-z0-9_]*$")
-  internal val stateKeyPattern = Regex("^[A-Za-z_][A-Za-z0-9_]{0,63}$")
-  val colorPattern = Regex("^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$")
-  val blankTextPattern =
-    Regex(
-      "^[\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]*$",
-    )
-  val numberTokenPattern = Regex("^-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$")
   internal val json = Json { ignoreUnknownKeys = false }
   val contract: JsonObject =
     json
@@ -25,6 +19,32 @@ internal object PrototypeSpecContract {
           .use { it.readText() },
       )
       .jsonObject
+  // Explicit whitespace and strict end assertions keep Java, ECMAScript and ICU in agreement.
+  val patterns =
+    contract.getValue("patterns").jsonObject.mapValues { Regex(it.value.jsonPrimitive.content) }
+  val pathKeyPattern = patterns.getValue("pathKey")
+  val stateKeyPattern = patterns.getValue("stateKey")
+  val colorPattern = patterns.getValue("color")
+  val blankTextPattern = patterns.getValue("blankText")
+  val numberTokenPattern = patterns.getValue("numberToken")
+  val checkControls =
+    contract.getValue("checkControls").jsonObject.mapValues {
+      it.value.jsonArray.map { control -> control.jsonPrimitive.content }
+    }
   val definitions = contract.getValue("definitions").jsonObject
   val limits = contract.getValue("limits").jsonObject
+  val checkPatternMaxLength =
+    definitions
+      .getValue("check")
+      .jsonObject
+      .getValue("fields")
+      .jsonObject
+      .getValue("pattern")
+      .jsonObject
+      .getValue("rule")
+      .jsonObject
+      .getValue("max")
+      .jsonPrimitive
+      .content
+      .toInt()
 }

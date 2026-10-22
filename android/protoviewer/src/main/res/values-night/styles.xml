@@ -1,0 +1,1 @@
+<resources><style name="Theme.ProtoViewer" parent="android:style/Theme.Material.NoActionBar"><item name="android:windowLightStatusBar">false</item><item name="android:fontFamily">sans</item></style></resources>

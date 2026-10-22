@@ -56,22 +56,10 @@ import {
   type DeviceIncarnationInvalidator,
 } from "./deviceSnapshotIncarnationInvalidator";
 import { sortedReaddirEntries } from "../utils/io";
-
-interface DeviceSnapshotCaptureArgs {
-  snapshotName?: string;
-  includeAppData?: boolean;
-  includeSettings?: boolean;
-  useVmSnapshot?: boolean;
-  strictBackupMode?: boolean;
-  vmSnapshotTimeoutMs?: number;
-  appBundleIds?: string[];
-}
-
-interface DeviceSnapshotRestoreArgs {
-  snapshotName: string;
-  useVmSnapshot?: boolean;
-  vmSnapshotTimeoutMs?: number;
-}
+import type {
+  DeviceSnapshotCaptureArgs,
+  DeviceSnapshotRestoreArgs,
+} from "../models/deviceSnapshotArgsSchema";
 
 function snapshotMatchesDevice(record: DeviceSnapshotRecord, device: BootedDevice): boolean {
   if (record.platform !== device.platform) {

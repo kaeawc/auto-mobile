@@ -1,9 +1,8 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { execFileSync } from "node:child_process";
-
 import { join, posix } from "node:path";
 import { parseSync } from "oxc-parser";
 import { readGuardFile, guardTextMayMatch, GuardVisitor as Visitor } from "./astGuard";
+import { workingTreeFiles } from "../helpers/workingTreeFiles";
 
 const ROOT = join(import.meta.dir, "..", "..");
 const EXTENSIONS = [".ts", ".tsx", ".js", ".json"];
@@ -87,15 +86,8 @@ let failures: string[];
 // Like the other tree-wide guards, reading/parsing belongs in setup, outside the per-test budget.
 // Full-tree parsing can be slow under CI contention; hook time is excluded from the 100ms per-test budget.
 beforeAll(() => {
-  const tracked = new Set(
-    execFileSync("git", ["ls-files", "-z"], {
-      cwd: ROOT,
-      encoding: "utf8",
-      maxBuffer: 64 * 1024 * 1024,
-    })
-      .split("\0")
-      .filter(Boolean),
-  );
+  // Untracked new files count, so a lane need not `git add` (or jj stage) before this runs.
+  const tracked = new Set(workingTreeFiles(ROOT));
   failures = [];
   const normalizedTracked = new Set([...tracked].map((file) => file.replaceAll("\\", "/")));
   for (const file of normalizedTracked) {

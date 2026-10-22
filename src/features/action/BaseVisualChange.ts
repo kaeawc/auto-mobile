@@ -312,6 +312,7 @@ export class BaseVisualChange {
       options,
       previousObserveResult,
       await beforeWindowRead,
+      timeoutMs,
     );
     const gfxMetrics = await this.awaitUiStability(options, packageName, timeoutMs, perf);
 

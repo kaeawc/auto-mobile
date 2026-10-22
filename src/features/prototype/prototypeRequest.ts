@@ -1,3 +1,4 @@
+import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import { forbiddenHeaderOf } from "./prototypeEgressPolicy";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
@@ -131,7 +132,9 @@ export function prototypeIntoError(into: string, action: string): string | undef
 }
 
 const memberPath = (path: string, name: string): string =>
-  /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? `${path}.${name}` : `${path}[${JSON.stringify(name)}]`;
+  prototypeContractPatterns.pathKey.test(name)
+    ? `${path}.${name}`
+    : `${path}[${JSON.stringify(name)}]`;
 
 /** An invalid header name, or one repeated in another letter case (names are case-insensitive). */
 function headerNameProblem(name: string, seen: Set<string>): string | undefined {

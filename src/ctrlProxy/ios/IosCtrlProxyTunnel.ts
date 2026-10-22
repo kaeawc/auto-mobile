@@ -1,4 +1,5 @@
 import type { IosCtrlProxyRuntime } from "./IosCtrlProxyRuntime";
+import type { RunnerLaunchProvenance } from "./IosCtrlProxyLifecycleSteps";
 import { RemoteServicePortUnavailableError } from "./RemoteServicePortUnavailableError";
 import { logger } from "../../utils/logger";
 import { IproxyTunnelStartOptions } from "./IosCtrlProxyContracts";
@@ -79,12 +80,12 @@ export class IosCtrlProxyTunnel {
     }
   }
 
-  async restartDeviceProcessAfterHostPortCollision(): Promise<void> {
+  async restartDeviceProcessAfterHostPortCollision(): Promise<RunnerLaunchProvenance> {
     // This replacement runs inside startInternal()'s shared completion, so it must
     // not wait for that same completion through stop() or it would deadlock.
     this.host.beginStop();
     await this.host.stopTrackedService();
     this.state.isStopping = false;
-    await this.state.steps.startOnDevice();
+    return this.state.steps.startOnDevice();
   }
 }

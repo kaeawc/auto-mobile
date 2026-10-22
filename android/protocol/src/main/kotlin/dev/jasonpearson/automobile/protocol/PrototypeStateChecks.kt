@@ -120,16 +120,7 @@ internal object PrototypeStateChecks {
     for ((index, check) in checks.withIndex()) {
       val kind = check.keys.first { it != "message" }
       val at = "$path.checks[$index].$kind"
-      val fits =
-        when (kind) {
-          "minLength",
-          "maxLength",
-          "format",
-          "pattern" -> node.text("type") == "textField"
-          "min",
-          "max" -> node.text("type") in setOf("slider", "datePicker", "timePicker")
-          else -> true
-        }
+      val fits = PrototypeSpecContract.checkControls[kind]?.contains(node.text("type")) ?: true
       if (!fits) return fail(at, "Check $kind does not fit ${node.text("type")}")
       check.text("pattern")?.let {
         val result = PrototypeCheckPattern.parse(it)

@@ -1,0 +1,152 @@
+{
+  "pathKey": {
+    "accepted": [
+      "a",
+      "_",
+      "A_09",
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ],
+    "rejected": ["", "0", "é", "a-b", " a", "a\n", "a\r", "a\r\n", "a", "a ", "a "]
+  },
+  "stateKey": {
+    "accepted": [
+      "a",
+      "_",
+      "A_09",
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ],
+    "rejected": [
+      "",
+      "0",
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "é",
+      "a-b",
+      " a",
+      "a\n",
+      "a\r",
+      "a\r\n",
+      "a",
+      "a ",
+      "a "
+    ]
+  },
+  "boundKey": {
+    "accepted": [
+      "a",
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "{index}",
+      "0{index}",
+      "_{item.id}",
+      "{item.id}{index}",
+      "{aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}",
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa{index}"
+    ],
+    "rejected": [
+      "",
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "0",
+      "{item}",
+      "{a.b.c}",
+      "{aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.id}",
+      "{a.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}",
+      "{a.0}",
+      "{}",
+      "{index",
+      "{index}}",
+      "é{index}",
+      "{index}\n",
+      "{index}\r",
+      "{index}\r\n",
+      "{index}",
+      "{index} ",
+      "{index} "
+    ]
+  },
+  "color": {
+    "accepted": ["#000000", "#ABCdef", "#01234567", "#aAbBcCdD"],
+    "rejected": [
+      "",
+      "#123",
+      "#1234567",
+      "#123456789",
+      "#GG0000",
+      "123456",
+      "#000000\n",
+      "#000000\r",
+      "#000000\r\n",
+      "#000000",
+      "#000000 ",
+      "#000000 "
+    ]
+  },
+  "blankText": {
+    "accepted": [
+      "",
+      "\t",
+      "\n",
+      "\u000b",
+      "\f",
+      "\r",
+      " ",
+      " ",
+      " ",
+      " ",
+      " ",
+      " ",
+      " ",
+      " ",
+      " ",
+      " ",
+      " ",
+      " ",
+      " ",
+      " ",
+      " ",
+      " ",
+      " ",
+      " ",
+      "　",
+      "﻿",
+      "\t\n\u000b\f\r                  　﻿"
+    ],
+    "rejected": ["a", "", "᠎", "​", " ​", "\u0000", "\u001c", "\u001f", "�", "😀", " a\n"]
+  },
+  "numberToken": {
+    "accepted": [
+      "0",
+      "-0",
+      "12",
+      "-42",
+      "0.1",
+      "-1.2e-3",
+      "1E+2",
+      "1e0",
+      "12345678901234567890",
+      "1e999"
+    ],
+    "rejected": [
+      "",
+      "+1",
+      "01",
+      "-01",
+      ".1",
+      "1.",
+      "1e",
+      "NaN",
+      "Infinity",
+      " 1",
+      "١",
+      "1\n",
+      "1\r",
+      "1\r\n",
+      "1",
+      "1 ",
+      "1 "
+    ]
+  },
+  "pointer": {
+    "accepted": ["/", "//", "/a", "/a~0b/~1", "/~01", "/é/😀", "/a\n", "/a\r\n", "/a"],
+    "rejected": ["", "a", "a/b", "/~", "/~2", "/~10~", "/a~\n"]
+  }
+}

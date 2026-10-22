@@ -1,10 +1,12 @@
-import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
+import { resolveOwnershipSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import { serverConfig } from "../utils/ServerConfig";
-import { executionTracker } from "./executionTracker";
+import { executionTracker, type ExecutionCancellationReason } from "./executionTracker";
 import type { SessionManager } from "./sessionManager";
 
 /** Lease registration precedes allocation/adb on both platforms. Resolve its
  * sessions on every read so label allocation and mid-step device switches count.
+ * A lease's sessions are its own and the labels it allocates (#14444), never every
+ * sibling published under the same base.
  * Keep adb bindings too: they fence work still draining on an earlier device.
  */
 export class PlanDeviceActivity {
@@ -13,7 +15,7 @@ export class PlanDeviceActivity {
     private readonly plans: Pick<typeof serverConfig, "getActivePlanExecutions"> = serverConfig,
     private readonly executions: Pick<
       typeof executionTracker,
-      "hasActiveDeviceExecutions" | "bindDeviceExecution"
+      "hasActiveDeviceExecutions" | "bindDeviceExecution" | "cancelDeviceExecutions"
     > = executionTracker,
   ) {}
 
@@ -47,21 +49,45 @@ export class PlanDeviceActivity {
     }
   }
 
+  /** Bind, then cancel, this device's plan invocations on confirmed loss. Their captured ids
+   * are cancelled directly (#14443): a plan routed through derived label base:B is recorded
+   * under base:B, so the owner filter alone never reaches it.
+   */
+  cancelPlanExecutions(
+    deviceId: string,
+    sessionUuid: string,
+    reason: ExecutionCancellationReason,
+  ): Promise<number> {
+    this.bindPlanExecutions(deviceId, sessionUuid);
+    return this.executions.cancelDeviceExecutions(deviceId, reason, {
+      onlySessionUuid: sessionUuid,
+      onlyToolName: "executePlan",
+      includeExecutionIds: this.getPlanExecutionIds(deviceId, sessionUuid),
+    });
+  }
+
   private leasesForDevice(deviceId: string, sessionUuid?: string) {
-    const holders = this.sessions
-      .getAllSessions()
-      .filter((session) => session.assignedDevice === deviceId)
-      .map((session) => this.baseSession(session.sessionId));
+    const holders = new Set(
+      this.sessions
+        .getAllSessions()
+        .filter((session) => session.assignedDevice === deviceId)
+        .map((session) => session.sessionId),
+    );
     return this.plans.getActivePlanExecutions().filter((plan) => {
       if (!plan.sessionUuid) {
         return sessionUuid === undefined && plan.deviceId === deviceId;
       }
-      const base = this.baseSession(plan.sessionUuid);
-      return (sessionUuid === undefined || base === sessionUuid) && holders.includes(base);
+      const uses = [plan.sessionUuid, ...(plan.labelSessionUuids ?? [])];
+      return (
+        (sessionUuid === undefined ||
+          this.ownerSession(plan.sessionUuid) === this.ownerSession(sessionUuid)) &&
+        uses.some((member) => holders.has(member))
+      );
     });
   }
 
-  private baseSession(sessionUuid: string): string {
-    return resolveToolSelectionBaseSessionUuid(sessionUuid, this.sessions) ?? sessionUuid;
+  /** Outermost owner (#14445): a plan on base:B and its nested label base:B:C share one. */
+  private ownerSession(sessionUuid: string): string {
+    return resolveOwnershipSessionUuid(sessionUuid, this.sessions);
   }
 }

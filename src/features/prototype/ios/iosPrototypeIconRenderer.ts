@@ -1,3 +1,4 @@
+import { prototypeContractPatterns } from "../prototypeContractPatterns";
 import { loadJimp, type JimpConstructor } from "../../../utils/image/loadJimp";
 import { JimpBackend } from "../../../utils/image/backend/JimpBackend";
 import type { ImageBackend } from "../../../utils/image/backend/ImageBackend";
@@ -25,7 +26,7 @@ export class IosPrototypeIconRenderer implements IconRenderer {
       });
     }
     const color = input.backgroundColor ?? "#2E59BF";
-    if (!/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(color)) {
+    if (!prototypeContractPatterns.color.test(color)) {
       throw new Error("Icon backgroundColor must be #RRGGBB or #RRGGBBAA");
     }
     const Jimp = await this.jimpLoader();

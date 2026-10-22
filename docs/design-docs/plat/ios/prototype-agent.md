@@ -645,8 +645,9 @@ does not depend on Alamofire. The URLSession client above is in place behind the
 `PrototypeHttpClient` protocol, which is the fallback the proposal describes; an Alamofire client would
 be a second conformance, chosen where the agent builds the driver, with no change to Core.
 
-**App Transport Security.** localhost and IP-literal `http://` hosts are exempt from ATS; any other
-cleartext `http://` host falls under the host app's own ATS settings. There is no allowlist. The
+**App Transport Security.** IP-literal `http://` hosts are exempt from ATS; any other cleartext
+`http://` host falls under the host app's own ATS settings. (`localhost` is exempt from ATS too, but the
+[destination policy](#destination-policy-13815) refuses it first.) There is no allowlist. The
 viewer template app sets `NSAllowsArbitraryLoads` in `Viewer/Info.plist`, so a viewer runs any URL. In
 an injected agent a `via: "device"` request that ATS blocks
 (`NSURLErrorAppTransportSecurityRequiresSecureConnection`) completes as a typed `network` error whose
@@ -664,18 +665,38 @@ map live in the Android design doc, [Data, storage and network](../android/proto
 | `prototype_network_v1`        | `request` with `via: "host"`                                         | Advertised; see [Request action capability](#request-action-capability)                                 |
 | `prototype_network_device_v1` | `request` with `via: "device"`                                       | Advertised; a dedicated ephemeral `URLSession`                                                          |
 
-**`localhost` on a simulator.** An iOS simulator shares the Mac's network stack, so `localhost`,
-`127.0.0.1` and `[::1]` are the Mac for both `via` values and nothing is reversed (Android needs
+### Destination policy (#13815)
+
+`via: "device"` requests are checked by `PrototypeEgressPolicy` before the request starts, against every
+DNS answer, and at each redirect. It refuses:
+
+- `localhost` and `*.localhost` names;
+- loopback (`127.0.0.0/8`, `[::1]`), unspecified, link-local and multicast addresses, and the Android
+  emulator host aliases;
+- names with no DNS answer or any refused answer, and ambiguous numeric spellings;
+- the daemon's HTTP ports (3000–3010 and 8765) on private addresses.
+
+Other private (RFC1918) and public addresses are permitted. A refusal completes the request as
+`blocked_destination`.
+
+**`localhost` on a simulator.** An iOS simulator shares the Mac's network stack, but `localhost`,
+`127.0.0.1` and `[::1]` are refused for both `via` values: by this policy for `via: "device"`, and by the
+host's own egress policy for `via: "host"` (see the Android doc's
+[host egress policy](../android/prototype-ux.md#data-storage-and-network-12531)). To call a service on
+the Mac, bind it to a non-loopback interface and use the Mac's LAN address on a port other than the
+daemon's, for example `http://192.168.1.10:8080/feed`. Nothing is reversed on iOS (Android uses
 `adb reverse` for `via: "device"`).
 
 **Transports.** `via: "host"` is a `prototype_request` frame to exactly one connection, the most
-recently authenticated one, answered by a `prototype_response`; the host runs the fetch and applies no
-allowlist. `via: "device"` runs on `URLSession` inside the target app. There is no URL allowlist on
-either path.
+recently authenticated one, answered by a `prototype_response`; the host runs the fetch under its
+egress policy. `via: "device"` runs on `URLSession` inside the target app under the
+[destination policy](#destination-policy-13815). Neither path has an allowlist; both refuse the
+destinations their policy denies.
 
-**App Transport Security.** `via: "device"` is subject to the app's ATS: cleartext `http://` to `localhost`
-and IP addresses is exempt, any other cleartext host is blocked and reported as `network` with a message
-that points to `via: "host"` (which the host runs without ATS) or `https://`.
+**App Transport Security.** `via: "device"` is subject to the app's ATS: cleartext `http://` to IP
+addresses is exempt (so is `localhost`, which the destination policy refuses first), any other cleartext
+host is blocked and reported as `network` with a message that points to `via: "host"` (which the host
+runs without ATS) or `https://`.
 
 **Storage.** Precedence is the same as Android: a changed `version` discards stored values, stored values
 replace the spec's for listed keys, and values that no longer fit are dropped. A failed disk write keeps
@@ -777,7 +798,10 @@ Android uses Material `PullToRefreshBox`.
 `prototype_text_field_actions_v1` gates textField `trailingIcon {icon, label, onTap?}`, `imeAction`
 (`done`, `next`, `search`, `send`, `go`) and `onSubmit` (1-32 actions); multiline text has no IME
 action, so the host refuses them with `multiline: true`. iOS maps `imeAction` to `submitLabel` (done
-when only `onSubmit` is authored) and runs `onSubmit` from `onSubmit`; the trailing icon is an SF
+when only `onSubmit` is authored) and runs `onSubmit` from `onSubmit`. The number, decimal and
+phone pads have no Return key, so while such a field is focused a keyboard toolbar shows a button
+named for the action (Done, Next, Search, Send or Go) that runs `onSubmit` and dismisses the pad
+(#12998). The trailing icon is an SF
 Symbol button beside the field (a plain glyph without `onTap`), named by `label`, with the
 accessibility identifier `<testTag>.trailingIcon` that `tapOn` can target. Android draws an
 `IconButton` in the field's trailing slot and uses Compose `ImeAction` with `KeyboardActions`.

@@ -150,7 +150,7 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, PendingMutat
     "notJournaled",
   ),
   ...pendingTools(
-    ["exportPlan", "recordToolCalls", "setActiveDevice", "setToolEnabled"],
+    ["exportPlan", "recordToolCalls", "setActiveDevice", "setToolEnabled", "systemAlerts"],
     "Host routing/recording configuration has no direct persistent device setting; device-side child operations remain pending (#14359).",
     "notJournaled",
   ),

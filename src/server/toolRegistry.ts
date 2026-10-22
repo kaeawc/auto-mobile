@@ -63,6 +63,7 @@ import {
   refuseInternalControlOnForeignOwnedSession,
   sessionDisplayPinnedHandler,
 } from "./pipeline/deviceCallDispatch";
+import { gateUiInteraction } from "./systemAlertHandler";
 import {
   DefaultExecutionTargetResolver,
   ExecutionTargetResolver,
@@ -356,7 +357,9 @@ export class ToolRegistryClass {
     inHandler: DeviceAwareToolHandler<z.output<S>>,
     inOptions: DeviceAwareToolOptions<z.output<S>> = {},
   ): void {
-    const { schema, handler, options } = eraseDeviceAware(inSchema, inHandler, inOptions);
+    // A UI interaction answers the device's system-alert policy first (#14106).
+    const erased = eraseDeviceAware(inSchema, inHandler, inOptions);
+    const { schema, handler, options } = gateUiInteraction(erased);
     const pinnedHandler = sessionDisplayPinnedHandler({ name, schema, handler });
     const traits = pickToolTraits(options);
     // Device-aware tools may reconnect before dispatch. Replaying an ambiguous

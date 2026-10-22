@@ -28,6 +28,7 @@ import {
 } from "../../utils/ios-cmdline-tools/IosHomeBackend";
 import { SimctlCommandTimeoutError } from "../../utils/ios-cmdline-tools/SimctlCommandTimeoutError";
 import { IosHomeLaunchTimeoutError } from "../../models/IosHomeLaunchTimeoutError";
+import { IosHomeNotForegroundError } from "../../models/IosHomeNotForegroundError";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import type { SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { sequenceBackoff, type BackoffPolicy } from "../../utils/Backoff";
@@ -59,6 +60,8 @@ const ANDROID_LAUNCHER_OVERLAY_MARKERS = [
  * (issue #6147) rather than trusting either dispatch method's self-reported
  * result.
  */
+const IOS_SPOTLIGHT = "com.apple.Spotlight";
+
 export class HomeScreen extends BaseVisualChange {
   /**
    * Deadline for the ADB `KEYCODE_HOME` fallback keyevent. Without a bound a
@@ -383,8 +386,43 @@ export class HomeScreen extends BaseVisualChange {
       );
     } catch (error) {
       throwIfAborted(signal);
+      if (error instanceof IosHomeNotForegroundError && error.foregroundApp === IOS_SPOTLIGHT) {
+        await this.dismissSpotlightWithRunnerHome(perf, signal);
+        return;
+      }
       throw new ActionableError(
         `simctl launched SpringBoard, but foreground verification failed: ${errorMessage(error)}`,
+        { cause: error },
+      );
+    }
+  }
+
+  /**
+   * iOS 27 Spotlight stays foreground through a SpringBoard launch; a hardware Home press is what
+   * dismisses it (#14827). Press Home through the runner, then verify SpringBoard again.
+   */
+  private async dismissSpotlightWithRunnerHome(
+    perf: PerformanceTracker | undefined,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const client = this.iosClient();
+    const pressError = await awaitWhileRequestIsLive(
+      this.tryIosRunnerHome(client, 5000, perf, undefined, { signal }),
+      signal,
+    );
+    if (pressError) {
+      throw new ActionableError(
+        `simctl launched SpringBoard but ${IOS_SPOTLIGHT} stayed foreground, and the runner Home press failed: ${pressError}`,
+      );
+    }
+    try {
+      await this.verifyIosHomeForeground(client, perf, undefined, undefined, undefined, {
+        signal,
+      });
+    } catch (error) {
+      throwIfAborted(signal);
+      throw new ActionableError(
+        `simctl launched SpringBoard but ${IOS_SPOTLIGHT} stayed foreground, and the runner Home press did not dismiss it: ${errorMessage(error)}`,
         { cause: error },
       );
     }
@@ -592,8 +630,11 @@ export class HomeScreen extends BaseVisualChange {
       ? `: a system alert (${modal.modalClass}${modal.modalTitle ? ` '${modal.modalTitle}'` : ""}) is blocking Home; dismiss it first`
       : "; the home screen did not become foreground";
     if (foregroundApp === "unknown app") {
-      throw new ActionableError("Home press did not bring SpringBoard to the foreground");
+      throw new IosHomeNotForegroundError("Home press did not bring SpringBoard to the foreground");
     }
-    throw new ActionableError(`Home press did not background ${foregroundApp}${alert}`);
+    throw new IosHomeNotForegroundError(
+      `Home press did not background ${foregroundApp}${alert}`,
+      foregroundApp,
+    );
   }
 }

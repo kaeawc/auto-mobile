@@ -867,6 +867,58 @@ describe("HomeScreen", () => {
       expect(fakeTimer.getSleepHistory()).toEqual([300, 600]);
     });
 
+    describe("simulator Spotlight dismissal (#14827)", () => {
+      const launchOk = {
+        executeCommandArgs: async () => createExecResult("", ""),
+      };
+
+      test("a SpringBoard launch that leaves Spotlight foreground falls back to the runner Home press", async () => {
+        const { action, client } = createIosHomeScreen({ simulator: true, simctl: launchOk });
+        client.setHierarchyData(iosHierarchy("com.apple.Spotlight"));
+        const press = spyOn(client, "requestPressHome").mockImplementation(async () => {
+          client.setHierarchyData(iosHierarchy("com.apple.springboard"));
+          return { success: true, totalTimeMs: 1 };
+        });
+
+        await expect(action.executeIosHomeNavigation()).resolves.toBeUndefined();
+        expect(press).toHaveBeenCalledTimes(1);
+      });
+
+      test("reports Spotlight when the runner Home press does not dismiss it either", async () => {
+        const { action, client } = createIosHomeScreen({ simulator: true, simctl: launchOk });
+        client.setHierarchyData(iosHierarchy("com.apple.Spotlight"));
+
+        await expect(action.executeIosHomeNavigation()).rejects.toThrow(
+          "simctl launched SpringBoard but com.apple.Spotlight stayed foreground, and the runner Home press did not dismiss it",
+        );
+        expect(client.getPressHomeRequestCount()).toBe(1);
+      });
+
+      test("reports a failed runner Home press after Spotlight survives the launch", async () => {
+        const { action, client } = createIosHomeScreen({ simulator: true, simctl: launchOk });
+        client.setHierarchyData(iosHierarchy("com.apple.Spotlight"));
+        spyOn(client, "requestPressHome").mockResolvedValue({
+          success: false,
+          totalTimeMs: 1,
+          error: "runner busy",
+        });
+
+        await expect(action.executeIosHomeNavigation()).rejects.toThrow(
+          "the runner Home press failed: runner busy",
+        );
+      });
+
+      test("another foreground app keeps the simctl verification failure without a runner press", async () => {
+        const { action, client } = createIosHomeScreen({ simulator: true, simctl: launchOk });
+        client.setHierarchyData(iosHierarchy("com.apple.Maps"));
+
+        await expect(action.executeIosHomeNavigation()).rejects.toThrow(
+          "simctl launched SpringBoard, but foreground verification failed: Home press did not background com.apple.Maps",
+        );
+        expect(client.getPressHomeRequestCount()).toBe(0);
+      });
+    });
+
     describe("simulator launch budget regression", () => {
       test("returns a typed timeout when a successful retry uses the whole Home budget", async () => {
         const timeouts: number[] = [];

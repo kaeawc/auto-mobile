@@ -1,0 +1,115 @@
+{
+  "spec": {
+    "id": "pager-options",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "pager",
+          "id": "peek",
+          "children": [
+            {
+              "type": "text",
+              "text": "One"
+            },
+            {
+              "type": "text",
+              "text": "Two"
+            }
+          ],
+          "axis": "horizontal",
+          "peek": {
+            "start": 12,
+            "end": 24
+          },
+          "pageSpacing": 8,
+          "pageSize": {
+            "dp": 180
+          }
+        },
+        {
+          "type": "pager",
+          "id": "vertical",
+          "children": [
+            {
+              "type": "text",
+              "text": "One"
+            },
+            {
+              "type": "text",
+              "text": "Two"
+            }
+          ],
+          "axis": "vertical"
+        },
+        {
+          "type": "pager",
+          "id": "all",
+          "children": [
+            {
+              "type": "text",
+              "text": "One"
+            },
+            {
+              "type": "text",
+              "text": "Two"
+            }
+          ],
+          "axis": "vertical",
+          "pageSpacing": 10000,
+          "peek": {
+            "start": 0,
+            "end": 10000
+          },
+          "pageSize": {
+            "dp": 0.000001
+          }
+        },
+        {
+          "type": "scroll",
+          "axis": "horizontal",
+          "child": {
+            "type": "pager",
+            "id": "nested",
+            "children": [
+              {
+                "type": "text",
+                "text": "One"
+              },
+              {
+                "type": "text",
+                "text": "Two"
+              }
+            ],
+            "axis": "vertical"
+          }
+        },
+        {
+          "type": "pager",
+          "id": "empty-peek",
+          "children": [
+            {
+              "type": "text",
+              "text": "One"
+            },
+            {
+              "type": "text",
+              "text": "Two"
+            }
+          ],
+          "peek": {},
+          "pageSize": "fill"
+        }
+      ]
+    }
+  },
+  "options": {
+    "supportedCapabilities": []
+  },
+  "expectedPath": "$"
+}

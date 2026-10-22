@@ -1,0 +1,6 @@
+{
+  "id": "strict",
+  "window": { "placement": { "type": "fullscreen" } },
+  "root": { "type": "spacer" },
+  "data": { "__proto__": "kept" }
+}

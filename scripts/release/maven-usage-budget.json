@@ -20,7 +20,12 @@
     "bundle already excludes them. #4852 shipped an empty javadoc jar, guarded by",
     "maxJavadocJarBytes below (the largest javadoc jar must stay tiny, so it cannot",
     "regress to the ~1.78 MB Dokka HTML site). Raise a ceiling deliberately when a",
-    "new coordinate is added."
+    "new coordinate is added.",
+    "",
+    "#13727 added auto-mobile-prototype-compose (the fifth coordinate): staged",
+    "unsigned at 160 files / 6.8 MB, roughly 295 files once signed, so the",
+    "ceilings rose from 260 files / 6 MB to 340 files / 8 MB. Seven releases at",
+    "8 MB stay inside the 80 MB monthly ceiling."
   ],
   "centralOrgLimits": {
     "monthlyReleaseSizeBytes": 83886080,
@@ -28,8 +33,8 @@
     "monthlyReleaseCount": 7
   },
   "perRelease": {
-    "maxFiles": 260,
-    "maxBytes": 6291456,
+    "maxFiles": 340,
+    "maxBytes": 8388608,
     "maxJavadocJarBytes": 51200
   }
 }

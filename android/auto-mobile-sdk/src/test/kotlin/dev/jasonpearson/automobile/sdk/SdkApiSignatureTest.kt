@@ -70,8 +70,25 @@ class SdkApiSignatureTest {
     assertContains(nestedSignature, "public class Outer {")
   }
 
+  @Test
+  fun `included packages limit the signature to classes declared directly in them`() {
+    assertContains(packageSignature, "public class stable.Api {")
+    assertFalse(packageSignature.contains("internal.Impl"))
+    assertFalse(packageSignature.contains("stable.nested.Deeper"))
+  }
+
+  @Test
+  fun `no included packages keeps every package`() {
+    assertContains(allPackagesSignature, "public class stable.Api {")
+    assertContains(allPackagesSignature, "public class internal.Impl {")
+    assertContains(allPackagesSignature, "public class stable.nested.Deeper {")
+  }
+
   companion object {
     @ClassRule @JvmField val temporaryFolder = TemporaryFolder()
+
+    private lateinit var packageSignature: String
+    private lateinit var allPackagesSignature: String
 
     private lateinit var originalConstants: String
     private lateinit var changedStringConstants: String
@@ -127,6 +144,19 @@ class SdkApiSignatureTest {
           ),
         )
       nestedSignature = generator.generate(listOf(nestedClasses))
+      val packaged =
+        compileJava(
+          "packages",
+          "Api",
+          "package stable; public class Api { public void stableOnly() {} }",
+          mapOf(
+            "Impl" to "package internal; public class Impl { public void internalOnly() {} }",
+            "Deeper" to
+              "package stable.nested; public class Deeper { public void deeperOnly() {} }",
+          ),
+        )
+      packageSignature = SdkApiSignature(javap, setOf("stable")).generate(listOf(packaged))
+      allPackagesSignature = generator.generate(listOf(packaged))
     }
 
     private fun compileConstants(directory: String, action: String, count: Int): File =

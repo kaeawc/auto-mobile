@@ -31,13 +31,14 @@ android_dir="${ANDROID_DIR:-$repo_root/android}"
 budget="$here/maven-usage-budget.json"
 generator="$here/maven-publication-manifest.sh"
 
-# The four published Maven coordinates. Kept here (not in the workflow) so the
+# The five published Maven coordinates. Kept here (not in the workflow) so the
 # staging command is versioned, linted, and runnable on its own.
 modules=(
   ":protocol"
   ":test-plan-validation"
   ":junit-runner"
   ":auto-mobile-sdk"
+  ":prototype-compose"
 )
 
 if [ -n "${STAGING_DIR:-}" ]; then

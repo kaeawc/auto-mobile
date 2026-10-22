@@ -1,7 +1,8 @@
 import com.android.build.api.dsl.LibraryExtension
 import com.vanniktech.maven.publish.AndroidMultiVariantLibrary
 import com.vanniktech.maven.publish.JavadocJar
-import dev.jasonpearson.automobile.buildlogic.api.SdkApiSignature
+import dev.jasonpearson.automobile.buildlogic.apisignature.ApiSignatureCheckTask
+import dev.jasonpearson.automobile.buildlogic.apisignature.ApiSignatureDumpTask
 import org.jetbrains.kotlin.gradle.dsl.KotlinVersion
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
@@ -98,64 +99,11 @@ tasks.withType<KotlinCompile>().configureEach {
 // are included; anonymous/local/lambda classes are excluded. apiDump generates the baseline
 // and apiCheck verifies it hasn't changed.
 
-abstract class SdkApiSignatureTask : DefaultTask() {
-  @get:InputFiles
-  @get:PathSensitive(PathSensitivity.RELATIVE)
-  abstract val releaseClasses: ConfigurableFileCollection
-
-  protected fun generateApiSignature(): String {
-    try {
-      return SdkApiSignature().generate(releaseClasses.files)
-    } catch (error: IllegalStateException) {
-      throw GradleException(error.message ?: "API signature generation failed", error)
-    }
-  }
-}
-
-abstract class SdkApiDumpTask : SdkApiSignatureTask() {
-  @get:OutputFile abstract val apiFile: RegularFileProperty
-
-  @TaskAction
-  fun dump() {
-    val signature = generateApiSignature()
-    val output = apiFile.get().asFile
-    output.parentFile.mkdirs()
-    output.writeText(signature)
-    logger.lifecycle("API dump written to ${output.name}")
-  }
-}
-
-abstract class SdkApiCheckTask : SdkApiSignatureTask() {
-  // InputFiles permits a missing baseline so the action can print the repair command.
-  @get:InputFiles
-  @get:PathSensitive(PathSensitivity.RELATIVE)
-  abstract val baselineFiles: ConfigurableFileCollection
-
-  @TaskAction
-  fun check() {
-    val expected = baselineFiles.singleFile
-    if (!expected.exists()) {
-      throw GradleException(
-        "API file ${expected.name} does not exist. " +
-          "Run cd android && ./gradlew :auto-mobile-sdk:apiDump first.",
-      )
-    }
-    val current = generateApiSignature()
-    if (current != expected.readText()) {
-      throw GradleException(
-        "Public API has changed! Run cd android && ./gradlew :auto-mobile-sdk:apiDump " +
-          "to update the API file.\nExpected file: ${expected.name}",
-      )
-    }
-    logger.lifecycle("API check passed: public API matches ${expected.name}")
-  }
-}
-
 val sdkApiFile = layout.projectDirectory.file("api/auto-mobile-sdk.api")
 val kotlinReleaseClassesDir =
   layout.buildDirectory.dir("intermediates/built_in_kotlinc/release/compileReleaseKotlin/classes")
 
-tasks.register<SdkApiDumpTask>("apiDump") {
+tasks.register<ApiSignatureDumpTask>("apiDump") {
   description = "Generate public API signature file from release classes"
   group = "verification"
   dependsOn("compileReleaseKotlin")
@@ -163,12 +111,13 @@ tasks.register<SdkApiDumpTask>("apiDump") {
   apiFile.set(sdkApiFile)
 }
 
-tasks.register<SdkApiCheckTask>("apiCheck") {
+tasks.register<ApiSignatureCheckTask>("apiCheck") {
   description = "Check that public API matches the checked-in signature file"
   group = "verification"
   dependsOn("compileReleaseKotlin")
   releaseClasses.from(kotlinReleaseClassesDir)
   baselineFiles.from(sdkApiFile)
+  dumpCommand.set("cd android && ./gradlew :auto-mobile-sdk:apiDump")
 }
 
 mavenPublishing {

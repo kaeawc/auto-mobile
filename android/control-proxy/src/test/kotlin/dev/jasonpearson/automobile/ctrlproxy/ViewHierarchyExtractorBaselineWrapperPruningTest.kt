@@ -69,6 +69,17 @@ internal class ViewHierarchyExtractorBaselineWrapperPruningTest : ViewHierarchyE
   }
 
   @Test
+  fun `enabled preserves accessibility focused baseline-only leaves and their parents`() {
+    val enabled = ViewHierarchyExtractor(pruneBaselineWrappers = true)
+    val focusedNode = baselineNode().copy(accessibilityFocused = "true")
+    val wrapper = baselineNode(children = listOf(focusedNode)).copy(resourceId = "wrapper")
+
+    assertEquals(listOf(focusedNode), enabled.optimizeHierarchy(focusedNode))
+    assertTrue(enabled.optimizeHierarchy(baselineNode()).isEmpty())
+    assertEquals(listOf(wrapper), enabled.optimizeHierarchy(wrapper))
+  }
+
+  @Test
   fun `enabled preserves every real action even alongside baseline actions`() {
     val enabled = ViewHierarchyExtractor(pruneBaselineWrappers = true)
     for (action in listOf("click", "scroll_forward", "set_text")) {
@@ -167,7 +178,7 @@ internal class ViewHierarchyExtractorBaselineWrapperPruningTest : ViewHierarchyE
         )
 
       assertEquals(value == "true", enabled)
-      assertEquals(listOf("debug.automobile.prune_baseline_wrappers"), reads)
+      assertEquals(listOf(BASELINE_WRAPPER_PRUNING_PROPERTY), reads)
       assertTrue(warnings.isEmpty())
     }
   }
@@ -185,9 +196,14 @@ internal class ViewHierarchyExtractorBaselineWrapperPruningTest : ViewHierarchyE
 
       assertFalse(enabled)
       assertEquals(1, warnings.size)
-      assertTrue(warnings.single().first.contains("debug.automobile.prune_baseline_wrappers"))
+      assertTrue(warnings.single().first.contains(BASELINE_WRAPPER_PRUNING_PROPERTY))
       assertSame(failure, warnings.single().second)
     }
+  }
+
+  @Test
+  fun `property name fits Android system property limit`() {
+    assertTrue(BASELINE_WRAPPER_PRUNING_PROPERTY.length <= 31)
   }
 
   private fun baselineNode(children: List<UIElementInfo> = emptyList()): UIElementInfo =

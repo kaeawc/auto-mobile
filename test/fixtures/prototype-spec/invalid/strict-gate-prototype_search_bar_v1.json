@@ -1,0 +1,28 @@
+{
+  "spec": {
+    "id": "search",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "query": "",
+      "active": true
+    },
+    "root": {
+      "type": "searchBar",
+      "stateKey": "query",
+      "variant": "docked",
+      "activeKey": "active",
+      "child": {
+        "type": "text",
+        "text": "Result"
+      }
+    }
+  },
+  "options": {
+    "supportedCapabilities": []
+  },
+  "expectedPath": "$"
+}

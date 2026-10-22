@@ -168,4 +168,19 @@ describe("DeviceRuntimeIdentity", () => {
     expect(h.identity.getPendingReplacement(id)).toBeUndefined();
     expect(h.identity.getPendingUnresolvedEvidence(id)).toBeUndefined();
   });
+
+  test("a timed-out name probe does not replace pending identity evidence", async () => {
+    const h = harness();
+    h.identity.beginPendingReplacement(observed("Other", 10));
+    await h.identity.reconcileDiscoveryObservation(
+      [{ ...observed(`Unknown (${id})`, 20), nameProbeTimedOut: true }],
+      "test",
+    );
+    await h.identity.reconcileDiscoveryObservation(
+      [{ ...observed(`Unknown (${id})`, 21), consoleBusyDuringProbe: true }],
+      "test",
+    );
+    expect(h.identity.getPendingReplacement(id)?.name).toBe("Other");
+    expect(h.identity.getPendingUnresolvedEvidence(id)).toBeUndefined();
+  });
 });

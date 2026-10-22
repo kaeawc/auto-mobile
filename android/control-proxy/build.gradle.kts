@@ -110,6 +110,8 @@ dependencies {
 
   // Embeddable prototype renderer; CtrlProxy adds the overlay host around it.
   implementation(projects.prototypeCompose)
+  // Saved-prototype store and device HTTP transport that the unprivileged ProtoViewer also links.
+  implementation(projects.prototypeSaved)
 
   // Compose BOM
   implementation(platform(libs.compose.bom))
@@ -146,6 +148,7 @@ dependencies {
 
   // Test dependencies
   testImplementation(projects.prototypeCompose)
+  testImplementation(projects.prototypeSaved)
   testImplementation(libs.bundles.unit.test)
   testImplementation(projects.junitRunner)
   testImplementation(libs.robolectric)
@@ -209,6 +212,10 @@ tasks.withType<Test>().configureEach {
   screenshotProperties.forEach { key ->
     System.getProperty(key)?.let { value -> systemProperty(key, value) }
   }
+  // The prototype screenshot harness pins the date picker's "today" by statically mocking
+  // LocalDate.now(); MockK then calls LocalDate's other (private) statics reflectively, which
+  // needs java.time opened to the test classpath.
+  jvmArgs("--add-opens=java.base/java.time=ALL-UNNAMED")
   // A preview reads spec files Gradle does not track, so never reuse an up-to-date or cached
   // result.
   if (System.getProperty("prototype.preview.spec") != null) {
@@ -228,7 +235,8 @@ configurations
       incoming
         .artifactView {
           componentFilter { id ->
-            id is ProjectComponentIdentifier && id.buildTreePath == ":prototype-compose"
+            id is ProjectComponentIdentifier &&
+              (id.buildTreePath == ":prototype-compose" || id.buildTreePath == ":prototype-saved")
           }
           attributes.attribute(
             Attribute.of("artifactType", String::class.java),
@@ -245,5 +253,10 @@ configurations
 tasks
   .matching { it.name.startsWith("test") && it.name.endsWith("UnitTest") }
   .configureEach {
-    dependsOn(":prototype-compose:$name", ":prototype-compose:verifyRendererDependencies")
+    dependsOn(
+      ":prototype-compose:$name",
+      ":prototype-compose:verifyRendererDependencies",
+      ":prototype-saved:$name",
+      ":prototype-saved:verifySavedPrototypeDependencies",
+    )
   }

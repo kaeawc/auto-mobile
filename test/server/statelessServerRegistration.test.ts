@@ -52,7 +52,7 @@ describe("stateless createMcpServer", () => {
     await server.connect(serverSide as never);
 
     ToolRegistry.notifyToolListChanged();
-    ResourceRegistry.notifyResourceListChanged();
+    void ResourceRegistry.notifyResourceListChanged();
     expect(received).toEqual([]);
 
     await server.close();

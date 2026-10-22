@@ -6,6 +6,7 @@ import { registerStatusBarSessionCleanup } from "./statusBarSessionCleanup";
 import { registerKillProfileSessionCleanup } from "./killProfileSessionCleanup";
 import { registerEmulatorSensorSessionCleanup } from "./emulatorSensorSessionCleanup";
 import { registerDisplayProfileSessionCleanup } from "./displayProfileSessionCleanup";
+import { registerKeyboardProfileSessionCleanup } from "./keyboardProfileSessionCleanup";
 import { registerDeviceConditionSessionCleanup } from "./deviceConditionSessionCleanup";
 import { registerDerivedLabelSessionReleaseCascade } from "./derivedLabelSessionReleaseCascade";
 import { executionTracker } from "./executionTracker";
@@ -13,7 +14,6 @@ import { getToolSelectionContext } from "../features/toolSelection/toolSelection
 import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 import { announceSessionRelease } from "./announceSessionRelease";
 import { clearSessionAppearanceConfig } from "./appearanceManager";
-import { resolveAppearanceSessionKey } from "./appearanceSessionKey";
 import {
   DefaultDeviceSettingsAccess,
   DeviceSettingDefaults,
@@ -29,6 +29,7 @@ import {
 import { registerPerformanceMonitorSessionCleanup } from "./performanceMonitorSessionCleanup";
 import { registerAppLinksSessionCleanup } from "./appLinksSessionCleanup";
 import { registerScreenLockSessionCleanup } from "./screenLockSessionCleanup";
+import { registerSystemAlertSessionCleanup } from "./systemAlertSessionCleanup";
 import {
   createOwnerlessRecordingAcquisitionCleanup,
   createRecorderTeardownRecoveryMarker,
@@ -44,7 +45,7 @@ import {
 } from "../features/navigation/NavigationGraphManager";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import type { DeviceReadiness } from "./readiness/DeviceReadiness";
-import { syncAppearanceForDevice } from "./AppearanceSyncScheduler";
+import { registerAppearanceClaimSync } from "./appearanceClaimSync";
 import type { Timer } from "../utils/SystemTimer";
 import type { SessionManager } from "./sessionManager";
 import type { DevicePool } from "./devicePool";
@@ -104,9 +105,11 @@ export function wireSessionLifecycle(
   registerKillProfileSessionCleanup(sessionManager);
   registerEmulatorSensorSessionCleanup(sessionManager);
   registerDisplayProfileSessionCleanup(sessionManager);
+  registerKeyboardProfileSessionCleanup(sessionManager);
   registerDeviceConditionSessionCleanup(sessionManager);
   registerPerformanceMonitorSessionCleanup(sessionManager);
   registerScreenLockSessionCleanup(sessionManager);
+  registerSystemAlertSessionCleanup(sessionManager);
   registerRecordingSessionCleanup(sessionManager, {
     ...defaultRecordingSessionCleanupDeps,
     markDeviceNeedsRecorderRecovery: createRecorderTeardownRecoveryMarker(sessionManager),
@@ -176,19 +179,9 @@ export function wireSessionLifecycle(
     host.setupNavigationGraphUpdateListener(
       NavigationGraphManager.getInstanceForSession(session.sessionId),
     );
-    if (host.passiveWorkPolicy().allows("android", "appearance-sync", session.assignedDevice)) {
-      const device = host.devicePool().getDevice(session.assignedDevice);
-      if (device?.platform === "android") {
-        void syncAppearanceForDevice({
-          deviceId: device.id,
-          name: device.id,
-          platform: "android",
-          incarnation: device.incarnation,
-          sessionKey: resolveAppearanceSessionKey(session.sessionId),
-        });
-      }
-    }
   });
+  // The device a session is created on or rebound to takes that session's appearance (#11363).
+  registerAppearanceClaimSync(sessionManager, host);
   // Register centralized cleanup for session-scoped state
   sessionManager.onSessionRelease((sessionId, deviceId, _reason, _snapshot, options) => {
     // A terminal upgrade of an already-cleaned-up release must not touch the device's next

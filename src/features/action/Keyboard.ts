@@ -325,6 +325,16 @@ export class Keyboard {
           "Keyboard closed after the close request timed out; dismissal method unknown (Return may have submitted the field)",
       };
     }
+    if (action === "close" && (await this.isIOSKeyboardOnScreen(signal)) === false) {
+      // A hardware-keyboard simulator keeps the return key in the AX tree off screen, so the
+      // runner's dismissal fails on a keyboard that is not shown; closed is the goal (#14953).
+      logger.warn(`iOS keyboard close failed but no software keyboard is visible: ${result.error}`);
+      return {
+        success: true,
+        open: false,
+        message: "Keyboard is closed (no visible on-screen software keyboard)",
+      };
+    }
     const message = result.error ?? `Failed to ${action} iOS keyboard`;
     return {
       success: false,

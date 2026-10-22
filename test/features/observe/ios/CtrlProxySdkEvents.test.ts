@@ -61,21 +61,42 @@ function createHarness(available: boolean | undefined) {
 }
 
 describe("bounded SDK identity refresh", () => {
-  test("a known no-SDK app skips all polls and sleeps", async () => {
+  test("a known no-SDK app drains once and skips retry sleeps", async () => {
     const h = createHarness(false);
     const result = await h.refresh(200);
-    expect(result.polls).toBe(0);
-    expect(result.wallMs).toBe(0);
+    expect(result.polls).toBe(1);
+    expect(result.wallMs).toBe(8);
+    expect(h.timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("a cached SDK absence still picks up a navigation the late-started SDK queued", async () => {
+    const h = createHarness(false);
+    h.state.navigationOnPoll = 1;
+    // #14432: the negative probe predates the SDK server, which then queued Details.
+    const result = await h.refresh(200);
+    expect(result.identity?.components.navigationRoute).toBe("Details");
+    expect(result.polls).toBe(1);
     expect(h.timer.getSleepHistory()).toEqual([]);
   });
 
   test("an SDK capture covered by the last identity event drains once", async () => {
     const h = createHarness(true);
-    const result = await h.refresh(100);
+    const result = await h.refresh(99);
     expect(result.polls).toBe(1);
     expect(result.wallMs).toBe(8);
     expect(result.identity?.components.navigationRoute).toBe("Home");
     expect(h.timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("a capture in the last event's millisecond keeps retrying for a newer navigation", async () => {
+    const h = createHarness(true);
+    h.state.navigationOnPoll = 2;
+    // #14433: equal truncated timestamps give no ordering, so poll one's empty
+    // drain must not end the refresh before poll two delivers the navigation.
+    const result = await h.refresh(100);
+    expect(result.identity?.components.navigationRoute).toBe("Details");
+    expect(result.polls).toBe(2);
+    expect(h.timer.getSleepHistory()).toEqual([10]);
   });
 
   test("a newer capture waits for navigation on poll three, then reuses it", async () => {
@@ -87,7 +108,7 @@ describe("bounded SDK identity refresh", () => {
     expect(result.polls).toBe(3);
     expect(result.wallMs).toBe(44);
     expect(h.timer.getSleepHistory()).toEqual([10, 10]);
-    expect((await h.refresh(200)).polls).toBe(1);
+    expect((await h.refresh(199)).polls).toBe(1);
   });
 
   test("a missing navigation stops at 100 ms; an older capture still drains once", async () => {
@@ -107,6 +128,6 @@ describe("bounded SDK identity refresh", () => {
     const result = await h.refresh(100);
     expect(result.polls).toBe(6);
     expect(result.wallMs).toBe(100);
-    expect(knownNegative.polls).toBe(0);
+    expect(knownNegative.polls).toBe(1);
   });
 });

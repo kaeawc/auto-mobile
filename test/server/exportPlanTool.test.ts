@@ -49,7 +49,7 @@ describe("exportPlan tool", () => {
   });
 
   afterAll(() => {
-    mock.module("../../src/daemon/deviceGestureRecordingManager", () => ({
+    void mock.module("../../src/daemon/deviceGestureRecordingManager", () => ({
       startDeviceGestureRecording: realStartDeviceGestureRecording,
       stopDeviceGestureRecording: realStopDeviceGestureRecording,
       getDeviceGestureRecordingStatus: realGetDeviceGestureRecordingStatus,
@@ -57,7 +57,7 @@ describe("exportPlan tool", () => {
   });
 
   test("successfully exports plan from active recording", async () => {
-    mock.module("../../src/daemon/deviceGestureRecordingManager", () => ({
+    void mock.module("../../src/daemon/deviceGestureRecordingManager", () => ({
       stopDeviceGestureRecording: mockStopDeviceGestureRecording,
       getDeviceGestureRecordingStatus: mockGetDeviceGestureRecordingStatus,
     }));
@@ -83,7 +83,7 @@ describe("exportPlan tool", () => {
     const error =
       "Warning: Touch track (getevent) stopped 1250 ms after recording start: code 1. Later taps may be missing.";
     const partialResult = { ...(await mockStopDeviceGestureRecording()), error };
-    mock.module("../../src/daemon/deviceGestureRecordingManager", () => ({
+    void mock.module("../../src/daemon/deviceGestureRecordingManager", () => ({
       stopDeviceGestureRecording: mock(() => Promise.resolve(partialResult)),
       getDeviceGestureRecordingStatus: mockGetDeviceGestureRecordingStatus,
     }));
@@ -101,7 +101,7 @@ describe("exportPlan tool", () => {
   });
 
   test("getevent failure uses the existing export error field", async () => {
-    mock.module("../../src/daemon/deviceGestureRecordingManager", () => ({
+    void mock.module("../../src/daemon/deviceGestureRecordingManager", () => ({
       stopDeviceGestureRecording: mock(() =>
         Promise.reject(
           new Error("Failed to stop device gesture recording: Touch track (getevent) spawn failed"),
@@ -121,7 +121,7 @@ describe("exportPlan tool", () => {
 
   test("nothing captured is a typed user-input failure", async () => {
     const error = new realDeviceGestureRecordingManager.NoUserInputCapturedError();
-    mock.module("../../src/daemon/deviceGestureRecordingManager", () => ({
+    void mock.module("../../src/daemon/deviceGestureRecordingManager", () => ({
       stopDeviceGestureRecording: mock(() => Promise.reject(error)),
       getDeviceGestureRecordingStatus: mockGetDeviceGestureRecordingStatus,
     }));
@@ -134,7 +134,7 @@ describe("exportPlan tool", () => {
   });
 
   test("returns error when no active recording", async () => {
-    mock.module("../../src/daemon/deviceGestureRecordingManager", () => ({
+    void mock.module("../../src/daemon/deviceGestureRecordingManager", () => ({
       stopDeviceGestureRecording: mockStopDeviceGestureRecording,
       getDeviceGestureRecordingStatus: mock(() => null),
     }));
@@ -152,7 +152,7 @@ describe("exportPlan tool", () => {
   });
 
   test("returns error when recording ID does not match", async () => {
-    mock.module("../../src/daemon/deviceGestureRecordingManager", () => ({
+    void mock.module("../../src/daemon/deviceGestureRecordingManager", () => ({
       stopDeviceGestureRecording: mockStopDeviceGestureRecording,
       getDeviceGestureRecordingStatus: mockGetDeviceGestureRecordingStatus,
     }));
@@ -185,7 +185,7 @@ describe("exportPlan tool", () => {
       }),
     );
 
-    mock.module("../../src/daemon/deviceGestureRecordingManager", () => ({
+    void mock.module("../../src/daemon/deviceGestureRecordingManager", () => ({
       stopDeviceGestureRecording: mockStopWithName,
       getDeviceGestureRecordingStatus: mockGetDeviceGestureRecordingStatus,
     }));
@@ -203,7 +203,7 @@ describe("exportPlan tool", () => {
   });
 
   test("respects optional recordingId parameter", async () => {
-    mock.module("../../src/daemon/deviceGestureRecordingManager", () => ({
+    void mock.module("../../src/daemon/deviceGestureRecordingManager", () => ({
       stopDeviceGestureRecording: mockStopDeviceGestureRecording,
       getDeviceGestureRecordingStatus: mockGetDeviceGestureRecordingStatus,
     }));

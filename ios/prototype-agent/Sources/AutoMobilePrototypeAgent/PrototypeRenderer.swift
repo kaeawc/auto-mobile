@@ -821,6 +821,11 @@
                     }
                 }
                 .background(palette.color(style?.background) ?? .clear)
+                .modifier(PrototypeShimmerModifier(
+                    enabled: style?.shimmer == true,
+                    animated: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion).enabled,
+                    shape: shape
+                ))
                 .clipShape(shape)
                 .overlay(
                     shape.stroke(palette.color(style?.border?.color) ?? .clear, lineWidth: style?.border?.width ?? 0)

@@ -1,3 +1,5 @@
+import { prototypeContractPatterns } from "./prototypeContractPatterns";
+import { forbiddenHeaderOf } from "./prototypeEgressPolicy";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import {
@@ -130,10 +132,15 @@ export function prototypeIntoError(into: string, action: string): string | undef
 }
 
 const memberPath = (path: string, name: string): string =>
-  /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? `${path}.${name}` : `${path}[${JSON.stringify(name)}]`;
+  prototypeContractPatterns.pathKey.test(name)
+    ? `${path}.${name}`
+    : `${path}[${JSON.stringify(name)}]`;
 
 /** An invalid header name, or one repeated in another letter case (names are case-insensitive). */
 function headerNameProblem(name: string, seen: Set<string>): string | undefined {
+  if (forbiddenHeaderOf({ [name]: "" }) !== undefined) {
+    return "Forbidden request header";
+  }
   if (!HEADER_NAME.test(name)) {
     return "Invalid header name";
   }
@@ -143,6 +150,11 @@ function headerNameProblem(name: string, seen: Set<string>): string | undefined 
   }
   seen.add(lower);
   return undefined;
+}
+
+function headerLineProblem(field: string, value: unknown, literal: unknown): boolean {
+  const text = typeof value === "string" ? value : literal;
+  return field === "headers" && typeof text === "string" && /[\r\n]/.test(text);
 }
 
 function literalEntryError(
@@ -161,6 +173,9 @@ function literalEntryError(
       return { path: entryPath, message: nameProblem };
     }
     const literal = (value as { value?: unknown } | null)?.value;
+    if (headerLineProblem(field, value, literal)) {
+      return { path: entryPath, message: "CR/LF in header value" };
+    }
     if (
       typeof value === "object" &&
       value !== null &&

@@ -5,10 +5,11 @@ import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
 import {
   BindingReconciler,
   DefaultManagedSpecResolver,
+  bindingDeviceName,
 } from "../../../src/daemon/sessionBroker/provisioning/reconciler";
 import { ProvisionDeviceError } from "../../../src/devices/exactDeviceProvisioning";
-import { logger } from "../../../src/utils/logger";
 import { describe, expect, spyOn, test } from "bun:test";
+import { logger } from "../../../src/utils/logger";
 import type { BrokerExecutionReleaseResult } from "../../../src/daemon/sessionBroker/provisioning/executionRelease";
 import { BrokerDeviceAcquisition } from "../../../src/daemon/sessionBroker/provisioning/deviceAcquisition";
 import { BindingJournal } from "../../../src/daemon/sessionBroker/registry/bindingJournal";
@@ -20,7 +21,6 @@ import {
   type BindingKey,
   type BindingRegistry,
   type BindingScopeIdentity,
-  type BindingAssignmentRecord,
 } from "../../../src/daemon/sessionBroker/registry/bindingRegistry";
 import { SessionBrokerFailureError } from "../../../src/daemon/sessionBroker/devicePort";
 import { ManagedDevicePort } from "../../../src/daemon/sessionBroker/managedDevicePort";
@@ -31,6 +31,10 @@ import type { BrokerProvisionRequest } from "../../../src/daemon/sessionBroker/p
 import type { BindingsResult } from "../../../src/daemon/sessionBroker/provisioning/acquisitionResult";
 import { FakeBindingRegistry } from "../../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import type {
+  TaskLeaseKeepalive,
+  TaskLeaseHoldRequest,
+} from "../../../src/daemon/tasks/taskLeaseKeepalive";
 import { FakeDeviceMutationJournal } from "../../fakes/FakeDeviceMutationJournal";
 import { drainUntilQuiescent } from "../../helpers/fakeTimerStepping";
 import type { DeviceMutationScope } from "../../../src/daemon/sessionBroker/mutations/types";
@@ -169,8 +173,110 @@ function acquisition(
   return { acquire: run };
 }
 
+class RecordingLeaseKeepalive implements TaskLeaseKeepalive {
+  readonly requests: TaskLeaseHoldRequest[] = [];
+  held = false;
+  releases = 0;
+
+  hold(request: TaskLeaseHoldRequest): () => void {
+    this.requests.push(request);
+    this.held = true;
+    return () => {
+      this.held = false;
+      this.releases++;
+    };
+  }
+}
+
 describe("ManagedDevicePort preparation and release", () => {
-  test("binds the exact broker mutation scope before returning a ready session", async () => {
+  test("does not hold a lease when acquisition throws before the session is ready", async () => {
+    const leaseKeepalive = new RecordingLeaseKeepalive();
+    const dependencies: ManagedDevicePortDependencies = {
+      scope: SCOPE,
+      timer: new FakeTimer(),
+      leaseKeepalive,
+      brokerDeviceAcquisition: acquisition(async () => {
+        throw new Error("acquisition failed");
+      }),
+      brokerExecutionRelease: { releaseExecution: async (id) => releaseResult(id) },
+      registry: new FakeBindingRegistry(new FakeTimer()),
+      bindingJournal: {
+        owner: OWNER,
+        redriveBinding: async () => ({ kind: "clear", redriven: [] }),
+      },
+    };
+    await expect(
+      new ManagedDevicePort(dependencies).prepare(resource(), { livenessOwnerToken: "token" }),
+    ).rejects.toThrow("acquisition failed");
+    expect(leaseKeepalive.requests).toEqual([]);
+    expect(leaseKeepalive.releases).toBe(0);
+  });
+
+  test.each(["success", "optional failure", "deadline failure"])(
+    "holds the lease during Android baseline capture and releases after %s",
+    async (outcome) => {
+      const leaseKeepalive = new RecordingLeaseKeepalive();
+      const timer = new FakeTimer();
+      const captureError = new Error("snapshot save failed");
+      let heldDuringCapture = false;
+      const dependencies: ManagedDevicePortDependencies = {
+        scope: SCOPE,
+        timer,
+        leaseKeepalive,
+        brokerDeviceAcquisition: acquisition(async (config) => readyResult(config)),
+        brokerExecutionRelease: { releaseExecution: async (id) => releaseResult(id) },
+        registry: new FakeBindingRegistry(timer),
+        bindingJournal: {
+          owner: OWNER,
+          redriveBinding: async () => ({ kind: "clear", redriven: [] }),
+        },
+        resetBaseline: {
+          android: {
+            canCapture: true,
+            capture: async () => {
+              heldDuringCapture = leaseKeepalive.held;
+              if (outcome === "deadline failure") {
+                timer.advanceTime(1000);
+              }
+              if (outcome !== "success") {
+                throw captureError;
+              }
+            },
+            forget: async () => {},
+            reset: async () => "clean",
+          },
+        },
+      };
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const preparation = new ManagedDevicePort(dependencies).prepare(resource(ANDROID), {
+          livenessOwnerToken: "token",
+          preparationTimeoutMs: 1000,
+        });
+        if (outcome === "deadline failure") {
+          await expect(preparation).rejects.toThrow("exceeded preparation deadline");
+        } else {
+          expect((await preparation).sessionId).toBe("session-1");
+        }
+        expect(heldDuringCapture).toBe(true);
+        expect(leaseKeepalive.requests).toEqual([
+          { taskId: "request-1", ownerKey: "session-broker", sessionUuid: "session-1" },
+        ]);
+        expect(leaseKeepalive.held).toBe(false);
+        expect(leaseKeepalive.releases).toBe(1);
+        if (outcome === "optional failure") {
+          expect(warn).toHaveBeenCalledWith(
+            expect.stringContaining(captureError.message),
+            captureError,
+          );
+        }
+      } finally {
+        warn.mockRestore();
+      }
+    },
+  );
+
+  test("binds the exact broker mutation scope, shared with the iOS reset scope, before returning a ready session", async () => {
     const scopes: DeviceMutationScope[] = [];
     const port = new ManagedDevicePort({
       scope: SCOPE,
@@ -190,7 +296,11 @@ describe("ManagedDevicePort preparation and release", () => {
       sessionId: "session-1",
     });
     expect(scopes).toEqual([
-      { sessionUuid: "session-1", deviceId: "transport-1", incarnation: '["resource-1",1]' },
+      {
+        sessionUuid: "session-1",
+        deviceId: "device-1",
+        incarnation: JSON.stringify([SCOPE_KEY, 7, "device-1"]),
+      },
     ]);
   });
 
@@ -270,107 +380,64 @@ describe("ManagedDevicePort preparation and release", () => {
     },
   );
 
-  test.each([
-    { binding: "missing", preparationTimeoutMs: 20_000 },
-    { binding: "empty", preparationTimeoutMs: 20_000 },
-    { binding: "occupied", preparationTimeoutMs: 30_000 },
-    { binding: "lookup-failed", preparationTimeoutMs: 20_000 },
-  ] as const)(
-    "maps exact iOS native identifiers and allocation budget: $binding",
-    async ({ binding, preparationTimeoutMs }) => {
-      let received: BrokerProvisionRequest | undefined;
-      const assignment: BindingAssignmentRecord = {
-        scopeKey: SCOPE_KEY,
-        bindingIndex: 7,
-        role: "session-broker-device",
-        platform: "ios",
-        generation: 1,
-        stableDeviceId: binding === "occupied" ? "UDID-1" : null,
-        deviceName: binding === "occupied" ? "iPhone broker 1" : null,
-        requestedSpec: {
-          runtime: IOS.profile.runtimeId,
-          deviceType: IOS.profile.simulatorDeviceTypeIdentifier,
-        },
-        resolvedSpec: null,
-        specFingerprint: null,
-        state: binding === "occupied" ? "ready" : "provisioning",
-        execOwner: null,
-        settler: null,
-        updatedAtMs: 0,
-      };
-      const lookupError = new Error("assignment lookup unavailable");
-      const registry: ManagedDevicePortDependencies["registry"] = {
-        getAssignment: async () => {
-          if (binding === "lookup-failed") {
-            throw lookupError;
-          }
-          return binding === "missing" ? null : assignment;
-        },
-        listOpenBindingJournal: async () => [],
-        openBindingJournal: async () => {
-          throw new Error("Unexpected journal write");
-        },
-      };
-      const getAssignment = spyOn(registry, "getAssignment");
-      const warn = spyOn(logger, "warn").mockImplementation(() => {});
-      try {
-        const port = new ManagedDevicePort({
-          scope: SCOPE,
-          timer: new FakeTimer(),
-          brokerDeviceAcquisition: acquisition(async (config) => {
-            received = config;
-            return readyResult(config);
-          }),
-          brokerExecutionRelease: {
-            releaseExecution: async (sessionId) => releaseResult(sessionId),
-          },
-          registry,
-          bindingJournal: {
-            owner: OWNER,
-            redriveBinding: async () => ({ kind: "clear", redriven: [] }),
-          },
-        });
+  test("maps exact iOS native identifiers and hands the create retry reserve to provisioning", async () => {
+    let received: BrokerProvisionRequest | undefined;
+    // Provisioning alone decides adopt, reuse, or create, so prepare reads no binding first.
+    const registry: ManagedDevicePortDependencies["registry"] = {
+      getAssignment: async () => {
+        throw new Error("Unexpected binding read");
+      },
+      listOpenBindingJournal: async () => [],
+      openBindingJournal: async () => {
+        throw new Error("Unexpected journal write");
+      },
+    };
+    const port = new ManagedDevicePort({
+      scope: SCOPE,
+      timer: new FakeTimer(),
+      brokerDeviceAcquisition: acquisition(async (config) => {
+        received = config;
+        return readyResult(config);
+      }),
+      brokerExecutionRelease: {
+        releaseExecution: async (sessionId) => releaseResult(sessionId),
+      },
+      registry,
+      bindingJournal: {
+        owner: OWNER,
+        redriveBinding: async () => ({ kind: "clear", redriven: [] }),
+      },
+    });
 
-        const prepared = await port.prepare(resource(), {
-          livenessOwnerToken: "consumer-liveness",
-          preparationTimeoutMs: 30_000,
-          idleTimeoutMs: 120_000,
-          executionOwnerPid: 303,
-        });
+    const prepared = await port.prepare(resource(), {
+      livenessOwnerToken: "consumer-liveness",
+      preparationTimeoutMs: 30_000,
+      idleTimeoutMs: 120_000,
+      executionOwnerPid: 303,
+    });
 
-        expect(received).toEqual({
-          contractVersion: 1,
-          ...SCOPE,
-          localBindingCapacity: 1,
-          requests: [
-            {
-              bindingIndex: 7,
-              role: "session-broker-device",
-              platform: "ios",
-              requestedSpec: {
-                runtime: IOS.profile.runtimeId,
-                deviceType: IOS.profile.simulatorDeviceTypeIdentifier,
-              },
-            },
-          ],
-          preparationTimeoutMs,
-          idleTimeoutMs: 120_000,
-          executionOwnerPid: 303,
-        });
-        expect(prepared).toEqual({ sessionId: "session-1", profile: IOS.profile });
-        if (binding === "lookup-failed") {
-          expect(warn).toHaveBeenCalledWith(expect.any(String), lookupError);
-        } else {
-          expect(warn).not.toHaveBeenCalled();
-        }
-        expect(getAssignment).toHaveBeenCalledTimes(1);
-        expect(getAssignment).toHaveBeenCalledWith({ scopeKey: SCOPE_KEY, bindingIndex: 7 });
-      } finally {
-        warn.mockRestore();
-        getAssignment.mockRestore();
-      }
-    },
-  );
+    expect(received).toEqual({
+      contractVersion: 1,
+      ...SCOPE,
+      localBindingCapacity: 1,
+      requests: [
+        {
+          bindingIndex: 7,
+          role: "session-broker-device",
+          platform: "ios",
+          requestedSpec: {
+            runtime: IOS.profile.runtimeId,
+            deviceType: IOS.profile.simulatorDeviceTypeIdentifier,
+          },
+        },
+      ],
+      preparationTimeoutMs: 30_000,
+      createRetryReserveMs: 10_000,
+      idleTimeoutMs: 120_000,
+      executionOwnerPid: 303,
+    });
+    expect(prepared).toEqual({ sessionId: "session-1", profile: IOS.profile });
+  });
 
   test("maps the exact Android profile and rejects inconsistent API, ABI, or flavor metadata", async () => {
     const configs: BrokerProvisionRequest[] = [];
@@ -417,10 +484,70 @@ describe("ManagedDevicePort preparation and release", () => {
     expect(configs).toHaveLength(1);
   });
 
-  test("rejects a non-ready acquisition and drains any session it returned", async () => {
-    const releases: string[] = [];
+  test("applies a requested manufacturer profile to the prepared session's device (#14058)", async () => {
+    const applied: unknown[] = [];
+    let routed = false;
     const port = new ManagedDevicePort({
       scope: SCOPE,
+      brokerDeviceAcquisition: acquisition(async (config) => readyResult(config)),
+      brokerExecutionRelease: { releaseExecution: async (sessionId) => releaseResult(sessionId) },
+      registry: {} as never,
+      bindingJournal: {
+        owner: OWNER,
+        redriveBinding: async () => ({ kind: "clear", redriven: [] }),
+      },
+      manufacturerProfileApplier: {
+        apply: async (device, profile, sessionId) => {
+          applied.push({ device, profile, sessionId });
+          const summary = { id: profile.manufacturerProfile, version: 1, displayName: "Samsung" };
+          return routed
+            ? {
+                message: "route",
+                deviceId: device.deviceId,
+                action: "apply",
+                catalogVersion: 1,
+                persona: summary,
+                status: "route_to_real_device",
+                capabilities: [],
+              }
+            : {
+                message: "applied",
+                deviceId: device.deviceId,
+                action: "apply",
+                catalogVersion: 1,
+                persona: summary,
+                status: "applied",
+                facets: [],
+                nonEmulatable: [],
+              };
+        },
+      },
+    });
+    const deviceProfile = { manufacturerProfile: "samsung-oneui" } as const;
+
+    await port.prepare(resource(ANDROID), { livenessOwnerToken: "token", deviceProfile });
+    expect(applied).toEqual([
+      {
+        device: { platform: "android", name: "device-1", deviceId: "transport-1" },
+        profile: deviceProfile,
+        sessionId: "session-1",
+      },
+    ]);
+    await port.prepare(resource(ANDROID), { livenessOwnerToken: "token" });
+    expect(applied).toHaveLength(1);
+
+    routed = true;
+    await expect(
+      port.prepare(resource(ANDROID), { livenessOwnerToken: "token", deviceProfile }),
+    ).rejects.toThrow("route");
+  });
+
+  test("rejects a non-ready acquisition and drains any session it returned", async () => {
+    const releases: string[] = [];
+    const leaseKeepalive = new RecordingLeaseKeepalive();
+    const port = new ManagedDevicePort({
+      scope: SCOPE,
+      leaseKeepalive,
       brokerDeviceAcquisition: acquisition(async (config) =>
         readyResult(config, { readiness: { mode: "automation", status: "booted" } }),
       ),
@@ -441,6 +568,8 @@ describe("ManagedDevicePort preparation and release", () => {
       port.prepare(resource(), { livenessOwnerToken: "consumer-liveness" }),
     ).rejects.toThrow("did not return an automation-ready session");
     expect(releases).toEqual(["session-1"]);
+    expect(leaseKeepalive.requests).toEqual([]);
+    expect(leaseKeepalive.releases).toBe(0);
   });
 
   test("reports settled only for confirmed release with no bookkeeping failures", async () => {
@@ -598,6 +727,7 @@ describe("ManagedDevicePort clean-reset ownership", () => {
 
   test("pool-entry baseline capture runs before exposing the owned execution session", async () => {
     const rig = await destructionRig();
+    const leaseKeepalive = new RecordingLeaseKeepalive();
     const assignment = await rig.registry.getAssignment(rig.key);
     if (!assignment) {
       throw new Error("Missing binding");
@@ -612,6 +742,7 @@ describe("ManagedDevicePort clean-reset ownership", () => {
       brokerDeviceAcquisition: acquisition(async (config) => readyResult(config)),
       brokerExecutionRelease: { releaseExecution: async (id) => releaseResult(id) },
       captureIosBaseline: async (context) => {
+        expect(leaseKeepalive.held).toBe(true);
         await context.assertOwned();
         captures++;
         expect(context.scope).toEqual({
@@ -620,16 +751,24 @@ describe("ManagedDevicePort clean-reset ownership", () => {
           sessionUuid: "session-1",
         });
       },
+      leaseKeepalive,
     });
     expect(
       (await port.prepare({ ...rig.resource, state: "reserved" }, { livenessOwnerToken: "token" }))
         .sessionId,
     ).toBe("session-1");
     expect(captures).toBe(1);
+    expect(leaseKeepalive.requests).toEqual([
+      { taskId: "request-1", ownerKey: "session-broker", sessionUuid: "session-1" },
+    ]);
+    expect(leaseKeepalive.held).toBe(false);
+    expect(leaseKeepalive.releases).toBe(1);
   });
 
   test("a failed optional baseline capture does not release the acquired session", async () => {
     const rig = await destructionRig();
+    const leaseKeepalive = new RecordingLeaseKeepalive();
+    let heldDuringCapture = false;
     const assignment = await rig.registry.getAssignment(rig.key);
     if (!assignment) {
       throw new Error("Missing binding");
@@ -649,8 +788,10 @@ describe("ManagedDevicePort clean-reset ownership", () => {
         },
       },
       captureIosBaseline: async () => {
+        heldDuringCapture = leaseKeepalive.held;
         throw new DOMException("inventory timed out", "TimeoutError");
       },
+      leaseKeepalive,
     });
     expect(
       (
@@ -661,6 +802,9 @@ describe("ManagedDevicePort clean-reset ownership", () => {
       ).sessionId,
     ).toBe("session-1");
     expect(releases).toBe(0);
+    expect(heldDuringCapture).toBe(true);
+    expect(leaseKeepalive.held).toBe(false);
+    expect(leaseKeepalive.releases).toBe(1);
   });
 
   test("the captured baseline survives a settling generation bump but not a replacement UDID", async () => {
@@ -1160,10 +1304,12 @@ describe("ManagedDevicePort retained readiness retries", () => {
       isOwnerLive: () => false,
     });
     const budgets: number[] = [];
+    const createDeadlines: (number | undefined)[] = [];
     const acquisitionPort = new BrokerDeviceAcquisition({
       registry: async () => registry,
       reconcile: async (_registry, request) => {
         budgets.push(request.deadlineMs);
+        createDeadlines.push(request.createDeadlineMs);
         return reconciler.reconcile(request);
       },
       sessions: {
@@ -1191,7 +1337,7 @@ describe("ManagedDevicePort retained readiness retries", () => {
       brokerDeviceAcquisition: acquisitionPort,
       brokerExecutionRelease: { releaseExecution: async (id) => releaseResult(id) },
     });
-    return { port, provisioner, inventory, deleter, budgets };
+    return { port, provisioner, inventory, deleter, budgets, createDeadlines };
   }
 
   test("prepare retries the created journal by adoption without creating or destroying another simulator", async () => {
@@ -1209,10 +1355,42 @@ describe("ManagedDevicePort retained readiness retries", () => {
     expect(rig.provisioner.calls[1]?.deviceId).toBe("UDID-1");
     expect(rig.provisioner.created()).toHaveLength(1);
     expect(rig.deleter.calls).toEqual([]);
-    expect(rig.budgets[0]).toBeLessThan(rig.budgets[1]!);
+    // Only the create spends the retry reserve; the warm adoption retry gets the rest.
+    expect(rig.provisioner.calls[0]!.deadlineMs).toBeLessThan(rig.provisioner.calls[1]!.deadlineMs);
+    expect(rig.provisioner.calls[1]!.deadlineMs).toBe(1000);
     expect(await registry.listOpenBindingJournal({ scopeKey: SCOPE_KEY, bindingIndex: 7 })).toEqual(
       [],
     );
+  });
+
+  test("an empty binding that replaces a leftover simulator spends the create reserve (#14643, #14799)", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const rig = await retryRig(new FakeBindingRegistry(timer), timer);
+    rig.inventory.devices.push({
+      name: bindingDeviceName({ scopeKey: SCOPE_KEY, bindingIndex: 7 }, 1, "leftover"),
+      platform: "ios",
+      deviceId: "UDID-LEFTOVER",
+      isRunning: false,
+      runtime: IOS.profile.runtimeId,
+      deviceType: IOS.profile.simulatorDeviceTypeIdentifier,
+    });
+
+    expect(
+      await rig.port.prepare(resource(), {
+        livenessOwnerToken: "consumer",
+        preparationTimeoutMs: 900,
+      }),
+    ).toMatchObject({ sessionId: "session-1" });
+    // A leftover is reclaimed by delete-and-recreate (#14799), so it is a create that holds back
+    // the warm retry reserve; the leftover itself is never handed out unreset.
+    expect(rig.provisioner.calls.map((call) => call.mode)).toEqual(["create", "adopt"]);
+    expect(rig.provisioner.calls.map((call) => call.deviceId)).not.toContain("UDID-LEFTOVER");
+    expect(rig.provisioner.calls[0]).toMatchObject({ mode: "create", deadlineMs: 600 });
+    expect(rig.budgets).toEqual([900, 900]);
+    expect(rig.createDeadlines).toEqual([600]);
+    expect(rig.deleter.calls).toHaveLength(1);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
   test.each([
@@ -1238,7 +1416,13 @@ describe("ManagedDevicePort retained readiness retries", () => {
           preparationTimeoutMs: timeoutMs,
         }),
       ).toMatchObject({ sessionId: "session-1" });
-      expect(rig.budgets).toEqual([firstDeadlineMs, timeoutMs]);
+      // Acquisition keeps the full deadline; only the create path stops at the reserve.
+      expect(rig.budgets).toEqual([timeoutMs, timeoutMs]);
+      expect(rig.createDeadlines).toEqual([firstDeadlineMs, undefined]);
+      expect(rig.provisioner.calls.map((call) => call.deadlineMs)).toEqual([
+        firstDeadlineMs,
+        timeoutMs,
+      ]);
       expect(rig.provisioner.calls.map((call) => call.mode)).toEqual(["create", "adopt"]);
       expect(rig.provisioner.calls[1]?.deviceId).toBe("UDID-1");
       expect(rig.provisioner.created()).toHaveLength(1);

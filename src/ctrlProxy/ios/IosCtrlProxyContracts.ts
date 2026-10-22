@@ -254,6 +254,13 @@ export type IosCtrlProxyManagerTestOptions = Omit<
   IosCtrlProxyManagerOptions,
   "timer" | "processExecutor"
 > & { timer: Timer; processExecutor: HostProcessExecutor };
+/**
+ * What a start()-time check proved about the tracked runner: `healthy` means its
+ * PID is alive and its health endpoint answered for this device; `alive` means
+ * only liveness was established (remote PID-strict status); `dead` means neither.
+ */
+export type CtrlProxyProcessLiveness = "healthy" | "alive" | "dead";
+
 export const IOS_CTRL_PROXY_STATUS_CACHE_TTL = 30 * 1000;
 export const IOS_CTRL_PROXY_IMPORTANT_OUTPUT_MARKERS = [
   "error",

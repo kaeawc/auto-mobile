@@ -63,14 +63,14 @@ export class CtrlProxySdkEvents {
     capturedAt?: number,
   ): Promise<ScreenIdentity | undefined> {
     const available = this.host.getSdkAvailability(applicationId);
-    if (available === false) {
-      return this.host.getSdkScreenIdentity(applicationId);
-    }
     // #4463: a newer capture may precede its navigation event in /sdk-events.
     // Missing capability/freshness evidence keeps the conservative 100 ms retry.
+    // #14432: a cached SDK absence may predate the in-app SDK server's start, so
+    // it skips the retry but still drains the queue once.
     const needsRetry =
-      available !== true ||
-      !this.host.screenIdentity.hasSdkScreenIdentityForCapture(applicationId, capturedAt);
+      available === undefined ||
+      (available === true &&
+        !this.host.screenIdentity.hasSdkScreenIdentityForCapture(applicationId, capturedAt));
     const deadline = this.host.timer.now() + CtrlProxySdkEvents.SDK_IDENTITY_REFRESH_TIMEOUT_MS;
     while (this.host.timer.now() < deadline) {
       const result = await this.pollSdkEventsUntil(deadline);

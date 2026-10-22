@@ -82,8 +82,55 @@ final class SdkEndpointResolverTests: XCTestCase {
         let resolver = makeResolver(stub, now: { TimeInterval(clock.now()) / 1000 }, negativeTTL: 1)
         try await assertUnavailable(resolver)
         clock.advance(by: 1001)
-        try await assertUnavailable(resolver)
+        // Discovery runs again after expiry, but the same bundle is not warned about twice (#14399).
+        try await assertUnavailable(resolver, cached: true)
         XCTAssertEqual(stub.recordedRequests.count, 2 * (SdkSimulatorPort.probeCount + 1))
+    }
+
+    func testUnavailableWarningIsOncePerForegroundBundleAcrossExpiry() async throws {
+        let clock = FakeMonotonicClock()
+        let failures = refusedCandidates + [.transportError]
+        let stub = StubHTTPTransport(failures + failures + failures)
+        let resolver = makeResolver(stub, now: { TimeInterval(clock.now()) / 1000 }, negativeTTL: 1)
+        await resolver.noteForegroundBundle("test.app.a")
+        try await assertUnavailable(resolver)
+        clock.advance(by: 1001)
+        try await assertUnavailable(resolver, cached: true)
+        await resolver.noteForegroundBundle("test.app.b")
+        try await assertUnavailable(resolver)
+        XCTAssertEqual(stub.recordedRequests.count, 3 * (SdkSimulatorPort.probeCount + 1))
+    }
+
+    /// Fails every probe; the first one also foregrounds another app while discovery is suspended.
+    private final class BundleChangingTransport: HTTPRequesting {
+        private let state = OSAllocatedUnfairLock(
+            initialState: (resolver: SdkEndpointResolver?.none, changed: false, requests: 0)
+        )
+        func attach(_ resolver: SdkEndpointResolver) { state.withLock { $0.resolver = resolver } }
+        var requestCount: Int { state.withLock { $0.requests } }
+
+        func data(for _: URLRequest) async throws -> (Data, URLResponse) {
+            let resolver = state.withLock { current -> SdkEndpointResolver? in
+                current.requests += 1
+                guard !current.changed else { return nil }
+                current.changed = true
+                return current.resolver
+            }
+            await resolver?.noteForegroundBundle("test.app.b")
+            throw URLError(.cannotConnectToHost)
+        }
+    }
+
+    func testFailedDiscoveryStartedBeforeABundleChangeIsNotCachedForTheNewApp() async throws {
+        let transport = BundleChangingTransport()
+        let resolver = makeResolver(transport)
+        transport.attach(resolver)
+        await resolver.noteForegroundBundle("test.app.a")
+        // App B comes to the foreground during app A's first probe (#14398).
+        try await assertUnavailable(resolver)
+        // App B gets its own discovery and its own warning, not app A's cached failure.
+        try await assertUnavailable(resolver)
+        XCTAssertEqual(transport.requestCount, 2 * (SdkSimulatorPort.probeCount + 1))
     }
 
     func testDefaultNegativeCacheSkipsProbesAtFourSecondObserveCadence() async throws {
@@ -158,7 +205,7 @@ final class SdkEndpointResolverTests: XCTestCase {
         }
     }
 
-    func testOnlyFreshUnavailableErrorsCarryWarningPerWindow() async throws {
+    func testOnlyTheFirstUnavailableErrorForABundleCarriesAWarning() async throws {
         let clock = FakeMonotonicClock()
         let failures = refusedCandidates + [.transportError]
         let stub = StubHTTPTransport(failures + failures)
@@ -170,7 +217,9 @@ final class SdkEndpointResolverTests: XCTestCase {
         try await assertUnavailable(resolver, cached: true)
         XCTAssertEqual(stub.recordedRequests.count, SdkSimulatorPort.probeCount + 1)
         clock.advance(by: 1)
-        try await assertUnavailable(resolver)
+        // The window expired, so discovery probes again, but the same bundle is not warned about
+        // twice (#14399).
+        try await assertUnavailable(resolver, cached: true)
         try await assertUnavailable(resolver, cached: true)
         XCTAssertEqual(stub.recordedRequests.count, 2 * (SdkSimulatorPort.probeCount + 1))
     }

@@ -7,7 +7,6 @@ import { PlanDeviceLossMonitor, type PlanDeviceLossPort } from "../deviceDisconn
 import { DevicePool, type PooledDevice } from "../devicePool";
 import { holderOf, isIdle } from "../deviceBinding";
 import { deviceLossCancellationReason } from "../emulatorLossIncident";
-import { executionTracker } from "../executionTracker";
 import { PlanDeviceActivity } from "../planDeviceActivity";
 import { resolveToolSelectionBaseSessionUuid } from "../../features/toolSelection/selectionSessionResolver";
 import { getPerformanceMonitor } from "../../features/performance/PerformanceMonitor";
@@ -390,16 +389,12 @@ export class DaemonDisconnect {
           ),
       finishLoss: (incidentId) =>
         this.host.services.devicePool().finishEmulatorLossIncident(incidentId, "not-attempted"),
-      cancelPlan: (id, sessionUuid, reason) => {
-        new PlanDeviceActivity(this.host.services.sessionManager()).bindPlanExecutions(
+      cancelPlan: (id, sessionUuid, reason) =>
+        new PlanDeviceActivity(this.host.services.sessionManager()).cancelPlanExecutions(
           id,
           sessionUuid,
-        );
-        return executionTracker.cancelDeviceExecutions(id, reason, {
-          onlySessionUuid: sessionUuid,
-          onlyToolName: "executePlan",
-        });
-      },
+          reason,
+        ),
     });
     return async (result, bootedDeviceIds) => {
       await monitor.check(

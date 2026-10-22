@@ -156,8 +156,6 @@ export interface PendingDaemonRequest {
   progressToken?: string | number;
   deadline?: ProgressExtendableDeadline;
   requestTimeoutMs?: number;
-  /** Clock reading when the request was sent; the daemon's budget is measured from here. */
-  sentAtMs?: number;
   removeAbortListener?: () => void;
   /** Per-request context retained if the shared socket closes. */
   disconnectCause: McpTimeoutError | DaemonDisconnectError;

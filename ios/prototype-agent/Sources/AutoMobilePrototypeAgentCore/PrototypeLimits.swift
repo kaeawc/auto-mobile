@@ -107,13 +107,7 @@ enum PrototypeLimits {
     }
 
     static func dataMemberPath(_ path: String, key: String) -> String {
-        let scalars = key.unicodeScalars
-        func initial(_ scalar: Unicode.Scalar) -> Bool {
-            ("A" ... "Z").contains(scalar) || ("a" ... "z").contains(scalar) || scalar == "_"
-        }
-        if let first = scalars.first, initial(first),
-           scalars.allSatisfy({ initial($0) || ("0" ... "9").contains($0) })
-        {
+        if PrototypeContractValidator.matches("pathKey", key) {
             return "\(path).\(key)"
         }
         let encoder = JSONEncoder()

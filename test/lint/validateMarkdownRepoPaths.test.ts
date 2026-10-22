@@ -1,7 +1,5 @@
 import { readGuardFile } from "./astGuard";
 import { beforeAll, describe, expect, test } from "bun:test";
-import { execFileSync } from "node:child_process";
-
 import path from "node:path";
 import {
   markdownRepoFiles,
@@ -9,6 +7,7 @@ import {
   staleMarkdownAllowlist,
   trackedPathExists,
 } from "./markdownRepoPaths";
+import { workingTreeFiles } from "../helpers/workingTreeFiles";
 
 const root = path.resolve(import.meta.dir, "../..");
 const allowlist: Readonly<Record<string, string>> = {
@@ -23,10 +22,8 @@ const allowlist: Readonly<Record<string, string>> = {
 let failures: string[];
 let stale: string[];
 beforeAll(() => {
-  const tracked = execFileSync("git", ["ls-files", "-z"], {
-    cwd: root,
-    encoding: "utf8",
-  }).split("\0");
+  // Tracked plus untracked-unignored files present on disk: the tree the next commit holds.
+  const tracked = workingTreeFiles(root);
   const files = markdownRepoFiles(() => tracked);
   const exists = trackedPathExists(tracked);
   const referenced = new Set<string>();

@@ -10,7 +10,7 @@ import type { BrokerDeviceAcquisition } from "./provisioning/deviceAcquisition";
 import type { BindingJournal } from "./registry/bindingJournal";
 import { defaultBindingExecOwnerLiveness } from "./registry/ownerLiveness";
 import { runAsBindingReconciler } from "./provisioning/exclusion";
-import { brokerMutationIncarnation } from "./mutations/recorder";
+import { brokerSessionMutationScope, iosMutationIncarnation } from "./mutations/recorder";
 import type { DeviceMutationScope } from "./mutations/types";
 import {
   computeBindingScopeKey,
@@ -40,9 +40,14 @@ import {
 import { nativeProfile, type BrokerNativeProfile } from "./profile";
 import type { BrokerResourceRecord } from "./store";
 import { preparationTiming } from "./preparationTiming";
+import {
+  defaultManufacturerProfileApplier,
+  type ManufacturerProfileApplier,
+} from "../../features/utility/personaExecutors";
 
 import { BROKER_BINDING_ROLE } from "./persistedIdentity";
 import type { AndroidBaselineReset } from "./androidBaselineReset";
+import type { TaskLeaseKeepalive } from "../tasks/taskLeaseKeepalive";
 
 type ManagedDevicePortRegistry = Pick<
   BindingRegistry,
@@ -57,12 +62,16 @@ export interface ManagedDevicePortDependencies {
   /** Stable provider-owned identity. Consumer requests never choose this scope or a binding index. */
   scope: BindingScopeIdentity;
   timer?: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
+  /** Renews the acquired session while baseline preparation delays the client grant. */
+  leaseKeepalive?: TaskLeaseKeepalive;
   brokerDeviceAcquisition: Pick<BrokerDeviceAcquisition, "acquire">;
   brokerExecutionRelease: Pick<BrokerExecutionRelease, "releaseExecution">;
   registry: ManagedDevicePortRegistry;
   bindingJournal: Pick<BindingJournal, "owner" | "redriveBinding">;
   /** Defaults to the binding PID plus process-generation liveness check. */
   isExecOwnerLive?: BindingExecOwnerLiveness;
+  /** Applies a requested `deviceProfile` after readiness (#14058); defaults to production. */
+  manufacturerProfileApplier?: ManufacturerProfileApplier;
   /** Supplied only for qualified platform reset implementations. */
   resetBaseline?: {
     ios?: (
@@ -110,21 +119,6 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     this.isExecOwnerLive = dependencies.isExecOwnerLive ?? defaultBindingExecOwnerLiveness;
   }
 
-  /** Whether the binding is empty, so acquisition could create a retained device. */
-  private async bindingCanCreateDevice(resource: BrokerResourceRecord): Promise<boolean> {
-    try {
-      const assignment = await this.dependencies.registry.getAssignment(this.key(resource));
-      return assignment === null || assignment.stableDeviceId === null;
-    } catch (error) {
-      // If the optional budget hint is unavailable, preserve the existing retry reserve.
-      logger.warn(
-        `Cannot read binding for iOS readiness retry budget: ${errorMessage(error)}`,
-        error,
-      );
-      return true;
-    }
-  }
-
   async prepare(
     resource: BrokerResourceRecord,
     options: SessionDevicePreparationOptions,
@@ -142,25 +136,29 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     const timer = this.dependencies.timer ?? defaultTimer;
     const deadlineMs =
       timer.now() + (options.preparationTimeoutMs ?? DEFAULT_PROVISION_DEVICE_TIMEOUT_MS);
-    const acquire = (preparationTimeoutMs: number) => {
+    const acquire = (preparationTimeoutMs: number, createRetryReserveMs = 0) => {
       const config = this.bindingConfig(resource, profile, requestedSpec, {
         ...options,
         preparationTimeoutMs: Math.max(1, preparationTimeoutMs),
       });
-      return this.dependencies.brokerDeviceAcquisition.acquire(config, {
-        livenessOwnerToken: options.livenessOwnerToken,
-        ...(options.signal ? { signal: options.signal } : {}),
-      });
+      return this.dependencies.brokerDeviceAcquisition.acquire(
+        createRetryReserveMs > 0 ? { ...config, createRetryReserveMs } : config,
+        {
+          livenessOwnerToken: options.livenessOwnerToken,
+          ...(options.signal ? { signal: options.signal } : {}),
+        },
+      );
     };
-    // Only an empty iOS binding can create a retained device for one warm readiness retry.
-    // Reserve one third (at most a runner provisioning window) for that retry; an occupied
-    // binding's reuse/adoption cannot produce retained creation evidence and gets the full budget.
-    const canCreate = profile.platform === "ios" && (await this.bindingCanCreateDevice(resource));
+    // Only an empty iOS binding's create path can retain a device for one warm readiness retry.
+    // Reserve one third (at most a runner provisioning window) for that retry, but spend it only
+    // once provisioning actually chooses to create (#14643): adopting a leftover simulator or
+    // reusing a bound device keeps the caller's full timeout for its boot wait.
     const remainingMs = deadlineMs - timer.now();
-    const retryReserveMs = canCreate
-      ? Math.min(remainingMs / 3, DEFAULT_RUNNER_PROVISION_TIMEOUT_MS)
-      : 0;
-    let result = await acquire(remainingMs - retryReserveMs);
+    const retryReserveMs =
+      profile.platform === "ios"
+        ? Math.min(remainingMs / 3, DEFAULT_RUNNER_PROVISION_TIMEOUT_MS)
+        : 0;
+    let result = await acquire(remainingMs, retryReserveMs);
     if (
       this.canRetryReadiness(result, resource, profile) &&
       !this.preparationStopped(deadlineMs, options.signal)
@@ -173,20 +171,72 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
       }
     }
     const sessionId = await this.readySessionId(result, resource, profile);
-    await this.captureAndroidBaseline(resource, result, profile, sessionId, {
+    await this.captureBaselinesHoldingLease(resource, result, profile, sessionId, {
       signal: options.signal,
       deadlineMs,
+      deviceProfileOptions: options,
     });
-    if (profile.platform === "ios" && this.dependencies.captureIosBaseline) {
-      await this.capturePoolEntryBaseline(resource, sessionId, {
-        signal: options.signal,
-        deadlineMs,
-      });
-    }
     const binding = result.bindings.find(
       (entry) => entry.bindingIndex === resource.allocationIndex,
     );
     return { sessionId, profile, timing: preparationTiming(binding?.lifecycle) };
+  }
+
+  /**
+   * Apply the request's manufacturer profile to the prepared session's device (#14058). Its
+   * release restores what it changed; a failure fails preparation like a readiness failure.
+   */
+  private async applyDeviceProfile(
+    resource: BrokerResourceRecord,
+    result: BrokerDeviceAcquisitionResult,
+    sessionId: string,
+    options: SessionDevicePreparationOptions,
+  ): Promise<void> {
+    const deviceProfile = options.deviceProfile;
+    if (!deviceProfile) {
+      return;
+    }
+    const device =
+      this.androidDevices.get(resource.resourceId)?.device ?? acquiredAndroidDevice(result);
+    const applier =
+      this.dependencies.manufacturerProfileApplier ?? defaultManufacturerProfileApplier;
+    const applied = await applier.apply(device, deviceProfile, sessionId, options.signal);
+    if (applied.status === "route_to_real_device") {
+      throw new ActionableError(applied.message);
+    }
+    logger.info(`[SessionBroker] ${applied.message}`);
+  }
+
+  /**
+   * Keeps the acquired session's lease renewed while baseline capture and the manufacturer
+   * profile apply delay the client grant.
+   */
+  private async captureBaselinesHoldingLease(
+    resource: BrokerResourceRecord,
+    result: BrokerDeviceAcquisitionResult,
+    profile: BrokerNativeProfile,
+    sessionId: string,
+    options: {
+      signal?: AbortSignal;
+      deadlineMs: number;
+      deviceProfileOptions: SessionDevicePreparationOptions;
+    },
+  ): Promise<void> {
+    const release = this.dependencies.leaseKeepalive?.hold({
+      taskId: resource.requestId!,
+      ownerKey: "session-broker",
+      sessionUuid: sessionId,
+    });
+    try {
+      await this.captureAndroidBaseline(resource, result, profile, sessionId, options);
+      if (profile.platform === "ios" && this.dependencies.captureIosBaseline) {
+        await this.capturePoolEntryBaseline(resource, sessionId, options);
+      }
+      // After the reset baseline is captured, so a keep-booted reset returns to pre-profile state.
+      await this.applyDeviceProfile(resource, result, sessionId, options.deviceProfileOptions);
+    } finally {
+      release?.();
+    }
   }
 
   private async captureAndroidBaseline(
@@ -266,7 +316,10 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     if (this.preparationStopped(options.deadlineMs, options.signal)) {
       throw new ActionableError("Android reset baseline capture exceeded preparation deadline");
     }
-    logger.warn("Android reset baseline unavailable; device will be destroyed on release", error);
+    logger.warn(
+      `Android reset baseline unavailable; device will be destroyed on release: ${errorMessage(error)}`,
+      error,
+    );
   }
 
   private async capturePoolEntryBaseline(
@@ -421,14 +474,16 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     if (resultReady && this.isReadyBinding(binding, profile)) {
       if (this.dependencies.bindMutationRecorder) {
         try {
-          this.dependencies.bindMutationRecorder({
-            sessionUuid: binding.sessionUuid,
-            deviceId: binding.device!.transportId ?? binding.device!.stableId,
-            incarnation: brokerMutationIncarnation(
-              resource.resourceId,
-              binding.assignmentGeneration,
-            ),
-          });
+          this.dependencies.bindMutationRecorder(
+            brokerSessionMutationScope({
+              platform: profile.platform,
+              sessionUuid: binding.sessionUuid,
+              resource,
+              stableDeviceId: binding.device!.stableId,
+              transportId: binding.device!.transportId,
+              assignmentGeneration: binding.assignmentGeneration,
+            }),
+          );
         } catch (error) {
           logger.warn(
             "Failed to bind broker device mutation recorder; acquiring without recording",
@@ -605,11 +660,11 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     }
     return {
       deviceId: assignment.stableDeviceId,
-      incarnation: JSON.stringify([
+      incarnation: iosMutationIncarnation(
         resource.scopeKey,
         resource.allocationIndex,
         assignment.stableDeviceId,
-      ]),
+      ),
     };
   }
 
@@ -870,4 +925,13 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
   private async hasOpenJournal(key: BindingKey): Promise<boolean> {
     return (await this.dependencies.registry.listOpenBindingJournal(key)).length > 0;
   }
+}
+
+/** The acquired Android emulator as a booted device, for work on the prepared session. */
+function acquiredAndroidDevice(result: BrokerDeviceAcquisitionResult): BootedDevice {
+  const binding = result.bindings[0]?.device;
+  if (!binding?.transportId) {
+    throw new ActionableError("A manufacturer profile requires the acquired emulator serial");
+  }
+  return { platform: "android", name: binding.name, deviceId: binding.transportId };
 }

@@ -14,13 +14,24 @@ export interface ProcessSupervisor {
   isRestartPending(): boolean;
 }
 
+/**
+ * Handed to each liveness probe. A probe that keeps state across calls (a miss
+ * streak, an exit-handling flag) must mutate it only while `isCurrent()` holds:
+ * once start(), stop() or a process exit opens a new supervision epoch, the
+ * supervisor discards the probe's answer, so any state it records would outlive
+ * the decision it was meant to feed.
+ */
+export interface LivenessProbe {
+  isCurrent(): boolean;
+}
+
 export interface ProcessSupervisorOptions {
   readonly name: string;
   readonly timer: Timer;
   readonly monitorIntervalMs: number;
   readonly restartBackoff: BackoffPolicy;
   readonly restart: () => Promise<void>;
-  readonly isAlive: () => Promise<boolean>;
+  readonly isAlive: (probe: LivenessProbe) => Promise<boolean>;
   readonly onExit?: () => void | Promise<void>;
   readonly onRestartSuccess?: () => void | Promise<void>;
   readonly onRestartFailure?: (error: unknown) => void | Promise<void>;
@@ -73,7 +84,7 @@ export class DefaultProcessSupervisor implements ProcessSupervisor {
   }
 
   public isAlive(): Promise<boolean> {
-    return this.options.isAlive();
+    return this.options.isAlive(this.probeForEpoch(this.lifecycleGeneration));
   }
 
   public setAutoRestart(enabled: boolean): void {
@@ -89,7 +100,7 @@ export class DefaultProcessSupervisor implements ProcessSupervisor {
 
   private startMonitoring(): void {
     this.stopMonitoring();
-    const generation = this.lifecycleGeneration;
+    const probe = this.probeForEpoch(this.lifecycleGeneration);
     // Create the device-lifetime monitor interval detached from any request's
     // performance tracker: `start()` may run inside a readiness request's
     // ambient perf scope, and Node's AsyncLocalStorage would otherwise bind that
@@ -97,7 +108,7 @@ export class DefaultProcessSupervisor implements ProcessSupervisor {
     // callbacks it fires) for the process's whole lifetime (see PerfContext).
     this.monitorInterval = runDetachedFromPerf(() =>
       this.options.timer.setInterval(() => {
-        void this.checkLiveness(generation);
+        void this.checkLiveness(probe);
       }, this.options.monitorIntervalMs),
     );
   }
@@ -109,10 +120,15 @@ export class DefaultProcessSupervisor implements ProcessSupervisor {
     }
   }
 
-  private async checkLiveness(generation: number): Promise<void> {
+  /** Binds probes to one supervision epoch; start(), stop() and an exit each open a new one. */
+  private probeForEpoch(generation: number): LivenessProbe {
+    return { isCurrent: () => generation === this.lifecycleGeneration && !this.isStopping };
+  }
+
+  private async checkLiveness(probe: LivenessProbe): Promise<void> {
     try {
-      const isAlive = await this.options.isAlive();
-      if (generation !== this.lifecycleGeneration || this.isStopping) {
+      const isAlive = await this.options.isAlive(probe);
+      if (!probe.isCurrent()) {
         return;
       }
       if (!isAlive) {

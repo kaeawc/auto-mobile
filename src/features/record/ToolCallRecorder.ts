@@ -48,6 +48,7 @@ const READ_ONLY_ACTIONS: Readonly<Record<string, ReadonlySet<string>>> = {
   keyboard: new Set(["detect", "listProfiles", "listImes"]),
   clipboard: new Set(["get"]),
   systemTray: new Set(["list", "find"]),
+  systemAlerts: new Set(["get"]),
 };
 
 /**
@@ -69,6 +70,9 @@ const READ_UNLESS_SET_FIELDS: Readonly<Record<string, readonly string[]>> = {
     "contentSize",
     "density",
     "theme",
+    "size",
+    "navigationMode",
+    "displayCutout",
     "increaseContrast",
     "reduceMotion",
     "boldText",

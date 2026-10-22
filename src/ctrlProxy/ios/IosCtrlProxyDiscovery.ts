@@ -10,6 +10,7 @@ import {
   ExternalCtrlProxyProcess,
   ListeningProcess,
   IOS_CTRL_PROXY_DEFAULT_PORT,
+  type CtrlProxyProcessLiveness,
 } from "./IosCtrlProxyContracts";
 
 interface IosCtrlProxyDiscoveryHost {
@@ -49,7 +50,7 @@ export class IosCtrlProxyDiscovery {
 
   /**
    * Whether the runner process WE spawned is alive at the OS level, regardless of
-   * whether its health endpoint is up yet. Unlike {@link isCtrlProxyProcessAlive}
+   * whether its health endpoint is up yet. Unlike {@link checkCtrlProxyProcessLiveness}
    * this does NOT require a health response, so a runner still initializing counts
    * as alive — used to avoid killing+respawning our own still-starting runner (#2834).
    */
@@ -107,13 +108,15 @@ export class IosCtrlProxyDiscovery {
    * Check if the tracked CtrlProxy process is alive AND still the real CtrlProxy.
    * Used by startInternal() to skip spawning when the process is merely slow.
    *
-   * We require both a PID liveness check AND a health endpoint response so that
-   * a stale xcTestProcessId that has been PID-reused by a different process does
-   * not produce a false "alive" result and cause setup() to silently skip restart.
+   * Locally we require both a PID liveness check AND a health endpoint response so
+   * that a stale xcTestProcessId that has been PID-reused by a different process
+   * does not produce a false "alive" result and cause setup() to silently skip
+   * restart; that verdict is `healthy`. A remote runner is judged by its PID-strict
+   * status alone, so it is only `alive`: its health was not confirmed (#14493).
    */
-  async isCtrlProxyProcessAlive(): Promise<boolean> {
+  async checkCtrlProxyProcessLiveness(): Promise<CtrlProxyProcessLiveness> {
     if (!this.state.xcTestProcessId) {
-      return false;
+      return "dead";
     }
     if (this.host.useRemoteRunner()) {
       try {
@@ -126,27 +129,27 @@ export class IosCtrlProxyDiscovery {
         // NEWER runner, not the tracked one. On mismatch we return false and the
         // remote start path re-adopts the device's current runner via
         // status({deviceId}) — the correct adoption point (#2834 review).
-        return (
+        const running =
           status.success &&
           (status.data?.running ?? false) &&
-          status.data?.pid === this.state.xcTestProcessId
-        );
+          status.data?.pid === this.state.xcTestProcessId;
+        return running ? "alive" : "dead";
       } catch (error) {
         // Remote status call failed; report not-alive so the caller respawns rather
         // than trusting a stale in-memory pid across a daemon error.
         logger.debug(`src/ctrlProxy/IOSCtrlProxyManager.ts fallback failed: ${error}`, error);
-        return false;
+        return "dead";
       }
     }
     // First check PID liveness (fast, no network). If the PID is already gone
     // we can skip the health check entirely.
     if (!(await this.host.isProcessRunning(this.state.xcTestProcessId))) {
-      return false;
+      return "dead";
     }
     // Also verify CtrlProxy identity via the health endpoint.  A different
     // process could have reused the same PID after CtrlProxy exited without
     // its exit being recorded (e.g. clean exit not caught by the exec callback).
-    return this.host.checkHealthEndpoint();
+    return (await this.host.checkHealthEndpoint()) ? "healthy" : "dead";
   }
 
   /**

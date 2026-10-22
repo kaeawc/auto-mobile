@@ -1,0 +1,4 @@
+{
+  "rawJson": "{\"id\":\"bad\u0000id\",\"window\":{\"placement\":{\"type\":\"fullscreen\"}},\"root\":{\"type\":\"spacer\"}}",
+  "expectedPath": "$"
+}

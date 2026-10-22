@@ -34,6 +34,12 @@ export interface BindingRefreshOptions {
    * read the registry before the caller's own change). Concurrent fresh calls share one load.
    */
   fresh?: boolean;
+  /**
+   * Refuse (with {@link BindingDiscoveryIncompleteError}) while a registry upgrade is pending,
+   * instead of resolving over the empty "absent" snapshot generic allocation uses meanwhile.
+   * For ownership readers, where "nothing managed" would mislabel held devices as external (#14476).
+   */
+  refuseUpgradePending?: boolean;
 }
 
 /**
@@ -139,6 +145,8 @@ interface LoadedSnapshot {
 interface AbsentSnapshot {
   kind: "absent";
   loadedAtMs: number;
+  /** The registry exists but awaits an upgrade: treated as absent, though ownership is unknown. */
+  upgradePending?: true;
 }
 
 /** The registry exists (or was opened) but has not been read successfully yet: unknown, never free. */
@@ -166,9 +174,19 @@ export class RegistryBindingExclusion implements BindingExclusion {
   ) {}
 
   async refresh(options: BindingRefreshOptions = {}): Promise<void> {
-    if (!options.fresh && this.snapshotIsYoung(options.maxAgeMs ?? 0)) {
-      return;
+    if (options.fresh || !this.snapshotIsYoung(options.maxAgeMs ?? 0)) {
+      await this.reload(options);
     }
+    if (
+      options.refuseUpgradePending &&
+      this.snapshot?.kind === "absent" &&
+      this.snapshot.upgradePending
+    ) {
+      throw new BindingDiscoveryIncompleteError("registry upgrade pending");
+    }
+  }
+
+  private async reload(options: BindingRefreshOptions): Promise<void> {
     try {
       await (options.fresh ? this.refreshFresh() : this.loadShared());
     } catch (error) {
@@ -265,7 +283,7 @@ export class RegistryBindingExclusion implements BindingExclusion {
           );
           this.warnedUpgradePending = true;
         }
-        this.snapshot = { kind: "absent", loadedAtMs: this.timer.now() };
+        this.snapshot = { kind: "absent", loadedAtMs: this.timer.now(), upgradePending: true };
         this.readFailed = false;
         return;
       }

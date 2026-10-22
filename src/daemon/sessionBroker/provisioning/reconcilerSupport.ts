@@ -204,4 +204,17 @@ export interface ReconcileContext {
   creatabilityChecked?: boolean;
 }
 
+/**
+ * The context an empty binding's create path runs under: its request deadline moves up to the
+ * caller's create deadline, if any, so the warm readiness retry reserve is spent only by a create
+ * (#14643). Adoption and reuse keep the request's full deadline.
+ */
+export function withCreateDeadline(context: ReconcileContext): ReconcileContext {
+  const { createDeadlineMs, deadlineMs } = context.request;
+  if (createDeadlineMs === undefined || createDeadlineMs >= deadlineMs) {
+    return context;
+  }
+  return { ...context, request: { ...context.request, deadlineMs: createDeadlineMs } };
+}
+
 export type ReadyResult = Extract<BindingReconcileResult, { outcome: "ready" }>;

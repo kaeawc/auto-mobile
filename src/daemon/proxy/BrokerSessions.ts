@@ -63,6 +63,15 @@ function isSessionOwnershipLostError(error: unknown): boolean {
   );
 }
 
+/**
+ * An acquisition-cleanup release in flight. Its retry may sleep a 5 s recovery hint, longer than
+ * the shutdown release budget, so close takes it over and the retry joins close's release
+ * instead of waking against the closed daemon client (#14490).
+ */
+interface PreparedRelease {
+  takenOver?: Promise<unknown>;
+}
+
 /** A ready broker receipt currently held by the heartbeat keeper. */
 export interface BrokerBinding {
   requestId: string;
@@ -108,6 +117,8 @@ export class BrokerSessions {
   readonly sessions = new Map<string, string>();
   /** Aborts preparation and same-request status polling when the proxy closes. */
   private acquisitionAbort: AbortController | undefined;
+  /** Acquisition-cleanup releases close must cover, even for sessions never held. */
+  private readonly preparedReleases = new Map<string, PreparedRelease>();
 
   constructor(private readonly deps: BrokerSessionsDependencies) {}
 
@@ -275,9 +286,14 @@ export class BrokerSessions {
     sessionUuid: string,
     budgetMs: number,
     reason?: SessionBrokerReleaseReason,
+    prepared?: PreparedRelease,
   ): Promise<unknown> {
     const deadline = this.deps.timer.now() + budgetMs;
     while (true) {
+      if (prepared?.takenOver) {
+        // Close already released this session within its own budget; never resend after it.
+        return await prepared.takenOver;
+      }
       let result: unknown;
       try {
         result = await this.callReleaseOnce(sessionUuid, reason, deadline - this.deps.timer.now());
@@ -355,9 +371,19 @@ export class BrokerSessions {
     if (this.binding?.sessionUuid === sessionUuid) {
       this.binding = undefined;
     }
+    const prepared: PreparedRelease = {};
+    this.preparedReleases.set(sessionUuid, prepared);
     try {
-      return await this.callRelease(sessionUuid, BROKER_PREPARED_RELEASE_TIMEOUT_MS);
+      return await this.callRelease(
+        sessionUuid,
+        BROKER_PREPARED_RELEASE_TIMEOUT_MS,
+        undefined,
+        prepared,
+      );
     } finally {
+      if (this.preparedReleases.get(sessionUuid) === prepared) {
+        this.preparedReleases.delete(sessionUuid);
+      }
       this.forget(sessionUuid);
     }
   }
@@ -366,18 +392,25 @@ export class BrokerSessions {
    * Broker teardown remains durable in the daemon even when this bounded call cannot confirm it.
    * An execution-owner loss reports `session_owner_exited` (#12791): the daemon records that
    * terminal receipt and answers before device destruction, which outlasts this bound.
+   * An in-flight acquisition-cleanup release is released here too, at once, because the daemon
+   * client closes after this returns (#14490).
    */
   async releaseAll(reason?: SessionBrokerReleaseReason): Promise<void> {
-    const sessions = [...this.sessions.keys()];
+    const sessions = new Set([...this.sessions.keys(), ...this.preparedReleases.keys()]);
     this.binding = undefined;
     await Promise.all(
-      sessions.map(async (sessionUuid) => {
+      [...sessions].map(async (sessionUuid) => {
         try {
-          const result = await this.callRelease(
+          const releasing = this.callRelease(
             sessionUuid,
             BROKER_EXECUTION_RELEASE_TIMEOUT_MS,
             reason,
           );
+          const prepared = this.preparedReleases.get(sessionUuid);
+          if (prepared) {
+            prepared.takenOver = releasing;
+          }
+          const result = await releasing;
           const release = result as Partial<SessionBrokerReleaseResult> | undefined;
           if (
             release?.sessionUuid !== sessionUuid ||

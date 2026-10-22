@@ -1,4 +1,5 @@
 import { parseCheckPattern } from "./prototypeCheckPattern";
+import contract from "../../../schemas/prototype-spec-contract.json";
 import { record, type Raw } from "./prototypeTemplate";
 import type { PrototypeValidationError } from "./prototypeValidation";
 interface Located {
@@ -7,15 +8,9 @@ interface Located {
   item?: number;
 }
 const error = (path: string, message: string): PrototypeValidationError => ({ path, message });
-const textKinds = new Set(["minLength", "maxLength", "format", "pattern"]);
+const checkControls: Readonly<Record<string, readonly string[]>> = contract.checkControls;
 function fitsControl(kind: string, type: unknown): boolean {
-  if (textKinds.has(kind)) {
-    return type === "textField";
-  }
-  if (kind === "min" || kind === "max") {
-    return ["slider", "datePicker", "timePicker"].includes(String(type));
-  }
-  return true;
+  return checkControls[kind]?.includes(String(type)) ?? true;
 }
 function checkErrors(node: Raw, path: string): PrototypeValidationError | undefined {
   const checks = Array.isArray(node.checks) ? node.checks.map((check) => record(check) ?? {}) : [];

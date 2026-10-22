@@ -46,6 +46,9 @@ export async function runStartup(
   if (await runSkippedBootstrapDaemonCommand(args, modules)) {
     return;
   }
+  if (await runSkippedBootstrapCliCommand(args, modules)) {
+    return;
+  }
   bootstrapServer(args, modules);
 
   const accessibilityConfig = buildAccessibilityConfig(args);
@@ -125,6 +128,22 @@ async function runSkippedBootstrapDaemonCommand(
     return true;
   }
   return false;
+}
+
+/**
+ * A `--cli doctor` invocation that only prints its usage or rejects its flags skips the server
+ * bootstrap, as usage-only daemon commands do (#11252), so it starts no maintenance or CtrlProxy
+ * prefetch (#14533). It needs no daemon startup options. Returns true when the command was handled.
+ */
+async function runSkippedBootstrapCliCommand(
+  args: ParsedArgs,
+  modules: ServerModules,
+): Promise<boolean> {
+  if (!args.cliMode || !modules.cliCommandSkipsServerBootstrap(args.cliArgs)) {
+    return false;
+  }
+  await runCliMode(args, modules, undefined);
+  return true;
 }
 
 function bootstrapServer(args: ParsedArgs, modules: ServerModules): void {

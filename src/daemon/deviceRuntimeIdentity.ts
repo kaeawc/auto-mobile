@@ -630,11 +630,14 @@ export class DeviceRuntimeIdentity {
     const evidence = this.identityEvidenceForBootedDevice(device);
     const pendingEvidence = this.identityEvidenceForBootedDevice(pending);
     if (evidence.unresolved) {
-      if (device.name === device.deviceId || device.nameProbeTimedOut) {
-        // ADB's raw serial listing attempted no AVD-name probe, and a timed-out probe supplies no
-        // identity evidence (as for a pooled entry, #14377): neither may supersede pending evidence.
+      if (
+        device.name === device.deviceId ||
+        device.consoleBusyDuringProbe ||
+        device.nameProbeTimedOut
+      ) {
+        // Raw serials and failed name probes carry no identity evidence to replace.
         logger.debug(
-          `[DevicePool] Ignoring unprobed AVD-name observation for pending replacement ${device.deviceId}`,
+          `[DevicePool] Ignoring no-evidence observation for pending replacement ${device.deviceId}`,
         );
         return;
       }

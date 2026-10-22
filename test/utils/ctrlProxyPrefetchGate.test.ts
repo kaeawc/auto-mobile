@@ -50,7 +50,7 @@ describe("AndroidCtrlProxyManager prefetch prerequisite gate", function () {
   test("does not download the APK when Android prerequisites are absent", async function () {
     useGate(false);
 
-    AndroidCtrlProxyManager.prefetchApk();
+    void AndroidCtrlProxyManager.prefetchApk();
     // Draining the prefetch promise must resolve null without throwing, so the
     // daemon stays healthy and non-Android workflows are unaffected.
     const result = await AndroidCtrlProxyManager.getPrefetchedApkPath();
@@ -62,7 +62,7 @@ describe("AndroidCtrlProxyManager prefetch prerequisite gate", function () {
   test("attempts the APK download when Android prerequisites are present", async function () {
     useGate(true);
 
-    AndroidCtrlProxyManager.prefetchApk();
+    void AndroidCtrlProxyManager.prefetchApk();
     await AndroidCtrlProxyManager.getPrefetchedApkPath();
 
     // The gate let the prefetch through, so the download was attempted.

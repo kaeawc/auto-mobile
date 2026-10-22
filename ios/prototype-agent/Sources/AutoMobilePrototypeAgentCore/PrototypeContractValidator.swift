@@ -4,6 +4,8 @@ import Foundation
 /// Cross-node and host environment checks remain the host's responsibility.
 struct PrototypeContractValidator {
     private struct Contract: Decodable {
+        let patterns: [String: String]
+        let checkControls: [String: [String]]
         let definitions: [String: JSONValue]
         let limits: [String: Int]
     }
@@ -11,13 +13,32 @@ struct PrototypeContractValidator {
     private static let contract = try? JSONDecoder().decode(
         Contract.self, from: Data(prototypeSpecContractData.utf8)
     )
+    private static let patterns = contract?.patterns.compactMapValues { try? NSRegularExpression(pattern: $0) } ?? [:]
+
+    static func matches(_ name: String, _ text: String) -> Bool {
+        patterns[name]?.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
+    }
+
+    static func limit(_ name: String) -> Int { contract?.limits[name] ?? 0 }
+    static let checkPatternMaxLength = Int(
+        contract?.definitions["check"]?.objectFields?["fields"]?
+            .objectFields?["pattern"]?.objectFields?["rule"]?.objectFields?["max"]?.numberValue ?? 0
+    )
+    static func checkFits(_ kind: String, _ control: String) -> Bool {
+        contract?.checkControls[kind]?.contains(control) ?? true
+    }
+
     let definitions: [String: JSONValue]
     let limits: [String: Int]
+    var locatedNodes: [PrototypeLocatedValue] = []
+    var actions: [PrototypeLocatedValue] = []
     var nodes = 0
     var images = 0
     var referenceDepth: [String: Int] = [:]
 
-    static func validate(data: Data) throws {
+    static func validate(data: Data) throws { _ = try inspect(data: data) }
+
+    static func inspect(data: Data) throws -> (JSONValue, PrototypeContractValidator) {
         guard data.count <= PrototypeLimits.maxSpecBytes * 4 else {
             throw invalid("$", "Spec byte limit exceeded")
         }
@@ -29,11 +50,16 @@ struct PrototypeContractValidator {
         let value: JSONValue
         do { value = try JSONDecoder().decode(JSONValue.self, from: data) }
         catch { throw invalid("$", error.localizedDescription) }
+        return try (value, inspect(value))
+    }
+
+    static func inspect(_ value: JSONValue) throws -> PrototypeContractValidator {
         guard let contract, let spec = contract.definitions["spec"] else {
             throw invalid("$", "Embedded structural contract is unavailable")
         }
         var validator = Self(definitions: contract.definitions, limits: contract.limits)
         try validator.walk(value, rule: spec, path: "", depth: 0)
+        return validator
     }
 
     static func invalid(_ path: String, _ message: String) -> PrototypeLoadError {
@@ -95,6 +121,7 @@ struct PrototypeContractValidator {
         if let limit = depthLimits[name], referenceDepth[name, default: 0] > limit {
             throw Self.invalid(path, messages[name] ?? "Reference depth limit exceeded")
         }
+        if name == "action", let fields = value.objectFields { actions.append(.init(value: fields, path: path)) }
         if name == "item" {
             images += Self.imageUses(value.objectFields?["image"])
             if images >
@@ -102,6 +129,7 @@ struct PrototypeContractValidator {
         }
         if name == "node" {
             guard let node = value.objectFields else { throw Self.invalid(path, "Expected object") }
+            locatedNodes.append(.init(value: node, path: path))
             nodes += 1
             if nodes > PrototypeLimits.maxNodes { throw Self.invalid(path, "Node limit exceeded") }
             if depth + 1 > PrototypeLimits.maxDepth { throw Self.invalid(path, "Tree depth limit exceeded") }

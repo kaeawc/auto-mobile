@@ -11,9 +11,7 @@
             case process
         }
 
-        private final class FontRegistry {
-            var registeredFontDigests: [String: SHA256.Digest] = [:]
-        }
+        private typealias FontRegistry = PrototypeFontFaceLedger<CGFont, SHA256.Digest>
 
         private static let processFontRegistry = FontRegistry()
         private let fontRegistry: FontRegistry
@@ -35,20 +33,34 @@
                   let font = CGFont(provider), let name = font.postScriptName
             else { return nil }
             let face = name as String
-            let digest = SHA256.hash(data: data)
-            if let registeredDigest = fontRegistry.registeredFontDigests[face],
-               registeredDigest != digest { return nil }
-            var error: Unmanaged<CFError>?
-            let registered = CTFontManagerRegisterGraphicsFont(font, &error)
-            let registrationError = error?.takeRetainedValue()
-            var alreadyRegistered = false
-            if let registrationError, fontRegistry.registeredFontDigests[face] == digest {
-                alreadyRegistered = CFErrorGetDomain(registrationError) as String == kCTFontManagerErrorDomain as String
-                    && CFErrorGetCode(registrationError) == CTFontManagerError.alreadyRegistered.rawValue
-            }
-            guard registered || alreadyRegistered else { return nil }
-            fontRegistry.registeredFontDigests[face] = digest
+            let registered = fontRegistry.register(
+                face: face,
+                digest: SHA256.hash(data: data),
+                font: font,
+                register: Self.registerGraphicsFont,
+                unregister: Self.unregisterGraphicsFont
+            )
+            guard registered else { return nil }
             return face
+        }
+
+        /// ProtoViewer owns the process and calls this only after its sole renderer has stopped.
+        static func releaseProcessFonts() {
+            processFontRegistry.unregisterAll(unregister: unregisterGraphicsFont)
+        }
+
+        // CoreText's font manager is thread-safe; nonisolated so the ledger can call these directly.
+        private nonisolated static func registerGraphicsFont(_ font: CGFont) -> PrototypeFontRegistrationResult {
+            var error: Unmanaged<CFError>?
+            if CTFontManagerRegisterGraphicsFont(font, &error) { return .registered }
+            guard let registrationError = error?.takeRetainedValue() else { return .failed }
+            let alreadyRegistered = CFErrorGetDomain(registrationError) as String == kCTFontManagerErrorDomain as String
+                && CFErrorGetCode(registrationError) == CTFontManagerError.alreadyRegistered.rawValue
+            return alreadyRegistered ? .alreadyRegistered : .failed
+        }
+
+        private nonisolated static func unregisterGraphicsFont(_ font: CGFont) {
+            CTFontManagerUnregisterGraphicsFont(font, nil)
         }
     }
 #endif

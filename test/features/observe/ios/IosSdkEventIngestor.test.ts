@@ -18,6 +18,15 @@ import { DefaultAndroidSdkEventIngestor } from "../../../../src/features/observe
 
 import { SdkFrameMetricsStore } from "../../../../src/features/performance/SdkFrameMetricsStore";
 import {
+  getNoOpTelemetryRepository,
+  TelemetryRecorder,
+} from "../../../../src/features/telemetry/TelemetryRecorder";
+import {
+  TelemetryEventBuffer,
+  type BatchTelemetryRepository,
+} from "../../../../src/features/telemetry/TelemetryEventBuffer";
+import type { RecordLayoutEventInput } from "../../../../src/db/layoutEventRepository";
+import {
   goldenLayoutHierarchy,
   largeLayoutHierarchy,
   previousLayoutDetails,
@@ -1096,6 +1105,76 @@ describe("DefaultIosSdkEventIngestor", () => {
       } finally {
         pending.resolve(true);
         record.mockRestore();
+      }
+    });
+
+    test("buffered mode dedupes once the flush receipt confirms the write, without stalling (#14625)", async () => {
+      const timer = new FakeTimer();
+      const layoutBatches: RecordLayoutEventInput[][] = [];
+      let failLayout = false;
+      const sink: BatchTelemetryRepository = {
+        recordLogEvents: async () => {},
+        recordOsEvents: async () => {},
+        recordNavigationEvents: async () => {},
+        recordLayoutEvents: async (rows) => {
+          if (failLayout) {
+            throw new Error("layout batch lost");
+          }
+          layoutBatches.push(rows);
+        },
+      };
+      const buffer = new TelemetryEventBuffer(sink, timer, {
+        flushIntervalMs: 250,
+        maxBufferedRows: 1000,
+      });
+      buffer.start();
+      const buffered = new DefaultIosSdkEventIngestor({
+        deviceId: DEVICE_ID,
+        timer,
+        getNavigationGraphManager: () => navSink,
+        captureScreenshot: async (): Promise<CtrlProxyScreenshotResult> => ({ success: false }),
+        telemetryRecorder: new TelemetryRecorder(
+          getNoOpTelemetryRepository(),
+          () => null,
+          undefined,
+          buffer,
+        ),
+        failureRecorder,
+        navigationScreenshotsEnabled: () => false,
+      });
+      const flushTick = async () => {
+        timer.advanceTime(250);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      };
+      const warning = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        // Returns synchronously while the receipt is pending; the pending capture
+        // suppresses an identical poll before the flush lands.
+        buffered.recordLayoutTelemetryEvent(hierarchy());
+        buffered.recordLayoutTelemetryEvent({ ...hierarchy(), updatedAt: 124 });
+        await flushTick();
+        expect(layoutBatches.map((batch) => batch.length)).toEqual([1]);
+
+        // Confirmed: identical captures on later polls are no longer re-recorded.
+        buffered.recordLayoutTelemetryEvent({ ...hierarchy(), updatedAt: 125 });
+        await flushTick();
+        expect(layoutBatches.map((batch) => batch.length)).toEqual([1]);
+
+        // A lost batch resolves false, so the same changed capture is retried.
+        const changed = hierarchy();
+        changed.updatedAt = 126;
+        changed.hierarchy.node!.node![0].$!.text = "changed";
+        failLayout = true;
+        buffered.recordLayoutTelemetryEvent(changed);
+        await flushTick();
+        failLayout = false;
+        buffered.recordLayoutTelemetryEvent({ ...changed, updatedAt: 127 });
+        await flushTick();
+        expect(layoutBatches.map((batch) => batch.length)).toEqual([1, 1]);
+        expect(JSON.parse(layoutBatches[1][0].detailsJson!).updatedAt).toBe(127);
+      } finally {
+        warning.mockRestore();
+        await buffer.stop();
       }
     });
 

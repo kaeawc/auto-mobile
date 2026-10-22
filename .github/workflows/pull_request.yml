@@ -288,6 +288,9 @@ jobs:
               - 'test/fixtures/refusal-wire/**'
               - 'scripts/generate-refusal-wire-fixtures.ts'
               - 'test/daemon/refusalWireContract.test.ts'
+              # Replayed by desktop-core's DaemonHttpTokenProviderTest (#14418); the
+              # android and ios filters already carry it for the JUnit and XCTest replays.
+              - 'test/fixtures/daemon-http-endpoints.json'
               # Shared job bodies live in composite actions; editing one must run
               # the jobs that consume it.
               - '.github/actions/ci-build-desktop-core/**'
@@ -428,6 +431,8 @@ jobs:
               - 'test/fixtures/encoded-h264-golden-vectors.json'
               - '.swiftformat'
               - '.swiftlint.yml'
+              # The root SwiftPM manifest defines the published AutoMobilePrototype product (#14457).
+              - 'Package.swift'
 
       # TypeScript-only concerns (memory-leak harness, benchmarks). CodeQL runs
       # from codeql.yml on push to main and weekly (#10888), not per PR.
@@ -860,6 +865,12 @@ jobs:
               echo '::warning::Failed to stop the isolated Gradle daemon before removing its home.' >&2
             fi
           fi
+          # `gradlew --stop` can return while the daemon still flushes into its home, so rm
+          # races it with "Directory not empty". Retry briefly; the last attempt still fails.
+          for attempt in 1 2 3 4; do
+            rm -rf -- "$RUNNER_TEMP/desktop-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" 2>/dev/null && exit 0
+            sleep "$attempt"
+          done
           rm -rf -- "$RUNNER_TEMP/desktop-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
 
   desktop-app-unit-tests:
@@ -996,7 +1007,7 @@ jobs:
           KTFMT_ONLY_TOUCHED_FILES: "false"
         run: |
           scripts/all_fast_validate_checks.sh \
-            --only yaml,lfs-pointers,scripts-referenced,schema-copy-drift,tool-definitions,ctrl-proxy-project-sources,xml,bun-version-coherence,shellcheck,shell-portability,shell-sete,pipefail-grep-q,stdlib-first,dependency-decisions,sharp-matrix,runtime-pins,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,ios-ctrl-proxy-process-boundary,element-resolution-ratchet,shared-process-allowlist,dependabot,desktop-core-unified,workflow-assertion-triggers,mkdocs-nav,docs-github-markdown,docs-assets,env-var-docs,ktfmt,claude-plugin,codex-skills,github-python-lock,debug-tags,datetime-now-literal,markdown-bash \
+            --only yaml,lfs-pointers,scripts-referenced,schema-copy-drift,tool-definitions,prototype-spec-models,ctrl-proxy-project-sources,xml,bun-version-coherence,shellcheck,shell-portability,shell-sete,pipefail-grep-q,stdlib-first,dependency-decisions,sharp-matrix,runtime-pins,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,ios-ctrl-proxy-process-boundary,element-resolution-ratchet,shared-process-allowlist,dependabot,desktop-core-unified,workflow-assertion-triggers,mkdocs-nav,docs-github-markdown,docs-assets,env-var-docs,ktfmt,claude-plugin,codex-skills,github-python-lock,debug-tags,datetime-now-literal,markdown-bash \
             --max-parallel 4
 
       - name: "Run offline lychee link check"
@@ -2409,7 +2420,7 @@ jobs:
       # tested here.
       - uses: ./.github/actions/gradle-task-run
         with:
-          gradle-tasks: ":control-proxy:testDebugUnitTest :control-proxy:createDebugUnitTestCoverageReport :prototype-compose:testDebugUnitTest :prototype-compose:createDebugUnitTestCoverageReport :auto-mobile-sdk:testDebugUnitTest :auto-mobile-sdk:createDebugUnitTestCoverageReport :test-plan-validation:test :test-plan-validation:jacocoTestReport :protocol:test :protocol:jacocoTestReport :video-server:test :video-server:d8Dex"
+          gradle-tasks: ":control-proxy:testDebugUnitTest :control-proxy:createDebugUnitTestCoverageReport :prototype-compose:testDebugUnitTest :prototype-compose:createDebugUnitTestCoverageReport :prototype-saved:testDebugUnitTest :prototype-saved:createDebugUnitTestCoverageReport :auto-mobile-sdk:testDebugUnitTest :auto-mobile-sdk:createDebugUnitTestCoverageReport :test-plan-validation:test :test-plan-validation:jacocoTestReport :protocol:test :protocol:jacocoTestReport :video-server:test :video-server:d8Dex"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           reuse-configuration-cache: true
@@ -3791,12 +3802,11 @@ jobs:
           source ./scripts/ios/run_with_timeout.sh
 
           reap_before_retry() {
-            pkill -f "index.js --daemon-mode" 2>/dev/null || true
-            pkill -x mediamtx 2>/dev/null || true
-            pkill -f "remote-debugging-port=9222" 2>/dev/null || true
-            sleep 2
-            pkill -KILL -x mediamtx 2>/dev/null || true
-            pkill -KILL -f "index.js --daemon-mode" 2>/dev/null || true
+            # Scoped to this job's own daemon (pid files under its data dirs),
+            # mediamtx and Chrome (cwd in the workspace). Never kill by process name:
+            # the self-hosted host also runs other AutoMobile daemons (#14826).
+            bash scripts/ci/reap-job-processes.sh "${GITHUB_WORKSPACE}" \
+              "${GITHUB_WORKSPACE}/scratch/webrtc-device-integration" >/dev/null
             if [ -n "${AUTOMOBILE_IOS_SIMULATOR_UDID:-}" ]; then
               if ! run_with_timeout 10 xcrun simctl bootstatus "${AUTOMOBILE_IOS_SIMULATOR_UDID}" -b >/dev/null 2>&1; then
                 echo "Simulator did not report booted within 10s after cleanup; skipping reboot (best-effort re-verify only, #7605)." >&2

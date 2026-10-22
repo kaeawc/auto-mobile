@@ -19,6 +19,8 @@ test/lint/relativeImportCasing.test.ts git
 test/lint/validateMarkdownRepoPaths.test.ts git
 # `git grep -l`, read-only, over the tracked tree.
 test/package/noBundledCoordinationServer.guard.test.ts git
+# Sources scripts/lib/bun-unit-test.sh to print the unit command arrays its configure step sets.
+test/scripts/changedUnitTests.test.ts bash
 # `git ls-files -z`, read-only, to enumerate integration test files.
 test/scripts/integrationSafeTier.test.ts git
 # Runs a bundle the test built in a temp dir, to prove its source map resolves at runtime.

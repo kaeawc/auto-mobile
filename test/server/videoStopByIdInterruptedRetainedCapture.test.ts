@@ -212,7 +212,7 @@ test("2: VM restore cannot let another session stop a retained interrupted captu
     expect((await repository.getRecording(active.recordingId))?.status).toBe("interrupted");
     await expectRefused(active.recordingId, { sessionUuid: OTHER });
   } finally {
-    listener.onIncarnationChangeSettled?.(device.deviceId, { ready: false });
+    void listener.onIncarnationChangeSettled?.(device.deviceId, { ready: false });
   }
 });
 

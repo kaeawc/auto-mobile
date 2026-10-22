@@ -128,4 +128,29 @@ final class PrototypeTextFieldOptionsTests: XCTestCase {
         XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains(PrototypeAgentProtocol.dataModelCapability))
         XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains(PrototypeAgentProtocol.textFieldOptionsCapability))
     }
+
+    // MARK: Submit accessory (#12998)
+
+    func testPadsWithoutAReturnKeyGetASubmitButtonForOnSubmit() throws {
+        let submit = #","onSubmit":[{"type":"emit","name":"go"}]"#
+        for keyboard in ["number", "decimal", "phone"] {
+            XCTAssertEqual(
+                try options(#","keyboardType":"\#(keyboard)""# + submit).submitAccessoryTitle, "Done", keyboard
+            )
+        }
+        XCTAssertEqual(
+            try options(#","keyboardType":"number","imeAction":"send""# + submit).submitAccessoryTitle,
+            "Send"
+        )
+        XCTAssertEqual(try options(#","keyboardType":"phone","imeAction":"go""#).submitAccessoryTitle, "Go")
+    }
+
+    func testKeyboardsWithAReturnKeyOrNoActionGetNoSubmitButton() throws {
+        let submit = #","onSubmit":[{"type":"emit","name":"go"}]"#
+        for keyboard in ["text", "email", "url"] {
+            XCTAssertNil(try options(#","keyboardType":"\#(keyboard)""# + submit).submitAccessoryTitle, keyboard)
+        }
+        XCTAssertNil(try options(#","keyboardType":"number""#).submitAccessoryTitle)
+        XCTAssertNil(try options(#","keyboardType":"number","multiline":true"# + submit).submitAccessoryTitle)
+    }
 }

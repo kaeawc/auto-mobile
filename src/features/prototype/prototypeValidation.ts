@@ -1,3 +1,5 @@
+import { prototypeStrictPolicyError, type PrototypeStrictOptions } from "./prototypeStrictPolicy";
+import { prototypeStrictJson } from "./prototypeStrictJson";
 import { prototypeCheckErrors } from "./prototypeCheckValidation";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { logger } from "../../utils/logger";
@@ -834,7 +836,10 @@ function validateExpanded(value: unknown): PrototypeValidationResult {
       };
 }
 /** Raw JSON strings measure transmitted UTF-8 bytes; object input measures compact JSON bytes. */
-export function validatePrototypeSpec(json: unknown): PrototypeValidationResult {
+export function validatePrototypeSpec(
+  json: unknown,
+  options: PrototypeStrictOptions = {},
+): PrototypeValidationResult {
   try {
     const input = typeof json === "string" ? json : JSON.stringify(json);
     if (input === undefined) {
@@ -843,9 +848,34 @@ export function validatePrototypeSpec(json: unknown): PrototypeValidationResult 
     if (Buffer.byteLength(input, "utf8") > MAX_PROTOTYPE_SPEC_BYTES) {
       return { success: false, error: fail("$", "Spec byte limit exceeded") };
     }
-    return validateExpanded(typeof json === "string" ? JSON.parse(input) : json);
+    const parsedJson = prototypeStrictJson(input);
+    const result = validateExpanded(typeof json === "string" ? parsedJson : json);
+    if (!result.success) {
+      return result;
+    }
+    const error = prototypeStrictPolicyError(result.data, options);
+    return error ? { success: false, error } : result;
   } catch (error) {
     logger.warn("Prototype JSON could not be decoded", error);
     return { success: false, error: fail("$", "Invalid JSON") };
+  }
+}
+
+/** Byte boundary for file/import callers; invalid UTF-8 is never replacement-decoded. */
+export function validatePrototypeSpecBytes(
+  bytes: Uint8Array,
+  options: PrototypeStrictOptions = {},
+): PrototypeValidationResult {
+  if (bytes.byteLength > MAX_PROTOTYPE_SPEC_BYTES) {
+    return { success: false, error: fail("$", "Spec byte limit exceeded") };
+  }
+  try {
+    return validatePrototypeSpec(
+      new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes),
+      options,
+    );
+  } catch (error) {
+    logger.warn("Prototype UTF-8 could not be decoded", error);
+    return { success: false, error: fail("$", "Invalid UTF-8") };
   }
 }

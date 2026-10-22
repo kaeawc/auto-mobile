@@ -99,7 +99,7 @@ describe("AndroidCtrlProxyClient.pushNetworkMockRules (#10101)", () => {
         rejected: [{ mockId: "mock-1", reason: "invalid regex: Illegal repetition" }],
       },
     });
-    expect(client["requestManager"].getPendingCount()).toBe(0);
+    expect(client.connectionTestHooks.requestManager.getPendingCount()).toBe(0);
   });
 
   test("an empty rejection list means every rule was installed", async () => {

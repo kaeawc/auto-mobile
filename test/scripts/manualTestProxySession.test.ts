@@ -1,3 +1,4 @@
+import { BrokerTransportError } from "../../scripts/manual-test/brokerDaemonClient";
 import { FakeBrokerDaemonClient } from "../helpers/FakeBrokerDaemonClient";
 import { drainUntilQuiescent } from "../helpers/fakeTimerStepping";
 import { expect, spyOn, test } from "bun:test";
@@ -1638,5 +1639,32 @@ posixTest(
     expect(bytes).toContain('"kind":"leaked"');
     expect(bytes).not.toContain('"kind":"info"');
     expect(f.files.has(join(brokerDir, "info.json"))).toBe(false);
+  },
+);
+
+posixTest.each([true, false])(
+  "broker release resends only after transport failure (%s)",
+  async (transport) => {
+    const f = brokerFixture();
+    await f.up();
+    const broker = new FakeBrokerDaemonClient();
+    f.deps.brokerDaemonClient = broker;
+    broker.releaseResults = [
+      transport ? new BrokerTransportError("predecessor exited") : new Error("refused"),
+      { sessionUuid: "own-session", outcome: "released" },
+    ];
+    broker.statusResults = [{ ...f.session, outcome: "released", cleanupPending: false }];
+    const pending = runProxySessionCommand(parsed(["release", "--client", "a-phone"]), f.deps);
+    await drainUntilQuiescent(f.timer);
+    if (transport) {
+      f.timer.advanceTime(1000);
+    }
+    expect(await pending).toBe(transport ? 0 : 2);
+    const calls = broker.calls.filter((call) => call.method === "release");
+    expect(calls).toHaveLength(transport ? 2 : 1);
+    if (transport) {
+      expect(calls[0].args).toEqual(calls[1].args);
+      expect(f.logs.join(" ")).toContain("retry");
+    }
   },
 );

@@ -82,7 +82,7 @@ describe("DelegateContext scaffolding (issue #5458)", () => {
     test("wires the shared fields to live client state", () => {
       const client = createAndroidClient();
       const ctx = client["createDelegateContext"]();
-      expect(ctx.requestManager).toBe(client["requestManager"]);
+      expect(ctx.requestManager).toBe(client.connectionTestHooks.requestManager);
       expect(ctx.timer).toBe(client["timer"]);
       // Not connected yet: the WebSocket accessor mirrors the client's null socket.
       expect(ctx.getWebSocket()).toBe(client.connectionTestHooks.socket);
@@ -144,7 +144,7 @@ describe("DelegateContext scaffolding (issue #5458)", () => {
     test("wires the shared fields to live client state", () => {
       const client = createIosClient();
       const ctx = client["createDelegateContext"]();
-      expect(ctx.requestManager).toBe(client["requestManager"]);
+      expect(ctx.requestManager).toBe(client.connectionTestHooks.requestManager);
       expect(ctx.timer).toBe(client["timer"]);
       expect(ctx.getWebSocket()).toBe(client.connectionTestHooks.socket);
       expect(typeof ctx.ensureConnected).toBe("function");

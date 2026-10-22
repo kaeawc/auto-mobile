@@ -113,7 +113,7 @@ describe("request_screenshot hidePrototypes (#9305)", () => {
     [undefined, undefined],
   ])("a reply with prototypesHidden=%p resolves prototypesHidden=%p", async (wire, expected) => {
     const { client } = clientWithCapturedFrames(fullAdvertisement);
-    const pending = client["requestManager"].register<ScreenshotResult>(
+    const pending = client.connectionTestHooks.requestManager.register<ScreenshotResult>(
       "s-1",
       "screenshot",
       1000,

@@ -408,6 +408,8 @@ export class PressButton extends BaseVisualChange {
       success: false,
       button,
       keyCode,
+      code: "indeterminate_outcome",
+      retryable: false,
       error: `Button press outcome is indeterminate: the request was dispatched but no result was confirmed (${reason ?? "unknown error"}). The press may have been applied. Do not retry automatically. Observe before retrying.`,
     });
     try {

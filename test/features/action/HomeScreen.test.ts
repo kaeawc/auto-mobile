@@ -900,6 +900,31 @@ describe("HomeScreen", () => {
         expect(client.getPressHomeRequestCount()).toBe(1);
       });
 
+      test("polls instead of failing when the runner's one-shot foreground check lost the race", async () => {
+        const { action, client } = createIosHomeScreen({ simulator: true, simctl });
+        let pressed = false;
+        let readsAfterPress = 0;
+        spyOn(client, "requestHierarchySync").mockImplementation(async () => {
+          readsAfterPress += pressed ? 1 : 0;
+          // Spotlight until the press, then SpringBoard settles a couple of reads later.
+          return {
+            hierarchy: iosHierarchy(
+              readsAfterPress > 2 ? "com.apple.springboard" : "com.apple.Spotlight",
+            ),
+          };
+        });
+        spyOn(client, "requestPressHome").mockImplementation(async () => {
+          pressed = true;
+          return {
+            success: false,
+            totalTimeMs: 1,
+            error: "Home press did not bring SpringBoard to the foreground",
+          };
+        });
+
+        await expect(action.executeIosHomeNavigation()).resolves.toBeUndefined();
+      });
+
       test("reports a failed runner Home press after Spotlight survives the launch", async () => {
         const { action, client } = createIosHomeScreen({ simulator: true, simctl });
         client.setHierarchyData(iosHierarchy("com.apple.Spotlight"));

@@ -398,6 +398,9 @@ private struct Instance {
             if case let .array(actions)? = fields["onSubmit"] {
                 fields["onSubmit"] = .array(actions.map(bindAction))
             }
+        case "chart":
+            // A repeat-bound series path takes the row's placeholders, as Android's repeat does.
+            bindList("series", in: &fields) { bindString("path", in: &$0) }
         case "menu":
             bindList("items", in: &fields) { bindPartFields(&$0) }
         case "dialog":

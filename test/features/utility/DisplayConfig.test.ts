@@ -12,6 +12,7 @@ import {
   parseNightMode,
   parseWmDensity,
 } from "../../../src/features/utility/DisplayConfig";
+import { DisplayProfileRestoreRegistry } from "../../../src/features/utility/DisplayProfileRestore";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
 import type {
@@ -51,7 +52,11 @@ const iosPhysical: BootedDevice = {
 
 /** Each test owns its store; session tests explicitly share one across instances. */
 function createDisplayConfig(device: BootedDevice, dependencies: DisplayConfigDependencies) {
-  return new DisplayConfig(device, { themeBaselines: new Map(), ...dependencies });
+  return new DisplayConfig(device, {
+    themeBaselines: new Map(),
+    geometry: { registry: new DisplayProfileRestoreRegistry(), invalidate: () => {} },
+    ...dependencies,
+  });
 }
 
 function captured(name: string): string {
@@ -915,7 +920,14 @@ describe("DisplayConfig default night-mode baseline lifecycle", () => {
       createExecResult(captured("night-mode-no"), ""),
     ]);
     // Omit themeBaselines to exercise the process-wide store across instances.
-    const config = () => new DisplayConfig({ ...androidEmulator, deviceId }, { adbFactory });
+    const config = () =>
+      new DisplayConfig(
+        { ...androidEmulator, deviceId },
+        {
+          adbFactory,
+          geometry: { registry: new DisplayProfileRestoreRegistry(), invalidate: () => {} },
+        },
+      );
     expect((await config().setConfig({ theme: "light" })).success).toBe(true);
     return { client, config };
   }

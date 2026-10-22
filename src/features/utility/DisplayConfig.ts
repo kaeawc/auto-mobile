@@ -12,6 +12,23 @@ import { SimCtlClient, type SimCtl } from "../../utils/ios-cmdline-tools/SimCtlC
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { isAndroidEmulatorSerial } from "../../utils/androidSerial";
 import { registerDeviceIncarnationListener } from "../../utils/deviceIncarnation";
+import {
+  invalidateAfterDensityChange,
+  resolveDensityCommand,
+  type DensityInput,
+} from "./androidDensityCommand";
+import {
+  AndroidDisplayGeometry,
+  GEOMETRY_ANDROID_ONLY_ERROR,
+  displayGeometrySupport,
+  hasDisplayGeometryField,
+  withoutGeometryFields,
+  type DisplayGeometryAvailability,
+  type DisplayGeometryInput,
+  type DisplayGeometryOptions,
+  type DisplayGeometrySupport,
+  type DisplayGeometryValues,
+} from "./AndroidDisplayGeometry";
 import { DEFAULT_FONT_SCALE, type DisplayTheme, type FontScaleInput } from "./displayConfigTypes";
 import {
   nightModeArg,
@@ -29,6 +46,7 @@ import {
 import {
   accessibilityValuesOf,
   displayFieldsOf,
+  mergeGeometryChange,
   hasDisplayField,
   mergedMessage,
   setInputContradiction,
@@ -83,31 +101,14 @@ export {
   parseWmDensity,
 } from "./displayConfigParsers";
 
-/** Relative density buckets, resolved against the device's physical density. */
-export type DensityBucket = "smaller" | "default" | "larger";
+export {
+  MAX_ANDROID_DENSITY_DPI,
+  MIN_ANDROID_DENSITY_DPI,
+  type DensityBucket,
+  type DensityInput,
+} from "./androidDensityCommand";
 
-/** Density input: an explicit effective dpi, or a relative bucket. */
-export type DensityInput = number | DensityBucket;
-
-/** Scale factors for the relative density buckets (against physical density). */
-const DENSITY_BUCKET_FACTORS: Record<Exclude<DensityBucket, "default">, number> = {
-  smaller: 0.85,
-  larger: 1.15,
-};
-
-/** `wm density` rejects values below this AOSP-supported floor. */
-export const MIN_ANDROID_DENSITY_DPI = 72;
-
-/**
- * Safety ceiling for explicit and relative density requests. AOSP's
- * `DisplayMetrics.DENSITY_XXXHIGH` is 640 dpi; 1280 dpi gives high-density
- * panels orchestrator-chosen headroom while bounding requests after issue
- * #11660 triggered a system_server ANR with an unbounded density.
- * Source: frameworks/base/core/java/android/util/DisplayMetrics.java.
- */
-export const MAX_ANDROID_DENSITY_DPI = 1280;
-
-export interface DisplayConfigValues extends AccessibilityDisplayValues {
+export interface DisplayConfigValues extends AccessibilityDisplayValues, DisplayGeometryValues {
   /** System text scale, or `"default"` when Android has no explicit override. */
   fontScale?: FontScaleInput;
   /**
@@ -129,9 +130,10 @@ export interface DisplayConfigValues extends AccessibilityDisplayValues {
  * Android devices, where `wm density` overrides are best-effort and may be
  * clamped or ignored by the OEM shell.
  */
-export interface DisplayConfigSupport extends Partial<
-  Record<AccessibilityDisplayField, AccessibilityDisplaySupportLevel>
-> {
+export interface DisplayConfigSupport
+  extends
+    Partial<Record<AccessibilityDisplayField, AccessibilityDisplaySupportLevel>>,
+    Partial<DisplayGeometrySupport> {
   fontScale: boolean;
   density: boolean | "partial";
   theme: boolean;
@@ -150,11 +152,12 @@ export interface DisplayConfigResult {
   applied?: DisplayConfigValues;
   /** Values read immediately before a set/reset, so the client can restore. */
   previous?: DisplayConfigValues;
+  available?: DisplayGeometryAvailability;
   message?: string;
   error?: string;
 }
 
-export interface SetDisplayConfigInput extends AccessibilityDisplayValues {
+export interface SetDisplayConfigInput extends AccessibilityDisplayValues, DisplayGeometryInput {
   fontScale?: FontScaleInput;
   density?: DensityInput;
   theme?: DisplayTheme;
@@ -194,6 +197,7 @@ export interface DisplayConfigDependencies {
   iosRunnerAppearance?: IosRunnerAppearanceClient;
   /** Process-lifetime baselines for the Simulator text size category this tool replaced. */
   contentSizeBaselines?: ContentSizeBaselineStore;
+  geometry?: DisplayGeometryOptions;
 }
 
 /** The runner's `request_appearance` (`XCUIDevice.appearance`); physical iOS has no simctl. */
@@ -235,6 +239,8 @@ export class DisplayConfig {
 
   private contentSizeBaselines?: ContentSizeBaselineStore;
 
+  private geometryOptions: DisplayGeometryOptions;
+
   constructor(device: BootedDevice, dependencies: DisplayConfigDependencies = {}) {
     this.device = device;
     this.themeBaselines = dependencies.themeBaselines ?? defaultThemeBaselines;
@@ -243,6 +249,7 @@ export class DisplayConfig {
     this.accessibilityBaselines = dependencies.accessibilityBaselines;
     this.iosRunnerAppearance = dependencies.iosRunnerAppearance;
     this.contentSizeBaselines = dependencies.contentSizeBaselines;
+    this.geometryOptions = dependencies.geometry ?? {};
   }
 
   /** The accessibility display preferences (#14088) on this device, sharing this tool's seams. */
@@ -305,6 +312,7 @@ export class DisplayConfig {
       // `wm density` overrides are reliable on emulators but best-effort on
       // physical/OEM devices, so report them as `partial` there (issue #6096).
       density: isAndroidEmulatorSerial(this.device.deviceId) ? true : "partial",
+      ...displayGeometrySupport(this.device),
     };
   }
 
@@ -569,7 +577,12 @@ export class DisplayConfig {
     try {
       const adb = this.adbFactory.create(this.device);
       const current = await this.readValues(adb);
-      return this.withAccessibilityRead(current, await this.accessibility().read());
+      const geometry = await this.geometry(adb).read();
+      const result = this.withAccessibilityRead(
+        { ...current, ...geometry.values },
+        await this.accessibility().read(),
+      );
+      return geometry.available ? { ...result, available: geometry.available } : result;
     } catch (error) {
       logger.warn(`[DisplayConfig] getConfig failed: ${errorMessage(error)}`, error);
       return {
@@ -628,6 +641,41 @@ export class DisplayConfig {
     if (refusal) {
       return refusal;
     }
+    if (
+      this.device.platform === "android" &&
+      (input.reset === true || hasDisplayGeometryField(input))
+    ) {
+      return this.setWithGeometry(input);
+    }
+    return this.setNonGeometry(input);
+  }
+
+  private geometry(adb: AdbExecutor): AndroidDisplayGeometry {
+    return new AndroidDisplayGeometry(this.device, adb, this.geometryOptions);
+  }
+
+  /** Android size/navigation/cutout (#14101): validated before any write, reported as one result. */
+  private async setWithGeometry(input: SetDisplayConfigInput): Promise<DisplayConfigResult> {
+    const geometry = this.geometry(this.adbFactory.create(this.device));
+    const reset = input.reset === true;
+    const prepared = reset ? undefined : await geometry.prepare(input);
+    if (prepared && "refusal" in prepared) {
+      return this.invalidRequest(prepared.refusal);
+    }
+    const rest = withoutGeometryFields(input);
+    const display = Object.keys(rest).length > 0 ? await this.setNonGeometry(rest) : undefined;
+    if (display && !display.success && display.previous === undefined) {
+      return display;
+    }
+    const change = prepared ? await geometry.apply(prepared) : await geometry.reset();
+    return mergeGeometryChange(display, change, {
+      deviceId: this.device.deviceId,
+      platform: this.device.platform,
+      supported: this.support(),
+    });
+  }
+
+  private async setNonGeometry(input: SetDisplayConfigInput): Promise<DisplayConfigResult> {
     const reset = input.reset === true;
     const accessibility = this.accessibility();
     const runAccessibility =
@@ -657,6 +705,9 @@ export class DisplayConfig {
     }
     if (this.device.platform !== "android" && this.device.platform !== "ios") {
       return this.unsupported(ANDROID_UNSUPPORTED_PLATFORM_ERROR);
+    }
+    if (this.device.platform !== "android" && hasDisplayGeometryField(input)) {
+      return this.unsupported(GEOMETRY_ANDROID_ONLY_ERROR);
     }
     return undefined;
   }
@@ -725,6 +776,7 @@ export class DisplayConfig {
       ? await this.applyReset(adb, expectedTheme)
       : await this.applyChanges(adb, input, physicalDensity);
     const { errors, issuedDensity } = mutation;
+    invalidateAfterDensityChange(this.device, issuedDensity, this.geometryOptions);
 
     let applied: DisplayConfigValues | undefined;
     try {
@@ -885,7 +937,7 @@ export class DisplayConfig {
     // error already collected above (issue #6303 review).
     let issuedDensity: number | "default" | undefined;
     if (input.density !== undefined) {
-      const resolution = this.resolveDensityCommand(input.density, physicalDensity);
+      const resolution = resolveDensityCommand(input.density, physicalDensity);
       if ("error" in resolution) {
         errors.push(resolution.error);
       } else {
@@ -927,57 +979,6 @@ export class DisplayConfig {
       }
     }
     return { errors, issuedDensity: "default", restoredTheme };
-  }
-
-  /**
-   * Resolve a density input to a `wm density` command. A number is an explicit
-   * dpi; `default` resets to physical; `smaller`/`larger` scale the physical
-   * density (returns null when it could not be read, so buckets are never guessed).
-   */
-  private resolveDensityCommand(
-    density: DensityInput,
-    physical: number | undefined,
-  ): { command: string; target: number | "default" } | { error: string } {
-    if (typeof density === "number") {
-      const target = Math.round(density);
-      if (target < MIN_ANDROID_DENSITY_DPI) {
-        return {
-          error: `Cannot set display density: ${target} dpi is below Android's ${MIN_ANDROID_DENSITY_DPI} dpi minimum.`,
-        };
-      }
-      if (target > MAX_ANDROID_DENSITY_DPI) {
-        return {
-          error: `Cannot set display density: ${target} dpi exceeds Android's ${MAX_ANDROID_DENSITY_DPI} dpi maximum.`,
-        };
-      }
-      return { command: `shell wm density ${target}`, target };
-    }
-    if (density === "default") {
-      return { command: "shell wm density reset", target: "default" };
-    }
-    if (physical === undefined) {
-      return {
-        error:
-          `Cannot resolve relative density bucket '${density}': the device's physical density ` +
-          "could not be read.",
-      };
-    }
-    const scaled = Math.round(physical * DENSITY_BUCKET_FACTORS[density]);
-    if (scaled < MIN_ANDROID_DENSITY_DPI) {
-      return {
-        error:
-          `Cannot resolve relative density bucket '${density}': ${scaled} dpi is below Android's ` +
-          `${MIN_ANDROID_DENSITY_DPI} dpi minimum.`,
-      };
-    }
-    if (scaled > MAX_ANDROID_DENSITY_DPI) {
-      return {
-        error:
-          `Cannot resolve relative density bucket '${density}': ${scaled} dpi exceeds Android's ` +
-          `${MAX_ANDROID_DENSITY_DPI} dpi maximum.`,
-      };
-    }
-    return { command: `shell wm density ${scaled}`, target: scaled };
   }
 
   private verifyAndroidAppliedConfig(

@@ -30,6 +30,14 @@ interface AutoMobileClient :
   val transportName: String
   val connectionDescription: String
 
+  /**
+   * The daemon session a device-targeted tool call through this client names, or null when it names
+   * none. A caller that must address the call's result later, such as the owner of a started
+   * recording, reads it here rather than from a registration-gated provider (#11366).
+   */
+  val actingSessionUuid: String?
+    get() = null
+
   fun ping()
 
   fun listResources(): List<McpResource>

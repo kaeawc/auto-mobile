@@ -310,19 +310,25 @@ final class PrototypeEmbeddedAPITests: XCTestCase {
         XCTAssertEqual(PrototypeAssets.none.fonts, [:])
     }
 
-    func testLoadFromDataMatchesFileDiagnosticsAndPublicValidation() throws {
+    func testLoadFromDataAndPublicValidationDiagnostics() throws {
         let valid = try fixture("prototype-spec/valid/text-field-actions.json")
         try PrototypeLoadError.validate(spec: valid)
         let loaded = try PrototypeEmbeddedSpec.load(data: valid)
         XCTAssertEqual(loaded.spec.id, "text-actions")
         XCTAssertEqual(loaded.bytes, try prototypeViewerCompactSpecBytes(valid))
-        for invalid in [Data(), Data("not JSON".utf8), Data(#"{"id":42}"#.utf8)] {
+        for invalid in [Data(), Data("not JSON".utf8)] {
             guard case let .invalid(path, message) = PrototypeViewerSpecLoader.load(data: invalid) else {
                 return XCTFail("Expected invalid Data")
             }
             XCTAssertThrowsError(try PrototypeLoadError.validate(spec: invalid)) {
                 XCTAssertEqual($0 as? PrototypeLoadError, .invalidSpec(path: path, message: message))
             }
+        }
+    }
+
+    func testEmbeddedTypeErrorUsesContractDiagnostic() {
+        XCTAssertThrowsError(try PrototypeLoadError.validate(spec: Data(#"{"id":42}"#.utf8))) {
+            XCTAssertEqual($0 as? PrototypeLoadError, .invalidSpec(path: "id", message: "Invalid string value"))
         }
     }
 

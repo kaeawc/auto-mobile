@@ -1,0 +1,82 @@
+{
+  "spec": {
+    "id": "choices",
+    "window": {
+      "placement": {
+        "type": "sheet",
+        "edge": "bottom",
+        "height": 240
+      },
+      "opacity": 100
+    },
+    "state": {
+      "selected": 0
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "scroll",
+          "axis": "horizontal",
+          "child": {
+            "type": "row",
+            "children": [
+              {
+                "onTap": [
+                  {
+                    "type": "emit",
+                    "name": "save",
+                    "payload": {
+                      "variant": "A"
+                    }
+                  }
+                ],
+                "type": "text",
+                "text": "Save"
+              },
+              {
+                "style": {
+                  "width": {
+                    "dp": 16
+                  }
+                },
+                "type": "spacer"
+              },
+              {
+                "onTap": [
+                  {
+                    "type": "setState",
+                    "key": "selected",
+                    "value": 1,
+                    "zzzUnknown": true
+                  }
+                ],
+                "type": "icon",
+                "name": "favorite"
+              }
+            ]
+          }
+        },
+        {
+          "safeAreaPadding": {
+            "edges": ["bottom"],
+            "types": ["systemBars"]
+          },
+          "type": "bottomNav",
+          "items": [
+            {
+              "label": "Home",
+              "icon": "home"
+            },
+            {
+              "label": "Favorites",
+              "icon": "favorite"
+            }
+          ],
+          "stateKey": "selected"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].child.children[2].onTap[0].zzzUnknown"
+}

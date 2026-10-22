@@ -1,0 +1,41 @@
+{
+  "spec": {
+    "id": "carousel",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "opacity": 100
+    },
+    "root": {
+      "repeat": {
+        "items": [
+          {
+            "title": "A"
+          },
+          {
+            "title": "B"
+          }
+        ],
+        "as": "item",
+        "zzzUnknown": true
+      },
+      "type": "carousel",
+      "variant": "hero",
+      "itemWidth": 280,
+      "children": [
+        {
+          "testTag": "slide",
+          "type": "card",
+          "children": [
+            {
+              "type": "text",
+              "text": "{item.title}"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.repeat.zzzUnknown"
+}

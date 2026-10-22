@@ -17,6 +17,7 @@ import type {
   WakeAndUnlockArgs,
 } from "./interactionToolTypes";
 import { AndroidCtrlProxyClient, type AndroidCtrlProxy } from "../features/observe/android";
+import { androidCtrlProxyClientFor } from "../features/observe/android/androidCtrlProxyClientFor";
 import {
   KEYBOARD_PROFILE_CATALOG_ID,
   KEYBOARD_PROFILE_CATALOG_VERSIONS,
@@ -29,7 +30,6 @@ import {
   throwIfAborted,
   withIsErrorOnFailure,
 } from "../utils/toolUtils";
-import { withAndroidImeLock } from "../features/action/androidImeLock";
 import type {
   AcceptIosAppOpenAlertOptions,
   InteractionToolDependencies,
@@ -70,41 +70,59 @@ import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { displayWaitInventory } from "../utils/deviceMatcher";
 import { toActionableError } from "../models/ActionableError";
 import { HomeScreen } from "../features/action/HomeScreen";
+import {
+  defaultKeyboardProfileRestoreRegistry,
+  resetKeyboardProfileFromRecord,
+  setKeyboardProfileRecorded,
+  type KeyboardProfileRestoreRegistry,
+} from "../features/utility/KeyboardProfileRestore";
+import { defaultDaemonContext } from "../daemon/daemonContext";
+import { runSessionKeyboardProfileMutation } from "./sessionKeyboardProfile";
 
+type KeyboardProfileWriteClient = Pick<AndroidCtrlProxy, "supportsCommand" | "setKeyboardProfile">;
+
+export interface KeyboardProfileRecordOptions {
+  /** The daemon session changing the profile, whose release restores it; none when sessionless. */
+  owner?: string;
+  registry?: KeyboardProfileRestoreRegistry;
+}
+
+/**
+ * `keyboard setProfile`: switch the AutoMobile IME's behaviour profile, recording
+ * the profile active before the first change (#14705) so the owning session's
+ * release, or a persona reset, can put it back.
+ */
 export async function setKeyboardProfileForTool(
   device: BootedDevice,
   profile: KeyboardArgs["profile"],
-  client?: Pick<AndroidCtrlProxy, "supportsCommand" | "setKeyboardProfile">,
+  client?: KeyboardProfileWriteClient,
   signal?: AbortSignal,
+  record: KeyboardProfileRecordOptions = {},
 ): Promise<{ activeProfileId?: string; previousProfileId?: string }> {
   if (!profile) {
     throw new ActionableError(
       `keyboard setProfile requires profile: ${KEYBOARD_PROFILE_IDS.join(", ")}.`,
     );
   }
-  if (device.platform !== "android") {
-    throw new ActionableError("Keyboard profiles are Android-only; select an Android device.");
-  }
-  const profileClient = client ?? AndroidCtrlProxyClient.getInstance(device);
-  const supported = await profileClient.supportsCommand("request_set_keyboard_profile");
-  throwIfAborted(signal);
-  if (!supported) {
-    throw new ActionableError(
-      "The installed control-proxy build does not support keyboard profiles; update/re-cut the APK.",
-    );
-  }
-  const result = await withAndroidImeLock(
-    device.deviceId,
-    () => {
-      throwIfAborted(signal);
-      return profileClient.setKeyboardProfile(profile);
-    },
-    signal,
-  );
-  if (!result.success) {
-    throw new ActionableError(result.error ?? "Failed to set keyboard profile.");
-  }
-  return { activeProfileId: result.activeProfileId, previousProfileId: result.previousProfileId };
+  const registry = record.registry ?? defaultKeyboardProfileRestoreRegistry;
+  return setKeyboardProfileRecorded(device, profile, client, signal, {
+    owner: record.owner,
+    registry,
+  });
+}
+
+/**
+ * Put back the keyboard profile recorded before the first change and forget it
+ * (#14705). With nothing recorded it changes nothing; a refused write stays
+ * recorded, so a later reset or the owning session's release retries it.
+ */
+export async function resetKeyboardProfileForTool(
+  device: BootedDevice,
+  client?: KeyboardProfileWriteClient,
+  signal?: AbortSignal,
+  registry: KeyboardProfileRestoreRegistry = defaultKeyboardProfileRestoreRegistry,
+): Promise<{ restoredProfileId?: string }> {
+  return resetKeyboardProfileFromRecord(device, client, signal, registry);
 }
 
 export async function listKeyboardProfilesForTool(
@@ -117,7 +135,7 @@ export async function listKeyboardProfilesForTool(
       "AutoMobile keyboard profiles are Android-only; select an Android device.",
     );
   }
-  const profileClient = client ?? AndroidCtrlProxyClient.getInstance(device);
+  const profileClient = client ?? androidCtrlProxyClientFor(device);
   const command = "request_list_keyboard_profiles";
   const supported = await profileClient.supportsCommand(command);
   throwIfAborted(signal);
@@ -805,6 +823,30 @@ export const createShakeHandler =
     }
   };
 
+/** `keyboard setProfile`, admitted and tracked against the session's device when one is named. */
+function setKeyboardProfileInSession(
+  device: BootedDevice,
+  args: KeyboardArgs,
+  deps: InteractionToolDependencies,
+  signal?: AbortSignal,
+) {
+  const profileDeps = deps.keyboardProfile ?? {};
+  const sessionManager =
+    args.sessionUuid && device.platform === "android"
+      ? (profileDeps.sessionManager ?? (() => defaultDaemonContext.sessionManager()))()
+      : undefined;
+  return runSessionKeyboardProfileMutation(
+    sessionManager,
+    args.sessionUuid,
+    device.deviceId,
+    (owner) =>
+      setKeyboardProfileForTool(device, args.profile, profileDeps.clientFor?.(device), signal, {
+        owner,
+        registry: profileDeps.registry,
+      }),
+  );
+}
+
 export const createKeyboardHandler =
   (deps: InteractionToolDependencies) =>
   async (
@@ -817,7 +859,7 @@ export const createKeyboardHandler =
       throwIfAborted(signal);
       if (args.action === "setProfile") {
         return createStructuredToolResponse(
-          await setKeyboardProfileForTool(device, args.profile, undefined, signal),
+          await setKeyboardProfileInSession(device, args, deps, signal),
         );
       }
       if (args.action === "listProfiles") {

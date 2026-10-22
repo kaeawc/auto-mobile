@@ -26,6 +26,7 @@ import { MultiPlatformDeviceManager } from "../../../../src/devices/deviceUtils"
 import { FakeAdbClient } from "../../../fakes/FakeAdbClient";
 import { createFakeAndroidEmulator } from "../../../fakes/FakeAndroidEmulator";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import { drainUntil } from "../../../helpers/fakeTimerStepping";
 import { BindingDiscoveryIncompleteError } from "../../../../src/daemon/sessionBroker/provisioning/refusal";
 import { logger } from "../../../../src/utils/logger";
 
@@ -531,6 +532,66 @@ describe("GateBindingBootCapacity", () => {
     const capacity = new GateBindingBootCapacity(timer, () => new Promise<void>(() => {}));
     expect(await capacity.check("ios", { timeoutMs: 3_000 })).toMatchObject({ kind: "unknown" });
     expect(timer.now()).toBe(3_000);
+  });
+
+  const slotReservation = () => ({
+    run: <T>(operation: () => Promise<T>) => operation(),
+    markReplacedDeviceGone: () => {},
+    release: () => {},
+  });
+
+  test("a slow replacement lookup leaves the reservation the gate's full sample budget (#14495)", async () => {
+    const timer = new FakeTimer();
+    const reserveTimeouts: number[] = [];
+    const capacity = new GateBindingBootCapacity(
+      timer,
+      async () => {},
+      (_platform, options) => {
+        reserveTimeouts.push(options.timeoutMs);
+        return new Promise((resolve) =>
+          timer.setTimeout(() => resolve(slotReservation()), DEFAULT_SAMPLE_TIMEOUT_MS),
+        );
+      },
+    );
+    const result = capacity.reserve("android", {
+      timeoutMs: 60_000,
+      resolveReplacingDeviceId: () =>
+        new Promise((resolve) => timer.setTimeout(() => resolve("emulator-5554"), 3_000)),
+    });
+    await timer.advanceTimersByTimeAsync(3_000);
+    await drainUntil(() => reserveTimeouts.length > 0, { description: "gate reservation" });
+    await timer.advanceTimersByTimeAsync(DEFAULT_SAMPLE_TIMEOUT_MS);
+    expect(await result).toMatchObject({ kind: "available" });
+    // The gate is handed what is left of the request, not its original budget.
+    expect(reserveTimeouts).toEqual([57_000]);
+  });
+
+  test("the request's timeoutMs still bounds the lookup and the sample together", async () => {
+    const timer = new FakeTimer();
+    let sampleSignal: AbortSignal | undefined;
+    const capacity = new GateBindingBootCapacity(
+      timer,
+      async () => {},
+      async (_platform, options) => {
+        sampleSignal = options.signal;
+        return await new Promise(() => {});
+      },
+    );
+    const result = capacity.reserve("android", {
+      timeoutMs: 10_000,
+      resolveReplacingDeviceId: () =>
+        new Promise((resolve) => timer.setTimeout(() => resolve("emulator-5554"), 3_000)),
+    });
+    await timer.advanceTimersByTimeAsync(3_000);
+    await drainUntil(() => sampleSignal !== undefined, { description: "gate reservation" });
+    await timer.advanceTimersByTimeAsync(7_000 - 1);
+    expect(sampleSignal?.aborted).toBe(false);
+    await timer.advanceTimersByTimeAsync(1);
+    expect(sampleSignal?.aborted).toBe(true);
+    expect(await result).toMatchObject({
+      kind: "unknown",
+      message: "Timed out reserving android boot capacity.",
+    });
   });
 
   test("a defect in the gate propagates instead of becoming a retryable refusal", async () => {

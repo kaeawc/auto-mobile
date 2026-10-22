@@ -67,7 +67,8 @@ describe("device mutation tool coverage", () => {
 
   test("journaled adapters, pending device adapters and host-only exemptions are distinct", () => {
     expect(DEVICE_MUTATION_TOOL_COVERAGE.clipboard.status).toBe("journaled");
-    expect(DEVICE_MUTATION_TOOL_COVERAGE.setPreference.status).toBe("pending-adapter");
+    expect(DEVICE_MUTATION_TOOL_COVERAGE.setPreference.status).toBe("journaled");
+    expect(DEVICE_MUTATION_TOOL_COVERAGE.stageSessionDownloads.status).toBe("pending-adapter");
     expect(DEVICE_MUTATION_TOOL_COVERAGE.setActiveDevice.status).toBe("notJournaled");
     expect(
       mutationToolCoverageViolations([{ name: "clipboard" }], {
@@ -76,7 +77,7 @@ describe("device mutation tool coverage", () => {
     ).toHaveLength(1);
   });
 
-  test.each(["persona", "statusBar", "sendBroadcast", "measureStartup"])(
+  test.each(["manufacturerProfile", "statusBar", "sendBroadcast", "measureStartup"])(
     "%s stays pending until a production mutation adapter is exercised",
     (name) => {
       expect(DEVICE_MUTATION_TOOL_COVERAGE[name].status).toBe("pending-adapter");

@@ -17,9 +17,43 @@ import { DEVICE_CREATE_ENV_VAR } from "../../../devices/deviceCreationGate";
 import { enableToolsSchemaField } from "../../toolSelection/enableToolsSchemaField";
 import { deviceResourceConfigurationSchema } from "../../../utils/deviceResourceSchemas";
 import {
-  androidProvisionDeviceSpecSchema,
+  androidProvisionDeviceSpecFields,
   iosProvisionDeviceSpecSchema,
+  refineAndroidSpec,
 } from "../../../utils/provisionDeviceSpecSchemas";
+import { NON_EMULATABLE_CAPABILITY_IDS, OEM_PERSONA_IDS } from "../../utility/OemPersonas";
+
+/**
+ * An OEM manufacturer profile applied to the device after boot and automation readiness
+ * (#14058). It simulates effects (keyboard, display, background kills), not firmware, and is
+ * not the AVD hardware profile (`deviceType`) nor a pool identity.
+ */
+export const provisionDeviceProfileSchema = z
+  .object({
+    manufacturerProfile: z
+      .enum(OEM_PERSONA_IDS)
+      .describe("Manufacturer profile id, as listed by the manufacturerProfile tool"),
+    requires: z
+      .array(z.enum(NON_EMULATABLE_CAPABILITY_IDS))
+      .optional()
+      .describe(
+        "OEM capabilities the task needs; one the manufacturer profile cannot emulate refuses with requires_real_device before anything is created",
+      ),
+  })
+  .strict()
+  .describe(
+    "Android: OEM manufacturer profile applied after automation readiness and reset when the session is released; the kill facet is deferred until an app is known (apply it with killProfile). Not the hardware deviceType. Requires boot=true and readiness=automation.",
+  );
+
+export type ProvisionDeviceProfile = z.output<typeof provisionDeviceProfileSchema>;
+
+const androidProvisionDeviceRequestSpecSchema = z
+  .object({
+    ...androidProvisionDeviceSpecFields,
+    deviceProfile: provisionDeviceProfileSchema.optional(),
+  })
+  .strict()
+  .superRefine(refineAndroidSpec);
 
 export const startDeviceParametersSchema = z.object({
   platform: platformSchema,
@@ -303,7 +337,7 @@ export const provisionDeviceSchema = z
           .object({
             platform: z.literal("android"),
             name: z.string().min(1).describe("Exact AVD name"),
-            spec: androidProvisionDeviceSpecSchema,
+            spec: androidProvisionDeviceRequestSpecSchema,
           })
           .strict(),
         z
@@ -355,4 +389,15 @@ export const provisionDeviceSchema = z
   .refine((args) => !args.enableTools || args.boot !== false, {
     path: ["enableTools"],
     message: "Capability declaration requires boot=true; boot=false mints no session.",
-  });
+  })
+  // A manufacturer profile is applied to the bound session's ready device (#14058).
+  .refine(
+    (args) =>
+      args.device.platform !== "android" ||
+      !args.device.spec.deviceProfile ||
+      (args.boot !== false && args.readiness !== "none"),
+    {
+      path: ["device", "spec", "deviceProfile"],
+      message: "A manufacturer profile requires boot=true and readiness=automation.",
+    },
+  );

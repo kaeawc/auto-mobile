@@ -5095,6 +5095,81 @@
       "required": ["deviceType", "runtime"],
       "additionalProperties": false
     },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "number",
+          "const": 1
+        },
+        "platform": {
+          "type": "string",
+          "const": "ios"
+        },
+        "deviceType": {
+          "type": "string"
+        },
+        "runtime": {
+          "type": "string"
+        },
+        "selection": {
+          "type": "object",
+          "properties": {
+            "valid": {
+              "type": "boolean"
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": ["valid"],
+          "additionalProperties": false
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "enum": [
+                  "biometrics.enrollment",
+                  "biometrics.match",
+                  "biometrics.fail",
+                  "biometrics.cancel",
+                  "biometrics.error"
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": ["supported", "partial", "unsupported"]
+              },
+              "reason": {
+                "type": "string"
+              },
+              "prerequisites": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": ["id", "state", "reason"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "platform",
+        "deviceType",
+        "runtime",
+        "selection",
+        "capabilities"
+      ],
+      "additionalProperties": {}
+    },
     "_meta": {
       "automobile/deviceReadOnly": true
     }

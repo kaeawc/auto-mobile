@@ -228,8 +228,11 @@ function notes(
 ): string[] {
   const result: string[] = [];
   if (capabilities.includes("prototype_network_v1")) {
+    // Defaults differ: Android's PrototypeNetwork() has no device client, iOS's uses URLSession.
     result.push(
-      '`request` actions default to via:"host"; pass a host handler to the network option, or they run on the device client.',
+      platform === "android"
+        ? '`request` actions fail until the app passes PrototypeNetwork(device = ...); host-routed requests (omitted or via:"host") then use it unless a hostHandler takes them over.'
+        : '`request` actions use the renderer\'s URLSession client by default; pass PrototypeNetworkConfiguration(hostHandler:) to take over host-routed requests (omitted or via:"host").',
     );
   }
   const missing = assets.filter((asset) => !asset.available).map((asset) => asset.id);

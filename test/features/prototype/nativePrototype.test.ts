@@ -98,7 +98,7 @@ describe("automobile:prototype/native", () => {
       ["hero", "image", false],
       ["brand", "font", false],
     ]);
-    expect(native.notes.join("\n")).toContain('via:"host"');
+    expect(native.notes.join("\n")).toContain("PrototypeNetwork(device = ...)");
     expect(native.notes.join("\n")).toContain("hero, brand");
   });
 
@@ -128,6 +128,7 @@ describe("automobile:prototype/native", () => {
       available: true,
     });
     expect(native.notes.join("\n")).toContain("folder reference");
+    expect(native.notes.join("\n")).toContain("URLSession");
   });
 
   test("a saved prototype on an unconnected device defaults to Android", async () => {

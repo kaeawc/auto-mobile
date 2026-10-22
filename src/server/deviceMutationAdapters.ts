@@ -1,5 +1,7 @@
 import { DISPLAY_KEYS } from "../features/utility/DefaultDeviceSettingsAccess";
-import type { BootedDevice } from "../models";
+import { ACCESSIBILITY_DISPLAY_FIELDS } from "../features/utility/AccessibilityDisplayPreferences";
+import type { DeviceSettingKey } from "../models/DeviceSettingDefaults";
+import type { Platform } from "../models";
 import type { DeviceMutationInput } from "../daemon/sessionBroker/mutations/types";
 import { isRecord } from "./pipeline/isRecord";
 import { KEYBOARD_READ_ACTIONS } from "./interactionToolTypes";
@@ -16,10 +18,32 @@ function mutation(kind: string, key = "device"): ToolMutation {
   return { kind, key };
 }
 
-function settingMutations(args: Record<string, unknown>): ToolMutation[] {
-  return DISPLAY_KEYS.filter(
-    (key) => args.reset === true || args[key === "nightMode" ? "theme" : key] !== undefined,
-  ).map((key) => mutation("device-setting", key));
+/** The displayConfig argument that selects each journaled display setting. */
+function displayArgument(key: DeviceSettingKey): string {
+  return key === "nightMode" ? "theme" : key;
+}
+
+/**
+ * Every displayConfig setting a call can change, in journal vocabulary: the display keys plus the
+ * accessibility display preferences (#14790). The iOS Simulator has no density, and its font
+ * scale is the Dynamic Type category, so the scale is journaled as `contentSize`, the setting
+ * that is actually restored.
+ */
+function settingMutations(args: Record<string, unknown>, platform?: Platform): ToolMutation[] {
+  const reset = args.reset === true;
+  const keys: DeviceSettingKey[] = [...DISPLAY_KEYS, ...ACCESSIBILITY_DISPLAY_FIELDS].filter(
+    (key) =>
+      args[displayArgument(key)] !== undefined ||
+      // Reset restores what an earlier call journaled, so it records the display keys only.
+      (reset && (DISPLAY_KEYS as readonly string[]).includes(key)),
+  );
+  const journaled =
+    platform === "ios"
+      ? keys
+          .filter((key) => key !== "density")
+          .map((key) => (key === "fontScale" ? "contentSize" : key))
+      : keys;
+  return [...new Set(journaled)].map((key) => mutation("device-setting", key));
 }
 
 function permissionMutations(args: Record<string, unknown>): ToolMutation[] {
@@ -92,7 +116,11 @@ function fileMutations(args: Record<string, unknown>): ToolMutation[] {
   ];
 }
 
-function mutationCallIsRead(name: string, args: Record<string, unknown>): boolean {
+function mutationCallIsRead(
+  name: string,
+  args: Record<string, unknown>,
+  platform?: Platform,
+): boolean {
   switch (name) {
     case "accessibility":
       return args.talkback === undefined && args.voiceover === undefined;
@@ -103,7 +131,7 @@ function mutationCallIsRead(name: string, args: Record<string, unknown>): boolea
     case "sqlQuery":
       return typeof args.query === "string" && isReadOnlySqlQuery(args.query);
     case "displayConfig":
-      return settingMutations(args).length === 0;
+      return settingMutations(args, platform).length === 0;
     case "network":
       return Object.keys(args).every((key) =>
         ["platform", "device", "deviceId", "sessionUuid"].includes(key),
@@ -122,9 +150,9 @@ function rotationMutations(args: Record<string, unknown>): ToolMutation[] {
 export function deviceToolMutations(
   name: string,
   args: Record<string, unknown>,
-  platform?: BootedDevice["platform"],
+  platform?: Platform,
 ): ToolMutation[] {
-  if (mutationCallIsRead(name, args) || mutationCallNotJournaled(name, args)) {
+  if (mutationCallIsRead(name, args, platform) || mutationCallNotJournaled(name, args)) {
     return [];
   }
   if (name === "rotate") {
@@ -146,7 +174,8 @@ export function deviceToolMutations(
   if (Object.hasOwn(opaqueKinds, name)) {
     return [mutation(opaqueKinds[name], name === "accessibility" ? "device" : `tool:${name}`)];
   }
-  const mutations = directToolMutations(name, args, platform) ?? stateToolMutations(name, args);
+  const mutations =
+    directToolMutations(name, args, platform) ?? stateToolMutations(name, args, platform);
   return mutations.length > 0 || DEVICE_MUTATION_TOOL_COVERAGE[name]?.status !== "journaled"
     ? mutations
     : [mutation("opaque", `tool:${name}`)];
@@ -162,7 +191,7 @@ export function mutationCallNotJournaled(name: string, args: Record<string, unkn
 function directToolMutations(
   name: string,
   args: Record<string, unknown>,
-  platform?: BootedDevice["platform"],
+  platform?: Platform,
 ): ToolMutation[] | undefined {
   switch (name) {
     case "installApp":
@@ -190,10 +219,14 @@ function directToolMutations(
   }
 }
 
-function stateToolMutations(name: string, args: Record<string, unknown>): ToolMutation[] {
+function stateToolMutations(
+  name: string,
+  args: Record<string, unknown>,
+  platform?: Platform,
+): ToolMutation[] {
   switch (name) {
     case "displayConfig":
-      return settingMutations(args);
+      return settingMutations(args, platform);
     case "changeLocalization":
       return ["locale", "timeZone", "textDirection", "timeFormat", "calendarSystem"]
         .filter((key) => args[key] !== undefined)

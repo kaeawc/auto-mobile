@@ -296,6 +296,8 @@
         "test/**/*.typecheck.ts",
         "tsconfig.json",
         "scripts/typecheck-baseline.sh",
+        "scripts/lib/host-heavy-run.sh",
+        "scripts/lib/host-slots.sh",
         "package.json"
       ],
       "outputs": [],
@@ -310,6 +312,8 @@
         "tsconfig.json",
         "tsconfig.test.json",
         "scripts/typecheck-baseline.sh",
+        "scripts/lib/host-heavy-run.sh",
+        "scripts/lib/host-slots.sh",
         "package.json"
       ],
       "outputs": [],

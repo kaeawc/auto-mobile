@@ -36,7 +36,7 @@ export interface BindingResourceUsage {
   preparing: number;
   /** Bound old devices named by an open replace in intent or deleting phase. */
   deleting: number;
-  /** Running (or power-unknown) daemon-named inventory devices without a registry commitment. */
+  /** Running (or iOS booting/shutting-down) daemon-named inventory devices without a registry commitment. */
   orphaned: number;
 }
 
@@ -78,7 +78,7 @@ interface ResourceCharge {
   stableDeviceId: string;
   journal?: BindingJournalEntry;
   name?: string;
-  orphanState?: "running" | "power_unknown";
+  orphanState?: "running" | "transitioning";
 }
 
 type ChargedEvidence = BindingBudgetEvidence["charged"][number];
@@ -108,8 +108,8 @@ function chargeReason(charge: ChargedEvidence): string {
   if (charge.kind !== "orphaned") {
     return chargeReasonText[charge.kind];
   }
-  return charge.orphanState === "power_unknown"
-    ? "orphaned: power state unknown"
+  return charge.orphanState === "transitioning"
+    ? "orphaned: booting or shutting down"
     : "orphaned: running";
 }
 
@@ -238,6 +238,16 @@ function addPreparingJournalCharge(charges: ResourceCharge[], entry: BindingJour
 }
 
 function resourceCharges(input: LedgerInput): ResourceCharge[] {
+  const { charges, seen } = commitmentCharges(input);
+  chargeOrphans(input, charges, seen);
+  return charges;
+}
+
+/** Registry and journal commitments, plus the resource keys they already account for. */
+function commitmentCharges(input: LedgerInput): {
+  charges: ResourceCharge[];
+  seen: Set<string>;
+} {
   const journal = input.openJournal.filter((entry) => isBindingJournalPhaseOpen(entry.phase));
   const deleting = new Set(
     journal
@@ -288,27 +298,37 @@ function resourceCharges(input: LedgerInput): ResourceCharge[] {
       addPreparingJournalCharge(charges, entry);
     }
   }
-  chargeOrphans(input, charges, seen);
-  return charges;
+  return { charges, seen };
 }
 
 /**
- * A known powered-off image with no registry commitment holds no live resource and is never
- * deleted by the budget, so it must not block creation (#13017). Unknown power state still counts,
- * and so does an iOS simulator in a transitional simctl state (`Booting` / `Shutting Down`): the
- * inventory reports `isRunning: false` for it, but it still holds host resources (#13060).
+ * What an unbound broker-named image holds, or null when it holds nothing. Only a device proven
+ * running counts (#13017); a known powered-off image never blocks creation and is never deleted by
+ * the budget. An image whose running state the listing could not read (`isRunningStateKnown:
+ * false`) holds nothing until a probe proves it running (#15016): it has no registry commitment,
+ * so charging it on suspicion would exhaust the cap forever on stale shut-down AVDs. An iOS
+ * simulator in a transitional simctl state (`Booting` / `Shutting Down`) reports `isRunning:
+ * false` but still holds host resources (#13060).
  */
-function isPoweredOffLeftover(device: DeviceInfo): boolean {
-  if (device.isRunning !== false || device.isRunningStateKnown === false) {
-    return false;
+function orphanHolding(device: DeviceInfo): ResourceCharge["orphanState"] | null {
+  if (device.isRunning === true) {
+    return "running";
   }
-  return !(device.platform === "ios" && device.state !== undefined && device.state !== "Shutdown");
+  if (device.isRunningStateKnown === false) {
+    return null;
+  }
+  return device.platform === "ios" && device.state !== undefined && device.state !== "Shutdown"
+    ? "transitioning"
+    : null;
 }
 
-function chargeOrphans(input: LedgerInput, charges: ResourceCharge[], seen: Set<string>): void {
+/** Unbound broker-named images with no registry or journal commitment, in inventory order. */
+function orphanCandidates(input: LedgerInput, committed: ReadonlySet<string>): DeviceInfo[] {
+  const seen = new Set(committed);
+  const candidates: DeviceInfo[] = [];
   for (const device of input.inventory ?? []) {
     const stableId = deviceStableId(device);
-    if (!stableId || !isProductBrokerDevice(device.name) || isPoweredOffLeftover(device)) {
+    if (!stableId || !isProductBrokerDevice(device.name)) {
       continue;
     }
     const key = resourceKey(device.platform, stableId);
@@ -326,16 +346,36 @@ function chargeOrphans(input: LedgerInput, charges: ResourceCharge[], seen: Set<
             )),
       );
     if (!known && !seen.has(key) && !device.name.startsWith(LEGACY_DEVICE_NAME_PREFIX)) {
-      charges.push({
-        category: "orphaned",
-        platform: device.platform,
-        stableDeviceId: stableId,
-        name: device.name,
-        orphanState: device.isRunning === true ? "running" : "power_unknown",
-      });
+      candidates.push(device);
       seen.add(key);
     }
   }
+  return candidates;
+}
+
+function chargeOrphans(input: LedgerInput, charges: ResourceCharge[], seen: Set<string>): void {
+  for (const device of orphanCandidates(input, seen)) {
+    const orphanState = orphanHolding(device);
+    const stableId = deviceStableId(device);
+    if (orphanState === null || !stableId) {
+      continue;
+    }
+    charges.push({
+      category: "orphaned",
+      platform: device.platform,
+      stableDeviceId: stableId,
+      name: device.name,
+      orphanState,
+    });
+    seen.add(resourceKey(device.platform, stableId));
+  }
+}
+
+/** Orphan candidates whose running state the inventory listing could not establish. */
+function powerUnknownOrphans(input: LedgerInput): DeviceInfo[] {
+  return orphanCandidates(input, commitmentCharges(input).seen).filter(
+    (device) => device.isRunning !== true && device.isRunningStateKnown === false,
+  );
 }
 
 function hasOldDevice(
@@ -368,11 +408,60 @@ export function computeBindingResourceUsage(input: LedgerInput): BindingResource
   return usageOf(resourceCharges(input));
 }
 
+/** One probe per device per admission, shared by the ledger's optimistic re-read. */
+type PowerProbes = Map<string, Promise<boolean>>;
+
+async function probeRunningOnce(
+  inventory: BindingInventory,
+  device: DeviceInfo,
+  signal: AbortSignal | undefined,
+  probes: PowerProbes,
+): Promise<boolean> {
+  const key = resourceKey(device.platform, deviceStableId(device) ?? device.name);
+  const existing = probes.get(key);
+  if (existing) {
+    return existing;
+  }
+  const probe = inventory.probeRunning
+    ? inventory.probeRunning(device, { signal }).catch((error: unknown) => {
+        signal?.throwIfAborted();
+        // An unreadable probe proves nothing, and an unbound device is never charged on suspicion.
+        logger.debug(`[Bindings] running-state probe of ${device.name} failed: ${error}`);
+        return false;
+      })
+    : Promise.resolve(false);
+  probes.set(key, probe);
+  return probe;
+}
+
+/** Settle unreadable orphan power states with one probe each; only proven-running ones change. */
+async function settlePowerUnknown(
+  inventory: BindingInventory,
+  ledger: LedgerInput,
+  signal: AbortSignal | undefined,
+  probes: PowerProbes,
+): Promise<DeviceInfo[]> {
+  const unknown = powerUnknownOrphans(ledger);
+  const running = new Set(
+    (
+      await Promise.all(
+        unknown.map(async (device) =>
+          (await probeRunningOnce(inventory, device, signal, probes)) ? device : null,
+        ),
+      )
+    ).filter((device) => device !== null),
+  );
+  return (ledger.inventory ?? []).map((device) =>
+    running.has(device) ? { ...device, isRunning: true, isRunningStateKnown: true } : device,
+  );
+}
+
 async function readResourceCharges(
   registry: BindingResourceRegistry,
   inventory: BindingInventory,
   request: { signal?: AbortSignal; deadlineMs?: number },
   timer: Pick<Timer, "now">,
+  probes: PowerProbes,
 ): Promise<{
   charges: ResourceCharge[];
   charged: ChargedEvidence[];
@@ -393,7 +482,14 @@ async function readResourceCharges(
     }
     devices.push(...listing.devices);
   }
-  const charges = resourceCharges({ ...snapshot, inventory: devices });
+  checkAdmissionBudget(request, timer);
+  const settled = await settlePowerUnknown(
+    inventory,
+    { ...snapshot, inventory: devices },
+    request.signal,
+    probes,
+  );
+  const charges = resourceCharges({ ...snapshot, inventory: settled });
   return {
     charges,
     charged: chargedEvidence(charges),
@@ -481,9 +577,12 @@ export class RegistryBindingResourceBudget implements BindingResourceBudget {
     limit: number,
     request: { journalEntryId: number; deadlineMs?: number; signal?: AbortSignal },
   ): Promise<BindingResourceAdmission> {
-    let ledger = await readResourceCharges(registry, this.deps.inventory, request, this.timer);
+    const probes: PowerProbes = new Map();
+    const read = () =>
+      readResourceCharges(registry, this.deps.inventory, request, this.timer, probes);
+    let ledger = await read();
     if (rankedCount(ledger.charges, request.journalEntryId) > limit) {
-      ledger = await readResourceCharges(registry, this.deps.inventory, request, this.timer);
+      ledger = await read();
     }
     const usage = usageOf(ledger.charges);
     return rankedCount(ledger.charges, request.journalEntryId) <= limit

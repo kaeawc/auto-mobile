@@ -73,6 +73,12 @@ export interface BindingInventory {
     device: DeviceInfo,
     options: { signal?: AbortSignal },
   ): Promise<string | undefined>;
+  /**
+   * One live read to settle an image whose running state the listing could not establish
+   * (`isRunningStateKnown: false`). Resolves true only when a fresh, complete booted-device
+   * listing proves the image is running; false means "not proven", never "proven off".
+   */
+  probeRunning?(device: DeviceInfo, options: { signal?: AbortSignal }): Promise<boolean>;
   list(
     platform: BindingPlatform,
     options: { signal?: AbortSignal },

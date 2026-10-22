@@ -180,6 +180,20 @@ describe("resolveDeviceGestureRecordingDevice folds its discovery into the pool 
     expect(await resolver.selectDevice(first.deviceId, "android", "requester")).toEqual(first);
   });
 
+  test("trims only outer whitespace before resolving the requester session device", async () => {
+    const { second, sessions } = resolution();
+    const requesters: Array<string | undefined> = [];
+    const resolver = createDeviceGestureRecordingDeviceResolution(
+      () => sessions,
+      (sessionUuid) => {
+        requesters.push(sessionUuid);
+        return sessionUuid === "requester:phone" ? second.deviceId : undefined;
+      },
+    );
+    expect(await resolver.selectDevice(undefined, "android", " requester:phone ")).toEqual(second);
+    expect(requesters).toEqual(["requester:phone"]);
+  });
+
   test("a session with no candidate device keeps the ambiguous-device refusal", async () => {
     const { sessions } = resolution();
     const resolver = createDeviceGestureRecordingDeviceResolution(

@@ -1,3 +1,5 @@
+import { prototypeStrictPolicyError, type PrototypeStrictOptions } from "./prototypeStrictPolicy";
+import { prototypeStrictJson } from "./prototypeStrictJson";
 import { prototypeCheckErrors } from "./prototypeCheckValidation";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { logger } from "../../utils/logger";
@@ -790,7 +792,7 @@ function behaviourErrors(
   );
 }
 
-function validateValue(value: unknown): PrototypeValidationResult {
+function validateValue(value: unknown, options: PrototypeStrictOptions): PrototypeValidationResult {
   const context: Context = {
     nodes: [],
     actions: [],
@@ -810,14 +812,20 @@ function validateValue(value: unknown): PrototypeValidationResult {
   if (!parsed.success) {
     return { success: false, error: fail("$", "Internal schema/contract mismatch") };
   }
-  return { success: true, data: parsed.data };
+  const policyError = prototypeStrictPolicyError(parsed.data, options, context.actions);
+  return policyError
+    ? { success: false, error: policyError }
+    : { success: true, data: parsed.data };
 }
 /**
  * Expands reusable components (#11053) before validating, so every limit applies to the tree the
  * device receives. The expanded spec must also fit the byte limit, because the device re-validates
  * bytes, and an error inside an expansion is reported at its authored location.
  */
-function validateExpanded(value: unknown): PrototypeValidationResult {
+function validateExpanded(
+  value: unknown,
+  options: PrototypeStrictOptions,
+): PrototypeValidationResult {
   const expansion = expandPrototypeComponents(value);
   if (!expansion.success) {
     return { success: false, error: expansion.error };
@@ -825,7 +833,7 @@ function validateExpanded(value: unknown): PrototypeValidationResult {
   if (expansion.expanded && bytes(expansion.spec) > MAX_PROTOTYPE_SPEC_BYTES) {
     return { success: false, error: fail("$", "Expanded spec byte limit exceeded") };
   }
-  const result = validateValue(expansion.spec);
+  const result = validateValue(expansion.spec, options);
   return result.success
     ? result
     : {
@@ -834,7 +842,10 @@ function validateExpanded(value: unknown): PrototypeValidationResult {
       };
 }
 /** Raw JSON strings measure transmitted UTF-8 bytes; object input measures compact JSON bytes. */
-export function validatePrototypeSpec(json: unknown): PrototypeValidationResult {
+export function validatePrototypeSpec(
+  json: unknown,
+  options: PrototypeStrictOptions = {},
+): PrototypeValidationResult {
   try {
     const input = typeof json === "string" ? json : JSON.stringify(json);
     if (input === undefined) {
@@ -843,9 +854,29 @@ export function validatePrototypeSpec(json: unknown): PrototypeValidationResult 
     if (Buffer.byteLength(input, "utf8") > MAX_PROTOTYPE_SPEC_BYTES) {
       return { success: false, error: fail("$", "Spec byte limit exceeded") };
     }
-    return validateExpanded(typeof json === "string" ? JSON.parse(input) : json);
+    const parsedJson = prototypeStrictJson(input);
+    return validateExpanded(typeof json === "string" ? parsedJson : json, options);
   } catch (error) {
     logger.warn("Prototype JSON could not be decoded", error);
     return { success: false, error: fail("$", "Invalid JSON") };
+  }
+}
+
+/** Byte boundary for file/import callers; invalid UTF-8 is never replacement-decoded. */
+export function validatePrototypeSpecBytes(
+  bytes: Uint8Array,
+  options: PrototypeStrictOptions = {},
+): PrototypeValidationResult {
+  if (bytes.byteLength > MAX_PROTOTYPE_SPEC_BYTES) {
+    return { success: false, error: fail("$", "Spec byte limit exceeded") };
+  }
+  try {
+    return validatePrototypeSpec(
+      new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes),
+      options,
+    );
+  } catch (error) {
+    logger.warn("Prototype UTF-8 could not be decoded", error);
+    return { success: false, error: fail("$", "Invalid UTF-8") };
   }
 }

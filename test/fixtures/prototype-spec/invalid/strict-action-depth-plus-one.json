@@ -1,0 +1,44 @@
+{
+  "spec": {
+    "id": "strict",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "spacer",
+      "onTap": [
+        {
+          "type": "request",
+          "url": "https://example.com/",
+          "onSuccess": [
+            {
+              "type": "request",
+              "url": "https://example.com/",
+              "onSuccess": [
+                {
+                  "type": "request",
+                  "url": "https://example.com/",
+                  "onSuccess": [
+                    {
+                      "type": "request",
+                      "url": "https://example.com/",
+                      "onSuccess": [
+                        {
+                          "type": "request",
+                          "url": "https://example.com/"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].onSuccess[0].onSuccess[0].onSuccess[0].onSuccess[0]"
+}

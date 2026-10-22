@@ -63,16 +63,6 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, PendingMutat
       "setPosture",
       "setUIState",
       "uninstallApp",
-    ],
-    "Session-scoped tool dispatch attempts to record before action; recording failures warn and proceed. Unreadable priors and opaque intents are non-revertible. Legacy sessions are unchanged.",
-    "journaled",
-  ),
-  ...pendingTools(
-    ["persona", "statusBar"],
-    "Pending device-appearance intent and prior-value adapters (#14359); unavailable journal coverage limits best-effort reverts but does not gate tool actions or unconditional keep-booted cleaning.",
-  ),
-  ...pendingTools(
-    [
       "clearKeyValueFile",
       "clearMockNetwork",
       "deviceSnapshot",
@@ -80,14 +70,25 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, PendingMutat
       "phoneCall",
       "removeKeyValue",
       "resetAppLogs",
-      "sendBroadcast",
       "sendSms",
       "setKeyValue",
       "setPreference",
       "sqlQuery",
-      "stageSessionDownloads",
     ],
+    "Session-scoped tool dispatch attempts to record before action; recording failures warn and proceed. Unreadable priors and opaque intents are non-revertible. Legacy sessions are unchanged.",
+    "journaled",
+  ),
+  ...pendingTools(
+    ["manufacturerProfile", "statusBar"],
+    "Pending device-appearance intent and prior-value adapters (#14359); unavailable journal coverage limits best-effort reverts but does not gate tool actions or unconditional keep-booted cleaning.",
+  ),
+  ...pendingTools(
+    ["sendBroadcast"],
     "Pending data/provider-specific journal adapter (#14359); opaque priors cannot drive best-effort reverts and do not gate keep-booted cleaning.",
+  ),
+  ...pendingTools(
+    ["stageSessionDownloads"],
+    "The deprecated Downloads alias resolves its device inside the service through nonDeviceHandler and bypasses the recorded device dispatcher. It needs service-side record-before-act wiring (#14359), not only an intent mapping. putAppFile is journaled; this alias remains pending and does not gate keep-booted cleaning.",
   ),
   ...pendingTools(
     [

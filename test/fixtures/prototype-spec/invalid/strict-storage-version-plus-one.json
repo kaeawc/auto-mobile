@@ -1,0 +1,21 @@
+{
+  "spec": {
+    "id": "strict",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "spacer"
+    },
+    "state": {
+      "a": false
+    },
+    "storage": {
+      "version": 2147483648,
+      "keys": ["state:a"]
+    }
+  },
+  "expectedPath": "storage.version"
+}

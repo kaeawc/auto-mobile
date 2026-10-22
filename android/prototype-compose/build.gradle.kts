@@ -52,9 +52,10 @@ dependencies {
 }
 
 // --- API surface tracking (#13727) ---
-// The stable API is the dev.jasonpearson.automobile.prototype package alone. The
-// ctrlproxy.prototype package is CtrlProxy's host API behind @InternalAutoMobilePrototypeApi
-// (an ERROR-level opt-in), so it is left out of the signature rather than pinned.
+// Only the dev.jasonpearson.automobile.prototype package is tracked; the ctrlproxy.prototype
+// package is CtrlProxy's host API behind @InternalAutoMobilePrototypeApi and is left out. javap
+// sees neither Kotlin `internal` nor opt-in annotations, so internal and opt-in declarations in
+// the tracked package (EmbeddedPrototype*) are still listed: changing them needs an apiDump too.
 val prototypeApiFile = layout.projectDirectory.file("api/auto-mobile-prototype-compose.api")
 val kotlinReleaseClassesDir =
   layout.buildDirectory.dir("intermediates/built_in_kotlinc/release/compileReleaseKotlin/classes")

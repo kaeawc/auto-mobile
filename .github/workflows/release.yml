@@ -684,6 +684,8 @@ jobs:
           echo "- **Maven Central:** [$A]($M/$A)" >> "$S"
           A="auto-mobile-sdk"
           echo "- **Maven Central:** [$A]($M/$A)" >> "$S"
+          A="auto-mobile-prototype-compose"
+          echo "- **Maven Central:** [$A]($M/$A)" >> "$S"
           MCP="https://registry.modelcontextprotocol.io/"
           L="dev.jasonpearson/auto-mobile"
           echo "- **MCP Registry:** [$L]($MCP)" >> "$S"

@@ -5,12 +5,14 @@
 # Publishes :protocol and :prototype-compose to a local Maven repository, then
 # asserts against the published files -- not the in-repo project() path -- that
 #
-#   AC1  the release AAR, sources jar and POM are published,
+#   AC1  the release AAR (with its consumer R8 rules), sources jar and POM are
+#        published,
 #   AC2  the sources jar carries every renderer source file under src/main,
 #   AC3  the POM names the artifact, depends on the published auto-mobile-protocol
 #        artifact and carries no unpublished or unversioned dependency, and
-#   AC4  an Android app resolving the artifact from that repository builds a
-#        minified (R8) release APK that renders AutoMobilePrototype.
+#   AC4  an Android app resolving the artifact from that repository (with no
+#        Compose BOM of its own) compiles a call to AutoMobilePrototype into a
+#        minified (R8) release APK. Nothing runs the APK.
 #
 # Usage:
 #   validate-prototype-compose-consumer.sh [--skip-publish] [--skip-consumer]
@@ -136,14 +138,13 @@ run_logged() {
 
 write_consumer_project() {
   local consumer_dir="$1" repo="$2" coordinate="$3" catalog="$4"
-  local agp kotlin compose_bom activity compile_sdk min_sdk
+  local agp kotlin activity compile_sdk min_sdk
   agp="$(catalog_version "$catalog" build-android-agp)"
   kotlin="$(catalog_version "$catalog" build-kotlin)"
-  compose_bom="$(catalog_version "$catalog" androidx-compose-bom)"
   activity="$(catalog_version "$catalog" androidx-activity-compose)"
   compile_sdk="$(catalog_version "$catalog" build-android-compileSdk)"
   min_sdk="$(catalog_version "$catalog" build-android-minSdk)"
-  for value in "$agp" "$kotlin" "$compose_bom" "$activity" "$compile_sdk" "$min_sdk"; do
+  for value in "$agp" "$kotlin" "$activity" "$compile_sdk" "$min_sdk"; do
     [ -n "$value" ] || usage_error "could not read consumer versions from ${catalog}"
   done
 
@@ -203,7 +204,6 @@ android {
 
 dependencies {
   implementation("${coordinate}")
-  implementation(platform("androidx.compose:compose-bom:${compose_bom}"))
   implementation("androidx.activity:activity-compose:${activity}")
 }
 GRADLE_BUILD
@@ -302,7 +302,9 @@ run_validation() {
   local group version
   group="$(sed -n 's/^GROUP=//p' "${android_dir}/gradle.properties" | head -n 1)"
   version="$(sed -n 's/^VERSION_NAME=//p' "${android_dir}/gradle.properties" | head -n 1)"
-  [ -n "$group" ] && [ -n "$version" ] || usage_error "could not read GROUP and VERSION_NAME from android/gradle.properties"
+  if [ -z "$group" ] || [ -z "$version" ]; then
+    usage_error "could not read GROUP and VERSION_NAME from android/gradle.properties"
+  fi
 
   if [ "$skip_publish" -eq 0 ]; then
     ( cd "$android_dir" && run_logged "${log_dir}/publish.log" ./gradlew \
@@ -320,6 +322,10 @@ run_validation() {
   [ -f "$sources" ] || fail "AC1: sources jar missing: ${sources}"
   [ -f "$pom" ] || fail "AC1: POM missing: ${pom}"
   [ -f "$protocol_jar" ] || fail "AC1: ${PROTOCOL_ARTIFACT_ID} jar missing: ${protocol_jar}"
+  # Icons resolve by reflection; without the shipped keep rule R8 strips them silently.
+  local aar_entries
+  aar_entries="$(unzip -Z1 "$aar")"
+  grep -qxF proguard.txt <<<"$aar_entries" || fail "AC1: AAR carries no proguard.txt consumer rules"
 
   # AC2 -- every renderer source is in the sources jar. Captured by assignment
   # so the helper never runs in a set -e-suppressed condition.
@@ -351,7 +357,7 @@ run_validation() {
   local apk="${consumer_dir}/build/outputs/apk/release/prototype-compose-consumer-release-unsigned.apk"
   [ -f "$apk" ] || fail "AC4: consumer release APK missing: ${apk}"
 
-  echo "Published ${ARTIFACT_ID} ${version}: AAR, complete sources jar and POM verified; a minified consumer built against it."
+  echo "Published ${ARTIFACT_ID} ${version}: AAR, complete sources jar and POM verified; a minified consumer compiled against it."
 }
 
 # Only orchestrate when executed; when sourced (BATS), expose the helpers only.

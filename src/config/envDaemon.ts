@@ -416,6 +416,7 @@ export const DAEMON_ENV = {
     name: "AUTOMOBILE_DAEMON_LAUNCH_NONCE",
     kind: "string",
     default: "unset",
+    internal: true,
     doc: "Manager-injected per-launch nonce that readiness matches against the answering daemon.",
   },
   HARNESS_PRIVATE_DAEMON: {

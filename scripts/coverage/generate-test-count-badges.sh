@@ -23,6 +23,15 @@ grep_lines() {
   fi
 }
 
+# BSD grep (macOS) exits 1, not 2, for a missing tree when --include is given, so check the trees
+# explicitly rather than relying on grep's status alone.
+for tree in test android ios; do
+  if [ ! -d "${repo_root}/${tree}" ]; then
+    echo "generate-test-count-badges: grep failed with status 2: missing source tree ${repo_root}/${tree}" >&2
+    exit 2
+  fi
+done
+
 # Count the lines of $1 that match the extended regex $2 (an empty $1 counts zero).
 count_matching() {
   printf '%s\n' "$1" | awk -v pattern="$2" 'NF && $0 ~ pattern {n++} END {print n+0}'

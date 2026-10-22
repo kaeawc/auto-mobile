@@ -31,6 +31,8 @@ class ProtoViewerApplication : Application() {
     val staging =
       File(app.cacheDir, "import").apply {
         check(isDirectory || mkdirs()) { "Cannot create import staging" }
+        // A crash mid-commit leaves staging directories behind; nothing else cleans them.
+        listFiles()?.forEach { it.deleteRecursively() }
       }
     val sharer =
       CanonicalLibrarySharer(repository, DirectoryLibraryExports(File(app.cacheDir, "export")), ids)

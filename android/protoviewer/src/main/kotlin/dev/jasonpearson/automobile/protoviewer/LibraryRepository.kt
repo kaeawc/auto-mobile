@@ -145,9 +145,10 @@ class DirectoryLibraryRepository(
   override fun delete(libraryId: String): LibraryResult<Unit> {
     if (readEntry(libraryId) == null) return LibraryResult.Failure(LibraryError.NotFound)
     return storageResult {
+      // Metadata is the visibility marker: drop it first so a later failure leaves no listed entry.
+      files.delete(libraryId)
       storage.reset(libraryId)
       check(store.delete(libraryId)) { "Cannot delete saved prototype" }
-      files.delete(libraryId)
     }
   }
 

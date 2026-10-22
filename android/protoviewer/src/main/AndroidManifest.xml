@@ -17,9 +17,14 @@
       android:taskAffinity="" android:excludeFromRecents="true">
       <intent-filter>
         <action android:name="android.intent.action.VIEW" />
-        <action android:name="android.intent.action.SEND" />
         <category android:name="android.intent.category.DEFAULT" />
         <data android:scheme="content" android:mimeType="application/vnd.automobile.prototype+zip" />
+        <data android:scheme="content" android:mimeType="application/json" />
+      </intent-filter>
+      <intent-filter>
+        <action android:name="android.intent.action.SEND" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <data android:mimeType="application/vnd.automobile.prototype+zip" />
         <data android:mimeType="application/json" />
       </intent-filter>
       <intent-filter>

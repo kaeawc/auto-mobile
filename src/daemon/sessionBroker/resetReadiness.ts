@@ -170,12 +170,27 @@ export class ResetReadiness {
     const deadlineMs =
       (input.timingStartedAtMs ?? this.timer.now()) +
       (preparationTimeoutMs ?? DEFAULT_PROVISION_DEVICE_TIMEOUT_MS);
+    const extensionMs = input.resetReadiness?.thresholdMs ?? 0;
     try {
       await this.wait(
         admission.resourceId,
         Math.max(0, Math.min(admission.waitMs, deadlineMs - this.timer.now())),
         signal,
       );
+      if (
+        extensionMs > 0 &&
+        (await this.store.getResource(admission.resourceId))?.state === "resetting" &&
+        this.activeResets.has(admission.resourceId) &&
+        this.timer.now() < deadlineMs
+      ) {
+        // One cold-create estimate past expiry is break-even for a create started then;
+        // the caller's preparation deadline still caps the extension.
+        await this.wait(
+          admission.resourceId,
+          Math.max(0, Math.min(extensionMs, deadlineMs - this.timer.now())),
+          signal,
+        );
+      }
     } finally {
       this.releaseWait(input.requestId);
     }

@@ -3,12 +3,19 @@ package dev.jasonpearson.automobile.ctrlproxy
 import android.annotation.SuppressLint
 import android.util.Log
 
+/**
+ * The opt-in's system property. Android before O (API 24-25) rejects property names longer than 31
+ * characters, so `setprop` could not set the original `debug.automobile.prune_baseline_wrappers`
+ * there (#14383).
+ */
+internal const val BASELINE_WRAPPER_PRUNING_PROPERTY = "debug.am.prune_wrappers"
+
 /** Debug-only opt-in, sampled once by CtrlProxy at service construction. */
 internal fun readBaselineWrapperPruningEnabled(
   readProperty: (String) -> String? = ::readAndroidSystemProperty,
   warn: (String, Throwable) -> Unit = { message, error -> Log.w("CtrlProxy", message, error) },
 ): Boolean {
-  val property = "debug.automobile.prune_baseline_wrappers"
+  val property = BASELINE_WRAPPER_PRUNING_PROPERTY
   return try {
     readProperty(property) == "true"
   } catch (error: ReflectiveOperationException) {

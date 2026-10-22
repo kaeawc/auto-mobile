@@ -167,7 +167,7 @@ internal class ViewHierarchyExtractorBaselineWrapperPruningTest : ViewHierarchyE
         )
 
       assertEquals(value == "true", enabled)
-      assertEquals(listOf("debug.automobile.prune_baseline_wrappers"), reads)
+      assertEquals(listOf("debug.am.prune_wrappers"), reads)
       assertTrue(warnings.isEmpty())
     }
   }
@@ -185,9 +185,23 @@ internal class ViewHierarchyExtractorBaselineWrapperPruningTest : ViewHierarchyE
 
       assertFalse(enabled)
       assertEquals(1, warnings.size)
-      assertTrue(warnings.single().first.contains("debug.automobile.prune_baseline_wrappers"))
+      assertTrue(warnings.single().first.contains("debug.am.prune_wrappers"))
       assertSame(failure, warnings.single().second)
     }
+  }
+
+  @Test
+  fun `enabled keeps a TalkBack-focused node that exposes only baseline actions`() {
+    val enabled = ViewHierarchyExtractor(pruneBaselineWrappers = true)
+    for (action in listOf("accessibility_focus", "clear_accessibility_focus")) {
+      val focused = UIElementInfo(actions = listOf(action), accessibilityFocused = "true")
+      assertEquals(action, listOf(focused), enabled.optimizeHierarchy(focused))
+    }
+  }
+
+  @Test
+  fun `the opt-in property name fits the pre-O 31-character limit`() {
+    assertTrue(BASELINE_WRAPPER_PRUNING_PROPERTY.length <= 31)
   }
 
   private fun baselineNode(children: List<UIElementInfo> = emptyList()): UIElementInfo =

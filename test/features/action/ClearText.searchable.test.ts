@@ -267,10 +267,7 @@ test("iOS focused-field reads prefer the native field over a focused web-page fi
   });
   const hierarchy = capture({
     className: "UIApplication",
-    node: [
-      { className: "WKWebView", node: [field("search", "example")] },
-      field("URL", "zq"),
-    ],
+    node: [{ className: "WKWebView", node: [field("search", "example")] }, field("URL", "zq")],
   });
   expect(getFocusedTextField(hierarchy, undefined, { iosPlaceholderAsBlank: true })).toEqual({
     value: "zq",

@@ -112,7 +112,9 @@ describe("iOS observed rotation verification (#8778)", () => {
 
   test("warns when the orientation restore itself fails", async () => {
     spyOn(runner, "requestRotate")
-      .mockResolvedValueOnce(runnerResult({ success: false, error: "no", rotationPerformed: false }))
+      .mockResolvedValueOnce(
+        runnerResult({ success: false, error: "no", rotationPerformed: false }),
+      )
       .mockRejectedValueOnce(new Error("runner gone"));
     observe.setObserveSequence([createObserveResult(0), createObserveResult(0)]);
     const result = await rotate.execute("landscape");

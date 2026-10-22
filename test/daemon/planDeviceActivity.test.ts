@@ -115,6 +115,33 @@ describe("plan device activity from execution leases", () => {
     expect(plan.abortController.signal.aborted).toBe(false);
   });
 
+  test("a nested label resolves to the outermost plan owner (#14445)", () => {
+    // An external plan on derived session base:B allocates nested label base:B:C.
+    const nested = createFakeSession("base:B:C", "nested-device", "android");
+    const labels: Record<string, Record<string, string>> = {
+      base: { A: "base", B: "base:B" },
+      "base:B": { A: "base:B", C: "base:B:C" },
+    };
+    const plans: PlanExecutionTarget[] = [
+      {
+        sessionUuid: "base:B",
+        executionId: "nested-plan",
+        labelSessionUuids: ["base:B", "base:B:C"],
+      },
+    ];
+    const activity = new PlanDeviceActivity(
+      { getAllSessions: () => [nested], getDeviceLabels: (id) => labels[id] },
+      { getActivePlanExecutions: () => plans },
+      new ExecutionTracker(new FakeTimer()),
+    );
+    // One hop of the holder is base:B, one hop of the plan is base: both name the same owner.
+    for (const filter of ["base:B", "base", "base:B:C"]) {
+      expect(activity.hasPlanExecution("nested-device", filter)).toBe(true);
+      expect(activity.getPlanExecutionIds("nested-device", filter)).toEqual(["nested-plan"]);
+    }
+    expect(activity.hasPlanExecution("nested-device", "other")).toBe(false);
+  });
+
   test("a sessionless lease protects its explicit device", () => {
     const h = harness();
     h.plans.splice(0, 1, { deviceId: "sessionless" });

@@ -248,6 +248,37 @@ describe("DaemonDisconnect per-device plan deferral", () => {
       await h.daemon.disconnectMonitor?.stop();
     }
   });
+  test("a nested label's loss reaches plan-time confirmation (#14445)", async () => {
+    const h = harness();
+    // An external plan on derived session base:B allocated nested label base:B:C on this device.
+    h.session.sessionId = "base:B:C";
+    h.device.sessionId = "base:B:C";
+    const labels: Record<string, Record<string, string>> = {
+      base: { A: "base", B: "base:B" },
+      "base:B": { A: "base:B", C: "base:B:C" },
+    };
+    h.daemon.getSessionManager().getDeviceLabels = (id) => labels[id];
+    const execution = executionTracker.startExecution("executePlan", undefined, "base:B");
+    executions.push(execution.id);
+    leases.push(
+      serverConfig.acquirePlanExecutionLease({
+        sessionUuid: "base:B",
+        deviceId: "primary-device",
+        executionId: execution.id,
+        labelSessionUuids: ["base:B", "base:B:C"],
+      }),
+    );
+    try {
+      await h.tick();
+      expect(h.daemon.disconnectMisses.get(h.device.id)).toBe(PLAN_DEVICE_DISCONNECT_MISS_CAP);
+      await h.tick();
+      expect(h.losses).toEqual([h.device.id]);
+      expect(h.released).toEqual([]);
+    } finally {
+      await h.daemon.disconnectMonitor?.stop();
+    }
+  });
+
   test("an unrelated plan does not hold deferred iOS recovery", async () => {
     const h = harness();
     startPlan(h.peer.id, "peer");

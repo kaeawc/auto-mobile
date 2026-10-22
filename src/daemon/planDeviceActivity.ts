@@ -1,4 +1,4 @@
-import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
+import { resolveOwnershipSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import { serverConfig } from "../utils/ServerConfig";
 import { executionTracker } from "./executionTracker";
 import type { SessionManager } from "./sessionManager";
@@ -62,13 +62,15 @@ export class PlanDeviceActivity {
       }
       const uses = [plan.sessionUuid, ...(plan.labelSessionUuids ?? [])];
       return (
-        (sessionUuid === undefined || this.baseSession(plan.sessionUuid) === sessionUuid) &&
+        (sessionUuid === undefined ||
+          this.ownerSession(plan.sessionUuid) === this.ownerSession(sessionUuid)) &&
         uses.some((member) => holders.has(member))
       );
     });
   }
 
-  private baseSession(sessionUuid: string): string {
-    return resolveToolSelectionBaseSessionUuid(sessionUuid, this.sessions) ?? sessionUuid;
+  /** Outermost owner (#14445): a plan on base:B and its nested label base:B:C share one. */
+  private ownerSession(sessionUuid: string): string {
+    return resolveOwnershipSessionUuid(sessionUuid, this.sessions);
   }
 }

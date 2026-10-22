@@ -1,0 +1,27 @@
+{
+  "spec": {
+    "id": "library-host-nested",
+    "window": { "placement": { "type": "fullscreen" } },
+    "root": {
+      "type": "column",
+      "repeat": { "items": [{ "label": "Load" }], "as": "item" },
+      "children": [
+        {
+          "type": "button",
+          "label": "{item.label}",
+          "onTap": [
+            {
+              "type": "request",
+              "url": "https://example.com",
+              "via": "device",
+              "onSuccess": [{ "type": "request", "url": "https://example.com/next", "via": "host" }]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "options": { "library": true },
+  "expectedPath": "root.children[0].onTap[0].onSuccess[0].via",
+  "expectedMessage": "Host requests are unavailable in a library"
+}

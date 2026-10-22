@@ -1,11 +1,17 @@
 package dev.jasonpearson.automobile.protocol
 
+import dev.jasonpearson.automobile.protocol.PrototypeStateChecks.Located
 import dev.jasonpearson.automobile.protocol.PrototypeValidationPaths.text
 import kotlinx.serialization.json.*
 
 /** Additional unprivileged-import and negotiated-capability checks after full validation. */
 internal object PrototypeStrictPolicy {
-  fun error(spec: JsonObject, supported: Set<String>?, library: Boolean): PrototypeSpecError? {
+  fun error(
+    spec: JsonObject,
+    supported: Set<String>?,
+    library: Boolean,
+    actions: List<Located>,
+  ): PrototypeSpecError? {
     if (supported != null && !supported.containsAll(required(spec))) {
       return PrototypeSpecError("$", "Unsupported capabilities")
     }
@@ -14,6 +20,14 @@ internal object PrototypeStrictPolicy {
       return PrototypeSpecError("window.layer", "Privileged window")
     if (library && window?.text("persistence") == "device")
       return PrototypeSpecError("window.persistence", "Privileged window")
+    if (library) {
+      // Located actions exclude opaque data, request bodies and emit payloads.
+      val host = actions.firstOrNull {
+        it.value.text("type") == "request" && it.value.text("via") == "host"
+      }
+      if (host != null)
+        return PrototypeSpecError("${host.path}.via", "Host requests are unavailable in a library")
+    }
     return null
   }
 

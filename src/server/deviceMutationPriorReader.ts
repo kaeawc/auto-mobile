@@ -20,7 +20,7 @@ import { TalkBackToggle } from "../features/accessibility/TalkBackToggle";
 import { VoiceOverToggle } from "../features/accessibility/VoiceOverToggle";
 import { awaitWhileRequestIsLive } from "../utils/toolUtils";
 import { type AndroidCtrlProxy } from "../features/observe/android/AndroidCtrlProxyClient";
-import { DataMutationPriorReader } from "./deviceMutationDataPriorReader";
+import { FamilyMutationPriorReader } from "./deviceMutationFamilyPriorReader";
 
 function stateField(entry: ToolMutation): DeviceStateField | undefined {
   const settingFields: Readonly<Record<string, DeviceStateField>> = {
@@ -127,7 +127,7 @@ export class DefaultMutationPriorReader implements MutationPriorReader {
     ) => new Rotate(device),
     observationReaders: Partial<MutationObservationReaders> = {},
   ) {
-    this.dataReader = observationReaders.dataReader ?? new DataMutationPriorReader();
+    this.dataReader = observationReaders.dataReader ?? new FamilyMutationPriorReader();
     this.observationReaders = {
       screenReaderFor:
         observationReaders.screenReaderFor ??

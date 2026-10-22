@@ -7,6 +7,9 @@ import type { DeviceMutationInput } from "../daemon/sessionBroker/mutations/type
 import { isRecord } from "./pipeline/isRecord";
 import { KEYBOARD_READ_ACTIONS } from "./interactionToolTypes";
 import { dataToolMutations } from "./deviceMutationDataAdapters";
+import { appearanceToolMutations } from "./deviceMutationAppearanceAdapters";
+import { lifecycleToolMutations } from "./deviceMutationLifecycleAdapters";
+import { orchestrationToolMutations } from "./deviceMutationOrchestrationAdapters";
 import { isReadOnlySqlQuery } from "../features/database/sqlQueryClassification";
 import {
   DEVICE_MUTATION_TOOL_COVERAGE,
@@ -188,6 +191,13 @@ export function deviceToolMutations(
   };
   if (Object.hasOwn(opaqueKinds, name)) {
     return [mutation(opaqueKinds[name], name === "accessibility" ? "device" : `tool:${name}`)];
+  }
+  const family =
+    appearanceToolMutations(name, args, platform) ??
+    lifecycleToolMutations(name, args, platform) ??
+    orchestrationToolMutations(name, args, platform);
+  if (family !== undefined) {
+    return family;
   }
   const mutations =
     directToolMutations(name, args, platform) ?? stateToolMutations(name, args, platform);

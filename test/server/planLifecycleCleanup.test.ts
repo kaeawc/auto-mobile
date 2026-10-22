@@ -261,7 +261,7 @@ describe("executePlan cleans every acquired device before release", () => {
     async () => {
       await acquire([devices[0]], false);
       const disabled = new Set(["base"]);
-      const cache = new ControlDiscoveryCache(async () => {});
+      const cache = new ControlDiscoveryCache(async () => {}, timer);
       const context: McpForwardContext = {
         request: { id: "list", type: "mcp_request", method: "tools/list", params: {} },
         route: { clientKey: "base", executionKey: "base", sessionUuid: "base" },

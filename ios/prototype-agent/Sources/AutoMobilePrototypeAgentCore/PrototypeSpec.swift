@@ -308,11 +308,6 @@ struct Placement: Decodable {
     let offset: Offset?
 }
 
-struct Offset: Decodable {
-    let x: Double
-    let y: Double
-}
-
 enum Dimension: Decodable, Equatable {
     case fill
     case wrap
@@ -331,13 +326,6 @@ enum Dimension: Decodable, Equatable {
             self = try .points(container.decode(Fixed.self).points)
         }
     }
-}
-
-struct Padding: Decodable {
-    let top: Double?
-    let bottom: Double?
-    let start: Double?
-    let end: Double?
 }
 
 /// Fixed columns or adaptive equal-width slots. Positivity is enforced by the host;

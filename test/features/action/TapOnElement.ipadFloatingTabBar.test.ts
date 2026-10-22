@@ -35,7 +35,7 @@ async function tapOn(observation: ObserveResult, text: string) {
     new FakeAdbExecutor(),
     {
       timer,
-      tapStrategy: new FakeTapStrategy(),
+      tapStrategy: FakeTapStrategy.ios(),
       visionConfig: { ...DEFAULT_VISION_CONFIG, enabled: false },
       selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
     },

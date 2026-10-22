@@ -86,8 +86,10 @@ and its renderer honours privileged window options. ProtoViewer declares `INTERN
 runtime-granted `ACCESS_LOCAL_NETWORK` permission that Android 17 (API 37) requires for private LAN
 connections, and nothing else (no accessibility, input method, overlay, device-admin or camera).
 `ACCESS_LOCAL_NETWORK` is requested only when the user turns on "Allow network for imported
-prototypes" (section 6), never at install or first launch; if it is denied, LAN requests fail with
-the same typed error as a blocked host. The validator rejects `window.layer: "system"` and any other privileged window option for library prototypes.
+prototypes" (section 6), never at install or first launch; if it is denied, the switch stays on for
+internet access and the library explains that LAN requests may time out (Android slice 3, closing
+#14539 via this work). The validator rejects `window.layer: "system"` and any other privileged window
+option for library prototypes.
 
 - **Android renderer extraction is one mechanical move.** The `ctrlproxy/prototype` package imports
   only a few symbols from the rest of CtrlProxy, so moving it to a `:prototype-render` module
@@ -139,6 +141,7 @@ Importing a prototype needs identical accept and reject behaviour on all three p
 
 ### 3.3 Android app
 
+- `minSdk` is 26: a new standalone app, and the bundle commit relies on `java.nio` NOFOLLOW checks and atomic same-volume moves.
 - Package `dev.jasonpearson.automobile.protoviewer`. `LibraryActivity` is the launcher list,
   `ViewerActivity` is a document task per prototype (not exported), and an exported `ImportActivity`
   handles VIEW and SEND for `content://` data only.
@@ -265,7 +268,7 @@ app-owned parent directory; callers serialize commits and the Node adapter uses 
 2. The strict zip reader (section 4) for bundles.
 3. Strict JSON parse: BOM strip, duplicate keys rejected, depth-limited.
 4. The full validator (TS and Kotlin full; Swift reject-only port): unknown keys rejected,
-   `window.layer: "system"` rejected, `secure` and `password` bindings into request URL, headers or
+   `window.layer: "system"` rejected, `secure` and `password` bindings into request URL, headers, query or
    body and into `storage` rejected, forbidden request headers (`Host`, `Connection`, `Upgrade`,
    `Proxy-*`, `Cookie`) and CR/LF rejected, and `via: "host"` rejected for library prototypes.
 5. Capability check: `PROTOTYPE_SPEC_CAPABILITY_GATES` against the app's capability set, yielding

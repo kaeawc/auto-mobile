@@ -5068,6 +5068,14 @@ describe("Android systemTray clearAll progress budget", () => {
     expect(swipes()).toHaveLength(4);
   });
 
+  test("a retried swipe does not spend the inventory cap, so the last row is not left behind (#13810)", async () => {
+    // clearAll passes the notification inventory (3 here) as maxSwipes: the retry is a 4th swipe.
+    const { swipes, drain } = setup(3, 2);
+
+    expect(await drain(3)).toMatchObject({ swipeCount: 4, dismissedCount: 3, stalled: false });
+    expect(swipes()).toHaveLength(4);
+  });
+
   test("respects maxSwipes even while dismissals keep making progress", async () => {
     const { timer, swipes, drain } = setup();
 

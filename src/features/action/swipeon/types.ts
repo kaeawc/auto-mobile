@@ -147,6 +147,8 @@ export interface SwipeOnDependencies extends DisplayFenceDependencies {
   scrollables?: import("../../../utils/interfaces/ElementTraitQueries").ScrollableElementsQuery;
   geometry?: import("../../../utils/interfaces/ElementGeometry").ElementGeometry;
   parser?: import("../../../utils/interfaces/ElementParser").ElementParser;
+  /** Android CtrlProxy client; defaults to the device's shared `AndroidCtrlProxyClient`. */
+  accessibilityService?: SwipeOnCtrlProxy;
   accessibilityDetector?: AccessibilityDetector;
   iosVoiceOverDetector?: IosVoiceOverDetector;
   featureFlags?: import("../../featureFlags/FeatureFlagService").FeatureFlagReader;

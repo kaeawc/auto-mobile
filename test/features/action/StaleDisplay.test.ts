@@ -347,6 +347,30 @@ describe("typed explicit-display fences G", () => {
       }
     });
   }
+  test("the caller revision is re-read through the injected reader, not the default daemon (#13315)", async () => {
+    for (const [later, stale] of [
+      [41, false],
+      [43, true],
+    ] as const) {
+      const h = harness(cases[2]);
+      let reads = 0;
+      // An injected reader bound to its own session store: the caller renders a newer frame mid-call.
+      const reader = () => ({
+        display: { key: "inner", generation: h.screen.display.generation },
+        displayRevision: reads++ === 0 ? 41 : later,
+      });
+      const prepare = prepareTargetDisplayAction(device, "inner", h.observe, h.adb, {
+        lastRenderedObservation: reader,
+        transitions: h.transitions,
+      });
+      if (stale) {
+        expect(await rejection(() => prepare)).toBeInstanceOf(StaleDisplayError);
+      } else {
+        expect((await prepare).observation.display.key).toBe("inner");
+      }
+      expect(reads).toBe(2);
+    }
+  });
   test("G still requires observation of the requested panel", async () => {
     const h = harness(cases[4]);
     await expect(

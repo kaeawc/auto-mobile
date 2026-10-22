@@ -2,7 +2,6 @@ import { ActionableError, type BootedDevice } from "../../models";
 import type { DeviceSettingKey } from "../../models/DeviceSettingDefaults";
 import type { DeviceProfileSelector } from "../../models/ManufacturerProfileIds";
 import { KEYBOARD_PROFILE_IDS, type KeyboardProfileId } from "../action/keyboardProfiles";
-import { setKeyboardProfile } from "../action/setKeyboardProfile";
 import { applyKillProfile, resetKillProfile } from "./ApplyKillProfile";
 import {
   applyPersona,
@@ -11,6 +10,11 @@ import {
   type RoutePersonaResult,
 } from "./ApplyPersona";
 import { recordDeviceSettingDefaultsBeforeChange } from "./DeviceSettingDefaults";
+import {
+  defaultKeyboardProfileRestoreRegistry,
+  resetKeyboardProfileFromRecord,
+  setKeyboardProfileRecorded,
+} from "./KeyboardProfileRestore";
 import {
   applyDisplayProfile,
   resetDisplayProfile,
@@ -62,12 +66,14 @@ export const defaultPersonaExecutors = (
   });
   return {
     keyboard: {
-      set: (profile, setSignal) => {
+      set: (profile, owner, setSignal) => {
         if (!isKeyboardProfileId(profile)) {
           throw new ActionableError(`Unknown keyboard profile '${profile}'.`);
         }
-        return setKeyboardProfile(device, profile, undefined, setSignal);
+        return setKeyboardProfileRecorded(device, profile, undefined, setSignal, { owner });
       },
+      pending: () => defaultKeyboardProfileRestoreRegistry.pending(device.deviceId),
+      reset: (resetSignal) => resetKeyboardProfileFromRecord(device, undefined, resetSignal),
     },
     kill: {
       apply: (appId, profile, owner) => applyKillProfile(device, appId, profile, killDeps(owner)),
@@ -99,7 +105,8 @@ export interface ManufacturerProfileApplier {
 
 /**
  * The production applier for acquisition: the kill facet is deferred (no app is known yet) and
- * the owning session's release restores everything, keyboard included.
+ * the owning session's release restores everything, keyboard included (through the shared
+ * keyboard-profile record, #14705).
  */
 export const defaultManufacturerProfileApplier: ManufacturerProfileApplier = {
   apply: (device, profile, sessionId, signal) =>
@@ -110,7 +117,6 @@ export const defaultManufacturerProfileApplier: ManufacturerProfileApplier = {
       {
         executors: defaultPersonaExecutors(device, signal),
         owner: sessionId,
-        restoreKeyboardOnRelease: true,
         signal,
       },
     ),

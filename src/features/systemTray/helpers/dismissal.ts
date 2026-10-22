@@ -298,6 +298,50 @@ export const verifyNotificationDismissed = async (
   return { outcome, observation: verified };
 };
 
+/**
+ * Reopen a closed post-swipe shade within one attempt budget. The reopen's
+ * first observation runs before `waitForSystemTrayOpen` checks its polling
+ * budget, so only this race caps a hung one; on timeout the attempt is
+ * aborted and `current` returned so the caller keeps recovering (#14532).
+ */
+const reopenClearAllShade = async (
+  device: BootedDevice,
+  current: { observation: ObserveResult; minTimestamp: number },
+  remainingMs: number,
+  signal: AbortSignal,
+): Promise<{ observation: ObserveResult; minTimestamp: number }> => {
+  const { timer } = getSystemTrayDependencies();
+  const attempt = new AbortController();
+  const attemptSignal = AbortSignal.any([signal, attempt.signal]);
+  const budgetMs = Math.min(SYSTEM_TRAY_POLL_INTERVAL_MS, remainingMs);
+  const attemptTimeout = new ActionableError("Notification shade reopen timed out.");
+  try {
+    const reopened = await raceWithDeadline(
+      () => ensureSystemTrayOpen(device, budgetMs, undefined, attemptSignal, current.observation),
+      {
+        timer,
+        signal,
+        timeoutMs: budgetMs,
+        label: "Notification shade reopen",
+        timeoutError: () => attemptTimeout,
+        onTimeout: () => attempt.abort(),
+      },
+    );
+    return {
+      observation: reopened.observation ?? current.observation,
+      minTimestamp: reopened.minTimestamp,
+    };
+  } catch (error) {
+    if (error !== attemptTimeout) {
+      throw error;
+    }
+    // Only this attempt timed out; the caller re-reads and may reopen again
+    // before its own deadline, so the abandoned reopen is not a failure.
+    logger.debug(`[systemTray] Shade reopen exceeded its ${budgetMs}ms attempt budget.`);
+    return current;
+  }
+};
+
 /** Re-read after a swipe until its row leaves, without swiping that row again. */
 const waitForClearAllDismissal = async (
   device: BootedDevice,
@@ -321,7 +365,7 @@ const waitForClearAllDismissal = async (
   const observer = observeScreenFactory(device);
   const deadlineMs = timer.now() + awaitTimeoutMs;
   const timeoutError = new ActionableError(
-    "Could not verify notification dismissal: shade read or reopen timed out.",
+    "Could not verify notification dismissal: shade read timed out.",
   );
   const raceOptions = () => ({
     timer,
@@ -364,19 +408,12 @@ const waitForClearAllDismissal = async (
         timer.now() - reexpandState.lastAttemptAtMs >= SYSTEM_TRAY_REEXPAND_INTERVAL_MS
       ) {
         reexpandState.lastAttemptAtMs = timer.now();
-        const reopened = await raceWithDeadline(
-          () =>
-            ensureSystemTrayOpen(
-              device,
-              Math.min(SYSTEM_TRAY_POLL_INTERVAL_MS, remainingMs),
-              undefined,
-              signal,
-              observation,
-            ),
-          raceOptions(),
-        );
-        observation = reopened.observation ?? observation;
-        minTimestamp = reopened.minTimestamp;
+        ({ observation, minTimestamp } = await reopenClearAllShade(
+          device,
+          { observation, minTimestamp },
+          remainingMs,
+          signal,
+        ));
         continue;
       }
       await sleep(Math.min(SYSTEM_TRAY_POLL_INTERVAL_MS, remainingMs), signal);

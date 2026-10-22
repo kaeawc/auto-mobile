@@ -11,7 +11,7 @@ extension CommandHandler {
         guard let appId = normalizedBundleId(requested) else {
             throw CommandError.missingParameter("appId")
         }
-        guard normalizedBundleId(await elementLocator.refreshForegroundBundleId()) == appId else {
+        guard await refreshTrackedForegroundBundleId() == appId else {
             throw CommandError.executionFailed("iOS key-value storage requires \(appId) to be the foreground app")
         }
         guard normalizedBundleId(await sdkHierarchyClient?.fetchServerInfo()?.bundleId) == appId else {

@@ -6,10 +6,12 @@ import Foundation
 /// repeated more than once cannot transitively contain a variable quantifier or alternation;
 /// fixed {n} repetitions remain legal. These limits reject backtracking blowups.
 enum PrototypeCheckPattern {
-    static let maxValueLength = 4096
+    static let maxValueLength = PrototypeContractValidator.limit("MAX_PROTOTYPE_CHECK_VALUE_LENGTH")
+    private static let maxBound = PrototypeContractValidator.limit("MAX_PROTOTYPE_CHECK_QUANTIFIER_BOUND")
+    private static let maxVariable = PrototypeContractValidator.limit("MAX_PROTOTYPE_CHECK_VARIABLE_QUANTIFIERS")
 
     static func withinLimits(_ pattern: String) -> Bool {
-        guard pattern.utf16.count <= 128 else { return false }
+        guard pattern.utf16.count <= PrototypeContractValidator.checkPatternMaxLength else { return false }
         var scanner = LimitScanner(pattern)
         return scanner.check()
     }
@@ -46,7 +48,7 @@ enum PrototypeCheckPattern {
                 if quantifier.max > 1, atom.variable || atom.alternation { valid = false }
                 if quantifier.variable {
                     variableCount += 1
-                    if variableCount > 2 { valid = false }
+                    if variableCount > maxVariable { valid = false }
                     return true
                 }
             }
@@ -129,7 +131,7 @@ enum PrototypeCheckPattern {
                 found = true
                 cursor += 1
                 value = value * 10 + Int(char.value - 48)
-                if value > 100 { valid = false; return nil }
+                if value > maxBound { valid = false; return nil }
             }
             return found ? value : nil
         }

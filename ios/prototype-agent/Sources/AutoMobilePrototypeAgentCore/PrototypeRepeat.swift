@@ -201,12 +201,7 @@ enum PrototypeRepeat {
     }
 
     static func isFieldName(_ name: String) -> Bool {
-        guard (1 ... 64).contains(name.unicodeScalars.count),
-              let first = name.unicodeScalars.first else { return false }
-        func letter(_ scalar: Unicode.Scalar) -> Bool {
-            ("A" ... "Z").contains(scalar) || ("a" ... "z").contains(scalar) || scalar == "_"
-        }
-        return letter(first) && name.unicodeScalars.allSatisfy { letter($0) || ("0" ... "9").contains($0) }
+        PrototypeContractValidator.matches("stateKey", name)
     }
 }
 

@@ -1,3 +1,4 @@
+import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import { prototypeStrictPolicyError, type PrototypeStrictOptions } from "./prototypeStrictPolicy";
 import { prototypeStrictJson } from "./prototypeStrictJson";
 import { prototypeCheckErrors } from "./prototypeCheckValidation";
@@ -45,7 +46,7 @@ interface Context {
 }
 const definitions: Record<string, Rule> = contract.definitions;
 function keyPath(path: string, key: string): string {
-  if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+  if (prototypeContractPatterns.pathKey.test(key)) {
     return path ? `${path}.${key}` : key;
   }
   return `${path || "$"}[${JSON.stringify(key)}]`;
@@ -325,7 +326,7 @@ function visitMap(
   }
   for (const key of Object.keys(data).sort()) {
     const childPath = keyPath(path, key);
-    if (!/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(key)) {
+    if (!prototypeContractPatterns.stateKey.test(key)) {
       return fail(childPath, "Invalid state key");
     }
     const error = walk(data[key], rule.item ?? { kind: "scalar" }, childPath, context, depth);
@@ -392,12 +393,12 @@ const primitiveChecks: Record<string, (value: unknown, rule: Rule) => boolean> =
   string: (value, rule) =>
     typeof value === "string" &&
     (rule.empty === true || value.length > 0) &&
-    (!rule.nonblank || value.trim().length > 0) &&
+    (!rule.nonblank || !prototypeContractPatterns.blankText.test(value)) &&
     value.length <= (rule.max ?? Infinity),
   pointer: isPrototypeDataPointer,
-  key: (value) => typeof value === "string" && /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(value),
+  key: (value) => typeof value === "string" && prototypeContractPatterns.stateKey.test(value),
   boundKey: (value) => typeof value === "string" && BOUND_STATE_KEY_PATTERN.test(value),
-  color: (value) => typeof value === "string" && /^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/.test(value),
+  color: (value) => typeof value === "string" && prototypeContractPatterns.color.test(value),
   number: numberValid,
   true: (value) => value === true,
   boolean: (value) => typeof value === "boolean",

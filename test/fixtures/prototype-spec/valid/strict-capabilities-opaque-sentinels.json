@@ -1,0 +1,23 @@
+{
+  "id": "{data:/ghost}",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "spacer",
+    "id": "{data:/ghost}",
+    "onTap": [
+      {
+        "type": "emit",
+        "name": "{data:/ghost}",
+        "payload": {
+          "type": "chart",
+          "data": "/ghost",
+          "shimmer": true
+        }
+      }
+    ]
+  }
+}

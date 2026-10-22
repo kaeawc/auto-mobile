@@ -23,6 +23,5 @@
     <ID>LongMethod:PrototypeSelectorCompatibilityTest.kt:PrototypeSelectorCompatibilityTest$@Test fun `acceptance selectors preserve tagged visuals text fields and button labels`</ID>
     <ID>LongMethod:PrototypeSemanticsNodeCountTest.kt:PrototypeSemanticsNodeCountTest$@Test fun `decorative visuals disappear and only safe single-text rows collapse`</ID>
     <ID>LongParameterList:PrototypeScreenshotComparator.kt:PrototypeScreenshotComparator$fun compare: Result</ID>
-    <ID>LongParameterList:RetrofitPrototypeHttpClientTest.kt:RetrofitPrototypeHttpClientTest$private fun request</ID>
   </CurrentIssues>
 </SmellBaseline>

@@ -42,12 +42,12 @@ async function harness() {
   );
   await Promise.resolve();
   client.connectionTestHooks.socket = socket;
-  client["supportedCommands"] = new Set([
+  client.connectionTestHooks.supportedCommands = new Set([
     "request_activate_accessibility_link",
     "discover_keystore",
     "tap_double_v1",
   ]);
-  const manager = client["requestManager"];
+  const manager = client.connectionTestHooks.requestManager;
   const ids = new CountingIdGenerator("wire");
   manager.generateId = (prefix) => `${prefix}_${ids.next()}`;
   client.ensureConnected = async () => true;

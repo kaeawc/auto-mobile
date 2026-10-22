@@ -3,19 +3,33 @@ package dev.jasonpearson.automobile.protoviewer
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.nio.file.Files
+import java.nio.file.LinkOption.NOFOLLOW_LINKS
 
 /**
  * Metadata is a sibling tree to the saved store: library/{prototypes,metadata/<uuid>/library.json}.
  */
 interface LibraryFileOperations {
+  fun sizeBytes(): Long
+
   fun ids(): List<String>
 
   fun read(id: String): String
 
   fun write(id: String, text: String)
+
+  fun delete(id: String)
 }
 
 class DirectoryLibraryFiles(private val root: File) : LibraryFileOperations {
+  override fun sizeBytes(): Long {
+    val library = checkNotNull(root.parentFile).toPath()
+    if (!Files.exists(library, NOFOLLOW_LINKS)) return 0
+    return Files.walk(library).use { paths ->
+      paths.filter { Files.isRegularFile(it, NOFOLLOW_LINKS) }.mapToLong { Files.size(it) }.sum()
+    }
+  }
+
   override fun ids(): List<String> {
     if (!root.exists()) return emptyList()
     return (root.listFiles() ?: throw IOException("Cannot list library"))
@@ -44,6 +58,12 @@ class DirectoryLibraryFiles(private val root: File) : LibraryFileOperations {
     } finally {
       if (temp.exists()) temp.delete()
     }
+  }
+
+  override fun delete(id: String) {
+    val directory = checkNotNull(fileFor(id).parentFile)
+    if (directory.exists() && !directory.deleteRecursively())
+      throw IOException("Cannot delete library metadata")
   }
 
   private fun fileFor(id: String): File {

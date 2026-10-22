@@ -98,8 +98,18 @@ class LibraryRepositoryTest {
   }
 
   @Test
-  fun deleteIsNotPartOfThisSlice() {
-    assertFalse(LibraryRepository::class.java.methods.any { it.name == "delete" })
+  fun deleteRemovesSpecAssetsMetadataAndStorageAndBlocksStaleWrites() {
+    files.put(Fixtures.entry(SECOND))
+    store.results[SECOND] = Fixtures.loaded(SECOND)
+    val stale = storage.namespace(FIRST)
+    stale.save("same-spec-id", VALUES)
+    assertEquals(LibraryResult.Success(Unit), repository.delete(FIRST))
+    assertEquals(SavedPrototypeLoadResult.NotFound, store.load(FIRST))
+    assertFalse(files.documents.containsKey(FIRST))
+    stale.save("same-spec-id", VALUES)
+    assertNull(storage.namespace(FIRST).load("same-spec-id"))
+    assertEquals(listOf(SECOND), success(repository.list()).map { it.libraryId })
+    assertEquals(LibraryResult.Failure(LibraryError.NotFound), repository.delete("../escape"))
   }
 
   @Test
@@ -121,6 +131,20 @@ class LibraryRepositoryTest {
       ),
     )
     assertEquals(2, ids.size)
+  }
+
+  @Test
+  fun byteCapRejectsBeforeGeneratingIdOrSaving() {
+    files.usedBytes = MAX_LIBRARY_BYTES
+    assertEquals(
+      LibraryResult.Failure(LibraryError.Limit),
+      repository.add(
+        SavedPrototypeSaveRequest("ignored", "Example", SPEC, emptyList()),
+        LibrarySource.file,
+      ),
+    )
+    assertEquals(2, ids.size)
+    assertEquals(setOf(FIRST), store.results.keys)
   }
 
   @Test

@@ -24,6 +24,17 @@ object ViewerLaunch {
     context.startActivity(intent(context, libraryId))
   }
 
+  fun close(context: Context, libraryId: String) {
+    context
+      .getSystemService(ActivityManager::class.java)
+      .appTasks
+      .filter {
+        it.taskInfo?.baseIntent?.component?.className == ViewerActivity::class.java.name &&
+          it.taskInfo?.baseIntent?.getStringExtra(LIBRARY_ID) == libraryId
+      }
+      .forEach { it.finishAndRemoveTask() }
+  }
+
   fun intent(context: Context, libraryId: String): Intent =
     Intent(context, ViewerActivity::class.java)
       .putExtra(LIBRARY_ID, libraryId)

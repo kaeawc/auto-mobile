@@ -13,6 +13,25 @@
         <category android:name="android.intent.category.LAUNCHER" />
       </intent-filter>
     </activity>
+    <activity android:name=".ImportActivity" android:exported="true"
+      android:taskAffinity="" android:excludeFromRecents="true">
+      <intent-filter>
+        <action android:name="android.intent.action.VIEW" />
+        <action android:name="android.intent.action.SEND" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <data android:scheme="content" android:mimeType="application/vnd.automobile.prototype+zip" />
+        <data android:mimeType="application/json" />
+      </intent-filter>
+      <intent-filter>
+        <action android:name="android.intent.action.VIEW" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <data android:scheme="content" android:mimeType="*/*" android:host="*" android:pathPattern=".*\\.automobile-proto" />
+      </intent-filter>
+    </activity>
+    <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.exports"
+      android:exported="false" android:grantUriPermissions="true">
+      <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/export_paths" />
+    </provider>
     <activity android:name=".ViewerActivity" android:documentLaunchMode="always" android:exported="false" />
   </application>
 </manifest>

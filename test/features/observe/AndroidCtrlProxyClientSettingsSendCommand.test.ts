@@ -312,7 +312,7 @@ describe("Android delegate timestamped IDs", () => {
   test("shares the injected generator across storage, packages, hierarchy, and certificate paths", async () => {
     const h = await harness();
     h.timer.advanceTime(123);
-    const storage = h.client["storage"].listPreferenceFiles("example.app");
+    const storage = h.client.testHooks.storage().listPreferenceFiles("example.app");
     await Promise.resolve();
     expect(JSON.parse(h.socket.frames[0]).requestId).toBe("list_preference_files_123_delegate-1");
     h.manager.resolve("list_preference_files_123_delegate-1", {
@@ -321,7 +321,7 @@ describe("Android delegate timestamped IDs", () => {
       files: [],
     });
     await storage;
-    const packages = h.client["packages"].requestInstalledPackages();
+    const packages = h.client.testHooks.packages().requestInstalledPackages();
     expect(JSON.parse(h.socket.frames[1]).requestId).toBe("installed_packages_123_delegate-2");
     h.manager.resolve<BaseResult>("installed_packages_123_delegate-2", {
       success: true,
@@ -335,7 +335,7 @@ describe("Android delegate timestamped IDs", () => {
     expect(hierarchy["sendHierarchyIfStaleRequest"](0)).toBe("stale_123_delegate-4");
     expect(hierarchy["sendRecompositionTrackingRequest"](true)).toBe(true);
     expect(JSON.parse(h.socket.frames[4]).requestId).toBe("recomp_123_delegate-5");
-    expect(h.client["certificates"]["buildDeviceCertificatePath"]("/tmp/root.crt")).toBe(
+    expect(h.client.testHooks.certificates()["buildDeviceCertificatePath"]("/tmp/root.crt")).toBe(
       "/sdcard/Download/automobile/ca_certs/root_123_delegate-6.crt",
     );
     expect(h.manager.getPendingCount()).toBe(0);

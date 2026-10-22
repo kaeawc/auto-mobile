@@ -2114,6 +2114,9 @@
                   "type": "string",
                   "enum": ["ios_ips", "android_dropbox"]
                 },
+                "reportId": {
+                  "type": "string"
+                },
                 "reportPath": {
                   "type": "string"
                 },
@@ -2142,7 +2145,7 @@
                   "type": "string"
                 }
               },
-              "required": ["status", "source", "reportPath", "exceptionType", "frames"],
+              "required": ["status", "source", "reportId", "reportPath", "exceptionType", "frames"],
               "additionalProperties": false
             },
             {
@@ -16154,7 +16157,7 @@
   },
   {
     "name": "pressButton",
-    "description": "Press a device or navigation button. On iOS simulators, volume_up, volume_down, and power use hardware-button events; menu is unsupported on iOS. action and camera are iOS-only (Action button, Camera Control) and return unsupported_button where the device lacks that hardware.",
+    "description": "Press a device or navigation button. On iOS simulators, volume_up, volume_down, and power use hardware-button events; menu is unsupported on iOS. action and camera are iOS-only (Action button, Camera Control) and return unsupported_button where the device lacks that hardware. Android-only system actions: lock, power_dialog, quick_settings, screenshot, split_screen (raw system toggle; windowMode places a chosen app) and dismiss_notification_shade; each needs the API level and CtrlProxy APK that supports it and otherwise returns unsupported_system_action. lock leaves the device locked (wakeAndUnlock); power_dialog and quick_settings stay open until back/home.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -16170,7 +16173,13 @@
             "volume_down",
             "recent",
             "action",
-            "camera"
+            "camera",
+            "lock",
+            "power_dialog",
+            "quick_settings",
+            "screenshot",
+            "split_screen",
+            "dismiss_notification_shade"
           ]
         },
         "platform": {

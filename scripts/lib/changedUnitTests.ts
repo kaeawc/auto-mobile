@@ -55,7 +55,45 @@ export function resolveChangedImports(specifier: string, importer: string): stri
  */
 export const DEPENDENCY_MANIFESTS: readonly string[] = ["package.json", "bun.lock"];
 
-/** Parse-only reverse closure; an uncertain local edge conservatively selects all units. */
+/** `[test].preload` entries Bun loads before every test file, as repository-relative paths. */
+export function bunfigPreloads(bunfig: string): string[] {
+  const config: unknown = Bun.TOML.parse(bunfig);
+  const test: unknown =
+    typeof config === "object" && config !== null && "test" in config ? config.test : undefined;
+  const preload: unknown =
+    typeof test === "object" && test !== null && "preload" in test ? test.preload : [];
+  const entries: unknown[] = Array.isArray(preload) ? preload : [preload];
+  if (!entries.every((entry): entry is string => typeof entry === "string")) {
+    throw new Error("bunfig.toml [test].preload must be a string or an array of strings");
+  }
+  return entries.map((entry) => path.posix.normalize(entry));
+}
+
+/** `--preload` paths the shared unit commands add, read by running their own configure function. */
+export function unitCommandPreloads(root: string): string[] {
+  // Root "." from cwd keeps native Windows paths out of bash and yields ./-relative preloads.
+  const argv = execFileSync(
+    "bash",
+    [
+      "-c",
+      'source scripts/lib/bun-unit-test.sh && configure_bun_unit_test . Linux && printf "%s\\0" "${BUN_UNIT_TEST_COMMAND[@]}" "${BUN_UNIT_SHARED_TEST_COMMAND[@]}"',
+    ],
+    { cwd: root, encoding: "utf8" },
+  ).split("\0");
+  return [
+    ...new Set(
+      argv
+        .filter((_, index) => argv[index - 1] === "--preload")
+        .map((file) => path.posix.normalize(file)),
+    ),
+  ];
+}
+
+/**
+ * Parse-only reverse closure; an uncertain local edge conservatively selects all units.
+ * A changed `fullSuiteTriggers` file (a dependency manifest, or a global preload no test
+ * imports) also selects all units.
+ */
 export function changedGraphTests(
   tests: string[],
   changed: string[],
@@ -152,12 +190,19 @@ if (import.meta.main) {
     )
     .sort();
   const read = (file: string): string => readFileSync(path.resolve(root, file), "utf8");
-  const graph = changedGraphTests(tests.map(canonical), changed, {
-    read,
-    imports: scanChangedImports,
-    resolve: (specifier, importer) =>
-      resolveChangedImports(specifier, path.resolve(root, importer)).map(canonical),
-  });
+  // Preloads run before every unit file without an import edge (#14425).
+  const preloads = [...bunfigPreloads(read("bunfig.toml")), ...unitCommandPreloads(root)];
+  const graph = changedGraphTests(
+    tests.map(canonical),
+    changed,
+    {
+      read,
+      imports: scanChangedImports,
+      resolve: (specifier, importer) =>
+        resolveChangedImports(specifier, path.resolve(root, importer)).map(canonical),
+    },
+    [...DEPENDENCY_MANIFESTS, ...preloads.map(canonical)],
+  );
   const extras = selectAffectedTests({
     reader: {
       list: () => files.filter((file) => /\.(ts|tsx|mts)$/.test(file)).concat("package.json"),

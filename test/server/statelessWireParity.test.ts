@@ -291,8 +291,21 @@ describe("desktop handshake against the real daemon streamable endpoint", () => 
     };
   }
 
-  test("answers match the checked-in fixture", async () => {
-    const captured = await captureHandshake();
+  // One handshake against a real HTTP listener serves both tests: the first capture pays the cold
+  // listener start (about 110 ms on a Linux runner), so it runs in beforeAll, outside the 100 ms
+  // budget (#11574).
+  let captured: HandshakeFixture;
+  beforeAll(async () => {
+    // beforeAll runs before the file's beforeEach, so install the same host-free device manager.
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([]));
+    try {
+      captured = await captureHandshake();
+    } finally {
+      PlatformDeviceManagerFactory.reset();
+    }
+  });
+
+  test("answers match the checked-in fixture", () => {
     if (process.env.UPDATE_CAPTURED_FIXTURES === "1") {
       writeFileSync(FIXTURE_PATH, `${JSON.stringify(captured, null, 2)}\n`);
     }
@@ -304,8 +317,7 @@ describe("desktop handshake against the real daemon streamable endpoint", () => 
     expect(captured).toEqual(JSON.parse(readFileSync(FIXTURE_PATH, "utf8")) as HandshakeFixture);
   });
 
-  test("the legacy initialize is answered with a negotiated protocol version", async () => {
-    const captured = await captureHandshake();
+  test("the legacy initialize is answered with a negotiated protocol version", () => {
     const init = captured.exchanges[0].response;
     expect(init.status).toBe(200);
     const result = (init.message as { result: { protocolVersion: string } }).result;

@@ -198,7 +198,7 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
   const fixtures = new Map<string, McpTestFixture>();
   const received: string[] = [];
   const routes: string[] = [];
-  const boundRoutes: string[] = [];
+  const boundRoutes: Array<{ clientKey: string; sessionUuid: string }> = [];
   const acquisitionOwners: Array<string | undefined> = [];
   let socketSessionId = "client";
   const dispatch = async (name: string, args: Record<string, unknown>) => {
@@ -212,7 +212,7 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
     const route = await socket.testHooks.getMcpForwardRoute(request, socketSessionId);
     routes.push(route.clientKey);
     if (route.sessionUuid) {
-      boundRoutes.push(route.clientKey);
+      boundRoutes.push({ clientKey: route.clientKey, sessionUuid: route.sessionUuid });
     }
     let fixture = fixtures.get(route.clientKey);
     if (!fixture) {
@@ -505,6 +505,10 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
     await proxy.callTool("setActiveDevice", { deviceId: devices[2].deviceId, platform: "android" });
     await proxy.callTool("routingProbe", { keepScreenAwake: false });
     expect(received.at(-1)).toBe(devices[2].deviceId);
+    // Capture the active Android-bound connection now: later calls (the stale Apple one
+    // below) append their own bound routes, so the last bound route is not this one.
+    const activeAndroidRoute = boundRoutes.at(-1);
+    expect(activeAndroidRoute?.sessionUuid).toBe(android);
     const staleResult = await proxy.callTool("routingProbe", {
       sessionUuid: apple,
       keepScreenAwake: false,
@@ -557,8 +561,9 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
         expect(failureText).not.toMatch(/disabled/i);
         expect(failureText).not.toMatch(/unknown tool/i);
         // Inventory listings never inherit the proxy's binding (#13796), so the call's own
-        // route is unbound; the advertisement under test is the bound connection's.
-        const fixture = fixtures.get(boundRoutes.at(-1)!);
+        // route is unbound; the advertisement under test is the active Android-bound
+        // connection's, not that of whichever bound route happened to run last.
+        const fixture = fixtures.get(activeAndroidRoute!.clientKey);
         expect(fixture).toBeDefined();
         const advertisedToolNames = (await fixture!.client.listTools()).tools.map(
           (tool) => tool.name,

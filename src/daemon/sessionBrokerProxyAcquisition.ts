@@ -1,8 +1,9 @@
 import { daemonSupportsSessionBroker, type SessionConfig } from "../devices/sessionConfig";
-import type {
-  SessionBrokerFailure,
-  SessionBrokerReleaseResult,
-  SessionBrokerResult,
+import {
+  NO_PREPARATION_BUDGET_REASON,
+  type SessionBrokerFailure,
+  type SessionBrokerReleaseResult,
+  type SessionBrokerResult,
 } from "../devices/sessionBrokerResult";
 import { errorMessage } from "../utils/describeUnknownError";
 import { DEFAULT_PROVISION_DEVICE_TIMEOUT_MS } from "../utils/deviceTimeouts";
@@ -496,7 +497,7 @@ function exhaustedPrepareBudget(
 ): SessionBrokerResult {
   // Stopping refused admission, so there is no durable request or grant to clean up.
   return retryAfterMs === undefined
-    ? timeoutFailure(config, new Error("No preparation budget remains"))
+    ? timeoutFailure(config, new Error(NO_PREPARATION_BUDGET_REASON))
     : failedResult(
         config,
         brokerFailure(

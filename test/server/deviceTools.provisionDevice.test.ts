@@ -523,6 +523,118 @@ describe("provisionDevice handler", () => {
     },
   );
 
+  describe("deviceProfile (#14058)", () => {
+    const profiled = (profile: Record<string, unknown>, extra: Record<string, unknown> = {}) => {
+      const args = provisionTestArgs("android");
+      return {
+        ...args,
+        ...extra,
+        device: { ...args.device, spec: { ...args.device.spec, deviceProfile: profile } },
+      };
+    };
+
+    test("the schema takes a manufacturer profile on Android only, with boot and readiness", () => {
+      const profile = { manufacturerProfile: "samsung-oneui", requires: ["knox"] };
+      expect(provisionDeviceSchema.safeParse(profiled(profile)).success).toBe(true);
+      expect(
+        provisionDeviceSchema.safeParse(profiled({ manufacturerProfile: "huawei-emui" })).success,
+      ).toBe(false);
+      expect(provisionDeviceSchema.safeParse(profiled(profile, { boot: false })).success).toBe(
+        false,
+      );
+      expect(
+        provisionDeviceSchema.safeParse(profiled(profile, { readiness: "none" })).success,
+      ).toBe(false);
+      const ios = provisionTestArgs("ios");
+      expect(
+        provisionDeviceSchema.safeParse({
+          ...ios,
+          device: { ...ios.device, spec: { ...ios.device.spec, deviceProfile: profile } },
+        }).success,
+      ).toBe(false);
+    });
+
+    test("applies after readiness to the bound session and never provisions the profile", async () => {
+      const order: string[] = [];
+      const applied: Array<{ deviceId: string; profile: unknown; sessionId: string }> = [];
+      const specs: unknown[] = [];
+      exactProvisioner.provision = async (request) => {
+        specs.push(request.spec);
+        return provisionedTestDevice("android", false);
+      };
+      deviceManager.setBootedDevices("android", [
+        {
+          name: provisionTestArgs("android").device.name,
+          platform: "android",
+          deviceId: "emulator-5554",
+        },
+      ]);
+      setDeviceToolsDependencies({
+        ensureCtrlProxyReady: async () => {
+          order.push("readiness");
+        },
+        manufacturerProfileApplier: {
+          apply: async (device, profile, sessionId) => {
+            order.push("profile");
+            applied.push({ deviceId: device.deviceId, profile, sessionId });
+            return {
+              message: "Applied manufacturer profile samsung-oneui v1",
+              deviceId: device.deviceId,
+              action: "apply",
+              catalogVersion: 1,
+              persona: { id: "samsung-oneui", version: 1, displayName: "Samsung One UI" },
+              status: "applied",
+              facets: [],
+              nonEmulatable: [],
+            };
+          },
+        },
+      });
+
+      const response = await ToolRegistry.getTool("provisionDevice")!.handler(
+        profiled({ manufacturerProfile: "samsung-oneui" }),
+      );
+
+      const payload = JSON.parse(asToolResponse(response).content[0].text);
+      expect(order).toEqual(["readiness", "profile"]);
+      expect(applied).toEqual([
+        {
+          deviceId: "emulator-5554",
+          profile: { manufacturerProfile: "samsung-oneui" },
+          sessionId: payload.sessionId,
+        },
+      ]);
+      expect(specs).toEqual([provisionTestArgs("android").device.spec]);
+      expect(payload).toMatchObject({
+        manufacturerProfile: { status: "applied", manufacturerProfile: { id: "samsung-oneui" } },
+        requestedSpec: { deviceProfile: { manufacturerProfile: "samsung-oneui" } },
+      });
+    });
+
+    test("a capability the profile cannot emulate refuses before anything is created", async () => {
+      let provisioned = false;
+      exactProvisioner.provision = async () => {
+        provisioned = true;
+        return provisionedTestDevice("android", false);
+      };
+
+      const response = toolResponseSchema.parse(
+        await ToolRegistry.getTool("provisionDevice")!.handler(
+          profiled({ manufacturerProfile: "samsung-oneui", requires: ["samsung-dex"] }),
+        ),
+      );
+
+      expect(response.isError).toBe(true);
+      const payload = JSON.parse(response.content[0].text);
+      expect(payload.error).toMatchObject({
+        code: "requires_real_device",
+        retryable: false,
+        capabilities: [{ id: "samsung-dex" }],
+      });
+      expect(provisioned).toBe(false);
+    });
+  });
+
   test("rejects adoption when distinct running emulators claim the exact AVD name", async () => {
     fixtureBuildSpy = spyOn(buildIdentity, "getCurrentBuildIdentity").mockReturnValue({
       entryScript: "",

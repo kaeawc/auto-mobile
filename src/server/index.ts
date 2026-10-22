@@ -72,6 +72,7 @@ import { registerSdkCapabilityResources } from "./sdkCapabilityResources";
 import { registerDataStoreResources } from "./dataStoreResources";
 import { registerAppFileResources } from "./appFileResources";
 import { registerSessionLogResources } from "./sessionLogResources";
+import { registerCrashReportResources } from "./crashReportResources";
 import { registerSharedStorageResources } from "./sharedStorageResources";
 import { registerFeatureFlagResources } from "./featureFlagResources";
 import { registerPrototypeResources } from "./prototypeResources";
@@ -249,6 +250,7 @@ function registerAllResources(iosDependencies: IosDoctorDependencies): void {
   registerDataStoreResources();
   registerAppFileResources();
   registerSessionLogResources();
+  registerCrashReportResources();
   registerSharedStorageResources();
   registerFeatureFlagResources();
   registerPrototypeResources();

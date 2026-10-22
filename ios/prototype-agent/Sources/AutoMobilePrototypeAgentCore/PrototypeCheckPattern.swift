@@ -74,15 +74,9 @@ enum PrototypeCheckPattern {
         private mutating func readAtom(_ char: Unicode.Scalar) -> (variable: Bool, alternation: Bool)? {
             var atom = (variable: false, alternation: false)
             if char == "\\" {
-                guard next != nil else { valid = false; return nil }
-                cursor += 1
+                _ = escape()
             } else if char == "[" {
-                while let member = next, member != "]" {
-                    cursor += 1
-                    if member == "\\", next != nil { cursor += 1 }
-                }
-                guard next == "]" else { valid = false; return nil }
-                cursor += 1
+                characterClass()
             } else if char == "(" {
                 if next == "?" {
                     cursor += 1
@@ -95,6 +89,37 @@ enum PrototypeCheckPattern {
                 return nil
             }
             return atom
+        }
+
+        private mutating func escape() -> Unicode.Scalar? {
+            guard let char = next else { valid = false; return nil }
+            cursor += 1
+            if "dwsDWS".unicodeScalars.contains(char) { return nil }
+            if !"^$\\.*+?()[]{}|/-".unicodeScalars.contains(char) { valid = false }
+            return char
+        }
+
+        private mutating func classAtom() -> Unicode.Scalar? {
+            guard let char = next else { valid = false; return nil }
+            cursor += 1
+            return char == "\\" ? escape() : char
+        }
+
+        private mutating func characterClass() {
+            if next == "^" { cursor += 1 }
+            var hasMember = false
+            while let char = next, char != "]", valid {
+                let start = classAtom()
+                hasMember = true
+                if next == "-", cursor + 1 < scalars.count, scalars[cursor + 1] != "]" {
+                    cursor += 1
+                    let end = classAtom()
+                    if let start, let end { if start.value > end.value { valid = false } }
+                    else { valid = false }
+                }
+            }
+            guard next == "]", hasMember else { valid = false; return }
+            cursor += 1
         }
 
         private mutating func number() -> Int? {

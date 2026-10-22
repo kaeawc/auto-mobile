@@ -1,0 +1,66 @@
+{
+  "spec": {
+    "id": "menus",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "opacity": 100
+    },
+    "state": {
+      "open": false,
+      "choice": "a"
+    },
+    "root": {
+      "type": "row",
+      "children": [
+        {
+          "onTap": [
+            {
+              "type": "setState",
+              "key": "open",
+              "value": true
+            }
+          ],
+          "type": "iconButton",
+          "icon": "more_vert"
+        },
+        {
+          "testTag": "overflow",
+          "type": "menu",
+          "openWhen": {
+            "key": "open",
+            "equals": true
+          },
+          "items": [
+            {
+              "label": "Share",
+              "onTap": [
+                {
+                  "type": "emit",
+                  "name": "share"
+                },
+                {
+                  "type": "setState",
+                  "key": "open",
+                  "value": false
+                }
+              ],
+              "icon": "share",
+              "trailingText": "Send",
+              "zzzUnknown": true
+            },
+            {
+              "type": "divider"
+            },
+            {
+              "label": "Unavailable",
+              "enabled": false
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[1].items[0].zzzUnknown"
+}

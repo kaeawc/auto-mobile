@@ -1,0 +1,64 @@
+{
+  "spec": {
+    "id": "platform-call",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "echoStatus": "idle",
+      "sent": false
+    },
+    "data": {
+      "echo": {}
+    },
+    "requires": {
+      "platform": ["test"]
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "button",
+          "id": "go",
+          "label": "Go",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "test.echo",
+              "args": {
+                "message": {
+                  "state": "echoStatus"
+                },
+                "delayMs": {
+                  "value": 10
+                }
+              },
+              "into": "/data/echo",
+              "statusKey": "echoStatus",
+              "timeoutMs": 5000,
+              "onSuccess": [
+                {
+                  "type": "setState",
+                  "key": "sent",
+                  "value": true
+                }
+              ],
+              "onError": [
+                {
+                  "type": "emit",
+                  "name": "echo_failed"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "options": {
+    "supportedCapabilities": ["prototype_data_model_v1", "prototype_platform_v1"]
+  },
+  "expectedPath": "$"
+}

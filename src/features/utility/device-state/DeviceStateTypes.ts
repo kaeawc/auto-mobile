@@ -46,6 +46,8 @@ import {
 } from "./BiometricState";
 import type { ScreenLockState, SetScreenLockInput } from "../screenLock/ScreenLockTypes";
 import type { ScreenLockDeviceStateDependencies } from "../screenLock/ScreenLockOperations";
+import type { PowerState, SetPowerInput } from "../power/PowerTypes";
+import type { PowerDeviceStateDependencies } from "../power/PowerOperations";
 
 export interface DeviceStateResult {
   success: boolean;
@@ -61,6 +63,7 @@ export interface DeviceStateResult {
   cameraPoster?: DeviceCameraPosterState;
   sensors?: DeviceSensorsState;
   screenLock?: ScreenLockState;
+  power?: PowerState;
   /** Requested fields skipped because the current platform cannot support them. */
   unsupported?: DeviceStateField[];
   error?: string;
@@ -77,6 +80,7 @@ export interface SetDeviceStateInput {
   clock?: SetDeviceClockInput;
   cameraPoster?: SetDeviceCameraPosterInput;
   screenLock?: SetScreenLockInput;
+  power?: SetPowerInput;
 }
 
 /**
@@ -94,6 +98,7 @@ export const DEVICE_STATE_READABLE_FIELDS = [
   "clock",
   "sensors",
   "screenLock",
+  "power",
 ] as const;
 
 export type DeviceStateField = (typeof DEVICE_STATE_READABLE_FIELDS)[number];
@@ -114,6 +119,7 @@ const DEVICE_STATE_WRITABLE_FIELD_PRESENCE: Record<keyof SetDeviceStateInput, tr
   clock: true,
   cameraPoster: true,
   screenLock: true,
+  power: true,
 };
 
 /**
@@ -141,6 +147,7 @@ export interface SelectedDeviceStates {
   clock?: DeviceClockState;
   sensors?: DeviceSensorsState;
   screenLock?: ScreenLockState;
+  power?: PowerState;
 }
 
 /**
@@ -190,6 +197,8 @@ export interface DeviceStateDependencies {
   iosAppNetworkRule?: () => IosAppNetworkRuleCommandContext | undefined;
   /** Android lock-screen credential seams (#14107); a session supplies `mutation`. */
   screenLock?: ScreenLockDeviceStateDependencies;
+  /** Android battery, Doze, standby, saver and thermal seams (#14084); a session supplies `mutation`. */
+  power?: PowerDeviceStateDependencies;
 }
 
 export type RequestedDeviceStates = Pick<
@@ -202,6 +211,7 @@ export type RequestedDeviceStates = Pick<
   | "clock"
   | "cameraPoster"
   | "screenLock"
+  | "power"
 >;
 
 export const EMPTY_STATE_SELECTION_ERROR = "At least one device state field must be included";
@@ -216,7 +226,8 @@ export function setDeviceStateInputIsEmpty(input: SetDeviceStateInput): boolean 
     !input.location &&
     !input.clock &&
     !input.cameraPoster &&
-    !input.screenLock
+    !input.screenLock &&
+    !input.power
   );
 }
 

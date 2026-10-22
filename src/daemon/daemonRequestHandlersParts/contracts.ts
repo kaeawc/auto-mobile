@@ -40,6 +40,7 @@ import type { BrokerConnectionScopes } from "../sessionBroker/connectionScope";
 import type { DEVICE_OUTSIDE_BROKER_GRANT_CODE } from "../sessionBroker/connectionRefusal";
 import type { DeviceLeaseRelinquishPort } from "../deviceLeaseActivitySources";
 import type { ScreenLockRegistry } from "../../features/utility/screenLock/ScreenLockRegistry";
+import type { PowerRegistry } from "../../features/utility/power/PowerRegistry";
 
 export interface DaemonStateAccess {
   isInitialized(): boolean;
@@ -53,6 +54,8 @@ export interface DaemonStateAccess {
   getDeviceLeaseRelinquishPort?(): DeviceLeaseRelinquishPort;
   /** Overrides the registry the release result reads `screenLockRestore` from (tests). */
   getScreenLockRegistry?(): ScreenLockRegistry;
+  /** Overrides the registry the release result reads `powerRestore` from (tests). */
+  getPowerRegistry?(): PowerRegistry;
   getObserverSessionRegistry?(): ObserverSessionStore | undefined;
   /** Socket sessions bound to broker bindings (#11178). */
   getBrokerConnectionScopes?(): Pick<BrokerConnectionScopes, "bind" | "get" | "unbind">;

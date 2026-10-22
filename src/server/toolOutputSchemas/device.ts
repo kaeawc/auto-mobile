@@ -19,6 +19,7 @@ import {
   LOCK_CREDENTIAL_MISMATCH,
   LOCK_CREDENTIAL_PREEXISTING,
 } from "../../features/utility/screenLock/ScreenLockTypes";
+import { BATTERY_CHARGING_VALUES, DOZE_MODES } from "../../features/utility/power/PowerTypes";
 import { observationOutputSchema } from "./observation";
 import { observationDiffMetadataSchema, tapEffectSchema } from "./observationMetadata";
 
@@ -233,6 +234,29 @@ const deviceStateOutputFields = {
       outcome: z.enum(["set", "changed", "cleared", "unchanged"]).optional(),
       restoreOnRelease: z.boolean().optional(),
       errorCode: z.enum([LOCK_CREDENTIAL_PREEXISTING, LOCK_CREDENTIAL_MISMATCH]).optional(),
+    })
+    .passthrough()
+    .optional(),
+  // Battery, Doze, saver, standby and thermal state plus the restore receipt (#14084).
+  power: z
+    .object({
+      ...deviceStateFieldOutputFields,
+      battery: z
+        .object({
+          level: z.number(),
+          charging: z.enum(BATTERY_CHARGING_VALUES),
+          status: z.string(),
+          faked: z.boolean(),
+        })
+        .optional(),
+      batterySaver: z.boolean().optional(),
+      dataSaver: z.boolean().optional(),
+      doze: z.object({ mode: z.enum(DOZE_MODES), deep: z.string(), light: z.string() }).optional(),
+      thermal: z.object({ status: z.number(), override: z.boolean() }).optional(),
+      applied: z.array(z.string()).optional(),
+      preconditions: z.array(z.string()).optional(),
+      restoreOnRelease: z.boolean().optional(),
+      errorCode: z.string().optional(),
     })
     .passthrough()
     .optional(),

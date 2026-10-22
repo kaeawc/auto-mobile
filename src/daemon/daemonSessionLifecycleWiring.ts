@@ -29,6 +29,7 @@ import {
 import { registerPerformanceMonitorSessionCleanup } from "./performanceMonitorSessionCleanup";
 import { registerAppLinksSessionCleanup } from "./appLinksSessionCleanup";
 import { registerScreenLockSessionCleanup } from "./screenLockSessionCleanup";
+import { registerPowerSessionCleanup } from "./powerSessionCleanup";
 import { registerSystemAlertSessionCleanup } from "./systemAlertSessionCleanup";
 import {
   createOwnerlessRecordingAcquisitionCleanup,
@@ -109,6 +110,7 @@ export function wireSessionLifecycle(
   registerDeviceConditionSessionCleanup(sessionManager);
   registerPerformanceMonitorSessionCleanup(sessionManager);
   registerScreenLockSessionCleanup(sessionManager);
+  registerPowerSessionCleanup(sessionManager);
   registerSystemAlertSessionCleanup(sessionManager);
   registerRecordingSessionCleanup(sessionManager, {
     ...defaultRecordingSessionCleanupDeps,

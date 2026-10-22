@@ -29,6 +29,7 @@ export interface DeviceConditionCallFields {
   location?: unknown;
   cameraPoster?: unknown;
   screenLock?: unknown;
+  power?: unknown;
 }
 
 export interface DeviceConditionToolDeps {
@@ -46,6 +47,7 @@ const OTHER_DEVICE_STATE_FIELDS: readonly (keyof DeviceConditionCallFields)[] = 
   "location",
   "cameraPoster",
   "screenLock",
+  "power",
 ];
 
 /** Fail closed until the composition root registers the process's feature flags. */

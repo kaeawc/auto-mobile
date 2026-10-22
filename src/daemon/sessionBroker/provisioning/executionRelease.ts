@@ -1,4 +1,5 @@
 import { screenLockRestoreResult } from "../../screenLockSessionCleanup";
+import { powerRestoreResult } from "../../powerSessionCleanup";
 import {
   type BrokerExecutionReleaseNotice,
   type BrokerExecutionReleaseOptions,
@@ -345,6 +346,7 @@ export class BrokerExecutionRelease {
     return {
       ...this.keepAwakeRestoreResult(sessionId),
       ...(await screenLockRestoreResult(sessionId)),
+      ...(await powerRestoreResult(sessionId)),
       sessionId,
       outcome: settled ? "reusable_for_this_binding" : "cleanup_pending",
       settlement: settled ? "confirmed" : "settling",
@@ -388,6 +390,7 @@ export class BrokerExecutionRelease {
     return {
       ...this.keepAwakeRestoreResult(sessionId),
       ...(await screenLockRestoreResult(sessionId)),
+      ...(await powerRestoreResult(sessionId)),
       sessionId,
       outcome: stillSettling ? "cleanup_pending" : "reusable_for_this_binding",
       settlement: stillSettling ? "settling" : "confirmed",

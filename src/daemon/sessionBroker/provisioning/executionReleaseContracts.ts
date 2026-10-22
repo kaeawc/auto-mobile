@@ -1,4 +1,5 @@
 import type { ScreenLockReleaseReport } from "../../screenLockSessionCleanup";
+import type { PowerReleaseReport } from "../../powerSessionCleanup";
 import { type BackoffPolicy, exponentialBackoff } from "../../../utils/Backoff";
 import type { KeepAwakeRestoreReport } from "../../../utils/KeepScreenAwakeManager";
 import type { Timer } from "../../../utils/SystemTimer";
@@ -57,6 +58,8 @@ export interface BrokerExecutionReleaseResult {
   keepAwakeRestore?: KeepAwakeRestoreReport;
   /** How clearing the lock-screen credential the session set went (#14107). */
   screenLockRestore?: ScreenLockReleaseReport;
+  /** How restoring the battery, Doze, standby, saver and thermal changes the session made went (#14084). */
+  powerRestore?: PowerReleaseReport;
   sessionId: string;
   outcome: BrokerExecutionReleaseOutcome;
   settlement: ManagedExecutionSettlement;

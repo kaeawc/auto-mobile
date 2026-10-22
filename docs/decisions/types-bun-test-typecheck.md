@@ -8,8 +8,8 @@ Dependency: `@types/bun`
 
 `tsconfig.test.json` type-checks `test/**/*.ts` (and `tsconfig.json` loads the same types for src, which imports `bun:sqlite`); tests import `bun:test` and use the `Bun`
 global. Those declarations ship in `@types/bun` (which pulls `bun-types`). It is a
-devDependency only, pinned to the same version as the Bun runtime the repo uses
-(`1.3.14`), and is never part of the published runtime graph.
+devDependency only, pinned to the Bun release line the repo uses (runtime `1.4.4`; `@types/bun`
+tracks the newest published `1.4.x`), and is never part of the published runtime graph.
 
 ## Alternatives checked
 

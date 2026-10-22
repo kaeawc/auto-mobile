@@ -22,7 +22,7 @@
 
 ARG ZULU_VERSION=21.0.2
 ARG PLATFORM=linux/amd64
-ARG BUN_VERSION=1.3.14
+ARG BUN_VERSION=1.4.4
 ARG KTFMT_VERSION=0.65
 # Keep in sync with scripts/ktfmt/ktfmt_version.sh (KTFMT_VERSION), the repo's canonical pin.
 # Computed locally from the downloaded GitHub Releases asset on 2026-10-08:

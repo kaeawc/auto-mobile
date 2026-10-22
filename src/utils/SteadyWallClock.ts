@@ -17,11 +17,11 @@ export const WALL_REPORT_ANCHOR_TOLERANCE_MS = 50;
 /**
  * A wall-anchored clock for session lease and idle deltas (#11080): it starts at the wall clock's
  * reading and then advances only with the monotonic clock, plus measured host sleep where the
- * monotonic clock pauses for it (darwin), because host sleep counts toward idle (owner rule).
+ * monotonic clock pauses for it (darwin, Linux), because host sleep counts toward idle (owner rule).
  *
  * Wall-clock steps therefore do not move it: a backward NTP step neither extends a dead owner's
- * hold nor shrinks an idle window, and where the monotonic clock already includes sleep (Windows,
- * Linux) a forward step is ignored too. On darwin a forward step is indistinguishable from host
+ * hold nor shrinks an idle window, and where the monotonic clock already includes sleep (Windows)
+ * a forward step is ignored too. On darwin and Linux a forward step is indistinguishable from host
  * sleep and is counted as sleep: it moves idle accounting the way sleep does, and the heartbeat
  * monitor excuses it from the lease the way it excuses sleep.
  *

@@ -7,21 +7,30 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import type { BindingProcessIdentity } from "./registry/bindingRegistry";
 import { SessionBrokerFailureError } from "./devicePort";
+import { SessionBrokerStoppingError } from "./SessionBrokerStoppingError";
+import { SESSION_BROKER_RETRY_AFTER_MS } from "./timing";
 import type { BrokerRequestRecord } from "./store";
 
 export function storedBrokerFailure(
   request: BrokerRequestRecord,
   cleanupPending: boolean,
 ): SessionBrokerFailure {
+  const code = request.errorCode ?? "session_preparation_failed";
   const retryable =
-    request.retryable && (request.errorCode === "eviction_pending" || !cleanupPending);
+    request.retryable &&
+    (["eviction_pending", "session_broker_stopping"].includes(code) || !cleanupPending);
   return {
-    code: request.errorCode ?? "session_preparation_failed",
+    code,
     message: request.error ?? "",
     retryable,
-    ...(retryable && request.errorCode === "eviction_pending" ? { retryAfterMs: 1_000 } : {}),
+    ...(retryable && code === "eviction_pending" ? { retryAfterMs: 1_000 } : {}),
+    ...(retryable && code === "session_broker_stopping"
+      ? { retryAfterMs: SESSION_BROKER_RETRY_AFTER_MS }
+      : {}),
     ...(retryable &&
-    ["capacity_exhausted", "cancelled", "eviction_pending"].includes(request.errorCode ?? "")
+    ["capacity_exhausted", "cancelled", "eviction_pending", "session_broker_stopping"].includes(
+      code,
+    )
       ? { retryRequires: "new_request_id" as const }
       : {}),
   };
@@ -44,7 +53,21 @@ export function failureFor(error: unknown): SessionBrokerFailure {
     : { code: "session_preparation_failed", message: errorMessage(error), retryable: false };
 }
 
+export function abortedByBrokerStop(signal: AbortSignal): boolean {
+  return signal.aborted && signal.reason instanceof SessionBrokerStoppingError;
+}
+
 export function preparationFailureError(error: unknown, signal: AbortSignal): unknown {
+  if (abortedByBrokerStop(signal)) {
+    return new SessionBrokerFailureError({
+      code: "session_broker_stopping",
+      retryable: true,
+      retryAfterMs: SESSION_BROKER_RETRY_AFTER_MS,
+      retryRequires: "new_request_id",
+      message:
+        "Session preparation was interrupted because the session broker is stopping; retry with a new request ID against the restarted daemon.",
+    });
+  }
   if (error instanceof SessionBrokerFailureError || !signal.aborted) {
     return error;
   }

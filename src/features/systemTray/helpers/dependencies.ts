@@ -12,6 +12,7 @@ import type { Timer } from "../../../utils/SystemTimer";
 import { defaultTimer } from "../../../utils/SystemTimer";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../../utils/toolUtils";
 import { PressButton } from "../../action/PressButton";
+import type { PressButtonResult } from "../../../models/PressButtonResult";
 import { AndroidCtrlProxyClient } from "../../observe/android";
 import type { ObserveScreenExecuteOptions } from "../../observe/interfaces/ObserveScreen";
 import { IOSCtrlProxyClient } from "../../observe/ios";
@@ -60,6 +61,7 @@ export interface SystemTrayDependencies {
   adbFactory: (device: BootedDevice) => SystemTrayAdb;
   iosClientFactory?: (device: BootedDevice) => SystemTrayIosClient;
   pressHomeFactory?: (device: BootedDevice, signal?: AbortSignal) => Promise<IosGestureResult>;
+  pressButtonFactory?: (device: BootedDevice) => Pick<PressButton, "execute">;
   timer: Timer;
 }
 
@@ -72,6 +74,19 @@ const toIosGestureResult = (result: IosGestureResult): IosGestureResult => ({
   dispatched: result.dispatched,
   acknowledged: result.acknowledged,
 });
+
+/** Preserve PressButton's dispatch state when adapting HOME to the iOS detector contract. */
+export const pressHomeResultToIosGestureResult = (result: PressButtonResult): IosGestureResult => {
+  const indeterminate =
+    result.code === "indeterminate_outcome" ||
+    result.error?.startsWith("Button press outcome is indeterminate:") === true;
+  return {
+    success: result.success,
+    error: result.error,
+    dispatched: result.dispatched ?? (indeterminate ? true : undefined),
+    acknowledged: result.acknowledged ?? (indeterminate ? false : undefined),
+  };
+};
 
 const defaultIosClientFactory: (device: BootedDevice) => SystemTrayIosClient = (device) => {
   const client = IOSCtrlProxyClient.getInstance(device);
@@ -93,9 +108,12 @@ export const getSystemTrayDependencies = (): SystemTrayDependencies => {
       observeScreenFactory: (device) => new RealObserveScreen(device),
       adbFactory: (device) => defaultAdbClientFactory.create(device),
       iosClientFactory: defaultIosClientFactory,
+      pressButtonFactory: (device) => new PressButton(device),
       pressHomeFactory: async (device, signal) => {
-        const result = await new PressButton(device).execute("home", { signal });
-        return { success: result.success, error: result.error };
+        const factory =
+          systemTrayDependencies?.pressButtonFactory ?? ((target) => new PressButton(target));
+        const result = await factory(device).execute("home", { signal });
+        return pressHomeResultToIosGestureResult(result);
       },
       timer: defaultTimer,
       appInventoryFactory: (device) =>
@@ -113,6 +131,7 @@ export const setSystemTrayDependencies = (overrides: Partial<SystemTrayDependenc
     adbFactory: overrides.adbFactory ?? current.adbFactory,
     iosClientFactory: overrides.iosClientFactory ?? current.iosClientFactory,
     pressHomeFactory: overrides.pressHomeFactory ?? current.pressHomeFactory,
+    pressButtonFactory: overrides.pressButtonFactory ?? current.pressButtonFactory,
     timer: overrides.timer ?? current.timer,
     appInventoryFactory: overrides.appInventoryFactory ?? current.appInventoryFactory,
     appLabelResolver: overrides.appLabelResolver ?? current.appLabelResolver,

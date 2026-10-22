@@ -370,8 +370,17 @@ function provisionDeviceDiagnosticFields(error: ProvisionDeviceError) {
     ...(diagnostics.runtimeCompatibility
       ? { runtimeCompatibility: diagnostics.runtimeCompatibility }
       : {}),
-    ...(diagnostics.binding ? { binding: diagnostics.binding } : {}),
-    ...(diagnostics.capacity ? diagnostics.capacity : {}),
+    ...provisionDeviceRefusalFields(error),
     daemonBuild: `${DAEMON_VERSION}+${getCurrentBuildIdentity().buildId}`,
+  };
+}
+
+/** Why the request itself was refused: a binding hold, missing capabilities, or capacity. */
+function provisionDeviceRefusalFields(error: ProvisionDeviceError) {
+  const diagnostics = error.diagnostics;
+  return {
+    ...(diagnostics.binding ? { binding: diagnostics.binding } : {}),
+    ...(diagnostics.capabilities ? { capabilities: diagnostics.capabilities } : {}),
+    ...(diagnostics.capacity ? diagnostics.capacity : {}),
   };
 }

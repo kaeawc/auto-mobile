@@ -7,6 +7,7 @@ import {
   reportedTextSizePx,
   squareHasOpaquePixel,
 } from "./contrastImageGeometry";
+import { ContrastGlyphFringe } from "./ContrastGlyphFringe";
 import type {
   ColorCluster,
   ContrastSample,
@@ -55,16 +56,16 @@ const GLYPH_MAX_FILL = 0.6;
 const GLYPH_MIN_BARS = 3;
 /** Pixels grown across all stroke regions of one colour when judging their shape. */
 const GLYPH_SHAPE_MAX_PIXELS = 65536;
-/** A sampled "background" this close to the text colour is a glyph pixel, not the background. */
-const GLYPH_PIXEL_MAX_DISTANCE = 30;
-/** How far from a sample point to look for the colour a stroke away. */
-const GLYPH_NEIGHBOUR_OFFSET = 12;
 /** Pixel sampling, glyph shape analysis, and WCAG color calculations. */
 export class ContrastImageAnalysis {
   constructor(
     private readonly config: { compositeOverlays: boolean },
     private readonly getCachedContrast: (text: RGB, background: RGB) => number,
   ) {}
+
+  private readonly fringe = new ContrastGlyphFringe((image, x, y) =>
+    this.resolvePixelColor(image, x, y),
+  );
 
   /**
    * Read a pixel as RGBA from a decoded raw image, reproducing jimp's
@@ -426,7 +427,15 @@ export class ContrastImageAnalysis {
           ? 0
           : STROKE_MAX_DISTANCE,
       );
-    const inkText = this.selectTextColor(supported, backgroundColor, perimeter, isSolidStroke);
+    const isFringe = (color: RGB, text: RGB): boolean =>
+      this.fringe.isFringe(image, ink ?? interior, color, text, backgroundColor);
+    const inkText = this.selectTextColor(
+      supported,
+      backgroundColor,
+      perimeter,
+      isSolidStroke,
+      isFringe,
+    );
     // Strokes within INK_MIN_DISTANCE of the background are not ink, so a brighter icon
     // alone can set the extent and leave a faint label beside it unmeasured. Judge faint
     // solid strokes anywhere inside the box as text too, keeping the lower contrast. Only
@@ -466,6 +475,7 @@ export class ContrastImageAnalysis {
     background: RGB,
     perimeter: ColorCluster[],
     isSolidStroke: (color: RGB) => boolean,
+    isFringe: (color: RGB, text: RGB) => boolean,
   ): RGB {
     const largest = clusters[0]?.count ?? 0;
     const candidates = clusters.filter(
@@ -473,6 +483,7 @@ export class ContrastImageAnalysis {
         cluster.count >= largest * 0.25 ||
         (cluster.coreCount >= cluster.count * 0.8 &&
           !perimeter.some((edge) => this.isSimilarColor(cluster.color, edge.color)) &&
+          !isFringe(cluster.color, clusters[0].color) &&
           isSolidStroke(cluster.color)),
     );
     return candidates.reduce((selected, candidate) => {
@@ -561,53 +572,13 @@ export class ContrastImageAnalysis {
           colors.filter((color) => this.isSimilarColor(color, background.color)),
           false,
         )[0].color;
-        return this.isGlyphPixel(image, bounds, elementColors, local, x, y)
+        return this.fringe.isGlyphPixel(image, bounds, elementColors, local, x, y)
           ? elementColors.backgroundColor
           : local;
       }
     }
 
     return elementColors.backgroundColor;
-  }
-
-  /**
-   * A point on a glyph stroke yields the stroke itself as its "background" (JPEG ringing
-   * and anti-aliasing put it just outside the text colour's similarity radius), which would
-   * report ~1:1 for legible text. Treat it as the dominant background instead (#10290).
-   */
-  private isGlyphPixel(
-    image: RawImage,
-    bounds: Element["bounds"],
-    elementColors: ElementColors,
-    color: RGB,
-    x: number,
-    y: number,
-  ): boolean {
-    if (
-      this.colorDistance(color, elementColors.textColor) > GLYPH_PIXEL_MAX_DISTANCE ||
-      this.colorDistance(color, elementColors.textColor) >=
-        this.colorDistance(color, elementColors.backgroundColor)
-    ) {
-      return false;
-    }
-    // A stroke is narrow: the colour a few strokes away is the dominant background. A
-    // genuinely text-coloured region (a gradient end, an image) is not surrounded by it.
-    const around = [
-      [GLYPH_NEIGHBOUR_OFFSET, 0],
-      [-GLYPH_NEIGHBOUR_OFFSET, 0],
-      [0, GLYPH_NEIGHBOUR_OFFSET],
-      [0, -GLYPH_NEIGHBOUR_OFFSET],
-    ].filter(([dx, dy]) =>
-      this.isSimilarColor(
-        this.resolvePixelColor(
-          image,
-          clamp(x + dx, bounds.left, bounds.right - 1),
-          clamp(y + dy, bounds.top, bounds.bottom - 1),
-        ),
-        elementColors.backgroundColor,
-      ),
-    );
-    return around.length >= 3;
   }
 
   private resolvePixelColor(image: RawImage, x: number, y: number): RGB {

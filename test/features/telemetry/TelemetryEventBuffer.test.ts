@@ -22,6 +22,7 @@ class FakeBatchTelemetryRepository implements BatchTelemetryRepository {
   layoutBatches: RecordLayoutEventInput[][] = [];
 
   rejectLogsWith: Error | null = null;
+  rejectLayoutWith: Error | null = null;
 
   private pendingLogGate: Promise<void> | null = null;
   private releaseLogGate: (() => void) | null = null;
@@ -58,6 +59,9 @@ class FakeBatchTelemetryRepository implements BatchTelemetryRepository {
   }
 
   async recordLayoutEvents(inputs: RecordLayoutEventInput[]): Promise<void> {
+    if (this.rejectLayoutWith) {
+      throw this.rejectLayoutWith;
+    }
     this.layoutBatches.push(inputs);
   }
 }
@@ -86,6 +90,30 @@ function makeOs(kind: string): RecordOsEventInput {
     details: null,
   };
 }
+
+function makeLayout(detailsJson: string): RecordLayoutEventInput {
+  return {
+    ...makeOs("layout"),
+    subType: "hierarchy_change",
+    composableName: null,
+    composableId: null,
+    recompositionCount: null,
+    durationMs: null,
+    likelyCause: null,
+    detailsJson,
+  };
+}
+
+/** Observe a receipt without awaiting it, so a test can assert it is still pending. */
+function observe(receipt: Promise<boolean>): { value: boolean | undefined } {
+  const state: { value: boolean | undefined } = { value: undefined };
+  void receipt.then((persisted) => {
+    state.value = persisted;
+  });
+  return state;
+}
+
+const settle = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 describe("TelemetryEventBuffer", () => {
   let repository: FakeBatchTelemetryRepository;
@@ -278,5 +306,99 @@ describe("TelemetryEventBuffer", () => {
     expect(repository.logBatches).toHaveLength(2);
     expect(repository.logBatches[0].map((r) => r.message)).toEqual(["first"]);
     expect(repository.logBatches[1].map((r) => r.message)).toEqual(["second", "third"]);
+  });
+
+  describe("layout write receipts (#14625)", () => {
+    it("stays pending until the interval flush commits the row, then resolves true", async () => {
+      const buffer = new TelemetryEventBuffer(repository, timer, {
+        flushIntervalMs: 250,
+        maxBufferedRows: 1000,
+      });
+      buffer.start();
+      const receipt = observe(buffer.addLayout(makeLayout("a")));
+      await settle();
+      expect(receipt.value).toBeUndefined();
+
+      timer.advanceTime(250);
+      await settle();
+
+      expect(repository.layoutBatches[0].map((r) => r.detailsJson)).toEqual(["a"]);
+      expect(receipt.value).toBe(true);
+    });
+
+    it("resolves a cap-triggered flush's receipts", async () => {
+      const buffer = new TelemetryEventBuffer(repository, timer, { maxBufferedRows: 2 });
+      const first = buffer.addLayout(makeLayout("a"));
+      const second = buffer.addLayout(makeLayout("b"));
+      expect(await Promise.all([first, second])).toEqual([true, true]);
+    });
+
+    it("resolves false when the layout batch fails, independent of other kinds", async () => {
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const buffer = new TelemetryEventBuffer(repository, timer, { maxBufferedRows: 1000 });
+        repository.rejectLogsWith = new Error("log insert failed");
+        buffer.addLog(makeLog("dropped"));
+        const kept = buffer.addLayout(makeLayout("kept"));
+        await buffer.flush();
+        expect(await kept).toBe(true);
+
+        repository.rejectLayoutWith = new Error("layout insert failed");
+        const lost = buffer.addLayout(makeLayout("lost"));
+        await buffer.flush();
+        expect(await lost).toBe(false);
+        expect(warn.mock.calls.map((call) => call[1])).toEqual([
+          repository.rejectLogsWith,
+          repository.rejectLayoutWith,
+        ]);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it("settles a row added mid-flush with the next batch, not the in-flight one", async () => {
+      const buffer = new TelemetryEventBuffer(repository, timer, { maxBufferedRows: 1000 });
+      buffer.addLog(makeLog("first"));
+      const early = observe(buffer.addLayout(makeLayout("early")));
+      repository.holdNextLogFlush();
+      const firstFlush = buffer.flush();
+      await settle();
+
+      const late = observe(buffer.addLayout(makeLayout("late")));
+      repository.releaseLogFlush();
+      await firstFlush;
+      expect(early.value).toBe(true);
+      expect(late.value).toBeUndefined();
+
+      await buffer.flush();
+      expect(late.value).toBe(true);
+      expect(repository.layoutBatches.map((batch) => batch.map((r) => r.detailsJson))).toEqual([
+        ["early"],
+        ["late"],
+      ]);
+    });
+
+    it("settles every receipt on stop() and refuses rows until start() reopens it", async () => {
+      const buffer = new TelemetryEventBuffer(repository, timer, { maxBufferedRows: 1000 });
+      buffer.start();
+      const before = buffer.addLayout(makeLayout("before"));
+      const stopping = buffer.stop();
+      const after = buffer.addLayout(makeLayout("after"));
+      buffer.addLog(makeLog("after"));
+      await stopping;
+
+      expect(await before).toBe(true);
+      expect(await after).toBe(false);
+      await buffer.flush();
+      expect(repository.layoutBatches.map((batch) => batch.map((r) => r.detailsJson))).toEqual([
+        ["before"],
+      ]);
+      expect(repository.logBatches).toHaveLength(0);
+
+      buffer.start();
+      const reopened = buffer.addLayout(makeLayout("reopened"));
+      await buffer.stop();
+      expect(await reopened).toBe(true);
+    });
   });
 });

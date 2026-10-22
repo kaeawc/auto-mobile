@@ -11,6 +11,14 @@ journal adapter yet; `notJournaled` tools are intentional host-only or transient
 UI/prompt exemptions. Pending adapters and exemptions include their reasons.
 Its registry enumeration test includes mixed, hidden and SDK
 tools, and rejects a new control tool without an explicit justification.
+The 37 journaled tools include the original 26 tool adapters plus 11 data/provider
+adapters: `setKeyValue`, `removeKeyValue`, `clearKeyValueFile`, `setPreference`,
+`sqlQuery`, `mockNetwork`, `clearMockNetwork`, `sendSms`, `phoneCall`,
+`resetAppLogs` and `deviceSnapshot`. The coverage proof exercises every journaled
+classification through record-before-act dispatch. `stageSessionDownloads` is
+still pending: its deprecated alias runs via `nonDeviceHandler` and resolves the
+device inside the service, bypassing the recorded device dispatcher. A mapping
+alone would not journal that production path; service-side wiring is required.
 
 For a `journaled` mutation, production tool dispatch records its intent before
 the action under the broker recorder scope, whose incarnation is
@@ -24,7 +32,7 @@ requires the pending adapters, and criterion 3 (journal-backed release/read-thro
 remains unmet; #14359 must not close as fully delivered on this slice.
 Neither `pending-adapter` nor `notJournaled` implies production journaling.
 The optional Android (#14364) and iOS (#14361) keep-booted strategies capture
-partial baselines and run best-effort cleaning. `persona` and `statusBar` remain
+partial baselines and run best-effort cleaning. `manufacturerProfile` and `statusBar` remain
 `pending-adapter`: device-appearance intent and prior-value adapters are not yet
 wired. Their missing coverage limits journal intent coverage, not baseline capture,
 tool execution or keep-booted reuse.
@@ -184,6 +192,34 @@ work lands. Baseline and prior-value payloads can contain
 sensitive device data and must not be included in logs or public reports.
 
 ## Tool-surface recovery and compatibility
+
+Data-store identities retain the app, store, Android user selector and key;
+set/remove operations and `name`/`fileName` aliases share a first-write identity.
+iOS key-value standard-store aliases (empty name, case-insensitive `standard`,
+and app bundle ID) share an identity, as do UserDefaults preference standard-suite
+aliases (including omitted suite and `Standard`). Android omitted and explicit
+`userId` selectors are not merged: the default user is resolved dynamically from
+the app's installed/running users and is not necessarily user 0.
+Identities are not merged across tools: `setKeyValue` and `setPreference` can
+touch the same SharedPreferences file or standard UserDefaults and still get
+separate first-write rows, so a future restorer must not assume they are merged.
+Store clearing records the observed entries under a separate whole-store key.
+Key-value priors use an existing connected SDK's storage read path, preserving
+the entry's encoded value and type. Missing keys are `absent`; an empty store is
+`present` with an empty entry list, not proof that the backing file was absent.
+Unconnected providers, redacted/unknown entries and explicitly user-scoped
+Android key-value calls record `unobservable` (the SDK route is not user-scoped).
+Preference priors reuse `AppPreferences.getPreference`, retaining value, type and
+resolved user/store metadata. Redacted, lossy or potentially stale container-plist
+reads are `unobservable`. Read failures warn and still record intent before action.
+
+SQL uses the existing read-only classifier: proven reads do not journal; mutations
+and unproven statements record opaque database intent without trying to infer an
+inverse query. Network mock creation/clearing share opaque intent, not an invented
+device prior from host-owned rules. Telephony, log deletion (including rotated
+siblings) and snapshot capture/restore record opaque intent without claiming a
+complete or reversible prior. These adapters do not implement restorers or change
+keep-booted cleaning, and unreadable priors never block the tool action.
 
 Journaled non-read calls with an empty adapter result record an opaque
 `unobservable` intent instead of silently proceeding. `screenLock` is covered;

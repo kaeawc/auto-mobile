@@ -202,10 +202,11 @@ private constructor(
   }
 
   override fun callTool(name: String, arguments: JsonObject): JsonElement {
+    // A device read never needs a session (#11364): naming this client's UUID would make the read
+    // fail with that session's terminal or suspect error between a release and the rotation.
+    val skipsClientSession = name == SET_TOOL_ENABLED_TOOL_NAME || "sessionUuid" in arguments
     val sessionArguments =
-      if (
-        sessionUuid != null && name != SET_TOOL_ENABLED_TOOL_NAME && "sessionUuid" !in arguments
-      ) {
+      if (sessionUuid != null && !skipsClientSession && !isDeviceReadCall(name, arguments)) {
         buildJsonObject {
           arguments.forEach { (key, value) -> put(key, value) }
           put("sessionUuid", JsonPrimitive(sessionUuid))
@@ -455,6 +456,10 @@ internal fun resolveDaemonUserId(userName: String, osName: String, readUid: () -
     userName
   } catch (e: InterruptedException) {
     // The user name is the documented fallback identifier when `id -u` is unavailable.
+    DAEMON_PATHS_LOG.debug("Could not read the user id; using the user name: ${e.message}")
+    userName
+  } catch (e: SecurityException) {
+    // A security policy that denies subprocesses makes `id -u` unavailable too (#14571).
     DAEMON_PATHS_LOG.debug("Could not read the user id; using the user name: ${e.message}")
     userName
   }

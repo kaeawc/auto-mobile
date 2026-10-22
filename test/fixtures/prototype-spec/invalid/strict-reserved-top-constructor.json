@@ -1,0 +1,4 @@
+{
+  "rawJson": "{\"constructor\":true,\"id\":\"strict\",\"window\":{\"placement\":{\"type\":\"fullscreen\"}},\"root\":{\"type\":\"spacer\"}}",
+  "expectedPath": "constructor"
+}

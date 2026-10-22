@@ -248,6 +248,60 @@ describe("DaemonDisconnect per-device plan deferral", () => {
       await h.daemon.disconnectMonitor?.stop();
     }
   });
+  test("a nested label's loss reaches plan-time confirmation (#14445)", async () => {
+    const h = harness();
+    // An external plan on derived session base:B allocated nested label base:B:C on this device.
+    h.session.sessionId = "base:B:C";
+    h.device.sessionId = "base:B:C";
+    const labels: Record<string, Record<string, string>> = {
+      base: { A: "base", B: "base:B" },
+      "base:B": { A: "base:B", C: "base:B:C" },
+    };
+    h.daemon.getSessionManager().getDeviceLabels = (id) => labels[id];
+    const execution = executionTracker.startExecution("executePlan", undefined, "base:B");
+    executions.push(execution.id);
+    leases.push(
+      serverConfig.acquirePlanExecutionLease({
+        sessionUuid: "base:B",
+        deviceId: "primary-device",
+        executionId: execution.id,
+        labelSessionUuids: ["base:B", "base:B:C"],
+      }),
+    );
+    try {
+      await h.tick();
+      expect(h.daemon.disconnectMisses.get(h.device.id)).toBe(PLAN_DEVICE_DISCONNECT_MISS_CAP);
+      await h.tick();
+      expect(h.losses).toEqual([h.device.id]);
+      expect(h.released).toEqual([]);
+    } finally {
+      await h.daemon.disconnectMonitor?.stop();
+    }
+  });
+
+  test("a plan recorded under its derived label is cancelled on confirmed loss (#14443)", async () => {
+    const h = harness();
+    // executePlan routed through base:B: ingress records the execution under base:B, while the
+    // loss monitor holds the base:B holder as its owner base.
+    h.session.sessionId = "base:B";
+    h.device.sessionId = "base:B";
+    h.daemon.getSessionManager().getDeviceLabels = (id) =>
+      id === "base" ? { A: "base", B: "base:B" } : undefined;
+    const { execution } = startLeasedPlan(h.device.id, "base:B");
+    const bystander = startPlan(h.device.id, "base:other");
+    try {
+      await h.tick();
+      expect(execution.abortController.signal.aborted).toBe(false);
+      await h.tick();
+      expect(h.losses).toEqual([h.device.id]);
+      expect(execution.abortController.signal.aborted).toBe(true);
+      expect(bystander.abortController.signal.aborted).toBe(false);
+      expect(h.released).toEqual([]);
+    } finally {
+      await h.daemon.disconnectMonitor?.stop();
+    }
+  });
+
   test("an unrelated plan does not hold deferred iOS recovery", async () => {
     const h = harness();
     startPlan(h.peer.id, "peer");

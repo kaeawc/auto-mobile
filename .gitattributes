@@ -206,3 +206,7 @@ ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeSpecContractDa
 # Cross-language prototype bundle corpus is base64 JSON, never an LFS binary.
 test/fixtures/prototype-bundle/*.json text eol=lf
 test/fixtures/android-secure-settings/*.txt text eol=lf
+
+# Generated prototype spec models are compared byte-for-byte by a unit test on Windows.
+android/protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol/PrototypeSpecModels.generated.kt text eol=lf
+ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeSpecModels.generated.swift text eol=lf

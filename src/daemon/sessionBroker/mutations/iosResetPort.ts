@@ -7,6 +7,10 @@ import { classifyCleanReleaseError } from "../cleanReleaseFailure";
 import type { Timer } from "../../../utils/SystemTimer";
 import type { SimCtl } from "../../../utils/ios-cmdline-tools/SimCtlClient";
 import type { SimCtlClient } from "../../../utils/ios-cmdline-tools/SimCtlClient";
+import {
+  SIMCTL_PRIVACY_TCC_SERVICES,
+  type TccServiceRowReader,
+} from "../../../utils/ios-cmdline-tools/SimulatorTccSqliteClient";
 import { isProcessAlreadyGoneError } from "../../../utils/ios-cmdline-tools/iosProcessErrors";
 import { getIosInstalledAppBundleId } from "../../../utils/ios-cmdline-tools/iosInstalledApp";
 import { parsePlist } from "../../../utils/ios-cmdline-tools/XctestrunPlist";
@@ -172,6 +176,7 @@ export interface IosMutationResetDependencies {
   simctl: Pick<SimCtl, "executeCommandArgs"> & Pick<SimCtlClient, "listAppsOrThrow">;
   files: IosResetFiles;
   pasteboard: IosResetPasteboard;
+  privacyGrants: Pick<TccServiceRowReader, "readServiceRows">;
 }
 
 interface IosAppGroupCleanup {
@@ -504,7 +509,50 @@ export class IosDeviceMutationResetPort implements DeviceMutationResetPort {
         context,
       );
     }
+    await this.resetSurvivingPrivacyGrants(context);
     await this.restoreSettings(context);
+  }
+
+  private async resetSurvivingPrivacyGrants(context: DeviceMutationResetContext): Promise<void> {
+    const udid = context.scope.deviceId;
+    const readRows = async () => {
+      await context.assertOwned();
+      context.signal.throwIfAborted();
+      const started = this.timer.now();
+      try {
+        return await this.dependencies.privacyGrants.readServiceRows(
+          udid,
+          SIMCTL_PRIVACY_TCC_SERVICES,
+          context.signal,
+        );
+      } catch (error) {
+        throw toActionableError(error, "iOS privacy grant verification failed");
+      } finally {
+        context.recordPhase?.("tcc:privacy-verify", this.timer.now() - started);
+      }
+    };
+    const rows = await readRows();
+    await context.assertOwned();
+    context.signal.throwIfAborted();
+    if (rows.length === 0) {
+      return;
+    }
+    const clients = [...new Set(rows.map((row) => row.client))].sort();
+    logger.warn(
+      `iOS privacy grants survived global reset; resetting clients: ${clients.join(", ")}`,
+    );
+    for (const client of clients) {
+      await this.command(context, ["privacy", udid, "reset", "all", client]);
+    }
+    const remaining = await readRows();
+    await context.assertOwned();
+    context.signal.throwIfAborted();
+    if (remaining.length > 0) {
+      throw new ActionableError(
+        "iOS privacy grants survived reset: " +
+          remaining.map((row) => `${row.service}:${row.client}`).join(", "),
+      );
+    }
   }
 
   private async restoreSettings(context: DeviceMutationResetContext): Promise<void> {

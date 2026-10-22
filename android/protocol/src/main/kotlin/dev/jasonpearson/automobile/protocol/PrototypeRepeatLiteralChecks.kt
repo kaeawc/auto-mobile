@@ -3,10 +3,10 @@ package dev.jasonpearson.automobile.protocol
 import dev.jasonpearson.automobile.protocol.PrototypeRepeatFields.chargeText
 import dev.jasonpearson.automobile.protocol.PrototypeRepeatFields.dataTextError
 import dev.jasonpearson.automobile.protocol.PrototypeRepeatFields.fail
-import dev.jasonpearson.automobile.protocol.PrototypeRepeatFields.stateKeyPattern
 import dev.jasonpearson.automobile.protocol.PrototypeRepeatFields.string
 import dev.jasonpearson.automobile.protocol.PrototypeRepeatFields.text
 import dev.jasonpearson.automobile.protocol.PrototypeRepeatTextChecks.RepeatState
+import dev.jasonpearson.automobile.protocol.PrototypeSpecContract.stateKeyPattern
 import kotlinx.serialization.json.JsonObject
 
 internal object PrototypeRepeatLiteralChecks {

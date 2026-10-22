@@ -4,6 +4,8 @@ import Foundation
 /// Cross-node and host environment checks remain the host's responsibility.
 struct PrototypeContractValidator {
     private struct Contract: Decodable {
+        let patterns: [String: String]
+        let checkControls: [String: [String]]
         let definitions: [String: JSONValue]
         let limits: [String: Int]
     }
@@ -11,6 +13,21 @@ struct PrototypeContractValidator {
     private static let contract = try? JSONDecoder().decode(
         Contract.self, from: Data(prototypeSpecContractData.utf8)
     )
+    private static let patterns = contract?.patterns.compactMapValues { try? NSRegularExpression(pattern: $0) } ?? [:]
+
+    static func matches(_ name: String, _ text: String) -> Bool {
+        patterns[name]?.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
+    }
+
+    static func limit(_ name: String) -> Int { contract?.limits[name] ?? 0 }
+    static let checkPatternMaxLength = Int(
+        contract?.definitions["check"]?.objectFields?["fields"]?
+            .objectFields?["pattern"]?.objectFields?["rule"]?.objectFields?["max"]?.numberValue ?? 0
+    )
+    static func checkFits(_ kind: String, _ control: String) -> Bool {
+        contract?.checkControls[kind]?.contains(control) ?? true
+    }
+
     let definitions: [String: JSONValue]
     let limits: [String: Int]
     var locatedNodes: [PrototypeLocatedValue] = []

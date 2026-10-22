@@ -67,7 +67,7 @@ describe("wireSessionLifecycle", () => {
 
     wireSessionLifecycle(manager, timer, hostWith([]));
 
-    // The location, network, App Links, device-condition, kill-profile, emulator sensor, display-profile, manufacturer-profile, status bar, performance, screen
+    // The location, network, App Links, device-condition, kill-profile, emulator sensor, display-profile, keyboard-profile, status bar, performance, screen
     // lock and recording cleanups register first (each takes a release listener and an unbound
     // listener), then the daemon's own, in this order.
     expect(order).toEqual([

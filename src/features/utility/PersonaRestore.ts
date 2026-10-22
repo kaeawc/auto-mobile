@@ -1,36 +1,27 @@
-import type { BootedDevice } from "../../models";
 import type { OemPersonaId } from "./OemPersonas";
 
 interface PersonaRestoreEntry {
   /** The persona applied last; reported by reset. */
   personaId: OemPersonaId;
-  /** The keyboard profile active before the first persona changed it; undefined once restored. */
-  keyboardProfileBefore?: string;
+  /** Whether a persona changed the keyboard profile and reset has not restored it yet. */
+  keyboard: boolean;
   /** Packages whose kill facet a persona applied, so reset restores each. */
   killAppIds: Set<string>;
-  /** The session whose release restores the keyboard (#14058), and the device it runs on. */
-  releaseOwner?: { sessionId: string; device: BootedDevice };
-}
-
-/** A released session's keyboard restore: the profile to put back on `device`. */
-export interface OwnedKeyboardRestore {
-  device: BootedDevice;
-  keyboardProfileBefore: string;
 }
 
 export interface PersonaRestoreSnapshot {
   personaId: OemPersonaId;
-  keyboardProfileBefore?: string;
+  keyboard: boolean;
   killAppIds: string[];
 }
 
 /**
- * Per-device record of what `persona` changed outside the kill and display
- * registries (#14055): the keyboard profile before the first change (write-once,
- * so applying a second persona never records the first one's keyboard) and the
- * packages a kill facet was applied to. The kill and display facets keep their
- * own write-once records, which their session cleanups restore on release. In
- * memory only: a daemon restart loses it.
+ * Per-device record of which persona was applied last (#14055), whether it
+ * changed the keyboard profile, and the packages a kill facet was applied to.
+ * The keyboard, kill and display facets keep their own write-once records of
+ * the state before the first change, which their session cleanups restore on
+ * release (#14705) and reset restores otherwise. In memory only: a daemon
+ * restart loses it.
  */
 export class PersonaRestoreRegistry {
   private readonly entries = new Map<string, PersonaRestoreEntry>();
@@ -38,25 +29,17 @@ export class PersonaRestoreRegistry {
   recordApply(
     deviceId: string,
     personaId: OemPersonaId,
-    change: {
-      keyboardProfileBefore?: string;
-      killAppId?: string;
-      releaseOwner?: { sessionId: string; device: BootedDevice };
-    },
+    change: { keyboard?: boolean; killAppId?: string },
   ): void {
     const entry: PersonaRestoreEntry = this.entries.get(deviceId) ?? {
       personaId,
+      keyboard: false,
       killAppIds: new Set(),
     };
     entry.personaId = personaId;
-    if (!("keyboardProfileBefore" in entry) && change.keyboardProfileBefore !== undefined) {
-      entry.keyboardProfileBefore = change.keyboardProfileBefore;
-    }
+    entry.keyboard ||= change.keyboard === true;
     if (change.killAppId !== undefined) {
       entry.killAppIds.add(change.killAppId);
-    }
-    if (change.releaseOwner !== undefined) {
-      entry.releaseOwner = change.releaseOwner;
     }
     this.entries.set(deviceId, entry);
   }
@@ -66,39 +49,17 @@ export class PersonaRestoreRegistry {
     return entry
       ? {
           personaId: entry.personaId,
-          ...(entry.keyboardProfileBefore !== undefined
-            ? { keyboardProfileBefore: entry.keyboardProfileBefore }
-            : {}),
+          keyboard: entry.keyboard,
           killAppIds: [...entry.killAppIds],
         }
       : undefined;
   }
 
-  /**
-   * The keyboard restore `sessionId`'s release owes on `deviceId`, taken so it runs once.
-   * Undefined when another session (or none) owns it or nothing is left to restore.
-   */
-  takeKeyboardOwnedBy(deviceId: string, sessionId: string): OwnedKeyboardRestore | undefined {
-    const entry = this.entries.get(deviceId);
-    if (entry?.releaseOwner?.sessionId !== sessionId) {
-      return undefined;
-    }
-    const { device } = entry.releaseOwner;
-    delete entry.releaseOwner;
-    const keyboardProfileBefore = entry.keyboardProfileBefore;
-    if (keyboardProfileBefore === undefined) {
-      return undefined;
-    }
-    delete entry.keyboardProfileBefore;
-    this.clearIfRestored(deviceId);
-    return { device, keyboardProfileBefore };
-  }
-
-  /** The keyboard profile was put back. */
+  /** The keyboard profile was put back, by reset or by the owning session's release. */
   forgetKeyboard(deviceId: string): void {
     const entry = this.entries.get(deviceId);
     if (entry) {
-      delete entry.keyboardProfileBefore;
+      entry.keyboard = false;
     }
   }
 
@@ -110,7 +71,7 @@ export class PersonaRestoreRegistry {
   /** Drop the entry once nothing it recorded is waiting to be restored. */
   clearIfRestored(deviceId: string): void {
     const entry = this.entries.get(deviceId);
-    if (entry && entry.keyboardProfileBefore === undefined && entry.killAppIds.size === 0) {
+    if (entry && !entry.keyboard && entry.killAppIds.size === 0) {
       this.entries.delete(deviceId);
     }
   }

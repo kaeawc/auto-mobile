@@ -9,6 +9,10 @@ import dev.jasonpearson.automobile.protocol.PrototypeBundleCommit
 import dev.jasonpearson.automobile.protocol.PrototypeBundleCommitFileSystem
 import dev.jasonpearson.automobile.protocol.PrototypeBundleCommitResult
 import java.nio.file.Path
+import java.util.logging.Level
+import java.util.logging.Logger
+
+private val logger: Logger = Logger.getLogger("ProtoViewerImport")
 
 /** Bounds-only decoding, on the import I/O dispatcher; never allocate the full image. */
 class AndroidImportAssetCheck : ImportAssetCheck {
@@ -41,8 +45,14 @@ class DirectoryLibraryImport(
     require(validLibraryId(id))
     val destination = stagingRoot.resolve(id)
     val staged = PrototypeBundleCommit.commit(bundle, destination, files)
-    if (staged is PrototypeBundleCommitResult.Failure)
+    if (staged is PrototypeBundleCommitResult.Failure) {
+      // The user only sees "Storage"; keep the underlying cause in the log.
+      logger.log(
+        Level.WARNING,
+        "Cannot stage import: ${staged.message} (cleanupFailed=${staged.cleanupFailed})",
+      )
       return LibraryResult.Failure(LibraryError.Storage)
+    }
     return try {
       val assets =
         (bundle.assets + bundle.fonts).map { (assetId, asset) ->
@@ -63,8 +73,7 @@ class DirectoryLibraryImport(
       try {
         files.remove(destination)
       } catch (error: Exception) {
-        java.util.logging.Logger.getLogger("ProtoViewerImport")
-          .log(java.util.logging.Level.WARNING, "Cannot clean import staging", error)
+        logger.log(Level.WARNING, "Cannot clean import staging", error)
       }
     }
   }

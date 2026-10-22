@@ -27,6 +27,13 @@ class PrototypeSpecCorpusTest {
           is PrototypeSpecValidation.Success,
         file.name,
       )
+      // Message parity with TS and Swift: request sinks, action payloads and storage differ.
+      val library = PrototypeSpecValidator.validate(invalidSpec.getValue(file), library = true)
+      assertEquals(
+        invalidJson.getValue(file).getValue("expectedMessage").jsonPrimitive.content,
+        (library as PrototypeSpecValidation.Failure).error.message,
+        file.name,
+      )
     }
   }
 

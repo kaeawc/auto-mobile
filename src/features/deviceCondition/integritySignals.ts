@@ -10,16 +10,16 @@ import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/A
  * emulator can never hide them; reporting them as `image-fixed` is the point,
  * rather than silently ignoring a request to toggle them.
  */
-export type IntegritySignalFamily = "root" | "emulator";
+type IntegritySignalFamily = "root" | "emulator";
 
 /**
  * - `runtime`: toggleable with no special privilege.
  * - `needs-root`: toggleable only after `adb root` (and a writable `/system` for files).
  * - `image-fixed`: baked into the system image; only a different image changes it.
  */
-export type IntegritySignalMutability = "runtime" | "needs-root" | "image-fixed";
+type IntegritySignalMutability = "runtime" | "needs-root" | "image-fixed";
 
-export interface IntegritySignal {
+interface IntegritySignal {
   id: string;
   family: IntegritySignalFamily;
   description: string;
@@ -127,56 +127,57 @@ const EMULATOR_BUILD_PATTERN = /sdk_gphone|generic|emulator|ranchu|goldfish|vbox
 interface DeviceReads {
   props: Map<string, string>;
   selinux: string;
-  presentPaths: Set<string>;
+  /** Paths that exist, or undefined when the path read itself failed (absence is then unknown). */
+  presentPaths: Set<string> | undefined;
 }
 
-function isActive(id: string, reads: DeviceReads): boolean {
-  const prop = (key: string): string => reads.props.get(key) ?? "";
-  switch (id) {
-    case "su-binary":
-      return SU_PATHS.some((path) => /\/su$/.test(path) && reads.presentPaths.has(path));
-    case "superuser-apk":
-      return reads.presentPaths.has(SUPERUSER_APK);
-    case "selinux-permissive":
-      return /permissive/i.test(reads.selinux);
-    case "debuggable-build":
-      return prop("ro.debuggable") === "1";
-    case "insecure-build":
-      return prop("ro.secure") === "0";
-    case "test-keys":
-      return prop("ro.build.tags").includes("test-keys");
-    case "missing-otacerts":
-      return !reads.presentPaths.has("/etc/security/otacerts.zip");
-    case "qemu-props":
-      return [EMULATOR_FLAG_PROP, "ro.boot.qemu"].some((key) => ["1", "true"].includes(prop(key)));
-    case "emulator-hardware":
-      return /^(goldfish|ranchu)$/.test(prop("ro.hardware"));
-    case "qemu-pipe":
-      return reads.presentPaths.has("/dev/qemu_pipe");
-    case "emulator-build-fields":
-      return ["ro.build.fingerprint", "ro.product.model", "ro.product.name"].some((key) =>
-        EMULATOR_BUILD_PATTERN.test(prop(key)),
-      );
-    default:
-      return false;
-  }
-}
+const prop = (reads: DeviceReads, key: string): string => reads.props.get(key) ?? "";
+const hasPath = (reads: DeviceReads, path: string): boolean =>
+  reads.presentPaths?.has(path) === true;
 
+/** One predicate per catalogued signal id; an id with no predicate reads as inactive. */
+const SIGNAL_READERS: Readonly<Record<string, (reads: DeviceReads) => boolean>> = {
+  "su-binary": (reads) => SU_PATHS.some((path) => /\/su$/.test(path) && hasPath(reads, path)),
+  "superuser-apk": (reads) => hasPath(reads, SUPERUSER_APK),
+  "selinux-permissive": (reads) => /permissive/i.test(reads.selinux),
+  "debuggable-build": (reads) => prop(reads, "ro.debuggable") === "1",
+  "insecure-build": (reads) => prop(reads, "ro.secure") === "0",
+  "test-keys": (reads) => prop(reads, "ro.build.tags").includes("test-keys"),
+  // Absence is only established by a successful read; a failed read leaves the signal off.
+  "missing-otacerts": (reads) =>
+    reads.presentPaths !== undefined && !reads.presentPaths.has("/etc/security/otacerts.zip"),
+  "qemu-props": (reads) =>
+    [EMULATOR_FLAG_PROP, "ro.boot.qemu"].some((key) => ["1", "true"].includes(prop(reads, key))),
+  "emulator-hardware": (reads) => /^(goldfish|ranchu)$/.test(prop(reads, "ro.hardware")),
+  "qemu-pipe": (reads) => hasPath(reads, "/dev/qemu_pipe"),
+  "emulator-build-fields": (reads) =>
+    ["ro.build.fingerprint", "ro.product.model", "ro.product.name"].some((key) =>
+      EMULATOR_BUILD_PATTERN.test(prop(reads, key)),
+    ),
+};
+
+const isActive = (id: string, reads: DeviceReads): boolean => SIGNAL_READERS[id]?.(reads) ?? false;
+
+/** Run one read-only shell command; undefined means the read failed (and was logged). */
 async function shellOut(
   adb: Pick<AdbExecutor, "execute">,
   args: readonly string[],
   signal?: AbortSignal,
-): Promise<string> {
+): Promise<string | undefined> {
   try {
     const result = await adb.execute(["shell", ...args], { signal });
-    return result.error ? "" : result.stdout.replace(/\r\n?/g, "\n").trim();
+    if (result.error) {
+      logger.warn(`integrity probe 'shell ${args[0]}' returned an error: ${result.error}`);
+      return undefined;
+    }
+    return result.stdout.replace(/\r\n?/g, "\n").trim();
   } catch (error) {
     if (signal?.aborted) {
       throw error;
     }
     // Best-effort read: a failed sub-probe leaves its signals inactive, but is logged.
     logger.warn(`integrity probe 'shell ${args[0]}' failed: ${errorMessage(error)}`, error);
-    return "";
+    return undefined;
   }
 }
 
@@ -184,16 +185,25 @@ const PROBED_PATHS = [...SU_PATHS, SUPERUSER_APK, "/etc/security/otacerts.zip", 
 
 /**
  * Read every catalogued signal from one device with read-only shell commands.
- * A failed sub-read leaves its signals inactive rather than failing the probe.
+ * A failed sub-read leaves its signals inactive (absence-based ones included)
+ * rather than failing the probe.
  */
 export async function readIntegritySignals(
   adb: Pick<AdbExecutor, "execute">,
   signal?: AbortSignal,
 ): Promise<IntegritySignalReading[]> {
-  const props = parseGetprop(await shellOut(adb, ["getprop"], signal));
-  const selinux = await shellOut(adb, ["getenforce"], signal);
-  const listing = await shellOut(adb, ["ls", "-d", ...PROBED_PATHS, "2>/dev/null"], signal);
-  const presentPaths = new Set(listing.split("\n").map((line) => line.trim()));
+  const props = parseGetprop((await shellOut(adb, ["getprop"], signal)) ?? "");
+  const selinux = (await shellOut(adb, ["getenforce"], signal)) ?? "";
+  // adb joins these words for the device shell. `ls` exits nonzero when ANY operand is
+  // missing (the normal case on a stock device) even though it still lists the ones that
+  // exist, and the adb client rejects a nonzero exit, so `; true` keeps the partial listing.
+  const listing = await shellOut(
+    adb,
+    ["ls", "-d", ...PROBED_PATHS, "2>/dev/null;", "true"],
+    signal,
+  );
+  const presentPaths =
+    listing === undefined ? undefined : new Set(listing.split("\n").map((line) => line.trim()));
   const reads: DeviceReads = { props, selinux, presentPaths };
   return INTEGRITY_SIGNALS.map((entry) => ({ ...entry, active: isActive(entry.id, reads) }));
 }

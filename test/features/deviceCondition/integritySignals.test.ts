@@ -97,4 +97,32 @@ describe("integrity signals (#14062)", () => {
       expect(mutability[id]).toBe("needs-root");
     }
   });
+
+  test("probes present and absent paths in one command that tolerates a nonzero ls exit", async () => {
+    const adb = adbWith({
+      getprop: EMULATOR_PROPS,
+      getenforce: "Enforcing",
+      "ls -d": "/dev/qemu_pipe",
+    });
+    await readIntegritySignals(adb);
+    const lsCommand = adb.getExecutedCommands().find((c) => c.includes("ls -d"));
+    expect(lsCommand).toMatch(/2>\/dev\/null; true$/);
+  });
+
+  test("a failed path read leaves absence-based signals off instead of reporting them", async () => {
+    const adb = adbWith({ getprop: EMULATOR_PROPS, getenforce: "Enforcing" });
+    adb.setCommandError("ls -d", new Error("adb offline"));
+    const active = byId(await readIntegritySignals(adb));
+    expect(active["missing-otacerts"]).toBe(false);
+    expect(active["su-binary"]).toBe(false);
+    expect(active["qemu-pipe"]).toBe(false);
+    expect(active["debuggable-build"]).toBe(true);
+  });
+
+  test("an ExecResult error is logged and treated as a failed read", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("getprop", { ...execResult(""), error: "closed" });
+    const active = byId(await readIntegritySignals(adb));
+    expect(active["debuggable-build"]).toBe(false);
+  });
 });

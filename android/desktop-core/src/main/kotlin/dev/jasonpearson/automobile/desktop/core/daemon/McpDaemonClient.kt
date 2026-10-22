@@ -454,6 +454,10 @@ internal fun resolveDaemonUserId(userName: String, osName: String, readUid: () -
     // The user name is the documented fallback identifier when `id -u` is unavailable.
     DAEMON_PATHS_LOG.debug("Could not read the user id; using the user name: ${e.message}")
     userName
+  } catch (e: SecurityException) {
+    // A security policy that denies subprocesses makes `id -u` unavailable too (#14571).
+    DAEMON_PATHS_LOG.debug("Could not read the user id; using the user name: ${e.message}")
+    userName
   }
 }
 

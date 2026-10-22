@@ -759,7 +759,7 @@ session acquires a device and on later scheduler ticks. IDE-only use without a
 session no longer syncs appearance unless the device serial is in
 `AUTOMOBILE_ANDROID_APPEARANCE_SYNC_DEVICES`. Set `AUTOMOBILE_APPEARANCE_SYNC` to
 `0`, `false`, `off`, or `no` (case-insensitive, with surrounding whitespace
-ignored) to turn off appearance sync in daemon and direct mode. Android
+ignored) to turn off scheduled host appearance sync in the daemon. Android
 observation-stream initial connections and cadence refreshes follow the same
 session-owned default; use
 `AUTOMOBILE_ANDROID_OBSERVATION_STREAM_DEVICES` to opt in unowned serials.

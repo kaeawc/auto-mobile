@@ -269,6 +269,7 @@ type Runtime = Pick<
   | "plainRestartSessionLosses"
   | "progressListeners"
   | "reconciliationSnapshot"
+  | "readCheckoutVersion"
   | "recoverableBoundSessionHandoff"
   | "recoverableBoundSessionHandoffIsDeviceRestart"
   | "releaseLedger"
@@ -337,6 +338,9 @@ export class ProxyCollaborators {
       },
       get clientVersion() {
         return proxy.clientVersion;
+      },
+      get readCheckoutVersion() {
+        return proxy.readCheckoutVersion;
       },
       get clientAssetVersion() {
         return proxy.clientAssetVersion;

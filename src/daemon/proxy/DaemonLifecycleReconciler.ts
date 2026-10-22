@@ -22,7 +22,7 @@ import {
   type BuildIdentity,
 } from "../buildIdentity";
 import { compareStrictNumericVersions } from "../../utils/deviceMatcher";
-import { releaseVersion } from "../../utils/mcpVersion";
+import { releaseVersion, withoutDirtyStamp } from "../../utils/mcpVersion";
 import { daemonProcessOptions } from "../daemonOptionScopes";
 import { DaemonRestartDeferredError } from "../daemonRestartAdmission";
 import {
@@ -75,6 +75,8 @@ export interface DaemonLifecycleReconcilerDeps {
   readonly clientVersion: string;
   readonly clientAssetVersion: string | null;
   readonly buildIdentity: BuildIdentity;
+  /** Version a daemon spawned from this client's entry script would report now; undefined when it cannot be probed. */
+  readonly readCheckoutVersion?: () => Promise<string | null>;
   invalidateCache(): void;
   assertDaemonLifecycleUnfenced(): void;
 
@@ -122,6 +124,8 @@ export interface DaemonLifecycleReconcilerDeps {
 
 export class DaemonLifecycleReconciler {
   private lastRunningStatus: DaemonStatus | undefined;
+  private checkoutVersion: string | undefined;
+  private readonly acceptedCheckoutVersions = new Set<string>();
 
   constructor(private readonly deps: DaemonLifecycleReconcilerDeps) {}
 
@@ -317,6 +321,10 @@ export class DaemonLifecycleReconciler {
       return;
     }
 
+    if ((await this.staleClientDisposition(status, runningVersion)) === "accept") {
+      return;
+    }
+
     // Reach here when the client is strictly newer OR the daemon is a same-release
     // dev-skew (different git stamp). Both reconcile by restarting the daemon from
     // this client's build. Same-release dev-skew must be handled HERE rather than
@@ -368,6 +376,14 @@ export class DaemonLifecycleReconciler {
   async verifyRestartedVersion(): Promise<void> {
     const restartedStatus = await this.deps.reconciliationStatus();
     const restartedVersion = restartedStatus.version?.trim() ?? "";
+    if (
+      restartedStatus.running &&
+      restartedVersion !== this.deps.clientVersion &&
+      this.isClientCheckout(restartedStatus)
+    ) {
+      this.acceptCheckoutVersion(restartedStatus, restartedVersion);
+      return;
+    }
     if (!restartedStatus.running || restartedVersion !== this.deps.clientVersion) {
       throw this.deps.versionMismatchError(
         restartedVersion,
@@ -375,6 +391,63 @@ export class DaemonLifecycleReconciler {
         "daemon restart completed but version still differs",
         undefined,
         buildIdentityFromStatus(restartedStatus),
+      );
+    }
+  }
+
+  private isClientCheckout(status: DaemonStatus): boolean {
+    return (
+      !!status.entryScript &&
+      status.entryScript === this.deps.buildIdentity.entryScript &&
+      buildIdentitiesMatch(this.deps.buildIdentity, buildIdentityFromStatus(status))
+    );
+  }
+
+  private async staleClientDisposition(
+    status: DaemonStatus,
+    runningVersion: string,
+  ): Promise<"accept" | "restart"> {
+    if (!this.isClientCheckout(status)) {
+      return "restart";
+    }
+    const checkoutVersion =
+      runningVersion === this.checkoutVersion
+        ? this.checkoutVersion
+        : await this.probeCheckoutVersion();
+    if (checkoutVersion !== runningVersion) {
+      return "restart";
+    }
+    this.acceptCheckoutVersion(status, runningVersion);
+    return "accept";
+  }
+
+  private async probeCheckoutVersion(): Promise<string | undefined> {
+    try {
+      return (await this.deps.readCheckoutVersion?.()) ?? this.checkoutVersion;
+    } catch (error) {
+      logger.warn(
+        "[DaemonMcpProxy] Checkout version probe failed; using last known version",
+        error,
+      );
+      return this.checkoutVersion;
+    }
+  }
+
+  private acceptCheckoutVersion(status: DaemonStatus, runningVersion: string): void {
+    this.checkoutVersion = runningVersion;
+    if (withoutDirtyStamp(runningVersion) !== withoutDirtyStamp(this.deps.clientVersion)) {
+      throw this.deps.versionMismatchError(
+        runningVersion,
+        "staleClient",
+        "the daemon already runs this checkout's current version; restarting cannot reconcile",
+        undefined,
+        buildIdentityFromStatus(status),
+      );
+    }
+    if (!this.acceptedCheckoutVersions.has(runningVersion)) {
+      this.acceptedCheckoutVersions.add(runningVersion);
+      logger.info(
+        `[DaemonMcpProxy] Accepting checkout version ${runningVersion} for MCP client ${this.deps.clientVersion}; only working-tree state differs`,
       );
     }
   }

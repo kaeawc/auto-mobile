@@ -299,7 +299,13 @@ test("report contains outcomes, failures, devices, durations and comparisons wit
     sessionUuid: null,
     devices: [],
   });
-  expect(report.ledger.summary).toEqual({ grants: 2, devices: 2, released: 0, absent: 0 });
+  expect(report.ledger.summary).toEqual({
+    grants: 2,
+    devices: 2,
+    released: 0,
+    absent: 0,
+    pooled: 0,
+  });
   expect(bytes + f.logs.join("\n")).not.toContain("secret-");
 });
 
@@ -552,4 +558,40 @@ test("devices inventory output tolerates diagnostics and surfaces them when no i
   expect(message).toContain("Private daemon command failed: daemon 1 is stopped");
   expect(message).not.toContain("JSON Parse error");
   expect(() => parseDevicesViewOutput(0, [])).toThrow("inventory unavailable");
+});
+
+test("down accepts pooled devices and report counts them", async () => {
+  const f = fixture(1);
+  expect(await f.run(["up"])).toBe(0);
+  const session = f.sessions.get("a-phone")!;
+  f.broker.statusResults = [
+    {
+      ...session,
+      outcome: "released",
+      timing: {
+        reset: {
+          mode: "erase",
+          outcome: "clean",
+          phases: {},
+          reuseCount: 0,
+          startedAtMs: 0,
+          totalMs: 1,
+        },
+      },
+    },
+  ];
+  f.deps.devicesView = async () => ({
+    devices: [{ name: "ambroker-a-phone", deviceId: "native-a-phone", platform: "android" }],
+    daemons: [{ alive: true }],
+  });
+  expect(
+    await settleByFakeEvents(f.timer, f.run(["down"]), { description: "pooled release" }),
+  ).toBe(0);
+  expect(f.logs.join("\n")).toContain(
+    "Pooled a-phone on ambroker-a-phone: clean idle device retained by the broker pool.",
+  );
+  expect(await f.run(["report"])).toBe(0);
+  expect(
+    JSON.parse(f.files.get(join(f.batchDir, "evidence/broker-report.json"))!).ledger.summary.pooled,
+  ).toBe(1);
 });

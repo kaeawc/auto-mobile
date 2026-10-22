@@ -7,5 +7,22 @@ preload = [
   "./test/setup/realDeviceToolSpawnGuardPreload.ts",
   "./test/setup/fixedCtrlProxyPortFetchGuardPreload.ts",
 ]
+# Every test file lives under test/. Without this, `bun test <relative path>`
+# scans the whole working tree for name matches, and once an untracked tree such
+# as scratch/ (a Gradle home, a build cache) or android/build holds thousands of
+# directories that scan leaves every child process the tests spawn (git, rg,
+# oxlint) with empty output, so repository tests fail on a pristine checkout
+# (#14717).
+pathIgnorePatterns = [
+  "scratch/**",
+  "android/**",
+  "ios/**",
+  "docs/**",
+  "dist/**",
+  "build/**",
+  "coverage/**",
+  "benchmark/**",
+  ".claude/**",
+]
 coverageReporter = ["text", "lcov"]
 coverageDir = "./coverage"

@@ -17,12 +17,6 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
 @Serializable
-data class PrototypeOffset(
-  val x: Double,
-  val y: Double,
-)
-
-@Serializable
 data class PrototypeBounds(
   val x: Double,
   val y: Double,
@@ -75,14 +69,6 @@ data class PrototypeSheetCondition(
 data class PrototypeSafeAreaPadding(
   val edges: List<String>,
   val types: List<String>,
-)
-
-@Serializable
-data class PrototypePadding(
-  val top: Double? = null,
-  val bottom: Double? = null,
-  val start: Double? = null,
-  val end: Double? = null,
 )
 
 @Serializable

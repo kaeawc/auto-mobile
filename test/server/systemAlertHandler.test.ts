@@ -20,11 +20,15 @@ function gateReturning(warnings: string[], order: string[] = []) {
       order.push("gate");
       return warnings;
     },
+    afterAction: async () => {
+      order.push("after");
+      return [];
+    },
   });
 }
 
 describe("withSystemAlertGate (#14106)", () => {
-  test("checks for system alerts before the action runs", async () => {
+  test("checks for system alerts before the action runs and again after it", async () => {
     const order: string[] = [];
     const handler = withSystemAlertGate(
       async () => {
@@ -34,7 +38,7 @@ describe("withSystemAlertGate (#14106)", () => {
       gateReturning([], order),
     );
     await handler(device, {});
-    expect(order).toEqual(["gate", "action"]);
+    expect(order).toEqual(["gate", "action", "after"]);
   });
 
   test("adds every gate warning to the result's warnings, after the action's own", async () => {
@@ -59,18 +63,35 @@ describe("withSystemAlertGate (#14106)", () => {
     expect(await handler(device, {})).toBe(original);
   });
 
-  test("a failed action still names the alert the gate answered", async () => {
+  test("a failed action's error is rethrown unchanged, with no after-action check", async () => {
+    const order: string[] = [];
+    const failure = new ActionableError("Element not found");
     const handler = withSystemAlertGate(
       async () => {
-        throw new ActionableError("Element not found");
+        throw failure;
       },
-      gateReturning([
-        'Answered system alert "Allow Demo?" with "Allow" (systemAlerts policy allow).',
-      ]),
+      gateReturning(['Answered system alert "Allow Demo?" with "Allow".'], order),
     );
-    await expect(handler(device, {})).rejects.toThrow(
-      'Element not found (system alerts: Answered system alert "Allow Demo?"',
+    await expect(handler(device, {})).rejects.toBe(failure);
+    expect(failure.message).toBe("Element not found");
+    expect(order).toEqual(["gate"]);
+  });
+
+  test("an abort keeps its read-only DOMException and skips the after-action check", async () => {
+    const order: string[] = [];
+    const controller = new AbortController();
+    const handler = withSystemAlertGate(
+      async () => {
+        controller.abort();
+        controller.signal.throwIfAborted();
+        return createStructuredToolResponse({ success: true });
+      },
+      gateReturning(["Alert seen."], order),
     );
+    await expect(handler(device, {}, undefined, controller.signal)).rejects.toMatchObject({
+      name: "AbortError",
+    });
+    expect(order).toEqual(["gate"]);
   });
 });
 
@@ -84,17 +105,18 @@ describe("ToolRegistry gates UI interactions on the system-alert policy (#14106)
     setDefaultSystemAlertGateForTesting(undefined);
   });
 
-  test("only tools declaring recordsNavigation pass the gate, on the handler plans also call", async () => {
+  test("only tools declaring answersSystemAlerts pass the gate, on the handler plans also call", async () => {
     const checked: string[] = [];
     setDefaultSystemAlertGateForTesting({
       beforeAction: async (target) => {
         checked.push(target.deviceId);
         return ["System alert seen."];
       },
+      afterAction: async () => [],
     });
     const action = async () => createStructuredToolResponse({ success: true });
     ToolRegistry.registerDeviceAware("systemAlertGateNav", "test", z.object({}), action, {
-      recordsNavigation: true,
+      answersSystemAlerts: true,
     });
     ToolRegistry.registerDeviceAware("systemAlertGatePlain", "test", z.object({}), action);
 

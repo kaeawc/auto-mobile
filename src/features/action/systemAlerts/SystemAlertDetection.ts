@@ -56,7 +56,8 @@ const IOS_BUTTON_CLASSES = new Set(["UIButton", "XCUIElementTypeButton"]);
 
 /**
  * English iOS permission-prompt labels, normalized (lowercase, straight apostrophes). Every
- * iOS permission prompt offers "Don't Allow", so that label is what marks an alert as one;
+ * iOS permission prompt offers a refusal ("Don't Allow", or "Ask App Not to Track" for App
+ * Tracking Transparency), so a refusal label is what marks an alert as one;
  * other languages are reported as unmatched unless a `match` entry names the button.
  */
 const IOS_BUTTONS: Record<string, { kind: SystemAlertButtonKind; rank: number }> = {
@@ -65,8 +66,10 @@ const IOS_BUTTONS: Record<string, { kind: SystemAlertButtonKind; rank: number }>
   "allow full access": { kind: "allow", rank: 2 },
   "allow access to all photos": { kind: "allow", rank: 3 },
   ok: { kind: "allow", rank: 4 },
+  continue: { kind: "allow", rank: 5 },
   "allow once": { kind: "allowOnce", rank: 0 },
   "don't allow": { kind: "deny", rank: 0 },
+  "ask app not to track": { kind: "deny", rank: 1 },
 };
 
 function normalizeLabel(label: string): string {
@@ -228,7 +231,8 @@ function matchApplies(alert: DetectedSystemAlert, entry: SystemAlertMatch): bool
 
 /**
  * The button `policy` answers `alert` with. A `match` entry whose `textContains` fits the alert
- * names its button by `buttonText` (any language, any alert) or, without one, defers to the policy.
+ * (or that has none) names its button by `buttonText`, in any language and on any alert; an
+ * alert no entry answers falls back to the policy.
  */
 export function chooseSystemAlertButton(
   alert: DetectedSystemAlert,
@@ -236,7 +240,7 @@ export function chooseSystemAlertButton(
   match: readonly SystemAlertMatch[],
 ): SystemAlertDecision {
   for (const entry of match) {
-    if (!matchApplies(alert, entry) || entry.buttonText === undefined) {
+    if (!matchApplies(alert, entry)) {
       continue;
     }
     const wanted = normalizeLabel(entry.buttonText);

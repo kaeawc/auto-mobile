@@ -7,10 +7,10 @@ export const SYSTEM_ALERT_POLICIES = ["report", "allow", "deny", "allowOnce"] as
  */
 export type SystemAlertPolicyName = (typeof SYSTEM_ALERT_POLICIES)[number];
 
-/** Answers a specific alert: when its text contains `textContains`, tap the `buttonText` button. */
+/** Answers a specific alert: tap the `buttonText` button, only on alerts containing `textContains`. */
 export interface SystemAlertMatch {
   textContains?: string;
-  buttonText?: string;
+  buttonText: string;
 }
 
 export interface SystemAlertPolicy {

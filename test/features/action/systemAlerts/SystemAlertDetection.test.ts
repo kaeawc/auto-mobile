@@ -183,15 +183,32 @@ describe("chooseSystemAlertButton (#14106)", () => {
     ).toEqual({ answer: "unmatched" });
   });
 
-  test("a match entry with only textContains answers that alert by the policy's kind", () => {
-    expect(chooseSystemAlertButton(location, "report", [{ textContains: "location" }])).toEqual({
-      answer: "report",
+  test("a match entry without textContains answers any alert with that button", () => {
+    const alert = detectSystemAlert("ios", iosAlert("Delete note?", ["Cancel", "OK"]))!;
+    expect(chooseSystemAlertButton(alert, "report", [{ buttonText: "cancel" }])).toMatchObject({
+      answer: "tap",
+      button: { label: "Cancel" },
     });
-    expect(chooseSystemAlertButton(location, "deny", [{ textContains: "location" }])).toMatchObject(
-      {
-        answer: "tap",
-        button: { label: "Don't allow" },
-      },
-    );
+  });
+
+  test("App Tracking Transparency and Contacts prompts are recognized iOS permission prompts", () => {
+    const tracking = detectSystemAlert(
+      "ios",
+      iosAlert("Allow “Demo” to track your activity across other companies’ apps and websites?", [
+        "Ask App Not to Track",
+        "Allow",
+      ]),
+    )!;
+    expect(tracking.recognized).toBe(true);
+    expect(chooseSystemAlertButton(tracking, "deny", [])).toMatchObject({
+      button: { label: "Ask App Not to Track" },
+    });
+    const contacts = detectSystemAlert(
+      "ios",
+      iosAlert("“Demo” Would Like to Access Your Contacts", ["Don’t Allow", "Continue"]),
+    )!;
+    expect(chooseSystemAlertButton(contacts, "allow", [])).toMatchObject({
+      button: { label: "Continue" },
+    });
   });
 });

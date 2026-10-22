@@ -21,13 +21,9 @@ const matchEntry = z
     buttonText: z
       .string()
       .min(1)
-      .optional()
       .describe("Tap the button with exactly this label (case-insensitive), in any language"),
   })
-  .strict()
-  .refine((entry) => entry.textContains !== undefined || entry.buttonText !== undefined, {
-    message: "A match entry needs textContains, buttonText, or both.",
-  });
+  .strict();
 
 const systemAlertsInput = z.object({
   action: z
@@ -55,9 +51,7 @@ const systemAlertsOutput = z.object({
   deviceId: z.string(),
   active: z.boolean().describe("Whether a policy is set for this device"),
   policy: z.enum(SYSTEM_ALERT_POLICIES),
-  match: z.array(
-    z.object({ textContains: z.string().optional(), buttonText: z.string().optional() }),
-  ),
+  match: z.array(z.object({ textContains: z.string().optional(), buttonText: z.string() })),
   clearsOnRelease: z.boolean().describe("Whether the owning daemon session's release clears it"),
   cleared: z.boolean().optional(),
   message: z.string(),
@@ -151,13 +145,13 @@ export const createSystemAlertsHandler =
 const systemAlertsTool = defineDeviceTool({
   name: "systemAlerts",
   description:
-    "Set how OS permission and system alerts are handled before each UI interaction (tapOn, swipeOn, " +
-    "sendKeys, pressButton, dragAndDrop, pinchOn) on this device, including executePlan steps. iOS: " +
-    "SpringBoard alerts such as location, camera and notification prompts; Android: permission-controller " +
-    "grant dialogs. report (default) never taps and surfaces the alert in the action's warnings; allow, deny " +
-    "and allowOnce tap that button; match names a button by label for localized or app-specific alerts. " +
-    "Every alert seen or answered is reported in the action's warnings. A policy set in a daemon session " +
-    "clears when the session is released.",
+    "Set how OS permission and system alerts are handled before and after each UI interaction (tapOn, " +
+    "tapAt, tapAny, swipeOn, swipeAt, sendKeys, pressButton, dragAndDrop, dragPath, pinchOn, multiTouch) " +
+    "on this device, including executePlan steps. iOS: SpringBoard permission prompts; Android: " +
+    "permission-controller grant dialogs. report (default) never taps and surfaces the alert in the " +
+    "action's warnings; allow, deny and allowOnce tap that button; match names a button by label for " +
+    "localized or app-specific alerts. Every alert seen or answered is reported in the action's " +
+    "warnings. A policy set in a daemon session clears when the session is released.",
   input: systemAlertsInput,
   options: {
     ...PLAN_RELEVANT,

@@ -1,6 +1,10 @@
-import type { BootedDevice, ViewHierarchyResult } from "../../../models";
+import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../models";
+import type { TapOnElementOptions } from "../../../models/TapOnElementOptions";
+import type { ObserveScreenExecuteOptions } from "../../observe/interfaces/ObserveScreen";
+import { ActionableError } from "../../../models/ActionableError";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
+import { runWithToolDispatchReporter } from "../../../utils/ToolDispatchContext";
 import { throwIfAborted } from "../../../utils/toolUtils";
 import { RealObserveScreen } from "../../observe/ObserveScreen";
 import { TapOnElement } from "../TapOnElement";
@@ -40,25 +44,67 @@ export interface SystemAlertGateDependencies {
   tapper?: SystemAlertTapper;
 }
 
-const defaultReader: SystemAlertHierarchyReader = {
-  read: async (device, signal) =>
-    (
-      await new RealObserveScreen(device).execute({
+/** The slice of an observe screen the reader uses; `RealObserveScreen` satisfies it. */
+interface HierarchyScreen {
+  execute(
+    options: ObserveScreenExecuteOptions,
+  ): Promise<Pick<ObserveResult, "viewHierarchy" | "error">>;
+}
+
+/** The slice of a tap action the tapper uses; `TapOnElement` satisfies it. */
+interface TapAction {
+  execute(
+    options: TapOnElementOptions,
+    call: { signal?: AbortSignal },
+  ): Promise<{ success: boolean; error?: string }>;
+}
+
+/** Reads through an observe screen; a capture that yields no hierarchy is a failed read. */
+export function createObserveHierarchyReader(
+  screenFor: (device: BootedDevice) => HierarchyScreen = (device) => new RealObserveScreen(device),
+): SystemAlertHierarchyReader {
+  return {
+    read: async (device, signal) => {
+      const result = await screenFor(device).execute({
         hierarchyOnly: true,
         skipScreenshot: true,
         skipCache: true,
         signal,
-      })
-    ).viewHierarchy,
-};
+      });
+      // A failed capture returns a fallback without a hierarchy rather than throwing; surface it.
+      if (!result.viewHierarchy) {
+        throw new ActionableError(result.error ?? "the hierarchy read returned no view hierarchy");
+      }
+      return result.viewHierarchy;
+    },
+  };
+}
 
-const defaultTapper: SystemAlertTapper = {
-  tap: (device, selector, signal) =>
-    new TapOnElement(device).execute({ ...selector, action: "tap" }, { signal }),
-};
+const ignoreDispatch = (): void => {};
 
-function quote(alert: DetectedSystemAlert): string {
-  return alert.message ? `"${alert.message}"` : `with buttons ${buttonList(alert)}`;
+/** Taps with `tapOn`'s element resolution, outside the running tool's dispatch report. */
+export function createTapOnTapper(
+  tapFor: (device: BootedDevice) => TapAction = (device) => new TapOnElement(device),
+): SystemAlertTapper {
+  return {
+    // The alert tap is not the running tool's gesture: keep it from marking that tool
+    // dispatched, or the tool's real tap would lose its navigation attribution window.
+    tap: (device, selector, signal) =>
+      runWithToolDispatchReporter(ignoreDispatch, () =>
+        tapFor(device).execute({ ...selector, action: "tap" }, { signal }),
+      ),
+  };
+}
+
+/** `system alert "<text>"`, or `alert "<text>"` when it is not a recognized permission prompt. */
+function describe(alert: DetectedSystemAlert): string {
+  const what = alert.recognized ? "system alert" : "alert";
+  return alert.message ? `${what} "${alert.message}"` : `${what} with buttons ${buttonList(alert)}`;
+}
+
+function sentence(alert: DetectedSystemAlert): string {
+  const text = describe(alert);
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 function buttonList(alert: DetectedSystemAlert): string {
@@ -70,10 +116,12 @@ function alertKey(alert: DetectedSystemAlert): string {
 }
 
 /**
- * Answers OS permission and system alerts before a UI interaction, per the device's
- * `systemAlerts` policy (#14106). Without a policy it does nothing, not even a read. Every alert
- * it sees is returned as a warning for the action's result, so an answer is never silent; a
- * failed read or tap is a warning too, never a reason to block the action.
+ * Answers OS permission and system alerts around a UI interaction, per the device's
+ * `systemAlerts` policy (#14106): before it, so the action reaches the app, and after it, so a
+ * prompt the action raised is answered even when no gated action follows. Without a policy it
+ * does nothing, not even a read. Every alert it sees is returned as a warning for the action's
+ * result and every answer is logged, so an answer is never silent; a failed read or tap is a
+ * warning too, never a reason to block the action.
  */
 export class SystemAlertGate {
   private readonly registry: SystemAlertPolicyRegistry;
@@ -82,18 +130,34 @@ export class SystemAlertGate {
 
   constructor(dependencies: SystemAlertGateDependencies = {}) {
     this.registry = dependencies.registry ?? defaultSystemAlertPolicyRegistry;
-    this.reader = dependencies.reader ?? defaultReader;
-    this.tapper = dependencies.tapper ?? defaultTapper;
+    this.reader = dependencies.reader ?? createObserveHierarchyReader();
+    this.tapper = dependencies.tapper ?? createTapOnTapper();
   }
 
-  async beforeAction(device: BootedDevice, signal?: AbortSignal): Promise<string[]> {
-    const policy = this.registry.get(device.deviceId);
-    if (!policy || (device.platform !== "android" && device.platform !== "ios")) {
+  beforeAction(device: BootedDevice, signal?: AbortSignal): Promise<string[]> {
+    return this.handleAlerts(device, signal, "before");
+  }
+
+  afterAction(device: BootedDevice, signal?: AbortSignal): Promise<string[]> {
+    return this.handleAlerts(device, signal, "after");
+  }
+
+  private async handleAlerts(
+    device: BootedDevice,
+    signal: AbortSignal | undefined,
+    phase: "before" | "after",
+  ): Promise<string[]> {
+    if (device.platform !== "android" && device.platform !== "ios") {
       return [];
     }
     const warnings: string[] = [];
     let lastAnswered: { key: string; label: string } | undefined;
     for (let answered = 0; ; answered += 1) {
+      // Re-read each round: a clear or release mid-loop stops the next tap.
+      const policy = this.registry.get(device.deviceId);
+      if (!policy) {
+        return warnings;
+      }
       throwIfAborted(signal);
       const alert = await this.readAlert(device, signal, warnings);
       if (!alert) {
@@ -101,14 +165,14 @@ export class SystemAlertGate {
       }
       if (lastAnswered?.key === alertKey(alert)) {
         warnings.push(
-          `System alert ${quote(alert)} is still showing after tapping "${lastAnswered.label}"; ` +
+          `${sentence(alert)} is still showing after tapping "${lastAnswered.label}"; ` +
             `it was left for you to answer.`,
         );
         return warnings;
       }
       if (answered >= SYSTEM_ALERT_MAX_ANSWERS_PER_ACTION) {
         warnings.push(
-          `System alert ${quote(alert)} is showing after ${answered} alerts were answered before ` +
+          `${sentence(alert)} is showing after ${answered} alerts were answered ${phase} ` +
             `this action; it was left for you to answer.`,
         );
         return warnings;
@@ -153,14 +217,14 @@ export class SystemAlertGate {
     const decision = chooseSystemAlertButton(alert, policy.policy, policy.match);
     if (decision.answer === "report") {
       warnings.push(
-        `System alert ${quote(alert)} is showing (buttons ${buttonList(alert)}); ` +
+        `${sentence(alert)} is showing (buttons ${buttonList(alert)}); ` +
           `the systemAlerts report policy left it for you to answer.`,
       );
       return undefined;
     }
     if (decision.answer === "unmatched") {
       warnings.push(
-        `System alert ${quote(alert)} is unmatched: none of its buttons (${buttonList(alert)}) ` +
+        `${sentence(alert)} is unmatched: none of its buttons (${buttonList(alert)}) ` +
           `fits the systemAlerts ${policy.policy} policy, so it was left for you to answer. ` +
           `Add a match entry naming the button to answer it.`,
       );
@@ -180,28 +244,29 @@ export class SystemAlertGate {
     }
     if (!result.success) {
       warnings.push(
-        `Failed to answer system alert ${quote(alert)} with "${label}": ${result.error ?? "the tap did not succeed"}.`,
+        `Failed to answer ${describe(alert)} with "${label}": ${result.error ?? "the tap did not succeed"}.`,
       );
       return undefined;
     }
-    warnings.push(
-      `Answered system alert ${quote(alert)} with "${label}" (systemAlerts policy ${policy.policy}).`,
-    );
+    const answer = `Answered ${describe(alert)} with "${label}" (systemAlerts policy ${policy.policy}).`;
+    // Composite tools (navigateTo, setUIState) drop inner warnings; the log keeps the trace.
+    logger.info(`[systemAlerts] ${device.deviceId}: ${answer}`);
+    warnings.push(answer);
     return label;
   }
 }
 
-let defaultGate: Pick<SystemAlertGate, "beforeAction"> | undefined;
+let defaultGate: Pick<SystemAlertGate, "beforeAction" | "afterAction"> | undefined;
 
 /** The process-wide gate over {@link defaultSystemAlertPolicyRegistry}. */
-export function defaultSystemAlertGate(): Pick<SystemAlertGate, "beforeAction"> {
+export function defaultSystemAlertGate(): Pick<SystemAlertGate, "beforeAction" | "afterAction"> {
   defaultGate ??= new SystemAlertGate();
   return defaultGate;
 }
 
 /** Replace the process-wide gate; `undefined` restores the default. */
 export function setDefaultSystemAlertGateForTesting(
-  gate: Pick<SystemAlertGate, "beforeAction"> | undefined,
+  gate: Pick<SystemAlertGate, "beforeAction" | "afterAction"> | undefined,
 ): void {
   defaultGate = gate;
 }

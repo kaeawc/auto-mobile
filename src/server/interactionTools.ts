@@ -89,7 +89,7 @@ import {
   wakeAndUnlockResultSchema,
 } from "./toolOutputSchemas";
 import { ToolRegistry } from "./toolRegistry";
-import { PLAN_RELEVANT, PLAN_SKELETON } from "./toolRegistryTypes";
+import { ANSWERS_SYSTEM_ALERTS, PLAN_RELEVANT, PLAN_SKELETON } from "./toolRegistryTypes";
 
 // Re-export types for backward compatibility
 export type {
@@ -117,8 +117,11 @@ export type { SystemTrayAdb, SystemTrayDependencies, SystemTrayObserver };
 
 export { resetSystemTrayDependencies, setSystemTrayDependencies, waitForNotificationMatch };
 
-/** UI interactions that may cause in-app navigation (the navigation recorder records them). */
-const NAV = { recordsNavigation: true } as const;
+/**
+ * UI interactions that may cause in-app navigation (the navigation recorder records them); they
+ * also run behind the device's `systemAlerts` policy.
+ */
+const NAV = { recordsNavigation: true, ...ANSWERS_SYSTEM_ALERTS } as const;
 
 const NAV_PLAN_SKELETON = { ...NAV, ...PLAN_SKELETON } as const;
 
@@ -302,7 +305,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     "Tap, long press, or double tap at screen coordinates in native, normalized, or percent units.",
     tapAtSchema,
     (device, args, progress, signal) => tapAtHandler(device, args, progress, signal, deps),
-    { defaultEnabled: true, supportsProgress: true, ...PLAN_SKELETON },
+    { defaultEnabled: true, supportsProgress: true, ...PLAN_SKELETON, ...ANSWERS_SYSTEM_ALERTS },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -310,7 +313,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     "Drag a finger along a polyline with segment timing, an initial hold and a release hold (Android and iOS).",
     dragPathSchema,
     dragPathHandler,
-    { defaultEnabled: false, supportsProgress: true, ...PLAN_SKELETON },
+    { defaultEnabled: false, supportsProgress: true, ...PLAN_SKELETON, ...ANSWERS_SYSTEM_ALERTS },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -328,7 +331,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     "Tap any clickable element; scope with container or scrollableContainer.",
     tapAnySchema,
     (device, args, progress, signal) => tapAnyHandler(device, args, progress, signal, deps),
-    { defaultEnabled: true, supportsProgress: true, ...PLAN_SKELETON },
+    { defaultEnabled: true, supportsProgress: true, ...PLAN_SKELETON, ...ANSWERS_SYSTEM_ALERTS },
   );
 
   ToolRegistry.registerDeviceAware(

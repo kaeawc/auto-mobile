@@ -1,10 +1,17 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import type { BootedDevice, ViewHierarchyNode, ViewHierarchyResult } from "../../../../src/models";
 import {
+  createObserveHierarchyReader,
+  createTapOnTapper,
   SYSTEM_ALERT_MAX_ANSWERS_PER_ACTION,
   SystemAlertGate,
   type SystemAlertTapSelector,
 } from "../../../../src/features/action/systemAlerts/SystemAlertGate";
+import type { ObserveResult } from "../../../../src/models";
+import {
+  reportToolDispatched,
+  runWithToolDispatchReporter,
+} from "../../../../src/utils/ToolDispatchContext";
 import { SystemAlertPolicyRegistry } from "../../../../src/features/action/systemAlerts/SystemAlertPolicy";
 
 const android: BootedDevice = { name: "emu", platform: "android", deviceId: "emulator-5554" };
@@ -145,6 +152,7 @@ describe("SystemAlertGate (#14106)", () => {
     expect(taps).toEqual([]);
     expect(warnings[0]).toContain("unmatched");
     expect(warnings[0]).toContain("Nicht erlauben");
+    expect(warnings[0]).toStartWith("Alert ");
   });
 
   test("a failed tap or read is a warning, never a thrown error", async () => {
@@ -163,5 +171,66 @@ describe("SystemAlertGate (#14106)", () => {
     controller.abort();
     await expect(gate.beforeAction(android, controller.signal)).rejects.toThrow();
     expect(reads).toBe(0);
+  });
+
+  test("after an action, a prompt that action raised is answered too", async () => {
+    registry.set(android.deviceId, { policy: "allow", match: [] });
+    screens = [permission("take pictures"), noAlert];
+    const warnings = await gate.afterAction(android);
+    expect(taps).toHaveLength(1);
+    expect(warnings[0]).toStartWith("Answered system alert");
+  });
+
+  test("a policy cleared mid-check stops the next tap", async () => {
+    registry.set(android.deviceId, { policy: "allow", match: [] });
+    const queue = [permission("access this device's location"), permission("take pictures")];
+    gate = new SystemAlertGate({
+      registry,
+      reader: { read: async () => queue.shift() ?? noAlert },
+      tapper: {
+        tap: async (_device, selector) => {
+          taps.push(selector);
+          registry.clear(android.deviceId);
+          return { success: true };
+        },
+      },
+    });
+    await gate.beforeAction(android);
+    expect(taps).toHaveLength(1);
+  });
+});
+
+describe("SystemAlertGate defaults (#14106)", () => {
+  test("a capture that yields no hierarchy is a failed read, reported as a warning", async () => {
+    const registry = new SystemAlertPolicyRegistry();
+    registry.set(android.deviceId, { policy: "allow", match: [] });
+    const fallback: Pick<ObserveResult, "error"> = { error: "device offline" };
+    const gate = new SystemAlertGate({
+      registry,
+      reader: createObserveHierarchyReader(() => ({
+        execute: async () => fallback,
+      })),
+      tapper: { tap: async () => ({ success: true }) },
+    });
+    expect(await gate.beforeAction(android)).toEqual([
+      "Could not check for a system alert before this action: device offline",
+    ]);
+  });
+
+  test("the alert tap is not reported as the running tool's dispatch", async () => {
+    let dispatched = 0;
+    const tapper = createTapOnTapper(() => ({
+      execute: async () => {
+        reportToolDispatched();
+        return { success: true };
+      },
+    }));
+    await runWithToolDispatchReporter(
+      () => {
+        dispatched += 1;
+      },
+      () => tapper.tap(android, { text: "Allow" }),
+    );
+    expect(dispatched).toBe(0);
   });
 });

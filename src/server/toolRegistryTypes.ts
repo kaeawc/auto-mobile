@@ -142,11 +142,10 @@ export interface ToolTraits {
   stopsApp?: boolean;
   /** Replaces a process without naming the app in its args (`installApp`): all remembered screens go. */
   replacesProcess?: boolean;
-  /**
-   * A UI interaction that may cause in-app navigation; excludes lifecycle tools (not replayable
-   * paths). It also answers the device's `systemAlerts` policy before dispatch (#14106).
-   */
+  /** A UI interaction that may cause in-app navigation; excludes lifecycle tools (not replayable paths). */
   recordsNavigation?: boolean;
+  /** A UI interaction run behind the device's `systemAlerts` policy, before and after (#14106). */
+  answersSystemAlerts?: boolean;
   /** Read-only: nothing happened on the device, so an artifact write failure stays loud. */
   loudArtifactWrites?: boolean;
   /**
@@ -169,6 +168,9 @@ export interface ToolTraits {
 /** Spread into the options of a tool that declares {@link ToolTraits.defaultsToSkeletonObservation}. */
 export const SKELETON_OBSERVATION = { defaultsToSkeletonObservation: true } as const;
 
+/** Spread into the options of a UI interaction that declares {@link ToolTraits.answersSystemAlerts}. */
+export const ANSWERS_SYSTEM_ALERTS = { answersSystemAlerts: true } as const;
+
 /** Spread into the options of a tool that declares {@link ToolTraits.planRelevant}. */
 export const PLAN_RELEVANT = { planRelevant: true } as const;
 
@@ -181,6 +183,7 @@ export function pickToolTraits(options: ToolTraits): ToolTraits {
     stopsApp,
     replacesProcess,
     recordsNavigation,
+    answersSystemAlerts,
     loudArtifactWrites,
     defaultsToSkeletonObservation,
     stagesFiles,
@@ -190,6 +193,7 @@ export function pickToolTraits(options: ToolTraits): ToolTraits {
     stopsApp,
     replacesProcess,
     recordsNavigation,
+    answersSystemAlerts,
     loudArtifactWrites,
     defaultsToSkeletonObservation,
     stagesFiles,

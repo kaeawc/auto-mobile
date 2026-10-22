@@ -1,0 +1,37 @@
+{
+  "spec": {
+    "id": "strict",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "spacer",
+      "visibleWhen": {
+        "not": {
+          "not": {
+            "not": {
+              "not": {
+                "not": {
+                  "not": {
+                    "not": {
+                      "not": {
+                        "key": "x",
+                        "equals": true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "state": {
+      "x": true
+    }
+  },
+  "expectedPath": "root.visibleWhen.not.not.not.not.not.not.not.not"
+}

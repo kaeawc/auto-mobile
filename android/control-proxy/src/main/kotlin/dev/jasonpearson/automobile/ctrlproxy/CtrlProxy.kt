@@ -3419,22 +3419,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    * if the action was dispatched successfully.
    */
   private fun executeGlobalAction(action: String): Boolean {
-    val actionId =
-      when (action.lowercase()) {
-        "back" -> GLOBAL_ACTION_BACK
-        "home" -> GLOBAL_ACTION_HOME
-        "recent",
-        "recents" -> GLOBAL_ACTION_RECENTS
-        "notifications" -> GLOBAL_ACTION_NOTIFICATIONS
-        "power_dialog" -> GLOBAL_ACTION_POWER_DIALOG
-        "lock_screen" ->
-          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            GLOBAL_ACTION_LOCK_SCREEN
-          } else {
-            return false
-          }
-        else -> return false
-      }
+    val actionId = SystemGlobalActions.resolve(action, Build.VERSION.SDK_INT) ?: return false
     return performGlobalAction(actionId)
   }
 
@@ -3452,7 +3437,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           success = success,
           action = action,
           totalTimeMs = totalTimeMs,
-          error = if (!success) "Unsupported or failed action: $action" else null,
+          error =
+            if (!success) {
+              SystemGlobalActions.refusal(action, Build.VERSION.SDK_INT)
+                ?: "Global action failed: $action"
+            } else {
+              null
+            },
         ),
       )
     }

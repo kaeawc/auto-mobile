@@ -148,6 +148,37 @@ describe("reset readiness", () => {
     expect(await context.readiness.snapshot(() => false)).toBeUndefined();
   });
 
+  test("cold-create break-even includes the readiness phase observed on device (#14791)", async () => {
+    const context = harness();
+    // Measured batch 20261022a: create 5.6 s, boot 27-49 s, readiness 60-70 s, total 111-123 s;
+    // erase resets 54-60 s. The third acquisition began shortly after release (about 50 s of reset remain).
+    const acquisition = context.store.samples[0].timing.acquisition!;
+    const cold = (createMs: number, bootMs: number, automationReadyMs: number, totalMs: number) =>
+      ({
+        profile: PROFILE,
+        timing: { acquisition: { ...acquisition, createMs, bootMs, automationReadyMs, totalMs } },
+      }) satisfies BrokerTimingSample;
+    const reset = (totalMs: number) =>
+      ({
+        profile: PROFILE,
+        timing: {
+          reset: { ...context.store.samples[0].timing.reset!, phases: {}, totalMs },
+        },
+      }) satisfies BrokerTimingSample;
+    context.store.samples = [
+      cold(5_569, 49_184, 68_000, 123_433),
+      cold(900, 38_000, 65_000, 110_992),
+      reset(60_500),
+      reset(56_500),
+    ];
+    context.timer.advanceTime(10_000);
+    context.store.request.timing!.reset!.startedAtMs = 1000;
+    const snapshot = (await context.readiness.snapshot(() => true))!;
+    expect(snapshot.thresholdMs).toBeGreaterThanOrEqual(110_992);
+    // About 50 s of reset remain: far cheaper than a 111-123 s cold create, so wait.
+    expect(snapshot.expectedReadyMs.get("resource")).toBeLessThanOrEqual(snapshot.thresholdMs);
+  });
+
   test("parked and failed pending resets never offer readiness", async () => {
     const context = harness();
     context.readiness.setResetActive("resource", false);

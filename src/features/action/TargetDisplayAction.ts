@@ -131,17 +131,16 @@ export function sessionRenderedObservation(
       };
 }
 
+/**
+ * The caller's latest rendered revision, read again through the same reader that supplied
+ * `previous` so an injected reader and its session store stay the one source (#13315).
+ */
 function renderedRevision(
   deviceId: string,
   previous: NonNullable<ReturnType<RenderedObservationReader>>,
-  daemon: DaemonContext = defaultDaemonContext,
+  lastRenderedObservation: RenderedObservationReader,
 ): number | undefined {
-  const sessions = daemon.renderedDisplaySessions();
-  if (!sessions) {
-    return previous.displayRevision;
-  }
-  const sessionId = sessions.getSessionForDevice(deviceId);
-  return sessionId ? sessions.getLastRenderedDisplayRevision(sessionId) : previous.displayRevision;
+  return lastRenderedObservation(deviceId)?.displayRevision ?? previous.displayRevision;
 }
 
 /** Keep resolving and dispatch checks bound to the same action-start stamp. */
@@ -247,7 +246,7 @@ export async function prepareTargetDisplayAction(
       `Coordinates for display "${panel.key}" require a prior observation of that panel. Re-observe display "${panel.key}" and retry.`,
     );
   }
-  const callerRevision = renderedRevision(device.deviceId, previous);
+  const callerRevision = renderedRevision(device.deviceId, previous, lastRenderedObservation);
   assertCallerCurrent(callerRevision);
   const observation = iosObservation ?? (await observe.execute(targetDisplayRead(display, signal)));
   assertCurrent();

@@ -488,6 +488,73 @@ describe("control socket discovery cache", () => {
     }
   });
 
+  describe("a stalled warm resource refresh stays cancellable (#14522)", () => {
+    function stalledHarness() {
+      let stalled = false;
+      let refreshes = 0;
+      const h = harness({
+        refreshResources: () => {
+          refreshes++;
+          return stalled ? new Promise<void>(() => {}) : Promise.resolve();
+        },
+      });
+      const context = (overrides: Partial<McpForwardContext> = {}) =>
+        h.context({
+          request: { id: "resources", type: "mcp_request", method: "resources/list", params: {} },
+          ...overrides,
+        });
+      return {
+        h,
+        context,
+        stall: () => {
+          stalled = true;
+        },
+        refreshes: () => refreshes,
+      };
+    }
+
+    test("an abort while the refresh hangs rejects with the abort reason", async () => {
+      const { h, context, stall } = stalledHarness();
+      await h.server.forwardRequest(context());
+      stall();
+      const abort = new AbortController();
+      const pending = h.server.forwardRequest(context({ signal: abort.signal }));
+      abort.abort(new Error("client cancelled"));
+      await expect(pending).rejects.toThrow("client cancelled");
+      expect(h.trips()).toBe(1);
+    });
+
+    test("the MCP deadline ends the wait with a timeout and never cold-loads", async () => {
+      const { h, context, stall } = stalledHarness();
+      await h.server.forwardRequest(context());
+      stall();
+      const pending = h.server.forwardRequest(
+        context({ deadline: new ProgressExtendableDeadline(h.timer.now(), 1000) }),
+      );
+      const settled = pending.then(
+        () => "resolved",
+        (error: unknown) => (error instanceof Error ? error.message : String(error)),
+      );
+      await h.timer.advanceTimeAsync(1000);
+      expect(await settled).toContain("MCP timeout: resources/list exceeded 1000ms");
+      expect(h.trips()).toBe(1);
+    });
+
+    test("later warm hits share the refresh left running instead of starting another", async () => {
+      const { h, context, stall, refreshes } = stalledHarness();
+      await h.server.forwardRequest(context());
+      stall();
+      const before = refreshes();
+      for (const reason of ["first", "second"]) {
+        const abort = new AbortController();
+        const pending = h.server.forwardRequest(context({ signal: abort.signal }));
+        abort.abort(new Error(reason));
+        await expect(pending).rejects.toThrow(reason);
+      }
+      expect(refreshes() - before).toBe(1);
+    });
+  });
+
   test("scope churn evicts the oldest answer instead of retaining lists without bound", async () => {
     const h = harness();
     for (let i = 0; i < 129; i++) {

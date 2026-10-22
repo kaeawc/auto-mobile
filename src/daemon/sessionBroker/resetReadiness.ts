@@ -29,6 +29,18 @@ function successfulTimingSample(sample: BrokerTimingSample): BrokerTimingSample 
   };
 }
 
+/**
+ * A real cold acquisition also pays the automation-readiness phase (runner/CtrlProxy start,
+ * 60-70 s on iOS), so the break-even is the whole create path, not just create + boot (#14791).
+ */
+function coldCreateMs(
+  group: SessionBrokerStats["groups"][number],
+  createAndBootMs: number,
+): number {
+  const phases = group.acquisitionPhases;
+  return Math.max(createAndBootMs + (phases.automationReadyMs?.p50 ?? 0), phases.totalMs?.p50 ?? 0);
+}
+
 function phaseEstimate(
   group: SessionBrokerStats["groups"][number] | undefined,
 ): { resetMs: number; thresholdMs: number } | undefined {
@@ -43,7 +55,7 @@ function phaseEstimate(
   ) {
     return undefined;
   }
-  return { resetMs, thresholdMs: createMs + bootMs };
+  return { resetMs, thresholdMs: coldCreateMs(group!, createMs + bootMs) };
 }
 
 type ReadinessStore = Pick<

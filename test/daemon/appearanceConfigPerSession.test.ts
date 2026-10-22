@@ -102,7 +102,7 @@ describe("AppearanceSyncScheduler with per-session config", () => {
 
   test("syncDevice reads the config of the session that acquired the device", async () => {
     const store = new FakeConfigStore();
-    await store.update({ syncWithHost: false }, "agent-a");
+    await store.update({ syncWithHost: false, applyOnConnect: false }, "agent-a");
     const { instance, applied } = scheduler(store, () => [
       target("emulator-5554", "agent-a"),
       target("emulator-5556", "agent-b"),
@@ -112,6 +112,33 @@ describe("AppearanceSyncScheduler with per-session config", () => {
     await instance.syncDevice(target("emulator-5556", "agent-b"));
 
     expect(applied).toEqual(["emulator-5556:dark"]);
+    await instance.stop();
+  });
+
+  test("a claim applies the holder's explicit mode although it does not follow the host (#11363)", async () => {
+    const store = new FakeConfigStore();
+    await store.update({ syncWithHost: false, defaultMode: "dark" }, "observer");
+    const { instance, applied } = scheduler(store, () => [target("emulator-5554", "observer")]);
+
+    await instance.syncDevice(target("emulator-5554", "observer"));
+    // The host-sync tick leaves an explicit choice alone.
+    await instance.trigger();
+
+    expect(applied).toEqual(["emulator-5554:dark"]);
+    await instance.stop();
+  });
+
+  test("a claim leaves the device alone when the holder neither follows the host nor applies on connect", async () => {
+    const store = new FakeConfigStore();
+    await store.update(
+      { syncWithHost: false, defaultMode: "dark", applyOnConnect: false },
+      "observer",
+    );
+    const { instance, applied } = scheduler(store, () => [target("emulator-5554", "observer")]);
+
+    await instance.syncDevice(target("emulator-5554", "observer"));
+
+    expect(applied).toEqual([]);
     await instance.stop();
   });
 });

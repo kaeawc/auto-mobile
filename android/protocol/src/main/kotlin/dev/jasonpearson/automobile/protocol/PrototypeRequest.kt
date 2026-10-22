@@ -592,7 +592,8 @@ internal object PrototypeUrl {
     ) : Result
   }
 
-  fun parse(url: String): Result {
+  fun parse(input: String): Result {
+    val url = input.trim { it.code <= 32 }.filterNot { it in "\t\r\n" }.replace('\\', '/')
     val colon = schemeEnd(url)
     if (colon < 0) return notAbsolute(url)
     val scheme = url.substring(0, colon).lowercase()
@@ -608,6 +609,11 @@ internal object PrototypeUrl {
     val pathAt = beforeQuery.indexOf('/')
     val authority = if (pathAt < 0) beforeQuery else beforeQuery.substring(0, pathAt)
     if (authority.isEmpty()) return notAbsolute(url)
+    try {
+      if (java.net.URI("$scheme://$authority").rawAuthority == null) return notAbsolute(url)
+    } catch (_: java.net.URISyntaxException) {
+      return notAbsolute(url)
+    }
     return Result.Absolute(
       scheme = scheme,
       authority = authority,

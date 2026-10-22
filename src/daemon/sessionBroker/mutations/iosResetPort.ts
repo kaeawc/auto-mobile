@@ -11,6 +11,7 @@ import {
   SIMCTL_PRIVACY_TCC_SERVICES,
   type TccServiceRowReader,
 } from "../../../utils/ios-cmdline-tools/SimulatorTccSqliteClient";
+import type { UserTrustStoreReader } from "../../../utils/ios-cmdline-tools/SimulatorTccSqliteClient";
 import { isProcessAlreadyGoneError } from "../../../utils/ios-cmdline-tools/iosProcessErrors";
 import { getIosInstalledAppBundleId } from "../../../utils/ios-cmdline-tools/iosInstalledApp";
 import { parsePlist } from "../../../utils/ios-cmdline-tools/XctestrunPlist";
@@ -177,6 +178,7 @@ export interface IosMutationResetDependencies {
   files: IosResetFiles;
   pasteboard: IosResetPasteboard;
   privacyGrants: Pick<TccServiceRowReader, "readServiceRows">;
+  trustStore: UserTrustStoreReader;
 }
 
 interface IosAppGroupCleanup {
@@ -510,7 +512,37 @@ export class IosDeviceMutationResetPort implements DeviceMutationResetPort {
       );
     }
     await this.resetSurvivingPrivacyGrants(context);
+    await this.assertNoUserTrustedCertificates(context);
     await this.restoreSettings(context);
+  }
+
+  /**
+   * `simctl keychain reset` leaves the user trust settings alone and nothing else here removes a
+   * trusted root, so one that survives would let the next session's TLS traffic be intercepted.
+   * Pool-entry simulators are created with no user-trusted roots, so any row means the session
+   * added it: refuse the keep-booted reset so the erase fallback wipes it (#14828).
+   */
+  private async assertNoUserTrustedCertificates(
+    context: DeviceMutationResetContext,
+  ): Promise<void> {
+    await context.assertOwned();
+    context.signal.throwIfAborted();
+    const started = this.timer.now();
+    try {
+      const certificates = await this.dependencies.trustStore.readUserTrustedCertificates(
+        context.scope.deviceId,
+        context.signal,
+      );
+      await context.assertOwned();
+      context.signal.throwIfAborted();
+      if (certificates.length > 0) {
+        throw new ActionableError(
+          `iOS reset cannot remove ${certificates.length} user-trusted root certificate(s); erase required`,
+        );
+      }
+    } finally {
+      context.recordPhase?.("trust-store:verify", this.timer.now() - started);
+    }
   }
 
   private async resetSurvivingPrivacyGrants(context: DeviceMutationResetContext): Promise<void> {

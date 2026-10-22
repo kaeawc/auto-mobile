@@ -122,7 +122,12 @@ enum class SessionReleaseReason {
   /** The daemon restarted (or the device restarted) and did not restore the session. */
   DAEMON_RESTARTED,
   /** The daemon no longer had the session's hold, for a reason it did not say. */
-  DAEMON_RELEASED;
+  DAEMON_RELEASED,
+  /**
+   * The user selected another device while recording this one (owner decision 2026-10-10, #11366):
+   * its pane closed, which releases it and finalizes the recording.
+   */
+  DEVICE_SWITCH;
 
   companion object {
     /** Maps the daemon's `releaseReason` string (`src/daemon/sessionManager.ts`) to a notice. */
@@ -188,6 +193,11 @@ data class DesktopDaemonSessionState(
    * shows. Safe from any thread.
    */
   val reportHeldElsewhere: (String) -> Unit = {},
+  /**
+   * Counts the times the user's remembered appearance choice was re-sent under a session (#11363),
+   * so a view of the session's appearance config re-reads it after the restore.
+   */
+  val appearanceRestores: Int = 0,
 ) {
   val sessionUuidProvider: () -> String?
     get() = session?.sessionUuidProvider ?: { null }
@@ -274,6 +284,15 @@ data class DesktopDaemonSessionOptions(
   val bindRetryBackoff: BindRetryBackoff = BindRetryBackoff.Default,
   /** Monotonic milliseconds, for [HEARTBEAT_LAPSE_MS]; tests pass their virtual clock. */
   val monotonicClockMs: () -> Long = { System.nanoTime() / 1_000_000 },
+  /**
+   * The user's last appearance choice, re-sent under each session that registers (#11363). Null
+   * re-sends nothing.
+   */
+  val appearanceChoices: AppearanceChoiceMemory? = null,
+  /** The plain (non-allocating) appearance client a re-sent choice goes through. */
+  val appearanceClientFactory: (sessionUuidProvider: () -> String?) -> AppearanceClient = {
+    AppearanceSocketClient(sessionUuidProvider = it)
+  },
 )
 
 @Composable
@@ -296,7 +315,7 @@ fun rememberDesktopDaemonSession(options: DesktopDaemonSessionOptions): DesktopD
   val visiblePanes = options.panes.value
   state.currentPanes = visiblePanes
   state.HostVisibilityEffect(options, activeRecordings)
-  state.VisiblePanesEffect(options, visiblePanes)
+  state.VisiblePanesEffect(options, visiblePanes, activeRecordings)
   val requestInput = state.rememberRequestInput(options)
   val inputAllocation = state.rememberInputAllocation(options, requestInput)
   val requestControl = state.rememberRequestControl(options)
@@ -308,7 +327,9 @@ fun rememberDesktopDaemonSession(options: DesktopDaemonSessionOptions): DesktopD
     else visiblePanes.firstOrNull { it.deviceId == state.inputDeviceId }
   state.CleanupEffect(options, session)
   state.BindingEffect(options, session, target)
-  return state.renderState(session, actions)
+  val registered = session?.isRegistered?.collectAsState()?.value ?: false
+  state.AppearanceRestoreEffect(options, session, registered)
+  return state.renderState(session, registered, actions)
 }
 
 internal class DesktopDaemonCompositionState {
@@ -323,6 +344,7 @@ internal class DesktopDaemonCompositionState {
   var carriedBindError by mutableStateOf<Pair<String, String>?>(null)
   var controlRequests by mutableStateOf(0)
   var hiddenPastGrace by mutableStateOf(false)
+  var appearanceRestores by mutableStateOf(0)
   val pendingRecoveryRefresh = AtomicBoolean(false)
   val heldDevice = AtomicReference<String?>(null)
   val gates = InputAllocationGates()
@@ -377,10 +399,19 @@ private fun DesktopDaemonCompositionState.HostVisibilityEffect(
 private fun DesktopDaemonCompositionState.VisiblePanesEffect(
   options: DesktopDaemonSessionOptions,
   visiblePanes: List<DesktopDaemonSessionBinding>,
+  activeRecordings: ActiveRecordingTracker,
 ) {
   with(options) {
     LaunchedEffect(visiblePanes) {
       val visible = visiblePanes.map { it.deviceId }.toSet()
+      inputDeviceId
+        ?.takeIf { it !in visible && activeRecordings.isRecordingOn(it) }
+        ?.let { recorded ->
+          // Leaving a recorded device releases it and finalizes the recording (#11366): mark it
+          // released, as an idle release does, so the dashboard fetches the artifact, drops Stop.
+          idleReleasedDeviceId = recorded
+          releaseReason = SessionReleaseReason.DEVICE_SWITCH
+        }
       if (inputDeviceId != null && inputDeviceId !in visible) inputDeviceId = null
       if (heldElsewhereDeviceId != null && heldElsewhereDeviceId !in visible) {
         heldElsewhereDeviceId = null
@@ -559,9 +590,9 @@ private fun DesktopDaemonCompositionState.BindingEffect(
 @Composable
 private fun DesktopDaemonCompositionState.renderState(
   session: DesktopDaemonSession?,
+  registered: Boolean,
   actions: DesktopSessionActions,
 ): DesktopDaemonSessionState {
-  val registered = session?.isRegistered?.collectAsState()?.value ?: false
   return DesktopDaemonSessionState(
     session = session,
     boundDeviceId = boundDeviceId,
@@ -575,5 +606,6 @@ private fun DesktopDaemonCompositionState.renderState(
     requestInput = actions.requestInput,
     inputAllocation = actions.inputAllocation,
     reportHeldElsewhere = actions.reportHeldElsewhere,
+    appearanceRestores = appearanceRestores,
   )
 }

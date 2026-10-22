@@ -74,6 +74,20 @@ export function describeFrame(frame: StackTraceElement): string {
   return location ? `${frame.methodName} (${location})` : frame.methodName;
 }
 
+/** The full text of one report, as the OS wrote it. */
+export interface NativeCrashReportBody {
+  report: NativeCrashReport;
+  text: string;
+}
+
+/**
+ * Re-reads one report by id from its source on the same device (the host `.ips`
+ * for this Simulator, or the device's dropbox). `undefined` when it is gone.
+ */
+export interface NativeCrashReportReader {
+  read(reportId: string, signal?: AbortSignal): Promise<NativeCrashReportBody | undefined>;
+}
+
 /** Finds the OS crash report for one crashed process, never one from another device or app. */
 export interface NativeCrashReportFinder {
   find(query: NativeCrashReportQuery): Promise<NativeCrashReportLookup>;

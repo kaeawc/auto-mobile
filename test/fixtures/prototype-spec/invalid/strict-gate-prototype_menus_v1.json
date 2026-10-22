@@ -1,0 +1,67 @@
+{
+  "spec": {
+    "id": "menus",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "open": false,
+      "choice": "a"
+    },
+    "root": {
+      "type": "row",
+      "children": [
+        {
+          "type": "iconButton",
+          "icon": "more_vert",
+          "onTap": [
+            {
+              "type": "setState",
+              "key": "open",
+              "value": true
+            }
+          ]
+        },
+        {
+          "type": "menu",
+          "testTag": "overflow",
+          "openWhen": {
+            "key": "open",
+            "equals": true
+          },
+          "items": [
+            {
+              "label": "Share",
+              "icon": "share",
+              "trailingText": "Send",
+              "onTap": [
+                {
+                  "type": "emit",
+                  "name": "share"
+                },
+                {
+                  "type": "setState",
+                  "key": "open",
+                  "value": false
+                }
+              ]
+            },
+            {
+              "type": "divider"
+            },
+            {
+              "label": "Unavailable",
+              "enabled": false
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "options": {
+    "supportedCapabilities": []
+  },
+  "expectedPath": "$"
+}

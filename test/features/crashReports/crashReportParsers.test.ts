@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  dropboxReportId,
+  dropboxTagOfReportId,
   parseDropboxCrashReports,
   parseUtcOffsetMinutes,
 } from "../../../src/features/crashReports/androidDropboxCrashReport";
@@ -84,7 +86,7 @@ describe("Android dropbox crash reports (#14103)", () => {
     ]);
     const latest = reports[2]!.report;
     expect(latest).toMatchObject({
-      id: "data_app_crash@2026-10-21 10:00:02#4321",
+      id: "data_app_crash-20261021T100002-4321",
       platform: "android",
       source: "android_dropbox",
       appId: "com.example.app",
@@ -119,7 +121,7 @@ describe("Android dropbox crash reports (#14103)", () => {
     const [parsed] = parseDropboxCrashReports(fixture("android-dropbox-native-crash.txt"));
 
     expect(parsed!.report).toMatchObject({
-      id: "data_app_native_crash@2026-10-21 10:00:03#4321",
+      id: "data_app_native_crash-20261021T100003-4321",
       processId: 4321,
       timestampMs: Date.parse("2026-10-21T10:00:03.123Z"),
       exceptionType: "SIGABRT",
@@ -139,6 +141,26 @@ describe("Android dropbox crash reports (#14103)", () => {
     const crlf = fixture("android-dropbox-native-crash.txt").replace(/\n/g, "\r\n");
     expect(parseDropboxCrashReports(crlf)).toHaveLength(1);
     expect(parseDropboxCrashReports("Drop box contents: 0 entries\n")).toEqual([]);
+  });
+
+  test("keeps each entry's own text for the full-report resource", () => {
+    const reports = parseDropboxCrashReports(fixture("android-dropbox-app-crash.txt"), 0);
+    expect(reports[2]!.rawText.startsWith("2026-10-21 10:00:02 data_app_crash (text")).toBe(true);
+    expect(reports[2]!.rawText).toContain("shell-induced crash");
+    expect(reports[2]!.rawText).not.toContain("another app's crash");
+  });
+
+  test("mints URI-safe ids whose tag can be recovered", () => {
+    const id = dropboxReportId(
+      "data_app_native_crash",
+      "2026-10-21 10:00:03",
+      "com.example:remote",
+    );
+    expect(id).toBe("data_app_native_crash-20261021T100003-com.example_remote");
+    expect(id).toMatch(/^[A-Za-z0-9._-]+$/);
+    expect(dropboxTagOfReportId(id)).toBe("data_app_native_crash");
+    expect(dropboxTagOfReportId("data_app_crash-20261021T100003-1")).toBe("data_app_crash");
+    expect(dropboxTagOfReportId("8E5D1F2A-3B4C-4D5E-8F60-718293A4B5C6")).toBeUndefined();
   });
 
   test("reads date +%z offsets", () => {

@@ -165,7 +165,7 @@ animated highlight over its background and reads "Loading" to accessibility; it 
 - **Error:** \`visibleWhen: {key: "feedStatus", equals: "error"}\`, with a retry button that runs
   the request again.
 
-The rows themselves repeat over \`{path: "/feed"}\`. The iOS agent does not draw shimmer yet (#14689).
+The rows themselves repeat over \`{path: "/feed"}\`. The iOS agent draws shimmer too.
 
 ## Motion v2
 

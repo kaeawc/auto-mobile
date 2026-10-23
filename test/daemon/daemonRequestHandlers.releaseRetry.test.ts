@@ -1,3 +1,4 @@
+import { defaultTimer } from "../../src/utils/SystemTimer";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import {
@@ -249,18 +250,59 @@ describe.each([false, true])("terminal release retry (autolock=%s)", (autolock) 
             device: deviceId,
             alreadyReleased: false,
             ...(reported ? { keepAwakeRestore: report } : {}),
+            ...(reported === "failed" ? { cleanup: "failed" } : {}),
           },
         });
         expect(await release()).toEqual({
           success: true,
           result: {
-            message: `Session ${sessionId} already released or never existed`,
+            message: `Session ${sessionId} already released${reported === "failed" ? "; cleanup failed" : ""}`,
+            known: true,
             alreadyReleased: true,
             ...(reported ? { keepAwakeRestore: report } : {}),
+            ...(reported === "failed" ? { cleanup: "failed" } : {}),
           },
         });
       } finally {
         getter.mockRestore();
+      }
+    },
+  );
+
+  arrangedEach(["screenLock", "power"] as const)(
+    "already released reports pending %s cleanup",
+    async (kind) => {
+      await release();
+      const cleanupTimer = new FakeTimer();
+      const screenLock = new ScreenLockRegistry();
+      const power = new PowerRegistry();
+      if (kind === "screenLock") {
+        screenLock.noteRestore(sessionId, new Promise(() => {}));
+      } else {
+        power.noteRestore(sessionId, new Promise(() => {}));
+      }
+      state = { ...state, getScreenLockRegistry: () => screenLock, getPowerRegistry: () => power };
+      const timeout = spyOn(defaultTimer, "setTimeout").mockImplementation(
+        cleanupTimer.setTimeout.bind(cleanupTimer),
+      );
+      const clear = spyOn(defaultTimer, "clearTimeout").mockImplementation(
+        cleanupTimer.clearTimeout.bind(cleanupTimer),
+      );
+      cleanupTimer.enableAutoAdvance();
+      try {
+        const response = await release();
+        expect(response).toMatchObject({
+          success: true,
+          result: {
+            alreadyReleased: true,
+            known: true,
+            cleanup: "pending",
+            message: `Session ${sessionId} already released; cleanup still pending`,
+          },
+        });
+      } finally {
+        timeout.mockRestore();
+        clear.mockRestore();
       }
     },
   );

@@ -65,8 +65,8 @@ Known failures report a `code` beside the `reason`:
 | `DEVICE_NOT_PAIRED`    | `unavailable` | The device has not paired with and trusted this Mac.    |
 | `DEVICE_LOCKED`        | `failed`      | The device is locked; unlock it and retry.              |
 
-These codes come from matching the text of `log collect` errors. That text has
-not been checked on real hardware yet (#14104, `needs-device-verify`).
+These codes are derived from the text of `log collect` errors and have not been
+checked on real hardware.
 Unrecognised failures report `failed` with the full command output.
 
 Every source reports its own outcome, so a failed or unavailable source never

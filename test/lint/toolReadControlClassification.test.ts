@@ -176,7 +176,6 @@ const CLASSIFICATION: Classification = {
     "setSensor",
     "setUIState",
     "shake",
-    "stageSessionDownloads",
     "swipeAt",
     "swipeOn",
     // Pulls the notification shade down, even to list or find.

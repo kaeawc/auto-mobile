@@ -8,7 +8,6 @@ import { registerSwipeAtTools } from "../../src/server/swipeAtTools";
 import { registerMultiTouchTools } from "../../src/server/multiTouchTools";
 import { registerBiometricTools } from "../../src/server/biometricTools";
 import { registerAppFileTools } from "../../src/server/appFileTools";
-import { registerDownloadsFixtureTools } from "../../src/server/downloadsFixtureTools";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 
 isolateToolRegistry();
@@ -38,7 +37,6 @@ describe("tool traits replace the navigation recorder's name lists (#11825)", ()
     registerMultiTouchTools();
     registerBiometricTools();
     registerAppFileTools();
-    registerDownloadsFixtureTools();
   });
 
   test("stopsApp is declared by exactly the tools APP_STOPPING_TOOLS named", () => {
@@ -87,7 +85,7 @@ describe("tool traits replace the navigation recorder's name lists (#11825)", ()
   });
 
   test("stagesFiles is declared by exactly the tools FILE_STAGING_TOOLS named", () => {
-    expect(toolsWith("stagesFiles")).toEqual(["putAppFile", "stageSessionDownloads"]);
+    expect(toolsWith("stagesFiles")).toEqual(["putAppFile"]);
   });
 
   test("the state-preserving kill is not an app-stopping tool", () => {

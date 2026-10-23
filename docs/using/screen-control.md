@@ -57,36 +57,10 @@ session: a command for it without `sessionUuid`, or naming a different session,
 fails with `code` `device_owned_by_other_session`. A device no session holds
 takes input from any client.
 
-For direct `input/*`, device-mutating `ide/*` frames and device-aware control tools,
-an Android transport the pool cannot identify (`isAndroidTransportAssignable` is false) is refused only
-while a held Android device could be its alias. Held devices are every
-Android device still in the session holder map, including expired sessions and
-releases in progress until their ownership is removed, plus one unknown hold if
-the fresh broker binding snapshot contains Android stable ids not represented by
-those sessions. Control frames and tools reuse that snapshot for at most one second.
-
-The pool can positively distinguish the target from a held device only when its
-current folded alias group identifies another canonical device, its proven
-physical serial differs from a held USB serial or physical alias group, or its
-loopback adb port identifies a different emulator console. An emulator proven by
-its current connection's probe is also told apart from a held physical phone
-(a USB serial or physical alias group), without becoming assignable. Matching physical
-serials or alias-group keys still could alias. A loopback port cannot distinguish
-a phone or an unknown device; an unknown broker binding hold could alias unless
-the target's current folded group identifies another device.
-
-If no held device could alias the transport, control is allowed. If every
-possible alias belongs to the requester's own session (including derived label
-sessions), control keeps the untyped “no proven identity” refusal. Otherwise
-it fails with `device_owned_by_other_session` and `retryable: false`, naming the
-transport the caller targeted; an unknown broker binding hold uses
-`device_assigned_to_binding` when its registry entry is available. Address
-the device by its USB serial or `emulator-NNNN` id. Refusal sends nothing and does
-not restart a holder's idle window. A target already held under its very id goes
-through the normal holder check. Identifiable Android targets and iOS targets
-keep their existing behavior; screenshot, hierarchy and observe reads never
-pass this control check. A broker connection still controls only its granted
-devices; the existing connection and ownership checks still apply.
+If a transport cannot be matched to a device that another session holds, the command
+is refused with `device_owned_by_other_session` and `retryable: false`. Address the
+device by its USB serial or `emulator-NNNN` id. A refused command sends nothing to
+the device. Screenshot, hierarchy and observe reads are never refused this way.
 
 A command whose session left the device (rebound or released) between being
 accepted and reaching the device fails with `code`
@@ -130,9 +104,8 @@ device and its runner; iOS has no menu hardware button.
 it defaults to 300 milliseconds.
 
 All three gesture methods require a non-empty string `gestureId` and numeric
-`x`/`y`. Send a start, moves, and an end with the same `gestureId`. The parser
-accepts an optional boolean `cancel` on all three, defaulting to false, but only
-`gestureEnd` forwards it to the runner; start and move ignore it.
+`x`/`y`. Send a start, moves, and an end with the same `gestureId`. `cancel` is an
+optional boolean on all three, defaulting to false, but only `gestureEnd` honors it.
 
 Two rules to get right:
 
@@ -303,8 +276,3 @@ Swap `method` and `params` in the same envelope:
 {"id":"3","type":"daemon_request","method":"input/pressButton","params":{"platform":"android","button":"back"}}
 {"id":"4","type":"daemon_request","method":"input/typeText","params":{"platform":"android","text":"hello","mode":"append","submit":false}}
 ```
-
-The reference client that ties click/drag/keyboard mapping to these commands is
-`DeviceControlSession`
-([source](https://github.com/kaeawc/auto-mobile/blob/main/android/desktop-core/src/main/kotlin/dev/jasonpearson/automobile/desktop/core/control/DeviceControlSession.kt)) —
-consult it for the ordered dispatch queue and the post-input refresh wait.

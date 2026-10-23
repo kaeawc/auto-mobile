@@ -78,6 +78,7 @@ export function deviceListRefreshFailureMessage(failure: string): string {
 
 /** Live pool state is read at each use, including after awaits. */
 export interface DevicePoolRefreshPort {
+  createInsertionFence(): { wasFenced(deviceId: string): boolean };
   needsAndroidTransportNormalization?(devices: readonly BootedDevice[]): boolean;
   normalizeAndroidDiscovery?(
     devices: readonly BootedDevice[],
@@ -172,6 +173,7 @@ export class DevicePoolRefresh {
     const perf = createGlobalPerformanceTracker();
     const refreshGeneration = ++this.refreshGeneration;
     const removalGenerationAtDiscoveryStart = this.deviceRemovalGeneration;
+    const insertionFence = this.pool.createInsertionFence();
     this.inFlightRefreshFloors.set(refreshGeneration, removalGenerationAtDiscoveryStart);
     try {
       logger.info("Refreshing device pool - discovering connected devices...");
@@ -247,6 +249,9 @@ export class DevicePoolRefresh {
               refreshGeneration,
             );
             return updated;
+          }
+          if (insertionFence.wasFenced(device.deviceId)) {
+            return undefined;
           }
           this.pool.addPooledDevice({
             id: device.deviceId,

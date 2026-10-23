@@ -45,6 +45,7 @@ export type DevicePoolSeams = Pick<
   | "finishEmulatorLossIncident"
   | "isCurrentDisconnectedDevice"
   | "markIntentionalShutdown"
+  | "fenceUnpooledShutdown"
   | "releaseDeviceRestartReservationForStop"
   | "hasRestartHandoffReservation"
   | "restartStopConfirmedPooledIdentity"

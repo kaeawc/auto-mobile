@@ -532,6 +532,10 @@ export class DevicePool {
     this.parts.reservations.clearUnpooledShutdown(deviceId);
   }
 
+  fenceUnpooledShutdown(deviceId: string): () => void {
+    return this.parts.reservations.fenceUnpooledShutdown(deviceId);
+  }
+
   settleUnpooledShutdown(deviceId: string): void {
     this.parts.reservations.settleUnpooledShutdown(deviceId);
   }

@@ -201,3 +201,73 @@ test("unpooled recovery reservation without opt-in permits exact insertion", asy
   });
   expect(pool.getDevice(device.deviceId)?.id).toBe(device.deviceId);
 });
+
+test("refresh refuses an unpooled kill during discovery and admits after grace", async () => {
+  const { pool, manager, timer } = harness();
+  const gate = parkDiscovery(manager);
+  const refresh = pool.refreshDevices();
+  await gate.entered;
+  await pool.reserveDeviceForShutdown(device.deviceId, undefined, undefined, undefined, undefined, {
+    fenceUnpooled: true,
+  });
+  gate.release();
+  expect(await refresh).toBe(0);
+  expect(pool.getDevice(device.deviceId)).toBeNull();
+  pool.settleUnpooledShutdown(device.deviceId);
+  timer.advanceTime(UNPOOLED_SHUTDOWN_FENCE_LIFETIME_MS);
+  expect(await pool.refreshDevices()).toBe(1);
+  expect(pool.getDevice(device.deviceId)?.id).toBe(device.deviceId);
+});
+
+test("refresh refuses a shutdown marker recorded during discovery", async () => {
+  const { pool, manager } = harness();
+  const gate = parkDiscovery(manager);
+  const refresh = pool.refreshDevices();
+  await gate.entered;
+  pool["state"].intentionalShutdowns.set(device.deviceId, -1);
+  gate.release();
+  expect(await refresh).toBe(0);
+  expect(pool.getDevice(device.deviceId)).toBeNull();
+});
+
+test("refresh still folds an existing pooled entry with a stale fence", async () => {
+  const { pool, manager } = harness();
+  await pool.reserveDeviceForShutdown(device.deviceId, undefined, undefined, undefined, undefined, {
+    fenceUnpooled: true,
+  });
+  await pool.addDevice(device);
+  manager.setBootedDevices("android", [{ ...device, name: "Updated handset", observedAt: 42 }]);
+  await pool.refreshDevices();
+  expect(pool.getDevice(device.deviceId)?.name).toBe("Updated handset");
+  expect(
+    pool["state"].shutdownReservationCoordinator.isUnpooledShutdownFenced(device.deviceId),
+  ).toBe(true);
+});
+
+test("refresh remembers an entry-time marker cleared during discovery", async () => {
+  const { pool, manager } = harness();
+  pool["state"].intentionalShutdowns.set(device.deviceId, -1);
+  const gate = parkDiscovery(manager);
+  const refresh = pool.refreshDevices();
+  await gate.entered;
+  pool["state"].intentionalShutdowns.delete(device.deviceId);
+  gate.release();
+  expect(await refresh).toBe(0);
+  expect(pool.getDevice(device.deviceId)).toBeNull();
+});
+
+test("a stale unpooled fence settler cannot shorten a newer shutdown", () => {
+  const { pool, timer } = harness();
+  const settleOld = pool.fenceUnpooledShutdown(device.deviceId);
+  const settleCurrent = pool.fenceUnpooledShutdown(device.deviceId);
+  settleOld();
+  timer.advanceTime(UNPOOLED_SHUTDOWN_FENCE_LIFETIME_MS);
+  expect(
+    pool["state"].shutdownReservationCoordinator.isUnpooledShutdownFenced(device.deviceId),
+  ).toBe(true);
+  settleCurrent();
+  timer.advanceTime(UNPOOLED_SHUTDOWN_FENCE_LIFETIME_MS);
+  expect(
+    pool["state"].shutdownReservationCoordinator.isUnpooledShutdownFenced(device.deviceId),
+  ).toBe(false);
+});

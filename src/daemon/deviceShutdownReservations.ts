@@ -70,6 +70,14 @@ export class DeviceShutdownReservations {
     return this.unpooledShutdownFences.isActive(deviceId);
   }
 
+  fenceUnpooledShutdown(deviceId: string): () => void {
+    if (this.pool.getDevices().has(deviceId)) {
+      return () => {};
+    }
+    const token = this.unpooledShutdownFences.record(deviceId);
+    return () => this.unpooledShutdownFences.settle(deviceId, token);
+  }
+
   settleUnpooledShutdown(deviceId: string): void {
     this.unpooledShutdownFences.settle(deviceId);
   }

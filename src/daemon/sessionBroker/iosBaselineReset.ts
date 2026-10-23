@@ -2,6 +2,7 @@ import type { BrokerNativeProfile } from "./profile";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { BootedDeviceDiscoveryIncompleteError } from "../../models/BootedDeviceDiscoveryIncompleteError";
 import { exponentialBackoff } from "../../utils/Backoff";
+import { ResetCapacityWaitExceededError } from "../../models/ResetCapacityWaitExceededError";
 import { BootCapacityExhaustedError } from "../../models/BootCapacityExhaustedError";
 import type { IosBootInstrumentation } from "../../models/IosBootInstrumentation";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../utils/deviceTimeouts";
@@ -18,6 +19,8 @@ import { assertIosResetInput, readExpectedIosResetTarget } from "./iosResetTarge
 type IosProfile = Extract<BrokerNativeProfile, { platform: "ios" }>;
 type ResetSimctl = Pick<SimCtl, "readSimulatorTarget" | "eraseSimulator" | "bootSimulator">;
 type ExpectedState = "Booted" | "Shutdown";
+
+export const IOS_RESET_CAPACITY_WAIT_MS = 60_000;
 
 export class IosBaselineReset {
   private readonly deferredBoots = new Set<string>();
@@ -112,11 +115,14 @@ export class IosBaselineReset {
     owned: () => Promise<void>,
     signal?: AbortSignal,
   ): Promise<BootSlotReservation | undefined> {
-    const deadline = this.timer.now() + DEFAULT_DEVICE_READY_TIMEOUT_MS;
+    const startedAt = this.timer.now();
+    let deadline = startedAt + DEFAULT_DEVICE_READY_TIMEOUT_MS;
     const backoff = exponentialBackoff({ initialDelayMs: 1_000, maxDelayMs: 8_000 });
     let attempt = 0;
+    let capacityAttempt = 0;
     for (;;) {
       signal?.throwIfAborted();
+      const attemptStartedAt = this.timer.now();
       try {
         return await this.dependencies.iosBootInstrumentation.reserveBoot?.({
           replacingDeviceId: deviceId,
@@ -125,6 +131,18 @@ export class IosBaselineReset {
           signal,
         });
       } catch (error) {
+        if (error instanceof BootCapacityExhaustedError) {
+          await this.waitResetCapacity({
+            error,
+            deviceId,
+            startedAt,
+            owned,
+            delayMs: backoff.delayForAttempt(++capacityAttempt),
+          });
+          // Time spent waiting on capacity is not charged to the discovery budget.
+          deadline += this.timer.now() - attemptStartedAt;
+          continue;
+        }
         const delayMs = backoff.delayForAttempt(++attempt);
         if (
           !(error instanceof BootedDeviceDiscoveryIncompleteError) ||
@@ -138,6 +156,25 @@ export class IosBaselineReset {
           throw toActionableError(error, "Cannot reserve iOS reset boot slot");
         }
       }
+    }
+  }
+
+  private async waitResetCapacity(options: {
+    error: BootCapacityExhaustedError;
+    deviceId: string;
+    startedAt: number;
+    owned: () => Promise<void>;
+    delayMs: number;
+  }): Promise<void> {
+    const { error, deviceId, startedAt, owned, delayMs } = options;
+    const deadline = startedAt + IOS_RESET_CAPACITY_WAIT_MS;
+    if (this.timer.now() + delayMs > deadline || this.timer.now() >= deadline) {
+      throw new ResetCapacityWaitExceededError(deviceId, this.timer.now() - startedAt, error);
+    }
+    await this.timer.sleep(delayMs);
+    await owned();
+    if (this.timer.now() >= deadline) {
+      throw new ResetCapacityWaitExceededError(deviceId, this.timer.now() - startedAt, error);
     }
   }
 

@@ -191,7 +191,7 @@ fi
 if [[ "${ctrl_proxy_sources_changed}" == true && "${PREPUSH_IOS_SKIP_CTRL_PROXY_RUNNER_BUILD:-0}" != 1 ]]; then
   attestation_runner=pass
   echo "Compiling CtrlProxy iOS UI test runner for changed Sources"
-  mkdir_spotlight_excluded "${AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA:-${project_root}/scratch/ctrl-proxy-prepush-derived-data}"
+  mkdir_spotlight_excluded_within "${project_root}" "${AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA:-${project_root}/scratch/ctrl-proxy-prepush-derived-data}"
   AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA="${AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA:-${project_root}/scratch/ctrl-proxy-prepush-derived-data}" \
     "${project_root}/scripts/ios/ctrl-proxy-build-for-testing.sh"
 fi

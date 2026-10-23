@@ -179,6 +179,15 @@ describe("dontKeepActivities fault (#14068)", () => {
     expect(writes(device.commands())).toEqual([]);
   });
 
+  test("a setting that already reads on but is ignored by the running system is refused, not accepted", async () => {
+    const device = settingsAdb("1", { liveIgnoresSetting: true });
+    const injector = createDontKeepActivitiesFaultInjector(device.adb);
+    await expect(injector.apply("on")).rejects.toThrow(/only reads it at boot/);
+    // Not ours: nothing was written or deleted.
+    expect(writes(device.commands())).toEqual([]);
+    expect(device.value()).toBe("1");
+  });
+
   test("a failed baseline read changes nothing", async () => {
     const device = settingsAdb("0", { failNext: "settings get" });
     const injector = createDontKeepActivitiesFaultInjector(device.adb);

@@ -140,6 +140,8 @@ export function createDontKeepActivitiesFaultInjector(adb: AdbExecutor): DeviceC
         return { status: "unchanged", detail: "Don't keep activities already on" };
       }
       if (current === "1") {
+        // Not ours, so nothing to own or undo; but "already on" must be true of the running system.
+        await verifyOn(signal);
         return { status: "unchanged", detail: "Don't keep activities was already on" };
       }
       // Own the fault before the first write, so a failure after it is still undone.

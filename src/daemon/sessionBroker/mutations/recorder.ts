@@ -93,6 +93,8 @@ export class SessionMutationRecorder implements MutationRecorder {
         toolName,
       });
     } catch (error) {
+      // Best effort by contract: the in-memory recording gap already forces the session's
+      // fallback, and the tool call must not fail because its failure marker did.
       logger.warn("Cannot persist device mutation recording failure marker", error);
     }
   }

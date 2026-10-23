@@ -203,6 +203,7 @@ export class SessionDeviceMutationRecording implements DeviceMutationRecording {
     try {
       this.markUnrecorded?.(sessionUuid, `${name}: ${errorMessage(error)}`);
     } catch (markerError) {
+      // Marking is best effort: a failing gap sink must never block the tool call itself.
       logger.warn(
         "Cannot mark device mutation recording gap; proceeding without recording",
         markerError,

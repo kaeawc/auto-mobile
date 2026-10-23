@@ -44,7 +44,7 @@ function tools(
 }
 
 const SESSION_DISPATCH_REASON =
-  "Session-scoped tool dispatch attempts to record before action; recording failures warn and proceed. Unreadable priors and opaque intents are non-revertible. Legacy sessions are unchanged.";
+  "Session-scoped tool dispatch attempts to record before action; recording failures warn, proceed, and force the session's next keep-booted reset to fall back. Unreadable priors and opaque intents are non-revertible. Legacy sessions are unchanged.";
 
 export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationToolCoverage>> = {
   ...tools(

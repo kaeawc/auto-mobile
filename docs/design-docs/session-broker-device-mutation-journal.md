@@ -57,7 +57,8 @@ settings. Photo residue is inspected and forces erase when changed; keyboard and
 increase-contrast defaults are restored and verified. `reduceMotion`, `boldText` and
 unknown settings have no sanitize coverage. `shared-file` (`putAppFile`) and
 `opened-url` (`openLink`) rows force erase even for a session-installed app: sanitize
-does not cover them. This deliberately fails closed until a narrower proof exists.
+does not cover them. So do the frequent `rotate`, VoiceOver (`accessibility`),
+`postNotification`, keep-awake and `windowMode` rows, whose effects persist. This deliberately fails closed until a narrower proof exists.
 Other non-revertible effects require erase. Non-fallback opaque rows and the app-owned
 interaction breadcrumbs are exempt; non-revertible store preferences are covered
 only for apps absent from the baseline inventory, whose data sanitize removes.
@@ -251,8 +252,8 @@ capture like other admission work.
 **Recovery**
 
 - Uses the registry's unique session-id index, not an all-receipts scan. Startup
-  warns and continues for an unrecoverable session (its later mutations warn and go
-  unrecorded). A fatal startup error closes the broker before releasing the host
+  warns and continues for an unrecoverable session, marking a recording gap so its
+  later mutations run unrecorded but its next keep-booted reset falls back. A fatal startup error closes the broker before releasing the host
   lock. A rebound session discards its old recorder and resolves the new native
   assignment before the next mutation.
 - Derived label routing sessions do not record into the base recorder (they may

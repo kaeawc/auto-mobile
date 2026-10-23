@@ -30,6 +30,12 @@ interface ViewerRenderer {
  * A failed spec composition must not take down the app composition containing Back and provenance.
  * Its own recomposer catches composition failures once, and [GuardedFrame] catches the measure,
  * layout and draw failures that composition cannot see; then the activity removes this surface.
+ *
+ * Validation (`PrototypeSpecValidator.MAX_PROTOTYPE_DEPTH` and `MAX_PROTOTYPE_NODES`, re-applied on
+ * every library load) bounds spec depth and size, so a validated spec cannot reach the
+ * stack-overflow path on a device. The StackOverflowError, layout and draw catches are defense in
+ * depth for any spec that bypasses validation. ViewerWatchdogTest exercises recovery with its fake
+ * renderer's layoutError, drawError and compositionError cases.
  */
 object GuardedViewerRenderer : ViewerRenderer {
   @Composable
@@ -75,6 +81,10 @@ object GuardedViewerRenderer : ViewerRenderer {
  * Hosts the spec's [ComposeView] and stops a measure, layout or draw failure from reaching the view
  * traversal (which would crash the process). The first failure detaches the spec from the traversal
  * and reports once; the activity then replaces this surface with the error screen.
+ *
+ * These layout and draw catches share [GuardedViewerRenderer]'s defense in depth for specs that
+ * bypass validation; ViewerWatchdogTest's fake-renderer layoutError and drawError cases exercise
+ * recovery without exceeding the validated spec limits on a device.
  */
 // Only constructed in code, never inflated from a layout, so the XML constructors are unneeded.
 @SuppressLint("ViewConstructor")

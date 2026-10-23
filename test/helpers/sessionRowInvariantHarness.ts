@@ -872,7 +872,8 @@ export async function runSessionRowInterleaving(
     const lastReason = current.notified.at(-1);
     // A terminal release that never reached its row left its intent: the next daemon applies it.
     const fencedAtExit =
-      journal.intents.has(sessionId) || manager["sessionSlots"].hasTerminalSnapshot(sessionId);
+      journal.intents.has(sessionId) ||
+      manager.testHooks.wiring.host.sessionSlots.hasTerminalSnapshot(sessionId);
     const handedOffAfterRelease = !liveAtShutdown && lastReason === SHUTDOWN_RELEASE;
     const expected =
       !ownTerminal &&

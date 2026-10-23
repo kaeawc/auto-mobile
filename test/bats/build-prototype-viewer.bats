@@ -6,6 +6,8 @@ setup() {
   MOCK_BIN="${BATS_TEST_TMPDIR}/bin"
   mkdir -p "${FIXTURE}/scripts/ios" "${MOCK_BIN}"
   cp "${REPO_ROOT}/scripts/ios/build-prototype-viewer-release.sh" "${FIXTURE}/scripts/ios/"
+  mkdir -p "${FIXTURE}/scripts/lib"
+  cp "${REPO_ROOT}/scripts/lib/spotlight-exclude.sh" "${FIXTURE}/scripts/lib/"
   SCRIPT="${FIXTURE}/scripts/ios/build-prototype-viewer-release.sh"
   export BUILD_LOG="${BATS_TEST_TMPDIR}/build.log"
   export DITTO_LOG="${BATS_TEST_TMPDIR}/ditto.log"

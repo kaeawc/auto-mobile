@@ -3,6 +3,9 @@
 # the caller composes host_slots_release into its EXIT/signal cleanup.
 # No flock dependency: mkdir is atomic on both macOS and Linux.
 # Unpublished owners and abandoned recovery claims expire after 60 seconds.
+# shellcheck source=scripts/lib/spotlight-exclude.sh
+source "$(dirname "${BASH_SOURCE[0]}")/spotlight-exclude.sh"
+
 host_slot_paths=()
 host_slots_acquired=0
 host_slots_capacity=0
@@ -76,6 +79,7 @@ host_slots_acquire() {
     host_slots_acquired="$demand"
     return 0
   fi
+  spotlight_exclude_dir "$coordination"
   # The base pool size, for callers that must know whether they hold all of it (#14450).
   # shellcheck disable=SC2034 # read by scripts/lib/host-heavy-run.sh
   host_slots_capacity="$capacity"

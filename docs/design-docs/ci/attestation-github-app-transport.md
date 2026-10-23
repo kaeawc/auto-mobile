@@ -2,8 +2,7 @@
 
 ## Purpose and trust boundary
 
-This implements the transport boundary for #11981 in epic #11972 (milestone
-"Pre-push Attestation CI"). The remote service owns policy and attestation truth
+Transport boundary for #11981 (epic #11972). The remote service owns policy and attestation truth
 in Neon. This client does not access a database or validate signed envelopes.
 GitHub authenticates the caller and displays informational checks; nothing stored
 on GitHub is authoritative evidence for skipping work.
@@ -20,29 +19,19 @@ gate input. The actual CI caller enforces the returned decision.
 
 ## Create and install the App
 
-1. In the owning GitHub account's **Settings → Developer settings → GitHub Apps**,
-   select **New GitHub App**. Supply a recognizable name and homepage URL.
-   No user authorization callback is needed for this installation-token flow.
-2. Disable **Active** under webhooks. No webhook, webhook secret, events, user
-   tokens, or OAuth client secret is needed.
-3. Set exactly these repository permissions:
+Create the App under the owning account's **Settings → Developer settings → GitHub Apps**
+([registration guide](https://docs.github.com/en/apps/creating-github-apps/setting-up-a-github-app/creating-a-github-app),
+[installation token guide](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app)):
 
-   | Permission | Access                                         |
-   | ---------- | ---------------------------------------------- |
-   | Checks     | Read and write                                 |
-   | Metadata   | Read-only (GitHub's mandatory metadata access) |
-
-   Leave all other permissions at **No access**, including Contents, Actions,
-   Pull requests, and Secrets. Do not grant organization or account permissions.
-
-4. Create the App, note its numeric App ID, and generate an RSA private key.
-   Keep that PEM in the trusted secret store. Do not commit it or print it.
-5. Install the App using **Only select repositories**, selecting
-   **kaeawc/auto-mobile only**. Record the numeric installation ID if desired.
-   If omitted, the client resolves it with the repository installation endpoint.
-
-See GitHub's [App registration guide](https://docs.github.com/en/apps/creating-github-apps/setting-up-a-github-app/creating-a-github-app)
-and [installation token guide](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app).
+- No user-authorization callback; webhooks disabled (no webhook secret, events, user tokens, or
+  OAuth client secret).
+- Repository permissions exactly **Checks: read and write** and **Metadata: read-only**
+  (mandatory); everything else, including Contents, Actions, Pull requests and Secrets, stays
+  **No access**. No organization or account permissions.
+- Note the numeric App ID and generate an RSA private key; keep the PEM in the trusted secret
+  store, never committed or printed.
+- Install on **Only select repositories**: **kaeawc/auto-mobile only**. The installation ID is
+  optional; if omitted the client resolves it via the repository installation endpoint.
 
 ## CI configuration and secrets
 

@@ -3,6 +3,7 @@ import type {
   IosDeviceSpecification,
 } from "../../../devices/exactDeviceProvisioning";
 import { MIN_CONFIGURED_SESSION_IDLE_TIMEOUT_MS } from "../../sessionLivenessWindows";
+import type { BindingDeviceFamily } from "../../../utils/provisionDeviceSpecSchemas";
 import { ActionableError } from "../../../models/ActionableError";
 export type BrokerDeviceRequest = {
   bindingIndex: number;
@@ -13,14 +14,14 @@ export type BrokerDeviceRequest = {
       platform: "android";
       requestedSpec: Omit<AndroidDeviceSpecification, "deviceType"> & {
         deviceType?: string;
-        deviceFamily?: "phone" | "tablet" | "foldable";
+        deviceFamily?: BindingDeviceFamily;
       };
     }
   | {
       platform: "ios";
       requestedSpec: Omit<IosDeviceSpecification, "deviceType"> & {
         deviceType?: string;
-        deviceFamily?: "phone" | "tablet" | "foldable";
+        deviceFamily?: BindingDeviceFamily;
       };
     }
 );

@@ -5,6 +5,8 @@ struct PrototypeScreen: View {
     private enum Action { case relaunch, reset }
     let store: PrototypeLibraryStore
     let entry: PrototypeLibraryEntry
+    let networkSwitch: PrototypeLibraryNetworkSwitch
+    @State private var showsSettings = false
     @Environment(\.dismiss) private var dismiss
     @State private var revision = 0
     @State private var rendererActive = false
@@ -14,14 +16,61 @@ struct PrototypeScreen: View {
     @State private var error: Error?
     @State private var confirmsReset = false
 
-    private var network: PrototypeNetworkConfiguration {
-        PrototypeNetworkConfiguration(
-            deviceClient: { _ in throw NetworkDisabled() },
-            hostHandler: { _ in throw NetworkDisabled() }
-        )
+    private let network: PrototypeNetworkConfiguration
+
+    init(store: PrototypeLibraryStore, entry: PrototypeLibraryEntry, networkSwitch: PrototypeLibraryNetworkSwitch) {
+        self.store = store
+        self.entry = entry
+        self.networkSwitch = networkSwitch
+        #if PROTOVIEWER_ALLOW_CLEARTEXT
+            let allowsCleartext = true
+        #else
+            let allowsCleartext = false
+        #endif
+        network = PrototypeLibraryNetwork.configuration(networkSwitch: networkSwitch, allowsCleartext: allowsCleartext)
     }
 
     var body: some View {
+        VStack(spacing: 0) {
+            if networkSwitch.enabled {
+                Label("Network on", systemImage: "network")
+                    .font(.footnote)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal)
+                    .padding(.vertical, 8)
+                    .background(.bar)
+            }
+            prototypeContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
+        }
+        .navigationTitle(entry.label)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button("Settings", systemImage: "gearshape") { showsSettings = true }
+                    Button("Relaunch", systemImage: "arrow.clockwise") { relaunch(.relaunch) }
+                    Button("Reset", systemImage: "arrow.counterclockwise", role: .destructive) { confirmsReset = true }
+                    Button("Close", systemImage: "xmark") { dismiss() }
+                } label: {
+                    Label("Prototype actions", systemImage: "ellipsis.circle")
+                }
+                .disabled(pending != nil)
+            }
+        }
+        .sheet(isPresented: $showsSettings) { LibrarySettingsView(networkSwitch: networkSwitch) }
+        .confirmationDialog(
+            "Reset stored values for this prototype?",
+            isPresented: $confirmsReset,
+            titleVisibility: .visible
+        ) {
+            Button("Reset and relaunch", role: .destructive) { relaunch(.reset) }
+        }
+        .onAppear(perform: load)
+    }
+
+    private var prototypeContent: some View {
         Group {
             if let error {
                 LibraryErrorView(error: error)
@@ -44,26 +93,6 @@ struct PrototypeScreen: View {
                 ProgressView()
             }
         }
-        .navigationTitle(entry.label)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    Button("Relaunch", systemImage: "arrow.clockwise") { relaunch(.relaunch) }
-                    Button("Reset", systemImage: "arrow.counterclockwise", role: .destructive) { confirmsReset = true }
-                    Button("Close", systemImage: "xmark") { dismiss() }
-                } label: { Label("Prototype actions", systemImage: "ellipsis.circle") }
-                    .disabled(pending != nil)
-            }
-        }
-        .confirmationDialog(
-            "Reset stored values for this prototype?",
-            isPresented: $confirmsReset,
-            titleVisibility: .visible
-        ) {
-            Button("Reset and relaunch", role: .destructive) { relaunch(.reset) }
-        }
-        .onAppear(perform: load)
     }
 
     private func relaunch(_ action: Action) {
@@ -93,8 +122,4 @@ struct PrototypeScreen: View {
             content = loaded
         } catch { self.error = error }
     }
-}
-
-private struct NetworkDisabled: Error, LocalizedError {
-    var errorDescription: String? { "Network is disabled for imported prototypes" }
 }

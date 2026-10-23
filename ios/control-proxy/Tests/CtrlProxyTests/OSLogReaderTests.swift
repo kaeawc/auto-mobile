@@ -204,6 +204,21 @@ final class OSLogReaderTests: XCTestCase {
         XCTAssertEqual(harness.source.queries.count, 46)
     }
 
+    func testIdleSessionDiscardsUnconsumedTail() {
+        let harness = Harness()
+        harness.reader.start()
+        harness.wake()
+        harness.source.records = [record(1001, "stale tail")]
+        harness.advance(1000)
+        XCTAssertEqual(harness.source.queries.count, 2)
+        harness.advance(45001)
+        XCTAssertEqual(harness.scheduler.pendingCount, 0)
+        XCTAssertEqual(harness.source.resetCount, 1)
+        XCTAssertTrue(harness.reader.drain().isEmpty, "A new consumer must not receive the previous session's tail")
+        harness.flush()
+        harness.reader.stop()
+    }
+
     func testThirtySecondDrainsKeepBackedOffSessionAlive() {
         let harness = Harness()
         harness.reader.start()

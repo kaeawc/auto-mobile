@@ -14,7 +14,7 @@ function createHarness(available: boolean | undefined) {
     invalidateAllBuildContexts: () => {},
     invalidateSdkCapabilities: () => {},
   });
-  const state = { available, polls: 0, navigationOnPoll: 0 };
+  const state = { available, polls: 0, navigationOnPoll: 0, logDemand: false };
   screenIdentity.rememberSdkScreenIdentity("navigation", appId, { destination: "Home" }, 100, 1);
   const ingestor = new FakeIosSdkEventIngestor();
   const events = new CtrlProxySdkEvents({
@@ -23,6 +23,7 @@ function createHarness(available: boolean | undefined) {
     getSdkAvailability: () => state.available,
     getSdkEventIngestor: () => ingestor,
     getPort: () => 1234,
+    hasLogDemand: () => state.logDemand,
     resolveWebSocketHost: () => "localhost",
     getSdkScreenIdentity: (id) => screenIdentity.getSdkScreenIdentity(id),
     pollSdkEvents: async () => {
@@ -57,8 +58,31 @@ function createHarness(available: boolean | undefined) {
     );
     return { identity, ...metrics };
   };
-  return { state, timer, refresh, screenIdentity };
+  return { state, timer, refresh, screenIdentity, events };
 }
+
+describe("SDK event poll log demand", () => {
+  test("log demand overrides empty-batch backoff until the consumer leaves", async () => {
+    const h = createHarness(false);
+    try {
+      for (let poll = 0; poll < 6; poll++) {
+        await h.events.runSdkEventPollCycle(h.events.diagnostics().generation);
+      }
+      expect(h.state.polls).toBe(6);
+      expect(h.events.currentSdkEventPollIntervalMs()).toBe(30_000);
+
+      h.state.logDemand = true;
+      expect(h.events.currentSdkEventPollIntervalMs()).toBe(2000);
+      await h.events.runSdkEventPollCycle(h.events.diagnostics().generation);
+      expect(h.events.currentSdkEventPollIntervalMs()).toBe(2000);
+
+      h.state.logDemand = false;
+      expect(h.events.currentSdkEventPollIntervalMs()).toBe(30_000);
+    } finally {
+      h.events.close();
+    }
+  });
+});
 
 describe("bounded SDK identity refresh", () => {
   test("a known no-SDK app drains once and skips retry sleeps", async () => {

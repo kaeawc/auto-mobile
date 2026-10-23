@@ -35,4 +35,15 @@ export class PhysicalIosAppCrasher {
     options.signal?.throwIfAborted();
     return outcome;
   }
+
+  /** SIGKILL for appLifecycle's state-preserving kill (#14098). */
+  async sendKill(
+    pid: number,
+    options: Pick<IosCrashCommandOptions, "signal"> = {},
+  ): Promise<PhysicalIosAbortOutcome> {
+    options.signal?.throwIfAborted();
+    const outcome = await this.apps.signalProcess(this.deviceId, pid, "SIGKILL");
+    options.signal?.throwIfAborted();
+    return outcome;
+  }
 }

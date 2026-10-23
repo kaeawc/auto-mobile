@@ -149,7 +149,6 @@ const FORMER_PLAN_RELEVANT_TOOLS = [
   "setSensor",
   "setUIState",
   "shake",
-  "stageSessionDownloads",
   "statusBar",
   "swipeAt",
   "swipeOn",
@@ -376,10 +375,6 @@ const RECORDED_STEP_CALLS: ReadonlyArray<readonly [string, Record<string, unknow
       contentText: "hi",
     },
   ],
-  [
-    "stageSessionDownloads",
-    { directory: "fixtures", files: [{ destinationPath: "a.txt", contentText: "a" }] },
-  ],
 ];
 
 const RECORDED_TOOLS_9966 = [
@@ -394,7 +389,6 @@ const RECORDED_TOOLS_9966 = [
   "resetKeychain",
   "resetAppLogs",
   "putAppFile",
-  "stageSessionDownloads",
 ];
 
 describe("tools recorded by #9966", () => {
@@ -417,7 +411,7 @@ describe("tools recorded by #9966", () => {
       throw new Error("Missing tool schema");
     }
     // PlanExecutor re-injects the session for device-aware tools before parsing;
-    // stageSessionDownloads declares it as required.
+    // putAppFile declares it as required.
     expect(() => schema.parse({ ...steps[0].params, sessionUuid: "session-2" })).not.toThrow();
   });
 
@@ -481,15 +475,6 @@ describe("tools recorded by #9966", () => {
           { destinationPath: "a.txt", contentText: "a" },
           { destinationPath: "b.txt", sourcePath: "/tmp/b.txt" },
         ],
-      },
-      STAGES_FILES,
-    );
-    recordPlanCall(
-      recorder,
-      "stageSessionDownloads",
-      {
-        directory: "fixtures",
-        files: [{ destinationPath: "a.txt", sourcePath: "/tmp/a.txt" }],
       },
       STAGES_FILES,
     );

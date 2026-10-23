@@ -1,0 +1,77 @@
+# Test files that run only on macOS hosts (owner rule 2026-10-23: iOS tests never
+# run on Linux or Windows). `scripts/test-ts.sh` leaves them out of the unit and
+# integration lanes on any non-macOS host; the macOS lanes (nightly CircleCI
+# macOS Node Unit Tests, local macOS runs) still run every file. Mechanism and
+# rationale: docs/design-docs/ci/macos-only-tests.md.
+#
+# Classification, in order:
+#   1. The first rule below that matches a path wins. Format:
+#        macos    <path-or-glob>  # reason
+#        portable <path-or-glob>  # reason
+#      `portable` keeps a file running everywhere; `macos` skips it off macOS.
+#   2. Otherwise a path with an iOS token (ios, simctl, devicectl, simulator,
+#      xcode, xcodegen, xcodebuild, xcrun, xctestrunner as a directory or
+#      camelCase word) is macOS-only. This covers ~280 files with no rule.
+#   3. Everything else runs everywhere. When unsure, keep it running: shared
+#      parsers, tool schemas, broker and registry logic for both platforms, and
+#      tests that scan repository files or workflows stay `portable`.
+#
+# test/lint/macOsOnlyTestClassification.integration.test.ts fails when a test
+# whose direct imports are only iOS source has no rule here, when a rule
+# matches nothing, and when a `portable` rule is not needed. Put the more
+# specific `portable` rules before the broader ones.
+
+# --- portable: path has an iOS token but the test needs no iOS host --------------
+
+# Source, workflow and script scans read repository files and run no iOS code.
+portable test/lint/**                                                    # source-scan guards over src/ and scripts
+portable test/scripts/**                                                 # workflow, script and generator checks that read repo files
+portable test/doctor/iosExecResultConsolidation.test.ts                  # AST scan of the doctor source
+portable test/utils/coreSimulatorDeviceSetEnvConstant.test.ts            # source scan of one environment-name constant
+portable test/utils/ios-cmdline-tools/DeviceAppManagerLaunchPreconditions.drift.test.ts # drift guard that reads source
+portable test/features/observe/ios/ctrlProxyWireScan.test.ts             # repo wire scanner plus a Windows path-separator guard
+portable test/features/prototype/prototypeIosSpecContract.test.ts        # generator output equals the embedded Swift contract file
+portable test/features/prototype/prototypeIosIconSymbols.test.ts         # schema table equals generated Swift symbols
+
+# Fakes are shared by platform-neutral suites; their self-tests guard that drift.
+portable test/fakes/FakeIOSCtrlProxy.test.ts                             # fake used outside iOS-only suites
+portable test/fakes/FakeIosVoiceOverDetector.test.ts                     # fake used outside iOS-only suites
+
+# Shared broker, pool, registry and tool-schema logic with iOS as one case.
+portable test/daemon/devicePool.iosRecovery.test.ts                      # DevicePool session recovery shared by both platforms
+portable test/daemon/disconnectMonitor-transitionalSimulator.test.ts     # shared DisconnectMonitor loss logic
+portable test/daemon/planDeviceLossMonitor.ios.test.ts                   # shared device-loss planner
+portable test/daemon/sessionBroker/provisioning/iosBindingDeviceUnexcludedWhileCreating.test.ts # also asserts the Android control case
+portable test/devices/physicalIosDeviceResolution.test.ts                # MultiPlatformDeviceManager resolution across platforms
+portable test/features/navigation/iosNavigationGraphWorkflow.test.ts     # shared NavigateTo and ToolRegistry wiring
+portable test/server/toolRegistry.iosSessionContext.test.ts              # shared ToolRegistry session routing
+portable test/server/inventoryIdeIosPhysicalSource.test.ts               # discovery_incomplete rule shared with Android
+
+# Tests that pin Android behavior beside the iOS case in code both platforms share.
+portable test/features/action/DragAndDropIos.test.ts                     # routes drag by platform; asserts the Android accessibility path
+portable test/features/action/InputText.iosImeAction.test.ts             # asserts Android failure reporting too
+portable test/features/action/IosClearEntryPoints.test.ts                # asserts Android ClearText keeps acknowledgement-only clearing
+portable test/features/action/IosSelectionScreenSize.test.ts             # tapAny geometry for iOS and Android
+portable test/features/action/TapOnElement.iosCachedResolution.test.ts   # Android failure text stays byte-identical
+portable test/features/action/TapOnElement.iosClippedTargetOwnership.test.ts # PIN cases for Android dispatch
+portable test/features/action/TapOnElement.iosKeyboardChromeCover.test.ts # PIN case for Android dispatch
+portable test/features/action/TapOnElementIosScreenSize.test.ts          # Android keeps legacy raw metadata
+portable test/features/action/swipeon/iosChromeInsets.test.ts            # Android auto-target inset comparison
+portable test/features/iosSimFleet/bootCapacityGateParity.test.ts        # boot-capacity parity with the Android gate
+portable test/features/observe/ios/IosLayoutTelemetryTree.test.ts       # shared display-property mapping with Android
+portable test/features/observe/ios/IosSdkEventIngestor.test.ts           # shared network fields match Android ingestion
+portable test/features/observe/output/IosChromeTapRefusalMarkers.test.ts # Android skeleton ignores an iOS hierarchy
+portable test/features/utility/DeviceStateIosNetworkCondition.test.ts    # Android never consults the iOS bridge
+portable test/features/utility/IosSimulatorDisplayConfig.test.ts         # contentSize refused on Android before any adb command
+portable test/features/utility/ResolverElementSelectorIosScreenSize.test.ts # selector geometry for iOS and Android
+portable test/server/databaseIos.test.ts                                 # keeps the Android response shape; iOS discovery vs Android failure
+portable test/server/prototypeToolsIos.test.ts                           # shared prototype tool; Android inspect shape
+portable test/utils/ios-cmdline-tools/iosDeviceType.test.ts              # device-id classification disjoint from Android serials
+portable test/utils/ios-cmdline-tools/iosDeviceType.property.test.ts     # Android serials are never classified as iOS
+
+# --- macos: no iOS token in the path, but the test exercises only iOS code -------
+
+macos test/ctrlProxy/runnerQueryTimeoutEnv.test.ts                       # imports only src/ctrlProxy/ios
+macos test/features/utility/writeBulletinBoardTemp.test.ts               # imports only the iOS notification authorization reader
+macos test/utils/CtrlProxyCodesignVerifier.test.ts                       # imports only the iOS codesign verifier
+macos test/utils/runtimeCompatibility.test.ts                            # imports only the simulator runtime compatibility check

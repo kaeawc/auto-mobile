@@ -14,7 +14,7 @@ name through `tools/call`:
 
 Set `enabled` to `false` to omit a tool from discovery. An optional
 `sessionUuid` scopes the choice to a routing session. The choice persists
-across daemon restarts.
+across restarts.
 
 ## Enabling several tools at once
 
@@ -62,9 +62,8 @@ and reported in `skipped`. `getAndroid` and `getApple` report both `gatedTools`
 (the complement) in their response; `provisionDevice` reports `enabledTools`
 and requires `boot: true`, since a no-boot provision mints no session to
 declare capabilities against.
-Both reports resolve a tool the same way `tools/list` does — the union of the
-connection profile and the routing session — so every tool they list is one the
-next `tools/list` will advertise. A direct `tools/call` can invoke an omitted tool.
+Every tool they list is one the next `tools/list` will advertise. A direct
+`tools/call` can still invoke an omitted tool.
 
 If the device is acquired but the capability declaration itself cannot be
 persisted, the response keeps its session handle and adds an `enableToolsError`

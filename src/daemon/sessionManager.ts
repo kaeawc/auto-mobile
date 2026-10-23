@@ -999,7 +999,7 @@ export class SessionManager extends SessionManagerForwarders {
    */
   /** @internal Typed view of private state for unit tests; not part of the public API. */
   get testHooks() {
-    return { sessions: this.sessions } as const;
+    return { sessions: this.sessions, wiring: this.wiring } as const;
   }
 
   private persistSession(

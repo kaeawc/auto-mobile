@@ -6,6 +6,7 @@ private let libraryLog = Logger(subsystem: "dev.jasonpearson.automobile.protovie
 @main
 @MainActor
 struct ProtoViewerApp: App {
+    @State private var networkSwitch = PrototypeLibraryNetworkSwitch()
     private let library: Result<(PrototypeLibraryStore, PrototypeLibraryImportService), Error>
 
     init() {
@@ -32,7 +33,8 @@ struct ProtoViewerApp: App {
     var body: some Scene {
         WindowGroup {
             switch library {
-            case let .success((store, imports)): LibraryView(store: store, importService: imports)
+            case let .success((store, imports)):
+                LibraryView(store: store, importService: imports, networkSwitch: networkSwitch)
             case let .failure(error): LibraryErrorView(error: error)
             }
         }

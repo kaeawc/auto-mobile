@@ -7,13 +7,14 @@ import type {
 import type { DeviceBaseline } from "./types";
 
 /** Baseline kinds the residue guard inventories; each is complete only when all are read. */
-export const IOS_RESIDUE_KINDS = ["media", "shared-file", "keyboard"] as const;
+export const IOS_RESIDUE_KINDS = ["media", "shared-file", "keyboard", "accessibility"] as const;
 
 const OBSERVATION_KEYS = {
   photos: { kind: "media", key: "dcim" },
   documents: { kind: "shared-file", key: "documents" },
   safariDocuments: { kind: "shared-file", key: "safari-documents" },
   keyboard: { kind: "keyboard", key: "defaults" },
+  accessibility: { kind: "accessibility", key: "defaults" },
 } as const;
 
 export function residueObservations(snapshot: IosResidueSnapshot): DeviceBaseline["observations"] {
@@ -56,6 +57,7 @@ export function residueFromBaseline(baseline: DeviceBaseline): IosResidueSnapsho
     documents: stringList(observed(baseline, "documents")),
     safariDocuments: stringList(observed(baseline, "safariDocuments")),
     keyboard: keyboardDefaults(observed(baseline, "keyboard")),
+    accessibility: keyboardDefaults(observed(baseline, "accessibility")),
   };
 }
 
@@ -65,6 +67,8 @@ export interface IosResidueRevertPlan {
   removals: { area: IosResidueFileArea; names: string[] }[];
   /** Keyboard defaults to restore; an undefined `prior` means the key was absent and is deleted. */
   keyboard: { key: string; prior: KeyboardDefaultValue | undefined }[];
+  /** `com.apple.Accessibility` increase-contrast defaults to restore, with the same `prior` rule. */
+  accessibility: { key: string; prior: KeyboardDefaultValue | undefined }[];
 }
 
 function added(current: readonly string[], baseline: readonly string[]): string[] {
@@ -98,15 +102,29 @@ export function planResidueRevert(
       removals.push({ area, names: extra });
     }
   }
-  const keyboard = [
-    ...new Set([...Object.keys(baseline.keyboard), ...Object.keys(current.keyboard)]),
-  ]
+  return {
+    unrevertible,
+    removals,
+    keyboard: changedDefaults(baseline.keyboard, current.keyboard),
+    accessibility: changedDefaults(baseline.accessibility, current.accessibility),
+  };
+}
+
+function changedDefaults(
+  baseline: Record<string, KeyboardDefaultValue>,
+  current: Record<string, KeyboardDefaultValue>,
+): { key: string; prior: KeyboardDefaultValue | undefined }[] {
+  return [...new Set([...Object.keys(baseline), ...Object.keys(current)])]
     .sort()
-    .filter((key) => !isDeepStrictEqual(baseline.keyboard[key], current.keyboard[key]))
-    .map((key) => ({ key, prior: baseline.keyboard[key] }));
-  return { unrevertible, removals, keyboard };
+    .filter((key) => !isDeepStrictEqual(baseline[key], current[key]))
+    .map((key) => ({ key, prior: baseline[key] }));
 }
 
 export function residueIsClean(plan: IosResidueRevertPlan): boolean {
-  return plan.unrevertible.length === 0 && plan.removals.length === 0 && plan.keyboard.length === 0;
+  return (
+    plan.unrevertible.length === 0 &&
+    plan.removals.length === 0 &&
+    plan.keyboard.length === 0 &&
+    plan.accessibility.length === 0
+  );
 }

@@ -20,6 +20,7 @@ import type { DeviceMutationResetContext, DeviceMutationResetPort } from "./rese
 import { DEVICE_MUTATION_KINDS, type DeviceBaseline, type DeviceMutationInput } from "./types";
 import type { BaselineChange } from "./baseline";
 import {
+  IOS_ACCESSIBILITY_RESIDUE_DOMAIN,
   IOS_KEYBOARD_DEFAULTS_DOMAIN,
   type IosResidueInspector,
 } from "../../../utils/ios-cmdline-tools/SimulatorResidueReader";
@@ -538,7 +539,7 @@ export class IosDeviceMutationResetPort implements DeviceMutationResetPort {
   }
 
   /**
-   * Photos, Documents and Safari files and keyboard defaults are changed outside the tools the
+   * Photos, Documents and Safari files, keyboard defaults and the increase-contrast defaults are changed outside the tools the
    * journal records, and `simctl` cannot undo a photo. Compare them against the baseline: revert
    * what can be reverted, and refuse the keep-booted reset (so erase runs) for the rest, so a
    * `clean` receipt never hides leftover state.
@@ -578,17 +579,22 @@ export class IosDeviceMutationResetPort implements DeviceMutationResetPort {
         context.signal,
       );
     }
-    for (const { key, prior } of plan.keyboard) {
-      await this.revert(
-        {
-          kind: "preference",
-          key: `${IOS_KEYBOARD_DEFAULTS_DOMAIN}:${key}`,
-          priorValue:
-            prior === undefined ? { state: "absent" } : { state: "present", value: prior },
-          toolName: "baseline-reset",
-        },
-        context,
-      );
+    for (const [domain, changes] of [
+      [IOS_KEYBOARD_DEFAULTS_DOMAIN, plan.keyboard],
+      [IOS_ACCESSIBILITY_RESIDUE_DOMAIN, plan.accessibility],
+    ] as const) {
+      for (const { key, prior } of changes) {
+        await this.revert(
+          {
+            kind: "preference",
+            key: `${domain}:${key}`,
+            priorValue:
+              prior === undefined ? { state: "absent" } : { state: "present", value: prior },
+            toolName: "baseline-reset",
+          },
+          context,
+        );
+      }
     }
     if (!residueIsClean(planResidueRevert(baseline, await read("residue:verify")))) {
       throw new ActionableError("iOS out-of-band residue survived reset; erase required");

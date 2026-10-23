@@ -1,11 +1,12 @@
-import type {
-  IosResidueFileArea,
-  IosResidueInspector,
-  IosResidueSnapshot,
+import {
+  IOS_INCREASE_CONTRAST_DEFAULT_KEYS,
+  type IosResidueFileArea,
+  type IosResidueInspector,
+  type IosResidueSnapshot,
 } from "../../src/utils/ios-cmdline-tools/SimulatorResidueReader";
 
 export function emptyIosResidue(): IosResidueSnapshot {
-  return { photos: [], documents: [], safariDocuments: [], keyboard: {} };
+  return { photos: [], documents: [], safariDocuments: [], keyboard: {}, accessibility: {} };
 }
 
 /** Holds the simulator's out-of-band state in memory; removals and keyboard writes mutate it. */
@@ -41,16 +42,26 @@ export class FakeIosResidueInspector implements IosResidueInspector {
     this.snapshot[key] = this.snapshot[key].filter((name) => !names.includes(name));
   }
 
-  /** Applies a `defaults write|delete com.apple.Preferences <key> [-type value]` command. */
+  /**
+   * Applies a `defaults write|delete <domain> <key> [-type value]` command to the tracked
+   * `com.apple.Preferences` keyboard and `com.apple.Accessibility` defaults.
+   */
   applyDefaultsCommand(args: readonly string[]): void {
     const [, , , verb, domain, key, flag, value] = args;
-    if (domain !== "com.apple.Preferences" || key === undefined) {
+    const defaults =
+      domain === "com.apple.Preferences"
+        ? this.snapshot.keyboard
+        : domain === "com.apple.Accessibility" &&
+            (IOS_INCREASE_CONTRAST_DEFAULT_KEYS as readonly string[]).includes(key ?? "")
+          ? this.snapshot.accessibility
+          : undefined;
+    if (defaults === undefined || key === undefined) {
       return;
     }
     if (verb === "delete") {
-      delete this.snapshot.keyboard[key];
+      delete defaults[key];
     } else if (verb === "write") {
-      this.snapshot.keyboard[key] =
+      defaults[key] =
         flag === "-bool" ? value === "true" : flag === "-int" ? Number(value) : String(value);
     }
   }

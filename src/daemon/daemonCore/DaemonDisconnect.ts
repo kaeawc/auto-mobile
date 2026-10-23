@@ -271,11 +271,7 @@ export class DaemonDisconnect {
           const sweep: DisconnectSweep = {
             adbServerResetCohort: [],
             selectPlatform: (platforms) =>
-              schedule.selectPlatform(
-                platforms,
-                this.host.services.timer().now(),
-                serverConfig.isPlanExecutionActive(),
-              ),
+              schedule.selectPlatform(platforms, this.host.services.timer().now()),
           };
           try {
             await this.checkDisconnects(
@@ -300,6 +296,7 @@ export class DaemonDisconnect {
         {
           shouldRun: async () => {
             const pool: DisconnectMonitorPool = this.host.services.devicePool();
+            const planExecutionActive = serverConfig.isPlanExecutionActive();
             const watching =
               this.host.services.sessionManager().getAllSessions().length > 0 ||
               pool.getAllDevices().some(({ id }) => {
@@ -309,9 +306,13 @@ export class DaemonDisconnect {
                   pool.isDeviceLeasedForAndroidStartup(id)
                 );
               }) ||
-              serverConfig.isPlanExecutionActive() ||
+              planExecutionActive ||
               (await listRecordings()).length > 0;
-            return schedule.shouldRun(watching, this.host.services.timer().now());
+            return schedule.shouldRun(
+              watching,
+              this.host.services.timer().now(),
+              planExecutionActive,
+            );
           },
         },
       ),

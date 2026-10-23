@@ -819,11 +819,11 @@ export class DeviceAppManager implements DeviceUrlLauncher, DevicectlVersionSour
     return bundlePath ? this.resolveRunningPid(deviceUdid, bundlePath) : undefined;
   }
 
-  /** `devicectl device process signal` (#14096); "already_exited" on ESRCH, else throws with stderr. */
+  /** `devicectl device process signal` (#14096, #14098); "already_exited" on ESRCH, else throws with stderr. */
   public async signalProcess(
     deviceUdid: string,
     pid: number,
-    signal: "SIGABRT",
+    signal: "SIGABRT" | "SIGKILL",
   ): Promise<"signalled" | "already_exited"> {
     const args = ["devicectl", "device", "process", "signal", "--device", deviceUdid];
     try {

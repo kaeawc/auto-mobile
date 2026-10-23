@@ -19,6 +19,7 @@ import type { ResetOutcome } from "./devicePort";
 import { ResetFailureError } from "./ResetFailureError";
 import { isAndroidCriticalSetting } from "./androidKeepBootedCleanup";
 import {
+  opaqueForcesFallback,
   type DeviceBaseline,
   type DeviceMutationJournal,
   type DeviceMutationScope,
@@ -387,6 +388,12 @@ export class AndroidKeepBootedReset implements AndroidResetStrategy {
     }
     if (context.opaquePersistentChanges) {
       return "opaque persistent changes (deviceSnapshot) cannot be journal-reverted";
+    }
+    const opaque = (await this.dependencies.journal.list(mutationContext.scope)).find(
+      opaqueForcesFallback,
+    );
+    if (opaque) {
+      return `opaque journaled mutation (${opaque.toolName}) cannot be journal-reverted`;
     }
     return this.cleanWithDeadline(port, mutationContext, context, phases);
   }

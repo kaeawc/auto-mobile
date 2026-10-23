@@ -195,6 +195,11 @@ class ViewerActivity : ComponentActivity() {
     ViewerLaunch.open(this, id, relaunch = true)
   }
 
+  override fun onResume() {
+    super.onResume()
+    revokeNetworkIfLocalNetworkLost(services.settings, services.localNetworkGrant, this)
+  }
+
   override fun onStop() {
     val target = runtime
     services.flushScope.launch {

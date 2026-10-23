@@ -18,6 +18,7 @@ import { logger } from "../utils/logger";
 import { isTypedToolRefusal, shapeToolCallError } from "../daemon/shapeToolCallError";
 import { typedRefusalFields } from "../models/typedRefusalFields";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
+import { EmulatorTeardownEscalationError } from "../features/deviceLifecycle/teardown/stuckEmulatorEscalation";
 import { DeviceOwnedByOtherDaemonError } from "../models/deviceAcquisitionRefusals";
 import type { ProgressCallback } from "./toolRegistry";
 import {
@@ -173,6 +174,17 @@ export function typedTeardownRefusal(
   resolved?: TeardownResolvedTarget["device"],
   phase: "precondition" | "stop" | "destroy" | "verification" = "precondition",
 ): TeardownToolResponse | undefined {
+  if (error instanceof EmulatorTeardownEscalationError) {
+    // Soft retries and the SIGTERM/SIGKILL escalation both ran: a caller (the session broker's
+    // journal) must be able to tell this terminal failure from an ordinary retryable one (#14018).
+    return createTeardownFailureResponse(args, phase, error.code, error.message, resolved, {
+      retryable: error.retryable,
+      reason: error.reason,
+      serial: error.serial,
+      softAttempts: error.softAttempts,
+      ...(error.pid !== undefined ? { pid: error.pid } : {}),
+    });
+  }
   if (!isTypedToolRefusal(error)) {
     return undefined;
   }

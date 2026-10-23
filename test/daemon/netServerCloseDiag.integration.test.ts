@@ -4,8 +4,9 @@ import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { defaultTimer } from "../../src/utils/SystemTimer";
 
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+const sleep = (ms: number) => new Promise<void>((r) => defaultTimer.setTimeout(r, ms));
 
 function probe(path: string): Promise<string> {
   return new Promise((resolve) => {
@@ -42,7 +43,9 @@ async function scenario(path: string, withOpenClient: boolean) {
     out.closeCallbackFired = true;
   } else {
     client!.destroy();
-    for (const s of accepted) s.destroy();
+    for (const s of accepted) {
+      s.destroy();
+    }
     await closeCb;
     out.closeCallbackFired = true;
   }

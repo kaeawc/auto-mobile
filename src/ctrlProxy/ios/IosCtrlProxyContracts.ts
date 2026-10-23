@@ -93,6 +93,7 @@ export interface CtrlProxyStartOptions {
  * {@link ProxyManager}.
  */
 export interface CtrlProxyIosManager extends ProxyManager {
+  markSimulatorShutDownIfNotBooted?(reason?: string): Promise<void>;
   getForcedRestartBudget(): ForcedRestartBudget;
   setup(
     force?: boolean,

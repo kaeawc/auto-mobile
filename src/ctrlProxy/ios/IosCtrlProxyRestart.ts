@@ -65,9 +65,9 @@ export class IosCtrlProxyRestart {
   ) {}
 
   /** Suspend recovery immediately, then retire any runner owned by this device. */
-  async suspendForDeviceRemoval(): Promise<void> {
+  async suspendForDeviceRemoval(reason = "device disappeared from discovery"): Promise<void> {
     const removalGeneration = ++this.state.removalGeneration;
-    this.state.forcedRestartBudget.suspend("device disappeared from discovery");
+    this.state.forcedRestartBudget.suspend(reason);
     this.state.forceRestartGeneration++;
     const cleanup = (async () => {
       try {

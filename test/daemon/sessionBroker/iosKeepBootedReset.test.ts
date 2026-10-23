@@ -1,3 +1,5 @@
+import { legacyAppContainerFileKey } from "../../../src/daemon/sessionBroker/mutations/appContainerFileKey";
+import { iosAppContainerWriteCovered } from "../../../src/daemon/sessionBroker/mutations/iosResetPort";
 import { deviceToolMutations } from "../../../src/server/deviceMutationAdapters";
 import { InMemoryMutationRecordingGaps } from "../../../src/daemon/sessionBroker/mutations/recordingGaps";
 import { describe, expect, test } from "bun:test";
@@ -40,7 +42,13 @@ const DEVICE = { deviceId: "UDID", platform: "ios", name: "phone" } as const;
 const SCOPE = { deviceId: DEVICE.deviceId, incarnation: "generation-1", sessionUuid: "session-a" };
 
 class FakeFastMutations extends FakeDeviceMutationResetPort implements IosKeepBootedMutationPort {
-  sanitizeCovers(entry: DeviceMutationInput): boolean {
+  sanitizeCovers(
+    entry: DeviceMutationInput,
+    context?: Pick<DeviceMutationResetContext, "baseline">,
+  ): boolean {
+    if (entry.kind === "shared-file") {
+      return iosAppContainerWriteCovered(entry, context);
+    }
     return (
       ["clipboard", "keychain", "permission", "certificate", "media"].includes(entry.kind) ||
       (entry.kind === "device-setting" && entry.key === "appearance")
@@ -781,4 +789,21 @@ test("uncovered older row erases before reverting a newer clipboard row", async 
   });
   expect(await rig.run()).toMatchObject({ outcome: "fallback:erase" });
   expect(rig.mutations.reverted).toEqual([]);
+});
+
+test.each([false, true])("app-container write with baseline app=%s", async (baselineApp) => {
+  const rig = await harness(
+    baselineApp
+      ? [{ kind: "installed-app", key: "app", value: { state: "present", value: true } }]
+      : [],
+  );
+  await rig.journal.record(SCOPE, {
+    kind: "shared-file",
+    key: legacyAppContainerFileKey("app", "documents", "a.txt"),
+    toolName: "putAppFile",
+    priorValue: { state: "unobservable" },
+  });
+  expect(await rig.run()).toMatchObject({ outcome: baselineApp ? "fallback:erase" : "clean" });
+  expect(rig.state.eraseCalls).toBe(baselineApp ? 1 : 0);
+  expect(rig.mutations.sanitizeCount).toBe(baselineApp ? 0 : 1);
 });

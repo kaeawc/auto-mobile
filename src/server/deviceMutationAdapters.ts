@@ -1,3 +1,7 @@
+import {
+  legacyAppContainerFileKey,
+  scopedAppFileKey,
+} from "../daemon/sessionBroker/mutations/appContainerFileKey";
 import { DISPLAY_KEYS } from "../features/utility/DefaultDeviceSettingsAccess";
 import { DISPLAY_GEOMETRY_FIELDS } from "../features/utility/AndroidDisplayGeometry";
 import { ACCESSIBILITY_DISPLAY_FIELDS } from "../features/utility/AccessibilityDisplayPreferences";
@@ -131,7 +135,10 @@ function deviceStateMutations(args: Record<string, unknown>, platform?: Platform
 function fileMutations(args: Record<string, unknown>): ToolMutation[] {
   if (!isRecord(args.target) || !Array.isArray(args.files)) {
     return [
-      mutation("shared-file", JSON.stringify([args.appId, args.container, args.destinationPath])),
+      mutation(
+        "shared-file",
+        legacyAppContainerFileKey(args.appId, args.container, args.destinationPath),
+      ),
     ];
   }
   const target = args.target;
@@ -145,11 +152,11 @@ function fileMutations(args: Record<string, unknown>): ToolMutation[] {
   ];
   return [
     ...(target.reset === true
-      ? [mutation(kind, JSON.stringify([...scope, "namespace-reset"]))]
+      ? [mutation(kind, scopedAppFileKey(target, args.userId, "namespace-reset"))]
       : []),
     ...args.files
       .filter(isRecord)
-      .map((file) => mutation(kind, JSON.stringify([...scope, file.destinationPath]))),
+      .map((file) => mutation(kind, scopedAppFileKey(target, args.userId, file.destinationPath))),
     ...(target.indexMedia === true ? [mutation("media", JSON.stringify(scope))] : []),
   ];
 }

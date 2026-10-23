@@ -59,15 +59,20 @@ certificate inspection that refuses surviving user-trusted roots, appearance,
 content size, increase contrast and global locale/language/calendar/time-format
 settings. Photo residue is inspected and forces erase when changed; keyboard and
 increase-contrast defaults are restored and verified. `reduceMotion`, `boldText` and
-unknown settings have no sanitize coverage. `shared-file` (`putAppFile`) and
-`opened-url` (`openLink`) rows force erase even for a session-installed app: sanitize
-does not cover them. So do the frequent `rotate`, VoiceOver (`accessibility`),
-`postNotification`, keep-awake and `windowMode` rows, whose effects persist. This deliberately fails closed until a narrower proof exists.
+unknown settings have no sanitize coverage. `shared-file` (`putAppFile`) app-container
+writes into apps absent from a complete baseline installed-app inventory are covered
+by sanitize uninstalling those apps and removing their private data. Other shared-file
+rows still force erase. `opened-url` (`openLink`) also forces erase: it names no app,
+and simctl listapps provides no URL-scheme handler ownership proof. So do the
+frequent `rotate`, VoiceOver (`accessibility`), `postNotification`, keep-awake and
+`windowMode` rows, whose effects persist. This deliberately fails closed until a
+narrower proof exists.
 Other non-revertible effects require erase. Non-fallback opaque rows and the app-owned
 interaction breadcrumbs are exempt; non-revertible store preferences are covered
 only for apps absent from the baseline inventory, whose data sanitize removes.
 
-Production shared-file intents have JSON-array keys and require a journal revert;
+Production shared-file intents outside that app-container proof have JSON-array
+keys and require a journal revert;
 the public-root file sweep does not cover those intents. CtrlProxy keyboard rows
 (`keyboard:tool:keyboard` and `keyboard:profile`) are not restored by settings
 cleaning and require a revert. Power controls also require their verified journal
@@ -85,7 +90,14 @@ packages whose data remains. Plain uninstalls of session-installed apps absent
 from the baseline remain covered; installs over baseline-held apps escalate.
 Non-fallback opaque rows remain diagnostic breadcrumbs only where reset coverage
 or transient effects justify them, including network mocks and iOS power/action
-presses. Missing inventory coverage alone
+presses. Rejected, aborted/timed-out or hung release-time cleared-state pushes,
+a missing CtrlProxy client, and iOS `noCapability`/`superseded` outcomes mark the
+session recording gap before cleanup settles, escalating keep-booted reset. An
+unconfirmed runner reply counts as delivered; Android delivery means the socket
+write succeeded, with no device acknowledgement. Remaining residuals: a failed
+in-session `clearMockNetwork` push leaves nothing owned at release, so nothing is
+pushed or marked, and the gap map is in memory and keyed by session only.
+Missing inventory coverage alone
 does not block Android cleaning; uncovered journaled effects cannot silently
 survive a clean reset (#15105).
 

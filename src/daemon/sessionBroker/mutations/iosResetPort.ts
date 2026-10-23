@@ -1,5 +1,6 @@
 import { posix } from "node:path";
 import { z } from "zod/v4";
+import { appContainerFileAppId } from "./appContainerFileKey";
 import { ActionableError, toActionableError } from "../../../models/ActionableError";
 import { logger } from "../../../utils/logger";
 import { errorMessage } from "../../../utils/describeUnknownError";
@@ -198,6 +199,22 @@ interface IosAppGroupCleanup {
   baselineIds: Set<string>;
   baselinePaths: Set<string>;
   removedPaths: Set<string>;
+}
+
+/** A complete inventory proves sanitize can remove a non-baseline app's private data. */
+export function iosAppContainerWriteCovered(
+  entry: DeviceMutationInput,
+  context?: Pick<DeviceMutationResetContext, "baseline">,
+): boolean {
+  const appId = appContainerFileAppId(entry.key);
+  return (
+    entry.kind === "shared-file" &&
+    appId !== undefined &&
+    context?.baseline?.completeKinds.includes("installed-app") === true &&
+    !context.baseline.observations.some(
+      (row) => row.kind === "installed-app" && row.key.toLowerCase() === appId.toLowerCase(),
+    )
+  );
 }
 
 export class IosDeviceMutationResetPort implements DeviceMutationResetPort {
@@ -522,7 +539,14 @@ export class IosDeviceMutationResetPort implements DeviceMutationResetPort {
     ];
   }
 
-  sanitizeCovers(entry: DeviceMutationInput): boolean {
+  sanitizeCovers(
+    entry: DeviceMutationInput,
+    context?: Pick<DeviceMutationResetContext, "baseline">,
+  ): boolean {
+    if (entry.kind === "shared-file") {
+      return iosAppContainerWriteCovered(entry, context);
+    }
+    // opened-url names no app, and listapps has no URL schemes to prove handler ownership.
     if (
       ["installed-app", "app-group", ...RESET_DEFAULT_KINDS, "certificate", "media"].includes(
         entry.kind,

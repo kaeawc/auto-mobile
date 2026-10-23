@@ -43,7 +43,10 @@ export interface IosKeepBootedMutationPort extends Pick<
   "canRevert" | "revert"
 > {
   assertSettled(context: DeviceMutationResetContext): Promise<void>;
-  sanitizeCovers(entry: DeviceMutationInput): boolean;
+  sanitizeCovers(
+    entry: DeviceMutationInput,
+    context?: Pick<DeviceMutationResetContext, "baseline">,
+  ): boolean;
   sanitize(context: DeviceMutationResetContext): Promise<void>;
 }
 
@@ -303,7 +306,7 @@ export class IosKeepBootedReset {
     if (entry.kind === "preference") {
       return storePreferenceCoveredByBaseline(entry, context.baseline);
     }
-    return this.dependencies.mutations.sanitizeCovers(entry);
+    return this.dependencies.mutations.sanitizeCovers(entry, context);
   }
 
   /**

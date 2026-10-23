@@ -187,32 +187,31 @@ export class CtrlProxyNetworkSync {
     }
   }
 
-  syncNetworkErrorSimulationToDevice(): void {
+  syncNetworkErrorSimulationToDevice(): boolean {
     if (
       !this.host.sdkCapability.hasSdkCapability("network_error_simulation") &&
       !this.host.sdkCapability.isLegacySdkCommandSupported("network_error_simulation")
     ) {
-      return;
+      return true;
     }
     if (!this.host.isCommandSupported("set_network_error_simulation")) {
       logger.info(
         "[IOSCtrlProxyClient] Skipping network error simulation sync; runner does not advertise set_network_error_simulation",
       );
-      return;
+      return true;
     }
     try {
       const sim = NetworkState.getInstance().getSimulation(this.host.getDevice().deviceId);
       if (sim === null) {
-        this.host.sendMessage(
+        return this.host.sendMessage(
           JSON.stringify({
             type: "set_network_error_simulation",
             enabled: false,
           }),
         );
-        return;
       }
       const state = NetworkState.getInstance();
-      this.host.sendMessage(
+      return this.host.sendMessage(
         JSON.stringify({
           type: "set_network_error_simulation",
           enabled: true,
@@ -227,6 +226,7 @@ export class CtrlProxyNetworkSync {
       logger.warn(
         `[IOSCtrlProxyClient] Failed to sync network error simulation on reconnect: ${e}`,
       );
+      return false;
     }
   }
 

@@ -1,4 +1,6 @@
 import { AdbPowerClient } from "../../features/utility/power/AndroidPowerClient";
+import { wakeSleptScreen } from "../../features/utility/power/PowerRestore";
+import { errorMessage } from "../../utils/describeUnknownError";
 import { runWithAbortSignal } from "../../utils/AbortContext";
 import { exponentialBackoff, type BackoffPolicy } from "../../utils/Backoff";
 import { createExecResult } from "../../utils/execResult";
@@ -38,6 +40,7 @@ interface AndroidRevertCommand {
   success?: string;
   timeoutMs?: number;
   retryable?: boolean;
+  wakeSleptScreen?: boolean;
 }
 
 const PACKAGE_PATTERN = /^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*$/;
@@ -176,7 +179,7 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
     ) {
       return;
     }
-    for (const { command, success, timeoutMs, retryable } of commands) {
+    for (const { command, success, timeoutMs, retryable, wakeSleptScreen } of commands) {
       const output = await this.execute(
         command,
         context,
@@ -191,8 +194,35 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
       if ((success !== undefined && output !== success) || this.failedOutput(output)) {
         throw new ActionableError("Android reset command failed to confirm success");
       }
+      if (wakeSleptScreen) {
+        await this.wakeBeforeReadBack(context);
+      }
     }
     await this.verifyPower(mutation, context);
+  }
+
+  private powerClient(context: DeviceMutationResetContext): AdbPowerClient {
+    return new AdbPowerClient({
+      execute: async (args) =>
+        createExecResult(await this.execute(args.map(shellQuoteUnlessSafe).join(" "), context), ""),
+      isScreenOn: async () =>
+        /mWakefulness=Awake/.test(
+          await this.execute("shell dumpsys power | grep mWakefulness=", context),
+        ),
+    });
+  }
+
+  /** A failed wake never fails the revert: the Doze read-back stays the authority (#15168). */
+  private async wakeBeforeReadBack(context: DeviceMutationResetContext): Promise<void> {
+    try {
+      await wakeSleptScreen({ screenSlept: true }, this.powerClient(context));
+    } catch (error) {
+      context.signal.throwIfAborted();
+      logger.warn(
+        `Android reset could not wake the screen before the Doze read-back: ${errorMessage(error)}`,
+        error,
+      );
+    }
   }
 
   private async verifyPower(
@@ -203,13 +233,7 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
     if (!verify) {
       return;
     }
-    const client = new AdbPowerClient({
-      execute: async (args) =>
-        createExecResult(await this.execute(args.map(shellQuoteUnlessSafe).join(" "), context), ""),
-      isScreenOn: async () => {
-        throw new ActionableError("Android reset power verification cannot read screen state");
-      },
-    });
+    const client = this.powerClient(context);
     let description: string | null;
     try {
       // settleDoze watches the ambient abort signal, so an aborted reset stops the poll at once.

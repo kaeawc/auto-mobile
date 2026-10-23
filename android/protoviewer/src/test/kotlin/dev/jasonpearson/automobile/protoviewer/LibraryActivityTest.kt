@@ -125,6 +125,29 @@ class LibraryActivityTest {
   }
 
   @Test
+  fun revokedPermissionDetectedOnWindowFocusTurnsSwitchOffWithoutResume() {
+    settings.setAllowNetwork(true)
+    val activity = launch()
+    compose.onNodeWithTag("allow-network").assertIsOn()
+    grant.granted = false
+    // A revoke in a floating settings window or split screen never pauses this activity.
+    compose.runOnIdle { activity.onWindowFocusChanged(true) }
+    compose.onNodeWithTag("allow-network").assertIsOff()
+    assertFalse(settings.allowNetwork.value)
+    compose.onNodeWithText(DENIED_TEXT).assertIsDisplayed()
+  }
+
+  @Test
+  fun losingWindowFocusDoesNotQueryTheGrant() {
+    settings.setAllowNetwork(true)
+    val activity = launch()
+    val before = grant.checks
+    compose.runOnIdle { activity.onWindowFocusChanged(false) }
+    assertEquals(before, grant.checks)
+    assertTrue(settings.allowNetwork.value)
+  }
+
+  @Test
   fun grantedPermissionKeepsSwitchOn() {
     settings.setAllowNetwork(true)
     launch()

@@ -165,6 +165,7 @@ nav:
       - "CI attestation GitHub App transport": design-docs/ci/attestation-github-app-transport.md
       - "CircleCI macOS migration": design-docs/ci/circleci-macos-migration.md
       - "macOS CI capacity plan": design-docs/ci/macos-capacity-plan.md
+      - "macOS-only iOS tests": design-docs/ci/macos-only-tests.md
       - "Interaction loop": design-docs/mcp/interaction-loop.md
       - "Stylus, pressure and hover injection": design-docs/mcp/stylus-pressure-hover-injection.md
       - "Daemon": design-docs/mcp/daemon.md

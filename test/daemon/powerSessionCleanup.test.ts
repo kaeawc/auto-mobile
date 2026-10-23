@@ -121,6 +121,26 @@ describe("registerPowerSessionCleanup", () => {
     expect(restore).toEqual(["dumpsys deviceidle unforce", "dumpsys battery reset"]);
   });
 
+  test("a Doze restore that deviceidle reports late is polled with backoff, not re-applied (#15042)", async () => {
+    const { adb, manager, ops, options, timer, mutating } = setup();
+    await ops.write({ doze: "deep" });
+    adb.idleSettleReads = 3;
+
+    manager.release("s-1", DEVICE);
+    await manager.settle();
+
+    expect(mutating().filter((c) => c.includes("deviceidle unforce"))).toEqual([
+      "dumpsys deviceidle unforce",
+    ]);
+    expect(timer.getSleepHistory()).toEqual(expect.arrayContaining([250, 500, 1000]));
+    const { powerRestore } = await powerRestoreResult("s-1", options);
+    expect(
+      powerRestore &&
+        "fields" in powerRestore &&
+        powerRestore.fields.find((f) => f.field === "doze"),
+    ).toEqual({ field: "doze", status: "restored", verified: true });
+  });
+
   test("one failing field does not stop the others and the failure is reported loudly", async () => {
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {

@@ -199,6 +199,12 @@ decide after the first run.
 
 ## Device selection
 
+> [!NOTE]
+> Implemented for #14946: `tv`, `watch` and `automotive` are in `FormFactor` and
+> `BINDING_DEVICE_FAMILIES`, classified from the system-image tag, then the profile id, then
+> geometry (`src/models/formFactor.ts`). The tag and profile names are still unconfirmed
+> (checklist row 10). The sections below describe the design as written.
+
 `provisionDevice` and `getAndroid` already accept the right inputs (a system-image id and
 an avdmanager profile); they do not classify the result correctly. The change is small:
 

@@ -25,6 +25,8 @@ fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 project_root="$(cd "${script_dir}/.." && pwd)"
+# shellcheck source=scripts/lib/spotlight-exclude.sh
+source "${project_root}/scripts/lib/spotlight-exclude.sh"
 
 attestation_head=""
 if [[ -e "${project_root}/.git" ]]; then
@@ -166,6 +168,7 @@ fi
 if [[ "${ctrl_proxy_sources_changed}" == true && "${PREPUSH_IOS_SKIP_CTRL_PROXY_RUNNER_BUILD:-0}" != 1 ]]; then
   attestation_runner=pass
   echo "Compiling CtrlProxy iOS UI test runner for changed Sources"
+  mkdir_spotlight_excluded "${AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA:-${project_root}/scratch/ctrl-proxy-prepush-derived-data}"
   AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA="${AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA:-${project_root}/scratch/ctrl-proxy-prepush-derived-data}" \
     "${project_root}/scripts/ios/ctrl-proxy-build-for-testing.sh"
 fi

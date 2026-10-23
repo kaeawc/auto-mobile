@@ -892,6 +892,23 @@ describe("DefaultDeviceMatcher.matchDeviceImage", () => {
     ).toBe("Tablet");
   });
 
+  it("never matches tv, watch or automotive images to phone or tablet criteria", () => {
+    const images = [
+      deviceImage({ name: "TV", formFactor: "tv", osVersion: "14" }),
+      deviceImage({ name: "Watch", formFactor: "watch", osVersion: "14" }),
+      deviceImage({ name: "Car", formFactor: "automotive", osVersion: "14" }),
+    ];
+    for (const formFactor of ["phone", "tablet"] as const) {
+      expect(matcher.matchDeviceImage({ platform: "android", formFactor }, images, "LATEST")).toBe(
+        null,
+      );
+    }
+    expect(
+      matcher.matchDeviceImage({ platform: "android", formFactor: "watch" }, images, "LATEST")
+        ?.name,
+    ).toBe("Watch");
+  });
+
   it("returns null when no images match", () => {
     const images = [deviceImage({ name: "Old", osVersion: "12" })];
 

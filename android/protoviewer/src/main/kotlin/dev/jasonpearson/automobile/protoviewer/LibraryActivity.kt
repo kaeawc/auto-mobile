@@ -113,9 +113,18 @@ class LibraryActivity : ComponentActivity() {
     }
   }
 
+  override fun onWindowFocusChanged(hasFocus: Boolean) {
+    super.onWindowFocusChanged(hasFocus)
+    if (hasFocus) {
+      recheckLocalNetworkPermission(services.settings, services.localNetworkGrant, this) {
+        localNetworkDenied = true
+      }
+    }
+  }
+
   override fun onResume() {
     super.onResume()
-    if (revokeNetworkIfLocalNetworkLost(services.settings, services.localNetworkGrant, this)) {
+    recheckLocalNetworkPermission(services.settings, services.localNetworkGrant, this) {
       localNetworkDenied = true
     }
     lifecycleScope.launch {

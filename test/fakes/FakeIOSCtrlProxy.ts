@@ -760,6 +760,13 @@ export class FakeIOSCtrlProxy implements IosCtrlProxy {
     return this.requestHierarchySync(...args);
   }
 
+  /** Scale metadata the fake reports; null models a runner that has sent none. */
+  screenScaleMetadata: ReturnType<IosCtrlProxy["getScreenScaleMetadata"]> = null;
+
+  getScreenScaleMetadata(): ReturnType<IosCtrlProxy["getScreenScaleMetadata"]> {
+    return this.screenScaleMetadata;
+  }
+
   requestAddHighlight(
     ...args: Parameters<IosCtrlProxy["requestAddHighlight"]>
   ): ReturnType<IosCtrlProxy["requestAddHighlight"]> {

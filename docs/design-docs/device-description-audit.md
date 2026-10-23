@@ -300,7 +300,7 @@ image supplies them.
   read-only signal.
 - **The `listDevices.formFactor` compatibility alias could be `null` while its
   output schema rejected null.** The alias is now nullable; canonical
-  top-level `formFactor` remains the strict four-value enum.
+  top-level `formFactor` remains the strict enum (`phone`, `tablet`, `foldable`, `tv`, `watch`, `automotive`, `unknown`).
 - **Canonical `runtime.serviceStatus` lost diagnostics held by its deprecated
   sibling.** It now preserves the nullable installed checksum, structured
   version identity, and the iOS supported-command and supported-feature

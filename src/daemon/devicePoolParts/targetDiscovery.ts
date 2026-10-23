@@ -112,7 +112,7 @@ export class DevicePoolTargetDiscovery {
     private readonly state: TargetDiscoveryState,
     private readonly callbacks: TargetDiscoveryCallbacks,
   ) {}
-  /** Share the insertion fence with exact-device discovery, including absent-slot shutdowns. */
+  /** Share the insertion fence with exact-device discovery, including bounded unpooled shutdowns. */
   private insertionWasFenced(
     deviceId: string,
     removalFence: { wasRemoved(): boolean },
@@ -122,6 +122,7 @@ export class DevicePoolTargetDiscovery {
     return (
       removalFence.wasRemoved() ||
       shutdownReserved ||
+      this.state.shutdownReservationCoordinator.isUnpooledShutdownFenced(deviceId) ||
       this.state.shutdownReservationCoordinator.isDeviceUnderShutdown(deviceId) ||
       shutdownMarker !== this.state.intentionalShutdowns.get(deviceId) ||
       shutdownMarker !== undefined
@@ -141,7 +142,11 @@ export class DevicePoolTargetDiscovery {
     const unavailableMessage = `Device ${deviceId} is no longer running; call startDevice for it.`;
     const pickupSignal = signal ?? getAbortSignal();
     try {
-      if (shutdownMarker !== undefined || shutdownReserved) {
+      if (
+        shutdownMarker !== undefined ||
+        shutdownReserved ||
+        this.state.shutdownReservationCoordinator.isUnpooledShutdownFenced(deviceId)
+      ) {
         throw new ActionableError(shutdownMessage);
       }
       const discovery = await raceWithDeadline(

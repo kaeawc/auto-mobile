@@ -164,13 +164,14 @@ test.each(["deadline", "abort"])("pickup wait is bounded by request %s", async (
   expect(h.state.readinessCalls).toBe(0);
 });
 
-test("default daemon pickup adds only the named device through its narrow writes view", async () => {
+test("default daemon pickup uses fenced pickup through its narrow writes view", async () => {
   const h = await observationServiceStartHarness();
   const pooled = h.pool.getDevice(h.device.deviceId);
   let discovered = false;
   const lookup = spyOn(h.pool, "getDevice").mockImplementation(() => (discovered ? pooled : null));
   const refresh = spyOn(h.pool, "refreshDevices").mockResolvedValue(0);
-  const add = spyOn(h.pool, "addDevice").mockImplementation(async () => {
+  const add = spyOn(h.pool, "addDevice");
+  const pickup = spyOn(h.pool, "pickUpRunningDevice").mockImplementation(async () => {
     discovered = true;
   });
   let readinessCalls = 0;
@@ -185,14 +186,16 @@ test("default daemon pickup adds only the named device through its narrow writes
   });
   try {
     expect(await starter.start({ device: h.device, deadlineMs: h.timer.now() + 100 })).toBe(true);
-    expect(add).toHaveBeenCalledTimes(1);
-    expect(add).toHaveBeenCalledWith(h.device);
+    expect(pickup).toHaveBeenCalledTimes(1);
+    expect(pickup).toHaveBeenCalledWith(h.device);
+    expect(add).not.toHaveBeenCalled();
     expect(refresh).not.toHaveBeenCalled();
     expect(readinessCalls).toBe(1);
   } finally {
     lookup.mockRestore();
     refresh.mockRestore();
     add.mockRestore();
+    pickup.mockRestore();
     h.close();
   }
 });

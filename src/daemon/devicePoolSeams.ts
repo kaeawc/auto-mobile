@@ -38,6 +38,7 @@ export function createDevicePoolSeams(
     waitForEmulatorLossIncident: (...args) => pool.waitForEmulatorLossIncident(...args),
     finishEmulatorLossIncident: (...args) => pool.finishEmulatorLossIncident(...args),
     isCurrentDisconnectedDevice: (...args) => pool.isCurrentDisconnectedDevice(...args),
+    fenceUnpooledShutdown: (...args) => pool.fenceUnpooledShutdown(...args),
     markIntentionalShutdown: (...args) => pool.markIntentionalShutdown(...args),
     releaseDeviceRestartReservationForStop: (...args) =>
       pool.releaseDeviceRestartReservationForStop(...args),

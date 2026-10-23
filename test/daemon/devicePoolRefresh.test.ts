@@ -55,6 +55,7 @@ function harness(
     }
   })();
   const port: DevicePoolRefreshPort = {
+    createInsertionFence: () => ({ wasFenced: () => false }),
     getTimer: () => timer,
     getDeviceManager: () => manager,
     getDevices: () => devices,

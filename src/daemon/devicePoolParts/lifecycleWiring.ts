@@ -1,3 +1,4 @@
+import { insertionWasFenced } from "./insertionFence";
 import type { Environment } from "../poolConfig";
 import { releaseSessionAndDevice } from "../releaseSessionAndDevice";
 import type { AmbientExecutionIdReader } from "../../utils/interfaces/AmbientExecutionIdReader";
@@ -29,6 +30,7 @@ export interface LifecycleWiringOperations {
 type LifecycleWiringState = Pick<
   DevicePoolState,
   | "assignmentMutex"
+  | "shutdownReservationCoordinator"
   | "deviceManager"
   | "devices"
   | "retryExecutor"
@@ -340,6 +342,23 @@ export class DevicePoolLifecycleWiring {
 
   createRefreshPort(): DevicePoolRefreshPort {
     return {
+      createInsertionFence: () => {
+        const markers = new Map(this.state.intentionalShutdowns);
+        const coordinator = this.state.shutdownReservationCoordinator;
+        return {
+          wasFenced: (deviceId) =>
+            insertionWasFenced(
+              {
+                intentionalShutdowns: this.state.intentionalShutdowns,
+                isDeviceUnderShutdown: (id) => coordinator.isDeviceUnderShutdown(id),
+                isUnpooledShutdownFenced: (id) => coordinator.isUnpooledShutdownFenced(id),
+              },
+              deviceId,
+              { wasRemoved: () => false },
+              { shutdownMarker: markers.get(deviceId), shutdownReserved: false },
+            ),
+        };
+      },
       normalizeAndroidDiscovery: (devices, held, current, complete) =>
         this.callbacks.normalizeAndroidDiscovery(devices, held, current, complete),
       isAndroidTransportAssignable: (device) =>

@@ -1,3 +1,4 @@
+import { BootedDeviceDiscoveryIncompleteError } from "../../models/BootedDeviceDiscoveryIncompleteError";
 import { classifySqliteError } from "../../db/databaseFailureClassification";
 import { SimctlCommandTimeoutError } from "../../utils/ios-cmdline-tools/SimctlCommandTimeoutError";
 import { SessionBrokerInvariantError } from "./SessionBrokerInvariantError";
@@ -5,9 +6,12 @@ import { SessionRequestOwnerMismatchError } from "./SessionRequestOwnerMismatchE
 
 type CleanReleaseFailureKind = "retryable" | "permanent" | "unknown";
 
-function isNativeTimeoutOrAbort(error: object): boolean {
+function isRetryableNativeFailure(error: object): boolean {
   return (
     error instanceof SimctlCommandTimeoutError ||
+    (error instanceof BootedDeviceDiscoveryIncompleteError &&
+      error.platform === "ios" &&
+      error.discoveryError?.retryable !== false) ||
     ("name" in error && (error.name === "AbortError" || error.name === "TimeoutError"))
   );
 }
@@ -22,7 +26,7 @@ function classifyCause(error: unknown): CleanReleaseFailureKind {
   if (typeof error !== "object" || error === null) {
     return "unknown";
   }
-  if (isNativeTimeoutOrAbort(error)) {
+  if (isRetryableNativeFailure(error)) {
     return "retryable";
   }
   if ("code" in error && typeof error.code === "string" && error.code.startsWith("SQLITE_")) {

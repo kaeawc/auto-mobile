@@ -114,7 +114,7 @@ export function drainFailureOutcome(
     );
     return "pending";
   }
-  // A failed or timed-out gate sample is not a capacity refusal and falls through to destruction.
+  // A discovery_incomplete gate sample stays pending so recovery can retry discovery.
   // Native execution/journal fences still prevent destructive work before the drain joins.
   logger.warn(`Session ${sessionUuid} could not finish its clean release: ${errorMessage(error)}`);
   const kind = classifyCleanReleaseError(error);

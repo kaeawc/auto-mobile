@@ -812,6 +812,41 @@ describe("IOSCtrlProxyClient restart threshold", () => {
       }
     });
 
+    test.each(["absent", "throws", "optional absent"])(
+      "recovery confirms shutdown only after a missing listing: %s",
+      async (scenario) => {
+        const fakeTimer = new FakeTimer();
+        const manager = new FakeIOSCtrlProxyManager(fakeTimer);
+        const marks: string[] = [];
+        if (scenario !== "optional absent") {
+          Object.assign(manager, {
+            markSimulatorShutDownIfNotBooted: async (reason: string) => {
+              marks.push(reason);
+            },
+          });
+        }
+        client = IOSCtrlProxyClient.createForTesting(
+          testDevice,
+          8765,
+          createInstantFailureWebSocketFactory(fakeTimer),
+          fakeTimer,
+          {
+            serviceManagerFactory: () => manager,
+            bootedDeviceLister: async () => {
+              if (scenario === "throws") {
+                throw new Error("simctl unavailable");
+              }
+              return [];
+            },
+          },
+        );
+        client.ensureRecoveryStarted();
+        expect(await client.awaitRecovery(20_000)).toBe("failed");
+        expect(marks).toHaveLength(scenario === "absent" ? 1 : 0);
+        expect(manager.getCallCount("forceRestart")).toBe(0);
+      },
+    );
+
     test("does not restart a simulator absent from booted discovery", async () => {
       const fakeTimer = new FakeTimer();
       fakeTimer.enableAutoAdvance();

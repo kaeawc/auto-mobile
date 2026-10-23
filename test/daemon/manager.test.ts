@@ -3698,7 +3698,7 @@ describe("Daemon manager process detection", () => {
       socketPath: join(directory, "daemon.sock"),
       processFinder,
       launcher,
-      peerSocketReachability: { isReachable: async () => false },
+      peerSocketReachability: { probe: async () => "absent" },
       portAvailabilityChecker: portChecker,
     });
 
@@ -5631,7 +5631,7 @@ describe("Daemon manager process detection", () => {
           command: process.execPath,
           args: [entryScript, "--daemon-mode"],
         }),
-        peerSocketReachability: { isReachable: async () => false },
+        peerSocketReachability: { probe: async () => "absent" },
       });
 
       await expect(manager.start()).rejects.toThrow(
@@ -5698,7 +5698,7 @@ describe("Daemon manager process detection", () => {
           command: process.execPath,
           args: [entryScript, "--daemon-mode"],
         }),
-        peerSocketReachability: { isReachable: async () => false },
+        peerSocketReachability: { probe: async () => "absent" },
       });
 
       await manager.start({ port: 1234 });
@@ -5895,7 +5895,7 @@ describe("Daemon manager process detection", () => {
           command: process.execPath,
           args: [entryScript, "--daemon-mode"],
         }),
-        peerSocketReachability: { isReachable: async () => false },
+        peerSocketReachability: { probe: async () => "absent" },
       });
 
       await expect(manager.start()).rejects.toThrow(
@@ -5946,7 +5946,7 @@ describe("Daemon manager process detection", () => {
           command: process.execPath,
           args: [join(dir, "entry.js"), "--daemon-mode"],
         }),
-        peerSocketReachability: { isReachable: async () => false },
+        peerSocketReachability: { probe: async () => "absent" },
       });
 
       await expect(manager.start()).rejects.toThrow(

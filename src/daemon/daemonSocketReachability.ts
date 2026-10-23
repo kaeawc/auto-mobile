@@ -2,6 +2,32 @@ import { existsSync } from "node:fs";
 import { createConnection } from "node:net";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 
+const ABSENT_CONFIRM_DELAY_MS = 50;
+
+export type SocketReachability = "answered" | "absent" | "unknown";
+
+// Every code outside these sets (EACCES, EPERM, EMFILE, ENFILE, EAGAIN, EBUSY,
+// ECONNRESET, EPIPE, ETIMEDOUT, ENOTSOCK, ENOMEM, undefined, ...) is unknown by design.
+const ABSENT_CONNECT_ERRORS: Record<"posix" | "win32", ReadonlySet<string>> = {
+  posix: new Set([
+    "ECONNREFUSED", // No listener accepts this Unix socket endpoint.
+    "ENOENT", // Missing Unix socket path.
+  ]),
+  win32: new Set([
+    "ENOENT", // Missing Windows named pipe.
+    "ECONNREFUSED", // No listener accepts this Windows endpoint.
+  ]),
+};
+
+/** Only explicit absence errnos authorize reclaim, on POSIX and Windows alike. */
+export function classifySocketConnectError(
+  code: string | undefined,
+  platform: NodeJS.Platform,
+): "absent" | "unknown" {
+  const absentErrors = ABSENT_CONNECT_ERRORS[platform === "win32" ? "win32" : "posix"];
+  return code !== undefined && absentErrors.has(code) ? "absent" : "unknown";
+}
+
 /**
  * Attempts a bare, side-effect-free connection to a daemon socket/pipe and reports
  * whether it is reachable. MUST NOT touch the socket file (no stat-clean, no unlink).
@@ -10,7 +36,8 @@ export type DaemonSocketConnectAttempt = (
   socketPath: string,
   timeoutMs: number,
   timer: Timer,
-) => Promise<boolean>;
+  platform: NodeJS.Platform,
+) => Promise<SocketReachability>;
 
 export interface DaemonSocketReachabilityDeps {
   platform?: NodeJS.Platform;
@@ -26,7 +53,7 @@ export interface DaemonSocketReachabilityDeps {
  * without a real socket, and keeps the real probe wired to the manager's injected timer.
  */
 export interface DaemonSocketReachabilityLike {
-  isReachable(socketPath: string, timeoutMs: number): Promise<boolean>;
+  probe(socketPath: string, timeoutMs: number): Promise<SocketReachability>;
 }
 
 /**
@@ -63,55 +90,63 @@ export class DaemonSocketReachability {
   constructor(deps: DaemonSocketReachabilityDeps = {}) {
     this.platform = deps.platform ?? process.platform;
     this.existsSyncFn = deps.existsSyncFn ?? existsSync;
-    this.connectAttempt = deps.connectAttempt ?? rawObservationOnlyConnectAttempt;
+    this.connectAttempt = deps.connectAttempt ?? createObservationOnlyConnectAttempt();
     this.timer = deps.timer ?? defaultTimer;
   }
 
   /**
-   * Whether the daemon socket/pipe is currently accepting connections. Returns false
-   * (rather than throwing) for every not-reachable case, and never mutates the socket
-   * file.
+   * Distinguishes an answering peer from definite absence and inconclusive probes.
+   * Never mutates the socket file; only definite absence can authorize reclaim.
    */
-  async isReachable(socketPath: string, timeoutMs: number): Promise<boolean> {
+  async probe(socketPath: string, timeoutMs: number): Promise<SocketReachability> {
     if (timeoutMs <= 0) {
-      return false;
+      return "unknown";
     }
     // POSIX: a missing filesystem entry means nothing is listening yet — skip the
     // connect so a nonexistent Unix socket isn't hammered. Windows named pipes have no
     // filesystem entry, so the connect must be attempted regardless.
     if (this.platform !== "win32" && !this.existsSyncFn(socketPath)) {
-      return false;
+      return "absent";
     }
-    return this.connectAttempt(socketPath, timeoutMs, this.timer);
+    const first = await this.connectAttempt(socketPath, timeoutMs, this.timer, this.platform);
+    if (first !== "absent" || this.platform === "win32") {
+      return first;
+    }
+    // Darwin can report ECONNREFUSED for a live listener whose backlog is full.
+    // Confirm absence after a short pause before authorizing POSIX path reclaim.
+    await this.timer.sleep(ABSENT_CONFIRM_DELAY_MS);
+    return this.connectAttempt(socketPath, timeoutMs, this.timer, this.platform);
   }
 }
 
 /**
  * The default connect attempt: a raw {@link createConnection} bounded by `timeoutMs`,
- * reporting reachable on connect and not-reachable on error or timeout. It destroys the
+ * reporting answered on connect, classified errors, and unknown on timeout. It destroys the
  * probe socket on every exit path and — deliberately, unlike the DaemonClient recovery
  * path — never unlinks or cleans up the socket file.
  */
-const rawObservationOnlyConnectAttempt: DaemonSocketConnectAttempt = (
-  socketPath,
-  timeoutMs,
-  timer,
-) =>
-  new Promise<boolean>((resolve) => {
-    let settled = false;
-    const settle = (value: boolean) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      timer.clearTimeout(timeout);
-      socket.destroy();
-      resolve(value);
-    };
+export function createObservationOnlyConnectAttempt(
+  connect: typeof createConnection = createConnection,
+): DaemonSocketConnectAttempt {
+  return (socketPath, timeoutMs, timer, platform) =>
+    new Promise<SocketReachability>((resolve) => {
+      let settled = false;
+      const settle = (value: SocketReachability) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        timer.clearTimeout(timeout);
+        socket.destroy();
+        resolve(value);
+      };
 
-    const socket = createConnection(socketPath, () => settle(true));
-    // No cleanupStaleSocketIfDaemonDead on error: this probe must never delete a live
-    // peer's endpoint (issue #6103).
-    socket.on("error", () => settle(false));
-    const timeout = timer.setTimeout(() => settle(false), timeoutMs);
-  });
+      const socket = connect(socketPath, () => settle("answered"));
+      // No cleanupStaleSocketIfDaemonDead on error: this probe must never delete a live
+      // peer's endpoint (issue #6103).
+      socket.on("error", (error: NodeJS.ErrnoException) =>
+        settle(classifySocketConnectError(error.code, platform)),
+      );
+      const timeout = timer.setTimeout(() => settle("unknown"), timeoutMs);
+    });
+}

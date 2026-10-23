@@ -19,7 +19,10 @@ import {
   READINESS_PROBE_MAX_ATTEMPTS,
 } from "../../src/daemon/constants";
 import type { DaemonClientLike } from "../../src/daemon/client";
-import type { DaemonSocketReachabilityLike } from "../../src/daemon/daemonSocketReachability";
+import type {
+  DaemonSocketReachabilityLike,
+  SocketReachability,
+} from "../../src/daemon/daemonSocketReachability";
 import type { DaemonStatus, PidFileData } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -76,9 +79,9 @@ class FakePeerSocketReachability implements DaemonSocketReachabilityLike {
   reachable: () => boolean = () => false;
   calls = 0;
 
-  isReachable(_socketPath: string, _timeoutMs: number): Promise<boolean> {
+  probe(_socketPath: string, _timeoutMs: number): Promise<SocketReachability> {
     this.calls++;
-    return Promise.resolve(this.reachable());
+    return Promise.resolve(this.reachable() ? "answered" : "absent");
   }
 }
 
@@ -1230,10 +1233,10 @@ describe("DaemonManager readiness", () => {
     class BudgetExhaustingReachability implements DaemonSocketReachabilityLike {
       calls = 0;
       constructor(private readonly timer: FakeTimer) {}
-      async isReachable(_socketPath: string, timeoutMs: number): Promise<boolean> {
+      async probe(_socketPath: string, timeoutMs: number): Promise<SocketReachability> {
         this.calls++;
         await this.timer.sleep(timeoutMs);
-        return false;
+        return "absent";
       }
     }
     const reachability = new BudgetExhaustingReachability(fakeTimer);
@@ -1346,9 +1349,9 @@ describe("DaemonManager readiness", () => {
     // reporting a miss, simulating a probe that burns most of the remaining time.
     class NearBudgetExhaustingReachability implements DaemonSocketReachabilityLike {
       constructor(private readonly timer: FakeTimer) {}
-      async isReachable(_socketPath: string, timeoutMs: number): Promise<boolean> {
+      async probe(_socketPath: string, timeoutMs: number): Promise<SocketReachability> {
         await this.timer.sleep(Math.max(0, timeoutMs - 40));
-        return false;
+        return "absent";
       }
     }
     const reachability = new NearBudgetExhaustingReachability(fakeTimer);

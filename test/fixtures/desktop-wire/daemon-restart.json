@@ -155,8 +155,9 @@
       "response": {
         "success": true,
         "result": {
-          "message": "Session d0000000-0000-4000-8000-000000000001 already released or never existed",
-          "alreadyReleased": true
+          "message": "Session d0000000-0000-4000-8000-000000000001 is not known to this daemon (never issued, or its release record expired); nothing was released",
+          "alreadyReleased": false,
+          "known": false
         }
       }
     },

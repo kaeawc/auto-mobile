@@ -1,3 +1,4 @@
+import { releaseCleanupStatus } from "./releaseCleanupStatus";
 import { holderOf } from "./deviceBinding";
 import {
   SESSION_BROKER_CAPABILITY,
@@ -521,11 +522,13 @@ async function releaseRestoreReports(
   sessionId: string,
 ) {
   const keepAwakeRestore = manager.getKeepAwakeRestoreReport?.(sessionId);
-  return {
+  const reports = {
     ...(keepAwakeRestore ? { keepAwakeRestore } : {}),
     ...(await screenLockRestoreResult(sessionId, { registry: state.getScreenLockRegistry?.() })),
     ...(await powerRestoreResult(sessionId, { registry: state.getPowerRegistry?.() })),
   };
+  const cleanup = releaseCleanupStatus(reports);
+  return { ...reports, ...(cleanup ? { cleanup } : {}) };
 }
 
 /**
@@ -569,7 +572,19 @@ async function releaseUnknownSession(
       };
     }
   }
-  if (requireKnown && (await lookupReleasedSessionReason(manager, sessionId)) === undefined) {
+  return reportUnboundSessionRelease(state, manager, sessionId, requireKnown);
+}
+
+async function reportUnboundSessionRelease(
+  state: DaemonStateAccess,
+  manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
+  sessionId: string,
+  requireKnown: boolean,
+): Promise<DaemonMethodResult> {
+  const known =
+    Boolean(manager.getTerminalReleaseSnapshot?.(sessionId)) ||
+    (await lookupReleasedSessionReason(manager, sessionId)) !== undefined;
+  if (requireKnown && !known) {
     return {
       success: false,
       error:
@@ -578,12 +593,22 @@ async function releaseUnknownSession(
       code: DAEMON_SESSION_NOT_FOUND_CODE,
     };
   }
+  const reports = await releaseRestoreReports(state, manager, sessionId);
+  const cleanupMessage =
+    reports.cleanup === "failed"
+      ? "; cleanup failed"
+      : reports.cleanup === "pending"
+        ? "; cleanup still pending"
+        : "";
   return {
     success: true,
     result: {
-      message: `Session ${sessionId} already released or never existed`,
-      alreadyReleased: true,
-      ...(await releaseRestoreReports(state, manager, sessionId)),
+      message: known
+        ? `Session ${sessionId} already released${cleanupMessage}`
+        : `Session ${sessionId} is not known to this daemon (never issued, or its release record expired); nothing was released`,
+      alreadyReleased: known,
+      known,
+      ...reports,
     },
   };
 }

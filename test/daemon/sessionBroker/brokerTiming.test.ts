@@ -166,6 +166,42 @@ describe("durable broker timing", () => {
     ]);
   });
 
+  test.each([{ managed: true }, { managed: false }])(
+    "reset receipt reports the reset-boot slot wait as its own phase (managed slots: $managed)",
+    async ({ managed }) => {
+      const releaseErase = Promise.withResolvers<void>();
+      let starts = 0;
+      const devices = harness.options.devices;
+      devices.managesResetBootSlots = managed;
+      devices.reset = async (resource, _signal, runResetBoot) => {
+        const erase = async () => {
+          starts++;
+          if (starts === 1) {
+            await releaseErase.promise;
+          }
+          await harness.devices.reset(resource);
+          return { outcome: "clean", mode: "erase", phases: {} } as const;
+        };
+        return managed ? runResetBoot!(erase) : erase();
+      };
+      await broker.close();
+      broker = new SessionBroker({
+        ...harness.options,
+        limits: { totalDeviceCap: 2, sessionCap: 2, idlePoolCap: 2, maxConcurrentResetBoots: 1 },
+      });
+      const first = await broker.prepare(exportConfig("first"), "token");
+      const second = await broker.prepare(exportConfig("second"), "token");
+      const releases = [broker.release(first.sessionUuid!), broker.release(second.sessionUuid!)];
+      await drainUntil(() => starts === 1, { description: "first reset holds the boot slot" });
+      await drainUntilQuiescent(harness.timer);
+      harness.timer.advanceTime(5_000);
+      releaseErase.resolve();
+      const [firstReleased, secondReleased] = await Promise.all(releases);
+      expect(firstReleased.timing?.reset?.phases.bootQueue).toBe(0);
+      expect(secondReleased.timing?.reset?.phases.bootQueue).toBe(5_000);
+    },
+  );
+
   test("persisted resource use count drives keep-booted retirement on the third release", async () => {
     const journal = new FakeDeviceMutationJournal(harness.timer);
     const mutations = new FakeDeviceMutationResetPort({

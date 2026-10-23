@@ -20,6 +20,8 @@ import {
   type IosInstalledAppsDetailedResult,
 } from "../../../src/features/observe/ListInstalledApps";
 import { getIosInstalledAppBundleId } from "../../../src/utils/ios-cmdline-tools/iosInstalledApp";
+import { AdbCommandTimeoutError } from "../../../src/utils/android-cmdline-tools/AdbCommandTimeoutError";
+import { fixedBackoff } from "../../../src/utils/Backoff";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -1448,7 +1450,7 @@ describe("systemTray clearAll dumpsys ownership", () => {
     adb.setCommandResponse("dumpsys notification", unchangedDump);
     setSystemTrayDependencies({ observeScreenFactory: () => observer });
     installClearAllDependencies(timer, adb);
-    return { adb, commands, timer };
+    return { adb, commands, timer, observer };
   };
 
   for (const initiallyOpen of [false, true]) {
@@ -1652,6 +1654,223 @@ describe("systemTray clearAll dumpsys ownership", () => {
     } finally {
       installedAppsSpy.mockRestore();
     }
+  });
+
+  // Under host load every pre-swipe read and dumpsys is slow and some time out. Each of
+  // those failures is transient: clearAll retries it rather than abandoning the drain
+  // before the first swipe (#13810).
+  describe("pre-swipe phases under host load (#13810)", () => {
+    const BACKOFF_MS = 1234;
+    const swipesOf = (commands: () => string[]) =>
+      commands().filter((command) => command.startsWith("shell input swipe"));
+    const expandsOf = (commands: () => string[]) =>
+      commands().filter((command) => command.endsWith("expand-notifications")).length;
+
+    test("a readiness read that outlasts its budget is retried after a backoff, not fatal", async () => {
+      const { adb, commands, timer, observer } = setupClearAllShade(false, undefined, false, true);
+      adb.setCommandResponseSequence("dumpsys notification", [
+        execResult(dumpsys(record(1, "Shell notification", "Body"))),
+        execResult(dumpsys()),
+      ]);
+      setSystemTrayDependencies({ backoff: fixedBackoff(BACKOFF_MS) });
+      const execute = observer.execute.bind(observer);
+      let hung = false;
+      spyOn(observer, "execute").mockImplementation((options) => {
+        // The first read after the drain opens the shade never returns in time.
+        if (!hung && expandsOf(commands) >= 2) {
+          hung = true;
+          return new Promise<ObserveResult>(() => {});
+        }
+        return execute(options);
+      });
+      const installedAppsSpy = mockInstalledApps([SHELL]);
+      try {
+        expect(toolJson(await clearAll())).toMatchObject({ dismissedCount: 1, success: true });
+        expect(hung).toBe(true);
+        expect(swipesOf(commands)).toHaveLength(1);
+        expect(timer.getSleepHistory()).toContain(BACKOFF_MS);
+      } finally {
+        installedAppsSpy.mockRestore();
+      }
+    });
+
+    test("a shade that stays unreadable through one budget is retried with a fresh budget", async () => {
+      const { adb, commands, timer, observer } = setupClearAllShade(false, undefined, false, true);
+      adb.setCommandResponseSequence("dumpsys notification", [
+        execResult(dumpsys(record(1, "Shell notification", "Body"))),
+        execResult(dumpsys()),
+      ]);
+      const execute = observer.execute.bind(observer);
+      const readableAtMs = 6000;
+      spyOn(observer, "execute").mockImplementation((options) =>
+        expandsOf(commands) >= 2 && timer.now() < readableAtMs
+          ? Promise.resolve({ ...page(), viewHierarchy: undefined })
+          : execute(options),
+      );
+      const installedAppsSpy = mockInstalledApps([SHELL]);
+      try {
+        expect(toolJson(await clearAll())).toMatchObject({ dismissedCount: 1, success: true });
+        expect(swipesOf(commands)).toHaveLength(1);
+        expect(timer.now()).toBeGreaterThanOrEqual(readableAtMs);
+      } finally {
+        installedAppsSpy.mockRestore();
+      }
+    });
+
+    test("a shade that never becomes readable fails after bounded attempts, with no swipe", async () => {
+      const { commands, timer } = setupClearAllShade(false, "missing");
+      const installedAppsSpy = mockInstalledApps([SHELL]);
+      try {
+        await expect(clearAll()).rejects.toThrow("shade not readable");
+        expect(swipesOf(commands)).toHaveLength(0);
+        // Three attempts, each with the caller's full 5000ms awaitTimeout.
+        expect(timer.now()).toBeGreaterThanOrEqual(15000);
+        expect(timer.now()).toBeLessThan(20000);
+      } finally {
+        installedAppsSpy.mockRestore();
+      }
+    });
+
+    test("an uncorrelated first listing pass is re-read before the drain gives up", async () => {
+      const fixture = headerlessTwoNotificationGroups.expanded!;
+      const { adb, observer, timer } = setup(
+        [{ ...page(), viewHierarchy: fixture }, page()],
+        false,
+      );
+      // The first pass catches the shade mid-render: a headerless row that no record explains.
+      const commands = () => adb.getExecutedCommands();
+      const execute = observer.execute.bind(observer);
+      spyOn(observer, "execute").mockImplementation((options) =>
+        expandsOf(commands) < 2
+          ? Promise.resolve(page(silentRow("Still rendering", "partial body")))
+          : execute(options),
+      );
+      const both = execResult(
+        dumpsys(record(1, "Delta", "delta body"), record(2, "Gamma", "gamma body")),
+      );
+      adb.setCommandResponseSequence("dumpsys notification", [
+        both,
+        both,
+        both,
+        both,
+        both,
+        execResult(api36EmptyDumpsys()),
+      ]);
+      const installedAppsSpy = mockInstalledApps([SHELL]);
+      installClearAllDependencies(timer, adb);
+      try {
+        expect(toolJson(await clearAll())).toMatchObject({
+          dismissedCount: 2,
+          expectedCount: 2,
+          remainingCount: 0,
+          success: true,
+        });
+      } finally {
+        installedAppsSpy.mockRestore();
+      }
+    });
+
+    test("an unreadable pre-swipe notification count is re-read before the drain gives up", async () => {
+      const { adb, commands } = setupClearAllShade(false, undefined, false, true);
+      adb.setCommandResponseSequence("dumpsys notification", [
+        execResult("dumpsys timed out under load"),
+        execResult(dumpsys(record(1, "Shell notification", "Body"))),
+        execResult(dumpsys()),
+      ]);
+      const installedAppsSpy = mockInstalledApps([SHELL]);
+      try {
+        expect(toolJson(await clearAll())).toMatchObject({
+          dismissedCount: 1,
+          expectedCount: 1,
+          remainingCount: 0,
+          success: true,
+        });
+        expect(swipesOf(commands)).toHaveLength(1);
+      } finally {
+        installedAppsSpy.mockRestore();
+      }
+    });
+
+    test("a collapse that times out while listing is retried, not fatal", async () => {
+      const { adb, commands } = setupClearAllShade(false, undefined, false, true);
+      const executeCommand = adb.executeCommand.bind(adb);
+      let timedOut = false;
+      spyOn(adb, "executeCommand").mockImplementation((command, options) => {
+        if (!timedOut && command === "shell cmd statusbar collapse") {
+          timedOut = true;
+          return Promise.reject(
+            new AdbCommandTimeoutError("Command timed out after 1000ms: adb shell cmd statusbar"),
+          );
+        }
+        return executeCommand(command, options);
+      });
+      adb.setCommandResponseSequence("dumpsys notification", [
+        execResult(dumpsys(record(1, "Shell notification", "Body"))),
+        execResult(dumpsys()),
+      ]);
+      const installedAppsSpy = mockInstalledApps([SHELL]);
+      try {
+        expect(toolJson(await clearAll())).toMatchObject({ dismissedCount: 1, success: true });
+        expect(timedOut).toBe(true);
+        expect(swipesOf(commands)).toHaveLength(1);
+      } finally {
+        installedAppsSpy.mockRestore();
+      }
+    });
+
+    test("a non-transient listing failure is not retried", async () => {
+      const { adb } = setupClearAllShade(false, undefined, false, true);
+      const executeCommand = adb.executeCommand.bind(adb);
+      let collapses = 0;
+      spyOn(adb, "executeCommand").mockImplementation((command, options) => {
+        if (command === "shell cmd statusbar collapse") {
+          collapses++;
+          return Promise.reject(new Error("device offline"));
+        }
+        return executeCommand(command, options);
+      });
+      const installedAppsSpy = mockInstalledApps([SHELL]);
+      try {
+        await expect(clearAll()).rejects.toThrow("device offline");
+        // One failed listing collapse plus the one shade-restore collapse; no retry between.
+        expect(collapses).toBe(2);
+      } finally {
+        installedAppsSpy.mockRestore();
+      }
+    });
+
+    test("reads the shade and resolves the app label only as often as needed before the first swipe", async () => {
+      const { adb, commands, observer } = setupClearAllShade(false, undefined, false, true);
+      const labelLookups: string[] = [];
+      setSystemTrayDependencies({
+        appLabelResolver: async (_device, appId) => {
+          labelLookups.push(appId);
+          return shellLabel;
+        },
+      });
+      adb.setCommandResponseSequence("dumpsys notification", [
+        execResult(dumpsys(record(1, "Shell notification", "Body"))),
+        execResult(dumpsys()),
+      ]);
+      let observesBeforeSwipe = 0;
+      const execute = observer.execute.bind(observer);
+      spyOn(observer, "execute").mockImplementation((options) => {
+        if (swipesOf(commands).length === 0) {
+          observesBeforeSwipe++;
+        }
+        return execute(options);
+      });
+      const installedAppsSpy = mockInstalledApps([SHELL]);
+      try {
+        expect(toolJson(await clearAll())).toMatchObject({ dismissedCount: 1, success: true });
+        // arm-restore probe, the listing scan, and the drain's post-expand read.
+        expect(observesBeforeSwipe).toBe(3);
+        // The label resolved for scoping is reused for attribution.
+        expect(labelLookups).toEqual([SHELL]);
+      } finally {
+        installedAppsSpy.mockRestore();
+      }
+    });
   });
 
   const setupDelayedClear = (
@@ -1886,8 +2105,8 @@ describe("systemTray clearAll dumpsys ownership", () => {
     }
   });
 
-  test("clearAll caps readiness polls at the caller deadline and closes the shade", async () => {
-    const { adb, timer, swipes } = setupDelayedClear(1000);
+  test("clearAll caps each readiness attempt at the caller deadline and closes the shade", async () => {
+    const { adb, timer, swipes } = setupDelayedClear(10000);
     const installedAppsSpy = mockInstalledApps([SHELL]);
     try {
       await expect(
@@ -1898,15 +2117,18 @@ describe("systemTray clearAll dumpsys ownership", () => {
         }),
       ).rejects.toThrow("shade not readable");
       expect(swipes()).toHaveLength(0);
-      expect(timer.now()).toBe(625);
-      expect(timer.getSleepHistory()).toEqual([250, 250, 125]);
+      // Three attempts at the caller's 625ms, with the 250ms and 500ms backoffs between them.
+      expect(timer.now()).toBe(625 * 3 + 250 + 500);
+      expect(timer.getSleepHistory().slice(0, 3)).toEqual([250, 250, 125]);
+      expect(timer.getSleepHistory()).toContain(250);
+      expect(timer.getSleepHistory()).toContain(500);
       expect(adb.getExecutedCommands().at(-1)).toBe("shell cmd statusbar collapse");
     } finally {
       installedAppsSpy.mockRestore();
     }
   });
 
-  test("a hung shade read hits the deadline and still restores the shade", async () => {
+  test("a hung shade read hits each attempt's deadline and still restores the shade", async () => {
     const { adb, timer, observer, swipes } = setupDelayedClear(0);
     const execute = observer.execute.bind(observer);
     const executeSpy = spyOn(observer, "execute").mockImplementation((options) => {
@@ -1925,7 +2147,7 @@ describe("systemTray clearAll dumpsys ownership", () => {
         }),
       ).rejects.toThrow("shade not readable");
       expect(swipes()).toHaveLength(0);
-      expect(timer.now()).toBe(625);
+      expect(timer.now()).toBe(625 * 3 + 250 + 500);
       expect(adb.getExecutedCommands().at(-1)).toBe("shell cmd statusbar collapse");
     } finally {
       installedAppsSpy.mockRestore();

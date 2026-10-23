@@ -4,6 +4,8 @@ import {
   type TeardownDeviceArgs,
   type TeardownToolResponse,
 } from "../../../../src/server/deviceTools";
+import { EmulatorTeardownEscalationError } from "../../../../src/features/deviceLifecycle/teardown/stuckEmulatorEscalation";
+import { typedTeardownRefusal } from "../../../../src/server/deviceToolsLifecycle";
 import { createTeardownResponse } from "../../../../src/features/deviceLifecycle/deviceLifecycleCore";
 import { WorkflowBindingDeviceDeleter } from "../../../../src/daemon/sessionBroker/provisioning/deviceDeleter";
 import { FakeTimer } from "../../../fakes/FakeTimer";
@@ -112,5 +114,35 @@ describe("WorkflowBindingDeviceDeleter", () => {
     const result = await deleter.deleteAndVerifyAbsence(target);
     expect(result).toMatchObject({ kind: "failed" });
     expect(result).not.toHaveProperty("notAttempted");
+  });
+
+  test("an exhausted emulator escalation is marked so the journal quarantines instead of retrying", async () => {
+    const response = typedTeardownRefusal(
+      TEARDOWN_ARGS,
+      new EmulatorTeardownEscalationError(
+        "emulator still running",
+        "still-running",
+        "emulator-5554",
+        3,
+        4242,
+      ),
+      undefined,
+      "stop",
+    );
+    expect(response).toBeDefined();
+    const deleter = new WorkflowBindingDeviceDeleter(timer, () => async () => response!);
+    expect(await deleter.deleteAndVerifyAbsence(target)).toMatchObject({
+      kind: "failed",
+      message: "emulator still running",
+      escalationExhausted: true,
+    });
+  });
+
+  test("other stop failures are not marked exhausted", async () => {
+    const deleter = new WorkflowBindingDeviceDeleter(
+      timer,
+      () => async () => failedResponse("emulator would not stop"),
+    );
+    expect(await deleter.deleteAndVerifyAbsence(target)).not.toHaveProperty("escalationExhausted");
   });
 });

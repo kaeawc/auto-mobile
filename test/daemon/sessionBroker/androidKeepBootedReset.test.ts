@@ -6,6 +6,7 @@ import {
 } from "../../../src/daemon/sessionBroker/androidBaselineReset";
 import {
   DEVICE_MUTATION_KINDS,
+  opaqueIntentKey,
   type DeviceMutationInput,
 } from "../../../src/daemon/sessionBroker/mutations/types";
 import { FakeDeviceMutationJournal } from "../../fakes/FakeDeviceMutationJournal";
@@ -210,6 +211,46 @@ describe("Android keep-booted strategy", () => {
     expect(seenOpaque).toBe(true);
     expect(result).toMatchObject({ outcome: "fallback:wipe-data", mode: "wipe-data" });
     expect(result.fallbackReason).toContain("deviceSnapshot");
+  });
+
+  test("a fallback-forcing opaque journal row skips the clean and escalates without the wipe flag", async () => {
+    let seenOpaque: boolean | undefined = true;
+    const { port, strategy, journal } = await rig({
+      fallback: {
+        reset: async (_device, _packages, _assertOwned, context) => {
+          seenOpaque = context.opaquePersistentChanges;
+          return { outcome: "clean", mode: "snapshot", phases: {} };
+        },
+      },
+    });
+    await journal.record(SCOPE, {
+      kind: "opaque",
+      key: opaqueIntentKey("sendBroadcast", "com.example.app"),
+      priorValue: { state: "unobservable" },
+      toolName: "sendBroadcast",
+    });
+    const result = await strategy.reset(ANDROID_RESET_DEVICE, new Set(), async () => {}, {
+      ...SESSION,
+      rebindIncarnation: async () => SESSION.incarnation ?? SESSION.resourceId,
+      assertBindingOwned: async () => {},
+    });
+    expect(port.cleanCount).toBe(0);
+    expect(seenOpaque).toBeUndefined();
+    expect(result).toMatchObject({ outcome: "fallback:snapshot", mode: "snapshot" });
+    expect(result.fallbackReason).toContain("sendBroadcast");
+  });
+
+  test("a best-effort opaque journal row keeps the booted clean", async () => {
+    const { port, strategy, journal } = await rig();
+    await journal.record(SCOPE, {
+      kind: "opaque",
+      key: "tool:sendSms",
+      priorValue: { state: "unobservable" },
+      toolName: "sendSms",
+    });
+    const result = await strategy.reset(ANDROID_RESET_DEVICE, new Set(), async () => {}, SESSION);
+    expect(port.cleanCount).toBe(1);
+    expect(result).toMatchObject({ outcome: "clean", mode: "keep-booted" });
   });
 
   test("a deviceSnapshot session without a fallback fails closed", async () => {

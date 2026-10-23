@@ -123,6 +123,17 @@ describe("session broker host configuration", () => {
     ).toEqual({ mode: "off" });
   });
 
+  test("iOS keep-booted defaults to an erase every 10th release; erase keeps its 20 (#15017)", () => {
+    expect(
+      iosReusePolicy(
+        parseSessionBrokerHostConfig(config({ reuse: { ios: { mode: "keep-booted" } } })),
+      ),
+    ).toEqual({ mode: "keep-booted", maxUses: 10, fallback: "erase" });
+    expect(
+      iosReusePolicy(parseSessionBrokerHostConfig(config({ reuse: { ios: { mode: "erase" } } }))),
+    ).toEqual({ mode: "erase", maxUses: 20, fallback: "erase" });
+  });
+
   test("iOS reuse rejects conflicting aliases, invalid bounds, unsupported fallback and Android keys", () => {
     for (const ios of [{ mode: "keep-booted" }, { mode: "off" }]) {
       expect(() =>

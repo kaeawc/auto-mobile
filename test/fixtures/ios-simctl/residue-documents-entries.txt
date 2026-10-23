@@ -1,0 +1,6 @@
+AMDSQLite.db.0
+AMDSQLite.db.0-shm
+AMDSQLite.db.0-wal
+com.apple.businessservicesd
+com.apple.springboard.appLibrary
+snapshot-gallery.jpeg

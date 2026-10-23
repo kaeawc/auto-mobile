@@ -201,27 +201,6 @@ describe("AppLifecycle", () => {
       });
       expect(h.adb.getExecutedCommands()).toEqual([]);
     });
-    for (const deviceId of ["AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE", "00008110-001A2B3C4D5E6F70"]) {
-      test(`iOS ${deviceId} ${action} is unsupported without commands`, async () => {
-        const h = harness();
-        const ios = new AppLifecycle(
-          { ...device, platform: "ios", deviceId },
-          {
-            adb: h.adb,
-            timer: h.timer,
-            home: h.home,
-            cacheInvalidator: { retireAppProcess: () => {}, invalidate: () => {} },
-          },
-        );
-        expect(await ios.execute(appId, action)).toMatchObject({
-          success: false,
-          supported: false,
-          mechanism: "unsupported",
-        });
-        expect(h.adb.getExecutedCommands()).toEqual([]);
-        expect(h.home.calls).toBe(0);
-      });
-    }
   }
   test("work profile is derived from a capture, not itself captured", async () => {
     const h = harness();

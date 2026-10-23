@@ -548,7 +548,7 @@
   },
   {
     "name": "appLifecycle",
-    "description": "State-preserving background-process kill for saved-state restoration tests (background, killBackgrounded); trimMemory sends onTrimMemory(level) to the running app without killing it.",
+    "description": "State-preserving background-process kill for saved-state restoration tests (background, killBackgrounded; iOS kills with SIGKILL after Home); trimMemory (Android only) sends onTrimMemory(level) to the running app without killing it.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -621,7 +621,7 @@
         },
         "mechanism": {
           "type": "string",
-          "enum": ["home", "am-kill", "am-send-trim-memory", "unsupported"]
+          "enum": ["home", "am-kill", "am-send-trim-memory", "ios-sigkill", "unsupported"]
         },
         "trimLevel": {
           "type": "string",

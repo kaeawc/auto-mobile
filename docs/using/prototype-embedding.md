@@ -52,18 +52,23 @@ The JSON result holds:
 
 ## Where the files go
 
-**Android:** `spec.json` and the assets go under `app/src/main/assets/prototypes/<id>/`, and the
-host file under `app/src/main/java/prototypes/`. Call the generated composable, for example
+Copy each `files[].path` and `assets[].path` exactly as the resource returns it. The host file reads
+from that directory, which is the id only when the id is already file-safe (see below).
+
+**Android:** `spec.json` and the assets go under `app/src/main/assets/prototypes/<directory>/`, and
+the host file under `app/src/main/java/prototypes/`. Call the generated composable, for example
 `CheckoutPrototype(onDismiss = { ... })`, from any screen.
 
-**iOS:** `spec.json` and the assets go under `Prototypes/<id>/`. Add the `Prototypes` folder to the
+**iOS:** `spec.json` and the assets go under `Prototypes/<directory>/`. Add the `Prototypes` folder to the
 app target as a folder reference (blue folder) so the files keep their subdirectory in the bundle. Add
 the host `.swift` file to the target outside that folder, since Xcode compiles nothing inside a folder
 reference. Use the generated view, for example `CheckoutPrototype()`, in any SwiftUI hierarchy.
 
-An id that is not plain letters and digits gets a short hash in its type and file names, so
-`checkout-flow` becomes `CheckoutFlowPrototype` plus an 8-character suffix. That keeps two ids that
-differ only in punctuation from overwriting each other's files. The host file's path names the
+An id that is not plain letters and digits gets a short hash in its type name, and one with
+characters outside letters, digits, `-` and `_`, or more than 64 characters, gets it in its
+directory and file names too. So `checkout-flow` becomes `CheckoutFlowPrototype` plus an
+8-character suffix. That keeps two ids that differ only in punctuation from overwriting each other's
+files. The host file's path names the
 type; pick a plain id such as `checkoutFlow` for a hash-free name.
 
 A missing asset falls back to the renderer's placeholder, and a missing spec shows the renderer's
@@ -90,8 +95,9 @@ data keys survive app restarts. Specs without a `storage` block use no storage.
 ## Capability errors
 
 An app may ship an older renderer than the spec needs. The renderer never draws such a spec partly.
-It reports an unsupported-spec error to `onError` (Android) or `onLoadError` (iOS) and shows a visible
-error state instead. Compare `requiredCapabilities` with `AutoMobilePrototype.capabilities` (Android)
+It shows a visible error state instead: on Android the `onError` slot draws it (the renderer's default
+view unless you pass your own), and on iOS the renderer shows its diagnostic and calls `onLoadError`.
+The generated host passes neither, so it shows the defaults; edit the host's call to pass them. Compare `requiredCapabilities` with `AutoMobilePrototype.capabilities` (Android)
 or `AutoMobilePrototypeCapabilities` (iOS) to check ahead of time.
 
 ## Not supported when embedded
@@ -109,4 +115,5 @@ or `AutoMobilePrototypeCapabilities` (iOS) to check ahead of time.
 `bun scripts/prototype/generateEmbeddingSamples.ts`. CI checks that they match the resource output
 and compiles both against the libraries: the Android sample in a minified consumer app
 (`scripts/android/validate-prototype-compose-consumer.sh`) and the iOS one in the library build
-(`scripts/ios/prototype-library-build.sh`).
+(`scripts/ios/prototype-library-build.sh`). The sample's request goes to `10.0.2.2`, the Android
+emulator's alias for the host machine; on an iOS simulator use `localhost` instead.

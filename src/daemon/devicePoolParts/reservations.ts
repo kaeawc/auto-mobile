@@ -15,6 +15,8 @@ import type { DevicePoolOperations } from "./operations";
 import type { DevicePoolState } from "./state";
 
 export interface ReservationsOperations {
+  clearUnpooledShutdown(deviceId: string): void;
+  settleUnpooledShutdown(deviceId: string): void;
   reserveDeviceForReadiness(
     deviceId: string,
     expectedIdentity: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
@@ -40,6 +42,7 @@ export interface ReservationsOperations {
     autolockClient?: AutolockClient,
     assertHolder?: () => void,
     foreignClaim?: ShutdownForeignClaim,
+    options?: { fenceUnpooled?: boolean },
   ): Promise<ShutdownDeviceReservation | undefined>;
   claimShutdownAgainstOtherDaemons(
     reservation: ShutdownDeviceReservation,
@@ -175,6 +178,14 @@ export class DevicePoolReservations {
     };
   }
 
+  clearUnpooledShutdown(deviceId: string): void {
+    this.state.shutdownReservationCoordinator.clearUnpooledShutdown(deviceId);
+  }
+
+  settleUnpooledShutdown(deviceId: string): void {
+    this.state.shutdownReservationCoordinator.settleUnpooledShutdown(deviceId);
+  }
+
   /**
    * @param foreignClaim set by lifecycle tools that stop a device another daemon could be driving
    *   (killDevice, deleteDevice, #11200): see {@link claimShutdownAgainstOtherDaemons}.
@@ -185,12 +196,14 @@ export class DevicePoolReservations {
     autolockClient?: AutolockClient,
     assertHolder?: () => void,
     foreignClaim?: ShutdownForeignClaim,
+    options?: { fenceUnpooled?: boolean },
   ): Promise<ShutdownDeviceReservation | undefined> {
     const reserved = await this.state.shutdownReservationCoordinator.reserveDeviceForShutdown(
       deviceId,
       abortSignal,
       autolockClient,
       assertHolder,
+      options,
     );
     const reservation = reserved && this.notifyingShutdownReservation(reserved);
     if (!reservation || !foreignClaim) {
@@ -396,6 +409,8 @@ export function connectReservations(
   >,
 ): ReservationsOperations {
   return {
+    clearUnpooledShutdown: (...args) => part().clearUnpooledShutdown(...args),
+    settleUnpooledShutdown: (...args) => part().settleUnpooledShutdown(...args),
     reserveDeviceForReadiness: (...args) => seams.reserveDeviceForReadiness(...args),
     reserveRestartRecoveryReadiness: (...args) => seams.reserveRestartRecoveryReadiness(...args),
     restartReadinessOwners: (...args) => part().restartReadinessOwners(...args),

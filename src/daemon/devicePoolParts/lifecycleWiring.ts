@@ -263,6 +263,7 @@ export class DevicePoolLifecycleWiring {
 
   createShutdownReservationsPort(): DeviceShutdownReservationsPoolPort {
     return {
+      now: () => this.state.timer.now(),
       getDevices: () => this.state.devices.backingMap(),
       withAssignmentLock: (operation) => this.state.assignmentMutex.runExclusive(operation),
       getIntentionalShutdowns: () => this.state.intentionalShutdowns,

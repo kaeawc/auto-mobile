@@ -1,6 +1,6 @@
 import { existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { posix } from "node:path";
 import { DefaultHostCommandExecutor } from "../../utils/HostCommandExecutor";
 import { DOCTOR_EXEC_TIMEOUT_MS } from "../../utils/diagnosticTimeouts";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -27,7 +27,7 @@ function defaultProbe(options: DoctorProbeOptions): SpotlightProbe {
   const executor = new DefaultHostCommandExecutor();
   return {
     exists: (dir) => existsSync(dir) && statSync(dir).isDirectory(),
-    hasMarker: (dir) => existsSync(join(dir, ".metadata_never_index")),
+    hasMarker: (dir) => existsSync(posix.join(dir, ".metadata_never_index")),
     indexingStatus: async (dir, timeoutMs) =>
       (
         await executor.executeCommand("mdutil", ["-s", dir], {
@@ -72,12 +72,12 @@ export async function checkSpotlightIndexing(
     const home = dependencies.homeDir ?? homedir();
     const probe = dependencies.probe ?? defaultProbe(options);
     const candidates = [
-      join(root, "scratch"),
-      join(root, ".claude/worktrees"),
-      join(home, ".auto-mobile"),
+      posix.join(root, "scratch"),
+      posix.join(root, ".claude/worktrees"),
+      posix.join(home, ".auto-mobile"),
       "/tmp/automobile-ctrl-proxy",
-      join(home, "Library/Developer/Xcode/DerivedData"),
-      join(home, ".gradle"),
+      posix.join(home, "Library/Developer/Xcode/DerivedData"),
+      posix.join(home, ".gradle"),
     ];
     const indexed = await findIndexedDirs(candidates, probe, options);
     if (indexed.length === 0) {

@@ -212,6 +212,12 @@ describe("data mutation identities", () => {
     ).toEqual([{ kind: "opaque", key: opaqueIntentKey("sql", "a.b", "db") }]);
   });
 
+  test("network mocks remain a covered non-fallback opaque breadcrumb", () => {
+    const rows = deviceToolMutations("mockNetwork", { host: "example.com" });
+    expect(rows).toEqual([{ kind: "opaque", key: "network-mocks" }]);
+    expect(rows.some(opaqueForcesFallback)).toBe(false);
+  });
+
   test("network mock creation and clearing share an opaque scope", () => {
     expect(deviceToolMutations("mockNetwork", { host: "example.com", path: "/" })).toEqual(
       deviceToolMutations("clearMockNetwork", { mockId: "123" }),

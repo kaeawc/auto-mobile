@@ -14,13 +14,17 @@ enumeration test (including mixed, hidden and SDK tools) rejects a new control
 tool without a justification. Neither `pending-adapter` nor `notJournaled` implies
 journaling.
 
-- 37 journaled tools: the original 26 plus data/provider adapters `setKeyValue`,
+- Journaled data/provider adapters include `setKeyValue`,
   `removeKeyValue`, `clearKeyValueFile`, `setPreference`, `sqlQuery`,
   `mockNetwork`, `clearMockNetwork`, `sendSms`, `phoneCall`, `resetAppLogs`,
   `deviceSnapshot`.
-- Pending: `manufacturerProfile`,
-  `statusBar` (appearance intent/prior adapters not wired). This limits journal
-  intent coverage, not baseline capture, tool execution or keep-booted reuse.
+- Appearance adapters journal `statusBar` overrides and Android `manufacturerProfile`
+  application. Keyboard-only personas record `keyboard:profile`; kill/display facets
+  also record a fallback opaque intent because their in-memory restore receipts
+  bypass the recorded dispatcher. Missing or unknown persona ids defensively record
+  fallback intent too; the tool schema enum normally rejects them. Intent is recorded
+  before the handler runs, so an `apply` later refused (for example
+  `route_to_real_device`) still falls back; this is an accepted cost.
 - Recording and reset use one typed `mutationIncarnation` constructor. Android
   uses `[resourceId, stableDeviceId, bootId]`; iOS retains
   `[scopeKey, allocationIndex, stableDeviceId]`. Android binds an interim null
@@ -70,20 +74,28 @@ cleaning and require a revert. Power controls also require their verified journa
 revert; baseline cleaning never covers `power:*`.
 
 SMS, phone calls, SQL writes or unclassified queries, app-log deletion,
-secondary-display rotation and `deviceSnapshot` restore record fallback opaque
-intents. Read-only SQL records nothing. iOS keep-booted also escalates to erase on the `fallback:` intents
-recorded by `sqlQuery` writes, `resetAppLogs`, `sendSms`, `phoneCall` and
+secondary-display rotation, volume presses on both platforms, Android manufacturer
+profiles with kill/display facets (or unknown ids), and `deviceSnapshot` restore record
+fallback opaque intents. Read-only SQL records nothing. iOS keep-booted also escalates to erase on the `fallback:` intents
+recorded by volume presses, `sqlQuery` writes, `resetAppLogs`, `sendSms`, `phoneCall` and
 `deviceSnapshot` restore.
 A data-kept uninstall always retains its fallback intent, including for
 a session-installed app, because the clean's package inventory cannot see removed
 packages whose data remains. Plain uninstalls of session-installed apps absent
 from the baseline remain covered; installs over baseline-held apps escalate.
-Other opaque rows remain best-effort breadcrumbs. Missing inventory coverage alone
+Non-fallback opaque rows remain diagnostic breadcrumbs only where reset coverage
+or transient effects justify them, including network mocks and iOS power/action
+presses. Missing inventory coverage alone
 does not block Android cleaning; uncovered journaled effects cannot silently
 survive a clean reset (#15105).
 
 **Recorder failure policy**: broker recorder binding/recovery failures, scope
-mismatches and journal I/O failures warn and let the action proceed, but mark the call's broker session as having an incomplete journal.
+mismatches and journal I/O failures warn and let the action proceed, but mark the
+recorder owner's broker session as having an incomplete journal. Derived-label
+sessions resolve their own recorder first, then recover the base recorder to learn
+its device. When the base recorder resolves to a different device, the call needs
+no recording and no gap. Failed base recovery still marks a gap on the base UUID,
+even for a call on another device: deliberate fail-closed over-escalation.
 Keep-booted reset must then use erase or Android baseline fallback. A matching
 recorder also attempts a fallback opaque row, independently warning if that write
 fails. The in-memory gap is keyed by session UUID and is lost on daemon restart;
@@ -94,6 +106,14 @@ reach a keep-booted reset remain until process exit. A missing recorder for a no
 Success keeps first-write-wins and record-before-act ordering; an aborted call
 signal still prevents the action. Prior-value read failures warn and record
 `unobservable` priors; reset applies its usual revert or baseline-coverage checks.
+
+**ACCEPTED-RESIDUAL**: the in-memory recording gap is not persisted. The only durable
+store is the same SQLite registry the journal uses: a marker table would fail with
+an unwritable journal and require a registry migration, advancing the schema
+boundary older daemons refuse. The best-effort `recording-failed` fallback row
+already survives restart when the journal is writable. Android loses its in-memory
+baseline on restart and already fails closed. The residual is an iOS session whose
+journal was unwritable and whose daemon restarted before reset.
 
 ## Identity and persistence
 
@@ -221,7 +241,13 @@ capture like other admission work.
   still record intent.
 - SQL uses the read-only classifier: proven reads do not journal; mutations and
   unproven statements record opaque intent (no inferred inverse). Network mocks
-  share opaque intent (no invented prior from host-owned rules). Telephony, log
+  share a non-fallback opaque breadcrumb: NetworkState owns the rules, and session
+  release clears them and pushes the cleared set to the device. Android and iOS SDK
+  rule stores use process memory only, so reset's reboot/app termination drops them.
+  Accepted residual, not a journal concern: a release-time cleared-state push that
+  fails, times out or is skipped while an SDK app keeps running leaves stale rules
+  until the next sync or app restart. This is best-effort cleanup, the same class
+  as every session-release cleanup. Telephony, log
   deletion (including rotated siblings) and snapshot restore record fallback opaque
   intent; snapshot capture/delete retain diagnostic opaque rows. None implement restorers or change cleaning; unreadable priors never block
   the action.
@@ -256,10 +282,15 @@ capture like other admission work.
   later mutations run unrecorded but its next keep-booted reset falls back. A fatal startup error closes the broker before releasing the host
   lock. A rebound session discards its old recorder and resolves the new native
   assignment before the next mutation.
-- Derived label routing sessions do not record into the base recorder (they may
-  target another device and have no resource/incarnation receipt); they have no
-  journal-led reverts, and native lifecycle cleanup is unchanged. The registry
-  recognizes them before recovery to avoid a receipt lookup per routed call.
+- Derived-label sessions resolve their own recorder first (live session, then broker
+  recovery). Without one, they resolve the base recorder the same way and use it
+  only on the base's device; journal writes and gaps belong to that base UUID.
+  When the base recorder resolves to a different device, the call needs no recording
+  and no gap. Resolution must recover the base to learn its device, so failed base
+  recovery still marks a gap on the base UUID even if the derived call lands on
+  another device; this is deliberate fail-closed over-escalation.
+- `recoverSessionMutationRecorder` returning undefined for an active request with no
+  live session is safe: the next call from the rehydrated session recovers again.
 
 **Schema compatibility**: the `unobservable` tag is a compatibility boundary within
 the current registry schema version: older daemons that accept the migration but not

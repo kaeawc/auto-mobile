@@ -1,3 +1,7 @@
+import {
+  opaqueIntentKey,
+  opaqueForcesFallback,
+} from "../../src/daemon/sessionBroker/mutations/types";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
 import type { DeviceLockState } from "../../src/models";
@@ -17,7 +21,7 @@ import { logger } from "../../src/utils/logger";
 const ANDROID: BootedDevice = { deviceId: "phone", platform: "android", name: "Phone" };
 const IOS: BootedDevice = { deviceId: "sim", platform: "ios", name: "Sim" };
 const SCREEN_STATE = { kind: "device-setting", key: "screen-state" };
-const VOLUME = { kind: "opaque", key: "tool:pressButton:volume" };
+const VOLUME = { kind: "opaque", key: opaqueIntentKey("pressButton", "volume") };
 
 /** Every tool the Interaction family owns whose calls never change persistent device state. */
 const PURE_INPUT_TOOLS = [
@@ -232,10 +236,20 @@ describe("Interaction rows are recorded before the tool acts", () => {
       },
       {
         kind: "opaque",
-        key: "tool:pressButton:volume",
+        key: opaqueIntentKey("pressButton", "volume"),
         priorValue: { state: "unobservable" },
         toolName: "pressButton",
       },
     ]);
   });
+});
+
+test("volume intents force fallback on both platforms", () => {
+  for (const platform of ["android", "ios"] as const) {
+    for (const button of ["volume_up", "volume_down"]) {
+      expect(
+        deviceToolMutations("pressButton", { button }, platform).every(opaqueForcesFallback),
+      ).toBe(true);
+    }
+  }
 });

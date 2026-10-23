@@ -110,12 +110,19 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationTool
   ),
   ...tools(
     ["manufacturerProfile"],
-    "apply records the keyboard profile row plus a breadcrumb for the kill and display facets, whose session-owned restore receipts bypass the recorded dispatcher; list, describe, reset, iOS and refused calls change nothing.",
+    "apply records the keyboard profile row plus a fallback intent for kill/display facets or an unknown persona; their in-memory restore receipts bypass the recorded dispatcher and cannot prove a clean reset; list, describe, reset and iOS calls change nothing.",
     "journaled",
+    { fallback: true },
   ),
   ...tools(
-    ["pressButton", "sendKeys"],
-    "Only some calls persist: power/lock journal the screen state with a readable prior, volume presses leave a breadcrumb, a typed keyboardProfile journals the keyboard profile row. Every other button or text call is transient input.",
+    ["pressButton"],
+    "Power/lock journal the screen state with a readable prior; volume presses record a fallback intent because live audio levels have no revert on either platform. iOS power/action retain diagnostic breadcrumbs; other buttons are transient input.",
+    "journaled",
+    { fallback: true },
+  ),
+  ...tools(
+    ["sendKeys"],
+    "A typed keyboardProfile journals the keyboard profile row. Other text calls are transient input.",
     "journaled",
   ),
   ...tools(

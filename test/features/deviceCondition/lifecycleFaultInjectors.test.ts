@@ -27,8 +27,6 @@ interface SettingsAdb {
   /** Change the stored value behind the injector's back (the user or another tool flipped it). */
   setValue(value: string): void;
   commands(): string[];
-  /** Make reads report this value instead of the stored one (something else flipped the setting). */
-  readAs(value: string | undefined): void;
   /** Reject the next `settings put`. */
   failNextPut(): void;
   /** Swallow the next `settings put` without changing the value, the way a flaky settings provider can. */
@@ -44,13 +42,18 @@ interface SettingsAdb {
  */
 function settingsAdb(
   initial: string,
-  options: { persists?: boolean; failNext?: string } = {},
+  options: {
+    persists?: boolean;
+    failNext?: string;
+    liveIgnoresSetting?: boolean;
+    /** The live flag is on regardless of the stored setting (booted with it on). */
+    forceLive?: boolean;
+  } = {},
 ): SettingsAdb {
   const adb = new FakeAdbExecutor();
   const log: string[] = [];
   let current = initial;
   let failNext = options.failNext;
-  let readOverride: string | undefined;
   let failPut = false;
   let ignorePut = false;
   const scheduled: { match: string; skip: number }[] = [];
@@ -71,8 +74,14 @@ function settingsAdb(
       failNext = undefined;
       return Promise.reject(new Error("adb offline"));
     }
+    if (command.startsWith("shell dumpsys activity processes")) {
+      // The activity manager prints this line only while its live flag is on.
+      const live =
+        options.forceLive === true || (options.liveIgnoresSetting !== true && current === "1");
+      return Promise.resolve(execResult(live ? "  mAlwaysFinishActivities=true" : ""));
+    }
     if (command === `shell settings get global ${SETTING}`) {
-      return Promise.resolve(execResult(readOverride ?? current));
+      return Promise.resolve(execResult(current));
     }
     if (command.startsWith(`shell settings put global ${SETTING} `)) {
       if (failPut) {
@@ -96,9 +105,6 @@ function settingsAdb(
       current = value;
     },
     commands: () => [...log],
-    readAs: (value) => {
-      readOverride = value;
-    },
     failNextPut: () => {
       failPut = true;
     },
@@ -154,12 +160,12 @@ describe("dontKeepActivities fault (#14068)", () => {
     const device = settingsAdb("0");
     const injector = createDontKeepActivitiesFaultInjector(device.adb);
     const first = await injector.apply("on");
-    device.readAs("0");
+    device.setValue("0");
 
     const second = await injector.apply("on");
     expect(second.status).toBe("unchanged");
+    expect(device.value()).toBe("1");
     expect(writes(device.commands()).filter((c) => c.endsWith(" 1"))).toHaveLength(2);
-    device.readAs(undefined);
     await first.reset?.();
     expect(device.value()).toBe("0");
   });
@@ -178,6 +184,34 @@ describe("dontKeepActivities fault (#14068)", () => {
     const injector = createDontKeepActivitiesFaultInjector(device.adb);
     await expect(injector.apply("on")).rejects.toThrow();
     expect(writes(device.commands())).toEqual([]);
+    expect(device.value()).toBe("0");
+  });
+
+  test("an image whose activity manager only reads the setting at boot is refused and rolled back", async () => {
+    const device = settingsAdb("0", { liveIgnoresSetting: true });
+    const injector = createDontKeepActivitiesFaultInjector(device.adb);
+    await expect(injector.apply("on")).rejects.toThrow(/only reads it at boot/);
+    expect(device.value()).toBe("0");
+    expect(await injector.isClean()).toBe(true);
+  });
+
+  test("reads not clean while the running activity manager still has the behaviour on", async () => {
+    // The setting reads off, but the live flag was left on: the device is still dirty.
+    const device = settingsAdb("0", { forceLive: true });
+    expect(await createDontKeepActivitiesFaultInjector(device.adb).isClean()).toBe(false);
+  });
+
+  test("a repeat apply whose reassertion is silently ignored fails instead of reporting unchanged", async () => {
+    const device = settingsAdb("0");
+    const injector = createDontKeepActivitiesFaultInjector(device.adb);
+    const first = await injector.apply("on");
+    device.setValue("0");
+    device.ignoreNextPut();
+
+    await expect(injector.apply("on")).rejects.toThrow(/did not take effect/);
+    // The fault stays owed, so the original reset still restores the baseline.
+    device.setValue("1");
+    await first.reset?.();
     expect(device.value()).toBe("0");
   });
 

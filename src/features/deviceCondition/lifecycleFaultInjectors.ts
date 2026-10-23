@@ -35,6 +35,14 @@ const ALWAYS_FINISH_ACTIVITIES = "always_finish_activities";
 const unsetValue = "null";
 
 /**
+ * `dumpsys activity processes` prints this line only while the running ActivityManager has the
+ * behaviour on. AOSP reads `always_finish_activities` at boot and from its `setAlwaysFinish`
+ * binder call, so writing the setting alone may leave the live state off; this is the read-back
+ * that tells the two apart.
+ */
+const LIVE_STATE_MARKER = "mAlwaysFinishActivities=true";
+
+/**
  * `settings global always_finish_activities 1`: the system destroys each activity
  * as soon as the user leaves it, so apps that lose state on a background kill show
  * it immediately. It applies to activities left after the change, not ones already
@@ -47,6 +55,34 @@ export function createDontKeepActivitiesFaultInjector(adb: AdbExecutor): DeviceC
     unsetValue;
   const write = (value: string, signal?: AbortSignal): Promise<string> =>
     shell(adb, ["settings", "put", "global", ALWAYS_FINISH_ACTIVITIES, value], signal);
+  // The grep runs on the device (adb joins the argv for its shell); `; true` keeps no-match from failing.
+  const liveOn = async (signal?: AbortSignal): Promise<boolean> =>
+    (
+      await shell(
+        adb,
+        [
+          "dumpsys",
+          "activity",
+          "processes",
+          "|",
+          "grep",
+          `${LIVE_STATE_MARKER.split("=")[0]};`,
+          "true",
+        ],
+        signal,
+      )
+    ).includes(LIVE_STATE_MARKER);
+  /** The setting reads on AND the running activity manager follows it; throws unsupported otherwise. */
+  const verifyOn = async (signal?: AbortSignal): Promise<void> => {
+    if ((await read(signal)) !== "1") {
+      unsupported(`\`settings put global ${ALWAYS_FINISH_ACTIVITIES} 1\` did not take effect`);
+    }
+    if (!(await liveOn(signal))) {
+      unsupported(
+        `the running activity manager ignored ${ALWAYS_FINISH_ACTIVITIES} (it only reads it at boot), so Don't keep activities cannot be switched on without a reboot`,
+      );
+    }
+  };
   /** The value to restore while the fault is applied; undefined when this injector owns nothing. */
   let baseline: string | undefined;
 
@@ -95,10 +131,12 @@ export function createDontKeepActivitiesFaultInjector(adb: AdbExecutor): DeviceC
       }
       const current = await read(signal);
       if (baseline !== undefined) {
-        // Already ours: re-assert in case something flipped it, and keep the one reset.
+        // Already ours: re-assert in case something flipped it, and keep the one reset. A
+        // reassertion that does not hold is an error, not "unchanged"; the reset stays owed.
         if (current !== "1") {
           await write("1", signal);
         }
+        await verifyOn(signal);
         return { status: "unchanged", detail: "Don't keep activities already on" };
       }
       if (current === "1") {
@@ -108,9 +146,7 @@ export function createDontKeepActivitiesFaultInjector(adb: AdbExecutor): DeviceC
       baseline = current;
       try {
         await write("1", signal);
-        if ((await read(signal)) !== "1") {
-          unsupported(`\`settings put global ${ALWAYS_FINISH_ACTIVITIES} 1\` did not take effect`);
-        }
+        await verifyOn(signal);
       } catch (error) {
         return rollBack(error);
       }
@@ -121,7 +157,7 @@ export function createDontKeepActivitiesFaultInjector(adb: AdbExecutor): DeviceC
       };
     },
     async isClean(signal): Promise<boolean> {
-      return (await read(signal)) !== "1";
+      return (await read(signal)) !== "1" && !(await liveOn(signal));
     },
   };
 }

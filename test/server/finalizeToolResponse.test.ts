@@ -5293,6 +5293,35 @@ describe("actions-compact-metadata", () => {
   function observation(response: ReturnType<typeof emit>): Record<string, unknown> {
     return structuredPayload(response).observation as Record<string, unknown>;
   }
+  for (const initialKnown of [true, false]) {
+    test(`lock metadata transitions replay correctly starting ${initialKnown ? "known" : "unknown"}`, () => {
+      const client: Record<string, unknown> = {};
+      for (const known of [initialKnown, !initialKnown, initialKnown]) {
+        const lock = known
+          ? { deviceLock: { locked: true, keyguardShowing: true } }
+          : { deviceLockUnknown: { reason: "pending" } };
+        const payload = action();
+        payload.observation = { ...makeObserveResult(), deviceId: "phone-a", ...lock };
+        const delivered = observation(emit(payload));
+        // Each delivered lock variant replaces the mutually exclusive sibling.
+        if (delivered.deviceLock !== undefined) {
+          delete client.deviceLockUnknown;
+        }
+        if (delivered.deviceLockUnknown !== undefined) {
+          delete client.deviceLock;
+        }
+        for (const key of ["deviceLock", "deviceLockUnknown"]) {
+          if (delivered[key] !== undefined) {
+            client[key] = delivered[key];
+          }
+        }
+        expect(client).toEqual(lock);
+      }
+      const stored = records.get("s1")?.blocks;
+      expect(stored?.deviceLock).toEqual(client.deviceLock);
+      expect(stored?.deviceLockUnknown).toEqual(client.deviceLockUnknown);
+    });
+  }
   function expectFull(response: ReturnType<typeof emit>) {
     for (const key of Object.keys(metadata)) {
       expect(observation(response)).toHaveProperty(key);

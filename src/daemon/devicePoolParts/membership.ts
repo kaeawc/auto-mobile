@@ -1,3 +1,4 @@
+import { getIosLockStateCache } from "../../features/observe/ios/IosLockStateCacheRegistry";
 import { clearDeviceError, isErrored, holderOf } from "../deviceBinding";
 import { notifyDeviceIdentityReplaced } from "../../utils/deviceIncarnation";
 import { logger } from "../../utils/logger";
@@ -538,6 +539,7 @@ export class DevicePoolMembership {
     this.state.sessionManager.retireRestorations(deviceId, "removal");
     displayTransitions.reset(deviceId);
     getObserveCacheStore().clear(deviceId);
+    getIosLockStateCache().invalidate(deviceId);
     this.state.refreshCoordinator.recordDeviceRemoval(deviceId);
     this.state.settledLateShutdowns.delete(deviceId);
     this.state.deferredDeviceReleases.delete(deviceId);

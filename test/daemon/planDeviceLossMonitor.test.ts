@@ -422,6 +422,7 @@ describe("confirmed plan device loss", () => {
         {
           bypassAndroidDeviceListCache: false,
           skipAndroidProfileEnrichment: true,
+          iosDeviceListMaxAgeMs: 15_000,
           skipPhysicalIosDiscovery: true,
         },
         {

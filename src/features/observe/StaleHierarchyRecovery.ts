@@ -84,6 +84,7 @@ export class StaleHierarchyRecovery {
       // Earlier back-stack/lock samples describe the discarded window.
       delete result.backStack;
       delete result.deviceLock;
+      delete result.deviceLockUnknown;
       await this.resampleAfterStaleWindowRecovery(result, {
         ...sideSamples,
         signal: options?.signal,
@@ -115,6 +116,7 @@ export class StaleHierarchyRecovery {
     const sampled: ObserveResult = {
       ...result,
       deviceLock: undefined,
+      deviceLockUnknown: undefined,
       backStack: undefined,
       errors: undefined,
     };
@@ -148,6 +150,9 @@ export class StaleHierarchyRecovery {
         error,
       );
       return;
+    }
+    if (sampled.deviceLockUnknown) {
+      result.deviceLockUnknown = sampled.deviceLockUnknown;
     }
     if (sampled.deviceLock) {
       result.deviceLock = sampled.deviceLock;
@@ -205,6 +210,7 @@ export class StaleHierarchyRecovery {
       this.reconciler.recorrelateActiveWindowToRecapture(result, hierarchy);
       delete result.backStack;
       delete result.deviceLock;
+      delete result.deviceLockUnknown;
       await this.resampleAfterStaleWindowRecovery(result, {
         ...options.sideSamples,
         signal: options.signal,

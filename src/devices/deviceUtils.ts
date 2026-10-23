@@ -697,7 +697,10 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     | { simulators: BootedDevice[]; transitional: TransitionalSimulator[] | undefined }
     | { error: unknown }
   > {
-    const listingOptions = { bypassCache: options.bypassIosDeviceListCache };
+    const listingOptions = {
+      bypassCache: options.bypassIosDeviceListCache,
+      maxCacheAgeMs: options.iosDeviceListMaxAgeMs,
+    };
     const listing = this.simctl.getSimulatorListingChecked
       ? this.simctl.getSimulatorListingChecked(undefined, signal, listingOptions)
       : this.simctl

@@ -300,6 +300,7 @@ export const DIFF_SCALAR_FIELDS: readonly string[] = [
   "intentChooserDetected",
   "notificationPermissionDetected",
   "deviceLock",
+  "deviceLockUnknown",
   "awaitTimeout",
   "awaitDuration",
   "timeoutReason",

@@ -1,3 +1,4 @@
+import { opaqueIntentKey } from "../../src/daemon/sessionBroker/mutations/types";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
 import type { MutationValue } from "../../src/daemon/sessionBroker/mutations/types";
@@ -878,7 +879,7 @@ describe("review regression coverage", () => {
 
   test("secondary-display rotation cannot claim a device-global restore prior", () => {
     expect(deviceToolMutations("rotate", { display: 2 })).toEqual([
-      { kind: "opaque", key: "display:2" },
+      { kind: "opaque", key: opaqueIntentKey("rotate", "display", 2) },
     ]);
     expect(deviceToolMutations("rotate", { display: 0 })).toEqual([
       { kind: "rotation", key: "device" },

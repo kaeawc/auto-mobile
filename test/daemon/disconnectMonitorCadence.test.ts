@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   DisconnectMonitorSchedule,
+  isHeldDisconnectDevice,
   eligibleIdleSweepSignature,
   idleSweepInterval,
   idleSweepSignature,
@@ -9,6 +10,17 @@ import {
 } from "../../src/daemon/disconnectMonitorCadence";
 
 describe("disconnect monitor cadence decisions", () => {
+  test("held pool predicate includes busy, claimed, errored and startup-leased devices", () => {
+    const idle = { status: "idle", sessionId: null } as const;
+    expect(isHeldDisconnectDevice(idle, false)).toBe(false);
+    expect(isHeldDisconnectDevice({ ...idle, status: "busy" }, false)).toBe(true);
+    expect(isHeldDisconnectDevice({ ...idle, sessionId: "holder" }, false)).toBe(true);
+    expect(isHeldDisconnectDevice({ ...idle, health: "error" }, false)).toBe(true);
+    expect(isHeldDisconnectDevice(idle, true)).toBe(true);
+    expect(isHeldDisconnectDevice(null, true)).toBe(true);
+    expect(isHeldDisconnectDevice(null, false)).toBe(false);
+  });
+
   test("idle intervals double from baseline and cap at two minutes", () => {
     expect([0, 1, 2, 3, 100].map((n) => idleSweepInterval(30_000, n))).toEqual([
       30_000, 60_000, 120_000, 120_000, 120_000,

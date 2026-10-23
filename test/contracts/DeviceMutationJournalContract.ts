@@ -67,6 +67,25 @@ export function runDeviceMutationJournalContract(
         expect(await journal.getBaseline(SCOPE)).toBeNull();
       }));
 
+    test("strays include only other incarnations for the exact session and device in sequence order", () =>
+      withJournal(async (journal) => {
+        expect(await journal.listStrayIncarnations(SCOPE)).toEqual([]);
+        for (const [index, scope] of [
+          { ...SCOPE, incarnation: "legacy" },
+          SCOPE,
+          { ...SCOPE, sessionUuid: "other", incarnation: "legacy" },
+          { ...SCOPE, deviceId: "other", incarnation: "legacy" },
+          { ...SCOPE, incarnation: "replacement" },
+        ].entries()) {
+          await journal.record(scope, { ...LOCALE, key: `key-${index}` });
+        }
+        const entries = await journal.listStrayIncarnations(SCOPE);
+        expect(entries.map((entry) => entry.key)).toEqual(["key-0", "key-4"]);
+        expect(entries[0].sequence).toBeLessThan(entries[1].sequence);
+        entries[0].key = "mutated-result";
+        expect((await journal.listStrayIncarnations(SCOPE))[0].key).toBe("key-0");
+      }));
+
     test("a recorded mutation lists exactly its journal fields, stamped with the clock", () =>
       withJournal(async (journal, timer) => {
         timer.setCurrentTime(42_000);

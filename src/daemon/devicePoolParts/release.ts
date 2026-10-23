@@ -1,3 +1,4 @@
+import { getIosLockStateCache } from "../../features/observe/ios/IosLockStateCacheRegistry";
 import { restoreBinding, snapshotBinding, unbindDevice, holderOf, isBusy } from "../deviceBinding";
 import type { SessionReleaseReason } from "../releaseReasons";
 import { currentAllocationCancellationScope } from "../allocationCancellationScope";
@@ -336,6 +337,7 @@ export class DevicePoolRelease {
     unbindDevice(device);
     displayTransitions.reset(deviceId);
     getObserveCacheStore().clear(deviceId);
+    getIosLockStateCache().invalidate(deviceId);
     device.errorCount = 0;
     // Idempotent and keyed on the released session id: every path that ends ownership
     // (including a late chained cleanup) clears a stale autolock here, and a newer

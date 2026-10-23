@@ -67,6 +67,8 @@ const MAX_STOPPED_RESULTS = 32;
 export class PerformanceTraceManager {
   private readonly active = new Map<string, ActiveTrace>();
   private readonly stopped = new Map<string, KnownPerformanceTrace>();
+  /** Stopped traces whose summary is still being generated; readable, no longer recording. */
+  private readonly summarizing = new Map<string, KnownPerformanceTrace>();
 
   constructor(private readonly deps: PerformanceTraceManagerDependencies) {}
 
@@ -131,7 +133,7 @@ export class PerformanceTraceManager {
         ownerSessionUuid: active.options.ownerSessionUuid,
       };
     }
-    return this.stopped.get(traceId);
+    return this.summarizing.get(traceId) ?? this.stopped.get(traceId);
   }
 
   activeTraceIds(): string[] {
@@ -161,7 +163,20 @@ export class PerformanceTraceManager {
       // A failed stop still frees the device: the recorder was signalled and is not retried.
       this.active.delete(trace.traceId);
     }
-    const { summary, warnings } = await trace.recording.summarize(signal);
+    this.summarizing.set(trace.traceId, {
+      result: this.describe(trace, "stopped", [
+        ...trace.recording.warnings,
+        "The summary is still being generated.",
+      ]),
+      ownerSessionUuid: trace.options.ownerSessionUuid,
+    });
+    let summarized: Awaited<ReturnType<RecordingPerformanceTrace["summarize"]>>;
+    try {
+      summarized = await trace.recording.summarize(signal);
+    } finally {
+      this.summarizing.delete(trace.traceId);
+    }
+    const { summary, warnings } = summarized;
     const result = this.describe(
       trace,
       "stopped",

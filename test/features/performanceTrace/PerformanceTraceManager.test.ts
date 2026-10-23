@@ -16,6 +16,7 @@ class FakeRecorder implements PerformanceTraceRecorder {
   readonly started: StartPerformanceTraceRequest[] = [];
   readonly stops: string[] = [];
   stopError?: Error;
+  summaryGate?: Promise<void>;
 
   async start(request: StartPerformanceTraceRequest): Promise<RecordingPerformanceTrace> {
     this.started.push(request);
@@ -28,7 +29,10 @@ class FakeRecorder implements PerformanceTraceRecorder {
           throw this.stopError;
         }
       },
-      summarize: async () => ({ summary: { durationMs: 1_500 }, warnings: ["summary warning"] }),
+      summarize: async () => {
+        await this.summaryGate;
+        return { summary: { durationMs: 1_500 }, warnings: ["summary warning"] };
+      },
     };
   }
 }
@@ -125,5 +129,29 @@ describe("PerformanceTraceManager (#14102)", () => {
     await expect(manager().manager.stop("trace-missing")).rejects.toThrow(
       "No performance trace with id trace-missing",
     );
+  });
+
+  test("lookup keeps a stopped trace readable while its summary is generated", async () => {
+    const { manager: traces, recorder } = manager();
+    let release!: () => void;
+    recorder.summaryGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const started = await traces.start(pixel, { ...hitches, ownerSessionUuid: "s1" });
+    expect(traces.lookup(started.traceId)?.result.state).toBe("recording");
+
+    const stopping = traces.stop(started.traceId);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const during = traces.lookup(started.traceId);
+    expect(during?.ownerSessionUuid).toBe("s1");
+    expect(during?.result.state).toBe("stopped");
+    expect(during?.result.summary).toBeUndefined();
+    expect(during?.result.warnings).toContain("The summary is still being generated.");
+
+    release();
+    await stopping;
+    expect(traces.lookup(started.traceId)?.result.summary).toEqual({ durationMs: 1_500 });
   });
 });

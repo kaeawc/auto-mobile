@@ -33,6 +33,11 @@ export class FakeProfilingDevice implements ProfilingAdbPort {
     "am dumpheap": null,
     "cmd activity dumpheap": null,
   };
+  /**
+   * `dumpheap` entry points whose output arrives as a rejected call, as a real `AdbClient` does
+   * for a nonzero remote exit: `wrapCommandError`'s new Error keeps the streams on `cause`.
+   */
+  readonly rejectingDumpheap = new Set<keyof FakeProfilingDevice["dumpheapOutput"]>();
   /** Commands (substring) that fail with this message. */
   readonly failing = new Map<string, string>();
 
@@ -124,6 +129,10 @@ export class FakeProfilingDevice implements ProfilingAdbPort {
     remotePath: string,
   ): ExecResult {
     const output = this.dumpheapOutput[entry];
+    if (output !== null && this.rejectingDumpheap.has(entry)) {
+      const raw = Object.assign(new Error("Command failed"), { stdout: "", stderr: output });
+      throw new Error(`adb shell ${entry} failed`, { cause: raw });
+    }
     if (output === null) {
       this.deviceFiles.set(remotePath, this.heapBytes);
       return this.out(`File: ${remotePath}\nWaiting for dump to finish...\n`);

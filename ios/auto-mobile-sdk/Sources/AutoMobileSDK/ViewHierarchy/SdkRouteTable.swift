@@ -67,6 +67,9 @@
             Entry(route: .dbTableStructure, handler: .bodyThenStorage { server in
                 { server.databaseRouteHandler.handleTableStructure(body: $0) }
             }),
+            Entry(route: .keychainDelete, handler: .bodyThenStorage { server in
+                { server.keychainDeletionRouteHandler.handle(body: $0) }
+            }),
             Entry(route: .preferences, handler: .bodyThenStorage { server in
                 { server.preferenceRouteHandler.handle(body: $0) }
             }),

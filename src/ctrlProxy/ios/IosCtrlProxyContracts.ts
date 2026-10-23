@@ -1,3 +1,5 @@
+import type { IosRunnerLaunchGate } from "./IosRunnerLaunchGate";
+import type { RunnerLaunchProgressProbe } from "./IosRunnerLaunchProgress";
 import { type IosTunnelClient } from "./IosTunnelClient";
 import type { IosPhysicalDeviceLister } from "../../utils/ios-cmdline-tools/DevicectlDeviceLister";
 import { type IosAppBundleGuard } from "./IosAppBundleGuard";
@@ -224,6 +226,8 @@ export const NO_PHYSICAL_DEVICES: IosPhysicalDeviceLister = {
 
 export interface IosCtrlProxyManagerOptions {
   device: BootedDevice;
+  runnerLaunchGate?: IosRunnerLaunchGate;
+  runnerLaunchProgressProbe?: RunnerLaunchProgressProbe;
   timer?: Timer;
   builder?: IosCtrlProxyBuilderSurface;
   processExecutor?: HostProcessExecutor;
@@ -287,3 +291,6 @@ export const IOS_CTRL_PROXY_MAX_UNRESPONSIVE_RUNNER_RELAUNCHES = 2;
 export const IOS_CTRL_PROXY_BUNDLE_ID = "dev.jasonpearson.automobile.ctrlproxy";
 export const IOS_CTRL_PROXY_APP_BUNDLE_ID = "dev.jasonpearson.automobile.ctrlproxy";
 export const IOS_CTRL_PROXY_LEGACY_APP_BUNDLE_ID = "dev.jasonpearson.automobile.XCTestServiceApp";
+
+export const IOS_CTRL_PROXY_LAUNCH_PROGRESS_THRESHOLD_MS = 100;
+export const IOS_CTRL_PROXY_MAX_PROGRESS_LAUNCH_MS = 300_000;

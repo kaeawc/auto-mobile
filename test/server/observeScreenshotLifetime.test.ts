@@ -33,7 +33,8 @@ test("observe description and docs agree with the fixed retention contract", () 
   );
   expect(description.toLowerCase()).toContain("new captures are never refused");
   expect(docs).toContain("**at least 10 minutes after return**");
-  expect(docs).toContain(`**128 MiB and ${MAX_SCREENSHOT_PATH_PROTECTIONS} files**`);
+  expect(docs).toContain("Retention starts at **128 MiB**");
+  expect(docs).toContain(`**${MAX_SCREENSHOT_PATH_PROTECTIONS} files**`);
   expect(docs).toContain("process-start grace");
   expect(docs).toContain("screenshotExpiresAt");
 });

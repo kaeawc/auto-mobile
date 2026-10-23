@@ -1,3 +1,4 @@
+import { BootCapacityExhaustedError } from "../../../src/models/BootCapacityExhaustedError";
 import { describe, expect, test } from "bun:test";
 import { IosSimCapacityGate } from "../../../src/features/iosSimFleet/CapacityGate";
 import { InMemoryBootDurationHistory } from "../../../src/features/iosSimFleet/BootDurationHistory";
@@ -258,4 +259,42 @@ test("unused iOS replacement reservations release idempotently", async () => {
   const next = await gate.admitBoot(undefined, { bootUdid: B });
   expect(next.decision.outcome).toBe("allow");
   next.releaseAdmission?.();
+});
+
+test.each(["Booted", "Booting"])("replacement carries its %s slot above the cap", async (state) => {
+  const source = new ScriptedSource();
+  const { gate } = build(source, { AUTOMOBILE_IOS_SIM_MAX_BOOTED: "2" });
+  source.immediate = [sim(A, state), sim(B, "Booted"), sim("C", "Booted")];
+  const held = await gate.reserveBoot({ replacingDeviceId: A, timeoutMs: 1000, reason: "reset" });
+  source.immediate = [sim(A, "Shutdown"), sim(B, "Booted"), sim("C", "Booted")];
+  expect(await gate.describeCapacity()).toMatchObject({ inFlight: 1 });
+  expect((await gate.admitBoot(undefined, { bootUdid: "NEW" })).decision.outcome).toBe("refuse");
+  held.release();
+});
+
+test("Shutdown replacement still refuses and names external simulators", async () => {
+  const source = new ScriptedSource();
+  const { gate } = build(source, { AUTOMOBILE_IOS_SIM_MAX_BOOTED: "2" });
+  source.immediate = [sim(A, "Shutdown"), sim(B, "Booted"), sim("C", "Booted")];
+  const reservation = gate.reserveBoot({ replacingDeviceId: A, timeoutMs: 1000, reason: "reset" });
+  await expect(reservation).rejects.toBeInstanceOf(BootCapacityExhaustedError);
+  await expect(reservation).rejects.toMatchObject({ details: { externalDevices: [B, "C"] } });
+});
+
+test("reservation without replacement refuses at the cap", async () => {
+  const source = new ScriptedSource();
+  const { gate } = build(source, { AUTOMOBILE_IOS_SIM_MAX_BOOTED: "2" });
+  source.immediate = [sim(A, "Booted"), sim(B, "Booted")];
+  await expect(gate.reserveBoot({ timeoutMs: 1000 })).rejects.toBeInstanceOf(
+    BootCapacityExhaustedError,
+  );
+});
+
+test("a non-reset replacement still refuses when other simulators fill the cap", async () => {
+  const source = new ScriptedSource();
+  const { gate } = build(source, { AUTOMOBILE_IOS_SIM_MAX_BOOTED: "2" });
+  source.immediate = [sim(A, "Booted"), sim(B, "Booted"), sim("C", "Booted")];
+  await expect(gate.reserveBoot({ replacingDeviceId: A, timeoutMs: 1000 })).rejects.toBeInstanceOf(
+    BootCapacityExhaustedError,
+  );
 });

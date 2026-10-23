@@ -1,3 +1,4 @@
+import { z } from "zod";
 import {
   CLI_KEEPER_LIVENESS_OWNER_KIND,
   CLI_SESSION_LIVENESS_POLICY,
@@ -682,9 +683,23 @@ async function queryDaemonCapabilities(args: string[], manager: DaemonManager): 
   }
 }
 
+const daemonReleaseResultSchema = z.object({
+  message: z.string(),
+  alreadyReleased: z.boolean(),
+  device: z.string().optional(),
+  known: z.boolean().optional(),
+  cleanup: z.enum(["pending", "failed"]).optional(),
+});
+
 async function releaseDaemonSession(rawArgs: string[], manager: DaemonManager): Promise<void> {
   const { json, rest: args } = takeJsonFlag(rawArgs);
-  const printReleased = (alreadyReleased: boolean, message: string, device?: string) => {
+  const printReleased = (
+    alreadyReleased: boolean,
+    message: string,
+    device?: string,
+    known?: boolean,
+    cleanup?: "pending" | "failed",
+  ) => {
     if (json) {
       console.log(
         JSON.stringify({
@@ -693,11 +708,16 @@ async function releaseDaemonSession(rawArgs: string[], manager: DaemonManager): 
           alreadyReleased,
           message,
           ...(device !== undefined ? { device } : {}),
+          ...(known !== undefined ? { known } : {}),
+          ...(cleanup !== undefined ? { cleanup } : {}),
         }),
       );
       return;
     }
     console.log(message);
+    if (cleanup !== undefined) {
+      console.log(`Cleanup ${cleanup}: the device may not be fully restored`);
+    }
     if (!alreadyReleased && device !== undefined) {
       console.log(`Device ${device} is now available`);
     }
@@ -728,18 +748,8 @@ async function releaseDaemonSession(rawArgs: string[], manager: DaemonManager): 
       const client = manager.createClient();
       const isReleaseResult = (
         result: unknown,
-      ): result is {
-        message: string;
-        alreadyReleased: boolean;
-        device?: string;
-      } =>
-        result !== null &&
-        typeof result === "object" &&
-        "message" in result &&
-        typeof result.message === "string" &&
-        "alreadyReleased" in result &&
-        typeof result.alreadyReleased === "boolean" &&
-        (!("device" in result) || result.device === undefined || typeof result.device === "string");
+      ): result is z.infer<typeof daemonReleaseResultSchema> =>
+        daemonReleaseResultSchema.safeParse(result).success;
       try {
         await client.connect();
         await client
@@ -753,6 +763,8 @@ async function releaseDaemonSession(rawArgs: string[], manager: DaemonManager): 
               result.alreadyReleased,
               result.alreadyReleased ? result.message : `Session ${sessionId} released`,
               result.device,
+              result.known,
+              result.cleanup,
             );
           });
       } catch (error) {

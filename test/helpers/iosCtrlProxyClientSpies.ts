@@ -68,6 +68,7 @@ export interface IosClientOverrides {
   requestHierarchySyncWithoutObservationStreamPush?: IOSCtrlProxyClient["requestHierarchySyncWithoutObservationStreamPush"];
   setPreference?: IOSCtrlProxyClient["setPreference"];
   removePreference?: IOSCtrlProxyClient["removePreference"];
+  deleteKeychainItemForIos?: IOSCtrlProxyClient["deleteKeychainItemForIos"];
   clearPreferenceStore?: IOSCtrlProxyClient["clearPreferenceStore"];
 }
 
@@ -116,6 +117,11 @@ export function createIosTestClient(
   }
   if (overrides.removePreference) {
     spyOn(client, "removePreference").mockImplementation(overrides.removePreference);
+  }
+  if (overrides.deleteKeychainItemForIos) {
+    spyOn(client, "deleteKeychainItemForIos").mockImplementation(
+      overrides.deleteKeychainItemForIos,
+    );
   }
   if (overrides.clearPreferenceStore) {
     spyOn(client, "clearPreferenceStore").mockImplementation(overrides.clearPreferenceStore);

@@ -61,6 +61,7 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
     location: (mutation) => this.locationCommands(mutation),
     preference: (mutation) => this.appDataCommands(mutation),
     "shared-file": (mutation) => this.fileCommands(mutation),
+    "status-bar": (mutation) => this.statusBarCommands(mutation),
   };
 
   constructor(
@@ -427,6 +428,26 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
           },
         ]
       : null;
+  }
+
+  /** Leaves SystemUI demo mode, then puts `sysui_demo_allowed` back to its journaled value. */
+  private statusBarCommands({
+    key,
+    priorValue,
+  }: DeviceMutationInput): AndroidRevertCommand[] | null {
+    const prior = priorValue.state === "present" ? priorValue.value : undefined;
+    if (key !== "device" || (priorValue.state !== "absent" && typeof prior !== "string")) {
+      return null;
+    }
+    return [
+      { command: "shell am broadcast -a com.android.systemui.demo -e command exit" },
+      {
+        command:
+          priorValue.state === "absent"
+            ? "shell settings delete global sysui_demo_allowed"
+            : `shell settings put global sysui_demo_allowed ${shellQuote(prior as string)}`,
+      },
+    ];
   }
 
   private fileCommands({ key, priorValue }: DeviceMutationInput): AndroidRevertCommand[] | null {

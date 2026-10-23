@@ -1,15 +1,37 @@
 import type { Platform } from "../models";
 import type { ToolMutation } from "./deviceMutationAdapters";
 
+/** The status-bar override a session leaves behind: one row per device, restored on reset. */
+export const STATUS_BAR_MUTATION: ToolMutation = { kind: "status-bar", key: "device" };
+
 /**
- * Appearance tool families: the journal intents recorded before the tool acts (#14359).
- * Returns undefined for a tool this family does not own, [] for an owned call that changes
- * nothing, and the intents otherwise.
+ * Appearance tools (#14359):
+ * - `statusBar override` turns on Android SystemUI demo mode (`sysui_demo_allowed` plus the demo
+ *   broadcasts) or an iOS Simulator `status_bar` override. `clear` and `get` leave nothing behind
+ *   (the clear is the revert itself; the session-release cleanup that also clears it is in-memory
+ *   and best effort, so the journal row stays the durable record).
+ * - `manufacturerProfile apply` composes the keyboard, kill and display profile executors on
+ *   Android, each backed by a session-owned restore receipt (`PersonaRestoreRegistry`). Those
+ *   executors bypass the recorded dispatcher, so the call records the keyboard profile row that
+ *   `keyboard setProfile` records, plus a breadcrumb for the kill and display facets. `list`,
+ *   `describe`, `reset`, iOS calls and a call that cannot apply change nothing.
  */
 export function appearanceToolMutations(
-  _name: string,
-  _args: Record<string, unknown>,
-  _platform?: Platform,
+  name: string,
+  args: Record<string, unknown>,
+  platform?: Platform,
 ): ToolMutation[] | undefined {
-  return undefined;
+  switch (name) {
+    case "statusBar":
+      return args.action === "override" ? [STATUS_BAR_MUTATION] : [];
+    case "manufacturerProfile":
+      return args.action === "apply" && platform === "android"
+        ? [
+            { kind: "keyboard", key: "profile" },
+            { kind: "opaque", key: "tool:manufacturerProfile" },
+          ]
+        : [];
+    default:
+      return undefined;
+  }
 }

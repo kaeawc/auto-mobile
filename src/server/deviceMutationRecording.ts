@@ -1,9 +1,11 @@
+import { readFile } from "node:fs/promises";
 import type { BootedDevice } from "../models";
 import { ActionableError } from "../models/ActionableError";
 import type { MutationRecorder } from "../daemon/sessionBroker/mutations/recorder";
 import type { MutationValue } from "../daemon/sessionBroker/mutations/types";
 import { logger } from "../utils/logger";
 import { deviceToolMutations, type ToolMutation } from "./deviceMutationAdapters";
+import { withoutSessionCoveredFallbacks } from "./deviceMutationAppFallback";
 import {
   DefaultMutationPriorReader,
   type MutationObservationReaders,
@@ -55,6 +57,19 @@ export function createRecording(
     ),
   );
 }
+
+/** Reads the JSON spec a `prototype show` names by path, or undefined when it cannot be read. */
+export type MutationSpecReader = (path: string, signal?: AbortSignal) => Promise<unknown>;
+
+export const readJsonSpecFile: MutationSpecReader = async (path, signal) => {
+  try {
+    return JSON.parse(await readFile(path, { encoding: "utf8", signal }));
+  } catch (error) {
+    signal?.throwIfAborted();
+    logger.warn("Cannot read prototype spec; recording an unresolved-spec mutation", error);
+    return undefined;
+  }
+};
 
 export interface MutationArtifactReader {
   appId(
@@ -131,6 +146,7 @@ export class SessionDeviceMutationRecording implements DeviceMutationRecording {
     ) => MutationRecorder | undefined | Promise<MutationRecorder | undefined>,
     private readonly reader: MutationPriorReader = new DefaultMutationPriorReader(),
     private readonly artifactReader: MutationArtifactReader = createDefaultMutationArtifactReader(),
+    private readonly specReader: MutationSpecReader = readJsonSpecFile,
   ) {}
 
   async beforeToolCall(
@@ -169,6 +185,12 @@ export class SessionDeviceMutationRecording implements DeviceMutationRecording {
         );
         mutations = deviceToolMutations(name, { ...args, appId }, device.platform);
       }
+      if (name === "prototype" && args.spec === undefined && typeof args.specPath === "string") {
+        const spec = await this.specReader(args.specPath, signal);
+        if (spec !== undefined) {
+          mutations = deviceToolMutations(name, { ...args, spec }, device.platform);
+        }
+      }
       await this.recordMutations(name, device, recorder, mutations, signal);
     } catch (error) {
       signal?.throwIfAborted();
@@ -184,7 +206,14 @@ export class SessionDeviceMutationRecording implements DeviceMutationRecording {
     signal?: AbortSignal,
   ): Promise<void> {
     signal?.throwIfAborted();
-    const missing = await recorder.missingMutations(mutations);
+    const missing = await withoutSessionCoveredFallbacks(
+      await recorder.missingMutations(mutations),
+      {
+        sessionInstalled: async (appId) =>
+          (await recorder.missingMutations([{ kind: "installed-app", key: appId }])).length === 0,
+        baseline: async () => (await recorder.readBaseline?.()) ?? null,
+      },
+    );
     signal?.throwIfAborted();
     if (missing.length === 0) {
       signal?.throwIfAborted();

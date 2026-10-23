@@ -237,8 +237,12 @@ export function deviceToolMutations(
   if (family !== undefined) {
     return family;
   }
-  const mutations =
-    directToolMutations(name, args, platform) ?? stateToolMutations(name, args, platform);
+  const direct = directToolMutations(name, args, platform);
+  if (direct !== undefined) {
+    // An adapter that answered [] decided this call changes nothing.
+    return direct;
+  }
+  const mutations = stateToolMutations(name, args, platform);
   return mutations.length > 0 || DEVICE_MUTATION_TOOL_COVERAGE[name]?.status !== "journaled"
     ? mutations
     : [mutation("opaque", `tool:${name}`)];
@@ -257,12 +261,6 @@ function directToolMutations(
   platform?: Platform,
 ): ToolMutation[] | undefined {
   switch (name) {
-    case "installApp":
-      return typeof args.appId === "string"
-        ? [mutation("installed-app", args.appId)]
-        : [mutation("opaque", "tool:installApp")];
-    case "uninstallApp":
-      return [mutation("installed-app", String(args.appId))];
     case "setAppPermissions":
       return permissionMutations(args);
     case "clipboard":

@@ -95,6 +95,9 @@ function opaqueDataToolMutations(
             key: JSON.stringify(["app-logs", args.appId, args.container ?? "documents", path]),
           }))
         : [];
+    case "stageSessionDownloads":
+      // The service records its own putAppFile-shaped intents before its first device write.
+      return [];
     case "deviceSnapshot":
       return [
         {

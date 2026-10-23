@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { ToolAnnotations } from "@modelcontextprotocol/server";
 import type { BackoffInput } from "../../utils/Backoff";
 import { type IdGenerator } from "../../utils/IdGenerator";
 import { type Timer } from "../../utils/SystemTimer";
@@ -239,6 +240,8 @@ export interface DaemonMcpProxyConfig {
  */
 export interface ProxiedToolDefinition {
   name: string;
+  title?: string;
+  annotations?: ToolAnnotations;
   description?: string;
   inputSchema: Record<string, unknown>;
   outputSchema?: Record<string, unknown>;

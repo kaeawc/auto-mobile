@@ -3,6 +3,7 @@ import { InMemoryTransport, McpServer } from "@modelcontextprotocol/server";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { TOOL_ANNOTATIONS } from "../../src/server/toolAnnotations";
 
 /**
  * `ToolRegistry.registerWithServer` registers tools with the SDK for capability
@@ -94,5 +95,19 @@ describe("ToolRegistry.registerWithServer", () => {
     expect(advertised).toBeDefined();
     expect(advertised!.outputSchema).toBeUndefined();
     expect(ToolRegistry.getTool("schemaTool")?.outputSchema).toBe(outputSchema);
+  });
+
+  test("SDK registration preserves display titles and hints for reads, deletes and multiplexed tools", async () => {
+    const names = ["observe", "listDevices", "uninstallApp", "killDevice", "videoRecording"];
+    for (const name of names) {
+      ToolRegistry.register(name, name, z.object({}), async () => ({}));
+    }
+    await connect();
+
+    const { tools } = await client.listTools();
+    expect(tools).toHaveLength(names.length);
+    for (const tool of tools) {
+      expect(tool).toMatchObject(TOOL_ANNOTATIONS[tool.name]);
+    }
   });
 });

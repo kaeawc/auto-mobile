@@ -1,0 +1,1359 @@
+{
+  "hierarchy": {
+    "node": {
+      "$": {
+        "text": "Safari",
+        "class": "XCUIApplication",
+        "bounds": [0, 0, 402, 874],
+        "view-id": "s2-a2f0cea16b960497"
+      },
+      "node": {
+        "$": {
+          "resource-id": "SafariWindow?View=Narrow&BarsKeptMinimized=false&UUID=3AC6AEB8-C00F-46FF-AC82-7F461439CDBB&UsingLoweredBar=true&IsSecure=true&IsTabBarAvailable=false",
+          "class": "UIView",
+          "bounds": [0, 0, 402, 874],
+          "view-id": "SafariWindow?View=Narrow&BarsKeptMinimized=false&UUID=3AC6AEB8-C00F-46FF-AC82-7F461439CDBB&UsingLoweredBar=true&IsSecure=true&IsTabBarAvailable=false"
+        },
+        "node": [
+          {
+            "$": {
+              "class": "UIScrollView",
+              "bounds": [0, 0, 402, 874],
+              "scrollable": "true",
+              "view-id": "s2-261fdae6a499b7df"
+            },
+            "node": [
+              {
+                "$": {
+                  "resource-id": "TabDocument?IsLoadedUsingDesktopUserAgent=false&InReaderMode=false&UUID=3262B662-E0B8-4033-9569-870AFF2C5B5E&IsPrivate=false&IsPageLoaded=true&WebViewProcessID=6999",
+                  "class": "UIView",
+                  "bounds": [0, 0, 402, 874],
+                  "view-id": "TabDocument?IsLoadedUsingDesktopUserAgent=false&InReaderMode=false&UUID=3262B662-E0B8-4033-9569-870AFF2C5B5E&IsPrivate=false&IsPageLoaded=true&WebViewProcessID=6999"
+                },
+                "node": {
+                  "$": {
+                    "resource-id": "WebView",
+                    "class": "WKWebView",
+                    "bounds": [0, 0, 402, 874],
+                    "scrollable": "true",
+                    "view-id": "WebView"
+                  },
+                  "node": {
+                    "$": {
+                      "class": "WKWebView",
+                      "bounds": [0, 0, 402, 874],
+                      "scrollable": "true",
+                      "view-id": "s2-345370dec2afcfef"
+                    },
+                    "node": [
+                      {
+                        "$": {
+                          "class": "WKWebView",
+                          "bounds": [0, 0, 402, 874],
+                          "scrollable": "true",
+                          "view-id": "s2-066bb3ffdc2df61c"
+                        },
+                        "node": {
+                          "$": {
+                            "text": "example - Google Search",
+                            "class": "UIView",
+                            "bounds": [0, 62, 402, 4618],
+                            "focused": "true",
+                            "view-id": "s2-6d3f5cefbaf292bd"
+                          },
+                          "node": [
+                            {
+                              "$": {
+                                "text": "banner",
+                                "class": "UIView",
+                                "bounds": [0, 62, 402, 173],
+                                "focused": "true",
+                                "view-id": "s2-bcea693d2631b59a"
+                              },
+                              "node": [
+                                {
+                                  "$": {
+                                    "text": "Go to Google Home",
+                                    "class": "UILink",
+                                    "bounds": [155, 62, 247, 132],
+                                    "clickable": "true",
+                                    "focused": "true",
+                                    "semantic-links": [
+                                      {
+                                        "occurrence": 0,
+                                        "text": "Go to Google Home"
+                                      }
+                                    ],
+                                    "role": "link",
+                                    "view-id": "s2-8e9f30719e178641"
+                                  }
+                                },
+                                {
+                                  "$": {
+                                    "text": "Sign in",
+                                    "class": "UILink",
+                                    "bounds": [332, 82, 375, 100],
+                                    "clickable": "true",
+                                    "focused": "true",
+                                    "semantic-links": [
+                                      {
+                                        "occurrence": 0,
+                                        "text": "Sign in"
+                                      }
+                                    ],
+                                    "role": "link",
+                                    "view-id": "s2-1cd96636a68d4488"
+                                  },
+                                  "node": {
+                                    "$": {
+                                      "text": "Sign in",
+                                      "class": "UILabel",
+                                      "bounds": [332, 82, 375, 100],
+                                      "focused": "true",
+                                      "role": "text",
+                                      "view-id": "s2-85cf78da71462184"
+                                    }
+                                  }
+                                },
+                                {
+                                  "$": {
+                                    "text": "Search settings",
+                                    "class": "UIView",
+                                    "bounds": [0, 62, 60, 126],
+                                    "focused": "true",
+                                    "view-id": "s2-2e806fc8d87e958d"
+                                  },
+                                  "node": {
+                                    "$": {
+                                      "text": "Main menu",
+                                      "class": "UIView",
+                                      "bounds": [0, 62, 60, 126],
+                                      "focused": "true",
+                                      "view-id": "s2-47cf0e685b60f395"
+                                    }
+                                  }
+                                },
+                                {
+                                  "$": {
+                                    "text": "search",
+                                    "class": "UIView",
+                                    "bounds": [16, 125, 386, 173],
+                                    "focused": "true",
+                                    "view-id": "s2-136c30f7e6dfd6ba"
+                                  },
+                                  "node": [
+                                    {
+                                      "$": {
+                                        "text": "Google Search",
+                                        "class": "UIButton",
+                                        "bounds": [16, 125, 64, 169],
+                                        "clickable": "true",
+                                        "focused": "true",
+                                        "role": "button",
+                                        "view-id": "s2-6fc912e84ff57fc2"
+                                      }
+                                    },
+                                    {
+                                      "$": {
+                                        "text": "Google Search",
+                                        "value": "example",
+                                        "class": "UITextField",
+                                        "bounds": [64, 135, 284, 159],
+                                        "clickable": "true",
+                                        "focused": "true",
+                                        "role": "textfield",
+                                        "hint-text": "Ask Google",
+                                        "view-id": "s2-fcda1b44131e4b50",
+                                        "actions": ["set_text", "clear_text"]
+                                      },
+                                      "node": [
+                                        {
+                                          "$": {
+                                            "class": "UIView",
+                                            "bounds": [64, 135, 284, 159],
+                                            "focused": "true",
+                                            "view-id": "s2-c1a4006fc2f8796f-1"
+                                          },
+                                          "node": {
+                                            "$": {
+                                              "text": "example",
+                                              "class": "UILabel",
+                                              "bounds": [64, 136, 126, 158],
+                                              "focused": "true",
+                                              "role": "text",
+                                              "view-id": "s2-0f1d433ecb24e54e-1"
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "$": {
+                                            "text": "example",
+                                            "class": "UILabel",
+                                            "bounds": [64, 136, 126, 158],
+                                            "focused": "true",
+                                            "role": "text",
+                                            "view-id": "s2-0f1d433ecb24e54e-2"
+                                          }
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "$": {
+                                        "text": "Search by voice",
+                                        "class": "UIButton",
+                                        "bounds": [284, 125, 332, 169],
+                                        "clickable": "true",
+                                        "focused": "true",
+                                        "role": "button",
+                                        "view-id": "s2-f98f968b2cef46e0"
+                                      }
+                                    },
+                                    {
+                                      "$": {
+                                        "text": "Search using your camera or photos",
+                                        "class": "UIButton",
+                                        "bounds": [332, 125, 380, 169],
+                                        "clickable": "true",
+                                        "focused": "true",
+                                        "role": "button",
+                                        "view-id": "s2-a7ac423333a29fc0"
+                                      }
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "$": {
+                                "text": "navigation",
+                                "class": "UIView",
+                                "bounds": [0, 169, 402, 218],
+                                "focused": "true",
+                                "view-id": "s2-07c90d946e29f458"
+                              },
+                              "node": [
+                                {
+                                  "$": {
+                                    "class": "UIView",
+                                    "bounds": [4, 169, 910, 217],
+                                    "focused": "true",
+                                    "view-id": "s2-b9754baec7ca637c"
+                                  },
+                                  "node": [
+                                    {
+                                      "$": {
+                                        "class": "UIView",
+                                        "bounds": [4, 169, 82, 217],
+                                        "focused": "true",
+                                        "view-id": "s2-182b55e180b0999f~999805ed"
+                                      },
+                                      "node": {
+                                        "$": {
+                                          "text": "AI Mode",
+                                          "class": "UILink",
+                                          "bounds": [16, 183, 71, 203],
+                                          "clickable": "true",
+                                          "focused": "true",
+                                          "semantic-links": [
+                                            {
+                                              "occurrence": 0,
+                                              "text": "AI Mode"
+                                            }
+                                          ],
+                                          "role": "link",
+                                          "view-id": "s2-00fd99abb5721cd0"
+                                        },
+                                        "node": {
+                                          "$": {
+                                            "text": "AI Mode",
+                                            "class": "UILabel",
+                                            "bounds": [16, 183, 71, 203],
+                                            "focused": "true",
+                                            "role": "text",
+                                            "view-id": "s2-209053a6d830e2c2"
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "$": {
+                                        "class": "UIView",
+                                        "bounds": [82, 169, 123, 217],
+                                        "focused": "true",
+                                        "view-id": "s2-55528a210bc637dd"
+                                      },
+                                      "node": {
+                                        "$": {
+                                          "text": "All",
+                                          "class": "UILink",
+                                          "bounds": [94, 183, 111, 203],
+                                          "focused": "true",
+                                          "semantic-links": [
+                                            {
+                                              "occurrence": 0,
+                                              "text": "All"
+                                            }
+                                          ],
+                                          "role": "link",
+                                          "view-id": "s2-3ee13ccaed91dac9"
+                                        },
+                                        "node": {
+                                          "$": {
+                                            "text": "All",
+                                            "class": "UILink",
+                                            "bounds": [94, 183, 111, 203],
+                                            "focused": "true",
+                                            "semantic-links": [
+                                              {
+                                                "occurrence": 0,
+                                                "text": "All"
+                                              }
+                                            ],
+                                            "role": "link",
+                                            "view-id": "s2-c039dbaa09901844"
+                                          },
+                                          "node": {
+                                            "$": {
+                                              "text": "All",
+                                              "class": "UILabel",
+                                              "bounds": [94, 183, 111, 203],
+                                              "focused": "true",
+                                              "role": "text",
+                                              "view-id": "s2-8269157aa300c630"
+                                            }
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "$": {
+                                        "class": "UIView",
+                                        "bounds": [122, 169, 195, 217],
+                                        "focused": "true",
+                                        "view-id": "s2-182b55e180b0999f~603bf9af"
+                                      },
+                                      "node": {
+                                        "$": {
+                                          "text": "Images",
+                                          "class": "UILink",
+                                          "bounds": [134, 183, 183, 203],
+                                          "clickable": "true",
+                                          "focused": "true",
+                                          "semantic-links": [
+                                            {
+                                              "occurrence": 0,
+                                              "text": "Images"
+                                            }
+                                          ],
+                                          "role": "link",
+                                          "view-id": "s2-cd27eefacf670181"
+                                        },
+                                        "node": {
+                                          "$": {
+                                            "text": "Images",
+                                            "class": "UILabel",
+                                            "bounds": [134, 183, 183, 203],
+                                            "focused": "true",
+                                            "role": "text",
+                                            "view-id": "s2-ff9b8b1c16b4b266"
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "$": {
+                                        "class": "UIView",
+                                        "bounds": [194, 169, 263, 217],
+                                        "focused": "true",
+                                        "view-id": "s2-182b55e180b0999f~c315281f"
+                                      },
+                                      "node": {
+                                        "$": {
+                                          "text": "Videos",
+                                          "class": "UILink",
+                                          "bounds": [206, 183, 251, 203],
+                                          "clickable": "true",
+                                          "focused": "true",
+                                          "semantic-links": [
+                                            {
+                                              "occurrence": 0,
+                                              "text": "Videos"
+                                            }
+                                          ],
+                                          "role": "link",
+                                          "view-id": "s2-9f8be92f1477c8b7"
+                                        },
+                                        "node": {
+                                          "$": {
+                                            "text": "Videos",
+                                            "class": "UILabel",
+                                            "bounds": [206, 183, 251, 203],
+                                            "focused": "true",
+                                            "role": "text",
+                                            "view-id": "s2-f6fe004cdd49ca27"
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "$": {
+                                        "class": "UIView",
+                                        "bounds": [262, 169, 350, 217],
+                                        "focused": "true",
+                                        "view-id": "s2-182b55e180b0999f~5ece5457"
+                                      },
+                                      "node": {
+                                        "$": {
+                                          "text": "Shopping",
+                                          "class": "UILink",
+                                          "bounds": [274, 183, 338, 203],
+                                          "clickable": "true",
+                                          "focused": "true",
+                                          "semantic-links": [
+                                            {
+                                              "occurrence": 0,
+                                              "text": "Shopping"
+                                            }
+                                          ],
+                                          "role": "link",
+                                          "view-id": "s2-211515c87c2830b9"
+                                        },
+                                        "node": {
+                                          "$": {
+                                            "text": "Shopping",
+                                            "class": "UILabel",
+                                            "bounds": [274, 183, 338, 203],
+                                            "focused": "true",
+                                            "role": "text",
+                                            "view-id": "s2-d317b11dc5bc5f96"
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "$": {
+                                        "class": "UIView",
+                                        "bounds": [349, 169, 457, 217],
+                                        "focused": "true",
+                                        "view-id": "s2-182b55e180b0999f~2704ea80"
+                                      },
+                                      "node": {
+                                        "$": {
+                                          "text": "Short videos",
+                                          "class": "UILink",
+                                          "bounds": [361, 183, 445, 203],
+                                          "clickable": "true",
+                                          "focused": "true",
+                                          "semantic-links": [
+                                            {
+                                              "occurrence": 0,
+                                              "text": "Short videos"
+                                            }
+                                          ],
+                                          "role": "link",
+                                          "view-id": "s2-7b6bbb9e2db44c35"
+                                        },
+                                        "node": {
+                                          "$": {
+                                            "text": "Short videos",
+                                            "class": "UILabel",
+                                            "bounds": [361, 183, 445, 203],
+                                            "focused": "true",
+                                            "role": "text",
+                                            "view-id": "s2-98b0260c91e36e0c"
+                                          }
+                                        }
+                                      }
+                                    }
+                                  ]
+                                },
+                                {
+                                  "$": {
+                                    "class": "UIView",
+                                    "bounds": [0, 217, 402, 237],
+                                    "focused": "true",
+                                    "view-id": "s2-c99cc170201c9970-1"
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "$": {
+                                "class": "UIView",
+                                "bounds": [0, 169, 402, 179],
+                                "focused": "true",
+                                "view-id": "s2-c99cc170201c9970-2"
+                              }
+                            },
+                            {
+                              "$": {
+                                "text": "Search Results",
+                                "class": "UIView",
+                                "bounds": [0, 226, 1, 228],
+                                "focused": "true",
+                                "view-id": "s2-c37d7fc11bbb7e50"
+                              },
+                              "node": {
+                                "$": {
+                                  "text": "Search Results",
+                                  "class": "UILabel",
+                                  "bounds": [0, 227, 94, 244],
+                                  "focused": "true",
+                                  "role": "text",
+                                  "view-id": "s2-0340b7acdad085b3"
+                                }
+                              }
+                            },
+                            {
+                              "$": {
+                                "class": "UIView",
+                                "bounds": [0, 218, 402, 228],
+                                "focused": "true",
+                                "view-id": "s2-c99cc170201c9970-3"
+                              }
+                            },
+                            {
+                              "$": {
+                                "class": "UIView",
+                                "bounds": [0, 218, 402, 228],
+                                "focused": "true",
+                                "view-id": "s2-8513fa6077aea5cc"
+                              },
+                              "node": {
+                                "$": {
+                                  "class": "UIView",
+                                  "bounds": [0, 218, 402, 228],
+                                  "focused": "true",
+                                  "view-id": "s2-c99cc170201c9970-4"
+                                }
+                              }
+                            },
+                            {
+                              "$": {
+                                "class": "UIView",
+                                "bounds": [0, 218, 402, 228],
+                                "focused": "true",
+                                "view-id": "s2-c99cc170201c9970-5"
+                              }
+                            },
+                            {
+                              "$": {
+                                "class": "UIView",
+                                "bounds": [0, 218, 402, 228],
+                                "focused": "true",
+                                "view-id": "s2-c99cc170201c9970-6"
+                              }
+                            },
+                            {
+                              "$": {
+                                "class": "UIView",
+                                "bounds": [0, 218, 406, 228],
+                                "focused": "true",
+                                "view-id": "s2-c99cc170201c9970-7"
+                              }
+                            },
+                            {
+                              "$": {
+                                "text": "AI Overview",
+                                "class": "UIView",
+                                "bounds": [34, 234, 113, 256],
+                                "focused": "true",
+                                "view-id": "s2-e9bff75f90fed5eb"
+                              },
+                              "node": {
+                                "$": {
+                                  "text": "AI Overview",
+                                  "class": "UILabel",
+                                  "bounds": [34, 235, 114, 255],
+                                  "focused": "true",
+                                  "role": "text",
+                                  "view-id": "s2-d1df38632f75d4c4"
+                                }
+                              }
+                            },
+                            {
+                              "$": {
+                                "class": "UIView",
+                                "bounds": [16, 234, 386, 244],
+                                "focused": "true",
+                                "view-id": "s2-c99cc170201c9970-8"
+                              }
+                            },
+                            {
+                              "$": {
+                                "class": "UIView",
+                                "bounds": [0, 272, 406, 282],
+                                "focused": "true",
+                                "view-id": "s2-c99cc170201c9970-9"
+                              }
+                            },
+                            {
+                              "$": {
+                                "class": "UIView",
+                                "bounds": [16, 272, 386, 316],
+                                "focused": "true",
+                                "view-id": "s2-31465b924cb23e47"
+                              },
+                              "node": [
+                                {
+                                  "$": {
+                                    "class": "UIView",
+                                    "bounds": [16, 276, 52, 312],
+                                    "focused": "true",
+                                    "view-id": "s2-5f996f74e339c876~1df98888"
+                                  },
+                                  "node": {
+                                    "$": {
+                                      "text": "Listen",
+                                      "class": "UIButton",
+                                      "bounds": [16, 276, 52, 312],
+                                      "clickable": "true",
+                                      "focused": "true",
+                                      "role": "button",
+                                      "view-id": "s2-75ecb5317fcaaac3"
+                                    }
+                                  }
+                                },
+                                {
+                                  "$": {
+                                    "class": "UIView",
+                                    "bounds": [64, 272, 144, 300],
+                                    "focused": "true",
+                                    "view-id": "s2-c1a4006fc2f8796f-2"
+                                  },
+                                  "node": {
+                                    "$": {
+                                      "text": "example",
+                                      "class": "UILabel",
+                                      "bounds": [64, 273, 144, 299],
+                                      "focused": "true",
+                                      "role": "text",
+                                      "view-id": "s2-0f1d433ecb24e54e-3"
+                                    }
+                                  }
+                                },
+                                {
+                                  "$": {
+                                    "class": "UIView",
+                                    "bounds": [64, 300, 122, 316],
+                                    "focused": "true",
+                                    "view-id": "s2-c1a4006fc2f8796f~0e15db9b"
+                                  },
+                                  "node": {
+                                    "$": {
+                                      "text": "/i\u0261\u02c8zamp\u0259l/",
+                                      "class": "UILabel",
+                                      "bounds": [64, 300, 122, 316],
+                                      "focused": "true",
+                                      "role": "text",
+                                      "view-id": "s2-5d930258e69d1290"
+                                    }
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "$": {
+                                "class": "UIView",
+                                "bounds": [16, 328, 386, 400],
+                                "focused": "true",
+                                "view-id": "s2-408d4aa8cf10cebb"
+                              },
+                              "node": [
+                                {
+                                  "$": {
+                                    "text": "An example is a specific case, instance, or person used to illustrate a general rule, represent a group, or act as a model of behavior.",
+                                    "class": "UILabel",
+                                    "bounds": [16, 329, 383, 399],
+                                    "focused": "true",
+                                    "role": "text",
+                                    "view-id": "s2-42beb85f81a0f312"
+                                  }
+                                },
+                                {
+                                  "$": {
+                                    "text": "Merriam-Webster (+1) - Related results",
+                                    "class": "UIButton",
+                                    "bounds": [234, 379, 371, 400],
+                                    "clickable": "true",
+                                    "focused": "true",
+                                    "role": "button",
+                                    "view-id": "s2-82985166fc780c89"
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "$": {
+                                "text": "Key Meanings",
+                                "class": "UIView",
+                                "bounds": [16, 424, 386, 452],
+                                "focused": "true",
+                                "view-id": "s2-04deece7ee8314da"
+                              },
+                              "node": {
+                                "$": {
+                                  "text": "Key Meanings",
+                                  "class": "UILabel",
+                                  "bounds": [16, 425, 148, 451],
+                                  "focused": "true",
+                                  "role": "text",
+                                  "view-id": "s2-6154e8bbc0813211"
+                                }
+                              }
+                            },
+                            {
+                              "$": {
+                                "class": "UIView",
+                                "bounds": [16, 464, 386, 728],
+                                "focused": "true",
+                                "view-id": "s2-5426892adddf206d"
+                              },
+                              "node": [
+                                {
+                                  "$": {
+                                    "text": "Representative Item: A single specimen or case that shows the common qualities of a larger group or category (e.g., a sample from a data set).",
+                                    "class": "UIView",
+                                    "bounds": [34, 464, 386, 560],
+                                    "focused": "true",
+                                    "view-id": "s2-3b6799a901450a42"
+                                  },
+                                  "node": [
+                                    {
+                                      "$": {
+                                        "text": "\u2022",
+                                        "class": "UIView",
+                                        "bounds": [16, 465, 23, 487],
+                                        "focused": "true",
+                                        "view-id": "s2-d19c5cb54d8400da"
+                                      }
+                                    },
+                                    {
+                                      "$": {
+                                        "text": "Representative Item: A single specimen or case that shows the common qualities of a larger group or category (e.g., a sample from a data set).",
+                                        "class": "UILabel",
+                                        "bounds": [38, 465, 378, 559],
+                                        "focused": "true",
+                                        "role": "text",
+                                        "view-id": "s2-257cf2984d3cfcbd"
+                                      }
+                                    }
+                                  ]
+                                },
+                                {
+                                  "$": {
+                                    "class": "UIView",
+                                    "bounds": [16, 464, 386, 474],
+                                    "focused": "true",
+                                    "view-id": "s2-c99cc170201c9970-10"
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "$": {
+                                "class": "UIView",
+                                "bounds": [0, 272, 406, 282],
+                                "focused": "true",
+                                "view-id": "s2-c99cc170201c9970-11"
+                              }
+                            },
+                            {
+                              "$": {
+                                "class": "UIView",
+                                "bounds": [0, 218, 406, 228],
+                                "focused": "true",
+                                "view-id": "s2-c99cc170201c9970-12"
+                              }
+                            },
+                            {
+                              "$": {
+                                "class": "UIView",
+                                "bounds": [0, 218, 402, 228],
+                                "focused": "true",
+                                "view-id": "s2-c99cc170201c9970-13"
+                              }
+                            },
+                            {
+                              "$": {
+                                "class": "UIView",
+                                "bounds": [0, 218, 402, 228],
+                                "focused": "true",
+                                "view-id": "s2-c99cc170201c9970-14"
+                              }
+                            },
+                            {
+                              "$": {
+                                "text": "Show more AI Overview",
+                                "class": "UIButton",
+                                "bounds": [0, 548, 402, 598],
+                                "clickable": "true",
+                                "focused": "true",
+                                "role": "button",
+                                "view-id": "s2-3faee031b8e4340e"
+                              }
+                            },
+                            {
+                              "$": {
+                                "class": "UIView",
+                                "bounds": [0, 218, 402, 228],
+                                "focused": "true",
+                                "view-id": "s2-c99cc170201c9970-15"
+                              }
+                            },
+                            {
+                              "$": {
+                                "class": "UIView",
+                                "bounds": [0, 218, 402, 228],
+                                "focused": "true",
+                                "view-id": "s2-c99cc170201c9970-16"
+                              }
+                            },
+                            {
+                              "$": {
+                                "text": "Web results",
+                                "class": "UIView",
+                                "bounds": [0, 645, 1, 647],
+                                "focused": "true",
+                                "view-id": "s2-828aa190477dbe4d"
+                              },
+                              "node": {
+                                "$": {
+                                  "text": "Web results",
+                                  "class": "UILabel",
+                                  "bounds": [0, 646, 134, 677],
+                                  "focused": "true",
+                                  "role": "text",
+                                  "view-id": "s2-b6178e2be54a42fa"
+                                }
+                              }
+                            },
+                            {
+                              "$": {
+                                "text": "Merriam-Webster https://www.merriam-webster.com EXAMPLE Definition & Meaning",
+                                "class": "UILink",
+                                "bounds": [0, 626, 402, 721],
+                                "clickable": "true",
+                                "focused": "true",
+                                "semantic-links": [
+                                  {
+                                    "occurrence": 0,
+                                    "text": "Merriam-Webster https://www.merriam-webster.com EXAMPLE Definition & Meaning"
+                                  }
+                                ],
+                                "role": "link",
+                                "view-id": "s2-72abaf1baa173594"
+                              },
+                              "node": [
+                                {
+                                  "$": {
+                                    "class": "UILink",
+                                    "bounds": [16, 645, 56, 673],
+                                    "clickable": "true",
+                                    "focused": "true",
+                                    "role": "link",
+                                    "view-id": "s2-988b5f47145f4c21-1"
+                                  }
+                                },
+                                {
+                                  "$": {
+                                    "class": "UILink",
+                                    "bounds": [56, 643, 167, 661],
+                                    "clickable": "true",
+                                    "focused": "true",
+                                    "role": "link",
+                                    "view-id": "s2-97ed2ca461d0ae79"
+                                  },
+                                  "node": {
+                                    "$": {
+                                      "text": "Merriam-Webster",
+                                      "class": "UILabel",
+                                      "bounds": [56, 643, 167, 661],
+                                      "focused": "true",
+                                      "role": "text",
+                                      "view-id": "s2-fefb1f11cf0022a3"
+                                    }
+                                  }
+                                },
+                                {
+                                  "$": {
+                                    "text": "https://www.merriam-webster.com",
+                                    "class": "UILabel",
+                                    "bounds": [56, 660, 346, 676],
+                                    "focused": "true",
+                                    "role": "text",
+                                    "view-id": "s2-9c0bb50cbef22ca2"
+                                  }
+                                },
+                                {
+                                  "$": {
+                                    "class": "UILink",
+                                    "bounds": [16, 642, 386, 652],
+                                    "clickable": "true",
+                                    "focused": "true",
+                                    "role": "link",
+                                    "view-id": "s2-988b5f47145f4c21-2"
+                                  }
+                                },
+                                {
+                                  "$": {
+                                    "text": "EXAMPLE Definition & Meaning",
+                                    "class": "UILink",
+                                    "bounds": [16, 687, 321, 717],
+                                    "clickable": "true",
+                                    "focused": "true",
+                                    "semantic-links": [
+                                      {
+                                        "occurrence": 0,
+                                        "text": "EXAMPLE Definition & Meaning"
+                                      }
+                                    ],
+                                    "role": "link",
+                                    "view-id": "s2-4c8c8f6e6a068a06"
+                                  },
+                                  "node": {
+                                    "$": {
+                                      "text": "EXAMPLE Definition & Meaning",
+                                      "class": "UILink",
+                                      "bounds": [16, 687, 321, 717],
+                                      "clickable": "true",
+                                      "focused": "true",
+                                      "semantic-links": [
+                                        {
+                                          "occurrence": 0,
+                                          "text": "EXAMPLE Definition & Meaning"
+                                        }
+                                      ],
+                                      "role": "link",
+                                      "view-id": "s2-66b9a6351c995e5f"
+                                    },
+                                    "node": {
+                                      "$": {
+                                        "text": "EXAMPLE Definition & Meaning",
+                                        "class": "UILabel",
+                                        "bounds": [16, 687, 321, 717],
+                                        "focused": "true",
+                                        "role": "text",
+                                        "view-id": "s2-c447e95b9096545f"
+                                      }
+                                    }
+                                  }
+                                },
+                                {
+                                  "$": {
+                                    "class": "UILink",
+                                    "bounds": [16, 642, 386, 652],
+                                    "clickable": "true",
+                                    "focused": "true",
+                                    "role": "link",
+                                    "view-id": "s2-988b5f47145f4c21-3"
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "$": {
+                                "class": "UIView",
+                                "bounds": [354, 634, 402, 644],
+                                "focused": "true",
+                                "view-id": "s2-5f996f74e339c876~99d7d789"
+                              },
+                              "node": {
+                                "$": {
+                                  "text": "About this result",
+                                  "class": "UIButton",
+                                  "bounds": [353, 634, 401, 682],
+                                  "clickable": "true",
+                                  "focused": "true",
+                                  "role": "button",
+                                  "view-id": "s2-327ef429c0e2925b"
+                                }
+                              }
+                            },
+                            {
+                              "$": {
+                                "text": "5 days ago",
+                                "class": "UILabel",
+                                "bounds": [16, 725, 85, 743],
+                                "focused": "true",
+                                "role": "text",
+                                "view-id": "s2-92ec89468b6d363c"
+                              }
+                            },
+                            {
+                              "$": {
+                                "text": "\u2014",
+                                "class": "UILabel",
+                                "bounds": [84, 725, 107, 743],
+                                "focused": "true",
+                                "role": "text",
+                                "view-id": "s2-12c9833994c38885"
+                              }
+                            },
+                            {
+                              "$": {
+                                "text": "The meaning of EXAMPLE is",
+                                "class": "UILabel",
+                                "bounds": [106, 725, 290, 743],
+                                "focused": "true",
+                                "role": "text",
+                                "view-id": "s2-7854ee745bdcd0fe"
+                              }
+                            },
+                            {
+                              "$": {
+                                "text": "a person or way of behaving that serves as a pattern to be imitated",
+                                "class": "UILabel",
+                                "bounds": [16, 725, 372, 764],
+                                "focused": "true",
+                                "role": "text",
+                                "view-id": "s2-4f9be638ca4e4923"
+                              }
+                            },
+                            {
+                              "$": {
+                                "text": "or not to be imitated. How to use example in a\u00a0...",
+                                "class": "UILabel",
+                                "bounds": [16, 766, 321, 784],
+                                "focused": "true",
+                                "role": "text",
+                                "view-id": "s2-7c7e8a9928c8b3a7"
+                              }
+                            },
+                            {
+                              "$": {
+                                "class": "UIView",
+                                "bounds": [0, 626, 402, 636],
+                                "focused": "true",
+                                "view-id": "s2-c99cc170201c9970-17"
+                              }
+                            },
+                            {
+                              "$": {
+                                "class": "UIView",
+                                "bounds": [0, 626, 402, 636],
+                                "focused": "true",
+                                "view-id": "s2-c99cc170201c9970-18"
+                              }
+                            },
+                            {
+                              "$": {
+                                "class": "UIView",
+                                "bounds": [0, 626, 402, 636],
+                                "focused": "true",
+                                "view-id": "s2-c99cc170201c9970-19"
+                              }
+                            },
+                            {
+                              "$": {
+                                "class": "UIView",
+                                "bounds": [0, 626, 402, 636],
+                                "focused": "true",
+                                "view-id": "s2-c99cc170201c9970-20"
+                              }
+                            },
+                            {
+                              "$": {
+                                "class": "UIView",
+                                "bounds": [0, 218, 402, 228],
+                                "focused": "true",
+                                "view-id": "s2-c99cc170201c9970-21"
+                              }
+                            },
+                            {
+                              "$": {
+                                "class": "UIView",
+                                "bounds": [0, 803, 402, 1094],
+                                "focused": "true",
+                                "view-id": "s2-c99cc170201c9970-22"
+                              }
+                            },
+                            {
+                              "$": {
+                                "text": "People also ask",
+                                "class": "UIView",
+                                "bounds": [16, 820, 374, 846],
+                                "focused": "true",
+                                "view-id": "s2-1b72e3f3b44161a0"
+                              },
+                              "node": {
+                                "$": {
+                                  "text": "People also ask",
+                                  "class": "UILabel",
+                                  "bounds": [16, 821, 143, 845],
+                                  "focused": "true",
+                                  "role": "text",
+                                  "view-id": "s2-caac0a53a30c554c"
+                                }
+                              }
+                            },
+                            {
+                              "$": {
+                                "text": "What is the meaning of example?",
+                                "class": "UIButton",
+                                "bounds": [16, 850, 386, 910],
+                                "clickable": "true",
+                                "focused": "true",
+                                "role": "button",
+                                "view-id": "s2-7527aaac4909888c"
+                              }
+                            },
+                            {
+                              "$": {
+                                "class": "UIView",
+                                "bounds": [16, 910, 386, 911],
+                                "focused": "true",
+                                "view-id": "s2-c99cc170201c9970-23"
+                              }
+                            },
+                            {
+                              "$": {
+                                "text": "What is another word for example?",
+                                "class": "UIButton",
+                                "bounds": [16, 911, 386, 971],
+                                "clickable": "true",
+                                "focused": "true",
+                                "role": "button",
+                                "view-id": "s2-c62cff19617d3603"
+                              }
+                            },
+                            {
+                              "$": {
+                                "class": "UIView",
+                                "bounds": [16, 850, 386, 860],
+                                "focused": "true",
+                                "view-id": "s2-c99cc170201c9970-24"
+                              }
+                            },
+                            {
+                              "$": {
+                                "class": "UIView",
+                                "bounds": [0, 218, 402, 228],
+                                "focused": "true",
+                                "view-id": "s2-c99cc170201c9970-25"
+                              }
+                            },
+                            {
+                              "$": {
+                                "class": "UIView",
+                                "bounds": [0, 218, 402, 228],
+                                "focused": "true",
+                                "view-id": "s2-c99cc170201c9970-26"
+                              }
+                            },
+                            {
+                              "$": {
+                                "class": "UIView",
+                                "bounds": [0, 218, 402, 228],
+                                "focused": "true",
+                                "view-id": "s2-c99cc170201c9970-27"
+                              }
+                            },
+                            {
+                              "$": {
+                                "class": "UIView",
+                                "bounds": [0, 218, 402, 228],
+                                "focused": "true",
+                                "view-id": "s2-c99cc170201c9970-28"
+                              }
+                            },
+                            {
+                              "$": {
+                                "class": "UIView",
+                                "bounds": [0, 218, 402, 228],
+                                "focused": "true",
+                                "view-id": "s2-c99cc170201c9970-29"
+                              }
+                            },
+                            {
+                              "$": {
+                                "class": "UIView",
+                                "bounds": [0, 218, 402, 228],
+                                "focused": "true",
+                                "view-id": "s2-c99cc170201c9970-30"
+                              }
+                            },
+                            {
+                              "$": {
+                                "class": "UIView",
+                                "bounds": [0, 218, 402, 228],
+                                "focused": "true",
+                                "view-id": "s2-c99cc170201c9970-31"
+                              }
+                            },
+                            {
+                              "$": {
+                                "class": "UIView",
+                                "bounds": [0, 218, 402, 228],
+                                "focused": "true",
+                                "view-id": "s2-c99cc170201c9970-32"
+                              }
+                            },
+                            {
+                              "$": {
+                                "class": "UIView",
+                                "bounds": [0, 218, 402, 228],
+                                "focused": "true",
+                                "view-id": "s2-c99cc170201c9970-33"
+                              }
+                            },
+                            {
+                              "$": {
+                                "class": "UIView",
+                                "bounds": [0, 218, 402, 228],
+                                "focused": "true",
+                                "view-id": "s2-c99cc170201c9970-34"
+                              }
+                            },
+                            {
+                              "$": {
+                                "class": "UIView",
+                                "bounds": [0, 218, 402, 228],
+                                "focused": "true",
+                                "view-id": "s2-c99cc170201c9970-35"
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "$": {
+                          "text": "Vertical scroll bar, 7 pages",
+                          "class": "UIView",
+                          "bounds": [369, 62, 399, 812],
+                          "view-id": "s2-da474f29082afcff"
+                        }
+                      },
+                      {
+                        "$": {
+                          "text": "Horizontal scroll bar, 1 page",
+                          "class": "UIView",
+                          "bounds": [62, 841, 340, 871],
+                          "view-id": "s2-a79830a9c63cf5c5-1"
+                        }
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "$": {
+                  "text": "Horizontal scroll bar, 1 page",
+                  "class": "UIView",
+                  "bounds": [62, 841, 340, 871],
+                  "view-id": "s2-a79830a9c63cf5c5-2"
+                }
+              }
+            ]
+          },
+          {
+            "$": {
+              "resource-id": "CapsuleViewController",
+              "class": "UIView",
+              "bounds": [0, 0, 402, 874],
+              "view-id": "CapsuleViewController"
+            },
+            "node": [
+              {
+                "$": {
+                  "text": "Back",
+                  "resource-id": "BackButton",
+                  "class": "UIButton",
+                  "bounds": [34, 792, 82, 840],
+                  "role": "button",
+                  "view-id": "BackButton"
+                }
+              },
+              {
+                "$": {
+                  "resource-id": "CapsuleNavigationBar?isSelected=true&isDistractionControlOverlayUp=false",
+                  "class": "UIView",
+                  "bounds": [90, 792, 312, 840],
+                  "selected": "true",
+                  "view-id": "CapsuleNavigationBar?isSelected=true&isDistractionControlOverlayUp=false"
+                },
+                "node": [
+                  {
+                    "$": {
+                      "text": "Page Menu",
+                      "resource-id": "MoreMenuButton",
+                      "class": "UIButton",
+                      "bounds": [90, 792, 138, 840],
+                      "clickable": "true",
+                      "role": "button",
+                      "view-id": "MoreMenuButton"
+                    }
+                  },
+                  {
+                    "$": {
+                      "text": "Address",
+                      "value": "example",
+                      "resource-id": "TabBarItemTitle",
+                      "class": "UITextField",
+                      "bounds": [159, 805, 242, 827],
+                      "clickable": "true",
+                      "role": "textfield",
+                      "view-id": "TabBarItemTitle",
+                      "actions": ["set_text", "clear_text"]
+                    }
+                  },
+                  {
+                    "$": {
+                      "text": "Voice Search",
+                      "resource-id": "VoiceSearchButton",
+                      "class": "UIButton",
+                      "bounds": [281, 805, 298, 826],
+                      "clickable": "true",
+                      "role": "button",
+                      "view-id": "VoiceSearchButton"
+                    }
+                  }
+                ]
+              },
+              {
+                "$": {
+                  "text": "Tabs",
+                  "resource-id": "TabOverviewButton",
+                  "class": "UIButton",
+                  "bounds": [320, 792, 368, 840],
+                  "clickable": "true",
+                  "role": "button",
+                  "view-id": "TabOverviewButton"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "packageName": "com.apple.mobilesafari",
+  "updatedAt": 1792762891312,
+  "windows": [
+    {
+      "bounds": [0, 0, 402, 874],
+      "id": 0,
+      "isActive": true,
+      "isFocused": true,
+      "type": 1
+    }
+  ],
+  "screenScale": 3,
+  "screenWidth": 402,
+  "screenHeight": 874,
+  "nativeScale": 3,
+  "pixelWidth": 1206,
+  "pixelHeight": 2622,
+  "rotation": 0,
+  "insets": {
+    "available": false,
+    "displayCutoutInfo": {
+      "classification": "unknown"
+    },
+    "source": "unavailable",
+    "units": "unknown"
+  },
+  "receivedAt": 1792762891318,
+  "fresh": true,
+  "frameContext": "C7715BC4-FA23-4699-8571-3E744E60AF86:1:44365817484a1615"
+}

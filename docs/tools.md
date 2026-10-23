@@ -3425,8 +3425,15 @@ its first settings write and restores both on release or rebind. An already
 locked no-op records nothing. If the initial auto-rotate setting is unreadable,
 omission leaves it unchanged rather than forcing a lock.
 
+The stock Android launcher requests a no-sensor orientation, so a landscape
+rotation on the home screen never reaches the display, even with auto-rotate off
+and a direct `user_rotation` write. The call waits up to its rotation time budget,
+returns `success: false` with "Timeout waiting for rotation", and leaves the display
+in portrait. Open a rotation-permitting app first, such as Settings or your app.
+
 In direct mode (no session or session manager), omission temporarily disables
-auto-rotate when necessary and restores it at the end of the call. With
+auto-rotate when necessary and restores it at the end of the call. Explicit
+`lockOrientation: false` behaves the same way, because it also ends with auto-rotate on. With
 auto-rotate on, the sensor then returns the display to its physical orientation,
 so a plain direct `rotate` to a different orientation reports `success: false`
 ("returned to ... because automatic rotation is on") and rolls back the
@@ -3445,6 +3452,8 @@ hold the lock past the call. In session mode it explicitly requests the same
 lock, also recording the restore slot so release restores the original settings;
 unlike omission, an explicit lock can force an unreadable initial setting off.
 
+Success is judged from the display's applied rotation, read after auto-rotate is
+restored, not from the window manager's requested rotation.
 The existing `orientationLockState` reports `locked`, `unlocked`, or `unknown`.
 A confirmed final orientation mismatch returns `success: false` with the achieved
 `currentOrientation`. `rotationPerformed` is false when the display ended in its
@@ -3456,10 +3465,13 @@ A persistent lock requires confirmation of the lock and live orientation.
 To restore automatic rotation, pass `lockOrientation: false`, for example
 `{ "orientation": "landscape", "lockOrientation": false }`. This rotates to the
 requested orientation and enables auto-rotate, deliberately overriding an
-originally locked `accelerometer_rotation=0`. In session mode, once auto-rotate
-is confirmed on, it additionally restores the original `user_rotation` and clears
-the slot. A failed user-setting restore adds a warning and retains the slot for
-release to retry. These options are supported only on Android.
+originally locked `accelerometer_rotation=0`. The requested orientation lasts with
+auto-rotate on only while the device is physically held that way; use a session's
+default lock or `lockOrientation: true` to hold it independently of the sensor.
+In session mode, once auto-rotate is confirmed on, it additionally restores the
+original `user_rotation` and clears the slot. A failed user-setting restore adds a
+warning and retains the slot for release to retry. These options are supported
+only on Android.
 
 ### Acquiring a device: `avdName`, `udid`, and the `deviceId` alias
 

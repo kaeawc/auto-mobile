@@ -771,7 +771,7 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
     const scanDiagnostic = relevantScanDiagnostic(scan, correlatedTargetDeviceId);
     retryUnresolvedReadinessNames(scan.devices, unresolvedNameSerials);
     state.lastDiagnostic = scanDiagnostic;
-    const runningEmulators = scan.devices;
+    const runningEmulators = scan.devices.filter((device) => !device.foreignOwned);
     logger.debug(`Device scan complete - found ${runningEmulators.length} running emulators`);
     const readinessTimeoutMs = Math.max(
       0,

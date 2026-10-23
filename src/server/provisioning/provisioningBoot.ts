@@ -164,7 +164,7 @@ function assertProvisionAndroidIdentities(
   devices: BootedDevice[],
 ): void {
   const unresolved = devices
-    .filter(isUnresolvedAndroidEmulatorName)
+    .filter((device) => !device.foreignOwned && isUnresolvedAndroidEmulatorName(device))
     .map((device) => device.deviceId);
   if (unresolved.length > 0) {
     throw new ProvisionDeviceError(
@@ -191,6 +191,7 @@ async function discoverProvisionAndroidIdentities(
     signal.throwIfAborted();
     const discovery = await deviceManager.getBootedDevicesDetailed("android", {
       bypassAndroidDeviceListCache: true,
+      skipForeignEnrichment: true,
       signal,
     });
     assertProvisionAndroidDiscovery(args, discovery.succeededPlatforms);
@@ -198,7 +199,12 @@ async function discoverProvisionAndroidIdentities(
     // so placeholders quarantine stale pooled labels even when we refuse (#7177).
     await reconcileDiscoveryObservation(discovery.devices, "provisionDevice-exact");
     // A never-launched AVD created by this request cannot be running on a sibling.
-    if (created || !discovery.devices.some(isUnresolvedAndroidEmulatorName)) {
+    if (
+      created ||
+      !discovery.devices.some(
+        (device) => !device.foreignOwned && isUnresolvedAndroidEmulatorName(device),
+      )
+    ) {
       return discovery.devices;
     }
     const delayMs = backoff.delayForAttempt(attempt + 1);

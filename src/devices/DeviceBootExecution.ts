@@ -49,6 +49,7 @@ export class DeviceBootExecution {
     // failure from a genuinely empty result (#7179).
     const useDetailed = platform === "android" || presentationOrder !== undefined;
     const options: BootedDeviceDiscoveryOptions = {
+      skipForeignEnrichment: true,
       ...(bypassAndroidCache ? { bypassAndroidDeviceListCache: true } : {}),
       ...(presentationOrder !== undefined ? { presentationOrder } : {}),
     };
@@ -56,14 +57,17 @@ export class DeviceBootExecution {
       const discovery = await this.runPhase(
         context,
         phase,
-        async () =>
-          await this.dependencies.deviceManager.getBootedDevicesDetailed(platform, options),
+        (signal) =>
+          this.dependencies.deviceManager.getBootedDevicesDetailed(platform, {
+            ...options,
+            signal,
+          }),
         awaitAbortSettlement,
       );
       if (platform === "android" && !discovery.succeededPlatforms.has("android")) {
         throw new AndroidBootedDeviceDiscoveryIncompleteError(discovery.discoveryErrors?.android);
       }
-      return discovery.devices;
+      return discovery.devices.filter((device) => !device.foreignOwned);
     }
     return await this.runPhase(
       context,

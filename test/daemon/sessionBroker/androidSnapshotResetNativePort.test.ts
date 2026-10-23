@@ -1,3 +1,5 @@
+import { AdbCommandTimeoutError } from "../../../src/utils/android-cmdline-tools/AdbCommandTimeoutError";
+import { SETTINGS_TIMEOUT, CTRL_PROXY_FAILED } from "./fixtures/androidResetLoadTimeouts";
 import { describe, expect, test } from "bun:test";
 import {
   NativeAndroidSnapshotResetPort,
@@ -83,6 +85,9 @@ function nativeRig() {
           options.signal,
           options.consoleExclusiveOwner,
         );
+        if (options.throwOnTimeout && result.nameProbeTimedOut) {
+          throw new AdbCommandTimeoutError(`AVD name timed out after ${options.timeoutMs}ms`);
+        }
         return result.name || undefined;
       },
       getListedNonDeviceStatesAmong: async () => new Map(),
@@ -282,14 +287,14 @@ describe("NativeAndroidSnapshotResetPort", () => {
     dependencies.inventory = async (options) => {
       expect(options).toEqual({
         signal: step.signal,
-        timeoutMs: 5000,
+        timeoutMs: 2000,
         targetDeviceId: ANDROID_RESET_DEVICE.deviceId,
       });
       timer.advanceTime(1500);
       return [];
     };
     dependencies.emulator.getListedNonDeviceStatesAmong = async (_ids, options) => {
-      expect(options?.timeoutMs).toBe(4500);
+      expect(options?.timeoutMs).toBe(2000);
       return new Map();
     };
     await port.stop(ANDROID_RESET_DEVICE, { ...step, timeoutMs: 6000 });
@@ -519,7 +524,8 @@ describe("NativeAndroidSnapshotResetPort", () => {
   });
 
   test("CtrlProxy failure cannot pass health after a successful snapshot load", async () => {
-    const { port, step, adb, failHealth } = nativeRig();
+    const { port, step, adb, failHealth, timer } = nativeRig();
+    timer.enableAutoAdvance();
     healthyClock(adb);
     failHealth();
     await expect(port.health(ANDROID_RESET_DEVICE, step)).rejects.toThrow("CtrlProxy health check");
@@ -545,5 +551,171 @@ describe("NativeAndroidSnapshotResetPort", () => {
     await expect(port.launchWiped(ANDROID_RESET_DEVICE, step)).rejects.toThrow("ownership lost");
     expect(adb.getCommandCalls()).toHaveLength(0);
     expect(launches).toHaveLength(0);
+  });
+});
+
+describe("snapshot health under load", () => {
+  test.each([60_000, 20_000])(
+    "clock and root floors clamp to %i ms remaining",
+    async (remaining) => {
+      const { port, step, adb } = nativeRig();
+      step.timeoutMs = remaining;
+      healthyClock(adb);
+      adb.setCommandResultSequence("shell id", [
+        { stdout: "uid=2000(shell)", stderr: "" },
+        { stdout: "uid=0(root)", stderr: "" },
+      ]);
+      adb.setCommandResult("shell getprop ro.debuggable", "1");
+      await port.health(ANDROID_RESET_DEVICE, step);
+      for (const command of ["shell id", "root", "unroot", "shell date -u @0"]) {
+        const calls = adb.getCommandCalls().filter((call) => call.command === command);
+        expect(calls.length).toBeGreaterThan(0);
+        expect(calls[0]?.timeoutMs).toBe(Math.min(30_000, remaining));
+      }
+      expect(
+        adb
+          .getCommandCalls()
+          .filter((call) => call.command === "wait-for-device")
+          .map((call) => call.timeoutMs),
+      ).toEqual([remaining, remaining]);
+    },
+  );
+
+  test.each([60_000, 20_000])(
+    "timestamped date write gets one attempt within %i ms",
+    async (remaining) => {
+      const { port, step, adb, timer } = nativeRig();
+      timer.enableAutoAdvance();
+      step.timeoutMs = remaining;
+      healthyClock(adb);
+      adb.setCommandError("shell date -u @0", new AdbCommandTimeoutError(SETTINGS_TIMEOUT));
+      await expect(port.health(ANDROID_RESET_DEVICE, step)).rejects.toThrow(SETTINGS_TIMEOUT);
+      const calls = adb.getCommandCalls().filter((call) => call.command === "shell date -u @0");
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.timeoutMs).toBe(Math.min(30_000, remaining));
+      expect(timer.getSleepHistory()).toEqual([]);
+    },
+  );
+
+  test.each([
+    "root",
+    "unroot",
+    "wait-for-device",
+    "shell date +%s",
+    "shell settings put global auto_time 1",
+  ])("%s retries a transient timeout because it is idempotent", async (target) => {
+    const { port, step, adb, timer } = nativeRig();
+    timer.enableAutoAdvance();
+    step.timeoutMs = 60_000;
+    healthyClock(adb);
+    adb.setCommandResultSequence("shell id", [
+      { stdout: "uid=2000(shell)", stderr: "" },
+      { stdout: "uid=0(root)", stderr: "" },
+    ]);
+    adb.setCommandResult("shell getprop ro.debuggable", "1");
+    const execute = adb.executeCommand.bind(adb);
+    let attempts = 0;
+    const timeouts: number[] = [];
+    adb.executeCommand = async (command, options) => {
+      if (command === target) {
+        timeouts.push(options?.timeoutMs ?? 0);
+        if (++attempts === 1) {
+          throw new AdbCommandTimeoutError(SETTINGS_TIMEOUT);
+        }
+      }
+      return execute(command, options);
+    };
+    await port.health(ANDROID_RESET_DEVICE, step);
+    // wait-for-device also runs after unroot; all others have one successful retry.
+    expect(attempts).toBe(target === "wait-for-device" ? 3 : 2);
+    expect(timeouts[0]).toBe(target === "wait-for-device" ? 60_000 : 30_000);
+    expect(timer.getSleepHistory()).toEqual([250]);
+  });
+
+  test("CtrlProxy false twice then true recovers within its window", async () => {
+    const { port, step, adb, timer, dependencies } = nativeRig();
+    timer.enableAutoAdvance();
+    step.timeoutMs = 600_000;
+    healthyClock(adb);
+    let calls = 0;
+    dependencies.ctrlProxyReady = async () => ++calls >= 3;
+    await port.health(ANDROID_RESET_DEVICE, step);
+    expect(calls).toBe(3);
+    expect(timer.getSleepHistory()).toEqual([250, 500]);
+  });
+  test("CtrlProxy stays false until its derived window expires", async () => {
+    const { port, step, adb, timer, dependencies } = nativeRig();
+    timer.enableAutoAdvance();
+    step.timeoutMs = 600_000;
+    healthyClock(adb);
+    let calls = 0;
+    dependencies.ctrlProxyReady = async () => {
+      calls++;
+      return false;
+    };
+    await expect(port.health(ANDROID_RESET_DEVICE, step)).rejects.toThrow(CTRL_PROXY_FAILED);
+    expect(timer.now()).toBe(150_000);
+    expect(calls).toBeGreaterThan(2);
+  });
+  test("clock root read timeout recovers and all adb budgets are derived", async () => {
+    const { port, step, adb, timer } = nativeRig();
+    timer.enableAutoAdvance();
+    step.timeoutMs = 600_000;
+    healthyClock(adb);
+    const execute = adb.executeCommand.bind(adb);
+    let reads = 0;
+    adb.executeCommand = async (command, options) => {
+      if (command === "shell id" && ++reads === 1) {
+        throw new Error(SETTINGS_TIMEOUT);
+      }
+      return execute(command, options);
+    };
+    await port.health(ANDROID_RESET_DEVICE, step);
+    expect(reads).toBe(2);
+    expect(
+      adb
+        .getCommandCalls()
+        .every(
+          (call) =>
+            call.timeoutMs === 18750 ||
+            call.timeoutMs === 37484 ||
+            call.timeoutMs === 30_000 ||
+            call.timeoutMs === 74968,
+        ),
+    ).toBe(true);
+  });
+  test("non-timeout root failure fails immediately", async () => {
+    const { port, step, adb, timer } = nativeRig();
+    healthyClock(adb);
+    adb.setCommandResult("shell id", "uid=2000(shell)");
+    adb.setCommandResult("shell getprop ro.debuggable", "0");
+    await expect(port.health(ANDROID_RESET_DEVICE, step)).rejects.toThrow();
+    expect(timer.getSleepHistory()).toEqual([]);
+    expect(adb.getCommandCalls().filter((call) => call.command === "shell id")).toHaveLength(1);
+  });
+});
+
+describe("reset target resolution under load", () => {
+  test("identity retries a timed-out real name resolver without retrying mismatched values", async () => {
+    const { port, step, identityAdb, timer, changeAvd } = nativeRig();
+    step.timeoutMs = 600_000;
+    timer.enableAutoAdvance();
+    const execute = identityAdb.executeCommand.bind(identityAdb);
+    let probes = 0;
+    identityAdb.executeCommand = async (command, options) => {
+      if (++probes === 1) {
+        timer.advanceTime(options?.timeoutMs ?? 0);
+        throw new AdbCommandTimeoutError(SETTINGS_TIMEOUT);
+      }
+      return execute(command, options);
+    };
+    await expect(port.identity(ANDROID_RESET_DEVICE, step)).resolves.toMatchObject({
+      avdName: ANDROID_RESET_DEVICE.name,
+    });
+    expect(probes).toBe(2);
+    expect(timer.getSleepHistory()).toEqual([250]);
+    changeAvd();
+    await expect(port.identity(ANDROID_RESET_DEVICE, step)).rejects.toThrow("owned AVD");
+    expect(probes).toBe(3);
   });
 });

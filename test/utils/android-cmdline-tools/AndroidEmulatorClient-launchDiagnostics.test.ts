@@ -1052,8 +1052,16 @@ describe("client early-serial probe wiring", () => {
     expect(harness.settled()).toBe(true);
     expect(await harness.launch).toBe(harness.child);
     expect(calls).toEqual([
-      [true, { bypassDeviceListCache: true }, controller.signal],
-      [true, { bypassDeviceListCache: true }, controller.signal],
+      [
+        true,
+        { bypassDeviceListCache: true, skipNameEnrichment: true, skipProfileEnrichment: true },
+        controller.signal,
+      ],
+      [
+        true,
+        { bypassDeviceListCache: true, skipNameEnrichment: true, skipProfileEnrichment: true },
+        controller.signal,
+      ],
     ]);
     expectStartupTimersCleared(harness.timer);
   });

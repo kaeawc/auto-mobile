@@ -98,6 +98,7 @@ describe("Android broker reset dispatch and recovery", () => {
     const scopeKey = scope.scope.scopeKey;
     const store = registry.sessionBrokerStore(scopeKey, new CountingIdGenerator("resource"));
     host = new FakeAndroidResetHost();
+    host.timer = timer;
     tracker = new ExecutionTracker(timer, new CountingIdGenerator("execution"));
     host.watchSession = (sessionId: string) => watchAndroidResetSession(tracker, sessionId);
     host.strategy = {
@@ -270,7 +271,7 @@ describe("Android broker reset dispatch and recovery", () => {
     const { adb } = androidBaselineRig();
     host.strategy = new AndroidKeepBootedReset({
       journal: new FakeDeviceMutationJournal(timer),
-      port: () => new AndroidDeviceMutationResetPort(adb),
+      port: () => new AndroidDeviceMutationResetPort(adb, timer),
       timer,
     });
     const first = await ready();
@@ -301,7 +302,7 @@ describe("Android broker reset dispatch and recovery", () => {
     const { adb } = androidBaselineRig();
     host.strategy = new AndroidKeepBootedReset({
       journal: new FakeDeviceMutationJournal(timer),
-      port: () => new AndroidDeviceMutationResetPort(adb),
+      port: () => new AndroidDeviceMutationResetPort(adb, timer),
       timer,
     });
     const first = await ready();
@@ -477,7 +478,7 @@ describe("Android broker reset dispatch and recovery", () => {
       port: () =>
         cfg.androidKeepBootedFallback === "snapshot"
           ? fakePort
-          : new AndroidDeviceMutationResetPort(adb),
+          : new AndroidDeviceMutationResetPort(adb, timer),
     });
     if (cfg.androidResetMode === undefined) {
       expect(host.strategy).toBeUndefined();
@@ -664,6 +665,8 @@ describe("Android broker reset dispatch and recovery", () => {
     }
     if (failure === "health") {
       host.healthy = false;
+      host.resetTimeoutMs = 8000;
+      host.onHealth = () => timer.advanceTime(2000);
     }
     if (failure === "mutations") {
       const execution = tracker.startExecution("tap", undefined, session);
@@ -711,6 +714,8 @@ describe("Android broker reset dispatch and recovery", () => {
   test("failed reset with transient deletion failure remains cleanup_pending until journal redrive", async () => {
     const session = await ready();
     host.healthy = false;
+    host.resetTimeoutMs = 8000;
+    host.onHealth = () => timer.advanceTime(2000);
     deleter.failWith = "temporary native deletion failure";
     expect(await broker.release(session)).toMatchObject({ outcome: "cleanup_pending" });
     expect((await options.store.listResources())[0]!.state).toBe("destroying");

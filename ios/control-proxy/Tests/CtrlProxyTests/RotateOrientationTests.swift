@@ -113,7 +113,7 @@ final class RotateOrientationTests: XCTestCase {
         try await assertRotation(from: "portrait_upside_down", to: "portrait_upside_down", performed: false, value: 0)
     }
 
-    func testUnsupportedDisplayKeepsPreviousOrientation() async throws {
+    func testUnsupportedDisplayRestoresDeviceToPortrait() async throws {
         let gestures = FakeGesturePerformer()
         try gestures.setOrientation("unknown")
         gestures.rotationSupported = false
@@ -138,8 +138,13 @@ final class RotateOrientationTests: XCTestCase {
         )))
         let portraitResponse = try XCTUnwrap(portraitResult as? RotateResponse)
         XCTAssertTrue(portraitResponse.success)
-        XCTAssertFalse(portraitResponse.rotationPerformed)
-        XCTAssertEqual(gestures.setOrientationCalls, 2)
+        XCTAssertTrue(portraitResponse.rotationPerformed)
+        XCTAssertEqual(portraitResponse.previousOrientation, "portrait")
+        XCTAssertEqual(portraitResponse.currentOrientation, "portrait")
+        XCTAssertEqual(portraitResponse.value, 0)
+        XCTAssertNil(portraitResponse.error)
+        XCTAssertEqual(gestures.getOrientation(), "portrait")
+        XCTAssertEqual(gestures.setOrientationCalls, 3)
     }
 
     func testUnknownPortraitOnPortraitDisplayIsNoOp() async throws {

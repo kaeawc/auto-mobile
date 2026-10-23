@@ -1,3 +1,4 @@
+import { SingleFlight } from "../utils/cache/SingleFlight";
 import { holderOf } from "./deviceBinding";
 import type { Platform } from "../models";
 import type { Timer } from "../utils/SystemTimer";
@@ -24,7 +25,62 @@ export class ForeignClaims {
     { readAt: number; verdict: Promise<{ ownerPid: number | undefined; unreadable: boolean }> }
   >();
 
+  private readonly inventoryFlight = new SingleFlight<string, void>();
+  private readonly inventorySnapshots = new Map<string, { readAt: number; foreign: boolean }>();
+
   constructor(private readonly port: ForeignClaimsPort) {}
+
+  /** Inventory excludes only positively foreign Android serials, never our session holders. */
+  async foreignSerials(
+    serials: readonly string[],
+    signal?: AbortSignal,
+  ): Promise<ReadonlySet<string>> {
+    signal?.throwIfAborted();
+    const ownership = this.port.foreignDeviceOwnership;
+    if (!ownership) {
+      return new Set<string>();
+    }
+    // Expire per serial: readiness scans rotate candidate subsets of the same inventory.
+    for (const [serial, snapshot] of this.inventorySnapshots) {
+      if (this.port.timer.now() - snapshot.readAt >= 1_000) {
+        this.inventorySnapshots.delete(serial);
+      }
+    }
+    const missing = [...new Set(serials)].filter((serial) => !this.inventorySnapshots.has(serial));
+    try {
+      // Inventory evidence may be reused briefly; explicit binds still refresh afresh.
+      if (missing.length > 0) {
+        await this.inventoryFlight.run(
+          JSON.stringify(missing.toSorted()),
+          async (flightSignal) => {
+            await ownership.refresh(missing, flightSignal);
+            flightSignal?.throwIfAborted();
+            for (const serial of missing) {
+              this.inventorySnapshots.set(serial, {
+                readAt: this.port.timer.now(),
+                foreign: ownership.foreignOwnerPid(serial) !== undefined,
+              });
+            }
+          },
+          signal,
+          { cancelWhenAllWaitersAbort: true },
+        );
+      }
+      return new Set(
+        serials.filter(
+          (serial) =>
+            this.inventorySnapshots.get(serial)?.foreign && !holderOf(this.port.getDevice(serial)),
+        ),
+      );
+    } catch (error) {
+      signal?.throwIfAborted();
+      logger.warn(
+        `[DevicePool] Android inventory ownership refresh failed: ${errorMessage(error)}`,
+        error,
+      );
+      return new Set<string>();
+    }
+  }
 
   /** Who else drives devices of `platform`: Android by adb server, iOS by UDID (#10980). */
   foreignOwnershipFor(platform: Platform | undefined): ForeignDeviceOwnership | undefined {

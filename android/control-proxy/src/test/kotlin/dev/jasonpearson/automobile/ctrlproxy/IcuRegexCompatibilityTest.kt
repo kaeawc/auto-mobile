@@ -258,23 +258,8 @@ object RegexLiteralScanner {
     val afterParen = call?.let { i + it.length }
     val next = afterParen?.let { p -> s.indexOfFirst(p) { c -> !c.isWhitespace() } }
     val isLiteralArg = next != null && next >= 0 && s[next] == '"'
-    val validatedPortablePattern =
-      call == "Pattern.compile(" &&
-        path.endsWith(
-          "protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol/PrototypeCheckPattern.kt",
-        ) &&
-        next != null &&
-        s.startsWith("source(pattern))", next) &&
-        s.substring(0, i).trimEnd().endsWith("if (!parse(pattern).ok) return false\n    return")
-    // Contract JSON patterns are checked as strings by the contract test, not as source.
-    val contractPatterns =
-      call == "Regex(" &&
-        path.endsWith(
-          "protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol/PrototypeSpecContract.kt",
-        ) &&
-        next != null &&
-        s.startsWith("it.value.jsonPrimitive.content)", next)
-    if (call != null && !isLiteralArg && !validatedPortablePattern && !contractPatterns) {
+    val isExempt = call != null && next != null && isValidatedPattern(s, i, call, path, next)
+    if (call != null && !isLiteralArg && !isExempt) {
       sites +=
         RegexSite(
           "$path:${lineOf(s, i)}",
@@ -284,6 +269,33 @@ object RegexLiteralScanner {
         )
     }
     return afterParen
+  }
+
+  /**
+   * Non-literal calls that are validated elsewhere: the portable-pattern gate in
+   * PrototypeCheckPattern and the contract JSON patterns (checked as strings by the contract test).
+   */
+  private fun isValidatedPattern(
+    s: String,
+    i: Int,
+    call: String,
+    path: String,
+    next: Int,
+  ): Boolean {
+    val portable =
+      call == "Pattern.compile(" &&
+        path.endsWith(
+          "protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol/PrototypeCheckPattern.kt",
+        ) &&
+        s.startsWith("source(pattern))", next) &&
+        s.substring(0, i).trimEnd().endsWith("if (!parse(pattern).ok) return false\n    return")
+    val contract =
+      call == "Regex(" &&
+        path.endsWith(
+          "protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol/PrototypeSpecContract.kt",
+        ) &&
+        s.startsWith("it.value.jsonPrimitive.content)", next)
+    return portable || contract
   }
 
   private fun String.indexOfFirst(from: Int, predicate: (Char) -> Boolean): Int {

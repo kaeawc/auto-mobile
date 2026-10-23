@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { createConnection, createServer, type Server, type Socket } from "node:net";
-import { existsSync } from "node:fs";
+import { existsSync, lstatSync } from "node:fs";
+import {
+  isOwnedSocketFile,
+  readSocketFileIdentity,
+  statFileIdentity,
+} from "../../src/daemon/socketFileIdentity";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -25,9 +30,38 @@ async function scenario(path: string, withOpenClient: boolean) {
     accepted.push(s);
     s.on("error", () => {});
   });
-  await new Promise<void>((r) => server.listen(path, r));
   const out: Record<string, unknown> = { path, withOpenClient };
+  let recorded: ReturnType<typeof readSocketFileIdentity> = null;
+  await new Promise<void>((r) =>
+    server.listen(path, () => {
+      recorded = readSocketFileIdentity(path);
+      out.identityInListenCallback = recorded ? `${recorded.dev}:${recorded.ino}` : null;
+      r();
+    }),
+  );
+  out.ownedAfterListen = isOwnedSocketFile(recorded, path);
   out.existsWhileListening = existsSync(path);
+  const ident = () => {
+    try {
+      const i = statFileIdentity(path);
+      return `${i.dev}:${i.ino}`;
+    } catch (e) {
+      return `throw:${(e as NodeJS.ErrnoException).code ?? e}`;
+    }
+  };
+  out.identity1 = ident();
+  out.identity2 = ident();
+  try {
+    const l = lstatSync(path);
+    out.lstat = {
+      isSocket: l.isSocket(),
+      isFile: l.isFile(),
+      isSymlink: l.isSymbolicLink(),
+      mode: l.mode,
+    };
+  } catch (e) {
+    out.lstat = `throw:${(e as NodeJS.ErrnoException).code ?? e}`;
+  }
   let client: Socket | undefined;
   if (withOpenClient) {
     client = createConnection(path);

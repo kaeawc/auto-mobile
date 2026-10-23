@@ -24,6 +24,8 @@ export interface DeviceStateRevertCommand {
   command: string;
   success?: string;
   timeoutMs?: number;
+  /** After this command succeeds, wake the screen if it is off (a Doze unforce, #15168). */
+  wakeSleptScreen?: boolean;
 }
 
 type Commands = DeviceStateRevertCommand[] | null;
@@ -82,10 +84,14 @@ function dozeCommands(prior: unknown): Commands {
   if (!mode.success) {
     return null;
   }
+  // Forcing deep Doze sleeps a lit screen and it only reads ACTIVE again once awake, so wake
+  // right after the unforce, before the read-back (#15168, as the session restore in #15165).
   return [
-    "shell dumpsys deviceidle unforce",
-    ...(mode.data === "off" ? [] : [`shell dumpsys deviceidle force-idle ${mode.data}`]),
-  ].map((command) => ({ command }));
+    { command: "shell dumpsys deviceidle unforce", wakeSleptScreen: true },
+    ...(mode.data === "off"
+      ? []
+      : [{ command: `shell dumpsys deviceidle force-idle ${mode.data}` }]),
+  ];
 }
 
 function thermalCommands(prior: unknown): Commands {

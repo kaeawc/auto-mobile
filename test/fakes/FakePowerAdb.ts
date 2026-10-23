@@ -66,6 +66,9 @@ export class FakePowerAdb extends FakeAdbExecutor implements AdbExecutor {
     if (cmd === "dumpsys" && sub === "deviceidle") {
       return this.runDeviceIdle(rest);
     }
+    if (cmd === "dumpsys" && sub === "power") {
+      return `  mWakefulness=${this.awake ? "Awake" : "Asleep"}\n`;
+    }
     if (cmd === "dumpsys" && sub === "thermalservice") {
       return `IsStatusOverride: ${this.thermal.override}\nThermal Status: ${this.thermal.status}\n`;
     }

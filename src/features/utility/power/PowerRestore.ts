@@ -59,7 +59,10 @@ function batteryRestore(record: SessionPower, client: PowerDeviceClient): FieldR
 }
 
 /** Wake the screen the session put to sleep; a screen already awake is left alone. */
-async function wakeSleptScreen(record: SessionPower, client: PowerDeviceClient): Promise<void> {
+export async function wakeSleptScreen(
+  record: Pick<SessionPower, "screenSlept">,
+  client: Pick<PowerDeviceClient, "isScreenOn" | "wakeScreen">,
+): Promise<void> {
   if (record.screenSlept && !(await client.isScreenOn())) {
     await client.wakeScreen();
   }

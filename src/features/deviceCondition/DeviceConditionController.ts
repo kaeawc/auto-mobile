@@ -148,25 +148,30 @@ export class DeviceConditionController {
     }
   }
 
-  /** Run and drop the reset for one key; a key with none is `unchanged`. */
+  /**
+   * Run and drop every reset registered for one key, newest first; a key with none is
+   * `unchanged`. An injector cannot always tell whether the controller still holds its earlier
+   * reset, so a key can have more than one, and clearing it must leave none behind. A reset that
+   * fails stays registered (with the older ones) so a later restore still owes it.
+   */
   private async clearKey(
     key: DeviceConditionKey,
     signal?: AbortSignal,
   ): Promise<DeviceConditionChangeResult> {
-    const index = this.resets.findIndex((entry) => entry.key === key);
-    if (index === -1) {
+    const entries = this.resets.filter((entry) => entry.key === key);
+    if (entries.length === 0) {
       return { key, status: "unchanged" };
     }
-    const [entry] = this.resets.splice(index, 1);
-    try {
-      await entry.reset(signal);
-      return { key, status: "cleared" };
-    } catch (error) {
-      // Re-register so a later restore still owes this key (device not left dirty silently).
-      this.resets.splice(index, 0, entry);
-      logger.warn(`[deviceCondition] clearing ${key} failed: ${errorMessage(error)}`, error);
-      return { key, status: "unsupported", detail: `Failed to clear: ${errorMessage(error)}` };
+    for (const entry of entries.reverse()) {
+      try {
+        await entry.reset(signal);
+        this.drop(entry);
+      } catch (error) {
+        logger.warn(`[deviceCondition] clearing ${key} failed: ${errorMessage(error)}`, error);
+        return { key, status: "unsupported", detail: `Failed to clear: ${errorMessage(error)}` };
+      }
     }
+    return { key, status: "cleared" };
   }
 
   /**

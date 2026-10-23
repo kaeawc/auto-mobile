@@ -332,6 +332,27 @@ describe("storage fault (#14066)", () => {
       expect(device.freeBytes()).toBe(BASE);
     });
 
+    test("a release the controller could not verify, then a fresh apply, still clears with one unset", async () => {
+      const device = storageDevice({ baseFreeBytes: BASE });
+      const controller = controllerFor(device);
+      await controller.apply({ faults: { storage: "low" } });
+
+      // The ballast is removed (ls 1 confirms it), then the controller's own clean read (ls 2) fails,
+      // so the controller keeps the reset although the injector has already forgotten its registration.
+      device.failOn("ls -d", 2);
+      const restored = await controller.restore();
+      expect(restored.verifiedClean).toBe(false);
+      expect(device.freeBytes()).toBe(BASE);
+
+      await controller.apply({ faults: { storage: "full" } });
+      expect(device.freeBytes()).toBe(STORAGE_FREE_BYTES_LEFT.full);
+
+      const cleared = await controller.apply({ faults: { storage: "unset" } });
+      expect(cleared.changes).toEqual([{ key: "faults.storage", status: "cleared" }]);
+      expect(cleared.active).toEqual([]);
+      expect(device.freeBytes()).toBe(BASE);
+    });
+
     test("a failed resize whose rollback fails too does not add a second reset", async () => {
       const device = storageDevice({ baseFreeBytes: BASE });
       const controller = controllerFor(device);

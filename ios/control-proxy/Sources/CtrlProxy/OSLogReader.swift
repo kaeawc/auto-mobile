@@ -226,6 +226,12 @@ public final class OSLogReader: @unchecked Sendable {
         do {
             let records = try source.entries(since: cursor)
             for record in records where record.date > cursor {
+                // Advance past self-generated noise so it is never re-read, but never publish it:
+                // it would count as activity, reset the backoff and keep the session alive (#15030).
+                lastEntryDate = max(lastEntryDate, record.date)
+                guard !Self.isSelfGeneratedNoise(
+                    subsystem: record.subsystem, category: record.category, message: record.composedMessage
+                ) else { continue }
                 newEntries.append(LogEntry(
                     eventType: "log",
                     timestamp: Int64(record.date.timeIntervalSince1970 * 1000),
@@ -234,7 +240,6 @@ public final class OSLogReader: @unchecked Sendable {
                     message: record.category.isEmpty
                         ? record.composedMessage : "[\(record.category)] \(record.composedMessage)"
                 ))
-                lastEntryDate = max(lastEntryDate, record.date)
             }
             appendCompletedEntries(newEntries)
         } catch {
@@ -257,6 +262,22 @@ public final class OSLogReader: @unchecked Sendable {
                 poll()
             }
         }
+    }
+
+    /// Entries this runner process generates by being read: each poll logs an
+    /// `com.apple.xpc` OSLogService connect/cancel pair and each HTTP drain logs
+    /// `com.apple.network` connection/listener transport lines (captured on iOS 27.0, #15030).
+    /// Publishing them feeds the reader its own output, so every poll "finds" entries and
+    /// the host never sees an empty batch.
+    /// The xpc cancel line names no service, so it matches any xpc service in this runner process, and the
+    /// network rule covers the whole runner process (the log store is scoped to `.currentProcessIdentifier`;
+    /// no app code runs there).
+    static func isSelfGeneratedNoise(subsystem: String, category: String, message: String) -> Bool {
+        if subsystem == "com.apple.xpc" {
+            return message.contains("OSLogService")
+                || message.contains("cancelled the connection by calling xpc_connection_cancel()")
+        }
+        return subsystem == "com.apple.network" && (category == "connection" || category == "listener")
     }
 
     /// Map `OSLogEntryLog.Level` to the AutoMobile SDK's `LogLevel` scale

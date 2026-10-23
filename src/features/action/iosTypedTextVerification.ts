@@ -44,13 +44,23 @@ export interface IosTypedTextVerificationResult {
 /** Literal Unicode characters in order; intervening mask characters are allowed. */
 export function compareIosTypedText(
   text: string,
-  before: FocusedTextField | undefined,
-  after: FocusedTextField | undefined,
+  before: FocusedTextField = { secure: false },
+  after: FocusedTextField = { secure: false },
 ): IosTypedTextVerificationResult {
-  if (before?.secure || after?.secure) {
+  if (before.secure || after.secure) {
     return { success: true, warning: "iOS typed text check skipped for a secure field." };
   }
-  if (before?.value === undefined || after?.value === undefined) {
+  const nativeComparison = compareNativeEditableValues(
+    before.nativeEditableValues,
+    after.nativeEditableValues,
+  );
+  if (nativeComparison === "changed") {
+    return { success: true };
+  }
+  if (
+    (before.value === undefined || after.value === undefined) &&
+    nativeComparison !== "unchanged"
+  ) {
     return {
       success: true,
       warning: "iOS typed text result was not verified: the focused field could not be read.",
@@ -62,12 +72,23 @@ export function compareIosTypedText(
       error: "iOS nothing was typed: the focused field value is unchanged.",
     };
   }
-  return containsTypedCharacters(after.value, text)
+  return containsTypedCharacters(after.value ?? "", text)
     ? { success: true }
     : {
         success: true,
         warning: `iOS typed text changed in the focused field; observed value: ${JSON.stringify(after.value)}.`,
       };
+}
+
+function compareNativeEditableValues(
+  before: Readonly<Record<string, string>> = {},
+  after: Readonly<Record<string, string>> = {},
+): "changed" | "unchanged" | "unavailable" {
+  const sharedIds = Object.keys(before).filter((id) => Object.hasOwn(after, id));
+  if (sharedIds.some((id) => before[id] !== after[id])) {
+    return "changed";
+  }
+  return sharedIds.length > 0 ? "unchanged" : "unavailable";
 }
 
 function containsTypedCharacters(value: string, text: string): boolean {
@@ -123,7 +144,10 @@ export async function readIosTypedTextField(
     const hierarchy = observation.viewHierarchy;
     return observation.freshness?.isFresh === false || !hierarchy || hierarchy.hierarchy.error
       ? undefined
-      : getFocusedTextField(hierarchy, new SecureValueOmittingParser(), options);
+      : getFocusedTextField(hierarchy, new SecureValueOmittingParser(), {
+          ...options,
+          includeIosNativeEditableValues: true,
+        });
   } catch {
     // Best-effort verification must preserve a confirmed delivery; never log field/transport values.
     logger.warn("[iOS typed text] Focused field read unavailable; result cannot be verified");

@@ -85,7 +85,8 @@ struct RotateDecision: Sendable {
         let matches: Bool
         if let appAxisBefore {
             matches = appAxisBefore == target.axis &&
-                (target.isCoarse || (deviceAxis != nil && deviceBefore == target.orientation))
+                ((target.isCoarse && (deviceAxis == nil || deviceAxis == target.axis)) ||
+                    (deviceAxis != nil && deviceBefore == target.orientation))
         } else {
             matches = deviceAxis != nil &&
                 (deviceBefore == target.orientation || (target.isCoarse && deviceAxis == target.axis))

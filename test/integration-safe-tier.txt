@@ -200,6 +200,7 @@ test/features/webrtc/WebRtcPublisher.loopback.integration.test.ts | unsafe | env
 test/fixtures/integrationRunnerProbe.integration.test.ts | safe | returns at once unless STALL_PID_FILE is set L8
 test/helpers/navigationTestHarness.integration.test.ts | safe | in-memory nav manager harness over createTestDatabase
 test/integration/androidH264SourceDevice.integration.test.ts | unsafe | real DefaultHostCommandExecutor driving adb L37
+test/integration/brokerMultiClientFixes.integration.test.ts | safe | real broker/handlers over :memory: SQLite, fake native port, FakeTimer, no processes or host tooling
 test/integration/foldablePostureRoundTrip.integration.test.ts | unsafe | execFile of dist/src CLI and ffprobe L23/L57
 test/integration/iosVideoRecordingStartStop.integration.test.ts | unsafe | execFile of dist CLI, xcrun simctl and ffprobe, real DaemonClient L130/L156/L372
 test/integration/logger-init-pidfile-crash.integration.test.ts | unsafe | Bun.spawn of a child bun process L42

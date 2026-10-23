@@ -4091,6 +4091,107 @@
     }
   },
   {
+    "name": "focusNavigate",
+    "description": "Move D-pad focus to an element on a focus-driven UI such as Android TV. Observes, and until the focused element matches `until` (text, contentDesc or resourceId) presses the D-pad arrow that moves toward the nearest match, or `direction` when given. Returns the path of focused elements and a status: focused, max_steps (default 30) or stuck (two presses left focus unchanged). Activate the result with sendKeys key enter.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "until": {
+          "description": "The element focus should land on; every field given must match",
+          "type": "object",
+          "properties": {
+            "text": {
+              "description": "Text of the element to focus (case-insensitive)",
+              "type": "string"
+            },
+            "contentDesc": {
+              "description": "Content-desc of the element to focus",
+              "type": "string"
+            },
+            "resourceId": {
+              "description": "Resource ID of the element to focus",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "direction": {
+          "description": "Press this D-pad direction every step instead of steering toward the target",
+          "type": "string",
+          "enum": ["up", "down", "left", "right"]
+        },
+        "maxSteps": {
+          "description": "Maximum D-pad presses (default 30)",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "settleMs": {
+          "description": "Wait after each press before observing (default 200)",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5000
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["until"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["focused", "max_steps", "stuck"]
+        },
+        "steps": {
+          "type": "number"
+        },
+        "path": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "focusedElement": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": ["success", "status", "steps", "path"],
+      "additionalProperties": {}
+    }
+  },
+  {
     "name": "getAndroid",
     "description": "Find or recover an Android AVD and prepare it for automation. See the automobile:tools resource for every tool's default enabled/gated state before acquiring a device.",
     "inputSchema": {
@@ -4176,6 +4277,7 @@
               "executePlan",
               "explore",
               "exportPlan",
+              "focusNavigate",
               "getAppPermissions",
               "getDataStore",
               "getDeepLinks",
@@ -4324,6 +4426,7 @@
               "executePlan",
               "explore",
               "exportPlan",
+              "focusNavigate",
               "getAppPermissions",
               "getDataStore",
               "getDeepLinks",
@@ -25104,6 +25207,7 @@
               "executePlan",
               "explore",
               "exportPlan",
+              "focusNavigate",
               "getAppPermissions",
               "getDataStore",
               "getDeepLinks",
@@ -32801,6 +32905,7 @@
             "executePlan",
             "explore",
             "exportPlan",
+            "focusNavigate",
             "getAppPermissions",
             "getDataStore",
             "getDeepLinks",
@@ -32915,6 +33020,7 @@
               "executePlan",
               "explore",
               "exportPlan",
+              "focusNavigate",
               "getAppPermissions",
               "getDataStore",
               "getDeepLinks",

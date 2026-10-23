@@ -138,6 +138,7 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationTool
       "accessibilityFocus",
       "dragAndDrop",
       "dragPath",
+      "focusNavigate",
       "highlight",
       "homeScreen",
       "multiTouch",

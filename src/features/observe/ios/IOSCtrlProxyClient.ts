@@ -567,9 +567,7 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
     this.bootedDeviceLister = options.bootedDeviceLister ?? defaultBootedDeviceLister;
     this.deviceConnectionLostNotifier =
       options.deviceConnectionLostNotifier ?? observationStreamDeviceConnectionLostNotifier;
-    this.logDemandProbe =
-      options.logDemandProbe ??
-      ((deviceId) => getTelemetryPushServer()?.hasSubscriberForLogTelemetry(deviceId) ?? false);
+    this.logDemandProbe = IOSCtrlProxyClient.resolveLogDemandProbe(options.logDemandProbe);
     // Constructed eagerly (unlike the lazy delegate getters): DefaultIosSdkEventIngestor's
     // constructor only stores these session-bound closures — it does no I/O and does not
     // resolve the telemetry/failure singletons (those resolve per-call), so eager
@@ -582,6 +580,16 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
         captureScreenshot: (timeoutMs: number) => this.requestScreenshot(timeoutMs),
       });
     this.messageEffects = this.createMessageEffects(options.messageEffects);
+  }
+
+  /** A runner log consumer is a live telemetry-push subscriber for this device (#15060). */
+  private static resolveLogDemandProbe(
+    override?: (deviceId: string) => boolean,
+  ): (deviceId: string) => boolean {
+    return (
+      override ??
+      ((deviceId) => getTelemetryPushServer()?.hasSubscriberForLogTelemetry(deviceId) ?? false)
+    );
   }
 
   /** Delegates each effect to this client's own member at call time, so per-instance overrides still apply. */

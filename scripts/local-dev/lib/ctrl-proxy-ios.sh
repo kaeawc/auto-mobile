@@ -20,6 +20,9 @@
 #   stop_ctrl_proxy_ios()       - Stop the running CtrlProxy iOS process
 #   watch_loop()               - Watch for changes and rebuild/restart
 
+# shellcheck source=scripts/lib/spotlight-exclude.sh
+source "${PROJECT_ROOT}/scripts/lib/spotlight-exclude.sh"
+
 # Runtime state
 XCODEBUILD_PID=""
 XCODEBUILD_LOG=""
@@ -130,6 +133,7 @@ run_xcodegen() {
 
 # Build CtrlProxy iOS using xcodebuild build-for-testing
 build_ctrl_proxy_ios() {
+  mkdir_spotlight_excluded "${DERIVED_DATA_PATH}"
   if ! command -v xcodebuild >/dev/null 2>&1; then
     log_error "xcodebuild not found. Install Xcode."
     return 1

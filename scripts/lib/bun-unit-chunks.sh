@@ -30,6 +30,8 @@ parent_is_alive() {
   fi
 }
 root="$1" runner_os="$2" chunk_files="$3" report_dir="$4" shard="$5"
+# shellcheck source=scripts/lib/spotlight-exclude.sh
+source "${root}/scripts/lib/spotlight-exclude.sh"
 shift 5
 # shellcheck source=scripts/lib/bun-unit-test.sh
 source "$root/scripts/lib/bun-unit-test.sh"
@@ -78,7 +80,7 @@ add_group_chunks 0 "$shared_count" 1
 add_group_chunks "$shared_count" "${#files[@]}" 0
 total="${#chunk_offsets[@]}"
 if [[ -n "$coverage_root" ]]; then
-  mkdir -p "$coverage_root"
+  mkdir_spotlight_excluded "$coverage_root"
   printf '%s\n' "$total" > "$coverage_root/shard-${shard}.chunks"
 fi
 

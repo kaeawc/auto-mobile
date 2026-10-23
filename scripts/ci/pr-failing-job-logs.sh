@@ -8,6 +8,10 @@
 # log to scratch/job-<id>.log, and exits non-zero when any check bucket is fail.
 set -uo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib/spotlight-exclude.sh
+source "${SCRIPT_DIR}/../lib/spotlight-exclude.sh"
+
 REPO=kaeawc/auto-mobile
 PR_NUM="${1:-$(gh pr view --json number -q .number 2>/dev/null)}"
 
@@ -114,7 +118,7 @@ if [ -n "$UNSUPPORTED_CHECK_LINKS" ]; then
   printf '%s\n' "$UNSUPPORTED_CHECK_LINKS" | sed 's/^/  /'
 fi
 
-mkdir -p scratch
+mkdir_spotlight_excluded scratch
 for RUN_ID in $RUN_IDS; do
   echo
   echo "=== run ${RUN_ID} — https://github.com/${REPO}/actions/runs/${RUN_ID} ==="

@@ -153,5 +153,5 @@ broker-looking name; only ledger-bound devices are allowed. The separate plain
 persistence test uses the harness's provenance-checked `shutdown-devices` before
 private daemon stop. Destruction/handoff resource samples remain `not-verifiable`
 until a product read-only diagnostic exists; do not turn that limit into PASS.
-See the [broker harness](../../docs/using/manual-test-harness.md) and
+See the [broker harness](../../docs/design-docs/manual-test-harness.md) and
 [broker lifecycle contract](../../docs/design-docs/session-broker-experiment.md).

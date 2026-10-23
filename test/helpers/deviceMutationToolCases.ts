@@ -114,4 +114,4 @@ export const DEVICE_MUTATION_TOOL_CASES: readonly {
 ];
 
 /** Journaled tools that record from their own service path, not from the dispatch boundary. */
-export const SERVICE_RECORDED_TOOLS: readonly string[] = ["stageSessionDownloads"];
+export const SERVICE_RECORDED_TOOLS: readonly string[] = [];

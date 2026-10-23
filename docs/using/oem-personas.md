@@ -1,9 +1,9 @@
 # Manufacturer profiles
 
-The `manufacturerProfile` tool (#14055) approximates an OEM device on a stock Android emulator
+The `manufacturerProfile` tool approximates an OEM device on a stock Android emulator
 or device. A manufacturer profile is a named, versioned bundle of facets. Each facet is applied by an existing tool:
 
-| Facet      | Executor                | What it changes                                               |
+| Facet      | Applied with            | What it changes                                               |
 | ---------- | ----------------------- | ------------------------------------------------------------- |
 | `keyboard` | `keyboard` `setProfile` | The AutoMobile IME's typing behaviour (`gboard`, `samsung`)   |
 | `kill`     | `killProfile`           | Standby bucket, appops, Doze and force-stop for one package   |
@@ -43,11 +43,6 @@ manufacturer profile.
 The catalog has a `catalogVersion`, and each manufacturer profile a `version` that changes whenever one of
 its facets does, so a result names exactly what it applied.
 
-Facets follow the ICSME 2024 taxonomy of OEM compatibility issues
-([arXiv 2408.01810](https://arxiv.org/abs/2408.01810)): every current facet is a
-"Functionality Break" (`functionalityBreak`), a change to how stock behaviour reaches the app.
-"OEM Feature" facets (`oemFeature`), such as vendor intents and settings screens, stay separate.
-
 ## Applying, switching and resetting
 
 - `apply` runs the keyboard, kill and display facets in that order. A manufacturer profile
@@ -59,13 +54,13 @@ Facets follow the ICSME 2024 taxonomy of OEM compatibility issues
   changed, and the keyboard profile that was active before the first change. The display, kill
   and keyboard records are shared with `displayProfile`, `killProfile` and `keyboard`
   `setProfile`, so reset also undoes their direct changes on the device.
-- In a daemon session, release or rebind restores the keyboard, kill and display facets, so the
+- When the session is released or rebound, the device restores the keyboard, kill and display facets, so the
   device's next session does not inherit them. A facet release already restored is not written
   again by a later `reset`.
 
 ## Acquiring a device with a manufacturer profile
 
-`provisionDevice` takes an Android `device.spec.deviceProfile` (#14058):
+`provisionDevice` takes an Android `device.spec.deviceProfile`:
 
 ```ts
 provisionDevice({
@@ -92,11 +87,6 @@ provisionDevice({
   booted.
 - Releasing that session restores everything the profile changed, including the keyboard
   profile, so the device's next session starts from baseline.
-
-A session broker request takes the same selector in its Android device requirement
-(`device.deviceProfile`, see [session requirements](../design-docs/session-requirements.md)).
-The broker applies it to the prepared session's device after the reset baseline is captured,
-so a keep-booted reset returns the device to its pre-profile state.
 
 ## What cannot be emulated
 

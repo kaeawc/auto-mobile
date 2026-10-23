@@ -17,30 +17,10 @@ test pin at SDK 30 and CtrlProxy at SDK 24.
 | Background activity launch via `IntentSender`, `System.load`, Contacts / SMS, content capture | Not affected                                   | No `IntentSender`, `System.load`/`loadLibrary`, `ContactsContract`, Telephony/SMS, `ContentCapture` or `PendingIntent` in playground. `startActivity` is in UI code (`discover/.../ictrace/IcTraceScreen.kt:99`) and in `app/.../navigation/DeepLinkManager.kt:614`, which only the unreferenced `navigateTo*ForTest` helpers (`:461-518`) call; the only receivers are debug-only (`app/src/debug/AndroidManifest.xml:4-19`) and start no activity.                                                                                                                                      |
 | Certificate Transparency / ECH                                                                | Not affected                                   | No `TrustManager`, `SSLContext`, `networkSecurityConfig`, cleartext flag or mock TLS server in playground. OkHttp (`app/.../App.kt:12-25`, `demos/.../NetworkTestScreen.kt:66-76`) talks to public HTTPS hosts with platform trust; mocking is in-process via the SDK interceptor.                                                                                                                                                                                                                                                                                                        |
 
-## Checklist for #12276 (targetSdk 37 bump)
+## Owed to the API 37 lane (#12273)
 
-- [x] Bump `targetSdk` to 37 and `buildTools` to 37.0.0 in #12276; preserve `compileSdk` and Robolectric pins.
-- [x] Decide background playback is unnecessary and pause active audio/video on `ON_STOP`.
-      The pure host-stop seam is covered by fake-player JUnit tests for playing,
-      buffering with play intent, already-paused, idle and uninitialized hosts,
-      including repeated stops. No Robolectric is needed.
-- [ ] After the bump, run the emulator suites on a tablet or foldable profile
-      (smallest width of 600dp or more) and confirm the layouts above still
-      render, since orientation and aspect locks are ignored there (owed: API 37 lane (#12273)).
-- [ ] Re-run the login flow on a device: the direct-API change above makes the
-      success path navigate to Home, which the reflective code could not do.
-      This change is not device-verified (owed: API 37 lane (#12273)).
-- [x] Repeat the non-test source re-grep at bump time (results below).
-- [ ] Verify the playground suites on API 37 and on the existing API levels (owed: API 37 lane (#12273), plus existing-level driver coverage).
+- Emulator suites on a tablet or foldable profile (smallest width 600dp or more), since orientation and aspect locks are ignored there.
+- Re-run the login flow on a device: the direct-API change above makes the success path navigate to Home, which the reflective code could not do.
+- Playground suites on API 37 and the existing API levels.
 
-## Bump-time re-grep (#12276)
-
-Repeated on 2026-10-15 across `android/control-proxy/src/main` and
-`android/playground`, excluding `test`, `androidTest`, `testFixtures` and `build`
-directories: no matches for `IntentSender`, `MODE_BACKGROUND_ACTIVITY_START`,
-`setAccessible`, `MessageQueue`, `System.load`, `ContactsContract` or `TrustManager`.
-The additional Playground SMS/content-capture/TLS terms (`Telephony`, `SmsManager`,
-`ContentCapture`, `SSLContext`, `networkSecurityConfig`) also had no matches.
-`SavedPrototypeActivity` exists on this base in CtrlProxy; its manifest entry has
-no orientation, resizability or aspect-ratio locks (see the CtrlProxy audit).
-Device-only validation remains owed: API 37 lane (#12273).
+The bump-time re-grep (2026-10-15) found no matches for the terms in the CtrlProxy audit, nor for `Telephony`, `SmsManager`, `ContentCapture`, `SSLContext` or `networkSecurityConfig`.

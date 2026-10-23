@@ -1,9 +1,7 @@
 # macOS CI capacity plan (#11010, #11011, #11012)
 
-Status: implemented 2026-10-09; the owner steps below are still open. Owner
-decisions are in issues #11010, #11011 and #11012. The earlier
-[CircleCI migration plan](circleci-macos-migration.md) (#10887) has the sourced
-CircleCI plan numbers.
+Owner steps below are still open. The earlier
+[CircleCI migration plan](circleci-macos-migration.md) (#10887) has the sourced CircleCI plan numbers.
 
 Rule: every pull-request macOS job runs in exactly one place. Hosted
 GitHub `macos-26` is the fallback for fork PRs only.
@@ -100,9 +98,7 @@ rollout switch, the repository variable `AUTOMOBILE_MAC_POOLS_ENABLED`, on every
 self-hosted Mac job (the four that were on the Mac before the pools gained it in
 #11580). Unless it is `true`, those jobs run on hosted `macos-26` /
 `macos-latest`. Without the switch, a job labelled for a pool with no online
-runner queues forever, and its required check with it: on 2026-10-10 no runner
-took a job between 18:25 and 20:02 UTC and one PR's seven Mac jobs waited 19–64
-minutes until they were cancelled (#11580).
+runner queues forever, and its required check with it (#11580).
 
 | Pool                   | Jobs                                                                                                                                       |
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -202,24 +198,24 @@ a 30-minute timeout. On the heavy lane it isolates `HOME` like the other
 self-hosted jobs, but it still starts an AutoMobile daemon and MediaMTX on fixed
 ports, so use that fallback only with the heavy runner under a dedicated user.
 
-## Job → runner, before and after
+## Job → runner
 
-| Job                                                                            | Before (same-repo PR)                        | After (same-repo PR)                       | Fork PR        |
-| ------------------------------------------------------------------------------ | -------------------------------------------- | ------------------------------------------ | -------------- |
-| SwiftLint, Swift Code Coverage                                                 | self-hosted `automobile-mac`                 | self-hosted `automobile-mac`               | `macos-26`     |
-| Build Desktop App / Installer Minimal (macOS)                                  | self-hosted `automobile-mac`                 | self-hosted `automobile-mac`               | `macos-latest` |
-| Swift Packages (Xcode 26.5)                                                    | hosted `macos-26` + CircleCI mirror          | self-hosted `automobile-mac`               | `macos-26`     |
-| Build Root SPM Package                                                         | hosted `macos-26` + CircleCI mirror          | self-hosted `automobile-mac`               | `macos-26`     |
-| Build Xcode Projects (Playground, CtrlProxy)                                   | hosted `macos-26` + CircleCI mirror          | self-hosted `automobile-mac-heavy`         | `macos-26`     |
-| Prototype Simulator iOS 26                                                     | CircleCI                                     | self-hosted `automobile-mac-heavy`         | `macos-26`     |
-| iOS Playground Tests                                                           | CircleCI (GitHub `macos-26` if label-forced) | CircleCI (heavy lane if label-forced)      | CircleCI       |
-| iOS Device Capture to WHEP                                                     | hosted `macos-26` + CircleCI mirror          | Namespace `auto-mobile-macos`              | `macos-26`     |
-| XCTestRunner Simulator Tests (`run-ios-sim`)                                   | hosted `macos-26`                            | hosted `macos-26` (exception, see above)   | `macos-26`     |
-| merge.yml: Build Desktop App (macOS), Generate/Build Xcode Projects            | dormant (`if: false`)                        | CircleCI post-merge, path-gated, coalesced | n/a            |
-| nightly.yml: macOS BATS/Node, Xcode sweeps, TSan, XCTestRunner Simulator Tests | hosted `macos-latest` / `macos-26`           | CircleCI `nightly-macos`                   | n/a            |
+| Job                                                                            | Same-repo PR                               | Fork PR        |
+| ------------------------------------------------------------------------------ | ------------------------------------------ | -------------- |
+| SwiftLint, Swift Code Coverage                                                 | self-hosted `automobile-mac`               | `macos-26`     |
+| Build Desktop App / Installer Minimal (macOS)                                  | self-hosted `automobile-mac`               | `macos-latest` |
+| Swift Packages (Xcode 26.5)                                                    | self-hosted `automobile-mac`               | `macos-26`     |
+| Build Root SPM Package                                                         | self-hosted `automobile-mac`               | `macos-26`     |
+| Build Xcode Projects (Playground, CtrlProxy)                                   | self-hosted `automobile-mac-heavy`         | `macos-26`     |
+| Prototype Simulator iOS 26                                                     | self-hosted `automobile-mac-heavy`         | `macos-26`     |
+| iOS Playground Tests                                                           | CircleCI (heavy lane if label-forced)      | CircleCI       |
+| iOS Device Capture to WHEP                                                     | Namespace `auto-mobile-macos`              | `macos-26`     |
+| XCTestRunner Simulator Tests (`run-ios-sim`)                                   | hosted `macos-26` (exception, see above)   | `macos-26`     |
+| merge.yml: Build Desktop App (macOS), Generate/Build Xcode Projects            | CircleCI post-merge, path-gated, coalesced | n/a            |
+| nightly.yml: macOS BATS/Node, Xcode sweeps, TSan, XCTestRunner Simulator Tests | CircleCI `nightly-macos`                   | n/a            |
 
-The "After" self-hosted and Namespace placements take effect once the owner steps
-below are done; until then the moved jobs run on hosted `macos-26`.
+Self-hosted and Namespace placements take effect once the owner steps below are done; until
+then the moved jobs run on hosted `macos-26`.
 
 ## Owner steps
 
@@ -259,39 +255,16 @@ the Mac as the user that owns `~/actions-runner`:
    ```
 
 3. Add three small-pool runners (the existing `mac` runner, labels
-   `self-hosted,macOS,ARM64,automobile-mac`, stays as the first one):
-
-   ```bash
-   for i in 2 3 4; do
-     dir="$HOME/actions-runner-small-$i"
-     mkdir -p "$dir" && cd "$dir"
-     tar xzf "$HOME/actions-runner/actions-runner-osx-arm64-2.337.0.tar.gz"
-     cp "$HOME/actions-runner/.path" "$HOME/actions-runner/.env" .
-     ./config.sh --unattended --url https://github.com/kaeawc/auto-mobile \
-       --token "$TOKEN" --name "mac-small-$i" --labels automobile-mac --work _work
-     ./svc.sh install && ./svc.sh start
-   done
-   ```
-
-4. Add exactly one heavy runner. It must have the `automobile-mac-heavy` label
-   and must NOT have `automobile-mac`, otherwise small jobs could land on it and
-   overlap a simulator job:
-
-   ```bash
-   dir="$HOME/actions-runner-heavy"
-   mkdir -p "$dir" && cd "$dir"
-   tar xzf "$HOME/actions-runner/actions-runner-osx-arm64-2.337.0.tar.gz"
-   cp "$HOME/actions-runner/.path" "$HOME/actions-runner/.env" .
-   ./config.sh --unattended --url https://github.com/kaeawc/auto-mobile \
-     --token "$TOKEN" --name mac-heavy --labels automobile-mac-heavy --work _work
-   ./svc.sh install && ./svc.sh start
-   ```
-
-   Recommended: install the heavy runner under a dedicated macOS user account
-   instead, so its CoreSimulator device set, `~/Library` and launchd services
-   are separate from the owner's own simulators and AutoMobile daemon. With a
-   dedicated user, log in as that user once so its LaunchAgent can start.
-
+   `self-hosted,macOS,ARM64,automobile-mac`, is the first). For each of `2 3 4`: make
+   `$HOME/actions-runner-small-$i`, extract `$HOME/actions-runner/actions-runner-osx-arm64-<ver>.tar.gz`
+   into it, copy `.path` and `.env` from `$HOME/actions-runner`, then
+   `./config.sh --unattended --url https://github.com/kaeawc/auto-mobile --token "$TOKEN" --name "mac-small-$i" --labels automobile-mac --work _work`
+   and `./svc.sh install && ./svc.sh start`.
+4. Add exactly one heavy runner the same way (`$HOME/actions-runner-heavy`, `--name mac-heavy`,
+   `--labels automobile-mac-heavy`). It must NOT carry `automobile-mac`, or small jobs could
+   land on it and overlap a simulator job. Preferably install it under a dedicated macOS user so
+   its CoreSimulator device set, `~/Library` and launchd services are separate from the owner's
+   simulators and AutoMobile daemon; log in as that user once so its LaunchAgent can start.
 5. Check the pools:
 
    ```bash
@@ -299,8 +272,7 @@ the Mac as the user that owns `~/actions-runner`:
      --jq '.runners[] | [.name, .status, ([.labels[].name] | join(","))] | @tsv'
    ```
 
-   Expect `mac`, `mac-small-2..4` with `automobile-mac`, and `mac-heavy` with
-   `automobile-mac-heavy`, all `online`.
+   Expect `mac`, `mac-small-2..4` (`automobile-mac`) and `mac-heavy` (`automobile-mac-heavy`), all `online`.
 
 6. Turn the routing on: `gh variable set AUTOMOBILE_MAC_POOLS_ENABLED --body true`.
    To fall back to hosted runners, set it to anything else

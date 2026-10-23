@@ -1,3 +1,4 @@
+import type { CleanupReceiptOwner, CleanupReceiptRecorder } from "./sessionCleanupReceipts";
 import type { IosAppNetworkRule } from "../features/networkFilter/IosAppNetworkRuleClient";
 import type { DeviceClockRestoreRegistry } from "../features/utility/DeviceClock";
 import type { BiometricEnrollment, NetworkConditionProfile } from "../features/utility/DeviceState";
@@ -61,6 +62,10 @@ export interface NetworkConditionRestoreTarget {
 
 /** What SessionDeviceStateRestore needs from the session manager that owns it (#11795). */
 export interface SessionDeviceStateRestoreHost {
+  readonly cleanupReceipts: Pick<
+    CleanupReceiptRecorder,
+    "track" | "trackOwner" | "fail" | "failOwner" | "invalidate" | "invalidateDevice"
+  >;
   readonly timer: Timer;
   /** Run one restore under the release teardown's identity-replacement fences. */
   dispatchDeviceRestore(
@@ -72,6 +77,7 @@ export interface SessionDeviceStateRestoreHost {
     ) => Promise<void>,
     generation?: number,
     teardownStep?: number,
+    receiptOwner?: CleanupReceiptOwner,
   ): Promise<void>;
   /** The device's replaced-restore generation; a changed value supersedes a captured restore. */
   restoreGeneration(deviceId: string): number;
@@ -98,7 +104,7 @@ export interface SessionDeviceStateRestoreHost {
   waitForIdentityReplacement(deviceId: string, generation: number): Promise<boolean>;
   /** Record an exhausted restore as a health marker and start background recovery. */
   abandonRestore(
-    target: { deviceId: string; incarnation?: number },
+    target: { sessionId: string; deviceId: string; incarnation?: number },
     reason: Exclude<DeviceHealthReason, "clock">,
     restore: () => Promise<void>,
     restoreTimeoutMs?: number,

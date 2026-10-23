@@ -1,3 +1,4 @@
+import { SessionCleanupReceipts } from "../../src/daemon/sessionCleanupReceipts";
 import { beforeEach, describe, expect, spyOn, test, afterEach, mock } from "bun:test";
 import {
   SessionDeviceStateRestore,
@@ -49,6 +50,7 @@ const makeSession = (sessionId: string): Session => ({
 });
 
 class FakeHost implements SessionDeviceStateRestoreHost {
+  readonly cleanupReceipts = new SessionCleanupReceipts();
   /** Published sessions; `publishAll` treats every session as published. */
   published = new Set<Session>();
   publishAll = false;

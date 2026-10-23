@@ -1,3 +1,4 @@
+import { SessionCleanupReceipts } from "../../src/daemon/sessionCleanupReceipts";
 import { expect, test } from "bun:test";
 import { DeviceCleanupQuarantine } from "../../src/daemon/deviceCleanupQuarantine";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -8,6 +9,7 @@ const DEFAULT_HINT = 1_000;
 function create(owned = new Set<string>()) {
   const timer = new FakeTimer();
   const quarantine = new DeviceCleanupQuarantine({
+    cleanupReceipts: new SessionCleanupReceipts(),
     timer,
     now: () => timer.now(),
     hasOwner: (deviceId) => owned.has(deviceId),

@@ -1,3 +1,4 @@
+import { SessionCleanupReceipts, type CleanupReceiptOwner } from "./sessionCleanupReceipts";
 import type { Session } from "./sessionManager/sessionTypes";
 
 import type * as Types from "./sessionManager/publicExports";
@@ -46,6 +47,7 @@ import type * as Reasserts from "./supersededRowReasserts";
 import { type TerminalReleaseJournal } from "./terminalReleaseJournal";
 
 export class SessionManager extends SessionManagerForwarders {
+  readonly cleanupReceipts = new SessionCleanupReceipts();
   protected readonly forwardersHost = this.createForwardersHost();
   private createForwardersHost(): SessionManagerForwardersHost {
     const manager = this;
@@ -271,6 +273,7 @@ export class SessionManager extends SessionManagerForwarders {
 
   private createCollaboratorHost(): SessionManagerWiring {
     const dependencies = {
+      cleanupReceipts: () => this.cleanupReceipts,
       stateRestore: () => this.stateRestore,
       timer: () => this.timer,
       acceptingSessionCreations: () => this.acceptingSessionCreations,
@@ -539,12 +542,14 @@ export class SessionManager extends SessionManagerForwarders {
     ) => Promise<void>,
     generation = this.replacedRestoreGenerations.get(deviceId) ?? 0,
     teardownStep?: number,
+    receiptOwner?: CleanupReceiptOwner,
   ): Promise<void> {
-    return this.wiring.recoveryPublication.dispatchDeviceRestore(
+    return this.wiring.recoveryPublication.dispatchDeviceRestoreWithReceipt(
       deviceId,
       restore,
       generation,
       teardownStep,
+      receiptOwner,
     );
   }
 
@@ -564,7 +569,7 @@ export class SessionManager extends SessionManagerForwarders {
   }
 
   private abandonRestore(
-    target: { deviceId: string; incarnation?: number },
+    target: { sessionId: string; deviceId: string; incarnation?: number },
     reason: Exclude<DeviceHealthReason, "clock">,
     restore: () => Promise<void>,
     restoreTimeoutMs: number = budgets.NETWORK_CONDITION_RESTORE_TIMEOUT_MS,
@@ -678,6 +683,7 @@ export class SessionManager extends SessionManagerForwarders {
    * owner, so no teardown may touch it. The force itself persists the fence it raised (#11058).
    */
   private async finishReleaseForcedBeforeStart(session: Session): Promise<null> {
+    this.cleanupReceipts.invalidate(session.sessionId, "release_forced");
     this.sessionSlots.unmarkReleasing(session);
     return null;
   }
@@ -867,15 +873,7 @@ export class SessionManager extends SessionManagerForwarders {
    * No retries may target a replacement device.
    */
   retireRestorations(deviceId: string, cause: "removal" | "incarnation-bump"): void {
-    for (const queue of [
-      this.stateRestore.clockRestores,
-      this.stateRestore.rotationRestores,
-      this.stateRestore.screenReaderRestores,
-    ]) {
-      if (cause === "removal" || queue.policy.retiredOnIncarnationBump) {
-        queue.retire(deviceId);
-      }
-    }
+    this.stateRestore.retireRestorations(deviceId, cause, this.deviceSessionMap.get(deviceId));
   }
 
   private trackPendingDeviceCleanup(deviceId: string, cleanups: readonly Promise<unknown>[]): void {

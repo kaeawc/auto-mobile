@@ -1,3 +1,4 @@
+import type { CleanupReceiptRecorder } from "../sessionCleanupReceipts";
 import {
   type DeviceSessionPersistence,
   type MarkReleasedOptions,
@@ -40,6 +41,8 @@ import type { ReleaseSessionInternalRequest } from "./releaseCommit";
 import { classifyOwnedRelease, classifyUnpublishedRelease } from "./releaseTarget";
 
 export interface SessionReleaseRequestsHost {
+  readonly cleanupReceipts: Pick<CleanupReceiptRecorder, "begin" | "finish" | "fail">;
+  readonly activeSessionExecutionChecker: ((sessionId: string) => boolean) | undefined;
   readonly recoveryExpiryReleaseHandler: RecoveryExpiryReleaseHandler | undefined;
   readonly sessionSlots: Pick<
     SessionLifecycleSlots,
@@ -219,6 +222,10 @@ export class SessionReleaseRequests {
 
     const hold = this.host.releaseDeviceHold?.(sessionId);
     this.host.sessionSlots.markReleasing(session);
+    this.host.cleanupReceipts.begin(session, {
+      executionsJoined: !this.host.activeSessionExecutionChecker?.(sessionId),
+      terminal: isTerminalReleaseReason(releaseReason),
+    });
     this.host.slotShadowProbe.check(sessionId, "release-start");
     const pendingRebind = this.host.sessionSlots.getRebind(sessionId);
     const reason = this.host.createReleaseReasonState(sessionId, releaseReason);
@@ -252,7 +259,13 @@ export class SessionReleaseRequests {
       release.promise = this.startReleaseWithDeviceHold(release, hold, pendingRebind, run);
       this.host.sessionSlots.setReleaseOp(sessionId, release);
       this.host.sessionSlots.addActiveRelease(release);
-      return await release.promise;
+      const deviceId = await release.promise;
+      this.host.cleanupReceipts.finish(session, deviceId);
+      return deviceId;
+    } catch (error) {
+      this.host.cleanupReceipts.fail(sessionId, "release_failed");
+      this.host.cleanupReceipts.finish(session, null);
+      throw error;
     } finally {
       this.host.finishIdentityReplacedRelease(release);
       this.host.sessionSlots.deleteActiveRelease(release);

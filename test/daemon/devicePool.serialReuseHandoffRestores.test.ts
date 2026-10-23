@@ -1404,7 +1404,7 @@ for (const reason of ["keep-screen-awake", "biometric-enrollment", "network-cond
           fixedBackoff(250),
         );
         h.sessions.testHooks.wiring.restoreHealth.abandonRestore(
-          { deviceId: original.deviceId, incarnation: 1 },
+          { sessionId: h.holder.sessionId, deviceId: original.deviceId, incarnation: 1 },
           reason,
           async () => {
             h.restores.push(`${reason}:${original.deviceId}`);

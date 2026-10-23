@@ -1,3 +1,4 @@
+import type { CleanupReceiptOwner, CleanupReceiptRecorder } from "../sessionCleanupReceipts";
 import { runWithAbortSignal } from "../../utils/AbortContext";
 import { exponentialBackoff, type BackoffPolicy } from "../../utils/Backoff";
 import { logger } from "../../utils/logger";
@@ -19,6 +20,11 @@ import {
 import { releaseSuperseded } from "./internalContracts";
 
 export interface DeviceRestoreHealthHost {
+  readonly cleanupReceipts: Pick<
+    CleanupReceiptRecorder,
+    "failOwner" | "failDevice" | "trackOwner" | "trackDevice"
+  >;
+  getSessionForDevice(deviceId: string): string | null;
   readonly stateRestore: Pick<SessionDeviceStateRestore, "clockRestores">;
   readonly timer: Timer;
   readonly acceptingSessionCreations: boolean;
@@ -31,6 +37,7 @@ export interface DeviceRestoreHealthHost {
     ) => Promise<void>,
     generation?: number,
     teardownStep?: number,
+    receiptOwner?: CleanupReceiptOwner,
   ): Promise<void>;
 }
 
@@ -207,8 +214,16 @@ export class DeviceRestoreHealth {
     retry: () => Promise<void>,
     retryTimeoutMs: number,
     retryKey?: string,
+    sessionId?: string,
   ): void {
-    this.markDeviceNeedsKeyedRecovery(deviceId, retry, retryTimeoutMs, retryKey, "app-cleanup");
+    this.markDeviceNeedsKeyedRecovery(
+      deviceId,
+      retry,
+      retryTimeoutMs,
+      retryKey,
+      "app-cleanup",
+      sessionId ?? this.host.getSessionForDevice(deviceId) ?? undefined,
+    );
   }
 
   /** Recorder teardown was unconfirmed; quarantine synchronously before release settles. */
@@ -217,6 +232,7 @@ export class DeviceRestoreHealth {
     retry: () => Promise<void>,
     retryTimeoutMs: number,
     retryKey?: string,
+    sessionId?: string,
   ): () => void {
     return this.markDeviceNeedsKeyedRecovery(
       deviceId,
@@ -224,6 +240,7 @@ export class DeviceRestoreHealth {
       retryTimeoutMs,
       retryKey,
       "recording-teardown",
+      sessionId ?? this.host.getSessionForDevice(deviceId) ?? undefined,
     );
   }
 
@@ -233,7 +250,16 @@ export class DeviceRestoreHealth {
     retryTimeoutMs: number,
     retryKey: string | undefined,
     reason: "recording-teardown" | "app-cleanup",
+    sessionId?: string,
   ): () => void {
+    // Entry points capture the current owner once, including active sessions before plan release.
+    // Truly unowned startup work must never attach to a later owner during recovery.
+    const target = { deviceId, sessionId };
+    this.host.cleanupReceipts.failOwner(target, `restoration_abandoned:${reason}`);
+    if (sessionId === undefined) {
+      // Release callbacks can run after unmapping; retain their releasing receipt evidence.
+      this.host.cleanupReceipts.failDevice(deviceId, `restoration_abandoned:${reason}`);
+    }
     this.pruneRecorderTeardownRetries();
     const health = this.deviceHealth;
     const incarnation = health?.incarnation(deviceId);
@@ -243,11 +269,11 @@ export class DeviceRestoreHealth {
       );
       return () => {};
     }
-    const target = { deviceId, incarnation };
+    const recoveryTarget = { ...target, incarnation };
     const key = `${deviceId}#${incarnation}:${reason}`;
     const retries =
       this.recorderTeardownRetries.get(key)?.retries ?? new RecorderTeardownRetries(reason);
-    this.recorderTeardownRetries.set(key, { ...target, reason, retries });
+    this.recorderTeardownRetries.set(key, { ...recoveryTarget, reason, retries });
     const remove = retries.add(retry, retryTimeoutMs, retryKey);
     const recheck = this.recorderTeardownRechecks.get(key);
     if (recheck !== undefined) {
@@ -257,12 +283,17 @@ export class DeviceRestoreHealth {
     health.markers.mark(deviceId, incarnation, reason);
     this.healthRecoveryDeadlines.set(key, undefined);
     if (!this.healthRecoveries.has(key)) {
-      this.startRecorderTeardownRecovery(target, retries, reason);
+      this.startRecorderTeardownRecovery(recoveryTarget, retries, reason);
+    } else {
+      this.host.cleanupReceipts.trackOwner(target, this.healthRecoveries.get(key)!);
+    }
+    if (sessionId === undefined) {
+      this.host.cleanupReceipts.trackDevice(deviceId, this.healthRecoveries.get(key)!);
     }
     return () => {
       remove();
       if (retries.empty && this.recorderTeardownRetries.get(key)?.retries === retries) {
-        this.clearRestoreHealth(target, reason);
+        this.clearRestoreHealth(recoveryTarget, reason);
         this.pruneRecorderTeardownRetries();
         this.healthRecoveries.delete(key);
         this.healthRecoveryDeadlines.delete(key);
@@ -271,7 +302,7 @@ export class DeviceRestoreHealth {
   }
 
   private startRecorderTeardownRecovery(
-    target: { deviceId: string; incarnation: number },
+    target: { deviceId: string; incarnation: number; sessionId?: string },
     retries: RecorderTeardownRetries,
     reason: "recording-teardown" | "app-cleanup",
   ): void {
@@ -304,6 +335,8 @@ export class DeviceRestoreHealth {
     ).then((revision) => {
       completedRevision = revision;
     });
+    // Owner-less startup recovery must never attach to a later session on this device.
+    this.host.cleanupReceipts.trackOwner(target, recovery);
     this.healthRecoveries.set(key, recovery);
     void recovery
       .catch((error: unknown) => {
@@ -401,11 +434,12 @@ export class DeviceRestoreHealth {
    * restore against a live owner (including a TTL's owner) or a replacement.
    */
   abandonRestore(
-    target: { deviceId: string; incarnation?: number },
+    target: { sessionId: string; deviceId: string; incarnation?: number },
     reason: Exclude<DeviceHealthReason, "clock">,
     restore: () => Promise<void>,
     restoreTimeoutMs: number = NETWORK_CONDITION_RESTORE_TIMEOUT_MS,
   ): void {
+    this.host.cleanupReceipts.failOwner(target, `restoration_abandoned:${reason}`);
     const health = this.deviceHealth;
     if (target.incarnation === undefined) {
       logger.warn(
@@ -499,6 +533,7 @@ export class DeviceRestoreHealth {
         attempt++;
       }
     });
+    this.host.cleanupReceipts.trackOwner(target, recovery);
     this.healthRecoveries.set(key, recovery);
     void recovery
       .catch((error: unknown) => {

@@ -1,3 +1,4 @@
+import type { DeviceCleanupQuarantineHost } from "../deviceCleanupQuarantine";
 import type { SessionAcquisitionHost } from "./acquisition";
 import type { SessionActivityClocksHost } from "./activityClocks";
 import type { SessionActivityPersistenceHost } from "./activityPersistence";
@@ -22,7 +23,8 @@ import type { DeviceRestoreHealthHost } from "./restoreHealth";
 import type { SupersededSessionRowsHost } from "./supersededRows";
 
 /** Capabilities wired once; every collaborator receives only its own narrow host view. */
-export type SessionManagerCollaboratorHost = DeviceRestoreHealthHost &
+export type SessionManagerCollaboratorHost = Pick<DeviceCleanupQuarantineHost, "cleanupReceipts"> &
+  DeviceRestoreHealthHost &
   PersistedSessionAdmissionHost &
   SessionRecoveryHost &
   SessionRehydrationHost &

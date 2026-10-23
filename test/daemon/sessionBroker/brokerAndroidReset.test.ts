@@ -60,188 +60,214 @@ function config(requestId: string): SessionConfig {
   };
 }
 
+async function buildHarness() {
+  const state = {
+    configured: true,
+    current: true,
+    creates: 0,
+    transportId: ANDROID_RESET_DEVICE.deviceId,
+    deviceName: ANDROID_RESET_DEVICE.name,
+  };
+  const timer = new FakeTimer();
+  const registry = await openSqliteBindingRegistry({
+    dbPath: ":memory:",
+    isExecOwnerLive: () => false,
+    timer,
+  });
+  const scope = await registry.ensureScope(SCOPE);
+  if (scope.kind !== "ready") {
+    throw new Error("Missing scope");
+  }
+  const scopeKey = scope.scope.scopeKey;
+  const store = registry.sessionBrokerStore(scopeKey, new CountingIdGenerator("resource"));
+  const host = new FakeAndroidResetHost();
+  host.timer = timer;
+  const tracker = new ExecutionTracker(timer, new CountingIdGenerator("execution"));
+  host.watchSession = (sessionId: string) => watchAndroidResetSession(tracker, sessionId);
+  host.strategy = {
+    reset: async (_device, _packages, assertOwned) => {
+      await assertOwned();
+      return { outcome: "clean", mode: "none", phases: {} };
+    },
+  };
+  const reset = new AndroidBaselineReset(host);
+  const inventory = new FakeInventory();
+  inventory.devices = [...host.devices];
+  const deleter = new FakeDeleter(inventory);
+  const journal = new BindingJournal({
+    registry,
+    inventory,
+    matcher: new FakeMatcher(),
+    deleter,
+    claims: new FakeClaims(),
+    timer,
+    owner: OWNER,
+    isOwnerLive: () => false,
+    isExecOwnerLive: () => false,
+  });
+  const sessionIds = new CountingIdGenerator("session");
+  const port = new ManagedDevicePort({
+    scope: SCOPE,
+    timer,
+    registry,
+    bindingJournal: journal,
+    resetBaseline: {
+      get android() {
+        return state.configured ? reset : undefined;
+      },
+    },
+    isCurrentReset: async (resource) => {
+      const stored = await store.getResource(resource.resourceId);
+      return (
+        state.current && stored?.state === "resetting" && stored.revision === resource.revision
+      );
+    },
+    brokerDeviceAcquisition: {
+      acquire: async (request) => {
+        const spec = request.requests[0]!;
+        const key = { scopeKey, bindingIndex: spec.bindingIndex };
+        await registry.initBinding(key, {
+          platform: "android",
+          role: spec.role,
+          requestedSpec: spec.requestedSpec,
+        });
+        let assignment = (await registry.getAssignment(key))!;
+        if (!assignment.stableDeviceId) {
+          state.creates++;
+          const result = await registry.commitBinding(key, assignment, {
+            stableDeviceId: ANDROID_RESET_DEVICE.name,
+            deviceName: state.deviceName,
+            resolvedSpec: spec.requestedSpec,
+            specFingerprint: "android-profile",
+            state: "ready",
+          });
+          if (result.kind !== "committed") {
+            throw new Error("Binding failed");
+          }
+          assignment = result.assignment;
+        }
+        const sessionId = sessionIds.next();
+        const claimed = await registry.claimExecution(key, assignment, {
+          ...OWNER,
+          sessionUuid: sessionId,
+        });
+        if (claimed.kind !== "claimed") {
+          throw new Error("Claim failed");
+        }
+        return {
+          contractVersion: 1,
+          scope: { ...SCOPE, scopeKey },
+          outcome: "ready",
+          bindings: [
+            {
+              bindingIndex: spec.bindingIndex,
+              role: spec.role,
+              platform: "android",
+              assignmentGeneration: assignment.generation,
+              device: {
+                stableId: ANDROID_RESET_DEVICE.name,
+                transportId: state.transportId,
+                name: state.deviceName,
+              },
+              sessionUuid: sessionId,
+              requestedSpec: spec.requestedSpec,
+              resolvedSpec: spec.requestedSpec,
+              specFingerprint: { version: 1, hash: "android-profile" },
+              disposition: "created",
+              readiness: { mode: "automation", status: "automation_ready" },
+              lifecycle: {},
+            },
+          ],
+        };
+      },
+    },
+    brokerExecutionRelease: {
+      releaseExecution: async (sessionId) => {
+        for (const assignment of await registry.findExecutionAssignments(sessionId)) {
+          const marked = await registry.updateBindingState(assignment, assignment, "settling", {
+            settler: OWNER,
+          });
+          if (marked.kind !== "updated") {
+            throw new Error("Release mark failed");
+          }
+          expect(marked.assignment.generation).toBe(assignment.generation + 1);
+          await registry.releaseExecution(assignment, sessionId);
+          const restored = await registry.updateBindingState(
+            assignment,
+            marked.assignment,
+            "ready",
+          );
+          if (restored.kind !== "updated") {
+            throw new Error("Release settlement failed");
+          }
+        }
+        return {
+          sessionId,
+          outcome: "reusable_for_this_binding",
+          settlement: "confirmed",
+          alreadyReleased: false,
+          cancellationRequested: 0,
+          releaseForced: false,
+          device: ANDROID_RESET_DEVICE.deviceId,
+          bindings: [],
+          bindingFailures: [],
+        };
+      },
+    },
+  });
+  const options: SessionBrokerOptions = {
+    store,
+    timer,
+    devices: port,
+    owner: OWNER,
+    limits: { totalDeviceCap: 1, sessionCap: 1, idlePoolCap: 1 },
+    catalog: async () => androidCatalog(),
+    defaults: () => androidDefaults(),
+    reuseCleanDevices: true,
+    reuseAndroidCleanDevices: true,
+  };
+  const broker = new SessionBroker(options);
+  return { state, timer, registry, host, tracker, deleter, options, broker };
+}
+
 describe("Android broker reset dispatch and recovery", () => {
   let registry: SqliteBindingRegistry;
   let broker: SessionBroker;
   let options: SessionBrokerOptions;
   let host: FakeAndroidResetHost;
   let deleter: FakeDeleter;
-  let configured = true;
-  let current = true;
-  let creates: number;
+  let harness: Awaited<ReturnType<typeof buildHarness>>;
   let timer: FakeTimer;
   let tracker: ExecutionTracker;
-  let transportId: string;
-  let deviceName: string;
 
   beforeAll(async () => {
-    const warm = await openSqliteBindingRegistry({ dbPath: ":memory:" });
-    await warm.close();
+    // Warm the real broker/reset/SQLite path outside the per-test timing budget.
+    // This harness owns all its state; beforeEach builds a fresh one for every test.
+    const warm = await buildHarness();
+    const { adb } = androidBaselineRig();
+    warm.host.strategy = new AndroidKeepBootedReset({
+      journal: new FakeDeviceMutationJournal(warm.timer),
+      port: () => new AndroidDeviceMutationResetPort(adb, warm.timer),
+      timer: warm.timer,
+    });
+    try {
+      const result = await warm.broker.prepare(config("warm-up"), "owner-token");
+      if (result.outcome !== "ready" || !result.sessionUuid) {
+        throw new Error(JSON.stringify(result));
+      }
+      expect(await warm.broker.release(result.sessionUuid)).toMatchObject({
+        outcome: "released",
+        timing: { reset: { outcome: "clean", mode: "keep-booted" } },
+      });
+    } finally {
+      await warm.broker.close();
+      await warm.registry.close();
+    }
   });
 
   beforeEach(async () => {
-    configured = true;
-    current = true;
-    creates = 0;
-    transportId = ANDROID_RESET_DEVICE.deviceId;
-    deviceName = ANDROID_RESET_DEVICE.name;
-    timer = new FakeTimer();
-    registry = await openSqliteBindingRegistry({
-      dbPath: ":memory:",
-      isExecOwnerLive: () => false,
-      timer,
-    });
-    const scope = await registry.ensureScope(SCOPE);
-    if (scope.kind !== "ready") {
-      throw new Error("Missing scope");
-    }
-    const scopeKey = scope.scope.scopeKey;
-    const store = registry.sessionBrokerStore(scopeKey, new CountingIdGenerator("resource"));
-    host = new FakeAndroidResetHost();
-    host.timer = timer;
-    tracker = new ExecutionTracker(timer, new CountingIdGenerator("execution"));
-    host.watchSession = (sessionId: string) => watchAndroidResetSession(tracker, sessionId);
-    host.strategy = {
-      reset: async (_device, _packages, assertOwned) => {
-        await assertOwned();
-        return { outcome: "clean", mode: "none", phases: {} };
-      },
-    };
-    const reset = new AndroidBaselineReset(host);
-    const inventory = new FakeInventory();
-    inventory.devices = [...host.devices];
-    deleter = new FakeDeleter(inventory);
-    const journal = new BindingJournal({
-      registry,
-      inventory,
-      matcher: new FakeMatcher(),
-      deleter,
-      claims: new FakeClaims(),
-      timer,
-      owner: OWNER,
-      isOwnerLive: () => false,
-      isExecOwnerLive: () => false,
-    });
-    const sessionIds = new CountingIdGenerator("session");
-    const port = new ManagedDevicePort({
-      scope: SCOPE,
-      timer,
-      registry,
-      bindingJournal: journal,
-      resetBaseline: {
-        get android() {
-          return configured ? reset : undefined;
-        },
-      },
-      isCurrentReset: async (resource) => {
-        const stored = await store.getResource(resource.resourceId);
-        return current && stored?.state === "resetting" && stored.revision === resource.revision;
-      },
-      brokerDeviceAcquisition: {
-        acquire: async (request) => {
-          const spec = request.requests[0]!;
-          const key = { scopeKey, bindingIndex: spec.bindingIndex };
-          await registry.initBinding(key, {
-            platform: "android",
-            role: spec.role,
-            requestedSpec: spec.requestedSpec,
-          });
-          let assignment = (await registry.getAssignment(key))!;
-          if (!assignment.stableDeviceId) {
-            creates++;
-            const result = await registry.commitBinding(key, assignment, {
-              stableDeviceId: ANDROID_RESET_DEVICE.name,
-              deviceName,
-              resolvedSpec: spec.requestedSpec,
-              specFingerprint: "android-profile",
-              state: "ready",
-            });
-            if (result.kind !== "committed") {
-              throw new Error("Binding failed");
-            }
-            assignment = result.assignment;
-          }
-          const sessionId = sessionIds.next();
-          const claimed = await registry.claimExecution(key, assignment, {
-            ...OWNER,
-            sessionUuid: sessionId,
-          });
-          if (claimed.kind !== "claimed") {
-            throw new Error("Claim failed");
-          }
-          return {
-            contractVersion: 1,
-            scope: { ...SCOPE, scopeKey },
-            outcome: "ready",
-            bindings: [
-              {
-                bindingIndex: spec.bindingIndex,
-                role: spec.role,
-                platform: "android",
-                assignmentGeneration: assignment.generation,
-                device: {
-                  stableId: ANDROID_RESET_DEVICE.name,
-                  transportId,
-                  name: deviceName,
-                },
-                sessionUuid: sessionId,
-                requestedSpec: spec.requestedSpec,
-                resolvedSpec: spec.requestedSpec,
-                specFingerprint: { version: 1, hash: "android-profile" },
-                disposition: "created",
-                readiness: { mode: "automation", status: "automation_ready" },
-                lifecycle: {},
-              },
-            ],
-          };
-        },
-      },
-      brokerExecutionRelease: {
-        releaseExecution: async (sessionId) => {
-          for (const assignment of await registry.findExecutionAssignments(sessionId)) {
-            const marked = await registry.updateBindingState(assignment, assignment, "settling", {
-              settler: OWNER,
-            });
-            if (marked.kind !== "updated") {
-              throw new Error("Release mark failed");
-            }
-            expect(marked.assignment.generation).toBe(assignment.generation + 1);
-            await registry.releaseExecution(assignment, sessionId);
-            const restored = await registry.updateBindingState(
-              assignment,
-              marked.assignment,
-              "ready",
-            );
-            if (restored.kind !== "updated") {
-              throw new Error("Release settlement failed");
-            }
-          }
-          return {
-            sessionId,
-            outcome: "reusable_for_this_binding",
-            settlement: "confirmed",
-            alreadyReleased: false,
-            cancellationRequested: 0,
-            releaseForced: false,
-            device: ANDROID_RESET_DEVICE.deviceId,
-            bindings: [],
-            bindingFailures: [],
-          };
-        },
-      },
-    });
-    options = {
-      store,
-      timer,
-      devices: port,
-      owner: OWNER,
-      limits: { totalDeviceCap: 1, sessionCap: 1, idlePoolCap: 1 },
-      catalog: async () => androidCatalog(),
-      defaults: () => androidDefaults(),
-      reuseCleanDevices: true,
-      reuseAndroidCleanDevices: true,
-    };
-    broker = new SessionBroker(options);
+    harness = await buildHarness();
+    ({ timer, registry, host, tracker, deleter, options, broker } = harness);
   });
 
   afterEach(async () => {
@@ -263,11 +289,11 @@ describe("Android broker reset dispatch and recovery", () => {
     expect(await broker.release(first)).toMatchObject({ outcome: "released" });
     expect((await options.store.listResources())[0]!.state).toBe("idle");
     expect(await ready("second")).not.toBe(first);
-    expect(creates).toBe(1);
+    expect(harness.state.creates).toBe(1);
     expect(deleter.calls).toHaveLength(0);
   });
 
-  test("production keep-booted cleaner publishes idle and reuses despite incomplete certification", async () => {
+  test("production keep-booted cleaner publishes idle with clean timing and clears clipboard", async () => {
     const { adb } = androidBaselineRig();
     host.strategy = new AndroidKeepBootedReset({
       journal: new FakeDeviceMutationJournal(timer),
@@ -286,6 +312,18 @@ describe("Android broker reset dispatch and recovery", () => {
       },
     });
     expect((await options.store.listResources())[0]!.state).toBe("idle");
+    expect(adb.getExecutedCommands()).toContain("shell cmd clipboard clear");
+  });
+
+  test("production keep-booted cleaner reuses despite incomplete certification", async () => {
+    const { adb } = androidBaselineRig();
+    host.strategy = new AndroidKeepBootedReset({
+      journal: new FakeDeviceMutationJournal(timer),
+      port: () => new AndroidDeviceMutationResetPort(adb, timer),
+      timer,
+    });
+    const first = await ready();
+    await broker.release(first);
     const second = await ready("second");
     expect(second).not.toBe(first);
     expect(await broker.release(second)).toMatchObject({
@@ -293,9 +331,8 @@ describe("Android broker reset dispatch and recovery", () => {
       timing: { reset: { outcome: "clean", mode: "keep-booted" } },
     });
     expect((await options.store.listResources())[0]!.state).toBe("idle");
-    expect(creates).toBe(1);
+    expect(harness.state.creates).toBe(1);
     expect(deleter.calls).toHaveLength(0);
-    expect(adb.getExecutedCommands()).toContain("shell cmd clipboard clear");
   });
 
   test("rebooting a retained AVD invalidates the original baseline even with the same serial and name", async () => {
@@ -366,7 +403,7 @@ describe("Android broker reset dispatch and recovery", () => {
         outcome: "ready",
         timing: { acquisition: { admission: "reuse", reuseCount: 1, createMs: 0, bootMs: 0 } },
       });
-      expect(creates).toBe(1);
+      expect(harness.state.creates).toBe(1);
     },
   );
 
@@ -410,8 +447,8 @@ describe("Android broker reset dispatch and recovery", () => {
   });
 
   test("serial-like acquired name reports the avdName identity mismatch", async () => {
-    deviceName = "emulator-5554";
-    host.devices[0]!.name = deviceName;
+    harness.state.deviceName = "emulator-5554";
+    host.devices[0]!.name = harness.state.deviceName;
     const session = await ready();
     const receipt = await broker.release(session);
     expect(receipt.outcome).toBe("released");
@@ -493,7 +530,7 @@ describe("Android broker reset dispatch and recovery", () => {
     expect((await options.store.listResources())[0]!.state).toBe(
       scenario.destroyed ? "destroyed" : "idle",
     );
-    expect(creates).toBe(1);
+    expect(harness.state.creates).toBe(1);
     expect(deleter.calls).toHaveLength(scenario.destroyed ? 1 : 0);
     if (cfg.androidResetMode === undefined) {
       expect(receipt.timing?.reset?.fallbackReason).toBe(
@@ -608,10 +645,10 @@ describe("Android broker reset dispatch and recovery", () => {
     "pm-timeout",
   ])("%s capture failure preserves acquisition and destroys on release", async (failure) => {
     if (failure === "missing-transport") {
-      transportId = "";
+      harness.state.transportId = "";
     }
     if (failure === "adb-connect") {
-      transportId = "127.0.0.1:5555";
+      harness.state.transportId = "127.0.0.1:5555";
     }
     if (failure === "boot") {
       host.booted = false;
@@ -651,11 +688,11 @@ describe("Android broker reset dispatch and recovery", () => {
     "post-health-ownership",
   ])("%s reset failure destroys rather than pooling the Android emulator", async (failure) => {
     if (failure === "unconfigured") {
-      configured = false;
+      harness.state.configured = false;
     }
     const session = await ready();
     if (failure === "ownership") {
-      current = false;
+      harness.state.current = false;
     }
     if (failure === "serial") {
       host.devices[0]!.deviceId = "emulator-5556";
@@ -687,7 +724,7 @@ describe("Android broker reset dispatch and recovery", () => {
     }
     if (failure === "post-health-ownership") {
       host.onHealth = () => {
-        current = false;
+        harness.state.current = false;
       };
     }
     expect(await broker.release(session)).toMatchObject({ outcome: "released" });

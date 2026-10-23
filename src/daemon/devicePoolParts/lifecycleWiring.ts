@@ -202,6 +202,7 @@ export class DevicePoolLifecycleWiring {
   }
 
   registerSessionReleaseHandlers(): void {
+    this.state.sessionManager.cleanupReceipts.setGeneration(this.state.daemonSessionId);
     this.state.sessionManager.setRecoveryExpiryReleaseHandler({
       release: (sessionId, reason, attempt, options) => {
         const recoveryRelease = this.state.recoveryCoordinator.releaseFailedRecoveryOnExpiry(

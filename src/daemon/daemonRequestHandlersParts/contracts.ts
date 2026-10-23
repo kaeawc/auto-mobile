@@ -59,7 +59,9 @@ export interface DaemonStateAccess {
   getObserverSessionRegistry?(): ObserverSessionStore | undefined;
   /** Socket sessions bound to broker bindings (#11178). */
   getBrokerConnectionScopes?(): Pick<BrokerConnectionScopes, "bind" | "get" | "unbind">;
-  getSessionManager(): Partial<Pick<SessionManager, "getKeepAwakeRestoreReport">> & {
+  getSessionManager(): Partial<
+    Pick<SessionManager, "getKeepAwakeRestoreReport" | "cleanupReceipts">
+  > & {
     hasSession(sessionId: string): boolean;
     getSession(sessionId: string): Session | null;
     /** Admission/liveness judgement; never starts lazy release. */

@@ -1,3 +1,4 @@
+import type { CleanupReceiptRecorder } from "../sessionCleanupReceipts";
 import { isDeviceRestartReleaseReason } from "../../db/deviceSessionRepository";
 import type { DeviceSession } from "../../db/types";
 import { SessionReleasedDuringCreationError } from "../../models/deviceAcquisitionRefusals";
@@ -15,6 +16,7 @@ import {
 } from "../sessionManager";
 
 export interface SessionCallbacksHost {
+  readonly cleanupReceipts: Pick<CleanupReceiptRecorder, "fail">;
   readonly releaseCallbacks: SessionReleaseCallback[];
   readonly deviceOwnershipCallbacks: Set<
     (deviceId: string, frameInvalidation: "generation-only" | "full") => void
@@ -134,6 +136,7 @@ export class SessionCallbacks {
       try {
         callback(snapshot.sessionId, snapshot.deviceId, snapshot.releaseReason, snapshot, options);
       } catch (error) {
+        this.host.cleanupReceipts.fail(snapshot.sessionId, "release_callback_failed");
         logger.warn(`Session release callback failed for ${snapshot.sessionId}: ${error}`);
       }
     }

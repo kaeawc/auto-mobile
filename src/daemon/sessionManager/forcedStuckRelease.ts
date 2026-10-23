@@ -1,3 +1,4 @@
+import type { CleanupReceiptRecorder } from "../sessionCleanupReceipts";
 import { isDeviceRestartReleaseReason } from "../../db/deviceSessionRepository";
 import { ActionableError } from "../../models/ActionableError";
 import type { Timer } from "../../utils/SystemTimer";
@@ -19,6 +20,7 @@ import type { TerminalReleaseJournal } from "../terminalReleaseJournal";
 import type { SessionRowWriter } from "../sessionRowWriter";
 
 export interface ForcedStuckReleasePort {
+  readonly cleanupReceipts: Pick<CleanupReceiptRecorder, "fail" | "finish">;
   sessionSlots(): Pick<
     SessionSlots<
       unknown,
@@ -94,6 +96,8 @@ export class ForcedStuckRelease {
     }
     const { session } = operation;
     const deviceId = session.assignedDevice;
+    this.port.cleanupReceipts.fail(sessionId, "release_forced");
+    this.port.cleanupReceipts.finish(session, deviceId);
     operation.forced = true;
     // Stop every restore the stuck release started: the device is about to go back to the pool.
     operation.forcedAbort?.abort(

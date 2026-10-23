@@ -88,8 +88,10 @@ export class SessionManagerConstruction {
   ) {}
   createDeviceCleanupQuarantine(timer: Timer) {
     return new DeviceCleanupQuarantine({
+      cleanupReceipts: this.host.cleanupReceipts,
       timer,
       now: () => this.host.sessionNow(),
+      sessionIdForDevice: (deviceId) => this.host.deviceSessionMap.get(deviceId),
       hasOwner: (deviceId) => this.host.getSessionForDevice(deviceId) !== null,
       teardownCapMs: SESSION_RELEASE_TEARDOWN_CAP_MS,
       defaultRetryAfterMs: DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS,
@@ -103,9 +105,9 @@ export class SessionManagerConstruction {
     const resolved = resolveDeviceStateRestorers(timer, restorers);
     return new SessionDeviceStateRestore(
       {
+        cleanupReceipts: this.host.cleanupReceipts,
         timer,
-        dispatchDeviceRestore: (deviceId, restore, generation, teardownStep) =>
-          this.host.dispatchDeviceRestore(deviceId, restore, generation, teardownStep),
+        dispatchDeviceRestore: (...args) => this.host.dispatchDeviceRestore(...args),
         restoreGeneration: (deviceId) => this.host.replacedRestoreGenerations.get(deviceId) ?? 0,
         hasIdentityReplacementFence: (deviceId) =>
           this.host.identityReplacementFences.has(deviceId),
@@ -176,6 +178,7 @@ export class SessionManagerConstruction {
   }
   createForcedStuckRelease(timer: Timer) {
     return new ForcedStuckRelease({
+      cleanupReceipts: this.host.cleanupReceipts,
       sessionSlots: () => this.host.sessionSlots,
       removeSession: (sessionId, expectedSession) =>
         this.host.removeSession(sessionId, expectedSession),

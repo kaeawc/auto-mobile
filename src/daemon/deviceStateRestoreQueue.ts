@@ -1,5 +1,7 @@
 /** One unsettled restore of a recorded device-state baseline, joined by every caller that asks. */
 export interface PendingRestore<S> {
+  /** Originating session, when this baseline was captured by a session. */
+  sessionId?: string;
   state: S;
   /** Set when the device was removed: no retry may reach a replacement. */
   removed: boolean;

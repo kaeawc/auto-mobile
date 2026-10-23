@@ -1,3 +1,4 @@
+import type { CleanupReceiptRecorder } from "./sessionCleanupReceipts";
 import { toActionableError } from "../models/ActionableError";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
@@ -19,11 +20,13 @@ interface PendingDeviceCleanupBound {
 }
 
 export interface DeviceCleanupQuarantineHost {
+  readonly cleanupReceipts: Pick<CleanupReceiptRecorder, "trackDevice" | "track" | "invalidate">;
   timer: Timer;
   /** The session clock every bound is stamped with. */
   now(): number;
   /** Whether a live session currently owns the device. */
   hasOwner(deviceId: string): boolean;
+  sessionIdForDevice?(deviceId: string): string | undefined;
   /** Cap the quarantine puts on listener cleanup once its holder leaves. */
   teardownCapMs: number;
   /** Retry hint when nothing bounds the quarantine. */
@@ -99,8 +102,15 @@ export class DeviceCleanupQuarantine {
     /** Numeric caps are trusted; only listener descriptors are manager-capped. */
     bound?: number | AbandonablePendingDeviceCleanup,
   ): void {
+    const sessionId = this.host.sessionIdForDevice?.(deviceId);
+    if (sessionId !== undefined) {
+      this.host.cleanupReceipts.invalidate(sessionId, "unverified_external_cleanup");
+      this.host.cleanupReceipts.track(sessionId, cleanup);
+    } else {
+      this.host.cleanupReceipts.trackDevice(deviceId, cleanup, true);
+    }
     if (bound === undefined) {
-      this.track(deviceId, [cleanup]);
+      this.recordWork(deviceId, [cleanup]);
       return;
     }
     const record: PendingDeviceCleanupBound = {};
@@ -110,7 +120,7 @@ export class DeviceCleanupQuarantine {
       cleanup = this.cap(deviceId, cleanup, record, bound);
     }
     this.trackBound(this.bounds, deviceId, cleanup, record);
-    this.track(deviceId, [cleanup]);
+    this.recordWork(deviceId, [cleanup]);
     this.armCaps(deviceId);
   }
 
@@ -121,6 +131,7 @@ export class DeviceCleanupQuarantine {
     /** The cleanup's own cap, when it has one: it bounds the retry hint a refused bind gets. */
     capMs?: number,
   ): void {
+    // Acquisition work is not release evidence and must not qualify a cleanup receipt.
     if (capMs !== undefined) {
       this.trackBound(this.acquisitionBounds, deviceId, cleanup, {
         settlesBy: this.host.now() + capMs,
@@ -157,6 +168,13 @@ export class DeviceCleanupQuarantine {
 
   /** Quarantine already-running work with no bound of its own. */
   track(deviceId: string, cleanups: readonly Promise<unknown>[]): void {
+    for (const cleanup of cleanups) {
+      this.host.cleanupReceipts.trackDevice(deviceId, cleanup);
+    }
+    this.recordWork(deviceId, cleanups);
+  }
+
+  private recordWork(deviceId: string, cleanups: readonly Promise<unknown>[]): void {
     const work = this.work.get(deviceId) ?? new Set<Promise<unknown>>();
     this.work.set(deviceId, work);
     for (const promise of cleanups) {

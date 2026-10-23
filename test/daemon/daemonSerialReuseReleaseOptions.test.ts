@@ -43,7 +43,7 @@ async function fixture() {
   pool.testHooks.deviceManager = manager;
   const restores: string[] = [];
   Object.assign(sessions, { getBarrier: () => new FakeDbWriteBarrier() });
-  Object.assign(sessions["stateRestore"], {
+  Object.assign(sessions.testHooks.wiring.host.stateRestore, {
     keepScreenAwakeRestorer: (device: BootedDevice) => ({
       restore: async () => {
         restores.push(device.deviceId);

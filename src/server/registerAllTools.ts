@@ -40,7 +40,6 @@ import { registerPreferenceTools } from "./preferenceTools";
 import { registerAppFileTools } from "./appFileTools";
 import { registerSessionLogTools } from "./sessionLogTools";
 import { registerPerformanceTraceTools } from "./performanceTraceTools";
-import { registerDownloadsFixtureTools } from "./downloadsFixtureTools";
 import { registerFormTools } from "./formTools";
 import { registerAccessibilityTools } from "./accessibilityTools";
 import { registerAccessibilityFocusTools } from "./accessibilityFocusTools";
@@ -125,7 +124,6 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerAppFileTools();
   registerSessionLogTools();
   registerPerformanceTraceTools();
-  registerDownloadsFixtureTools();
   registerFormTools();
   registerAccessibilityTools();
   registerAccessibilityFocusTools();

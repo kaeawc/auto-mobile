@@ -5,181 +5,95 @@
 > (`ios/control-proxy/Sources/CtrlProxy`), and `CtrlProxyRewriteTests` is now `CtrlProxyTests`.
 > Identifiers below keep their original names for history.
 
-Working notes for the `ios/control-proxy` Swift-6 concurrency rewrite
-(`CtrlProxyRewrite` target). These are **temporary planning docs**: they capture
-design decisions and deferred improvements uncovered while porting, and should be
-pruned as the work they describe lands.
+Notes for the `ios/control-proxy` Swift-6 concurrency rewrite. Start with [STATUS.md](STATUS.md)
+for current state, archetype decisions and the race ledger.
 
-**To resume the work (incl. from a fresh session): start with [STATUS.md](STATUS.md)** —
-the authoritative "where we are / how to continue" doc (current phase, commits, build/test
-gate, parity technique, archetype decisions, race ledger, and the next phase's plan). A
-new session can be pointed at it with minimal guidance. (An abbreviated running status is
-also mirrored in the assistant's project memory `ctrlproxy-swift6-rewrite`.)
+## Approach
 
-## Approach (recap)
+Parallel reimplementation, not in-place migration: the old `CtrlProxy` stayed as a behavioral
+oracle (Swift 5 mode) while `CtrlProxyRewrite` was brought up under strict Swift 6 concurrency
+and verified by differential parity against the frozen wire contract. The oracle is now
+retired. Phases 0-7 (scaffold, pure core, networking, off-main SDK layer, `@MainActor` UI,
+PerfProvider, CommandHandler/coordinator, cutover) are complete; see [STATUS.md](STATUS.md) for the
+current state, archetype decisions and race ledger.
 
-Parallel reimplementation, not in-place migration. The shipped `CtrlProxy` target
-stays as a **behavioral oracle** (pinned to Swift 5 language mode) while
-`CtrlProxyRewrite` is brought up under strict Swift 6 concurrency and verified
-against it by differential parity tests keyed off the frozen wire contract. See the
-memory note for the archetype map and the race ledger.
-
-## Amended phase plan
-
-Critical path (the rewrite's actual goal — concurrency correctness + parity):
-
-0. Scaffold + wire-decode parity gate ✅
-1. Pure/stateless core (models, StructuralHasher, HierarchyMerger, geometry
-   helpers, framing statics + wire-error mapping) ✅
-2. Networking core (queue-confinement: WebSocketServer / connection / byte channel) ✅
-3. Off-main SDK layer (SdkHierarchyCache **lock-confined** + transactional `reconcile`;
-   SDK/DB clients async; OSLogReader) ✅ — the cache is a lock, not the actor first
-   proposed here; see [STATUS.md](STATUS.md) §6 for the (approved) rationale.
-4. `@MainActor` UI domain (ElementLocator, GesturePerformer, HierarchyDebouncer,
-   DisplayLinkFPSMonitor, VoiceOver) ✅
-
-   Physical-device VoiceOver Settings lookup now prefers a stable `VoiceOver`
-   accessibility identifier, then the sourced English label. If neither is
-   exposed, it opens the first Accessibility navigation cell and accepts the
-   sole switch on that sub-page. An unmatched switch on the Accessibility root
-   is never tapped, nor is an ambiguous sub-page with multiple switches.
-   Apple Settings translations are not bundled in this repo, so there is no
-   verified localized label table; a reordered first cell or a changed sub-page
-   structure still needs physical-device validation.
-
-5. PerfProvider (TaskLocal call-tree + confined pool) ✅
-6. CommandHandler (Sendable POD router, async) + async serial dispatch + CtrlProxy coordinator ✅
-7. Cutover — ✅ **complete** (`CtrlProxyRewrite` is the sole implementation):
-   - 7A ✅ wire rewrite into XcodeGen (additive `CtrlProxyRewriteUITests` target) + first green
-     iOS-simulator compile (host-hidden `ElementLocator` init fixed).
-   - 7B ✅ iOS strict-concurrency warning cleanup (the ~149 non-fatal iOS-only warnings → 0;
-     `DeviceRotation`/`VoiceOverToggling` isolation; runtime-validated — `testServiceStarts` runs
-     green on an iOS 27 simulator).
-   - 7C ✅ (middle route) production runner switched to the rewrite — the `CtrlProxyUITests` target
-     now compiles `Sources/CtrlProxyRewrite` (name/app/identifier kept → zero TS/script churn);
-     reference kept as the SwiftPM parity oracle.
-   - 7D ✅ on-device validation: `testServiceStarts` green + the full observe→gesture→hierarchy loop
-     (`HierarchyIntegrationTests`) green on the **iOS 26.5** sim (tap/typeText/secure-field masking,
-     0 failures). Skip-guarded so it skips on the 27.0-**beta** runtime (host-app launch flake, not the
-     rewrite).
-   - 7E ✅ reference retired — KEEP wire-contract tests re-anchored reference-free (`JSONGolden`
-     containment/idempotence + Framing/Geometry invariants); behavioral-domain parity tests dropped;
-     `Sources/CtrlProxy`, `Tests/CtrlProxyTests`, the SwiftPM + Xcode reference targets, and the
-     differential-parity harness removed. SPM 196 tests green; sim build + runner smoke green.
-
-   Remaining after cutover: **Phase 8** fixups (below) + the deferred Phase-2 loopback/connection
-   scenarios as iOS UI tests.
-
-**8. Post-concurrency fixups (NEW).** Pure, off-critical-path improvements that we
-deliberately defer so the concurrency migration lands _parity-first_. Each is
-captured as a note below and only acted on once the critical path is done (or, if a
-note is parity-preserving and self-contained, opportunistically — but never at the
-cost of parity discipline).
+Physical-device VoiceOver Settings lookup prefers a stable `VoiceOver` accessibility identifier,
+then the sourced English label. If neither is exposed, it opens the first Accessibility
+navigation cell and accepts the sole switch on that sub-page. An unmatched switch on the
+Accessibility root is never tapped, nor is an ambiguous sub-page with multiple switches. Apple
+Settings translations are not bundled, so there is no verified localized label table; a
+reordered first cell or changed sub-page structure still needs physical-device validation.
 
 ## Deferred-fixup index
 
-| Note                                                            | Area                              | Parity risk                                                            | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| --------------------------------------------------------------- | --------------------------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [hierarchy-merger-geometry](fixup-hierarchy-merger-geometry.md) | `HierarchyMerger` bounds matching | Mixed (containment: none; ±tol: intentional behavior change, approved) | Designed, deferred to Phase 8                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| dead API: `ElementLocator.getCachedElement`                     | ElementLocator                    | None (drop/internalize)                                                | ✅ Resolved — dropped when porting `ElementLocator` (Phase 4F); not carried into the rewrite                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `Timer` protocol shadows `Foundation.Timer`                     | PerfProvider/scheduling           | None (rename)                                                          | ✅ Resolved — renamed to `ProxyTimer` when porting the timer seam (Phase 4A)                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `GesturePerformer` keyboard-focus / keyboard-visibility polling | GesturePerformer                  | Deadline-edge probes detect conditions met during an overrunning sleep | ✅ Resolved — all four waits (focus, visibility, close, destructive-key post-condition) await `KeyboardWait` with an injected monotonic `Clock`, yielding the main actor between probes and checking the condition after the final sleep. Close-action deadline gates and horizontal-arrow budgets use the same injected clock. The waits honour task cancellation (`CancellationError`), but WebSocketServer's serial command-chain tasks are unstructured and never cancelled, so cancellation is currently unreachable in production. |
-| PerfProvider is an over-elaborate interval accumulator          | PerfProvider                      | None (external timing data stays equivalent)                           | ✅ Resolved — flat interval records with direct duration math build the existing `PerfTiming` shape on demand; injected `any PerfTracking` and pooled flush semantics remain. No reference singleton.                                                                                                                                                                                                                                                                                                                                    |
+Post-concurrency (Phase 8) improvements deferred so the migration landed parity-first.
+Append new entries as they are uncovered.
 
-Append new entries here as they're uncovered.
+| Note                                                            | Area                              | Parity risk                                                            | Status                                                                                                                                                                                                                                                                                                                                                                                     |
+| --------------------------------------------------------------- | --------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| [hierarchy-merger-geometry](fixup-hierarchy-merger-geometry.md) | `HierarchyMerger` bounds matching | Mixed (containment: none; ±tol: intentional, approved behavior change) | Implemented; golden replay shows no output change on real pairs                                                                                                                                                                                                                                                                                                                            |
+| dead API: `ElementLocator.getCachedElement`                     | ElementLocator                    | None                                                                   | Resolved: dropped in the port                                                                                                                                                                                                                                                                                                                                                              |
+| `Timer` protocol shadows `Foundation.Timer`                     | PerfProvider/scheduling           | None                                                                   | Resolved: renamed `ProxyTimer`                                                                                                                                                                                                                                                                                                                                                             |
+| `GesturePerformer` keyboard-focus / keyboard-visibility polling | GesturePerformer                  | Deadline-edge probes detect conditions met during an overrunning sleep | Resolved: all four waits (focus, visibility, close, destructive-key post-condition) await `KeyboardWait` with an injected monotonic `Clock`, yield the main actor between probes and check the condition after the final sleep. The waits honour task cancellation, but the serial command-chain tasks are unstructured and never cancelled, so cancellation is unreachable in production. |
+| PerfProvider is an over-elaborate interval accumulator          | PerfProvider                      | None                                                                   | Resolved: flat interval records with direct duration math build the existing `PerfTiming` shape on demand; injected `any PerfTracking` and pooled flush remain                                                                                                                                                                                                                             |
 
-## Beyond ctrl-proxy — native-Swift landscape & follow-ups
+## Beyond ctrl-proxy: native-Swift landscape
 
-Captured while answering "where does ctrl-proxy fit, and what else needs a Swift-6 pass?"
-(evidence: a subsystem survey of `ios/*` + the TS integration). Not full roadmaps — pointers.
-
-**ctrl-proxy structure — two simplifications evaluated and rejected (don't re-litigate):**
+**Two ctrl-proxy structure simplifications were evaluated and rejected (do not re-litigate):**
 
 - The server runs _inside the XCUITest runner_ (`CtrlProxyUITests-Runner.app` → `testRunService`),
-  not in `AutoMobileTest` (that app is only the required UI-test _host_; blank VC). Cross-app
-  hierarchy reads + gesture injection come from `XCUIApplication`/`XCUIElement`, a privilege
-  `testmanagerd` grants **only** to a UI-test process — no entitlement grants it, so it can never
-  be a packaged/App-Store app. `control-proxy.ipa` is just a zip of `Build/Products/`.
-- **macOS CLI target** (in the SPM package): not useful — on macOS the whole `ElementLocator`/
-  `GesturePerformer` capability compiles out (`#if os(iOS)`); a CLI server would drive nothing, and
-  XCUITest isn't available to a plain executable anyway. The `#else` "non-iOS mode" path is only a
-  fast host compile/parity gate.
-- **Drop `CtrlProxy.xcodeproj` for pure SPM**: not feasible — SPM can't emit the `bundle.ui-testing`
-  product / `XCTRunner.app`, an iOS app host, the `.xctestrun`, or the signing/install orchestration.
-  The SPM (fast host logic + parity + the `.v6` `CtrlProxyRewrite`) ⇄ xcodegen (the only thing that
-  builds the shipped runner) split **is** the minimal form; `project.yml` is already the declarative
-  source of truth.
+  not in `AutoMobileTest` (only the required UI-test _host_; blank VC). Cross-app hierarchy
+  reads and gesture injection come from `XCUIApplication`/`XCUIElement`, a privilege
+  `testmanagerd` grants only to a UI-test process; no entitlement grants it, so it can never be a
+  packaged/App-Store app. `control-proxy.ipa` is a zip of `Build/Products/`.
+- **macOS CLI target**: useless, since on macOS the `ElementLocator`/`GesturePerformer` capability
+  compiles out (`#if os(iOS)`) and XCUITest is unavailable to a plain executable. The `#else`
+  non-iOS path is only a fast host compile gate.
+- **Pure SPM instead of `CtrlProxy.xcodeproj`**: not feasible. SPM cannot emit the
+  `bundle.ui-testing` product / `XCTRunner.app`, an iOS app host, the `.xctestrun`, or the
+  signing/install orchestration. SPM (fast host logic + tests) plus XcodeGen (`project.yml`, the
+  only thing that builds the shipped runner) is the minimal form.
 
-**Other native-Swift components needing their own Swift-6 pass (ranked, separate from this rewrite):**
+**Other native-Swift components needing their own Swift-6 pass (ranked, separate work):**
 
-- **`ios/auto-mobile-sdk`** (in-app instrumentation SDK; ctrl-proxy links it for wire models) — **largest
-  need.** It is architecturally the _pre-rewrite ctrl-proxy state_: **11 `@unchecked Sendable`** in
-  `Sources/` (down from 26 before step 3, 35 after the base step, ~44 originally) + NSLock.
-  **CI builds it macOS-only**, so its iOS UIKit `@MainActor` surface is unchecked → an
-  _iOS Simulator_ `SWIFT_STRICT_CONCURRENCY=complete` build now measures **158 unique diagnostics**
-  (down from 163 before step 3): 150 actor isolation (unchanged; UIKit main-actor pass not started),
-  4 global/static mutable state (from 5), 2 non-Sendable captures/conversions (from 6),
-  2 Sendable conformance (unchanged).
-  Converted so far (#5839): Storage (`DatabaseInspector`, `DefaultDatabaseDriver`,
-  `DefaultUserDefaultsDriver`, `UserDefaultsStoreResolver`, per-call ISO-8601 formatter),
-  `NetworkMockRuleStore` plus Sendable conformances on `NetworkFaultTransport`, `NetworkFaultAction`,
-  `NetworkFaultRuleDTO`, `FaultRequest`, `FaultDecision`; `NetworkCaptureRecorder` and its three
-  adapters; `AutoMobileWebViewPolicy`. Step 3 converts 15 more types to checked `Sendable`:
-  `AutoMobileBiometrics`, `AutoMobileFailures`, `AutoMobileNetwork`, `AutoMobileNotifications`,
-  `AutoMobileInteractionTracker`, `ViewBodyTracker`, `NavigationAdapterHub`,
-  `DeepLinkNavigationAdapter`, `CustomNavigationAdapter`, `UIKitNavigationAdapter`,
-  `SwiftUINavigationAdapter`, `BlockNavigationListener`, `DefaultAutoMobileAPI`,
-  `DefaultAutoMobileCrashesAPI`, `DefaultAutoMobileNetworkAPI`.
-  Five diagnostics fixed at source: lock-protected `AutoMobileURLProtocol.faultScheduler`
-  (internal DEBUG-only `FaultScheduling` is now `Sendable`, taking a `@Sendable` closure instead of
-  `DispatchWorkItem`), two `UNUserNotificationCenter` delegate completion handlers in internal
-  `NotificationActionHandler`, and two private HTTP body-reader completions in `SdkHierarchyServer`
-  (all four closures now `@Sendable`). Remaining unchecked (11): `AutoMobileSDK`,
-  `AutoMobileNotificationObserver`, `AutoMobileOsEvents`, `ViewHierarchyTracker` (non-Sendable
-  NotificationCenter observer tokens `[NSObjectProtocol]`); `AutoMobileCrashes` (non-Sendable
-  injected handler closures); `AutoMobileHangs` (`Thread?` and non-Sendable injected closures);
-  `NotificationActionHandler` (weak non-Sendable `UNUserNotificationCenterDelegate`);
-  `SdkHierarchyServer` (injected `any NSLocking`, non-Sendable listener existentials, weak server
-  reference, non-Sendable factory/logging closures); by owner decision D52, `UserDefaultsInspector`
-  (non-Sendable public `UserDefaultsChangeListener` values and observer token), `SQLiteDatabaseDriver`
-  (cached raw `OpaquePointer` handles), `AutoMobileWebViewBridge` (mutable `weak var WKWebView` and
-  main-actor WebKit delegate requirements).
-  Remaining non-actor blockers (4 global/static + 2 captures/conversions + 2 conformance):
-  `AutoMobileCrashes.signalCrashFilePath` / `previousSignalHandlers` (C signal handler must stay
-  lock-free and async-signal-safe); `SdkHighlightOverlayManager.shared`, timer `self` capture and
-  removal-closure conversion (UIKit/Timer state, main-actor pass). `AutoMobileURLProtocol` is now
-  `final` and `@unchecked Sendable` (all mutable state, instance and static, sits in
-  `OSAllocatedUnfairLock`s); `final` is not a source break because the class is `public`, not
-  `open`, so no other module could subclass it.
-  Main-actor sizing: `ViewHierarchyWalker` is a public enum with synchronous public `walk(bundleId:)`
-  / `computeHash(_:)`; whole-type `@MainActor` changes public API → nonisolated public facades over
-  an isolated internal implementation. Callers: `ViewHierarchyTracker.walkNow()` / `performWalk()`
-  / hash, reached from the Network.framework request queue via `SdkHierarchyServer`.
-  `SdkHighlightOverlayManager` is internal → whole-type `@MainActor` is possible without a public
-  change; highlight-show caller is `SdkHierarchyServer`'s off-main HTTP request continuation,
-  plus main-isolated Playground tests. Timer callback and teardown need internal work.
-  Next: UIKit main-actor pass over those two types and the remaining actor-diagnostic files
-  (`AutoMobileOsEvents.swift`, `AutoMobileInteractionTracker.swift`, `NavigationAdapters.swift`,
-  `AutoMobileFailures.swift`, `ViewHierarchyTracker.swift`); signal-handler globals and URLProtocol
-  decisions; then enable `.v6`. **Done (#5839):** the SDK and highlight-core targets (sub-package
-  manifests and the root `Package.swift`) now compile in the Swift 6 language mode with zero
-  concurrency diagnostics on both the macOS host build and a generic iOS Simulator `xcodebuild`;
-  the counts above are historical. The **iOS 17 / macOS 15 floor** is decided and applied (#5839,
-  owner decision 2026-10-02): iOS 17 already shipped in #6773;
-  the SDK and highlight-core sub-package manifests were aligned here. Use **`OSAllocatedUnfairLock`**
-  for the concurrency pass; `Mutex` requires iOS 18.
-- **`ios/XCTestRunner`** (standalone MCP-client XCTest wrapper — the iOS analog of the Android JUnit
-  runner; NOT an XCUITest harness, no `XCUIApplication`; no code coupling to ctrl-proxy) — **moderate,
-  in-place.** Already tools-6.0/`.v5`. Work concentrates in 2 MCP-client classes (fields mutated from
-  `@Sendable` closures → queue-confine or async-seam POD) + ~4 singleton annotations. Surfaces a real
-  bug: `TestTimingCache.clear()` mutates state without `loadLock`. No parity machinery needed.
-- **`ios/screen-capture`** (independent macOS CLI video helper; frozen stdout wire protocol) —
-  **moderate, annotate-and-isolate** (future-proofing; no current race). Already coded toward Swift 6
-  (`withLock`, 3 `@unchecked Sendable`). Per-target `.v6` + `@Sendable` on ~17 closures + make 5
-  capture/writer classes Sendable; expect ScreenCaptureKit/AVFoundation `@MainActor`-drift churn.
-  Verification is easy (macOS target → every body compiles on the host). Keep `runBlocking` as-is.
-- **`ios/Playground`** (internal SwiftUI SDK demo/test-host app, not shipped) — **defer**; no
-  concurrency surface of its own. Should follow `auto-mobile-sdk`, not lead.
+- **`ios/auto-mobile-sdk`** (in-app instrumentation SDK; ctrl-proxy links it for wire models):
+  largest need, architecturally the pre-rewrite ctrl-proxy. CI builds it macOS-only, so its iOS
+  UIKit `@MainActor` surface was unchecked. #5839 moved the SDK and highlight-core targets to the
+  Swift 6 language mode with zero concurrency diagnostics on the macOS host build and a generic
+  iOS Simulator `xcodebuild`, converting most types to checked `Sendable` (storage drivers,
+  network mock/capture, navigation adapters, API facades). Remaining `@unchecked Sendable`
+  types and why:
+  - non-Sendable NotificationCenter observer tokens: `AutoMobileSDK`, `AutoMobileNotificationObserver`,
+    `AutoMobileOsEvents`, `ViewHierarchyTracker`
+  - non-Sendable injected closures / `Thread?`: `AutoMobileCrashes`, `AutoMobileHangs`
+  - weak non-Sendable delegate: `NotificationActionHandler`
+  - injected `any NSLocking`, listener existentials, weak server reference: `SdkHierarchyServer`
+  - owner decision D52: `UserDefaultsInspector` (non-Sendable public listener values),
+    `SQLiteDatabaseDriver` (raw `OpaquePointer` handles), `AutoMobileWebViewBridge` (mutable
+    `weak var WKWebView`, main-actor WebKit delegate requirements)
+  - `AutoMobileURLProtocol` is `final` and `@unchecked Sendable` (all instance and static state
+    behind `OSAllocatedUnfairLock`); `final` is not a source break since the class is `public`,
+    not `open`.
+  - Intentionally non-lock: `AutoMobileCrashes.signalCrashFilePath` / `previousSignalHandlers`
+    (the C signal handler must stay lock-free and async-signal-safe).
+  - Main-actor sizing: `ViewHierarchyWalker` is a public enum with synchronous `walk(bundleId:)` /
+    `computeHash(_:)`, so whole-type `@MainActor` would change public API; use nonisolated
+    public facades over an isolated internal implementation. `SdkHighlightOverlayManager` is
+    internal, so whole-type `@MainActor` is possible; its caller is `SdkHierarchyServer`'s
+    off-main HTTP continuation.
+  - Floor: iOS 17 / macOS 15 (owner decision 2026-10-02); use `OSAllocatedUnfairLock`, since
+    `Mutex` needs iOS 18.
+- **`ios/XCTestRunner`** (standalone MCP-client XCTest wrapper; the iOS analog of the Android JUnit
+  runner, not an XCUITest harness, no code coupling to ctrl-proxy): moderate, in place. Already
+  tools-6.0/`.v5`. Work concentrates in 2 MCP-client classes (fields mutated from `@Sendable`
+  closures) plus ~4 singleton annotations. Surfaces a real bug: `TestTimingCache.clear()` mutates
+  state without `loadLock`.
+- **`ios/screen-capture`** (independent macOS CLI video helper; frozen stdout protocol): moderate,
+  future-proofing with no current race. Per-target `.v6`, `@Sendable` on ~17 closures, make 5
+  capture/writer classes Sendable; expect ScreenCaptureKit/AVFoundation `@MainActor` churn. Easy to
+  verify (macOS target). Keep `runBlocking` as is.
+- **`ios/Playground`** (internal SwiftUI SDK demo/test host, not shipped): defer; follows
+  `auto-mobile-sdk`.
 
 ## Gesture phase diagnostics
 

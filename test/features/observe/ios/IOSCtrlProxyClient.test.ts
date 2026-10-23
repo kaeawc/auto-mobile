@@ -5393,6 +5393,47 @@ describe("IOSCtrlProxyClient", function () {
       }
     });
 
+    test("requests OSLog events only while this device has log demand", async () => {
+      let demand = false;
+      const probedDevices: string[] = [];
+      const urls: string[] = [];
+      const { factory } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+        {
+          sdkEventIngestor: new FakeIosSdkEventIngestor(),
+          logDemandProbe: (deviceId) => {
+            probedDevices.push(deviceId);
+            return demand;
+          },
+        },
+      );
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = createFetchMock(async (url) => {
+        urls.push(String(url));
+        return { ok: true, json: async () => [] };
+      });
+      try {
+        await testClient.pollSdkEvents();
+        demand = true;
+        await testClient.pollSdkEvents();
+        demand = false;
+        await testClient.pollSdkEvents();
+        expect(urls.map((url) => new URL(url).pathname + new URL(url).search)).toEqual([
+          "/sdk-events",
+          "/sdk-events?logs=1",
+          "/sdk-events",
+        ]);
+        expect(probedDevices).toEqual(Array(3).fill(testDevice.deviceId));
+      } finally {
+        globalThis.fetch = originalFetch;
+        await testClient.close();
+      }
+    });
+
     test("forwards decoded SDK events from the /sdk-events poll to the ingestor", async function () {
       const fakeIngestor = new FakeIosSdkEventIngestor();
       const { factory } = createCapturingWebSocketFactory(fakeTimer);

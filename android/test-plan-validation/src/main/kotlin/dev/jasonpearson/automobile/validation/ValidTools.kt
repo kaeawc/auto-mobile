@@ -119,7 +119,6 @@ object ValidTools {
         "setSensor",
         "setToolEnabled",
         "snapshotOf",
-        "stageSessionDownloads",
         "statusBar",
         "tapAny",
         "tapAt",

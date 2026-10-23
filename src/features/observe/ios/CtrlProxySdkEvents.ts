@@ -17,6 +17,7 @@ interface SdkEventsHost {
   readonly screenIdentity: CtrlProxySdkScreenIdentity;
   getSdkEventIngestor(): IosSdkEventIngestor;
   getPort(): number;
+  hasLogDemand(): boolean;
   resolveWebSocketHost(): string;
   pollSdkEvents(): Promise<SdkEventPollResult>;
   getSdkScreenIdentity(appId?: string): ScreenIdentity | undefined;
@@ -152,6 +153,9 @@ export class CtrlProxySdkEvents {
   }
 
   currentSdkEventPollIntervalMs(): number {
+    if (this.host.hasLogDemand()) {
+      return CtrlProxySdkEvents.SDK_EVENT_POLL_INTERVAL_MS;
+    }
     return this.sdkEventPollConsecutiveEmpty >=
       CtrlProxySdkEvents.SDK_EVENT_POLL_EMPTY_BATCHES_BEFORE_BACKOFF
       ? CtrlProxySdkEvents.SDK_EVENT_POLL_BACKOFF_INTERVAL_MS
@@ -203,7 +207,7 @@ export class CtrlProxySdkEvents {
   private async pollSdkEventsOnce(generation: number): Promise<SdkEventPollResult> {
     const pollGeneration = this.host.screenIdentity.capturePollGeneration();
     const host = this.host.resolveWebSocketHost();
-    const url = `http://${host}:${this.host.getPort()}/sdk-events`;
+    const url = `http://${host}:${this.host.getPort()}/sdk-events${this.host.hasLogDemand() ? "?logs=1" : ""}`;
     const abortController = new AbortController();
     this.sdkEventPollAbortController = abortController;
     const timeoutId = this.host.timer.setTimeout(

@@ -96,7 +96,6 @@
     "putAppFile",
     "resetAppLogs",
     "performanceTrace",
-    "stageSessionDownloads",
     "setUIState",
     "accessibility",
     "accessibilityAudit",
@@ -208,7 +207,6 @@
     "putAppFile",
     "resetAppLogs",
     "performanceTrace",
-    "stageSessionDownloads",
     "setUIState",
     "accessibility",
     "accessibilityAudit",
@@ -337,7 +335,6 @@
     "mediaSession",
     "resetAppLogs",
     "performanceTrace",
-    "stageSessionDownloads",
     "windowMode"
   ],
   "measurementScripts": [

@@ -107,7 +107,7 @@ is repeatable; selected scenarios retain file order. `--package`, `--spec`, and
 `PROTOTYPE_BENCH_ADB` and `PROTOTYPE_BENCH_CLI` accept executable paths, such as private
 CLI wrappers; the default CLI is `bun <repo>/src/index.ts --cli`.
 
-Baseline: not yet recorded on a device
+Baseline: not yet recorded on a device.
 
 ## Trace sections
 

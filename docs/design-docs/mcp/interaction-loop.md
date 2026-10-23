@@ -50,7 +50,7 @@ attached yet — for Settings rows, the `switchWidget` node that is the only
 carrier of `toggle` / `checked` — and the parent row's content-derived `s2-…`
 elementId would then change on the client's next `observe`.
 
-For those actions AutoMobile now gates the embedded capture on hierarchy
+For those actions AutoMobile gates the embedded capture on hierarchy
 stability before returning it, using the same settle primitive standalone
 `observe(waitFor: {for: "stable"})` uses: re-observe until two consecutive
 hierarchies are structurally equal, bounded at 1000 ms and cancelled with the

@@ -6,14 +6,9 @@ the `ios-build` repository.
 
 ## Overview
 
-AutoMobile tests need:
-
-1. A **pre-built `.xctestrun`** containing the `YourAppAutoMobileTests` bundle
-2. A **booted iOS Simulator** on the runner
-3. A **running AutoMobile daemon** reachable over the Unix socket
-4. The **CtrlProxy iOS app** installed in the simulator
-
-The sections below walk through each step.
+AutoMobile tests need a pre-built `.xctestrun` containing the `YourAppAutoMobileTests` bundle, a
+booted iOS Simulator, a running AutoMobile daemon reachable over the Unix socket, and the CtrlProxy
+iOS app installed in the simulator.
 
 > [!NOTE]
 > **No cloud device service required.** Unlike Android — which uses
@@ -117,140 +112,37 @@ automobile-tests:
         retention-days: 7
 ```
 
-## Step-by-step breakdown
+## Step notes
 
-### 1. Bun and auto-mobile
+- **Bun and auto-mobile**: the daemon is a Node/Bun application, so `setup-bun` must precede
+  `auto-mobile --daemon start`. Pin the CLI to the version the XCTestRunner package resolution uses.
+- **Build products artifact**: the `build-for-testing` artifact holds both test bundles
+  (`YourAppTests.xctest`, `YourAppAutoMobileTests.xctest`) and the `.xctestrun` referencing them,
+  so the test runner never recompiles.
+- **Boot**: `auto-mobile --boot-device` finds the simulator matching the current Xcode SDK,
+  creating and booting it if missing. `xcrun simctl boot "iPhone 16"` also works.
+- **Daemon**: `auto-mobile --daemon start` launches the managed daemon, waits for readiness and
+  exits. Its launcher PID is not the daemon PID, so do not save it for cleanup.
+- **CtrlProxy pre-install**: `auto-mobile --cli observe --platform ios` blocks until the daemon
+  socket is up and installs CtrlProxy into the booted simulator if absent, so the first `observe`
+  in a test plan does not pay the install cost.
+- **Run**: set `xctestrun_file` and `booted_udid` in the same shell step (or export via
+  `GITHUB_ENV`). These are application-specific; the repository ships no test-without-building
+  wrapper (`scripts/ios/xcode-test.sh` builds and tests repository Xcode projects instead).
+  `-only-testing:YourAppAutoMobileTests` limits execution to the AutoMobile bundle.
+- **Cleanup**: `if: always()` guards stop the daemon (it resolves the detached process from its PID
+  file) and the log stream. The simulator stays booted; macOS runners are ephemeral.
 
-The daemon is a Node/Bun application. `setup-bun` ensures the Bun runtime is available on the
-runner so `auto-mobile --daemon start` works correctly.
-
-```yaml
-- uses: oven-sh/setup-bun@v2
-
-- name: Install matching auto-mobile CLI
-  env:
-    # Match the AutoMobile version pinned by the XCTestRunner package resolution.
-    AUTOMOBILE_VERSION: "<runner-version>"
-  run: bun install -g "@kaeawc/auto-mobile@${AUTOMOBILE_VERSION}"
-```
-
-### 2. Build products artifact
-
-AutoMobile tests run `test-without-building` against the `.xctestrun` produced by the
-`build-for-testing` job. Downloading the artifact avoids recompiling on the test runner:
-
-```yaml
-- uses: actions/download-artifact@v7
-  with:
-    name: build-for-testing-macos-26
-    path: build/DerivedData/Build/Products/
-```
-
-The artifact contains both test bundles (`YourAppTests.xctest` and
-`YourAppAutoMobileTests.xctest`) and a `.xctestrun` file that references them.
-
-### 3. Boot the simulator
-
-```bash
-ios_version="$(xcrun --sdk iphonesimulator --show-sdk-version)"
-auto-mobile --boot-device --platform ios --create-if-missing --timeout-ms 600000 \
-  --min-os-version "${ios_version}" --max-os-version "${ios_version}"
-```
-
-AutoMobile product boot finds the simulator that matches the current Xcode SDK, creates it if
-missing, and boots it. Alternatively:
-
-```bash
-xcrun simctl boot "iPhone 16"
-open -a Simulator
-xcrun simctl list devices booted   # confirm it booted
-```
-
-### 4. Daemon startup
-
-Start the daemon and wait for its detached process to become ready:
-
-```bash
-auto-mobile --daemon start
-```
-
-The start command launches the managed daemon process, waits for readiness, and
-then exits. Its launcher PID is not the daemon PID, so it must not be saved for
-cleanup.
-
-### 5. CtrlProxy pre-installation
-
-```bash
-auto-mobile --cli observe --platform ios
-```
-
-This step does two things:
-
-1. **Waits** for the daemon socket to become available (blocks until the daemon is up).
-2. **Installs** the CtrlProxy iOS app into the booted simulator if it is not already present, so
-   the first `observe` step in a test plan does not pay the installation cost.
-
-Running this once before the test task ensures CtrlProxy is ready before `observe` steps in test
-plans execute.
-
-### 6. Run AutoMobile tests
-
-Set `xctestrun_file` to the downloaded `.xctestrun` and `booted_udid` to the simulator UUID
-in the same shell step, then run the command below. These are application-specific
-examples; the repository does not provide a test-without-building wrapper.
-`scripts/ios/xcode-test.sh` builds and tests repository Xcode projects instead.
-
-```bash
-xcodebuild test-without-building \
-  -xctestrun "$xctestrun_file" \
-  -destination "platform=iOS Simulator,id=$booted_udid" \
-  -only-testing:YourAppAutoMobileTests \
-  -enableCodeCoverage NO \
-  -skipMacroValidation
-```
-
-`-only-testing:YourAppAutoMobileTests` limits execution to the AutoMobile bundle. Unit tests in
-`YourAppTests` are handled by the separate `simulator-tests` job.
-
-### 7. Cleanup
-
-The `if: always()` guards ensure cleanup runs even when tests fail:
-
-```bash
-auto-mobile --daemon stop || true
-kill "$LOG_STREAM_PID" 2>/dev/null || true
-```
-
-The daemon manager resolves and stops the detached process recorded in its PID
-file. The simulator remains booted for the remainder of the runner's lifetime
-(macOS runners are ephemeral so no explicit teardown is needed).
-
-### 8. Artifacts
-
-| Artifact                    | When uploaded | Contents                                                                                 |
-| --------------------------- | ------------- | ---------------------------------------------------------------------------------------- |
-| `automobile-test-results`   | Always        | `build/automobile-tests.xcresult` — pass/fail, timing, screenshots                       |
-| `automobile-simulator-logs` | On failure    | `build/automobile-simulator.log` — simulator log stream filtered to your app's subsystem |
+| Artifact                    | When uploaded | Contents                                                           |
+| --------------------------- | ------------- | ------------------------------------------------------------------ |
+| `automobile-test-results`   | Always        | `build/automobile-tests.xcresult` (pass/fail, timing, screenshots) |
+| `automobile-simulator-logs` | On failure    | `build/automobile-simulator.log` filtered to your app's subsystem  |
 
 ## Keeping unit tests and AutoMobile tests separate
 
-The `simulator-tests` job runs unit tests using `-skip-testing:YourAppAutoMobileTests`:
-
-```bash
-# Application-specific unit-test command
-# -skip-testing:YourAppAutoMobileTests excludes the AutoMobile bundle
-xcodebuild test-without-building \
-  -xctestrun "$xctestrun_file" \
-  -destination "platform=iOS Simulator,id=$booted_udid" \
-  -skip-testing:YourAppAutoMobileTests \
-  -enableCodeCoverage NO \
-  -parallel-testing-enabled YES \
-  -skipMacroValidation
-```
-
-The `automobile-tests` job runs the complement using `-only-testing:YourAppAutoMobileTests`.
-This mirrors the Android pattern where `testDebugUnitTest -PexcludeAutoMobileTests` runs unit tests
-and `testDebugUnitTest --tests '*.automobiletest.*'` runs the AutoMobile tests.
+The `simulator-tests` job runs the complement of `automobile-tests` with
+`-skip-testing:YourAppAutoMobileTests` (plus `-parallel-testing-enabled YES`), mirroring Android's
+`testDebugUnitTest -PexcludeAutoMobileTests` versus `--tests '*.automobiletest.*'`.
 
 ## Caching strategy
 
@@ -283,9 +175,6 @@ package directories it depends on): `*.swift`, `*.m`, `*.mm`, `*.h`, `*.c`, `*.c
 excluding `.build/`, `DerivedData/`, and `SourcePackages/` (already excluded by scoping to source
 directories, matching the SPM cache-path exclusions above).
 
-The workflow examples above require `xctestrun_file` and `booted_udid` to be set in
-the test step (or exported through `GITHUB_ENV` by earlier steps).
-
 ## Required secrets
 
 No additional secrets are required for a basic AutoMobile test run. The macOS runner has Xcode
@@ -302,15 +191,6 @@ them as environment variables through the test scheme:
 ```
 
 Resolve them from the environment in the test target before executing the plan.
-
-## Conditional execution
-
-To skip the job on draft pull requests or when a specific label is absent:
-
-```yaml
-automobile-tests:
-  if: github.event.pull_request.draft != true
-```
 
 ## Reading results from CI
 

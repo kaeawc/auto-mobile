@@ -165,13 +165,25 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
    * the backfill could recover (#14461).
    */
   hasSubscriberForPerformanceTelemetry(deviceId: string): boolean {
+    return this.hasSubscriberForCategory(deviceId, "performance");
+  }
+
+  /** Whether a live subscriber (including backfill) could receive this device's logs. */
+  hasSubscriberForLogTelemetry(deviceId: string): boolean {
+    return this.hasSubscriberForCategory(deviceId, "log");
+  }
+
+  private hasSubscriberForCategory(
+    deviceId: string,
+    category: TelemetryEvent["category"],
+  ): boolean {
     const deviceSessionUuid = this.deviceSessionResolver.resolveUuid(deviceId);
     for (const subscriber of this.subscribers.values()) {
       const { filter } = subscriber;
       // The event's sessionId is unknown at demand time; ignoring it only over-counts demand.
       if (
         !subscriber.socket.destroyed &&
-        (filter.category === null || filter.category === "performance") &&
+        (filter.category === null || filter.category === category) &&
         (filter.deviceSessionUuid === null || filter.deviceSessionUuid === deviceSessionUuid)
       ) {
         return true;

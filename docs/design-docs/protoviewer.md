@@ -1,62 +1,39 @@
 # ProtoViewer: a prototype library app for iOS and Android
 
-Status: accepted design for epic #13625. Owner request: a ProtoViewer app on iOS and Android to
-switch between, relaunch, share, download, and view any prototype that is a valid AutoMobile JSON
-SDUI spec.
+Accepted design for epic #13625: a ProtoViewer app on iOS and Android to switch between, relaunch,
+share, download and view any prototype that is a valid AutoMobile JSON SDUI spec.
 
 ## 1. Current state
 
-**Spec and validation**
-
-- Contract: `schemas/prototype-spec-contract.json` (limits, per-node field rules). Host validator
-  and types: `src/features/prototype/prototypeSpec.ts` and `prototypeValidation.ts`. Kotlin twin:
-  `PrototypeSpecValidator` in `android/protocol`. Swift's reject-only `PrototypeSpecStrictValidator`
-  extends the generated structural interpreter from #14803 in `AutoMobilePrototypeAgentCore`.
-  It composes the existing request, platform, state, check, repeat and resource-limit helpers with
-  located host semantics. Unknown keys and malformed storage reject the whole spec. All three
-  runtimes consume the complete shared valid/invalid corpus; there are no Swift exemptions.
-- Envelope: `{ id, window, data?, state?, motion?, storage?, theme?, root }`. There is **no
+- **Spec and validation.** Contract `schemas/prototype-spec-contract.json`; host validator
+  `src/features/prototype/prototypeSpec.ts` / `prototypeValidation.ts`; Kotlin twin
+  `PrototypeSpecValidator` (`android/protocol`); Swift reject-only `PrototypeSpecStrictValidator`
+  (#14803, see [iOS prototype agent](plat/ios/prototype-agent.md)). All three consume the shared
+  valid/invalid corpus with no exemptions. Unknown keys and malformed storage reject the whole spec.
+- **Envelope** `{ id, window, data?, state?, motion?, storage?, theme?, root }`. There is **no
   `specVersion`**: the 2026-10-04 owner decision rejects older and newer shapes instead of migrating
-  (see Owner decisions in [Android prototype specification](plat/android/prototype-ux.md)).
-  Evolution is by device capabilities (`prototype_data_model_v1`, `prototype_storage_v1`,
-  `prototype_network_v1`, ... in `prototypeCapabilityGates.ts`, `PROTOTYPE_SPEC_CAPABILITY_GATES`).
-- Limits: 1 MiB spec, 2000 nodes, depth 24, 32 images, data 256 KiB, storage 64 keys / 256 KiB,
-  4 requests in flight, 30 s timeout.
-- `readPrototypeSpecFile` (`prototypeSpecFile.ts`) already does stat-then-read size caps, BOM strip
+  (see [Android prototype specification](plat/android/prototype-ux.md)). Evolution is by device
+  capabilities (`PROTOTYPE_SPEC_CAPABILITY_GATES` in `prototypeCapabilityGates.ts`).
+- **Limits:** 1 MiB spec, 2000 nodes, depth 24, 32 images, data 256 KiB, storage 64 keys / 256 KiB,
+  4 requests in flight, 30 s timeout. `readPrototypeSpecFile` does stat-then-read size caps, BOM strip
   and JSON parse for `specPath`.
-
-**Showing today**
-
-- MCP `prototype` tool (`src/server/prototypeTools.ts`): `show`, `patch`, `dismiss`, `status`,
-  `inspect`, `awaitEvent`, `save`, `listSaved`, `deleteSaved`, `clearStorage`. `show` takes an inline
-  `spec` or a host-side `specPath`.
-- Android: the CtrlProxy overlay renderer (`ctrlproxy/prototype/*`, Compose), transport
-  `androidPrototypeTransport.ts`.
-- iOS simulator: the injected dylib `ios/prototype-agent` (epic #10563), a loopback socket and a
-  SwiftUI window.
-
-**Saved prototypes (no host needed)**
-
-- Android: `SavedPrototypeStore` and `SavedPrototypeDirectoryStore` (app-private slug directories,
-  manifest last, content-hash assets, 50 saved at most), `SavedPrototypeActivity` (one document task
-  per id, not exported), pinned launcher shortcuts, per-id storage under
-  `filesDir/prototype-storage/`. All of it lives inside the CtrlProxy APK.
-- iOS (epic #12251): a per-prototype app copy of `ios/prototype-agent/Viewer` installed by
-  `iosPrototypeInstaller.ts`. The spec lives at `Documents/prototype/{manifest.json,spec.json,assets,fonts}`
-  (formatVersion 1, one prototype per container). The template ships as
-  `AutoMobilePrototypeViewer.zip`, built by `.github/workflows/build-prototype-viewer.yml`.
-  Simulator only. The Viewer already has error screens, standalone mode, host attach and
-  file-backed storage.
-- Shared layout code in TS (`savedPrototypeLayout.ts`) and Swift, with the common fixture
+- **Showing today.** MCP `prototype` tool (`src/server/prototypeTools.ts`): `show` (inline `spec` or
+  host-side `specPath`), `patch`, `dismiss`, `status`, `inspect`, `awaitEvent`, `save`, `listSaved`,
+  `deleteSaved`, `clearStorage`. Android: CtrlProxy Compose overlay (`ctrlproxy/prototype/*`,
+  `androidPrototypeTransport.ts`). iOS simulator: injected dylib `ios/prototype-agent` (#10563).
+- **Saved prototypes (no host needed).** Android: `SavedPrototypeStore` / `SavedPrototypeDirectoryStore`
+  (app-private slug dirs, manifest last, content-hash assets, max 50), `SavedPrototypeActivity` (one
+  document task per id, not exported), pinned shortcuts, per-id storage under
+  `filesDir/prototype-storage/`, all inside the CtrlProxy APK. iOS (#12251): per-prototype app copy of
+  `ios/prototype-agent/Viewer` installed by `iosPrototypeInstaller.ts`, spec at
+  `Documents/prototype/{manifest.json,spec.json,assets,fonts}` (formatVersion 1, one per container),
+  template `AutoMobilePrototypeViewer.zip` from `build-prototype-viewer.yml`, simulator only. Shared
+  layout code in `savedPrototypeLayout.ts` and Swift with fixture
   `test/fixtures/prototype-saved-layout/layout.json`.
-
-**Data and network (epic #12518)**: `/data` writes, storage, and `request` actions with
-`via: host|device` (Retrofit on Android, `URLSession` on iOS; the owner chose `URLSession` for
-#12518). That choice stands for MCP-direct flows; library prototypes need a pinned transport on
-iOS (section 6).
-
-**Missing today**: a library UI, a multi-prototype iOS viewer, import, export and share, a way to
-open a `.json` or URL, a physical iPhone path, an on-device list for Android saved prototypes.
+- **Data and network (#12518).** `request` with `via: host|device` (Retrofit on Android, `URLSession` on
+  iOS). That stands for MCP-direct flows; library prototypes need a pinned iOS transport (section 6).
+- **Missing:** library UI, multi-prototype iOS viewer, import/export/share, opening a `.json` or URL, a
+  physical iPhone path, an on-device list of Android saved prototypes.
 
 ## 2. Goals and non-goals
 
@@ -102,44 +79,37 @@ option for library prototypes.
 
 ### 3.2 Validation parity (critical path)
 
-Importing a prototype needs identical accept and reject behaviour on all three platforms:
+Import needs identical accept/reject behaviour on all three platforms.
 
-1. `PrototypeSpecStrictValidator.validate(data:supportedCapabilities:library:)` accepts raw UTF-8
-   `Data` and returns normally or throws `PrototypeLoadError.invalidSpec(path:message:)`. It extends
-   `PrototypeContractValidator` and the generated `PrototypeSpecContractData.swift`; it does not
-   replace the interpreter or return a render model. Existing runtime helpers supply request,
-   platform, state binding, check grammar, repeat projection/binding and limit rules. Additional
-   strict checks retain authored paths for cross-node targets, charts, storage and template scope.
+1. `PrototypeSpecStrictValidator.validate(data:supportedCapabilities:library:)` takes raw UTF-8 `Data`
+   and returns or throws `PrototypeLoadError.invalidSpec(path:message:)`. It extends
+   `PrototypeContractValidator` and generated `PrototypeSpecContractData.swift`; it neither replaces the
+   interpreter nor returns a render model. Existing runtime helpers supply request, platform, state
+   binding, check grammar, repeat and limit rules; extra checks keep authored paths for cross-node
+   targets, charts, storage and template scope.
 2. All three corpus runners discover **every** `.json` in
-   `test/fixtures/prototype-spec/{valid,invalid}` and compare their lists with `corpus.json`.
-   The inventory also records TS-computed capabilities for every valid spec, asserted by all three.
-   An added fixture without a refreshed inventory fails the ratchet in each runner. Capture with
-   `bun scripts/capture-prototype-strict-fixtures.ts`: `expectedPath` comes from real TS output.
-   Assertions compare acceptance and error path, never message text. Unknown-key cases cover each
-   observed strict object rule; boundary cases exercise structural and data/expanded-tree budgets.
-3. Valid fixtures remain ordinary specs. An invalid envelope contains `spec` or, when JSON cannot
-   preserve the input, `rawJson` (duplicate keys, escaped surrogates, non-JSON tokens, nesting) or
-   `rawBytesBase64` (invalid UTF-8), plus `expectedPath`. Optional `options` supplies `library` and
-   `supportedCapabilities`. No additional fixture directory or binary assets are needed; the
-   existing `.gitattributes` JSON rule pins LF.
-4. Raw inputs allow one leading UTF-8 BOM. Duplicate keys (including escaped aliases), lone UTF-16
-   surrogates, invalid UTF-8, nonfinite numeric tokens and more than 128 JSON containers reject at
-   `$` before recursive decoding. The semantic tree/data depths remain 24/8. Finite numbers follow
-   TS double semantics, including `-0` and values above 2^53; IDs keep the existing TS grammar
-   without imposing an undocumented 256-character or Unicode-normalization restriction.
-5. Capability computation is independent of the agent's advertised renderer support; supplying a
-   capability set rejects missing features at `$`. `library: true` additionally rejects explicit
-   system windows and device persistence at their window paths. Host validation continues to accept
-   these options for CtrlProxy. Forbidden headers and literal CR/LF header values reject in every
-   mode. Network routing and secure-binding import policy in section 5 still require the import
-   boundary; this validator alone does not enable network access.
-6. Import never partially renders or stores a failed spec. Element anchors are structurally valid;
-   the existing embedded loader still requires host resolution to bounds (three corpus fixtures).
-   Storage version/key _shape_ and declarations are validated here; persisted-version mismatch
-   remains the existing storage restore/drop policy. Runtime-only caps (in-flight calls, response
-   bytes, stack navigation and patch operations) are tested at their runtime boundaries rather than
-   represented as invalid authored specs. The data-write pair is captured after a real TS write:
-   data fits its own budget but its repeat expansion exceeds the node budget.
+   `test/fixtures/prototype-spec/{valid,invalid}` and compare with `corpus.json`, which also records
+   TS-computed capabilities per valid spec. An added fixture without a refreshed inventory fails each
+   runner. Capture with `bun scripts/capture-prototype-strict-fixtures.ts` (`expectedPath` is real TS
+   output). Assertions compare acceptance and error path, never message text.
+3. An invalid envelope holds `spec` or, when JSON can't preserve the input, `rawJson` (duplicate keys,
+   escaped surrogates, non-JSON tokens, nesting) or `rawBytesBase64` (invalid UTF-8), plus
+   `expectedPath` and optional `options` (`library`, `supportedCapabilities`). The `.gitattributes` JSON
+   rule pins LF.
+4. Raw input: one leading BOM allowed; duplicate keys (including escaped aliases), lone surrogates,
+   invalid UTF-8, nonfinite tokens and more than 128 JSON containers reject at `$` before decoding.
+   Semantic tree/data depths stay 24/8. Numbers follow TS doubles (`-0`, above 2^53); IDs keep the TS
+   grammar with no extra length or normalization rule.
+5. Capability computation is independent of the renderer; a supplied capability set rejects missing
+   features at `$`. `library: true` also rejects explicit system windows and device persistence (host
+   validation still accepts them for CtrlProxy). Forbidden headers and literal CR/LF reject in every
+   mode. Network routing and secure-binding policy (section 5) still need the import boundary.
+6. Import never partially renders or stores a failed spec. Element anchors are structurally valid but
+   the embedded loader needs host-resolved bounds (three fixtures). Storage version/key shape is
+   validated here; persisted-version mismatch stays the storage restore/drop policy. Runtime-only caps
+   (in-flight calls, response bytes, stack navigation, patch operations) are tested at runtime
+   boundaries. The data-write pair is captured after a real TS write: data fits its budget but repeat
+   expansion exceeds the node budget.
 
 ### 3.3 Android app
 
@@ -370,50 +340,38 @@ listing):
 
 ## 9. Phased plan
 
-**First release.** Library list; open and switch; relaunch and reset; delete; share a clean bundle;
-import by file or share sheet; MCP `save` routing and `open`; the global network switch; the shared
-hardening work.
-Not included: thumbnails, search, keep-both or replace, compact links, MCP export and import,
-per-host consent, URL and QR import, universal links.
+**First release.** Library list; open/switch; relaunch/reset; delete; share a clean bundle; import by
+file or share sheet; MCP `save` routing and `open`; global network switch; shared hardening. Not
+included: thumbnails, search, keep-both/replace, compact links, MCP export/import, per-host consent,
+URL/QR import, universal links. Order: (1) corpus, strict zip reader, Swift validator in parallel with
+(2) the Android extraction; then (3) Android app, (4) hardening, (5) MCP routing, (6) iOS app.
 
-Order: (1) the corpus, strict zip reader and Swift reject-only validator, in parallel with (2) the
-single Android extraction; then (3) the Android app, (4) the hardening module, (5) MCP routing,
-(6) the iOS app.
-
-**Phase 2.** Per-host consent UI, URL import (https only, with confirmation and the egress check on
-the fetch), QR, thumbnails, search, replace and keep-both, font opt-in.
-**Phase 3.** Store tracks, universal links, MCP export and import, live attach for imported
-prototypes (off by default).
+**Phase 2.** Per-host consent UI, URL import (https only, confirmation, egress check on the fetch), QR,
+thumbnails, search, replace/keep-both, font opt-in. **Phase 3.** Store tracks, universal links, MCP
+export/import, live attach for imported prototypes (off by default).
 
 ## 10. Test plan
 
-Unit tests (fakes and FakeTimer, each under 100 ms): the strict zip reader (path handling,
-duplicates, links, size and ratio limits, header-size mismatch, encryption, methods), `bundle.json`
-strictness, the library index (a corrupt entry is skipped), id isolation and empty storage on import,
-export rebuild (no storage, source or library fields) and the preflight scan, the egress check on
-resolved addresses with a fake resolver and fake pinned transport (a second DNS answer is never
-used; loopback, `10.0.2.2`, link-local, IPv6, redirect
-re-check, https to http), forbidden headers, privileged-window rejection, the network switch,
-import size gates, missing referenced image, font and manifest-entry bundles rejected, the MCP inbox
-route rejected from the exported entry point, iOS pixel budget and magic bytes.
-
-Corpus: the extended `test/fixtures/prototype-spec` run in TS, Kotlin and Swift, asserting accept or
-reject plus error path only.
-
-Device (manual-test skill; Android API 37 and iOS 27.x on the owner's iPhone): MCP save to library;
-switch among three; relaunch; reset; delete; share and re-import across platforms; adb push plus
-VIEW import; invalid-spec error; offline with stored values; a localhost request blocked and a LAN
-request allowed with the switch on.
+Unit tests (fakes and FakeTimer, each under 100 ms): strict zip reader (paths, duplicates, links, size
+and ratio limits, header-size mismatch, encryption, methods); `bundle.json` strictness; library index (a
+corrupt entry is skipped); id isolation and empty storage on import; export rebuild (no storage, source
+or library fields) and preflight scan; egress check on resolved addresses with a fake resolver and fake
+pinned transport (a second DNS answer is never used; loopback, `10.0.2.2`, link-local, IPv6, redirect
+re-check, https to http); forbidden headers; privileged-window rejection; network switch; import size
+gates; missing referenced image/font/manifest-entry bundles rejected; MCP inbox route rejected from the
+exported entry point; iOS pixel budget and magic bytes. Corpus: `test/fixtures/prototype-spec` in TS,
+Kotlin and Swift (accept/reject plus error path only). Device (manual-test skill; Android API 37, iOS
+27.x on the owner's iPhone): MCP save to library; switch among three; relaunch; reset; delete; share and
+re-import across platforms; adb push plus VIEW import; invalid-spec error; offline with stored values;
+localhost request blocked and LAN request allowed with the switch on.
 
 ## 11. Risks
 
-1. Swift validator parity is the critical path; mitigated by the reject-only scope and the corpus.
-2. The network policy for library prototypes differs from the "no allowlist" behaviour of #12518;
-   MCP-direct `show` flows are unchanged.
-3. The extraction touches CtrlProxy; mitigated by one mechanical change and the existing suites.
-4. The adb-based MCP channel is Android-specific; iOS uses `simctl` and `devicectl`.
-5. With no `specVersion`, older apps reject newer specs; `requires` and capability messages soften
-   this.
+1. Swift validator parity is the critical path (mitigated by reject-only scope and the corpus).
+2. Library network policy differs from #12518's "no allowlist"; MCP-direct `show` is unchanged.
+3. The extraction touches CtrlProxy (one mechanical change plus existing suites).
+4. The adb-based MCP channel is Android-specific; iOS uses `simctl`/`devicectl`.
+5. With no `specVersion`, older apps reject newer specs; `requires` and capability messages soften this.
 
 ## 12. Decisions
 

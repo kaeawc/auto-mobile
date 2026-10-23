@@ -70,10 +70,10 @@ async function boundRecoveryHarness() {
     getDeviceSessionRegistry: () => ({ list: () => [] }),
   };
   const server = createTestUnixSocketServer("/fake/recovery.sock", state, timer);
-  server["acceptingRequests"] = true;
+  server.testHooks.acceptingRequests = true;
   const socket = new FakeSocket();
-  server["handleConnection"](socket);
-  const socketId = [...server["sessions"].keys()][0]!;
+  server.testHooks.transport.handleConnection(socket);
+  const socketId = [...server.testHooks.sessions.keys()][0]!;
   const forwarded: Record<string, unknown>[] = [];
   const recoveryErrors: unknown[] = [];
   const discoverySeeds: { method: string; sessionUuid: string | undefined }[] = [];
@@ -118,7 +118,7 @@ async function boundRecoveryHarness() {
     connectionId = socketId,
     connectionSocket = socket,
   ) =>
-    server["handleRequest"](connectionId, connectionSocket, {
+    server.testHooks.transport.handleRequest(connectionId, connectionSocket, {
       id: "recovery",
       type: "mcp_request",
       method: "tools/call",
@@ -145,7 +145,7 @@ async function boundRecoveryHarness() {
     discoverySeeds,
     call,
     request: (method: string) =>
-      server["handleRequest"](socketId, socket, {
+      server.testHooks.transport.handleRequest(socketId, socket, {
         id: method,
         type: "mcp_request",
         method,
@@ -157,8 +157,8 @@ async function boundRecoveryHarness() {
       }),
     connect: () => {
       const other = new FakeSocket();
-      server["handleConnection"](other);
-      const id = [...server["sessions"].keys()].at(-1)!;
+      server.testHooks.transport.handleConnection(other);
+      const id = [...server.testHooks.sessions.keys()].at(-1)!;
       return { id, socket: other };
     },
     close: () => {
@@ -186,24 +186,22 @@ test("bound call inside restart window reaches session_recovery_pending and keep
       retryable: true,
       recoveryWindowRemainingMs: 180_000,
     });
-    expect(h.server["boundMcpClientKeysBySocketSession"].get(h.socketId)?.sessionUuid).toBe(
-      "bound",
-    );
+    expect(h.server.testHooks.boundMcpClientFor(h.socketId)?.sessionUuid).toBe("bound");
     expect(h.forwarded.at(-1)?.sessionUuid).toBeUndefined();
-    const bindingBeforeExplicit = h.server["boundMcpClientKeysBySocketSession"].get(h.socketId);
+    const bindingBeforeExplicit = h.server.testHooks.boundMcpClientFor(h.socketId);
     if (!bindingBeforeExplicit) {
       throw new Error("Expected the first call to bind an MCP client");
     }
     const explicit = await h.call(false);
     expect(explicit?.result).toEqual(response?.result);
-    const explicitBinding = h.server["boundMcpClientKeysBySocketSession"].get(h.socketId);
+    const explicitBinding = h.server.testHooks.boundMcpClientFor(h.socketId);
     expect(explicitBinding).toEqual({
       ...bindingBeforeExplicit,
       executionKey: "session:bound",
       requiresLiveDaemonSession: false,
     });
     expect((await h.call())?.result).toEqual(response?.result);
-    expect(h.server["boundMcpClientKeysBySocketSession"].get(h.socketId)).toEqual(explicitBinding);
+    expect(h.server.testHooks.boundMcpClientFor(h.socketId)).toEqual(explicitBinding);
   } finally {
     h.close();
   }
@@ -312,7 +310,7 @@ test("healthy bound route is synchronous and does not read persistence", async (
   const h = await boundRecoveryHarness();
   try {
     const lookup = spyOn(h.persistence, "getSession");
-    const route = h.server["getMcpForwardRoute"](
+    const route = h.server.testHooks.getMcpForwardRoute(
       {
         id: "healthy",
         type: "mcp_request",
@@ -327,7 +325,7 @@ test("healthy bound route is synchronous and does not read persistence", async (
     expect(route).not.toBeInstanceOf(Promise);
     const client = await h.server.mcpClientFactory("bound");
     const before = h.forwarded.length;
-    const forward = h.server["handleIdeRequest"](
+    const forward = h.server.testHooks.ide.handleIdeRequest(
       client,
       {
         id: "healthy",
@@ -401,11 +399,11 @@ test.each(["tools/list", "resources/list", "resources/list-templates", "resource
   async (method) => {
     const h = await boundRecoveryHarness();
     try {
-      const binding = h.server["boundMcpClientKeysBySocketSession"].get(h.socketId);
+      const binding = h.server.testHooks.boundMcpClientFor(h.socketId);
       await h.manager.releaseSession("bound", "device-restart:Pixel");
       expect(await h.request(method)).toMatchObject({ success: true });
       expect(h.discoverySeeds.at(-1)).toEqual({ method, sessionUuid: "bound" });
-      expect(h.server["boundMcpClientKeysBySocketSession"].get(h.socketId)).toEqual(binding);
+      expect(h.server.testHooks.boundMcpClientFor(h.socketId)).toEqual(binding);
       expect((await h.call())?.boundSessionLoss).toBeUndefined();
       h.timer.advanceTime(180_000);
       expect(await h.request(method)).toMatchObject({
@@ -454,13 +452,11 @@ test("a second connection's recovery marker grants only explicit-path results an
   try {
     await h.manager.releaseSession("bound", "device-restart:Pixel");
     const marked = await h.call(true, "bound", other.id, other.socket);
-    expect(h.server["boundMcpClientKeysBySocketSession"].get(other.id)).toBeUndefined();
+    expect(h.server.testHooks.boundMcpClientFor(other.id)).toBeUndefined();
     const explicit = await h.call(false, "bound", other.id, other.socket);
     expect(marked?.result).toEqual(explicit?.result);
     expect(h.manager.getSession("bound")).toBeNull();
-    expect(h.server["boundMcpClientKeysBySocketSession"].get(h.socketId)?.sessionUuid).toBe(
-      "bound",
-    );
+    expect(h.server.testHooks.boundMcpClientFor(h.socketId)?.sessionUuid).toBe("bound");
   } finally {
     other.socket.destroy();
     h.close();
@@ -580,11 +576,11 @@ test("a failed token declaration is logged and does not stop owned-session resto
     new FakeTimer(),
   );
   const socket = new FakeSocket();
-  server["acceptingRequests"] = true;
-  server["handleConnection"](socket);
-  const connectionId = [...server["sessions"].keys()][0]!;
+  server.testHooks.acceptingRequests = true;
+  server.testHooks.transport.handleConnection(socket);
+  const connectionId = [...server.testHooks.sessions.keys()][0]!;
   try {
-    await server["restoreSelectorSessions"](
+    await server.testHooks.restoreSelectorSessions(
       {
         [DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM]: "owner",
         [DAEMON_OWNED_SESSIONS_PARAM]: ["owned"],
@@ -612,7 +608,7 @@ test("a token declaration after socket close leaves no inert identity or later m
     await proceed.promise;
   });
   try {
-    const request = h.server["handleRequest"](other.id, other.socket, {
+    const request = h.server.testHooks.transport.handleRequest(other.id, other.socket, {
       id: "late-token",
       type: "mcp_request",
       method: "tools/call",

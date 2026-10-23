@@ -99,3 +99,49 @@ SCRIPTS
   run bash -c 'source "$1"; mkdir() { return 23; }; if mkdir_spotlight_excluded "$2"; then exit 99; else exit $?; fi' _ "$HELPER" "$DIR"
   [ "$status" -eq 23 ]
 }
+
+@test "bounded mkdir marks a descendant inside the root" {
+  run bash -c 'source "$1"; mkdir_spotlight_excluded_within "$2" "$2/nested/output"' _ "$HELPER" "$DIR"
+  [ "$status" -eq 0 ]
+  [ -f "$DIR/nested/output/.metadata_never_index" ]
+}
+
+@test "bounded mkdir marks the root itself" {
+  run bash -c 'source "$1"; mkdir_spotlight_excluded_within "$2" "$2"' _ "$HELPER" "$DIR"
+  [ "$status" -eq 0 ]
+  [ -f "$DIR/.metadata_never_index" ]
+}
+
+@test "bounded mkdir creates outside output without marking it" {
+  run bash -c 'source "$1"; mkdir_spotlight_excluded_within "$2" "$2-sibling/output"' _ "$HELPER" "$DIR"
+  [ "$status" -eq 0 ]
+  [ -d "$DIR-sibling/output" ]
+  [ ! -e "$DIR-sibling/output/.metadata_never_index" ]
+}
+
+@test "bounded mkdir never marks an ancestor of the root" {
+  run bash -c 'source "$1"; mkdir_spotlight_excluded_within "$2" "$2/.."' _ "$HELPER" "$DIR"
+  [ "$status" -eq 0 ]
+  [ ! -e "$DIR/../.metadata_never_index" ]
+}
+
+@test "bounded mkdir resolves symlink escapes before marking" {
+  mkdir -p "$BATS_TEST_TMPDIR/outside"
+  ln -s "$BATS_TEST_TMPDIR/outside" "$DIR/escape"
+  run bash -c 'source "$1"; mkdir_spotlight_excluded_within "$2" "$2/escape/output"' _ "$HELPER" "$DIR"
+  [ "$status" -eq 0 ]
+  [ -d "$BATS_TEST_TMPDIR/outside/output" ]
+  [ ! -e "$BATS_TEST_TMPDIR/outside/output/.metadata_never_index" ]
+}
+
+@test "bounded mkdir resolves a symlinked root and relative output" {
+  ln -s "$DIR" "$BATS_TEST_TMPDIR/root-link"
+  run bash -c 'source "$1"; cd "$2"; mkdir_spotlight_excluded_within "$3" ./nested' _ "$HELPER" "$DIR" "$BATS_TEST_TMPDIR/root-link"
+  [ "$status" -eq 0 ]
+  [ -f "$DIR/nested/.metadata_never_index" ]
+}
+
+@test "bounded mkdir preserves creation errors in conditional callers" {
+  run bash -c 'source "$1"; mkdir() { return 23; }; if mkdir_spotlight_excluded_within "$2" "$2/nested"; then exit 99; else exit $?; fi' _ "$HELPER" "$DIR"
+  [ "$status" -eq 23 ]
+}

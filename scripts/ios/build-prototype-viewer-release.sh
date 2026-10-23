@@ -10,7 +10,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "${repo_root}/scripts/lib/spotlight-exclude.sh"
 command -v ditto >/dev/null || { echo "ERROR: ditto is required" >&2; exit 1; }
 output_dir="$(dirname "${output_path}")"
-mkdir_spotlight_excluded "${output_dir}"
+mkdir_spotlight_excluded_within "${repo_root}" "${output_dir}"
 output_path="$(cd "${output_dir}" && pwd -P)/$(basename "${output_path}")"
 work_dir="$(mktemp -d)"
 trap 'rm -rf "${work_dir}"' EXIT

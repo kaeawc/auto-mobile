@@ -69,7 +69,8 @@ SCRIPT
 @test "builds both simulator slices and signs the separate ProtoViewer app" {
   run bash "$SCRIPT" "$OUT"
   [ "$status" -eq 0 ]
-  [ -f "$OUT/.metadata_never_index" ]
+  # Caller-owned output outside the fixture repo must remain searchable.
+  [ ! -e "$OUT/.metadata_never_index" ]
   [ -s "$OUT/ProtoViewer.app/ProtoViewer" ]
   [[ "$output" == *'/ProtoViewer.app'* ]]
   run cat "$BUILD_LOG"

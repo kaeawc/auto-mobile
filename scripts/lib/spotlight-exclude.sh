@@ -19,3 +19,15 @@ mkdir_spotlight_excluded() {
   mkdir -p "$@" || return $?
   spotlight_exclude_dir "$@"
 }
+
+# Caller-owned output may be outside the repo; resolve symlinks before marking.
+mkdir_spotlight_excluded_within() {
+  local root dir
+  mkdir -p "$2" || return $?
+  root="$(cd -P -- "$1" && pwd -P)" || return 0
+  dir="$(cd -P -- "$2" && pwd -P)" || return 0
+  case "$dir" in
+    "$root"|"${root%/}/"*) spotlight_exclude_dir "$dir" ;;
+  esac
+  return 0
+}

@@ -1,4 +1,4 @@
-import { markSpotlightExcluded } from "../../../utils/spotlightExclusion";
+import { type SpotlightFileSystem, markSpotlightExcluded } from "../../../utils/spotlightExclusion";
 import AdmZip from "adm-zip";
 import * as fs from "node:fs/promises";
 import path from "node:path";
@@ -46,6 +46,8 @@ export interface PrototypeViewerMetadata {
 }
 
 export interface PrototypeViewerTemplateProviderDeps {
+  platform?: NodeJS.Platform;
+  spotlightFileSystem?: SpotlightFileSystem;
   downloader?: FileDownloader;
   checksumCalculator?: ChecksumCalculator;
   cacheDir?: string;
@@ -74,6 +76,7 @@ export class PrototypeViewerTemplateProvider implements TemplateProvider {
   private readonly idGenerator: IdGenerator;
   private readonly env: NodeJS.ProcessEnv;
   private readonly renameFile: (from: string, to: string) => Promise<void>;
+  private spotlightExclusion: Promise<void> | undefined;
   private inFlight: Promise<ResolvedPrototypeViewerTemplate> | null = null;
 
   constructor(private readonly deps: PrototypeViewerTemplateProviderDeps = {}) {
@@ -231,7 +234,12 @@ export class PrototypeViewerTemplateProvider implements TemplateProvider {
         ensureSecureTempDirSync(CACHE_SUBDIR);
       }
       await fs.mkdir(paths.directory, { recursive: true, mode: 0o700 });
-      await markSpotlightExcluded(paths.directory, fs);
+      this.spotlightExclusion ??= markSpotlightExcluded(
+        this.cacheDir,
+        this.deps.spotlightFileSystem ?? fs,
+        this.deps.platform ?? process.platform,
+      );
+      await this.spotlightExclusion;
       await this.downloadBytes(url, partial);
       await fs.chmod(partial, 0o600);
       const { checksum: actual } = await this.checksumCalculator.computeFileSha256(partial);

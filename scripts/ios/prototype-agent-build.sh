@@ -20,7 +20,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "${repo_root}/scripts/lib/spotlight-exclude.sh"
 sources_root="${PROTOTYPE_AGENT_SOURCES_ROOT:-${repo_root}/ios/prototype-agent/Sources}"
 out_dir="${1:-${repo_root}/scratch/prototype-agent}"
-mkdir_spotlight_excluded "${out_dir}"
+mkdir_spotlight_excluded_within "${repo_root}" "${out_dir}"
 
 sdk="$(xcrun --sdk iphonesimulator --show-sdk-path)"
 arch="${PROTOTYPE_AGENT_ARCH:-$(uname -m)}"

@@ -18,7 +18,7 @@ output_path="${1:-${repo_root}/scratch/prototype-agent/AutoMobilePrototypeAgent.
 slices=(arm64 x86_64)
 
 output_dir="$(dirname "${output_path}")"
-mkdir_spotlight_excluded "${output_dir}"
+mkdir_spotlight_excluded_within "${repo_root}" "${output_dir}"
 output_path="$(cd "${output_dir}" && pwd -P)/$(basename "${output_path}")"
 
 build_script="${repo_root}/scripts/ios/prototype-agent-build.sh"

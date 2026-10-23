@@ -16,7 +16,7 @@ project_root="$(cd "${script_dir}/../.." && pwd)"
 source "${project_root}/scripts/lib/spotlight-exclude.sh"
 package_dir="${project_root}/ios/screen-capture"
 output_dir="$(dirname "${output_path}")"
-mkdir_spotlight_excluded "${output_dir}"
+mkdir_spotlight_excluded_within "${project_root}" "${output_dir}"
 output_path="$(cd "${output_dir}" && pwd -P)/$(basename "${output_path}")"
 archive_path="${output_path}.partial"
 

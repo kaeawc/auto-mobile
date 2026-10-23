@@ -17,6 +17,7 @@ export interface SpotlightProbe {
 
 export interface SpotlightDependencies {
   platform?: NodeJS.Platform;
+  /** Repository candidate root; defaults to the process cwd. */
   repoRoot?: string;
   homeDir?: string;
   probe?: SpotlightProbe;
@@ -75,10 +76,11 @@ export async function checkSpotlightIndexing(
     return {
       name,
       status: "warn",
-      message: `Developer directories may be indexed by Spotlight: ${indexed.join(", ")}`,
+      message: `Developer directories may be indexed by Spotlight (only marker files and volume-wide mdutil status are detected): ${indexed.join(", ")}`,
       recommendation:
         "Drop a marker (`touch <dir>/.metadata_never_index`) or add the directory in " +
-        "System Settings > Spotlight > Search Privacy. OPTIONAL: run `sudo mdutil -i off <vol>` " +
+        "System Settings > Spotlight > Search Privacy. A directory already excluded via Search Privacy " +
+        "may still be listed; ignore it or add the marker to silence this warning. OPTIONAL: run `sudo mdutil -i off <vol>` " +
         "yourself to disable indexing for an entire volume; doctor never changes system settings.",
     };
   } catch (error) {

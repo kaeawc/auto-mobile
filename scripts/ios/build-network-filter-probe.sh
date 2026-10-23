@@ -96,7 +96,7 @@ if [[ "${mode}" == signed ]]; then
 fi
 
 output_root="${PROBE_OUTPUT_ROOT:-${project_root}/scratch}"
-mkdir_spotlight_excluded "${output_root}"
+mkdir_spotlight_excluded_within "${project_root}" "${output_root}"
 output="$(mktemp -d "${output_root}/network-filter-probe.XXXXXX")"
 slices="${output}/slices"
 

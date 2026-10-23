@@ -51,6 +51,9 @@ describe("Spotlight Indexing", () => {
     const result = await run(new FakeSpotlightProbe());
     expect(result.status).toBe("warn");
     expect(result.message).toContain("/repo/scratch");
+    expect(result.message).toContain("only marker files and volume-wide mdutil status");
+    expect(result.recommendation).toContain("already excluded via Search Privacy");
+    expect(result.recommendation).toContain("ignore it or add the marker");
     expect(result.recommendation).toContain("touch");
     expect(result.recommendation).toContain("Search Privacy");
     expect(result.recommendation).toContain("OPTIONAL");

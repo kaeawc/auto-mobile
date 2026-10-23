@@ -1,22 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
-import {
-  opaqueForcesFallback,
-  type DeviceMutationEntry,
-  type DeviceMutationInput,
-  type DeviceMutationScope,
-} from "../../src/daemon/sessionBroker/mutations/types";
+import { opaqueForcesFallback } from "../../src/daemon/sessionBroker/mutations/types";
 import { SessionMutationRecorder } from "../../src/daemon/sessionBroker/mutations/recorder";
 import { deviceToolMutations } from "../../src/server/deviceMutationAdapters";
 import { SessionDeviceMutationRecording } from "../../src/server/deviceMutationRecording";
-import type { ActiveSessionDevice } from "../../src/server/activeSessionDevice";
-import type { SharedStorageService } from "../../src/server/sharedStorageService";
-import type { StageSharedStorageResult } from "../../src/server/sharedStorageContract";
 import { FakeDeviceMutationJournal } from "../fakes/FakeDeviceMutationJournal";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const ANDROID: BootedDevice = { deviceId: "phone", platform: "android", name: "Phone" };
-const IOS: BootedDevice = { ...ANDROID, platform: "ios" };
 const SCOPE = { sessionUuid: "broker", deviceId: "phone", incarnation: "native-1" };
 const APP = "com.example";
 

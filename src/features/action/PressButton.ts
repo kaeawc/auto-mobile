@@ -129,6 +129,23 @@ export function acceptIosHomeAlreadyOnSpringboard(
   }
 }
 
+/** A successful Android Home dispatch already verified the launcher foreground (#15028). */
+export function acceptAndroidHomeAlreadyOnLauncher(
+  result: { success: boolean; error?: string },
+  context: { platform: string; button: string; pressSucceeded: boolean },
+): void {
+  if (
+    context.platform === "android" &&
+    context.button.toLowerCase() === "home" &&
+    context.pressSucceeded &&
+    !result.success &&
+    result.error === "No visual change observed"
+  ) {
+    result.success = true;
+    delete result.error;
+  }
+}
+
 export class PressButton extends BaseVisualChange {
   private readonly globalActionClient?: PressButtonCtrlProxyOverrides["globalActionClient"];
   private readonly frameContextClient?: PressButtonCtrlProxyOverrides["frameContextClient"];
@@ -234,6 +251,7 @@ export class PressButton extends BaseVisualChange {
       perf,
     };
     let startedOnFallbackSpringboard = false;
+    let pressSucceeded = false;
     const result = await this.observedInteraction(async (previousObservation) => {
       // A Home press on SpringBoard may change nothing (#14954); that is a no-op success.
       if (isIosHomePressOnSpringboard(this.device.platform, button, previousObservation)) {
@@ -244,11 +262,18 @@ export class PressButton extends BaseVisualChange {
         button,
         previousObservation,
       );
-      return await perf.track("buttonPress", () =>
+      const pressed = await perf.track("buttonPress", () =>
         this.press(button, undefined, undefined, signal),
       );
+      pressSucceeded = pressed.success;
+      return pressed;
     }, options);
     acceptIosHomeAlreadyOnSpringboard(result, startedOnFallbackSpringboard);
+    acceptAndroidHomeAlreadyOnLauncher(result, {
+      platform: this.device.platform,
+      button,
+      pressSucceeded,
+    });
     return result;
   }
 

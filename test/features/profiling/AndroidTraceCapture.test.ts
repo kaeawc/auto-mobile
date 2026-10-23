@@ -81,8 +81,8 @@ describe("AndroidTraceCapture (#14113)", () => {
       sizeBytes: 4096,
     });
     expect(stopped.durationMs).toBeGreaterThanOrEqual(4_000);
-    // One 250 ms flush poll elapses on the auto-advancing fake clock.
-    expect(stopped.durationMs).toBe(4_250);
+    // The flush poll after the recorder stopped is not recording time.
+    expect(stopped.durationMs).toBe(4_000);
     expect(device.commands.filter((c) => c.startsWith("pull"))).toEqual([
       `pull ${remote} ${stopped.path}`,
     ]);
@@ -233,5 +233,20 @@ describe("AndroidTraceCapture (#14113)", () => {
     await expect(capture.start({ deviceId: DEVICE })).resolves.toMatchObject({
       traceId: "trace-fake-1",
     });
+  });
+
+  test("a slow pull is not counted as recording time (#14113 review)", async () => {
+    const { device, capture, timer } = setup();
+    await capture.start({ deviceId: DEVICE, maxDurationMs: 5_000 });
+    timer.advanceTime(1_000);
+    const original = device.execute.bind(device);
+    device.execute = async (args, options) => {
+      if (args[0] === "pull") {
+        timer.advanceTime(20_000);
+      }
+      return original(args, options);
+    };
+
+    expect((await capture.stop(DEVICE, "trace-a1")).durationMs).toBe(1_000);
   });
 });

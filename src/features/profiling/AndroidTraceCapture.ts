@@ -130,6 +130,8 @@ export class AndroidTraceCapture {
     // dispatched (cancellation, adb error) the recorder is still running, and the trace stays
     // registered so a retry or the session's release cleanup can still stop it.
     await stopPerfettoRecorder(adb, timer, record.pid, warnings, poll, signal);
+    // The recording ended here; waiting for the file, pulling and cleanup are not recording time.
+    const recordedMs = timer.now() - record.startedAtMs;
     try {
       await awaitFlushedDeviceFile(adb, timer, record.remotePath, poll ?? {}, LOG_TAG, signal);
       await adb.execute(["pull", record.remotePath, record.hostPath], {
@@ -161,7 +163,7 @@ export class AndroidTraceCapture {
       path: record.hostPath,
       sizeBytes,
       // The recorder bounds itself, so a stop long after maxDurationMs still recorded that long.
-      durationMs: Math.min(timer.now() - record.startedAtMs, record.config.maxDurationMs),
+      durationMs: Math.min(recordedMs, record.config.maxDurationMs),
       warnings,
     };
   }

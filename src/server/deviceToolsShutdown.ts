@@ -1,3 +1,4 @@
+import { createUnpooledFenceTracker } from "./unpooledShutdownFenceTracker";
 import {
   isAlreadyStoppedDeviceError,
   resumeCtrlProxyAfterUnconfirmedFailure,
@@ -778,6 +779,36 @@ async function resolveRestartStopKillTarget(
   return { killTarget, stopIdentity };
 }
 
+async function preparePlatformShutdown(
+  input: {
+    dependencies: DeviceToolsDependencies;
+    context: ShutdownEntryContext;
+    options: ShutdownDeviceOptions;
+    devicePool: DevicePool | undefined;
+    shutdownContext: ShutdownDeadlineContext;
+    perf: ReturnType<typeof createPerformanceTracker>;
+  },
+  clearFence: () => void,
+) {
+  const { dependencies, context, options, devicePool, shutdownContext, perf } = input;
+  try {
+    // Identity first: a refusal must leave a still-running device untouched.
+    const target = await resolveRestartStopKillTarget(dependencies, context, options, devicePool);
+    await stopVideoRecordingsBeforeShutdown(shutdownContext, perf);
+    await stopIosCtrlProxyBeforeShutdown(shutdownContext, perf, dependencies.daemonState);
+    const androidObserverState = await stopAndroidCtrlProxyBeforeShutdown(
+      shutdownContext,
+      perf,
+      dependencies.stopAndroidObservers,
+      dependencies.daemonState,
+    );
+    return { ...target, androidObserverState };
+  } catch (error) {
+    clearFence();
+    throw error;
+  }
+}
+
 export async function shutdownDevice(
   context: ShutdownEntryContext,
   dependencies: DeviceToolsDependencies,
@@ -813,6 +844,7 @@ export async function shutdownDevice(
                 undefined,
                 assertHolder,
                 options.foreignClaim,
+                { fenceUnpooled: true },
               ),
             timeoutMs: timeoutMs,
           },
@@ -821,127 +853,123 @@ export async function shutdownDevice(
         return reservation;
       },
       execute: async (shutdownReservation, retainReservationUntil) => {
-        const releaseShutdownReservation = async (): Promise<void> => {
-          try {
-            await shutdownReservation?.release();
-          } catch (error) {
-            // Release is best-effort cleanup and must not replace the shutdown outcome.
-            logger.warn(
-              `[DeviceTools] Failed to release shutdown reservation for ${device.deviceId}: ${errorMessage(error)}`,
-              error,
-            );
-          }
-        };
-        const expectedPooledDevice = shutdownReservation?.device ?? null;
-        const retainShutdownUntil = (
-          operation: Promise<unknown>,
-          releaseReservationAfterFailure = false,
-        ): void => {
-          retainReservationUntil(operation, releaseReservationAfterFailure);
-          retainLifecycleUntil?.(operation);
-        };
-        const shutdownContext: ShutdownDeadlineContext = {
-          device,
-          timer: dependencies.timer,
-          deadlineMs: shutdownDeadlineMs,
-          timeoutMs,
-          requestAbortSignal,
-          retainReservationUntil: retainShutdownUntil,
-        };
-        // Identity first: a refusal must leave a still-running device untouched.
-        const { killTarget, stopIdentity } = await resolveRestartStopKillTarget(
-          dependencies,
-          context,
-          options,
-          devicePool,
+        const fence = createUnpooledFenceTracker(
+          shutdownReservation ? undefined : devicePool,
+          device.deviceId,
         );
-        await stopVideoRecordingsBeforeShutdown(shutdownContext, perf);
-        await stopIosCtrlProxyBeforeShutdown(shutdownContext, perf, dependencies.daemonState);
-        const androidObserverState = await stopAndroidCtrlProxyBeforeShutdown(
-          shutdownContext,
-          perf,
-          dependencies.stopAndroidObservers,
-          dependencies.daemonState,
-        );
-
-        const alreadyStoppedMessage = await killProcessAndRetireOwnership(
-          {
-            ...context,
-            expectedPooledDevice,
-            expectedSession,
-            retainReservationUntil: retainShutdownUntil,
-          },
-          dependencies,
-          perf,
-          devicePool,
-          {
-            androidObserverState,
-            stoppingSessionUuid: options.stoppingSessionUuid,
-            stoppingMcpSessionId: options.stoppingMcpSessionId,
-            stableIds: options.stableIds,
-            stopIdentity,
-            releaseShutdownReservation,
-            retainReservationUntil: retainShutdownUntil,
-            strictDeadline,
+        try {
+          const releaseShutdownReservation = async (): Promise<void> => {
+            try {
+              await shutdownReservation?.release();
+            } catch (error) {
+              // Release is best-effort cleanup and must not replace the shutdown outcome.
+              logger.warn(
+                `[DeviceTools] Failed to release shutdown reservation for ${device.deviceId}: ${errorMessage(error)}`,
+                error,
+              );
+            }
+          };
+          const expectedPooledDevice = shutdownReservation?.device ?? null;
+          const retainShutdownUntil = fence.wrapRetain(
+            (operation: Promise<unknown>, releaseReservationAfterFailure = false): void => {
+              retainReservationUntil(operation, releaseReservationAfterFailure);
+              retainLifecycleUntil?.(operation);
+            },
+          );
+          const shutdownContext: ShutdownDeadlineContext = {
+            device,
+            timer: dependencies.timer,
+            deadlineMs: shutdownDeadlineMs,
             timeoutMs,
-            killTarget,
-            force: pooledAvdIdentity?.force ?? false,
-            processStop: androidKillProcessStop(dependencies, device, pooledAvdIdentity),
-          },
-        );
+            requestAbortSignal,
+            retainReservationUntil: retainShutdownUntil,
+          };
+          const { killTarget, stopIdentity, androidObserverState } = await preparePlatformShutdown(
+            { dependencies, context, options, devicePool, shutdownContext, perf },
+            fence.clear,
+          );
 
-        if (alreadyStoppedMessage !== undefined) {
-          // The target may have stopped between teardown discovery and the platform
-          // kill command. Retire the captured pool incarnation before deletion.
-          perf.startOperation("retireOwnership");
-          await retireShutdownOwnership(
+          const alreadyStoppedMessage = await killProcessAndRetireOwnership(
             {
               ...context,
               expectedPooledDevice,
               expectedSession,
-              deviceManager: dependencies.deviceManagerFactory(),
               retainReservationUntil: retainShutdownUntil,
             },
-            undefined,
-            true,
+            dependencies,
+            perf,
+            devicePool,
             {
-              retryAfterDiscoveryFailure: true,
+              androidObserverState,
+              stoppingSessionUuid: options.stoppingSessionUuid,
+              stoppingMcpSessionId: options.stoppingMcpSessionId,
+              stableIds: options.stableIds,
+              stopIdentity,
+              releaseShutdownReservation,
+              retainReservationUntil: retainShutdownUntil,
               strictDeadline,
               timeoutMs,
-              terminalReleaseRetriesRemaining: DEVICE_SHUTDOWN_TERMINAL_RELEASE_RETRIES,
-              skipAndroidNameEnrichment: pooledAvdIdentity?.force ?? false,
+              killTarget,
+              force: pooledAvdIdentity?.force ?? false,
+              processStop: androidKillProcessStop(dependencies, device, pooledAvdIdentity),
             },
           );
-          perf.endOperation("retireOwnership");
+
+          if (alreadyStoppedMessage !== undefined) {
+            // The target may have stopped between teardown discovery and the platform
+            // kill command. Retire the captured pool incarnation before deletion.
+            perf.startOperation("retireOwnership");
+            await retireShutdownOwnership(
+              {
+                ...context,
+                expectedPooledDevice,
+                expectedSession,
+                deviceManager: dependencies.deviceManagerFactory(),
+                retainReservationUntil: retainShutdownUntil,
+              },
+              undefined,
+              true,
+              {
+                retryAfterDiscoveryFailure: true,
+                strictDeadline,
+                timeoutMs,
+                terminalReleaseRetriesRemaining: DEVICE_SHUTDOWN_TERMINAL_RELEASE_RETRIES,
+                skipAndroidNameEnrichment: pooledAvdIdentity?.force ?? false,
+              },
+            );
+            perf.endOperation("retireOwnership");
+          }
+
+          // Retire the installed-apps cache incarnation BEFORE the shutdown
+          // reservation is released, i.e. before a same-ID replacement can boot
+          // (#6894). From here on, work that captured this incarnation is fenced,
+          // the replacement starts a fresh incarnation, and the late release below
+          // binds to this token so it can never delete the replacement's fences.
+          // Invalidations landing on the retired incarnation meanwhile (the
+          // cleanup below, and notifyResourcesAfterShutdown() ->
+          // syncInstalledAppResources() re-invalidating the same, already-gone
+          // device) fence it without starting a phantom incarnation, so the
+          // release still finds and frees the bookkeeping (#6704).
+          const retiredIncarnation = getInstalledAppsCacheWriteCoordinator().retireIncarnation(
+            device.deviceId,
+          );
+          await releaseShutdownReservation();
+          unregisterDirectSessionsForDevice(device.deviceId);
+
+          await finishShutdownCleanup(shutdownContext, dependencies, perf, {
+            strictDeadline,
+            timeoutMs,
+            retiredIncarnation,
+          });
+
+          perf.end();
+          return {
+            timing: perf.getTimings(),
+            alreadyStoppedMessage,
+          };
+        } finally {
+          fence.settle();
         }
-
-        // Retire the installed-apps cache incarnation BEFORE the shutdown
-        // reservation is released, i.e. before a same-ID replacement can boot
-        // (#6894). From here on, work that captured this incarnation is fenced,
-        // the replacement starts a fresh incarnation, and the late release below
-        // binds to this token so it can never delete the replacement's fences.
-        // Invalidations landing on the retired incarnation meanwhile (the
-        // cleanup below, and notifyResourcesAfterShutdown() ->
-        // syncInstalledAppResources() re-invalidating the same, already-gone
-        // device) fence it without starting a phantom incarnation, so the
-        // release still finds and frees the bookkeeping (#6704).
-        const retiredIncarnation = getInstalledAppsCacheWriteCoordinator().retireIncarnation(
-          device.deviceId,
-        );
-        await releaseShutdownReservation();
-        unregisterDirectSessionsForDevice(device.deviceId);
-
-        await finishShutdownCleanup(shutdownContext, dependencies, perf, {
-          strictDeadline,
-          timeoutMs,
-          retiredIncarnation,
-        });
-
-        perf.end();
-        return {
-          timing: perf.getTimings(),
-          alreadyStoppedMessage,
-        };
       },
       failure: (error) => rethrowShutdownFailure(device, requestAbortSignal, error),
     }),

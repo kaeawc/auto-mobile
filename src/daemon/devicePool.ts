@@ -528,6 +528,14 @@ export class DevicePool {
     return this.parts.reservations.reserveRestartRecoveryReadiness(...args);
   }
 
+  clearUnpooledShutdown(deviceId: string): void {
+    this.parts.reservations.clearUnpooledShutdown(deviceId);
+  }
+
+  settleUnpooledShutdown(deviceId: string): void {
+    this.parts.reservations.settleUnpooledShutdown(deviceId);
+  }
+
   reserveDeviceForShutdown(
     ...args: Parameters<PoolOps["reserveDeviceForShutdown"]>
   ): ReturnType<PoolOps["reserveDeviceForShutdown"]> {

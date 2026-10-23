@@ -1,3 +1,5 @@
+import { NetworkState } from "../../src/utils/NetworkState";
+import { defaultNetworkDeviceStatePusher } from "../../src/daemon/networkStateSessionCleanup";
 import { afterEach, describe, expect, spyOn, test, mock } from "bun:test";
 import { wireSessionLifecycle } from "../../src/daemon/daemonSessionLifecycleWiring";
 import type { DaemonSessionLifecycleHost } from "../../src/daemon/daemonSessionLifecycleWiring";
@@ -25,6 +27,7 @@ const REGISTRATIONS = [
 
 function hostWith(calls: string[]): DaemonSessionLifecycleHost {
   return {
+    markMutationUnrecorded: () => {},
     deviceReadiness: () => ({ clearExplicitDevicePin: () => undefined }),
     deviceDataStreamServer: () => null,
     socketServer: () => null,
@@ -117,4 +120,46 @@ describe("wireSessionLifecycle", () => {
       "onSessionRelease",
     ]);
   });
+});
+
+test("failed network cleanup marks the ownership session before settlement", async () => {
+  const timer = new FakeTimer();
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+  const state = new NetworkState({ timer, notifier: { notifyResourceUpdated: () => {} } });
+  spyOn(NetworkState, "getInstance").mockReturnValue(state);
+  spyOn(defaultNetworkDeviceStatePusher, "push").mockRejectedValue(new Error("wire push failed"));
+  const ownership = spyOn(manager, "ownershipSessionUuid").mockReturnValue("ownership-session");
+  const base = spyOn(manager, "getBaseSessionOfDerivedLabel").mockReturnValue("base-session");
+  const callbacks: Array<Parameters<SessionManager["onSessionDeviceUnbound"]>[0]> = [];
+  spyOn(manager, "onSessionDeviceUnbound").mockImplementation((callback) => {
+    callbacks.push(callback);
+  });
+  const pending: Promise<unknown>[] = [];
+  spyOn(manager, "registerPendingDeviceCleanup").mockImplementation((_deviceId, cleanup) => {
+    pending.push(cleanup);
+  });
+  const host = hostWith([]);
+  const gaps: Array<{ sessionId: string; reason: string }> = [];
+  host.markMutationUnrecorded = (sessionId, reason) => {
+    gaps.push({ sessionId, reason });
+  };
+  try {
+    wireSessionLifecycle(manager, timer, host);
+    state.startSimulation("fake-device", "timeout", 30, null, "derived-session");
+    callbacks[1]!("derived-session", "fake-device");
+    expect(ownership).toHaveBeenCalledWith("derived-session");
+    expect(base).toHaveBeenCalledWith("derived-session");
+    ownership.mockReturnValue("gone-owner");
+    base.mockReturnValue(undefined);
+    await pending[0];
+    expect(ownership).toHaveBeenCalledWith("derived-session");
+    expect(gaps).toEqual(
+      ["derived-session", "ownership-session", "base-session"].map((sessionId) => ({
+        sessionId,
+        reason: expect.stringContaining("fake-device: wire push failed"),
+      })),
+    );
+  } finally {
+    manager.stopCleanupTimer();
+  }
 });

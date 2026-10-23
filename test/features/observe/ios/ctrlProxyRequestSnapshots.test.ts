@@ -951,3 +951,34 @@ describe("iOS integer millisecond request boundary", () => {
     expect(serializeIosRequest(message)).toBe(JSON.stringify(message));
   });
 });
+
+test.each(["sent", "false", "throw", "no-capability", "unsupported"] as const)(
+  "simulation sync reports delivery: %s",
+  (outcome) => {
+    const h = createHarness();
+    let sends = 0;
+    const sync = new CtrlProxyNetworkSync({
+      getDevice: () => ({ deviceId: "simulation-result", platform: "ios", name: "fake" }),
+      requestManager: h.requestManager,
+      sdkCapability: {
+        hasSdkCapability: () => outcome !== "no-capability",
+        isLegacySdkCommandSupported: () => false,
+        ensureSdkCapability: async () => true,
+        sdkCapabilityGate: async () => null,
+      },
+      sendMessage: () => {
+        sends++;
+        if (outcome === "throw") {
+          throw new Error("socket closed");
+        }
+        return outcome !== "false";
+      },
+      isCommandSupported: () => outcome !== "unsupported",
+      createDelegateContext: () => h.context,
+    });
+    expect(sync.syncNetworkErrorSimulationToDevice()).toBe(
+      outcome !== "false" && outcome !== "throw",
+    );
+    expect(sends).toBe(outcome === "no-capability" || outcome === "unsupported" ? 0 : 1);
+  },
+);

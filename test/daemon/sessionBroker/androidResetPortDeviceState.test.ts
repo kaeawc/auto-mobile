@@ -132,6 +132,41 @@ describe("AndroidDeviceMutationResetPort setDeviceState reverts", () => {
       expect((await client.readDoze()).mode).toBe("off");
     });
 
+    test("a screen the session slept is woken after the unforce so the Doze read-back settles (#15168)", async () => {
+      const entry = await journal("power:doze");
+      await client.forceDoze("deep");
+      power.idleLingersWhileAsleep = true;
+      power.setScreenState(false);
+      await port.revert(entry, context);
+      expect(power.getExecutedCommands().filter((c) => c.includes("KEYCODE_WAKEUP"))).toHaveLength(
+        1,
+      );
+      expect((await client.readDoze()).mode).toBe("off");
+      expect(await power.isScreenOn()).toBe(true);
+    });
+
+    test("an awake screen is not sent a wake key by the Doze revert", async () => {
+      const entry = await journal("power:doze");
+      await client.forceDoze("deep");
+      await port.revert(entry, context);
+      expect(power.getExecutedCommands().some((c) => c.includes("KEYCODE_WAKEUP"))).toBe(false);
+    });
+
+    test("a failed wake is logged and the Doze read-back stays authoritative (#15168)", async () => {
+      const entry = await journal("power:doze");
+      await client.forceDoze("deep");
+      power.idleLingersWhileAsleep = true;
+      power.setScreenState(false);
+      power.failing.add("KEYCODE_WAKEUP");
+      await expect(port.revert(entry, context)).rejects.toThrow("could not confirm power:doze");
+      // Without the lingering idle the wake failure alone does not fail the revert.
+      power.idleLingersWhileAsleep = false;
+      await client.forceDoze("deep");
+      power.setScreenState(false);
+      await port.revert(entry, context);
+      expect((await client.readDoze()).mode).toBe("off");
+    });
+
     test("refused light Doze re-force is caught by read-back", async () => {
       await client.forceDoze("light");
       const entry = await journal("power:doze");

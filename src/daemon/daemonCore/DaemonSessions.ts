@@ -66,6 +66,7 @@ const DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS = 1_000;
 export interface DaemonSessionsHost {
   services: Pick<
     DaemonCoreServices,
+    | "daemonState"
     | "deviceReadiness"
     | "sessionManager"
     | "devicePool"
@@ -254,6 +255,11 @@ export class DaemonSessions {
 
   configureSessionLifecycleCallbacks(): void {
     wireSessionLifecycle(this.host.services.sessionManager(), this.host.services.timer(), {
+      markMutationUnrecorded: (sessionUuid, reason) =>
+        this.host.services
+          .daemonState()
+          .getSessionBrokerService()
+          ?.markMutationUnrecorded(sessionUuid, reason),
       deviceDataStreamServer: () => this.host.lifecycle.deviceDataStreamServer(),
       socketServer: () => this.host.lifecycle.socketServer(),
       managedExecutionReowner: () => this.host.lifecycle.managedExecutionReowner(),

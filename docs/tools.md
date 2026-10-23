@@ -2733,7 +2733,7 @@ Location route playback uses `setDeviceState` with `location: { mode: "route", w
 
 One route runs per device. A static fix, new route, `location: { mode: "stop" }`, session release, unbind, or device removal cancels it. On release or rebind of a session that set a location, iOS Simulator clears it with `simctl location clear`; failed clears are retried and quarantine the device until success or removal. Android emulator fixes persist after the session because the emulator console has no unset command; reset the fix explicitly if needed. Direct-mode (sessionless) calls are unchanged. A sessionless fix written while a session marker remains on that device is cleared by that session's release; markers are per device and session, not per write. Stop reports `stopped: false` when idle and `previousRoute` when a route ended, including its `endedReason` (`completed`, `failed`, `replaced`, or `stopped`) and any `lastError`.
 
-Device-condition fixtures use `setDeviceState` with `deviceCondition: { ... }`, behind the `device-condition` feature flag (off by default). It is the session-scoped surface for the root/integrity/fault test fixtures of epic #14047: a versioned object with `rootState`, `integrityState`, a `faults` map, an optional `expiresInSeconds` lease, and `reset`. Each applied condition registers a reset that runs — newest first, verified against a clean read-back — on session release, rebind, or lease expiry, so a device never returns to the pool holding a fixture; the `expiresInSeconds` lease needs a session to enforce it. The `rootState`/`integrityState` fields accept only `"unset"` until their injectors land, and `deviceCondition` must be sent in its own call rather than combined with the other `setDeviceState` fields. The `faults` sub-object carries the power-domain fault injectors (Android only, root-free): `battery` (`unplug` / `low` / `full` via `dumpsys battery`, reset with `dumpsys battery reset`), `lowPower` (`settings global low_power`, restored to its prior value), `doze` (`dumpsys deviceidle force-idle`, reset with `unforce`), and `thermal` (`cmd thermalservice override-status`, reset with `reset`). Each fault clears with `"unset"`. A request for a passing hardware-attestation state (`verifiedBootState=Verified`, `MEETS_DEVICE_INTEGRITY`/`MEETS_STRONG_INTEGRITY`, `ctsProfileMatch`) is refused with an `attestation_ceiling` error and nothing is applied, because an emulator can never present one; see the attestation-ceiling design doc. The version-sensitive verbs (`deviceidle`, `thermalservice`) probe their capability first and return an "unsupported on this image" result instead of half-applying.
+Device-condition fixtures use `setDeviceState` with `deviceCondition: { ... }`, behind the `device-condition` feature flag (off by default). It is the session-scoped surface for the root/integrity/fault test fixtures of epic #14047: a versioned object with `rootState`, `integrityState`, a `faults` map, an optional `expiresInSeconds` lease, and `reset`. Each applied condition registers a reset that runs — newest first, verified against a clean read-back — on session release, rebind, or lease expiry, so a device never returns to the pool holding a fixture; the `expiresInSeconds` lease needs a session to enforce it. `rootState` accepts `"rooted-detectable"` (or `"unset"`): on a non-Play Android image it runs `adb root` and `adb remount`, sets SELinux permissive, and plants inert `su`/`busybox` stubs and `/system/app/Superuser.apk` so file-based root-detection checks trip. It is a detection fixture, not working root; a Google Play image is refused with a pointer to real root, and the AVD must boot with `-writable-system` (or have verity disabled). Artifacts already present on the image (a userdebug image ships a real `su`) are left untouched; release removes only what it planted and restores SELinux. `integrityState` accepts only `"unset"` until its injector lands, and `deviceCondition` must be sent in its own call rather than combined with the other `setDeviceState` fields. The `faults` sub-object carries the power-domain fault injectors (Android only, root-free): `battery` (`unplug` / `low` / `full` via `dumpsys battery`, reset with `dumpsys battery reset`), `lowPower` (`settings global low_power`, restored to its prior value), `doze` (`dumpsys deviceidle force-idle`, reset with `unforce`), and `thermal` (`cmd thermalservice override-status`, reset with `reset`). Each fault clears with `"unset"`. A request for a passing hardware-attestation state (`verifiedBootState=Verified`, `MEETS_DEVICE_INTEGRITY`/`MEETS_STRONG_INTEGRITY`, `ctsProfileMatch`) is refused with an `attestation_ceiling` error and nothing is applied, because an emulator can never present one; see the attestation-ceiling design doc. The version-sensitive verbs (`deviceidle`, `thermalservice`) probe their capability first and return an "unsupported on this image" result instead of half-applying.
 Lock-screen credentials use `setDeviceState` with `screenLock: { type: "pin", credential: "1357" }`, `screenLock: { type: "password", credential: "s3cret" }`, `screenLock: { type: "pattern", credential: "14789" }` (cells of the 3x3 grid as digits 1-9, row by row, each used once), or `screenLock: { type: "none", currentCredential: "1357" }` to clear one. It runs `adb shell locksettings set-pin|set-password|set-pattern|clear` for user 0 on an Android emulator or physical device, so `KeyguardManager.isDeviceSecure()` becomes true and Keystore keys that need user authentication can be generated; iOS returns unsupported. A PIN is 4-16 digits; a password or `currentCredential` is 4-16 printable ASCII characters, not starting with `-` and without a single quote. `getDeviceState` with `include: ["screenLock"]` reads the credential type (`none`, `pin`, `password`, `pattern`, or `unknown`) from `dumpsys lock_settings`, falling back to the keyguard's `secure` flag.
 
 The result reports only the type and outcome, such as `screenLock: { type: "pin", set: true, outcome: "set", verified: true, restoreOnRelease: true }`; the credential is never returned. Within a session, AutoMobile keeps the credential in daemon memory (never on disk) so that session can replace it (`--old`) and its release or rebind clears it. A leaked lock blocks every later session on the device, so the outcome of that clear is returned in the session-release result as `screenLockRestore` (`cleared`, `failed` with the leftover and how to remove it, `skipped` for a replaced device, or `pending` if still running at the teardown cap); a refused credential is not retried, because each refusal counts toward the device's failed-attempt lockout. A daemon restart loses the in-memory credential, leaving the lock until it is cleared by hand. A sessionless set is never cleared automatically and carries a `warning`. An existing credential this session did not set is never overwritten: the call fails with `errorCode: "lock_credential_preexisting"` and no write; a wrong `currentCredential` fails with `lock_credential_mismatch`. Any change also drops the PIN `wakeAndUnlock` remembered for the device.
@@ -3456,8 +3456,15 @@ its first settings write and restores both on release or rebind. An already
 locked no-op records nothing. If the initial auto-rotate setting is unreadable,
 omission leaves it unchanged rather than forcing a lock.
 
+The stock Android launcher requests a no-sensor orientation, so a landscape
+rotation on the home screen never reaches the display, even with auto-rotate off
+and a direct `user_rotation` write. The call waits up to its rotation time budget,
+returns `success: false` with "Timeout waiting for rotation", and leaves the display
+in portrait. Open a rotation-permitting app first, such as Settings or your app.
+
 In direct mode (no session or session manager), omission temporarily disables
-auto-rotate when necessary and restores it at the end of the call. With
+auto-rotate when necessary and restores it at the end of the call. Explicit
+`lockOrientation: false` behaves the same way, because it also ends with auto-rotate on. With
 auto-rotate on, the sensor then returns the display to its physical orientation,
 so a plain direct `rotate` to a different orientation reports `success: false`
 ("returned to ... because automatic rotation is on") and rolls back the
@@ -3476,6 +3483,8 @@ hold the lock past the call. In session mode it explicitly requests the same
 lock, also recording the restore slot so release restores the original settings;
 unlike omission, an explicit lock can force an unreadable initial setting off.
 
+Success is judged from the display's applied rotation, read after auto-rotate is
+restored, not from the window manager's requested rotation.
 The existing `orientationLockState` reports `locked`, `unlocked`, or `unknown`.
 A confirmed final orientation mismatch returns `success: false` with the achieved
 `currentOrientation`. `rotationPerformed` is false when the display ended in its
@@ -3487,10 +3496,13 @@ A persistent lock requires confirmation of the lock and live orientation.
 To restore automatic rotation, pass `lockOrientation: false`, for example
 `{ "orientation": "landscape", "lockOrientation": false }`. This rotates to the
 requested orientation and enables auto-rotate, deliberately overriding an
-originally locked `accelerometer_rotation=0`. In session mode, once auto-rotate
-is confirmed on, it additionally restores the original `user_rotation` and clears
-the slot. A failed user-setting restore adds a warning and retains the slot for
-release to retry. These options are supported only on Android.
+originally locked `accelerometer_rotation=0`. The requested orientation lasts with
+auto-rotate on only while the device is physically held that way; use a session's
+default lock or `lockOrientation: true` to hold it independently of the sensor.
+In session mode, once auto-rotate is confirmed on, it additionally restores the
+original `user_rotation` and clears the slot. A failed user-setting restore adds a
+warning and retains the slot for release to retry. These options are supported
+only on Android.
 
 ### Acquiring a device: `avdName`, `udid`, and the `deviceId` alias
 

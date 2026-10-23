@@ -1,3 +1,5 @@
+import { SETTINGS_TIMEOUT } from "./fixtures/androidResetLoadTimeouts";
+
 import { describe, expect, test } from "bun:test";
 import { cleanAndroidBaseline } from "../../../src/daemon/sessionBroker/androidKeepBootedCleanup";
 import type { DeviceMutationInput } from "../../../src/daemon/sessionBroker/mutations/types";
@@ -22,7 +24,7 @@ async function rig(users: readonly number[] = [0], fallback?: AndroidResetStrate
   const { adb, reply } = androidBaselineRig(users);
   const timer = new FakeTimer();
   const journal = new FakeDeviceMutationJournal(timer);
-  const port = new AndroidDeviceMutationResetPort(adb);
+  const port = new AndroidDeviceMutationResetPort(adb, timer);
   let owned = true;
   const assertOwned = async () => {
     if (!owned) {
@@ -187,7 +189,7 @@ describe("Android unconditional keep-booted cleaning", () => {
         .getCommandCalls()
         .every(
           (call) =>
-            call.timeoutMs === 2000 &&
+            call.timeoutMs! >= 2000 &&
             call.noRetry &&
             call.signal &&
             call.waitForProcessSettlementAfterAbort,
@@ -387,5 +389,38 @@ describe("Android unconditional keep-booted cleaning", () => {
     loseOwnership();
     await expect(reset()).rejects.toThrow("ownership lost");
     expect(adb.getExecutedCommands()).toEqual([]);
+  });
+});
+
+describe("cleaning adb under load", () => {
+  test("captured secure settings timeout retries and cleaning stays clean", async () => {
+    const { adb } = androidBaselineRig();
+    const timer = new FakeTimer();
+    const journal = new FakeDeviceMutationJournal(timer);
+    const port = new AndroidDeviceMutationResetPort(adb, timer);
+    const strategy = new AndroidKeepBootedReset({ journal, port: () => port, timer });
+    await strategy.capture(ANDROID_RESET_DEVICE, {
+      ...SESSION,
+      timeoutMs: 600_000,
+      signal: new AbortController().signal,
+      assertOwned: async () => {},
+    });
+    const execute = adb.executeCommand.bind(adb);
+    let reads = 0;
+    adb.executeCommand = async (command, options) => {
+      if (command === "shell settings --user 0 list secure" && ++reads === 1) {
+        throw new Error(SETTINGS_TIMEOUT);
+      }
+      return execute(command, options);
+    };
+    timer.enableAutoAdvance();
+    const result = await strategy.reset(ANDROID_RESET_DEVICE, new Set(), async () => {}, {
+      ...SESSION,
+      timeoutMs: 600_000,
+      deadlineMs: 600_000,
+    });
+    expect(result.outcome).toBe("clean");
+    expect(reads).toBe(2);
+    expect(timer.getSleepHistory()).toEqual([250]);
   });
 });

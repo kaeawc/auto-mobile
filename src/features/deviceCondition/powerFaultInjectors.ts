@@ -1,5 +1,4 @@
 import type { BootedDevice } from "../../models";
-import { ActionableError } from "../../models/ActionableError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import {
   defaultAdbClientFactory,
@@ -10,6 +9,7 @@ import type {
   DeviceConditionInjector,
 } from "./DeviceConditionController";
 import type { DeviceConditionKey } from "./DeviceConditionTypes";
+import { rejectValue, shell, unsupported } from "./injectorSupport";
 
 /**
  * Power-domain fault injectors for `deviceCondition.faults` (#14063): battery,
@@ -35,28 +35,6 @@ export type PowerFaultKey = (typeof POWER_FAULT_KEYS)[number];
 
 /** Android thermal severities the surface exposes, mapped to framework status ints. */
 const THERMAL_SEVERITY: Record<string, number> = { throttling: 3, critical: 4 };
-
-async function shell(
-  adb: AdbExecutor,
-  args: readonly string[],
-  signal?: AbortSignal,
-): Promise<string> {
-  const result = await adb.execute(["shell", ...args], { signal });
-  if (result.error) {
-    throw new ActionableError(`adb shell ${args.join(" ")} failed: ${result.error}`);
-  }
-  return result.stdout.replace(/\r\n?/g, "\n").trim();
-}
-
-function unsupported(reason: string): never {
-  throw new ActionableError(`unsupported on this image: ${reason}`);
-}
-
-function rejectValue(key: DeviceConditionKey, value: string, allowed: readonly string[]): never {
-  throw new ActionableError(
-    `Invalid ${key} value '${value}'. Expected one of: ${allowed.join(", ")}.`,
-  );
-}
 
 const BATTERY_VALUES = ["unplug", "low", "full"] as const;
 

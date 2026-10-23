@@ -44,6 +44,13 @@ describe("automobile:prototype resource", () => {
     expect(await read("automobile:prototype")).toContain("# Prototype authoring guide");
   });
 
+  test("lists the native-code resources and the guide points to them (#13729)", () => {
+    const templates = ResourceRegistry.getTemplateDefinitions().map((t) => t.uriTemplate);
+    expect(templates).toContain("automobile:prototype/native{?id,platform,deviceId}");
+    expect(templates).toContain("automobile:prototype/native/asset{?id,assetId,deviceId}");
+    expect(renderPrototypeGuide()).toContain("automobile:prototype/native?id=<id>");
+  });
+
   test("limits table matches the contract", () => {
     const table = renderLimitsTable();
     for (const [name, value] of Object.entries(contract.limits)) {

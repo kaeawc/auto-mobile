@@ -166,9 +166,11 @@ describe("CLI tool output never emits truncated JSON (#6870)", () => {
   });
 
   test("renders a non-serializable result as an explicit failure, not a crash", () => {
-    // A BigInt takes the same JSON.stringify-throws path as a cycle. A cycle is not used
-    // because Bun 1.4 spends about 650 ms building its "circular structure" error.
-    const parsed = JSON.parse(renderCliToolOutput({ count: 1n }, { tool: "tapOn" }));
+    // A BigInt is non-serializable like a cycle but throws immediately; building the
+    // cyclic-reference error costs 450ms or more, which blew the 100ms unit budget.
+    const unserializable = { count: 1n };
+
+    const parsed = JSON.parse(renderCliToolOutput(unserializable, { tool: "tapOn" }));
 
     expect(parsed.truncated).toBe(true);
     expect(parsed.reason).toBeTruthy();

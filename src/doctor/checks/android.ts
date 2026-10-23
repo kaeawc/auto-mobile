@@ -31,6 +31,7 @@ import {
 } from "../../utils/android-cmdline-tools/AvdConfigReader";
 import type { AdbDeviceState } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { awaitDoctorProbe, remainingDoctorProbe } from "../deadline";
+import { checkAndroidIntegritySignals } from "./androidIntegrity";
 
 const MIN_CMDLINE_TOOLS_VERSION = [9, 0] as const;
 type CmdlineToolsVersionReader = (
@@ -677,6 +678,7 @@ export async function runAndroidChecks(options: DoctorOptions = {}): Promise<Che
   await run(() => checkAdbVersion(defaultAdbClientFactory, options));
   await run(() => checkEmulator(options));
   await run(() => checkConnectedDevices(defaultAdbClientFactory, options));
+  await run(() => checkAndroidIntegritySignals(defaultAdbClientFactory, options));
   await run(() => checkAvailableAvds(options));
   await run(() => checkAvdMemory(createAndroidDoctorDependencies(), options));
 

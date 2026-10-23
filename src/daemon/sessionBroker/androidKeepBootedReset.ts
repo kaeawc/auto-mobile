@@ -19,6 +19,7 @@ import {
 import type { ResetOutcome } from "./devicePort";
 import { ResetFailureError } from "./ResetFailureError";
 import { isAndroidCriticalSetting } from "./androidKeepBootedCleanup";
+import { parsePowerIntentKey } from "./mutations/deviceStateKeys";
 import {
   opaqueForcesFallback,
   type DeviceBaseline,
@@ -557,7 +558,13 @@ export class AndroidKeepBootedReset implements AndroidResetStrategy {
           error,
         );
         await context.assertOwned();
-        if (mutation.kind !== "device-setting" || isAndroidCriticalSetting(mutation.key)) {
+        // Power controls live in system_server state the baseline settings clean cannot reach, and
+        // their revert is verified by read-back (#15110): a failure means the device is still dirty.
+        if (
+          mutation.kind !== "device-setting" ||
+          isAndroidCriticalSetting(mutation.key) ||
+          parsePowerIntentKey(mutation.key) !== null
+        ) {
           throw error;
         }
       }

@@ -80,6 +80,7 @@ A read never writes settings on a device another session holds. A sessionless re
 | 🧹 <code>resetAppLogs</code>          | Reset named app log files                                                                      |
 | ⚙️ <code>getPreference</code>         | Read an Android system property, Android SharedPreferences key, or iOS UserDefaults key        |
 | ⚙️ <code>setPreference</code>         | Write a system property, SharedPreferences, or UserDefaults key                                |
+| 🗝️ <code>deleteKeychainItem</code>    | Delete one allowlisted app-owned iOS Keychain item (SDK opt-in, requires confirm)              |
 | 🔑 <code>setKeyValue</code>           | Set app key-value storage entry                                                                |
 | ❌ <code>removeKeyValue</code>        | Remove app key-value storage entry                                                             |
 | 🧼 <code>clearKeyValueFile</code>     | Clear app key-value storage file                                                               |

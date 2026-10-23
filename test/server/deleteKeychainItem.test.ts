@@ -1,10 +1,13 @@
 import { toolJson, toolIsError } from "../helpers/toolResponse";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { registerStorageTools, type IosKeyValueClient } from "../../src/server/storageTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import type { BootedDevice } from "../../src/models";
 import type { KeychainItemSelector } from "../../src/features/observe/ios/CtrlProxyStorage";
+
+isolateToolRegistry();
 
 const device: BootedDevice = { deviceId: "ios-test", name: "iPhone", platform: "ios" };
 const selector: KeychainItemSelector = {

@@ -444,17 +444,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
   if (value.action === "awaitEvent") {
     validateAwaitEventInput(value, ctx);
   }
-  if (
-    (value.action === "save" || value.action === "open") &&
-    value.timeoutMs !== undefined &&
-    value.timeoutMs > MAX_PROTOTYPE_EVENT_TIMEOUT_MS
-  ) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["timeoutMs"],
-      message: `${value.action} timeoutMs must not exceed ${MAX_PROTOTYPE_EVENT_TIMEOUT_MS}`,
-    });
-  }
+  validateProtoViewerTimeout(value, ctx);
   if (value.action === "show" && (value.spec === undefined) === (value.specPath === undefined)) {
     ctx.addIssue({
       code: "custom",
@@ -473,6 +463,21 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     });
   }
 });
+
+/** save and open may wait on ProtoViewer; the daemon budgets at most the awaitEvent maximum. */
+function validateProtoViewerTimeout(
+  value: { action: string; timeoutMs?: number },
+  ctx: z.RefinementCtx,
+): void {
+  const waits = value.action === "save" || value.action === "open";
+  if (waits && (value.timeoutMs ?? 0) > MAX_PROTOTYPE_EVENT_TIMEOUT_MS) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["timeoutMs"],
+      message: `${value.action} timeoutMs must not exceed ${MAX_PROTOTYPE_EVENT_TIMEOUT_MS}`,
+    });
+  }
+}
 
 function validateAwaitEventInput(
   value: z.infer<typeof prototypeSchema>,

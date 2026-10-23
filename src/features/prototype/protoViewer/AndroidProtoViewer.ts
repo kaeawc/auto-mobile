@@ -22,6 +22,9 @@ import {
   protoViewerResultSchema,
   type ProtoViewerResult,
 } from "./protoViewerContract";
+import { ProtoViewerEntryPointMissingError } from "./ProtoViewerEntryPointMissingError";
+
+export { ProtoViewerEntryPointMissingError };
 
 /** Host temp file holding the bundle for `adb push`; disposed after the push either way. */
 export interface ProtoViewerTempFile {
@@ -55,13 +58,6 @@ export const PROTOVIEWER_RESULT_POLL_MS = 250;
 export const PROTOVIEWER_DEFAULT_TIMEOUT_MS = 15_000;
 /** Cleanup runs even after the caller's signal fired, but only this long. */
 const PROTOVIEWER_CLEANUP_TIMEOUT_MS = 5_000;
-
-/** The installed ProtoViewer predates the MCP entry point; a save then keeps the CtrlProxy path. */
-export class ProtoViewerEntryPointMissingError extends ActionableError {
-  constructor() {
-    super("This ProtoViewer build has no MCP entry point. Install a newer ProtoViewer and retry.");
-  }
-}
 
 interface AndroidProtoViewerDependencies {
   adb: AdbExecutor;

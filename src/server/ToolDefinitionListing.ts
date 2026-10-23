@@ -3,6 +3,8 @@ import type { DeviceReadOnlyArgShape } from "../daemon/deviceReadOnlyArgShapes";
 import { SET_TOOL_ENABLED_TOOL_NAME } from "../features/toolSelection/toolSelectionControl";
 import { serverConfig } from "../utils/ServerConfig";
 import { RegisteredTool, ToolListingOptions, withItemsEnum } from "./toolRegistryTypes";
+import type { ToolAnnotations } from "@modelcontextprotocol/server";
+import { TOOL_ANNOTATIONS } from "./toolAnnotations";
 export class ToolDefinitionListing {
   constructor(
     private readonly getAllTools: (options: ToolListingOptions) => RegisteredTool[],
@@ -45,6 +47,8 @@ export class ToolDefinitionListing {
 
       const definition: {
         name: string;
+        title?: string;
+        annotations?: ToolAnnotations;
         description: string;
         inputSchema: Record<string, unknown>;
         outputSchema?: Record<string, unknown>;
@@ -59,6 +63,7 @@ export class ToolDefinitionListing {
         };
       } = {
         name: tool.name,
+        ...TOOL_ANNOTATIONS[tool.name],
         description: tool.description,
         inputSchema,
       };

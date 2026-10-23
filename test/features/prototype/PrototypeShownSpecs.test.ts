@@ -201,3 +201,17 @@ describe("PrototypeShownSpecs", () => {
     expect(store.commitPatch("d", "panel", 0, spec)).toBe(false);
   });
 });
+
+test("remembers the platform a show was sent to and which devices show an id (#13729)", () => {
+  const specs = new PrototypeShownSpecs();
+  const ticket = specs.beginShow("sim", "a", true, "ios");
+  specs.endShow("sim", ticket, { id: "a", spec: { id: "a" } });
+  const other = specs.beginShow("emu", "a", true, "android");
+  specs.endShow("emu", other, { id: "a", spec: { id: "a" } });
+  expect(specs.platformOf("sim")).toBe("ios");
+  expect(specs.platformOf("emu")).toBe("android");
+  expect(specs.platformOf("unknown")).toBeUndefined();
+  expect(specs.devicesShowing("a")).toEqual(["emu", "sim"]);
+  specs.forget("emu", "a");
+  expect(specs.devicesShowing("a")).toEqual(["sim"]);
+});

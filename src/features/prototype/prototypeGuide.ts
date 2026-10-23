@@ -26,6 +26,7 @@ import {
   GUIDE_STORAGE,
 } from "./prototypeGuideProse";
 import { MAX_PROTOTYPE_COMPONENT_DEPTH } from "./prototypeComponents";
+import { PROTOTYPE_NATIVE_ASSET_URI, PROTOTYPE_NATIVE_URI } from "./nativePrototypeUris";
 
 /** Resource URIs served by the prototype authoring guide. */
 export const PROTOTYPE_GUIDE_URI = "automobile:prototype";
@@ -194,6 +195,14 @@ function renderIcons(): string {
   ].join("\n");
 }
 
+function renderNativeCode(): string {
+  return [
+    "## Embedding in an app",
+    "",
+    `Read \`${PROTOTYPE_NATIVE_URI}?id=<id>\` (optional \`platform=android|ios\`, \`deviceId\`) for a shown or saved prototype as app code: the spec, its assets, a Jetpack Compose or SwiftUI host file that renders it with the published renderer library, the library coordinate to add, and the capabilities the spec needs. Asset bytes for saved prototypes come from \`${PROTOTYPE_NATIVE_ASSET_URI}?id=<id>&assetId=<asset>\`.`,
+  ].join("\n");
+}
+
 function renderWindow(): string {
   const placement = definitions.placement.variants ?? {};
   return [
@@ -264,6 +273,7 @@ export function renderPrototypeGuide(): string {
     GUIDE_DEVICE_LOOPBACK,
     renderIcons(),
     renderPlatformDifferences(),
+    renderNativeCode(),
     GUIDE_COST,
     GUIDE_ERRORS,
   ].join("\n\n");

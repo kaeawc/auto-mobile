@@ -59,11 +59,21 @@ describe("handleDeviceConditionCall (#14050)", () => {
   test("refuses an invalid deviceCondition value", async () => {
     const response = await handleDeviceConditionCall(
       device,
-      { deviceCondition: { rootState: "rooted-detectable" }, sessionUuid: "s" },
+      { deviceCondition: { rootState: "fully-rooted" }, sessionUuid: "s" },
       { featureFlags: flagOn, registry: freshRegistry() },
     );
     expect(toolStructured(response).success).toBe(false);
     expect(toolText(response)).toMatch(/Invalid deviceCondition/);
+  });
+
+  test("accepts rooted-detectable and reports it unsupported when no injector is registered", async () => {
+    const response = await handleDeviceConditionCall(
+      device,
+      { deviceCondition: { rootState: "rooted-detectable" }, sessionUuid: "s" },
+      { featureFlags: flagOn, registry: freshRegistry() },
+    );
+    expect(toolText(response)).not.toMatch(/Invalid deviceCondition/);
+    expect(toolStructured(response).success).toBe(false);
   });
 
   test("refuses a lease in direct mode (no session to enforce it)", async () => {

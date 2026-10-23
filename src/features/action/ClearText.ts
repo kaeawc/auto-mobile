@@ -225,7 +225,9 @@ function captureIosNativeEditableValue(
   const id = properties["view-id"] ?? searchable.nativeId;
   if (typeof id === "string" && id !== "") {
     // Runner omissions represent empty native values; labels are never editable values.
-    values[id] = typeof properties.value === "string" ? properties.value : "";
+    const value = typeof properties.value === "string" ? properties.value : "";
+    // XCUI reports an empty field's placeholder as its value.
+    values[id] = value === properties["hint-text"] ? "" : value;
   }
 }
 

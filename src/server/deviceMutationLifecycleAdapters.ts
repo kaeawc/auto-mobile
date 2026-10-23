@@ -38,6 +38,8 @@ const PROCESS_ONLY_TOOLS: ReadonlySet<string> = new Set([
   "crashApp",
   "appLifecycle",
   "performanceTrace",
+  "captureTrace",
+  "heapDump",
   "videoRecording",
   "recordDeviceGestures",
 ]);

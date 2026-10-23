@@ -140,20 +140,22 @@ A read never writes settings on a device another session holds. A sessionless re
 
 ## 🌐 Network, plans & recording
 
-| Tool                                 | What it does                                                         |
-| ------------------------------------ | -------------------------------------------------------------------- |
-| 📶 <code>network</code>              | Control network capture and error simulation                         |
-| 🎭 <code>mockNetwork</code>          | Add mock network response rule                                       |
-| 🧽 <code>clearMockNetwork</code>     | Clear mock network response rules                                    |
-| 🕸️ <code>getNetworkGraph</code>      | Get aggregate captured network graph                                 |
-| ▶️ <code>executePlan</code>          | Execute YAML plan steps; stops on first failed step                  |
-| 🔒 <code>criticalSection</code>      | Synchronize multiple devices at a barrier, then run steps serially   |
-| 🚧 <code>barrier</code>              | Sync multiple devices at a point in a plan                           |
-| ⏺️ <code>recordToolCalls</code>      | Record MCP tool calls to YAML                                        |
-| 🎬 <code>recordDeviceGestures</code> | Start recording on-device user input (not tool calls) for exportPlan |
-| 📤 <code>exportPlan</code>           | Stop active recording and export a YAML plan                         |
-| 🎥 <code>videoRecording</code>       | Start or stop device video recording                                 |
-| 📈 <code>performanceTrace</code>     | Record an xctrace / Perfetto trace                                   |
+| Tool                                 | What it does                                                                                                                                                                      |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 📶 <code>network</code>              | Control network capture and error simulation                                                                                                                                      |
+| 🎭 <code>mockNetwork</code>          | Add mock network response rule                                                                                                                                                    |
+| 🧽 <code>clearMockNetwork</code>     | Clear mock network response rules                                                                                                                                                 |
+| 🕸️ <code>getNetworkGraph</code>      | Get aggregate captured network graph                                                                                                                                              |
+| ▶️ <code>executePlan</code>          | Execute YAML plan steps; stops on first failed step                                                                                                                               |
+| 🔒 <code>criticalSection</code>      | Synchronize multiple devices at a barrier, then run steps serially                                                                                                                |
+| 🚧 <code>barrier</code>              | Sync multiple devices at a point in a plan                                                                                                                                        |
+| ⏺️ <code>recordToolCalls</code>      | Record MCP tool calls to YAML                                                                                                                                                     |
+| 🎬 <code>recordDeviceGestures</code> | Start recording on-device user input (not tool calls) for exportPlan                                                                                                              |
+| 📤 <code>exportPlan</code>           | Stop active recording and export a YAML plan                                                                                                                                      |
+| 🎥 <code>videoRecording</code>       | Start or stop device video recording                                                                                                                                              |
+| 📈 <code>performanceTrace</code>     | Record an xctrace / Perfetto trace                                                                                                                                                |
+| 🔬 <code>captureTrace</code>         | Android: record a Perfetto trace from typed categories (`sched`, `gfx`, `view`, `am`, `wm`, `binder_driver`, `memory`, `app`); `stop` pulls the `.perfetto-trace`. Off by default |
+| 🧠 <code>heapDump</code>             | Android: dump a debuggable or profileable app's heap to a host `.hprof` (`heap_dump_not_debuggable` otherwise). Off by default                                                    |
 
 ## ♿ Accessibility & tooling
 

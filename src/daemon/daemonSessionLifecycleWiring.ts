@@ -30,6 +30,7 @@ import { registerPerformanceMonitorSessionCleanup } from "./performanceMonitorSe
 import { registerAppLinksSessionCleanup } from "./appLinksSessionCleanup";
 import { registerScreenLockSessionCleanup } from "./screenLockSessionCleanup";
 import { registerPowerSessionCleanup } from "./powerSessionCleanup";
+import { registerProfilingSessionCleanup } from "./profilingSessionCleanup";
 import { registerSystemAlertSessionCleanup } from "./systemAlertSessionCleanup";
 import {
   createOwnerlessRecordingAcquisitionCleanup,
@@ -111,6 +112,7 @@ export function wireSessionLifecycle(
   registerPerformanceMonitorSessionCleanup(sessionManager);
   registerScreenLockSessionCleanup(sessionManager);
   registerPowerSessionCleanup(sessionManager);
+  registerProfilingSessionCleanup(sessionManager);
   registerSystemAlertSessionCleanup(sessionManager);
   registerRecordingSessionCleanup(sessionManager, {
     ...defaultRecordingSessionCleanupDeps,

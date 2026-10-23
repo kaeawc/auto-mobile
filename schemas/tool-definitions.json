@@ -1460,6 +1460,130 @@
     }
   },
   {
+    "name": "captureTrace",
+    "description": "Android: record a Perfetto trace from typed categories (sched, gfx, view, am, wm, binder_driver, memory, app). start returns a traceId; drive the flow; stop pulls the .perfetto-trace to the host. Released sessions stop their trace.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "start a recorder, or stop one by traceId",
+          "type": "string",
+          "enum": ["start", "stop"]
+        },
+        "traceId": {
+          "description": "stop: the id start returned",
+          "type": "string",
+          "minLength": 1
+        },
+        "appId": {
+          "description": "start: enables the app's atrace tags (Choreographer, RenderThread, custom slices)",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "categories": {
+          "description": "start: what to record; default sched, gfx, view. app needs an appId",
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["sched", "gfx", "view", "am", "wm", "binder_driver", "memory", "app"]
+          }
+        },
+        "bufferMb": {
+          "description": "start: ring buffer size; default 32",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 256
+        },
+        "maxDurationMs": {
+          "description": "start: the recorder stops itself after this; default 30000",
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 300000
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["action"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "action": {
+          "type": "string",
+          "enum": ["start", "stop"]
+        },
+        "traceId": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "sizeBytes": {
+          "type": "number"
+        },
+        "durationMs": {
+          "type": "number"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "appId": {
+          "type": "string"
+        },
+        "categories": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["sched", "gfx", "view", "am", "wm", "binder_driver", "memory", "app"]
+          }
+        },
+        "bufferMb": {
+          "type": "number"
+        },
+        "maxDurationMs": {
+          "type": "number"
+        },
+        "startedAt": {
+          "type": "string"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": ["success", "action", "traceId", "deviceId", "warnings", "message"],
+      "additionalProperties": {}
+    }
+  },
+  {
     "name": "changeLocalization",
     "title": "Change Locale",
     "annotations": {
@@ -4375,6 +4499,7 @@
               "audit",
               "backgroundWork",
               "biometricAuth",
+              "captureTrace",
               "changeLocalization",
               "clearKeyValueFile",
               "clearMockNetwork",
@@ -4401,6 +4526,7 @@
               "getNetworkGraph",
               "getNotificationPolicy",
               "getPreference",
+              "heapDump",
               "highlight",
               "hitTest",
               "homeScreen",
@@ -4527,6 +4653,7 @@
               "audit",
               "backgroundWork",
               "biometricAuth",
+              "captureTrace",
               "changeLocalization",
               "clearKeyValueFile",
               "clearMockNetwork",
@@ -4553,6 +4680,7 @@
               "getNetworkGraph",
               "getNotificationPolicy",
               "getPreference",
+              "heapDump",
               "highlight",
               "hitTest",
               "homeScreen",
@@ -6541,6 +6669,91 @@
     },
     "_meta": {
       "automobile/deviceReadOnly": true
+    }
+  },
+  {
+    "name": "heapDump",
+    "description": "Android: dump a running debuggable or profileable app's heap (am dumpheap) to a host .hprof; refuses other apps with heap_dump_not_debuggable.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "description": "Running debuggable or profileable app to dump",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "native": {
+          "description": "Dump the native heap (am dumpheap -n); default Java",
+          "type": "boolean"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["appId"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "path": {
+          "type": "string"
+        },
+        "sizeBytes": {
+          "type": "number"
+        },
+        "appId": {
+          "type": "string"
+        },
+        "native": {
+          "type": "boolean"
+        },
+        "attempts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "command": {
+                "type": "string"
+              },
+              "outcome": {
+                "type": "string",
+                "enum": ["dumped", "empty"]
+              },
+              "output": {
+                "type": "string"
+              }
+            },
+            "required": ["command", "outcome"],
+            "additionalProperties": false
+          }
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": ["success", "path", "sizeBytes", "appId", "native", "attempts", "message"],
+      "additionalProperties": {}
     }
   },
   {
@@ -25466,6 +25679,7 @@
               "audit",
               "backgroundWork",
               "biometricAuth",
+              "captureTrace",
               "changeLocalization",
               "clearKeyValueFile",
               "clearMockNetwork",
@@ -25492,6 +25706,7 @@
               "getNetworkGraph",
               "getNotificationPolicy",
               "getPreference",
+              "heapDump",
               "highlight",
               "hitTest",
               "homeScreen",
@@ -33192,6 +33407,7 @@
             "audit",
             "backgroundWork",
             "biometricAuth",
+            "captureTrace",
             "changeLocalization",
             "clearKeyValueFile",
             "clearMockNetwork",
@@ -33218,6 +33434,7 @@
             "getNetworkGraph",
             "getNotificationPolicy",
             "getPreference",
+            "heapDump",
             "highlight",
             "hitTest",
             "homeScreen",
@@ -33306,6 +33523,7 @@
               "audit",
               "backgroundWork",
               "biometricAuth",
+              "captureTrace",
               "changeLocalization",
               "clearKeyValueFile",
               "clearMockNetwork",
@@ -33332,6 +33550,7 @@
               "getNetworkGraph",
               "getNotificationPolicy",
               "getPreference",
+              "heapDump",
               "highlight",
               "hitTest",
               "homeScreen",

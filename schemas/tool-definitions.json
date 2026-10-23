@@ -31169,8 +31169,8 @@
             },
             "rootState": {
               "type": "string",
-              "const": "unset",
-              "description": "Root fixture state. Only 'unset' (clear) is available until a root injector lands."
+              "enum": ["rooted-detectable", "unset"],
+              "description": "Root fixture: 'rooted-detectable' plants inert su/busybox stubs and sets SELinux permissive so root-detection checks trip (Android, non-Play image, needs a writable /system); 'unset' restores."
             },
             "integrityState": {
               "type": "string",

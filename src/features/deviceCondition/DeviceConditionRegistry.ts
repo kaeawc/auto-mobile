@@ -7,6 +7,7 @@ import {
   type DeviceConditionInjector,
 } from "./DeviceConditionController";
 import { resolvePowerFaultInjector } from "./powerFaultInjectors";
+import { resolveRootStateInjector } from "./rootStateInjector";
 import {
   deviceConditionInputIsMeaningful,
   type DeviceConditionInput,
@@ -203,13 +204,16 @@ export class DeviceConditionRegistry {
 }
 
 /**
- * Default resolver: power-domain fault injectors (#14063) on an Android device.
- * Root/integrity injectors (#14060, #14062) add their keys here as they land.
+ * Default resolver: the root fixture (#14060) and power-domain fault injectors
+ * (#14063) on an Android device. The integrity injector (#14062) adds its key here
+ * as it lands.
  * Returns undefined for a key with no injector, which the controller reports as
  * `unsupported` rather than silently dropping.
  */
 const defaultInjectorResolver: DeviceConditionInjectorResolver = (owner, key) =>
-  owner.device ? resolvePowerFaultInjector(owner.device, key) : undefined;
+  owner.device
+    ? (resolveRootStateInjector(owner.device, key) ?? resolvePowerFaultInjector(owner.device, key))
+    : undefined;
 
 /**
  * Process-wide registry for the `deviceCondition` surface. It lives in the feature

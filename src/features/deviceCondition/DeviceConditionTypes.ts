@@ -29,7 +29,7 @@ export const DEVICE_CONDITION_UNSET = "unset";
  */
 export interface DeviceConditionInput {
   version?: typeof DEVICE_CONDITION_SCHEMA_VERSION;
-  rootState?: typeof DEVICE_CONDITION_UNSET;
+  rootState?: "rooted-detectable" | typeof DEVICE_CONDITION_UNSET;
   integrityState?: typeof DEVICE_CONDITION_UNSET;
   /**
    * Power-domain fault injectors (#14063), each optional and each clearable with
@@ -53,10 +53,10 @@ export const deviceConditionInputSchema: z.ZodType<DeviceConditionInput> = z
       .optional()
       .describe("Request shape version; only 1 exists."),
     rootState: z
-      .literal(DEVICE_CONDITION_UNSET)
+      .enum(["rooted-detectable", DEVICE_CONDITION_UNSET])
       .optional()
       .describe(
-        "Root fixture state. Only 'unset' (clear) is available until a root injector lands.",
+        "Root fixture: 'rooted-detectable' plants inert su/busybox stubs and sets SELinux permissive so root-detection checks trip (Android, non-Play image, needs a writable /system); 'unset' restores.",
       ),
     integrityState: z
       .literal(DEVICE_CONDITION_UNSET)

@@ -14,6 +14,7 @@ import {
 import { serverConfig } from "../utils/ServerConfig";
 import type { ToolRegistryHost, ToolRegistrySchema } from "./registryHost";
 import { ToolDefinitionListing } from "./ToolDefinitionListing";
+import { TOOL_ANNOTATIONS } from "./toolAnnotations";
 import { toolExecutionError } from "./toolExecutionError";
 import { erased, eraseDeviceAware, erasePlain } from "./toolRegistryErasure";
 
@@ -757,6 +758,7 @@ export class ToolRegistryClass {
       server.registerTool(
         tool.name,
         {
+          ...TOOL_ANNOTATIONS[tool.name],
           description: tool.description,
           inputSchema: erased<ToolRegistrySchema>(tool.schema),
           ...(isAlwaysLoadToolsEnabled() && { _meta: { "anthropic/alwaysLoad": true } }),

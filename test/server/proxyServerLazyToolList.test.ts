@@ -11,6 +11,7 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { createToolCatalogResourceHandler } from "../../src/server/toolCatalogResource";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { TOOL_ANNOTATIONS } from "../../src/server/toolAnnotations";
 
 isolateToolRegistry();
 
@@ -100,6 +101,9 @@ describe("proxy server lazy tools/list", () => {
         .map((tool) => tool.name)
         .sort();
       expect(result.tools.map((tool) => tool.name).sort()).toEqual(staticNames);
+      for (const tool of result.tools) {
+        expect(tool).toMatchObject(TOOL_ANNOTATIONS[tool.name]);
+      }
       expect(proxy.isConnected()).toBe(false);
       expect(fakeClient.isConnected()).toBe(false);
       expect(isAvailableProbe).not.toHaveBeenCalled();

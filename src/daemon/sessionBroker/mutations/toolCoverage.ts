@@ -164,8 +164,8 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationTool
     "notJournaled",
   ),
   ...tools(
-    ["performanceTrace", "videoRecording", "recordDeviceGestures"],
-    "Writes host-side artifacts; the device-side recording or trace file is removed after the pull, and gesture capture only reads input events.",
+    ["performanceTrace", "captureTrace", "heapDump", "videoRecording", "recordDeviceGestures"],
+    "Writes host-side artifacts; the device-side recording, trace or heap dump file is removed after the pull (session release removes one left behind), and gesture capture only reads input events.",
     "notJournaled",
   ),
   ...tools(

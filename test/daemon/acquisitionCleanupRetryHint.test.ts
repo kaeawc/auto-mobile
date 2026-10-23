@@ -351,9 +351,7 @@ describe("device_cleanup_in_progress retryAfterMs for a capped recording finaliz
     expect(manager.hasDeviceCleanupInProgress(DEVICE.deviceId)).toBe(false);
     // The push's own deadline race and the bounded acquisition cleanup both report the cap.
     expect(warn).toHaveBeenCalledTimes(2);
-    expect(warn.mock.calls.map(([message]) => String(message)).join("\n")).toContain(
-      "exceeded 10000ms",
-    );
+    expect(warn.mock.calls.map((call) => String(call[0])).join("\n")).toContain("exceeded 10000ms");
     await pool.bindOrReuseDeviceSession({
       sessionId: "next-owner",
       deviceId: DEVICE.deviceId,

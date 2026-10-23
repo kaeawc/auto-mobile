@@ -252,11 +252,10 @@ final class PrototypeLibraryStore {
     {
         do {
             try PrototypeSpecStrictValidator.validate(data: bytes, library: true)
-            let (value, context) = try PrototypeContractValidator.inspect(data: PrototypeStrictJSON.prepare(bytes))
+            let (value, _) = try PrototypeContractValidator.inspect(data: PrototypeStrictJSON.prepare(bytes))
             let missing = PrototypeStrictCapabilities.required(value.objectFields ?? [:])
                 .subtracting(supportedCapabilities).sorted()
             if !missing.isEmpty { throw PrototypeLibraryImportFailure.needsNewerViewer(missing: missing) }
-            try PrototypeLibraryPolicy.validate(value.objectFields ?? [:], context: context)
         } catch let failure as PrototypeLibraryImportFailure { throw failure }
         catch let failure as PrototypeLibraryFailure { throw failure }
         catch let PrototypeLoadError.invalidSpec(path, message) {

@@ -134,6 +134,28 @@ function harness(
 }
 
 describe("ForwardLeaseForeignDeviceOwnership", () => {
+  test("inventory refresh forwards cancellation and never publishes a late verdict", async () => {
+    const started = Promise.withResolvers<void>();
+    const pending = Promise.withResolvers<ForeignCtrlProxyForwardVerdict>();
+    let forwardedSignal: AbortSignal | undefined;
+    const { ownership } = harness({
+      read: (_id, signal) => {
+        forwardedSignal = signal;
+        started.resolve();
+        return pending.promise;
+      },
+    });
+    const controller = new AbortController();
+    const refresh = ownership.refresh(["emulator-5556"], controller.signal);
+    await started.promise;
+    expect(forwardedSignal).toBe(controller.signal);
+    controller.abort(new Error("request expired"));
+    await expect(refresh).rejects.toThrow("request expired");
+    pending.resolve({ kind: "foreign", ports: [8767], clientPids: [FOREIGN_PID], message: "peer" });
+    await Promise.resolve();
+    expect(ownership.foreignOwnerPid("emulator-5556")).toBeUndefined();
+  });
+
   test("F4c refresh shares one forward listing across all Android devices", async () => {
     const adb = new FakeAdbExecutor();
     const ids = ["a", "b", "c", "d"];

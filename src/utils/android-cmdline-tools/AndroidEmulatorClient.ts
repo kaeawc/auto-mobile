@@ -256,7 +256,9 @@ export interface AndroidEmulatorForDeviceManager extends Pick<
   | "launchEmulator"
   | "killDevice"
   | "waitForEmulatorReady"
-> {}
+> {
+  withForeignInventoryResolver?(resolver: BootedDeviceScanOptions["resolveForeignSerials"]): void;
+}
 
 // Route the default long-lived spawn through the shared host-process seam so the
 // client no longer reaches for `child_process.spawn` directly (issue #5459). The
@@ -384,6 +386,12 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
   private readonly runningAvdAdvertisementReader: RunningAvdAdvertisementReader;
   private readonly consoleBusyRegistry: EmulatorConsoleBusyRegistry;
   private readonly reservations: EmulatorPortReservations;
+  private foreignInventoryResolver?: BootedDeviceScanOptions["resolveForeignSerials"];
+
+  withForeignInventoryResolver(resolver: BootedDeviceScanOptions["resolveForeignSerials"]): void {
+    this.foreignInventoryResolver = resolver;
+  }
+
   private readonly inventory: AndroidDeviceInventoryScanner;
   private readonly launcher: EmulatorLauncher;
   private readonly readinessPoller: EmulatorReadinessPoller;
@@ -483,7 +491,11 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       targets: () => this.targets,
       posterFileSystem: () => this.posterFileSystem,
       getBootedDevicesChecked: (onlyEmulators, scanOptions, signal) =>
-        this.getBootedDevicesChecked(onlyEmulators, scanOptions, signal),
+        this.getBootedDevicesChecked(
+          onlyEmulators,
+          { ...scanOptions, resolveForeignSerials: this.foreignInventoryResolver },
+          signal,
+        ),
       isAvdStarting: (avdName) => this.isAvdStarting(avdName),
     });
     // Only set a fallback emulator path here; proper detection happens lazily
@@ -582,7 +594,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     try {
       const devices = await this.getBootedDevicesChecked(
         true,
-        { bypassDeviceListCache: true },
+        { bypassDeviceListCache: true, skipNameEnrichment: true, skipProfileEnrichment: true },
         signal,
       );
       if (devices.some((device) => device.deviceId === serial)) {
@@ -853,7 +865,16 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     options: BootedDeviceScanOptions = {},
     signal?: AbortSignal,
   ): Promise<BootedDeviceScan> {
-    return this.inventory.getBootedDevicesWithDiagnostics(onlyEmulators, options, signal);
+    return this.inventory.getBootedDevicesWithDiagnostics(
+      onlyEmulators,
+      {
+        ...options,
+        resolveForeignSerials:
+          options.resolveForeignSerials ??
+          (options.readinessOnly ? this.foreignInventoryResolver : undefined),
+      },
+      signal,
+    );
   }
 
   /**

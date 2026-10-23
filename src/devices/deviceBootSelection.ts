@@ -110,6 +110,7 @@ export function findUniqueBootedAndroidDeviceByName(
     devices
       .filter(
         (device) =>
+          !device.foreignOwned &&
           device.platform === "android" &&
           device.name === avdName &&
           isAndroidEmulatorSerial(device.deviceId),

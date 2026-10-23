@@ -129,57 +129,52 @@ describe("UnixSocketServer feature flag handlers", () => {
     expect(response.error).toContain("Unknown feature flag");
   });
 
-  // Skipped on Windows: Bun 1.4.4 keeps the closed AF_UNIX listener reachable, so restarting a
-  // server on the same path is refused by the bind guard. Tracked in #15035.
-  test.skipIf(process.platform === "win32")(
-    "ide/setSessionToolEnabled persists then broadcasts a tools list refresh",
-    async () => {
-      const writes: Array<{ sessionUuid: string; toolName: string; enabled: boolean }> = [];
-      const profileService = {
-        isEnabled: async (
-          _sessionUuid: string | undefined,
-          _toolName: string,
-          declaredDefault: boolean,
-        ) => declaredDefault,
-        setEnabled: async (sessionUuid: string, toolName: string, enabled: boolean) => {
-          writes.push({ sessionUuid, toolName, enabled });
-        },
-      };
-      ToolRegistry.register("clipboard", "clipboard", z.object({}), async () => ({ content: [] }), {
-        defaultEnabled: false,
-      });
-      await server.close();
-      server = new UnixSocketServer(
-        socketPath,
-        createFakeDaemonState(),
-        fakeTimer,
-        featureFlagService,
-        { sessionToolSelectionService: profileService },
-      );
-      await server.start();
+  test("ide/setSessionToolEnabled persists then broadcasts a tools list refresh", async () => {
+    const writes: Array<{ sessionUuid: string; toolName: string; enabled: boolean }> = [];
+    const profileService = {
+      isEnabled: async (
+        _sessionUuid: string | undefined,
+        _toolName: string,
+        declaredDefault: boolean,
+      ) => declaredDefault,
+      setEnabled: async (sessionUuid: string, toolName: string, enabled: boolean) => {
+        writes.push({ sessionUuid, toolName, enabled });
+      },
+    };
+    ToolRegistry.register("clipboard", "clipboard", z.object({}), async () => ({ content: [] }), {
+      defaultEnabled: false,
+    });
+    await server.close();
+    server = new UnixSocketServer(
+      socketPath,
+      createFakeDaemonState(),
+      fakeTimer,
+      featureFlagService,
+      { sessionToolSelectionService: profileService },
+    );
+    await server.start();
 
-      const emitted: string[] = [];
-      const unsubscribe = ListChangedBroadcaster.subscribe((kind) => emitted.push(kind));
-      try {
-        const response = await sendRequest(socketPath, "ide/setSessionToolEnabled", {
+    const emitted: string[] = [];
+    const unsubscribe = ListChangedBroadcaster.subscribe((kind) => emitted.push(kind));
+    try {
+      const response = await sendRequest(socketPath, "ide/setSessionToolEnabled", {
+        sessionUuid: "device-session-1",
+        toolName: "clipboard",
+        enabled: false,
+      });
+
+      expect(response.success).toBe(true);
+      expect(writes).toEqual([
+        {
           sessionUuid: "device-session-1",
           toolName: "clipboard",
           enabled: false,
-        });
-
-        expect(response.success).toBe(true);
-        expect(writes).toEqual([
-          {
-            sessionUuid: "device-session-1",
-            toolName: "clipboard",
-            enabled: false,
-          },
-        ]);
-        expect(emitted).toEqual(["tools"]);
-      } finally {
-        unsubscribe();
-        ToolRegistry.clearTools();
-      }
-    },
-  );
+        },
+      ]);
+      expect(emitted).toEqual(["tools"]);
+    } finally {
+      unsubscribe();
+      ToolRegistry.clearTools();
+    }
+  });
 });

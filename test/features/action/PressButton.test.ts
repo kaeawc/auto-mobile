@@ -9,7 +9,12 @@ import { createStructuredToolResponse } from "../../../src/utils/toolUtils";
 import { FakeArtifactWriter } from "../../fakes/FakeArtifactWriter";
 import { describe, expect, spyOn, test } from "bun:test";
 import { createExecResult } from "../../../src/utils/execResult";
-import { PressButton, isIosHomePressOnSpringboard } from "../../../src/features/action/PressButton";
+import {
+  PressButton,
+  acceptIosHomeAlreadyOnSpringboard,
+  isIosHomePressOnSpringboard,
+  isIosSpringboardFallbackPress,
+} from "../../../src/features/action/PressButton";
 import type { ObserveResult } from "../../../src/models";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
@@ -894,5 +899,46 @@ describe("isIosHomePressOnSpringboard (#14954)", () => {
     ["ios", "home", undefined],
   ] as const)("is false for %s %s %#", (platform, button, previous) => {
     expect(isIosHomePressOnSpringboard(platform, button, previous)).toBe(false);
+  });
+});
+
+describe("iOS Home press on the real home screen (#14954, runner reports fallbackToSpringboard)", () => {
+  // Shape captured from the runner on SpringBoard: ios-c/item2-fallback-flag.txt.
+  const capturedHomeScreen = (error?: unknown): ObserveResult =>
+    ({
+      viewHierarchy: {
+        packageName: "com.apple.springboard",
+        fallbackToSpringboard: true,
+        hierarchy: error ? { error } : {},
+      },
+    }) as ObserveResult;
+  const noChange = (observation: ObserveResult) => ({
+    success: false,
+    error: "No visual change observed",
+    observation,
+  });
+
+  test("recognizes the captured fallback flag on SpringBoard", () => {
+    expect(isIosSpringboardFallbackPress("ios", "home", capturedHomeScreen())).toBe(true);
+    expect(isIosSpringboardFallbackPress("ios", "back", capturedHomeScreen())).toBe(false);
+    expect(isIosSpringboardFallbackPress("ios", "home", capturedHomeScreen("boom"))).toBe(false);
+  });
+
+  test("no visual change on a healthy SpringBoard becomes success", () => {
+    const result = noChange(capturedHomeScreen());
+    acceptIosHomeAlreadyOnSpringboard(result, true);
+    expect(result.success).toBe(true);
+    expect(result.error).toBeUndefined();
+  });
+
+  test("still fails when the press did not start on SpringBoard or ended elsewhere", () => {
+    const fresh = noChange(capturedHomeScreen());
+    acceptIosHomeAlreadyOnSpringboard(fresh, false);
+    expect(fresh.success).toBe(false);
+    const elsewhere = noChange({
+      viewHierarchy: { packageName: "com.apple.Maps", hierarchy: {} },
+    } as ObserveResult);
+    acceptIosHomeAlreadyOnSpringboard(elsewhere, true);
+    expect(elsewhere.success).toBe(false);
   });
 });

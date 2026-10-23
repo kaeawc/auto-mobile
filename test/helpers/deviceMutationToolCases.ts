@@ -83,4 +83,35 @@ export const DEVICE_MUTATION_TOOL_CASES: readonly {
   { name: "sendSms", args: { phoneNumber: "123", message: "Hello" }, kind: "opaque" },
   { name: "resetAppLogs", args: { appId: "com.example", paths: ["app.log"] }, kind: "opaque" },
   { name: "deviceSnapshot", args: { action: "restore", snapshotName: "baseline" }, kind: "opaque" },
+  { name: "statusBar", args: { action: "override", time: "9:41" }, kind: "status-bar" },
+  { name: "manufacturerProfile", args: { action: "apply" }, kind: "keyboard" },
+  { name: "pressButton", args: { button: "power" }, kind: "device-setting" },
+  {
+    name: "sendKeys",
+    args: { commands: [{ action: "type", text: "a", keyboardProfile: "samsung" }] },
+    kind: "keyboard",
+  },
+  {
+    name: "sendBroadcast",
+    args: { appId: "com.example", intent: { action: "com.example.SEED" } },
+    kind: "opaque",
+  },
+  {
+    name: "backgroundWork",
+    args: { appId: "com.example", action: { runJob: { jobId: 7 } } },
+    kind: "opaque",
+  },
+  { name: "launchApp", args: { appId: "com.example", clearAppData: true }, kind: "opaque" },
+  { name: "measureStartup", args: { appId: "com.example", compilation: "speed" }, kind: "opaque" },
+  {
+    name: "executePlan",
+    args: { cleanupAppId: "com.example", cleanupClearAppData: true },
+    kind: "opaque",
+  },
+  { name: "setDeviceResources", args: { resources: { animations: false } }, kind: "opaque" },
+  { name: "reconcileDeviceResources", args: { repair: true }, kind: "opaque" },
+  { name: "prototype", args: { action: "save" }, kind: "opaque" },
 ];
+
+/** Journaled tools that record from their own service path, not from the dispatch boundary. */
+export const SERVICE_RECORDED_TOOLS: readonly string[] = ["stageSessionDownloads"];

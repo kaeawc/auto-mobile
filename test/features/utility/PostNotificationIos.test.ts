@@ -3,6 +3,7 @@ import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { PostNotification } from "../../../src/features/utility/PostNotification";
 import { BootedDevice } from "../../../src/models";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
+import { macOsOnlyTest } from "../../helpers/macOsHost";
 
 import { logger } from "../../../src/utils/logger";
 
@@ -98,21 +99,24 @@ describe("PostNotification - iOS Simulator", () => {
     expect(pushCalls()).toHaveLength(0);
   });
 
-  test("an image is forwarded for the app's service extension with a warning (#14097)", async () => {
-    const result = await make(SIM_UDID).execute({
-      title: "t",
-      body: "b",
-      appId: "com.x",
-      imageType: "bigPicture",
-      imagePath: "/fake-host/images/x.png",
-    });
-    expect(result.success).toBe(true);
-    expect(result.warning).toContain("Notification Service Extension");
-    expect(pushCalls()).toHaveLength(1);
-    const payload = JSON.parse(String(pushCalls()[0].payloadJson));
-    expect(payload.aps["mutable-content"]).toBe(1);
-    expect(payload["automobile-image-url"]).toBe("file:///fake-host/images/x.png");
-  });
+  macOsOnlyTest(
+    "an image is forwarded for the app's service extension with a warning (#14097)",
+    async () => {
+      const result = await make(SIM_UDID).execute({
+        title: "t",
+        body: "b",
+        appId: "com.x",
+        imageType: "bigPicture",
+        imagePath: "/fake-host/images/x.png",
+      });
+      expect(result.success).toBe(true);
+      expect(result.warning).toContain("Notification Service Extension");
+      expect(pushCalls()).toHaveLength(1);
+      const payload = JSON.parse(String(pushCalls()[0].payloadJson));
+      expect(payload.aps["mutable-content"]).toBe(1);
+      expect(payload["automobile-image-url"]).toBe("file:///fake-host/images/x.png");
+    },
+  );
 
   test("category and a raw payload reach simctl push (#14097)", async () => {
     const result = await make(SIM_UDID).execute({

@@ -197,6 +197,9 @@ export function parseJournalTarget(json: string): BindingJournalTarget {
   return {
     ...(newPlatform ? { newPlatform } : {}),
     ...(record.removalRequested === true ? { removalRequested: true as const } : {}),
+    ...(typeof record.quarantinedAtMs === "number" && Number.isFinite(record.quarantinedAtMs)
+      ? { quarantinedAtMs: record.quarantinedAtMs }
+      : {}),
     oldStableId: nullableString(record, "oldStableId"),
     oldName: nullableString(record, "oldName"),
     newName: nullableString(record, "newName"),

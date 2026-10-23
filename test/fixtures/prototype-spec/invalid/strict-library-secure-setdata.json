@@ -59,5 +59,6 @@
   "options": {
     "library": true
   },
-  "expectedPath": "root.children[2].onTap[0].value.state"
+  "expectedPath": "root.children[2].onTap[0].value.state",
+  "expectedMessage": "Secure value cannot be bound into an action payload"
 }

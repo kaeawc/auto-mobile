@@ -101,6 +101,7 @@
                     series: .value("Series", seriesIndex)
                 )
                 .foregroundStyle(tint.opacity(areaOpacity))
+                .accessibilityHidden(true)
             }
             LineMark(
                 x: .value("Index", index),
@@ -109,6 +110,8 @@
             )
             .foregroundStyle(tint)
             .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+            .accessibilityLabel(chart.pointDescription(seriesIndex: seriesIndex, index: index).label)
+            .accessibilityValue(chart.pointDescription(seriesIndex: seriesIndex, index: index).value)
         }
 
         /// Grouped bars: one slot per point index, one bar per series within it, rising from zero.
@@ -140,6 +143,8 @@
             )
             .foregroundStyle(color(chart, bar.seriesIndex))
             .cornerRadius(2)
+            .accessibilityLabel(chart.pointDescription(seriesIndex: bar.seriesIndex, index: bar.index).label)
+            .accessibilityValue(chart.pointDescription(seriesIndex: bar.seriesIndex, index: bar.index).value)
         }
 
         @ChartContentBuilder

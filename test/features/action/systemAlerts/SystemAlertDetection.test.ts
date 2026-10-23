@@ -55,6 +55,25 @@ const iosAlert = (message: string, buttons: string[]) =>
   );
 
 describe("detectSystemAlert (#14106)", () => {
+  test("leaves accessibility scroll-bar nodes out of an iOS alert's message", () => {
+    const alert = detectSystemAlert(
+      "ios",
+      tree(
+        node({ className: "UIApplication", text: "Demo", bounds }, [
+          node(
+            { className: "UIAlertController", text: "Allow Demo to use your location?", bounds },
+            [
+              node({ className: "UIScrollView", text: "Vertical scroll bar, 2 pages", bounds }),
+              node({ className: "UIScrollView", text: "Horizontal scroll bar, 1 page", bounds }),
+              node({ className: "UIButton", role: "button", text: "Don’t Allow", bounds }),
+            ],
+          ),
+        ]),
+      ),
+    );
+    expect(alert?.message).toBe("Allow Demo to use your location?");
+  });
+
   test("finds an Android permission-controller dialog by resource id", () => {
     const alert = detectSystemAlert("android", androidLocationDialog());
     expect(alert).toMatchObject({

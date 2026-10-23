@@ -71,6 +71,18 @@ struct PrototypeChartBar: Equatable, Sendable {
 }
 
 extension PrototypeChartModel {
+    /// What VoiceOver and `observe` read for one drawn point: the x (category/day) label, or
+    /// "Point N" when the series has none, prefixed by the series label when there are several,
+    /// and the value as the summary formats it (#14679). Never the plot's internal coordinates.
+    func pointDescription(seriesIndex: Int, index: Int) -> (label: String, value: String) {
+        guard series.indices.contains(seriesIndex), series[seriesIndex].points.indices.contains(index)
+        else { return ("", "") }
+        let entry = series[seriesIndex]
+        let point = entry.points[index]
+        let name = point.x ?? "Point \(index + 1)"
+        return (series.count > 1 ? "\(entry.label), \(name)" : name, PrototypeChart.format(point.y))
+    }
+
     /// Slots along the x axis of a bar chart: the longest series' point count.
     var barSlots: Int { series.map(\.points.count).max() ?? 0 }
 

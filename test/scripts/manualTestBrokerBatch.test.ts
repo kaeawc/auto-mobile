@@ -151,6 +151,31 @@ test.each(["erase", "keep-booted"])("explicit iOS %s cannot bypass no-reuse guar
   expect(renderHostConfig(parsed).reuse?.ios.mode).toBe(mode);
 });
 
+test("the iOS keep-booted reuse cap is accepted by the harness and defaults to 10 (#15017)", () => {
+  const withCap = {
+    ...brokerBatchInput(),
+    reuseCleanDevices: false,
+    reuse: { ios: { mode: "keep-booted", maxUses: 4 } },
+  };
+  expect(renderHostConfig(parseBrokerBatch(withCap, { allowReuse: true })).reuse?.ios).toEqual({
+    mode: "keep-booted",
+    maxUses: 4,
+    fallback: "erase",
+  });
+  const defaulted = { ...withCap, reuse: { ios: { mode: "keep-booted" } } };
+  expect(renderHostConfig(parseBrokerBatch(defaulted, { allowReuse: true })).reuse?.ios).toEqual({
+    mode: "keep-booted",
+    maxUses: 10,
+    fallback: "erase",
+  });
+  expect(() =>
+    parseBrokerBatch(
+      { ...withCap, reuse: { ios: { mode: "keep-booted", maxUses: 0 } } },
+      { allowReuse: true },
+    ),
+  ).toThrow("Invalid session broker host configuration");
+});
+
 test("planning retains excess clients and marks capacity refusals by order", () => {
   const input = brokerBatchInput();
   expect(planExpectations(parseBrokerBatch(input))).toEqual([

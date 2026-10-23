@@ -12,6 +12,7 @@ import {
   reportToolDispatched,
   runWithToolDispatchReporter,
 } from "../../../../src/utils/ToolDispatchContext";
+import { FakeTimer } from "../../../fakes/FakeTimer";
 import { SystemAlertPolicyRegistry } from "../../../../src/features/action/systemAlerts/SystemAlertPolicy";
 
 const android: BootedDevice = { name: "emu", platform: "android", deviceId: "emulator-5554" };
@@ -44,6 +45,10 @@ const iosLocation = tree(
   ]),
 );
 
+/** Each alert is read twice (shown, then settled); a cleared screen is read once. */
+const settled = (...shown: ViewHierarchyResult[]): ViewHierarchyResult[] =>
+  shown.flatMap((screen) => (screen === noAlert ? [screen] : [screen, screen]));
+
 describe("SystemAlertGate (#14106)", () => {
   let registry: SystemAlertPolicyRegistry;
   let screens: Array<ViewHierarchyResult | Error>;
@@ -51,6 +56,7 @@ describe("SystemAlertGate (#14106)", () => {
   let taps: SystemAlertTapSelector[];
   let tapResult: { success: boolean; error?: string };
   let gate: SystemAlertGate;
+  let timer: FakeTimer;
 
   beforeEach(() => {
     registry = new SystemAlertPolicyRegistry();
@@ -58,8 +64,11 @@ describe("SystemAlertGate (#14106)", () => {
     reads = 0;
     taps = [];
     tapResult = { success: true };
+    timer = new FakeTimer();
+    timer.enableAutoAdvance();
     gate = new SystemAlertGate({
       registry,
+      timer,
       reader: {
         read: async () => {
           reads += 1;
@@ -97,7 +106,7 @@ describe("SystemAlertGate (#14106)", () => {
 
   test("allow answers an Android permission dialog and reports what it tapped", async () => {
     registry.set(android.deviceId, { policy: "allow", match: [] });
-    screens = [permission("access this device's location"), noAlert];
+    screens = settled(permission("access this device's location"), noAlert);
     const warnings = await gate.beforeAction(android);
     expect(taps).toEqual([{ elementId: pc("permission_allow_foreground_only_button") }]);
     expect(warnings).toEqual([
@@ -107,21 +116,27 @@ describe("SystemAlertGate (#14106)", () => {
 
   test("allow answers an iOS location alert by its label", async () => {
     registry.set(ios.deviceId, { policy: "allow", match: [] });
-    screens = [iosLocation, noAlert];
+    screens = settled(iosLocation, noAlert);
     await gate.beforeAction(ios);
     expect(taps).toEqual([{ text: "Allow While Using App" }]);
   });
 
   test("answers back-to-back prompts, up to a bound", async () => {
     registry.set(android.deviceId, { policy: "deny", match: [] });
-    screens = [permission("access this device's location"), permission("take pictures"), noAlert];
+    screens = settled(
+      permission("access this device's location"),
+      permission("take pictures"),
+      noAlert,
+    );
     const warnings = await gate.beforeAction(android);
     expect(taps).toHaveLength(2);
     expect(warnings).toHaveLength(2);
 
     taps = [];
-    screens = Array.from({ length: SYSTEM_ALERT_MAX_ANSWERS_PER_ACTION + 2 }, (_, index) =>
-      permission(`use thing ${index}`),
+    screens = settled(
+      ...Array.from({ length: SYSTEM_ALERT_MAX_ANSWERS_PER_ACTION + 2 }, (_, index) =>
+        permission(`use thing ${index}`),
+      ),
     );
     const capped = await gate.beforeAction(android);
     expect(taps).toHaveLength(SYSTEM_ALERT_MAX_ANSWERS_PER_ACTION);
@@ -136,6 +151,47 @@ describe("SystemAlertGate (#14106)", () => {
     const warnings = await gate.beforeAction(android);
     expect(taps).toHaveLength(1);
     expect(warnings.at(-1)).toContain("still showing");
+  });
+
+  test("waits for a dialog that is still animating in before answering it (#15005)", async () => {
+    registry.set(android.deviceId, { policy: "deny", match: [] });
+    const at = (top: number) =>
+      tree(
+        node({}, [
+          node({ "resource-id": pc("permission_message"), text: "Allow Demo to scan?" }),
+          node({
+            "resource-id": pc("permission_deny_button"),
+            text: "Don't allow",
+            bounds: { left: 0, top, right: 100, bottom: top + 50 },
+          }),
+        ]),
+      );
+    const tapsAtRead: number[] = [];
+    const frames = [at(900), at(700), at(600), at(600), noAlert];
+    gate = new SystemAlertGate({
+      registry,
+      timer,
+      reader: { read: async () => frames.shift() ?? noAlert },
+      tapper: {
+        tap: async (_device, selector) => {
+          tapsAtRead.push(frames.length);
+          taps.push(selector);
+          return { success: true };
+        },
+      },
+    });
+    const warnings = await gate.afterAction(android);
+    expect(taps).toEqual([{ elementId: pc("permission_deny_button") }]);
+    expect(tapsAtRead).toEqual([1]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toStartWith("Answered system alert");
+  });
+
+  test("an alert that disappears while settling is not tapped", async () => {
+    registry.set(android.deviceId, { policy: "deny", match: [] });
+    screens = [permission("scan"), noAlert];
+    expect(await gate.afterAction(android)).toEqual([]);
+    expect(taps).toEqual([]);
   });
 
   test("an alert the policy cannot answer is reported as unmatched, never tapped", async () => {
@@ -175,7 +231,7 @@ describe("SystemAlertGate (#14106)", () => {
 
   test("after an action, a prompt that action raised is answered too", async () => {
     registry.set(android.deviceId, { policy: "allow", match: [] });
-    screens = [permission("take pictures"), noAlert];
+    screens = settled(permission("take pictures"), noAlert);
     const warnings = await gate.afterAction(android);
     expect(taps).toHaveLength(1);
     expect(warnings[0]).toStartWith("Answered system alert");
@@ -183,9 +239,10 @@ describe("SystemAlertGate (#14106)", () => {
 
   test("a policy cleared mid-check stops the next tap", async () => {
     registry.set(android.deviceId, { policy: "allow", match: [] });
-    const queue = [permission("access this device's location"), permission("take pictures")];
+    const queue = settled(permission("access this device's location"), permission("take pictures"));
     gate = new SystemAlertGate({
       registry,
+      timer,
       reader: { read: async () => queue.shift() ?? noAlert },
       tapper: {
         tap: async (_device, selector) => {

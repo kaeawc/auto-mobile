@@ -165,18 +165,37 @@ export function getFocusedTextField(
   options: FocusedTextFieldOptions = {},
 ): FocusedTextField | undefined {
   for (const rootGroup of extractSearchRootGroups(viewHierarchy, parser)) {
+    let firstField: FocusedTextField | undefined;
     for (const root of rootGroup) {
-      let field: FocusedTextField | undefined;
-      parser.traverseNode(root, (node: ViewHierarchyNode) => {
+      let nativeField: FocusedTextField | undefined;
+      let webViewDepth: number | undefined;
+      parser.traverseNode(root, (node: ViewHierarchyNode, depth: number) => {
+        if (webViewDepth !== undefined && depth <= webViewDepth) {
+          webViewDepth = undefined;
+        }
         const properties = parser.extractNodeProperties(node);
-        if (field !== undefined || !isFocusedTextInputProperties(properties)) {
+        const nodeClass = properties.class ?? properties.className;
+        if (webViewDepth === undefined && nodeClass === "WKWebView") {
+          webViewDepth = depth;
+        }
+        if (!isFocusedTextInputProperties(properties)) {
           return;
         }
-        field = readFocusedTextField(properties, options);
+        const field = readFocusedTextField(properties, options);
+        if (field === undefined) {
+          return;
+        }
+        // Web content can report its own focused field (a page search box) beside the native
+        // one that owns the keyboard (Safari's URL field); the native field is the typing target.
+        firstField ??= field;
+        nativeField ??= webViewDepth === undefined ? field : undefined;
       });
-      if (field !== undefined) {
-        return field;
+      if (nativeField !== undefined) {
+        return nativeField;
       }
+    }
+    if (firstField !== undefined) {
+      return firstField;
     }
   }
   return undefined;

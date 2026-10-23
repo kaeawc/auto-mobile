@@ -1,6 +1,5 @@
 package dev.jasonpearson.automobile.junit
 
-import java.io.File
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
@@ -9,7 +8,6 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -80,7 +78,10 @@ internal object HeartbeatTransport {
       connection.requestMethod = "POST"
       // This transport creates the connection and owns its headers; the JDK hides Authorization
       // from getRequestProperty, so it cannot be used to detect caller-supplied credentials.
-      val usesDaemonAuthentication = isDaemonHttpEndpoint(endpoint)
+      // The pid-file port is re-resolved per request, only for daemon-shaped URLs.
+      val usesDaemonAuthentication =
+        daemonHttpPort(endpoint) != null &&
+          isDaemonHttpEndpoint(endpoint, tokenProvider.discoveredPort())
       if (usesDaemonAuthentication) {
         tokenProvider.read()?.let { connection.setRequestProperty("Authorization", "Bearer $it") }
       }
@@ -147,21 +148,13 @@ internal object HeartbeatTransport {
     return DaemonSessionReleasedException(sessionId, releaseReason, error)
   }
 
-  private fun readDaemonPort(): Int? {
-    val pidFile = File(daemonPidPath())
-    if (!pidFile.exists()) {
-      return null
-    }
-
-    return try {
-      val content = pidFile.readText()
-      val element = json.parseToJsonElement(content).jsonObject
-      element["port"]?.jsonPrimitive?.intOrNull
-    } catch (_: Exception) {
-      // A missing or invalid daemon port safely skips this best-effort heartbeat.
-      null
-    }
-  }
+  private fun readDaemonPort(): Int? =
+    // The missing port is reported by the caller as a thrown IOException, so no extra log here.
+    readDaemonPidPort(
+      pidPath = ::daemonPidPath,
+      readText = NioDaemonHttpTokenFiles::readPid,
+      logUnavailable = {},
+    )
 
   private fun daemonPidPath(): String = userIdResolver.pidPath()
 }

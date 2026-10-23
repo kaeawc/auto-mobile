@@ -29,7 +29,7 @@ const API_DEVICE_IDLE = 23;
 const ACTIVE_BUCKET = "10";
 
 /** App ops set per uid rather than per package (as `SetAndroidScheduleExactAlarmAppOp` does). */
-const UID_MODE_OPS: ReadonlySet<KillProfileAppOp> = new Set(["SCHEDULE_EXACT_ALARM"]);
+export const UID_MODE_OPS: ReadonlySet<KillProfileAppOp> = new Set(["SCHEDULE_EXACT_ALARM"]);
 
 const APP_OP_MIN_API: Readonly<Record<KillProfileAppOp, number>> = {
   RUN_ANY_IN_BACKGROUND: API_RUN_ANY_IN_BACKGROUND,

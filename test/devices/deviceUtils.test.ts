@@ -26,6 +26,8 @@ import type {
   PhysicalIosDeviceDiscovery,
 } from "../../src/utils/ios-cmdline-tools/DevicectlDeviceLister";
 import { logger } from "../../src/utils/logger";
+import { DefaultAndroidDeviceInventoryScanner } from "../../src/utils/android-cmdline-tools/AndroidDeviceInventoryScanner";
+import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import type { BootedDeviceScanOptions } from "../../src/utils/android-cmdline-tools/AndroidDeviceInventoryScanner";
 import type { AndroidEmulatorLaunchHandle } from "../../src/utils/android-cmdline-tools/AndroidEmulatorLaunchTypes";
 
@@ -54,6 +56,54 @@ async function withProcessPlatform<T>(platform: NodeJS.Platform, fn: () => Promi
 }
 
 describe("MultiPlatformDeviceManager", () => {
+  test("targeted Android discovery keeps AVD identity without probing other emulators or profiles", async () => {
+    const adb = new FakeAdbClient();
+    const names: string[] = [];
+    const timer = new FakeTimer();
+    const scanner = new DefaultAndroidDeviceInventoryScanner({
+      timer: () => timer,
+      adbFactory: () => new FakeAdbClientFactory(adb),
+      observationSequence: () => ({ next: () => 1 }),
+      avdConfigReader: () => ({ readConfig: async () => null }),
+      getRunningAvdName: async (device) => {
+        names.push(device.deviceId);
+        return { name: "broker-avd" };
+      },
+      isUnknownEmulatorName: (name, serial) => name === `Unknown (${serial})`,
+      unknownEmulatorName: (serial) => `Unknown (${serial})`,
+      throwIfAborted: (signal) => signal?.throwIfAborted(),
+    });
+    const manager = new MultiPlatformDeviceManager(
+      adb,
+      null,
+      createFakeAndroidEmulator({
+        getBootedDevicesChecked: async (onlyEmulators, options, signal) =>
+          (
+            await scanner.getBootedDevicesWithDiagnostics(
+              onlyEmulators,
+              {
+                ...options,
+                devices: ["emulator-5554", "emulator-5556"].map((deviceId) => ({
+                  deviceId,
+                  platform: "android",
+                  name: deviceId,
+                })),
+              },
+              signal,
+            )
+          ).devices,
+      }),
+    );
+    const result = await manager.getBootedDevicesDetailed("android", {
+      androidTargetDeviceId: "emulator-5554",
+      skipAndroidProfileEnrichment: true,
+    });
+    expect(result.devices.map((device) => device.deviceId)).toEqual(["emulator-5554"]);
+    expect(result.devices[0]!.name).toBe("broker-avd");
+    expect(names).toEqual(["emulator-5554"]);
+    expect(adb.getInteractionLog()).toEqual([]);
+  });
+
   describe("concurrent detailed discovery", () => {
     const androidDevice: BootedDevice = {
       name: "Pixel 9",

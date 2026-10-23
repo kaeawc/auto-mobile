@@ -50,7 +50,7 @@ The mode table describes only `reuse.ios.mode`; Android uses
 
 `reuse.ios.mode` replaces the coarse legacy switch. In `keep-booted` mode,
 `maxUses` forces every Nth release to use erase instead of keep-booted cleanup;
-its default is 20. This bounds keep-booted reuse rather than capping sessions or
+its default is 10 (20 in `erase` mode, where it has no effect). This bounds keep-booted reuse rather than capping sessions or
 retiring the device. When that erase succeeds, the same device returns to the
 idle pool, and later releases can use keep-booted again. `maxUses` has no effect
 in `erase` mode. The only iOS fallback is `erase`.
@@ -60,7 +60,7 @@ in `erase` mode. The only iOS fallback is `erase`.
   "reuse": {
     "ios": {
       "mode": "keep-booted",
-      "maxUses": 20,
+      "maxUses": 10,
       "fallback": "erase"
     }
   },
@@ -192,20 +192,20 @@ reset under a stale fence. For `off`, release destroys the device.
 
 ## When a device is not reused
 
-Reuse applies to a normal release. Two lifecycle events destroy the device
-instead of resetting it, whatever the configured mode (including `erase`):
+Reuse applies to a normal release. Owner exit and daemon restart affect device
+lifetime differently:
 
 - **Owner exit.** When the owning client exits (`session_owner_exited`), the
   broker destroys the device after a delay (about 26 s in batch 20261021e)
   rather than resetting and returning it to the idle pool.
-- **Graceful daemon restart.** A restart ends active broker sessions with
-  `binding-ownership-lost` and destroys their devices, including a device that
-  was mid-reset. Restarting does not preserve devices for reuse. A mid-reset
-  device now converges (#14780); at the batch SHA the release receipt of an
-  in-flight release was lost.
+- **Graceful daemon restart.** The daemon hands off active broker sessions and
+  the restarted daemon adopts them (#12765, #13849); each session keeps its
+  device. Android reset baselines live in daemon memory, so an adopted Android
+  session's device cannot be reset on its later release and is destroyed. Its
+  next session requires a cold create.
 
-Plan capacity around both: a client that crashes or a daemon that restarts pays
-a cold create for its next session.
+Plan capacity for a cold create after owner exit, or after an adopted Android
+session releases its device following a graceful daemon restart.
 
 ## Keep-booted cleaning operations
 

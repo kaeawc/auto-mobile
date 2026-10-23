@@ -5,6 +5,8 @@ import {
 } from "../../src/daemon/readiness/DeviceReadiness";
 import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { FakeAdbClient } from "../fakes/FakeAdbClient";
+import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
 import { FakeCtrlProxyManager } from "../fakes/FakeCtrlProxyManager";
@@ -19,6 +21,7 @@ import { FakeDeviceCreationGate } from "../fakes/FakeDeviceCreationGate";
 import { FakeVirtualDeviceLifecycleCoordinator } from "../fakes/FakeVirtualDeviceLifecycleCoordinator";
 import { FakeWindow } from "../fakes/FakeWindow";
 import { ActionableError, BootedDevice, AppearanceConfigInput, ExecResult } from "../../src/models";
+import { AmbiguousDeviceTargetError } from "../../src/daemon/ambiguousDeviceTargetRefusal";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { parseAppearanceConfig } from "../../src/features/appearance";
 import { DEFAULT_RUNNER_PROVISION_TIMEOUT_MS } from "../../src/utils/runnerReadinessConfig";
@@ -481,10 +484,27 @@ describe("DeviceReadiness", () => {
     const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {
       window: notReadyWindow,
     });
-    const manager = createTestSessionManager(provider);
+    const manager = createTestSessionManager(provider, new FakeAdbClientFactory());
 
     await expect(
       manager.verifyAndroidDevice(device.deviceId, { readiness: "booted" }),
+    ).rejects.toThrow("Failed to verify Android device device-1 readiness");
+  });
+
+  test("booted Android readiness accepts an asleep device that has no focused window", async () => {
+    const notReadyWindow = new FakeWindow();
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {
+      window: notReadyWindow,
+    });
+    const asleep = new FakeAdbClient();
+    asleep.setScreenState(false, "Asleep");
+    const manager = createTestSessionManager(provider, new FakeAdbClientFactory(asleep));
+
+    await expect(
+      manager.verifyAndroidDevice(device.deviceId, { readiness: "booted" }),
+    ).resolves.toBeUndefined();
+    await expect(
+      manager.verifyAndroidDevice(device.deviceId, { readiness: "automationReady" }),
     ).rejects.toThrow("Failed to verify Android device device-1 readiness");
   });
 
@@ -506,6 +526,44 @@ describe("DeviceReadiness", () => {
 
     // When installed, enabled, and WebSocket connects - service is working, no need for setup
     expect(accessibilityManager.wasMethodCalled("setup")).toBe(false);
+  });
+
+  test("checks the installed CtrlProxy APK content when the service is already enabled and connected (#15007)", async () => {
+    const accessibilityManager = new FakeCtrlProxyManager();
+    accessibilityManager.setInstalled(true);
+    accessibilityManager.setEnabled(true);
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {
+      window: fakeWindow,
+      ctrlProxyManager: accessibilityManager,
+      ctrlProxyClient: stubAndroidCtrlProxy({
+        isConnected: () => false,
+        waitForConnection: () => Promise.resolve(true),
+      }),
+    });
+    const manager = createTestSessionManager(provider);
+    await manager.ensureDeviceReady("android", "device-1");
+
+    expect(accessibilityManager.wasMethodCalled("ensureCompatibleVersion")).toBe(true);
+    expect(accessibilityManager.wasMethodCalled("setup")).toBe(false);
+  });
+
+  test("a stale CtrlProxy APK that was swapped is followed by a reconnect (#15007)", async () => {
+    const accessibilityManager = new FakeCtrlProxyManager();
+    accessibilityManager.setInstalled(true);
+    accessibilityManager.setEnabled(true);
+    accessibilityManager.setCompatibilityStatus("upgraded");
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {
+      window: fakeWindow,
+      ctrlProxyManager: accessibilityManager,
+      ctrlProxyClient: stubAndroidCtrlProxy({
+        isConnected: () => false,
+        waitForConnection: () => Promise.resolve(true),
+      }),
+    });
+    const manager = createTestSessionManager(provider);
+    await manager.ensureDeviceReady("android", "device-1");
+
+    expect(accessibilityManager.wasMethodCalled("setup")).toBe(true);
   });
 
   test("should run setup when accessibility cache is stale (WebSocket fails)", async () => {
@@ -1293,6 +1351,23 @@ describe("DeviceReadiness dual-platform resolution", () => {
     await expect(readiness).rejects.toThrow(
       "Both Android and iOS devices are connected. For a device tool call, pass sessionUuid (from getAndroid/getApple), platform, or a bound device label on this call",
     );
+  });
+
+  test("mixed-platform ambiguity is the typed ambiguous_device_target with candidates (#15020)", async () => {
+    const manager = createTestSessionManager(buildProvider(), fakeAdbFactory);
+
+    const error = await manager
+      .ensureDeviceReady("either", undefined, { skipCtrlProxyDownload: true })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(AmbiguousDeviceTargetError);
+    const ambiguous = error as AmbiguousDeviceTargetError;
+    expect(ambiguous.code).toBe("ambiguous_device_target");
+    expect(ambiguous.candidates.map((candidate) => candidate.platform).sort()).toEqual([
+      "android",
+      "ios",
+    ]);
+    expect(ambiguous.candidates.every((candidate) => candidate.deviceId.length > 0)).toBe(true);
   });
 
   test("session-scoped readiness leaves sessionless mixed-platform selection ambiguous (#11810)", async () => {

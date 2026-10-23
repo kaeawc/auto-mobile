@@ -1,3 +1,4 @@
+import type { BootedDeviceDiscoveryOptions } from "../../devices/deviceDiscoveryContracts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { IOSCtrlProxyManager } from "../../ctrlProxy/IOSCtrlProxyManager";
 import { RunnerReadinessService } from "../../ctrlProxy/RunnerReadinessService";
@@ -93,10 +94,9 @@ import { ReadinessSelection } from "./ReadinessSelection";
 import { lifecycleIdentityForDevice, type LifecycleStartHold } from "./readinessLifecycleIdentity";
 import { runWithLifecycleLease, startDeviceOwningCancelledLaunch } from "./readinessLifecycleStart";
 import {
-  androidReadinessWindowDevice,
-  assertAndroidActiveWindow,
   assertIosDeviceAvailable,
   assertUsableIosOverride,
+  verifyAndroidWindow,
 } from "./readinessValidation";
 export {
   type ConnectedPlatformScan,
@@ -314,10 +314,15 @@ export class DeviceReadiness implements DeviceReadinessContract {
     return this.readinessSelection.detectConnectedPlatformsWithStatus(signal, options);
   }
 
-  public listBootedAndroidDevices(options?: { signal?: AbortSignal }): Promise<BootedDevice[]> {
+  public listBootedAndroidDevices(
+    options?: Pick<
+      BootedDeviceDiscoveryOptions,
+      "signal" | "androidTargetDeviceId" | "skipAndroidProfileEnrichment"
+    >,
+  ): Promise<BootedDevice[]> {
     return this.readinessSelection.listBootedAndroidDevicesForSelection({
+      ...options,
       bypassAndroidDeviceListCache: true,
-      signal: options?.signal,
     });
   }
 
@@ -426,21 +431,12 @@ export class DeviceReadiness implements DeviceReadinessContract {
         `Android device ${deviceId} is not connected. Available devices: ${describeDevices(allDevices)}`,
       );
     }
-    // Check if we can get an active window from the device
-    try {
-      logger.info(`[DeviceReadiness] Verifying Android device ${deviceId} readiness`);
-
-      const deviceForWindow = androidReadinessWindowDevice(device, resolvedIdentity);
-      const window = this.provider.getWindow(deviceForWindow);
-
-      const activeWindow = await window.getActive(true);
-      assertAndroidActiveWindow(deviceId, activeWindow);
-    } catch (error) {
-      const errorMsg = errorMessage(error);
-      throw new ActionableError(
-        `Failed to verify Android device ${deviceId} readiness: ${errorMsg}`,
-      );
-    }
+    await verifyAndroidWindow(
+      { getWindow: (target) => this.provider.getWindow(target), adbFactory: this.adbFactory },
+      device,
+      resolvedIdentity,
+      options,
+    );
 
     options?.signal?.throwIfAborted();
     if (options?.readiness === "booted") {

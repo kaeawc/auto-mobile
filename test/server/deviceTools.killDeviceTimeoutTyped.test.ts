@@ -13,6 +13,7 @@ import {
 } from "../../src/daemon/videoRecordingManager";
 import type { BootedDevice } from "../../src/models";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeEmulatorProcessStopper } from "../fakes/FakeEmulatorProcessStopper";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 
@@ -25,7 +26,8 @@ class StubbornDeviceManager extends FakeDeviceUtils {
 
 describe("killDevice post-kill timeout", () => {
   const timer = new FakeTimer();
-  const device: BootedDevice = { name: "Pixel 8", platform: "android", deviceId: "emulator-5554" };
+  const device: BootedDevice = { name: "Pixel_8", platform: "android", deviceId: "emulator-5554" };
+  const stopper = new FakeEmulatorProcessStopper();
 
   beforeEach(async () => {
     const manager = new StubbornDeviceManager();
@@ -44,6 +46,7 @@ describe("killDevice post-kill timeout", () => {
       notifyResourcesChanged: async () => {},
       ensureCtrlProxyReady: async () => {},
       clearInstalledAppsForDevice: async () => {},
+      androidEmulatorProcessStopper: stopper,
       timer,
     });
     registerDeviceTools();
@@ -57,16 +60,23 @@ describe("killDevice post-kill timeout", () => {
     ToolRegistry.clearTools();
   });
 
-  test("a device that never disappears is refused with a typed retryable timeout", async () => {
+  test("an emulator that ignores the soft kill escalates to its pid and fails typed when it stays up (#14018)", async () => {
+    stopper.outcome = {
+      kind: "still-running",
+      pid: 4242,
+      command: "qemu-system-aarch64 -avd Pixel_8 -port 5554",
+      signalled: true,
+    };
     const tool = ToolRegistry.getTool("killDevice")!;
     const pending = tool.handler({ device }).catch((error: unknown) => error);
     await new Promise((resolve) => setImmediate(resolve));
     timer.advanceTime(30_000);
     const error = (await pending) as { message?: string; code?: unknown; retryable?: unknown };
 
-    // The provisionDevice and acquisition timeouts carry code "timeout" + retryable.
-    expect(error.message).toContain("Timed out waiting for android device");
-    expect(error.code).toBe("timeout");
-    expect(error.retryable).toBe(true);
+    expect(error.message).toContain("still running with pid 4242");
+    expect(error.code).toBe("emulator_teardown_failed");
+    expect(error.retryable).toBe(false);
+    expect(stopper.stopCalls).toHaveLength(1);
+    expect(stopper.stopCalls[0]![0]).toEqual({ serial: "emulator-5554", avdName: "Pixel_8" });
   });
 });

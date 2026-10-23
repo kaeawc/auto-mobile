@@ -109,7 +109,17 @@ unverified swipes do not count as dismissals. App-filtered `dismissedCount`
 continues to use the before/after notification inventory. Cancellation still
 aborts the operation, and an unreadable shade before any swipe remains an error.
 
-The initial shade read uses the initial `awaitTimeout` budget. Each verified
+Before the first swipe, every step that a loaded host can make slow is retried
+instead of failing the call: the initial shade read, the app-filtered listing
+(a collapse that times out, a shade read mid-render that no notification record
+explains) and the notification-count `dumpsys`. Each step gets up to three
+attempts with a short exponential backoff (250 ms, then 500 ms); the shade
+readiness attempts each use the full `awaitTimeout`, so an unreadable shade fails
+after about three budgets. Device errors and cancellation are never retried. The
+listing leaves the shade collapsed and the drain expands it directly, skipping a
+second collapse/expand cycle and two probe reads.
+
+The initial shade read uses the initial `awaitTimeout` budget per attempt. Each verified
 dismissal starts a fresh per-notification budget for expansion, swiping and
 verification, so a progressing drain can exceed `awaitTimeout` overall. A row
 that does not leave within its budget stalls the drain without another swipe on

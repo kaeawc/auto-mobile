@@ -45,5 +45,6 @@
   "options": {
     "library": true
   },
-  "expectedPath": "storage.keys[1]"
+  "expectedPath": "storage.keys[1]",
+  "expectedMessage": "Secure value cannot be persisted"
 }

@@ -261,6 +261,79 @@ describe("DeviceManagerBindingInventory", () => {
 
     expect(await inventory.list("ios", {})).toEqual({ complete: false, devices: [] });
   });
+
+  describe("probeRunning (#15016)", () => {
+    const avd: DeviceInfo = {
+      name: "ambroker-verify-api30",
+      platform: "android",
+      isRunning: false,
+    };
+    const booted = (name: string, deviceId: string): BootedDevice => ({
+      name,
+      deviceId,
+      platform: "android",
+      source: "local",
+    });
+
+    function probing(
+      discover: NonNullable<
+        ConstructorParameters<typeof DeviceManagerBindingInventory>[0]["getBootedDevicesDetailed"]
+      >,
+    ) {
+      return new DeviceManagerBindingInventory({
+        listDeviceImages: async () => [],
+        getBootedDevicesDetailed: discover,
+      });
+    }
+
+    test("proves running only from a fresh, complete booted listing naming the AVD", async () => {
+      const calls: Array<{ bypass?: boolean }> = [];
+      const inventory = probing(async (_platform, options) => {
+        calls.push({ bypass: options?.bypassAndroidDeviceListCache });
+        return {
+          devices: [booted(avd.name, "emulator-5556")],
+          succeededPlatforms: new Set(["android"]),
+        };
+      });
+      expect(await inventory.probeRunning?.(avd, {})).toBe(true);
+      expect(calls).toEqual([{ bypass: true }]);
+    });
+
+    test("a complete listing without the AVD, or with only an unresolved emulator, is not proof", async () => {
+      const inventory = probing(async () => ({
+        devices: [
+          booted("other-avd", "emulator-5554"),
+          booted("Unknown (emulator-5610)", "emulator-5610"),
+          booted(avd.name, "R58M123ABC"),
+        ],
+        succeededPlatforms: new Set(["android"]),
+      }));
+      expect(await inventory.probeRunning?.(avd, {})).toBe(false);
+    });
+
+    test("an incomplete listing or a discovery failure is not proof", async () => {
+      expect(
+        await probing(async () => ({
+          devices: [booted(avd.name, "emulator-5556")],
+          succeededPlatforms: new Set(),
+        })).probeRunning?.(avd, {}),
+      ).toBe(false);
+      expect(
+        await probing(async () => {
+          throw new Error("adb offline");
+        }).probeRunning?.(avd, {}),
+      ).toBe(false);
+    });
+
+    test("an aborted probe rethrows the abort", async () => {
+      const controller = new AbortController();
+      const inventory = probing(async () => {
+        controller.abort();
+        throw new Error("aborted");
+      });
+      await expect(inventory.probeRunning?.(avd, { signal: controller.signal })).rejects.toThrow();
+    });
+  });
 });
 
 describe("PoolBindingDeviceClaims", () => {

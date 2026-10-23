@@ -141,6 +141,32 @@ describe("PowerOperations.write", () => {
     expect(state).toMatchObject({ verified: true, doze: { mode: "light" } });
   });
 
+  test("doze off after deep Doze wakes the screen and puts back the plug it took", async () => {
+    const { ops, adb, mutating } = setup({ owner: "s-1" });
+    adb.idleLingersWhileAsleep = true;
+    adb.setScreenState(true);
+    await ops.write({ doze: "deep" });
+    expect(adb.deep).toBe("IDLE");
+    expect(adb.battery.ac).toBe(false);
+    const before = mutating().length;
+    const state = await ops.write({ doze: "off" });
+    expect(mutating().slice(before)).toEqual([
+      "dumpsys deviceidle unforce",
+      "input keyevent KEYCODE_WAKEUP",
+      "dumpsys battery reset",
+    ]);
+    expect(adb.deep).toBe("ACTIVE");
+    expect(adb.battery.ac).toBe(true);
+    expect(state).toMatchObject({ verified: true, doze: { mode: "off" } });
+  });
+
+  test("doze off on a device that was not dozing only unforces", async () => {
+    const { ops, adb, mutating } = setup({ owner: "s-1" });
+    adb.setScreenState(false);
+    await ops.write({ doze: "off" });
+    expect(mutating()).toEqual(["dumpsys deviceidle unforce"]);
+  });
+
   test("Doze with a charger requested is refused before anything changes", async () => {
     const { ops, mutating } = setup();
     const state = await ops.write({ doze: "deep", battery: { charging: "ac" } });

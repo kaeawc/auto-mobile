@@ -3,6 +3,7 @@ import {
   IosKeepBootedReset,
   type IosKeepBootedMutationPort,
   type IosResetHealthPort,
+  type IosKeepBootedResetDependencies,
 } from "../../../src/daemon/sessionBroker/iosKeepBootedReset";
 import { ResetFailureError } from "../../../src/daemon/sessionBroker/ResetFailureError";
 import { drainFailureOutcome } from "../../../src/daemon/sessionBroker/brokerSupport";
@@ -52,7 +53,11 @@ class FakeFastMutations extends FakeDeviceMutationResetPort implements IosKeepBo
   }
 }
 
-async function harness(observations: DeviceBaseline["observations"] = [], missingBaseline = false) {
+async function harness(
+  observations: DeviceBaseline["observations"] = [],
+  missingBaseline = false,
+  budgets: Pick<IosKeepBootedResetDependencies, "hostLoad" | "budgetCeilingMs"> = {},
+) {
   const timer = new FakeTimer();
   const baseline: DeviceBaseline = {
     completeKinds: ["installed-app", "device-setting"],
@@ -100,6 +105,7 @@ async function harness(observations: DeviceBaseline["observations"] = [], missin
     mutations,
     maxUses: 3,
     budgetMs: 50,
+    ...budgets,
     simctl: {
       readSimulatorTarget: async () => {
         await owned();
@@ -307,6 +313,9 @@ describe("iOS keep-booted best-effort cleaning", () => {
       );
       await drainUntilQuiescent(rig.timer);
       rig.timer.advanceTime(50);
+      await drainUntilQuiescent(rig.timer);
+      // The abandoned step never settles, so the single retry is not attempted.
+      rig.timer.advanceTime(100);
       expect(await failure).toBeInstanceOf(ResetFailureError);
       expect(rig.state.eraseCalls).toBe(0);
       await expect(rig.run(2)).rejects.toThrow("unsettled native step");
@@ -315,7 +324,7 @@ describe("iOS keep-booted best-effort cleaning", () => {
       expect(writes).toBe(0);
       expect(await rig.run()).toMatchObject({
         outcome: "fallback:erase",
-        fallbackReason: expect.stringContaining("timed out"),
+        fallbackReason: expect.stringMatching(/^budget-driven: /),
       });
       expect(rig.state.eraseCalls).toBe(1);
     },
@@ -353,6 +362,8 @@ describe("iOS keep-booted best-effort cleaning", () => {
       );
       await drainUntilQuiescent(rig.timer);
       rig.timer.advanceTime(50);
+      await drainUntilQuiescent(rig.timer);
+      rig.timer.advanceTime(100);
       const failure = await operation;
       expect(failure).toBeInstanceOf(ResetFailureError);
       expect(drainFailureOutcome(failure, SCOPE.sessionUuid, false)).toBe("pending");
@@ -465,28 +476,26 @@ describe("iOS keep-booted best-effort cleaning", () => {
     expect(rig.state.healthCalls).toBe(0);
   });
 
-  test("health deadline fences a late probe and erases only after it settles", async () => {
+  test("health deadline waits for the abandoned probe before retry", async () => {
     const rig = await harness();
+    let calls = 0;
     rig.health.probe = async (_device, signal) => {
-      await rig.timer.sleep(100);
+      calls++;
+      if (calls === 1) {
+        await rig.timer.sleep(100);
+      }
       signal.throwIfAborted();
       return true;
     };
-    const operation = rig.run().then(
-      () => undefined,
-      (error: unknown) => error,
-    );
+    const operation = rig.run();
     await drainUntilQuiescent(rig.timer);
     rig.timer.advanceTime(50);
-    const failure = await operation;
-    expect(failure).toBeInstanceOf(ResetFailureError);
-    expect(drainFailureOutcome(failure, SCOPE.sessionUuid, false)).toBe("pending");
-    await expect(rig.run(2)).rejects.toThrow("unsettled native step");
+    await drainUntilQuiescent(rig.timer);
+    expect(calls).toBe(1);
+    rig.timer.advanceTime(50);
+    expect(await operation).toMatchObject({ outcome: "clean" });
+    expect(calls).toBe(2);
     expect(rig.state.eraseCalls).toBe(0);
-    rig.timer.advanceTime(50);
-    await drainUntilQuiescent(rig.timer);
-    expect(await rig.run()).toMatchObject({ outcome: "fallback:erase" });
-    expect(rig.state.eraseCalls).toBe(1);
   });
 
   test.each([false, true])(
@@ -531,4 +540,91 @@ describe("iOS keep-booted best-effort cleaning", () => {
     await expect(rig.run(0, controller.signal)).rejects.toThrow("shutdown");
     expect(rig.state.eraseCalls).toBe(0);
   });
+});
+
+test("sanitize completes within the load-scaled budget", async () => {
+  const rig = await harness([], false, { hostLoad: { loadAverage1m: () => 3, cpuCount: () => 1 } });
+  rig.mutations.sanitize = async () => {
+    await rig.timer.sleep(120);
+  };
+  const operation = rig.run();
+  await drainUntilQuiescent(rig.timer);
+  rig.timer.advanceTime(120);
+  expect(await operation).toMatchObject({ outcome: "clean" });
+  expect(rig.state.eraseCalls).toBe(0);
+});
+
+test.each(["sanitize", "health"] as const)(
+  "%s retries once with a fresh signal after its deadline",
+  async (phase) => {
+    const rig = await harness();
+    const signals: AbortSignal[] = [];
+    const operation = async (signal: AbortSignal) => {
+      signals.push(signal);
+      if (signals.length === 1) {
+        await new Promise<void>((resolve) =>
+          signal.addEventListener("abort", () => resolve(), { once: true }),
+        );
+        signal.throwIfAborted();
+      }
+    };
+    if (phase === "sanitize") {
+      rig.mutations.sanitize = (context) => operation(context.signal);
+    } else {
+      rig.health.probe = async (_device, signal) => {
+        await operation(signal);
+        return true;
+      };
+    }
+    const result = rig.run();
+    await drainUntilQuiescent(rig.timer);
+    rig.timer.advanceTime(50);
+    expect(await result).toMatchObject({ outcome: "clean" });
+    expect(signals).toHaveLength(2);
+    expect(signals[0].aborted).toBe(true);
+    expect(signals[1].aborted).toBe(false);
+    expect(rig.state.eraseCalls).toBe(0);
+  },
+);
+
+test("a retry that also times out falls back to a budget-driven erase", async () => {
+  const rig = await harness();
+  let calls = 0;
+  rig.mutations.sanitize = async (context) => {
+    calls++;
+    const signal = context.signal;
+    await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve()));
+    signal.throwIfAborted();
+  };
+  const result = rig.run();
+  await drainUntilQuiescent(rig.timer);
+  rig.timer.advanceTime(50);
+  await drainUntilQuiescent(rig.timer);
+  rig.timer.advanceTime(100);
+  expect(await result).toMatchObject({
+    outcome: "fallback:erase",
+    fallbackReason: expect.stringMatching(/^budget-driven: /),
+  });
+  expect(calls).toBe(2);
+  expect(rig.state.eraseCalls).toBe(1);
+});
+
+test("an abandoned step that never settles is not retried and blocks the erase", async () => {
+  const rig = await harness();
+  let calls = 0;
+  rig.mutations.sanitize = async () => {
+    calls++;
+    await new Promise<void>(() => {});
+  };
+  const result = rig.run().then(
+    () => undefined,
+    (error: unknown) => error,
+  );
+  await drainUntilQuiescent(rig.timer);
+  rig.timer.advanceTime(50);
+  await drainUntilQuiescent(rig.timer);
+  rig.timer.advanceTime(100);
+  expect(await result).toBeInstanceOf(ResetFailureError);
+  expect(calls).toBe(1);
+  expect(rig.state.eraseCalls).toBe(0);
 });

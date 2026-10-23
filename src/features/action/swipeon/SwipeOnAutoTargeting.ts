@@ -1,6 +1,7 @@
 import {
   BootedDevice,
   Element,
+  ElementBounds,
   ObserveResult,
   SwipeDirection,
   SwipeOnOptions,
@@ -19,6 +20,7 @@ import { buildContainerFromElement } from "../../utility/elementProperties";
  */
 export type AutoTargetDecision = {
   element?: Element;
+  scrollFrame?: ElementBounds;
   container?: SwipeOnOptions["container"];
   warning?: string;
   scrollableCandidates?: ScrollableCandidate[];
@@ -113,6 +115,8 @@ export class SwipeOnAutoTargeting {
     if (!container) {
       logger.info(`[SwipeOn] Mode: screen swipe (auto-target element has no usable identifier)`);
       return {
+        // Explicit system-inset inclusion preserves the full-screen fallback geometry.
+        scrollFrame: includeSystemInsets ? undefined : element.bounds,
         warning:
           "Auto-targeted scrollable container lacks a usable identifier; swiping the screen. Provide container.elementId or container.text to target it explicitly.",
         scrollableCandidates: candidates,

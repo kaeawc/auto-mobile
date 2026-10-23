@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib/spotlight-exclude.sh
+source "${SCRIPT_DIR}/lib/spotlight-exclude.sh"
+
 start_api="${1:-21}"
 end_api="${2:-35}"
 tag="${3:-google_apis}"
@@ -25,7 +29,7 @@ for tool in "$sdkmanager" "$avdmanager" "$emulator" "$adb"; do
 done
 
 scratch_dir="scratch/avd-experiments"
-mkdir -p "$scratch_dir"
+mkdir_spotlight_excluded "$scratch_dir"
 
 list_log="${scratch_dir}/sdkmanager-list.log"
 install_log="${scratch_dir}/sdkmanager-install-${start_api}-${end_api}.log"

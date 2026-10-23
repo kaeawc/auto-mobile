@@ -18,6 +18,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# shellcheck source=scripts/lib/spotlight-exclude.sh
+source "${PROJECT_ROOT}/scripts/lib/spotlight-exclude.sh"
 
 # shellcheck source=scripts/lib/shell-core.sh
 source "$SCRIPT_DIR/lib/shell-core.sh"
@@ -352,7 +354,7 @@ fi
 # deps are present, so CI is unaffected.
 ensure_node_modules "$PROJECT_ROOT"
 
-mkdir -p "$PROJECT_ROOT/scratch"
+mkdir_spotlight_excluded "$PROJECT_ROOT/scratch"
 run_id="$(date +%Y%m%dT%H%M%S)"
 run_dir="$PROJECT_ROOT/scratch/fast-validate-$run_id"
 mkdir -p "$run_dir"

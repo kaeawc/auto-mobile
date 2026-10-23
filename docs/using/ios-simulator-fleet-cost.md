@@ -53,3 +53,9 @@ An admitted boot holds its slot until it finishes; a refused boot fails with `ca
 
 - `auto-mobile --cli doctor` (macOS): the "iOS Simulator Fleet Cost" check lists each booted
   simulator's memory, CPU, data size and last boot time, and warns when a new boot would exceed capacity.
+
+Doctor also reports advisory Spotlight indexing warnings for existing developer directories on macOS.
+Generated scratch, build, and bootstrapped worktree roots receive `.metadata_never_index` markers.
+Set `AUTOMOBILE_SPOTLIGHT_EXCLUDE=0` to opt out of shell marker creation.
+For other developer directories, add a marker or use System Settings > Spotlight > Search Privacy.
+Doctor only reads indexing status and never changes system settings.

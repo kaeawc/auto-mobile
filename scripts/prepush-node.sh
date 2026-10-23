@@ -6,6 +6,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+# shellcheck source=scripts/lib/spotlight-exclude.sh
+source "${ROOT}/scripts/lib/spotlight-exclude.sh"
 cd "$ROOT"
 
 # shellcheck source=scripts/lib/vcs-diff.sh
@@ -193,7 +195,7 @@ cleanup_affected_selection() {
 affected_test_selection() {
   local branch_changes worktree_changes untracked_changes="" selection_dir rc caller_options="$-"
   local -a path_filters=()
-  mkdir -p "$ROOT/scratch"
+  mkdir_spotlight_excluded "$ROOT/scratch"
   selection_dir="$(mktemp -d "$ROOT/scratch/affected-tests.XXXXXX")" || return $?
   affected_selection_dir="$selection_dir"
   trap cleanup_affected_selection EXIT

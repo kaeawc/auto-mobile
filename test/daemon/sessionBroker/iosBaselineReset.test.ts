@@ -7,6 +7,7 @@ import type {
   IosBootInstrumentation,
   IosBootRequest,
 } from "../../../src/models/IosBootInstrumentation";
+import { BootedDeviceDiscoveryIncompleteError } from "../../../src/models/BootedDeviceDiscoveryIncompleteError";
 import { BootCapacityExhaustedError } from "../../../src/models/BootCapacityExhaustedError";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../../src/utils/deviceTimeouts";
 import { FakeSimulatorCapacityGate } from "../../fakes/FakeSimulatorCapacityGate";
@@ -80,6 +81,20 @@ function capacityRefusal(): BootCapacityExhaustedError {
   );
 }
 
+function discoveryFailure(): BootedDeviceDiscoveryIncompleteError {
+  return new BootedDeviceDiscoveryIncompleteError("ios", {
+    code: "timeout",
+    message: "timed out after 15000ms collecting iOS simulator capacity",
+    retryable: true,
+  });
+}
+
+const RESERVATION = {
+  run: async <T>(operation: () => Promise<T>): Promise<T> => operation(),
+  markReplacedDeviceGone: () => {},
+  release: () => {},
+};
+
 interface HarnessOptions {
   instrumentation?: IosBootInstrumentation;
   timer?: FakeTimer;
@@ -135,6 +150,253 @@ function harness(options: HarnessOptions = {}) {
 }
 
 describe("IosBaselineReset", () => {
+  test("retries incomplete discovery with backoff and fresh ownership before mutation", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const h = harness({ timer });
+    const attempts: number[] = [];
+    h.instrumentation.reserveBoot = async ({ timeoutMs }) => {
+      attempts.push(timeoutMs);
+      expect(h.events.at(-1)).toBe(`owned:${attempts.length}`);
+      if (attempts.length <= 2) {
+        throw discoveryFailure();
+      }
+      return RESERVATION;
+    };
+    await expect(h.resetter.reset(DEVICE, PROFILE, h.assertOwned)).resolves.toBe("clean");
+    expect(timer.getSleepHistory()).toEqual([1_000, 2_000]);
+    expect(attempts).toEqual([
+      DEFAULT_DEVICE_READY_TIMEOUT_MS,
+      DEFAULT_DEVICE_READY_TIMEOUT_MS - 1_000,
+      DEFAULT_DEVICE_READY_TIMEOUT_MS - 3_000,
+    ]);
+    expect(h.events.filter((event) => event.startsWith("stop:"))).toHaveLength(1);
+    expect(h.events.filter((event) => event.startsWith("erase:"))).toHaveLength(1);
+  });
+
+  test("persistent incomplete discovery shares one remaining reservation budget", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const failure = discoveryFailure();
+    const h = harness({ timer });
+    const attempts: number[] = [];
+    h.instrumentation.reserveBoot = async ({ timeoutMs }) => {
+      attempts.push(timeoutMs);
+      timer.advanceTime(Math.min(15_000, timeoutMs));
+      throw failure;
+    };
+    await expect(h.resetter.reset(DEVICE, PROFILE, h.assertOwned)).rejects.toBe(failure);
+    expect(attempts.length).toBeGreaterThan(2);
+    let elapsed = 0;
+    for (const [index, timeout] of attempts.entries()) {
+      expect(timeout).toBe(DEFAULT_DEVICE_READY_TIMEOUT_MS - elapsed);
+      elapsed += Math.min(15_000, timeout) + (timer.getSleepHistory()[index] ?? 0);
+    }
+    expect(timer.now()).toBe(DEFAULT_DEVICE_READY_TIMEOUT_MS);
+    expect(h.events.filter((event) => /^(stop|erase|boot):/.test(event))).toEqual([]);
+  });
+
+  test("abort during reservation backoff prevents another attempt", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const controller = new AbortController();
+    const abort = new ActionableError("reset cancelled");
+    const h = harness({ timer });
+    let attempts = 0;
+    h.instrumentation.reserveBoot = async () => {
+      attempts++;
+      timer.setTimeout(() => controller.abort(abort), 500);
+      throw discoveryFailure();
+    };
+    await expect(h.resetter.reset(DEVICE, PROFILE, h.assertOwned, controller.signal)).rejects.toBe(
+      abort,
+    );
+    expect(attempts).toBe(1);
+    expect(timer.getSleepHistory()).toEqual([1_000]);
+    expect(h.events).toEqual(["list:1", "owned:1"]);
+  });
+
+  test("does not sleep when the remaining budget cannot cover the next backoff", async () => {
+    const timer = new FakeTimer();
+    const h = harness({ timer });
+    const failure = discoveryFailure();
+    let attempts = 0;
+    h.instrumentation.reserveBoot = async () => {
+      attempts++;
+      timer.advanceTime(DEFAULT_DEVICE_READY_TIMEOUT_MS - 500);
+      throw failure;
+    };
+    await expect(h.resetter.reset(DEVICE, PROFILE, h.assertOwned)).rejects.toBe(failure);
+    expect(attempts).toBe(1);
+    expect(timer.getSleepHistory()).toEqual([]);
+    expect(h.events).toEqual(["list:1", "owned:1"]);
+  });
+
+  test.each(["lost", "expired"] as const)(
+    "ownership fence after backoff stops retry when ownership is %s",
+    async (state) => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const failure = discoveryFailure();
+      const lost = new ActionableError("ownership lost");
+      const h = harness({
+        timer,
+        assertOwned: async (call) => {
+          if (call === 2) {
+            if (state === "lost") {
+              throw lost;
+            }
+            timer.advanceTime(DEFAULT_DEVICE_READY_TIMEOUT_MS);
+          }
+        },
+      });
+      let attempts = 0;
+      h.instrumentation.reserveBoot = async () => {
+        attempts++;
+        throw failure;
+      };
+      await expect(h.resetter.reset(DEVICE, PROFILE, h.assertOwned)).rejects.toBe(
+        state === "lost" ? lost : failure,
+      );
+      expect(attempts).toBe(1);
+      expect(timer.getSleepHistory()).toEqual([1_000]);
+      expect(h.events).toEqual(["list:1", "owned:1", "owned:2"]);
+    },
+  );
+
+  test("reservation capacity exhaustion is not retried in process", async () => {
+    const timer = new FakeTimer();
+    const h = harness({ timer });
+    const failure = capacityRefusal();
+    let attempts = 0;
+    h.instrumentation.reserveBoot = async () => {
+      attempts++;
+      throw failure;
+    };
+    await expect(h.resetter.reset(DEVICE, PROFILE, h.assertOwned)).rejects.toBe(failure);
+    expect(attempts).toBe(1);
+    expect(timer.getSleepHistory()).toEqual([]);
+    expect(h.events).toEqual(["list:1", "owned:1"]);
+  });
+
+  test("incomplete discovery before boot defers an already erased Shutdown simulator", async () => {
+    const h = harness({
+      inventories: [
+        [image()],
+        [image("Shutdown")],
+        [image("Shutdown")],
+        [image("Shutdown")],
+        [image()],
+      ],
+    });
+    const failure = discoveryFailure();
+    h.instrumentation.error = failure;
+    await expect(h.resetter.reset(DEVICE, PROFILE, h.assertOwned)).rejects.toBe(failure);
+    h.instrumentation.error = undefined;
+    await expect(h.resetter.reset(DEVICE, PROFILE, h.assertOwned)).resolves.toBe("clean");
+    expect(h.events.filter((event) => event.startsWith("stop:"))).toHaveLength(1);
+    expect(h.events.filter((event) => event.startsWith("erase:"))).toHaveLength(2);
+  });
+
+  test("a deferred Shutdown reset survives exhausted reservation discovery retries", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const h = harness({
+      timer,
+      inventories: [
+        [image()],
+        [image("Shutdown")],
+        [image("Shutdown")],
+        [image("Shutdown")],
+        [image("Shutdown")],
+        [image()],
+      ],
+    });
+    const failure = discoveryFailure();
+    h.instrumentation.error = failure;
+    await expect(h.resetter.reset(DEVICE, PROFILE, h.assertOwned)).rejects.toBe(failure);
+    h.instrumentation.error = undefined;
+    h.instrumentation.reserveBoot = async ({ timeoutMs }) => {
+      timer.advanceTime(timeoutMs);
+      throw failure;
+    };
+    await expect(h.resetter.reset(DEVICE, PROFILE, h.assertOwned)).rejects.toBe(failure);
+    h.instrumentation.reserveBoot = undefined;
+    await expect(h.resetter.reset(DEVICE, PROFILE, h.assertOwned)).resolves.toBe("clean");
+    expect(h.events.filter((event) => event.startsWith("stop:"))).toHaveLength(1);
+    expect(h.events.filter((event) => event.startsWith("erase:"))).toHaveLength(2);
+  });
+
+  test.each(["abort", "ownership"] as const)(
+    "a deferred Shutdown reset survives %s during reservation backoff",
+    async (failureKind) => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const controller = new AbortController();
+      const interrupted = new ActionableError("reset interrupted during backoff");
+      let ownershipLost = false;
+      const h = harness({
+        timer,
+        inventories: [
+          [image()],
+          [image("Shutdown")],
+          [image("Shutdown")],
+          [image("Shutdown")],
+          [image("Shutdown")],
+          [image()],
+        ],
+        assertOwned: async () => {
+          if (ownershipLost) {
+            throw interrupted;
+          }
+        },
+      });
+      const refusal = capacityRefusal();
+      h.instrumentation.error = refusal;
+      await expect(h.resetter.reset(DEVICE, PROFILE, h.assertOwned)).rejects.toBe(refusal);
+      h.instrumentation.error = undefined;
+      let attempts = 0;
+      h.instrumentation.reserveBoot = async () => {
+        attempts++;
+        timer.setTimeout(() => {
+          if (failureKind === "abort") {
+            controller.abort(interrupted);
+          } else {
+            ownershipLost = true;
+          }
+        }, 500);
+        throw discoveryFailure();
+      };
+      await expect(
+        h.resetter.reset(DEVICE, PROFILE, h.assertOwned, controller.signal),
+      ).rejects.toBe(interrupted);
+      expect(controller.signal.aborted).toBe(failureKind === "abort");
+      expect(attempts).toBe(1);
+      expect(timer.getSleepHistory()).toEqual([1_000]);
+      expect(h.events.filter((event) => event.startsWith("erase:"))).toHaveLength(1);
+      ownershipLost = false;
+      h.instrumentation.reserveBoot = undefined;
+      await expect(h.resetter.reset(DEVICE, PROFILE, h.assertOwned)).resolves.toBe("clean");
+      expect(h.events.filter((event) => event.startsWith("stop:"))).toHaveLength(1);
+      expect(h.events.filter((event) => event.startsWith("erase:"))).toHaveLength(2);
+      expect(h.events.filter((event) => event.startsWith("boot:"))).toHaveLength(1);
+    },
+  );
+
+  test("incomplete discovery from inside the boot callback does not defer reset", async () => {
+    const failure = discoveryFailure();
+    const h = harness({
+      inventories: [[image()], [image("Shutdown")], [image("Shutdown")]],
+      bootSimulator: async () => {
+        throw failure;
+      },
+    });
+    await expect(h.resetter.reset(DEVICE, PROFILE, h.assertOwned)).rejects.toBe(failure);
+    await expect(h.resetter.reset(DEVICE, PROFILE, h.assertOwned)).rejects.toThrow(
+      "lacks authoritative Booted",
+    );
+  });
+
   test.each([undefined, "  ", " 27.0 "])(
     "normalizes raw os_version %j with the runtime fallback",
     async (os_version) => {

@@ -1,3 +1,9 @@
+import {
+  ctrlProxyDeadlineMs,
+  isTransientAdbTimeout,
+  pollUntilWithinBudget,
+  retryAdbWithinBudget,
+} from "./androidResetBudget";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import type { BootedDevice, DeviceInfo } from "../../models/DeviceInfo";
 import type { AdbCommandRunner } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -34,7 +40,7 @@ function activityAllowsReset(
 }
 
 function isStepTimeout(error: unknown): boolean {
-  return error instanceof Error && /timed out after \d+ms/.test(error.message);
+  return isTransientAdbTimeout(error);
 }
 
 export type AndroidResetProfile = Extract<BrokerNativeProfile, { platform: "android" }>;
@@ -122,7 +128,7 @@ export interface AndroidBaselineResetDependencies {
   ): Promise<boolean>;
   strategy?: AndroidResetStrategy;
   resetTimeoutMs?: number;
-  timer?: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
+  timer?: Pick<Timer, "now" | "sleep" | "setTimeout" | "clearTimeout">;
 }
 
 interface AndroidBaseline {
@@ -134,7 +140,13 @@ interface AndroidBaseline {
   incarnation: string;
   incarnationKey: string;
   bootId?: string;
-  timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
+  timer: Pick<Timer, "now" | "sleep" | "setTimeout" | "clearTimeout">;
+}
+
+interface ResetReadBudget {
+  deadlineMs: number;
+  timer: Pick<Timer, "now" | "sleep" | "setTimeout" | "clearTimeout">;
+  assertOwned(): Promise<void>;
 }
 
 export class AndroidBaselineReset {
@@ -154,7 +166,7 @@ export class AndroidBaselineReset {
     options: {
       signal?: AbortSignal;
       timeoutMs?: number;
-      timer?: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
+      timer?: Pick<Timer, "now" | "sleep" | "setTimeout" | "clearTimeout">;
       assertOwned?: () => Promise<void>;
       fresh?: boolean;
       incarnation?: string;
@@ -385,7 +397,7 @@ export class AndroidBaselineReset {
     }: {
       deadlineMs: number;
       timing: ResetOutcome;
-      timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
+      timer: Pick<Timer, "now" | "sleep" | "setTimeout" | "clearTimeout">;
     },
   ): Promise<"clean" | ResetOutcome> {
     const strategy = this.dependencies.strategy;
@@ -403,17 +415,25 @@ export class AndroidBaselineReset {
     ) {
       throw new ActionableError("Android reset lacks the original session baseline");
     }
+    const budget: ResetReadBudget = { deadlineMs, timer, assertOwned };
     const fence = async () => {
       await assertOwned();
       if (!strategy.handlesSessionMutations && !activityAllowsReset(strategy, baseline.activity)) {
         throw new ActionableError("Android session mutations cannot be restored by this reset");
       }
-      await this.assertTarget(device, profile, signal, Math.max(1, deadlineMs - timer.now()), {
-        requireBoot: !strategy.handlesSessionMutations,
-        allowPendingName: true,
-      });
+      await this.assertTarget(
+        device,
+        profile,
+        signal,
+        Math.max(1, deadlineMs - timer.now()),
+        {
+          requireBoot: !strategy.handlesSessionMutations,
+          allowPendingName: true,
+        },
+        budget,
+      );
       if (baseline.bootId) {
-        await this.assertBootIdentity(device, baseline.bootId, signal);
+        await this.assertBootIdentity(device, baseline.bootId, signal, budget);
       }
       await assertOwned();
     };
@@ -425,27 +445,16 @@ export class AndroidBaselineReset {
           baseline.packages,
           "Android reset detected untracked package inventory changes",
           signal,
+          budget,
         );
       }
-      const healthCheck = async (context?: DeviceMutationResetContext) => {
-        await context?.assertOwned();
-        await this.assertTarget(
+      const healthCheck = (context?: DeviceMutationResetContext) =>
+        this.healthCheck(
           device,
           profile,
           context?.signal ?? signal,
-          Math.max(1, deadlineMs - timer.now()),
-          {
-            allowPendingName: true,
-          },
+          healthReadBudget(budget, context),
         );
-        await context?.assertOwned();
-        await this.packages(device, context?.signal ?? signal);
-        await context?.assertOwned();
-        if (!(await this.checkCtrlProxy(device, timer, context?.signal ?? signal))) {
-          throw new ActionableError("Android reset CtrlProxy health check failed");
-        }
-        await context?.assertOwned();
-      };
       const result = await strategy.reset(
         device,
         baseline.packages,
@@ -480,8 +489,9 @@ export class AndroidBaselineReset {
               signal,
               Math.max(1, deadlineMs - timer.now()),
               { allowPendingName: true },
+              budget,
             );
-            const bootId = await this.bootIdentity(device, signal);
+            const bootId = await this.bootIdentity(device, signal, undefined, budget);
             await assertOwned();
             baseline.bootId = bootId;
             baseline.incarnation = JSON.stringify([resourceId, baseline.incarnationKey, bootId]);
@@ -499,6 +509,7 @@ export class AndroidBaselineReset {
           baseline.packages,
           "Android reset did not restore the original package inventory",
           signal,
+          budget,
         );
       }
       await healthCheck();
@@ -509,15 +520,41 @@ export class AndroidBaselineReset {
     }
   }
 
+  private async healthCheck(
+    device: BootedDevice,
+    profile: AndroidResetProfile,
+    signal: AbortSignal,
+    budget: ResetReadBudget,
+  ): Promise<void> {
+    await budget.assertOwned();
+    await this.assertTarget(
+      device,
+      profile,
+      signal,
+      Math.max(1, budget.deadlineMs - budget.timer.now()),
+      { allowPendingName: true },
+      budget,
+    );
+    await budget.assertOwned();
+    await this.packages(device, signal, undefined, budget);
+    await budget.assertOwned();
+    if (!(await this.checkCtrlProxy(device, budget, signal))) {
+      throw new ActionableError("Android reset CtrlProxy health check failed");
+    }
+    await budget.assertOwned();
+  }
+
   private async assertTarget(
     device: BootedDevice,
     profile: AndroidResetProfile,
     signal?: AbortSignal,
+    // Capture-only default; reset callers always supply an absolute read budget.
     timeoutMs = 2000,
     {
       requireBoot = true,
       allowPendingName = false,
     }: { requireBoot?: boolean; allowPendingName?: boolean } = {},
+    budget?: ResetReadBudget,
   ): Promise<void> {
     const runtime = parseAndroidSystemImageRuntime(profile.systemImagePackage);
     const validInput = [
@@ -533,11 +570,17 @@ export class AndroidBaselineReset {
         "Android reset requires an exact emulator and system-image profile",
       );
     }
-    const inventory = await this.dependencies.inventory({
+    const inventory = await this.readWithinBudget(
+      (attemptTimeoutMs) =>
+        this.dependencies.inventory({
+          signal,
+          timeoutMs: attemptTimeoutMs,
+          targetDeviceId: device.deviceId,
+        }),
       signal,
       timeoutMs,
-      targetDeviceId: device.deviceId,
-    });
+      budget,
+    );
     signal?.throwIfAborted();
     if (!inventoryProvesTarget(inventory, device, profile, allowPendingName)) {
       throw new ActionableError(
@@ -545,23 +588,29 @@ export class AndroidBaselineReset {
       );
     }
     if (requireBoot) {
-      await this.assertBoot(device, signal, Math.min(2000, timeoutMs));
+      await this.assertBoot(device, signal, captureReadTimeout(timeoutMs, budget), budget);
     }
   }
 
   private async assertBoot(
     device: BootedDevice,
     signal?: AbortSignal,
+    // Capture-only default; reset callers always supply an absolute read budget.
     timeoutMs = 2000,
+    budget?: ResetReadBudget,
   ): Promise<void> {
-    const boot = await this.dependencies
-      .adb(device)
-      .executeCommand("shell getprop sys.boot_completed", {
-        timeoutMs,
-        signal,
-        noRetry: true,
-        waitForProcessSettlementAfterAbort: true,
-      });
+    const boot = await this.readWithinBudget(
+      (attemptTimeoutMs) =>
+        this.dependencies.adb(device).executeCommand("shell getprop sys.boot_completed", {
+          timeoutMs: attemptTimeoutMs,
+          signal,
+          noRetry: true,
+          waitForProcessSettlementAfterAbort: true,
+        }),
+      signal,
+      timeoutMs,
+      budget,
+    );
     if (boot.stdout.trim() !== "1" || outputLooksLikeShellFailure(boot.stdout, boot.stderr)) {
       throw new ActionableError("Android reset target has not completed boot");
     }
@@ -570,17 +619,23 @@ export class AndroidBaselineReset {
   private async bootIdentity(
     device: BootedDevice,
     signal?: AbortSignal,
+    // Capture-only default; reset callers always supply an absolute read budget.
     timeoutMs = 2000,
+    budget?: ResetReadBudget,
   ): Promise<string> {
     signal?.throwIfAborted();
-    const result = await this.dependencies
-      .adb(device)
-      .executeCommand("shell cat /proc/sys/kernel/random/boot_id", {
-        signal,
-        timeoutMs,
-        noRetry: true,
-        waitForProcessSettlementAfterAbort: true,
-      });
+    const result = await this.readWithinBudget(
+      (attemptTimeoutMs) =>
+        this.dependencies.adb(device).executeCommand("shell cat /proc/sys/kernel/random/boot_id", {
+          signal,
+          timeoutMs: attemptTimeoutMs,
+          noRetry: true,
+          waitForProcessSettlementAfterAbort: true,
+        }),
+      signal,
+      timeoutMs,
+      budget,
+    );
     signal?.throwIfAborted();
     const bootId = result.stdout.trim();
     if (
@@ -597,31 +652,71 @@ export class AndroidBaselineReset {
     device: BootedDevice,
     bootId: string,
     signal?: AbortSignal,
+    budget?: ResetReadBudget,
   ): Promise<void> {
-    if ((await this.bootIdentity(device, signal)) !== bootId) {
+    if ((await this.bootIdentity(device, signal, undefined, budget)) !== bootId) {
       throw new ActionableError("Android reset target changed emulator boot identity");
     }
   }
 
   private async checkCtrlProxy(
     device: BootedDevice,
-    timer: Pick<Timer, "setTimeout" | "clearTimeout">,
-    parentSignal?: AbortSignal,
+    budget: ResetReadBudget,
+    signal?: AbortSignal,
   ): Promise<boolean> {
     const controller = new AbortController();
-    const signal = parentSignal
-      ? AbortSignal.any([parentSignal, controller.signal])
-      : controller.signal;
+    const probeSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+    const deadlineMs = ctrlProxyDeadlineMs(budget.timer, budget.deadlineMs);
+    const failure = () => new ActionableError("Android reset CtrlProxy health check failed");
     return raceWithDeadline(
-      () => this.dependencies.ctrlProxyReady(device, { signal, timeoutMs: 2000, noRetry: true }),
+      () =>
+        pollUntilWithinBudget(
+          async (timeoutMs) => {
+            await budget.assertOwned();
+            const ready = await this.dependencies.ctrlProxyReady(device, {
+              signal: probeSignal,
+              timeoutMs,
+              noRetry: true,
+            });
+            await budget.assertOwned();
+            return ready;
+          },
+          {
+            timer: budget.timer,
+            deadlineMs,
+            signal: probeSignal,
+            label: "Android reset CtrlProxy health check",
+          },
+        ),
       {
-        timer,
+        timer: budget.timer,
+        timeoutMs: Math.max(0, deadlineMs - budget.timer.now()),
         signal,
-        timeoutMs: 2000,
         label: "Android reset CtrlProxy health check",
-        onTimeout: () =>
-          controller.abort(new ActionableError("Android reset CtrlProxy health check timed out")),
+        timeoutError: failure,
+        onTimeout: () => controller.abort(failure()),
       },
+    );
+  }
+
+  private readWithinBudget<T>(
+    operation: (timeoutMs: number) => Promise<T>,
+    signal: AbortSignal | undefined,
+    timeoutMs: number,
+    budget?: ResetReadBudget,
+  ): Promise<T> {
+    if (!budget) {
+      return operation(timeoutMs);
+    }
+    return retryAdbWithinBudget(
+      async (attemptTimeoutMs) => {
+        await budget.assertOwned();
+        signal?.throwIfAborted();
+        const result = await operation(attemptTimeoutMs);
+        await budget.assertOwned();
+        return result;
+      },
+      { timer: budget.timer, deadlineMs: budget.deadlineMs, signal, label: "Android reset adb" },
     );
   }
 
@@ -630,8 +725,9 @@ export class AndroidBaselineReset {
     baseline: ReadonlySet<string>,
     message: string,
     signal?: AbortSignal,
+    budget?: ResetReadBudget,
   ): Promise<void> {
-    const packages = await this.packages(device, signal);
+    const packages = await this.packages(device, signal, undefined, budget);
     if (
       packages.size !== baseline.size ||
       [...baseline].some((packageName) => !packages.has(packageName))
@@ -643,24 +739,38 @@ export class AndroidBaselineReset {
   private async packages(
     device: BootedDevice,
     signal?: AbortSignal,
+    // Capture-only default; reset callers always supply an absolute read budget.
     timeoutMs = 2000,
+    budget?: ResetReadBudget,
   ): Promise<Set<string>> {
-    const health = await this.dependencies.adb(device).executeCommand("shell pm path android", {
-      timeoutMs,
+    const health = await this.readWithinBudget(
+      (attemptTimeoutMs) =>
+        this.dependencies.adb(device).executeCommand("shell pm path android", {
+          timeoutMs: attemptTimeoutMs,
+          signal,
+          noRetry: true,
+          waitForProcessSettlementAfterAbort: true,
+        }),
       signal,
-      noRetry: true,
-      waitForProcessSettlementAfterAbort: true,
-    });
+      timeoutMs,
+      budget,
+    );
     signal?.throwIfAborted();
     if (!health.stdout.trim().startsWith("package:") || health.stderr.trim()) {
       throw new ActionableError("Android reset package manager is not responsive");
     }
-    const result = await this.dependencies.adb(device).executeCommand("shell pm list packages -3", {
-      timeoutMs,
+    const result = await this.readWithinBudget(
+      (attemptTimeoutMs) =>
+        this.dependencies.adb(device).executeCommand("shell pm list packages -3", {
+          timeoutMs: attemptTimeoutMs,
+          signal,
+          noRetry: true,
+          waitForProcessSettlementAfterAbort: true,
+        }),
       signal,
-      noRetry: true,
-      waitForProcessSettlementAfterAbort: true,
-    });
+      timeoutMs,
+      budget,
+    );
     signal?.throwIfAborted();
     if (result.stderr.trim() || outputLooksLikeShellFailure(result.stdout, result.stderr)) {
       throw new ActionableError("Android reset package manager is not responsive");
@@ -716,4 +826,20 @@ function inventoryProvesTarget(
   // Only after the initial full profile proof may serial presence stand in for that profile.
   const pendingName = allowPendingName && isUnknownEmulatorName(target.name, device.deviceId);
   return targetProvesProfile(target, device, profile, pendingName);
+}
+
+function healthReadBudget(
+  budget: ResetReadBudget,
+  context?: DeviceMutationResetContext,
+): ResetReadBudget {
+  return {
+    ...budget,
+    deadlineMs: Math.min(budget.deadlineMs, context?.deadlineMs ?? budget.deadlineMs),
+    assertOwned: context?.assertOwned ?? budget.assertOwned,
+  };
+}
+
+function captureReadTimeout(timeoutMs: number, budget?: ResetReadBudget): number {
+  // Capture retains its existing step cap; resets derive every attempt from the deadline.
+  return budget ? timeoutMs : Math.min(2000, timeoutMs);
 }

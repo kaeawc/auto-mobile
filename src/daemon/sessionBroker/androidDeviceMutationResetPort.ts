@@ -1,3 +1,4 @@
+import { adbAttemptTimeoutMs, retryAdbWithinBudget } from "./androidResetBudget";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import type { AdbCommandRunner } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import {
@@ -31,6 +32,7 @@ interface AndroidRevertCommand {
   command: string;
   success?: string;
   timeoutMs?: number;
+  retryable?: boolean;
 }
 
 const PACKAGE_PATTERN = /^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*$/;
@@ -66,7 +68,7 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
 
   constructor(
     private readonly adb: AdbCommandRunner,
-    private readonly timer: Pick<Timer, "now"> = defaultTimer,
+    private readonly timer: Pick<Timer, "now" | "sleep"> = defaultTimer,
   ) {}
 
   canRevert(mutation: DeviceMutationInput): boolean {
@@ -129,7 +131,7 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
       (command, timeoutMs) => this.execute(command, context, timeoutMs),
       (mutation) => this.revert(mutation, context),
     );
-    const output = await this.execute("shell cmd clipboard clear", context, 2000, true);
+    const output = await this.execute("shell cmd clipboard clear", context, undefined, true);
     if (this.unsupportedClipboard(output)) {
       logger.warn("Android cleaning skipped unsupported clipboard clear");
     } else if (this.failedOutput(output)) {
@@ -164,8 +166,14 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
     ) {
       return;
     }
-    for (const { command, success, timeoutMs } of commands) {
-      const output = await this.execute(command, context, timeoutMs, mutation.kind === "clipboard");
+    for (const { command, success, timeoutMs, retryable } of commands) {
+      const output = await this.execute(
+        command,
+        context,
+        timeoutMs,
+        mutation.kind === "clipboard",
+        retryable,
+      );
       if (mutation.kind === "clipboard" && this.unsupportedClipboard(output)) {
         logger.warn("Android cleaning skipped unsupported journal clipboard clear");
         continue;
@@ -202,19 +210,48 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
   private async execute(
     command: string,
     context: DeviceMutationResetContext,
+    // Legacy callers without a deadline retain one attempt; reset deadlines turn this into a floor.
     timeoutMs = 2000,
     optionalClipboard = false,
+    retryable = true,
   ): Promise<string> {
-    await context.assertOwned();
-    context.signal.throwIfAborted();
     try {
-      const result = await this.adb.executeCommand(command, {
-        signal: context.signal,
-        timeoutMs,
-        maxBuffer: 4 * 1024 * 1024,
-        noRetry: true,
-        waitForProcessSettlementAfterAbort: true,
-      });
+      const dispatch = async (attemptTimeoutMs: number) => {
+        await context.assertOwned();
+        context.signal.throwIfAborted();
+        return this.adb.executeCommand(command, {
+          signal: context.signal,
+          timeoutMs: attemptTimeoutMs,
+          maxBuffer: 4 * 1024 * 1024,
+          noRetry: true,
+          waitForProcessSettlementAfterAbort: true,
+        });
+      };
+      const result =
+        context.deadlineMs === undefined
+          ? await dispatch(timeoutMs)
+          : await retryAdbWithinBudget(
+              (attemptTimeoutMs) =>
+                dispatch(
+                  retryable
+                    ? attemptTimeoutMs
+                    : Math.min(
+                        context.deadlineMs! - this.timer.now(),
+                        Math.max(
+                          timeoutMs,
+                          adbAttemptTimeoutMs(context.deadlineMs! - this.timer.now(), 3),
+                        ),
+                      ),
+                ),
+              {
+                timer: this.timer,
+                deadlineMs: context.deadlineMs,
+                signal: context.signal,
+                label: "Android reset command",
+                minAttemptMs: timeoutMs,
+                attempts: retryable ? undefined : 1,
+              },
+            );
       context.signal.throwIfAborted();
       await context.assertOwned();
       if (optionalClipboard && this.unsupportedClipboard(`${result.stdout}\n${result.stderr}`)) {
@@ -243,6 +280,7 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
           { command: `shell am force-stop --user ${target[1]} ${shellQuote(target[2]!)}` },
           {
             command: `shell pm uninstall --user ${target[1]} ${shellQuote(target[2]!)}`,
+            retryable: false,
             success: "Success",
             timeoutMs: 10_000,
           },
@@ -424,6 +462,7 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
           { command: `shell am force-stop --user ${appData[1]} ${shellQuote(appData[2]!)}` },
           {
             command: `shell pm clear --user ${appData[1]} ${shellQuote(appData[2]!)}`,
+            retryable: false,
             success: "Success",
           },
         ]

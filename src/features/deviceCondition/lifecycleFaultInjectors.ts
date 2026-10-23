@@ -9,6 +9,10 @@ import type {
   DeviceConditionInjector,
 } from "./DeviceConditionController";
 import type { DeviceConditionKey } from "./DeviceConditionTypes";
+import { ActionableError } from "../../models/ActionableError";
+import { errorMessage } from "../../utils/describeUnknownError";
+import { logger } from "../../utils/logger";
+import { OwedResetError } from "./OwedResetError";
 import { rejectValue, shell, unsupported } from "./injectorSupport";
 
 /**
@@ -46,6 +50,7 @@ export function createDontKeepActivitiesFaultInjector(adb: AdbExecutor): DeviceC
   /** The value to restore while the fault is applied; undefined when this injector owns nothing. */
   let baseline: string | undefined;
 
+  /** Put the baseline back and keep owning it until a read-back shows it took effect. */
   const restore = async (signal?: AbortSignal): Promise<void> => {
     if (baseline === undefined) {
       return;
@@ -55,7 +60,31 @@ export function createDontKeepActivitiesFaultInjector(adb: AdbExecutor): DeviceC
     } else {
       await write(baseline, signal);
     }
+    const now = await read(signal);
+    if (now !== baseline) {
+      throw new ActionableError(
+        `Restoring ${ALWAYS_FINISH_ACTIVITIES} to ${baseline} did not take effect (reads ${now}).`,
+      );
+    }
     baseline = undefined;
+  };
+
+  /** Undo a failed apply; if that fails too, hand the reset to the controller so release retries it. */
+  const rollBack = async (error: unknown): Promise<never> => {
+    try {
+      await restore();
+    } catch (restoreError) {
+      logger.warn(
+        `dontKeepActivities rollback failed: ${errorMessage(restoreError)}`,
+        restoreError,
+      );
+      throw new OwedResetError(
+        `${errorMessage(error)} Rollback also failed (${errorMessage(restoreError)}); Don't keep activities may still be on, and release will retry.`,
+        restore,
+        { cause: error },
+      );
+    }
+    throw error;
   };
 
   return {
@@ -75,11 +104,16 @@ export function createDontKeepActivitiesFaultInjector(adb: AdbExecutor): DeviceC
       if (current === "1") {
         return { status: "unchanged", detail: "Don't keep activities was already on" };
       }
-      await write("1", signal);
-      if ((await read(signal)) !== "1") {
-        unsupported(`\`settings put global ${ALWAYS_FINISH_ACTIVITIES} 1\` did not take effect`);
-      }
+      // Own the fault before the first write, so a failure after it is still undone.
       baseline = current;
+      try {
+        await write("1", signal);
+        if ((await read(signal)) !== "1") {
+          unsupported(`\`settings put global ${ALWAYS_FINISH_ACTIVITIES} 1\` did not take effect`);
+        }
+      } catch (error) {
+        return rollBack(error);
+      }
       return {
         status: "applied",
         detail: "Don't keep activities on",

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import type { BootedDevice, ExecResult } from "../../../src/models";
 import { DeviceConditionController } from "../../../src/features/deviceCondition/DeviceConditionController";
+import { OwedResetError } from "../../../src/features/deviceCondition/OwedResetError";
 import {
   createDontKeepActivitiesFaultInjector,
   resolveLifecycleFaultInjector,
@@ -28,6 +29,10 @@ interface SettingsAdb {
   readAs(value: string | undefined): void;
   /** Reject the next `settings put`. */
   failNextPut(): void;
+  /** Swallow the next `settings put` without changing the value, the way a flaky settings provider can. */
+  ignoreNextPut(): void;
+  /** Reject a later command containing `match`: the `nth` one from now (1 = the next). */
+  failOn(match: string, nth: number): void;
 }
 
 /**
@@ -45,9 +50,21 @@ function settingsAdb(
   let failNext = options.failNext;
   let readOverride: string | undefined;
   let failPut = false;
+  let ignorePut = false;
+  const scheduled: { match: string; skip: number }[] = [];
   adb.execute = (args) => {
     const command = args.join(" ");
     log.push(command);
+    for (const entry of [...scheduled]) {
+      if (command.includes(entry.match)) {
+        if (entry.skip > 0) {
+          entry.skip -= 1;
+        } else {
+          scheduled.splice(scheduled.indexOf(entry), 1);
+          return Promise.reject(new Error("adb offline"));
+        }
+      }
+    }
     if (failNext !== undefined && command.includes(failNext)) {
       failNext = undefined;
       return Promise.reject(new Error("adb offline"));
@@ -60,7 +77,9 @@ function settingsAdb(
         failPut = false;
         return Promise.reject(new Error("adb offline"));
       }
-      if (options.persists !== false) {
+      if (ignorePut) {
+        ignorePut = false;
+      } else if (options.persists !== false) {
         current = args[args.length - 1];
       }
     } else if (command === `shell settings delete global ${SETTING}`) {
@@ -77,6 +96,12 @@ function settingsAdb(
     },
     failNextPut: () => {
       failPut = true;
+    },
+    ignoreNextPut: () => {
+      ignorePut = true;
+    },
+    failOn: (match, nth) => {
+      scheduled.push({ match, skip: nth - 1 });
     },
   };
 }
@@ -167,6 +192,64 @@ describe("dontKeepActivities fault (#14068)", () => {
     await expect(outcome.reset?.()).rejects.toThrow();
     expect(device.value()).toBe("1");
     await outcome.reset?.();
+    expect(device.value()).toBe("0");
+  });
+
+  test("a restore write that is silently ignored keeps the fault owed until a retry verifies it", async () => {
+    const device = settingsAdb("0");
+    const injector = createDontKeepActivitiesFaultInjector(device.adb);
+    const outcome = await injector.apply("on");
+    device.ignoreNextPut();
+
+    await expect(outcome.reset?.()).rejects.toThrow(/did not take effect/);
+    expect(device.value()).toBe("1");
+    expect(await injector.isClean()).toBe(false);
+
+    // The retry must issue a fresh write; with the baseline dropped it would be a no-op.
+    await outcome.reset?.();
+    expect(device.value()).toBe("0");
+    expect(await injector.isClean()).toBe(true);
+  });
+
+  test("a failed verification read after a successful write is rolled back", async () => {
+    const device = settingsAdb("0");
+    // Reads: 1 = baseline, 2 = verification (fails), 3 = rollback read-back.
+    device.failOn("settings get", 2);
+    const injector = createDontKeepActivitiesFaultInjector(device.adb);
+
+    await expect(injector.apply("on")).rejects.toThrow(/adb offline/);
+    expect(device.value()).toBe("0");
+    expect(await injector.isClean()).toBe(true);
+  });
+
+  test("when the rollback fails too, the owed reset still restores the setting", async () => {
+    const device = settingsAdb("0");
+    device.failOn("settings get", 2);
+    device.failOn("settings put", 2);
+    const injector = createDontKeepActivitiesFaultInjector(device.adb);
+
+    const error = await injector.apply("on").catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(OwedResetError);
+    expect(device.value()).toBe("1");
+
+    await (error as OwedResetError).owedReset();
+    expect(device.value()).toBe("0");
+    expect(await injector.isClean()).toBe(true);
+  });
+
+  test("the controller registers the owed reset when apply and rollback both fail", async () => {
+    const device = settingsAdb("0");
+    device.failOn("settings get", 2);
+    device.failOn("settings put", 2);
+    const injector = createDontKeepActivitiesFaultInjector(device.adb);
+    const controller = new DeviceConditionController(() => injector);
+
+    const result = await controller.apply({ faults: { dontKeepActivities: "on" } });
+    expect(result.success).toBe(false);
+    expect(result.active).toEqual(["faults.dontKeepActivities"]);
+
+    const restored = await controller.restore();
+    expect(restored.verifiedClean).toBe(true);
     expect(device.value()).toBe("0");
   });
 

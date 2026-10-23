@@ -1,3 +1,4 @@
+import { mutationIncarnation } from "../../../src/daemon/sessionBroker/mutations/incarnation";
 import { describe, expect, test } from "bun:test";
 import { AndroidKeepBootedReset } from "../../../src/daemon/sessionBroker/androidKeepBootedReset";
 import {
@@ -23,7 +24,12 @@ import {
 const SESSION = {
   resourceId: "resource-a",
   sessionId: "session-a",
-  incarnation: JSON.stringify(["resource-a", "resource-a", "12345678-1234-1234-1234-123456789abc"]),
+  incarnation: mutationIncarnation({
+    platform: "android",
+    resourceId: "resource-a",
+    stableDeviceId: "stable-avd",
+    bootId: "12345678-1234-1234-1234-123456789abc",
+  }),
 };
 const SCOPE = {
   deviceId: ANDROID_RESET_DEVICE.deviceId,
@@ -836,6 +842,7 @@ describe("Android keep-booted strategy", () => {
       ANDROID_RESET_DEVICE,
       ANDROID_RESET_PROFILE,
       SESSION.sessionId,
+      { stableDeviceId: "stable-avd" },
     );
     host.safe = false;
     await journal.record(SCOPE, SETTING);
@@ -863,6 +870,7 @@ describe("Android keep-booted strategy", () => {
       ANDROID_RESET_DEVICE,
       ANDROID_RESET_PROFILE,
       SESSION.sessionId,
+      { stableDeviceId: "stable-avd" },
     );
     await journal.record(SCOPE, SETTING);
     host.healthy = false;
@@ -884,6 +892,7 @@ describe("Android keep-booted strategy", () => {
       ANDROID_RESET_DEVICE,
       ANDROID_RESET_PROFILE,
       SESSION.sessionId,
+      { stableDeviceId: "stable-avd" },
     );
     host.commands = [];
     host.commandOptions = [];
@@ -926,7 +935,7 @@ describe("Android keep-booted strategy", () => {
       ANDROID_RESET_DEVICE,
       ANDROID_RESET_PROFILE,
       SESSION.sessionId,
-      { timer },
+      { stableDeviceId: "stable-avd", timer },
     );
     const reached = Promise.withResolvers<void>();
     let probeSignal: AbortSignal | undefined;
@@ -971,6 +980,7 @@ describe("Android keep-booted strategy", () => {
       ANDROID_RESET_DEVICE,
       ANDROID_RESET_PROFILE,
       SESSION.sessionId,
+      { stableDeviceId: "stable-avd" },
     );
     host.bootId = "87654321-1234-1234-1234-123456789abc";
     await expect(
@@ -1005,6 +1015,7 @@ describe("Android keep-booted strategy", () => {
         ANDROID_RESET_DEVICE,
         ANDROID_RESET_PROFILE,
         SESSION.sessionId,
+        { stableDeviceId: "stable-avd" },
       );
       port.beforeClean = async () => {
         host.booted = failure !== "boot";
@@ -1043,6 +1054,7 @@ describe("Android keep-booted strategy", () => {
       ANDROID_RESET_DEVICE,
       ANDROID_RESET_PROFILE,
       SESSION.sessionId,
+      { stableDeviceId: "stable-avd" },
     );
     host.onHealth = () => {
       owned = false;
@@ -1069,6 +1081,7 @@ describe("Android keep-booted strategy", () => {
       ANDROID_RESET_DEVICE,
       ANDROID_RESET_PROFILE,
       SESSION.sessionId,
+      { stableDeviceId: "stable-avd" },
     );
     host.safe = false;
     host.installed.add("com.example.session");
@@ -1105,6 +1118,7 @@ describe("Android keep-booted strategy", () => {
       ANDROID_RESET_DEVICE,
       ANDROID_RESET_PROFILE,
       SESSION.sessionId,
+      { stableDeviceId: "stable-avd" },
     );
     host.installed.add("com.example.contamination");
     expect(

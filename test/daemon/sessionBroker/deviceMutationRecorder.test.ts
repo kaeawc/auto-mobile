@@ -1,6 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import {
-  brokerMutationIncarnation,
+  brokerSessionMutationScope,
   SessionMutationRecorder,
 } from "../../../src/daemon/sessionBroker/mutations/recorder";
 import {
@@ -50,16 +50,32 @@ describe("session mutation recorder scope", () => {
     ]);
   });
 
-  test("broker incarnation fences replacement assignment generations", () => {
-    expect(brokerMutationIncarnation("resource-1", 2)).toBe('["resource-1",2]');
-    expect(brokerMutationIncarnation("resource-1", 2)).not.toBe(
-      brokerMutationIncarnation("resource-1", 3),
+  test("broker Android keys fence native replacements and boots, not assignment generations", () => {
+    const input = {
+      platform: "android",
+      sessionUuid: "session",
+      resource: { resourceId: "resource-1", scopeKey: "pool", allocationIndex: 0 },
+      stableDeviceId: "avd",
+      assignmentGeneration: 2,
+    };
+    const scope = brokerSessionMutationScope(input);
+    expect(scope.incarnation).toBe('["resource-1","avd",null]');
+    expect(brokerSessionMutationScope({ ...input, assignmentGeneration: 3 })).toEqual(scope);
+    expect(
+      brokerSessionMutationScope({ ...input, stableDeviceId: "replacement" }).incarnation,
+    ).not.toBe(scope.incarnation);
+    expect(brokerSessionMutationScope({ ...input, bootId: "boot" }).incarnation).not.toBe(
+      scope.incarnation,
     );
-    expect(brokerMutationIncarnation("resource-1", 2)).not.toBe(
-      brokerMutationIncarnation("resource-2", 2),
-    );
-    expect(() => brokerMutationIncarnation("resource-1", null)).toThrow("exact resource");
-    expect(() => brokerMutationIncarnation("resource-1", Number.NaN)).toThrow("exact resource");
+    for (const assignmentGeneration of [null, NaN, -1, 0.5, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(() => brokerSessionMutationScope({ ...input, assignmentGeneration })).toThrow(
+        "exact resource and assignment generation",
+      );
+    }
+    // Assignment generation is Android-only validation.
+    expect(() =>
+      brokerSessionMutationScope({ ...input, platform: "ios", assignmentGeneration: null }),
+    ).not.toThrow();
   });
 
   test("missing mutations uses one scoped list and matches kind/key pairs without collisions", async () => {

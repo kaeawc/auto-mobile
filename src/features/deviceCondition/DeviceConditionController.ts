@@ -70,7 +70,8 @@ export class DeviceConditionController {
 
   /** Keys with a reset still owed, in application order. */
   activeKeys(): DeviceConditionKey[] {
-    return this.resets.map((entry) => entry.key);
+    // A key can hold more than one reset (see clearKey); it is still one active condition.
+    return [...new Set(this.resets.map((entry) => entry.key))];
   }
 
   hasActiveConditions(): boolean {

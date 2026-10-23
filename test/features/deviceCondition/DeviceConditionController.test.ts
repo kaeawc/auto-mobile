@@ -171,7 +171,8 @@ describe("DeviceConditionController (#14050)", () => {
     battery.failReset = true;
     const failed = await controller.apply({ faults: { battery: "unset" } });
     expect(failed.changes[0]).toMatchObject({ key: "faults.battery", status: "unsupported" });
-    expect(failed.active).toEqual(["faults.battery", "faults.battery"]);
+    // Two resets are held, but it is one active condition.
+    expect(failed.active).toEqual(["faults.battery"]);
 
     battery.failReset = false;
     const retried = await controller.apply({ faults: { battery: "unset" } });

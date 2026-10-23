@@ -87,14 +87,20 @@ export function createStorageFaultInjector(adb: AdbExecutor): DeviceConditionInj
 
   /** Whether this injector has (or may have) a ballast on the device to remove. */
   let owned = false;
-  /**
-   * Whether the controller holds this injector's reset. Kept apart from `owned`: a rolled-back
-   * resize frees the ballast but the controller still has the reset, and registering another
-   * would leave two resets behind one `unset`.
-   */
-  let registered = false;
 
-  const restore = async (signal?: AbortSignal): Promise<void> => {
+  /**
+   * Apply and reset run one at a time. A lease-expiry reset can be in flight when a new apply
+   * starts; interleaved, the reset would clear `owned` after the apply had allocated and the
+   * ballast would outlive every later reset.
+   */
+  let tail: Promise<unknown> = Promise.resolve();
+  const serialize = <T>(task: () => Promise<T>): Promise<T> => {
+    const run = tail.then(task, task);
+    tail = run.catch(() => undefined);
+    return run;
+  };
+
+  const restoreNow = async (signal?: AbortSignal): Promise<void> => {
     if (!owned) {
       return;
     }
@@ -102,27 +108,23 @@ export function createStorageFaultInjector(adb: AdbExecutor): DeviceConditionInj
     owned = false;
   };
 
-  /** The reset the controller runs; it also forgets the registration once the ballast is gone. */
-  const release = async (signal?: AbortSignal): Promise<void> => {
-    await restore(signal);
-    registered = false;
-  };
-
   /**
-   * Undo a failed apply. If that fails too, make sure the controller holds a reset so release
-   * retries it: hand it ours, unless it already has one.
+   * The reset handed to the controller. It is idempotent (a no-op once the ballast is gone), so
+   * the controller holding more than one of them, which it clears together, is harmless.
    */
+  const reset = (signal?: AbortSignal): Promise<void> => serialize(() => restoreNow(signal));
+
+  /** Undo a failed apply; if that fails too, hand the reset to the controller so release retries it. */
   const rollBack = async (error: unknown): Promise<never> => {
     try {
-      await restore();
+      await restoreNow();
     } catch (restoreError) {
       logger.warn(`storage fault rollback failed: ${errorMessage(restoreError)}`, restoreError);
-      const message = `${errorMessage(error)} Rollback also failed (${errorMessage(restoreError)}); the storage ballast may still be on the device, and release will retry.`;
-      if (registered) {
-        throw new ActionableError(message, { cause: error });
-      }
-      registered = true;
-      throw new OwedResetError(message, release, { cause: error });
+      throw new OwedResetError(
+        `${errorMessage(error)} Rollback also failed (${errorMessage(restoreError)}); the storage ballast may still be on the device, and release will retry.`,
+        reset,
+        { cause: error },
+      );
     }
     throw error;
   };
@@ -144,43 +146,39 @@ export function createStorageFaultInjector(adb: AdbExecutor): DeviceConditionInj
     return size;
   };
 
+  const applyNow = async (
+    value: string,
+    signal?: AbortSignal,
+  ): Promise<DeviceConditionApplyOutcome> => {
+    const leftBytes = STORAGE_FREE_BYTES_LEFT[value];
+    if (leftBytes === undefined) {
+      rejectValue("faults.storage", value, STORAGE_VALUES);
+    }
+    await ensureFallocate(signal);
+    // Own the ballast before the first write, so a failure after it is still undone.
+    owned = true;
+    let allocated: number;
+    try {
+      // A leftover ballast (ours from a crashed session, or a re-size) would hide the true free space.
+      await removeBallast(signal);
+      allocated = await fill(leftBytes, signal);
+    } catch (error) {
+      return rollBack(error);
+    }
+    if (allocated === 0) {
+      // Nothing was allocated (any earlier ballast was just removed), so there is nothing left to undo.
+      owned = false;
+      return {
+        status: "unchanged",
+        detail: `free space already at or below the ${value} target`,
+      };
+    }
+    return { status: "applied", detail: `storage ${value}: allocated ${allocated} bytes`, reset };
+  };
+
   return {
     key: "faults.storage",
-    async apply(value, signal): Promise<DeviceConditionApplyOutcome> {
-      const leftBytes = STORAGE_FREE_BYTES_LEFT[value];
-      if (leftBytes === undefined) {
-        rejectValue("faults.storage", value, STORAGE_VALUES);
-      }
-      await ensureFallocate(signal);
-      const alreadyRegistered = registered;
-      // Own the ballast before the first write, so a failure after it is still undone.
-      owned = true;
-      let allocated: number;
-      try {
-        // A leftover ballast (ours from a crashed session, or a re-size) would hide the true free space.
-        await removeBallast(signal);
-        allocated = await fill(leftBytes, signal);
-      } catch (error) {
-        return rollBack(error);
-      }
-      if (allocated === 0 && !alreadyRegistered) {
-        // Nothing was allocated, so there is nothing to undo and no reset to owe.
-        owned = false;
-        return {
-          status: "unchanged",
-          detail: `free space already at or below the ${value} target`,
-        };
-      }
-      registered = true;
-      return {
-        status: "applied",
-        detail:
-          allocated === 0
-            ? `free space already at or below the ${value} target`
-            : `storage ${value}: allocated ${allocated} bytes`,
-        ...(alreadyRegistered ? {} : { reset: release }),
-      };
-    },
+    apply: (value, signal) => serialize(() => applyNow(value, signal)),
     // Clean means no ballast is left; free space also depends on what the app wrote meanwhile.
     async isClean(signal): Promise<boolean> {
       return !(await ballastPresent(signal));

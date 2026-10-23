@@ -40,6 +40,11 @@ interface StorageDevice {
   failOn(match: string, nth: number): void;
   /** Make the next `rm -f` succeed without deleting anything. */
   ignoreNextRm(): void;
+  /**
+   * Hold the next command containing `match` after its result is computed, until the returned
+   * function releases it: the command observes the device now but answers later.
+   */
+  holdNext(match: string): () => void;
 }
 
 interface StorageDeviceOptions {
@@ -58,9 +63,18 @@ function storageDevice(options: StorageDeviceOptions): StorageDevice {
   const log: string[] = [];
   let ballast: number | undefined = options.staleBallastBytes;
   let ignoreRm = false;
+  let held: { match: string; gate: Promise<void> } | undefined;
   const scheduled: { match: string; skip: number }[] = [];
   let baseFree = options.baseFreeBytes;
   const free = (): number => baseFree - (ballast ?? 0);
+  const answer = async (command: string, stdout: string): Promise<ExecResult> => {
+    if (held !== undefined && command.includes(held.match)) {
+      const { gate } = held;
+      held = undefined;
+      await gate;
+    }
+    return execResult(stdout);
+  };
   adb.execute = (args) => {
     const command = args.join(" ");
     log.push(command);
@@ -75,7 +89,7 @@ function storageDevice(options: StorageDeviceOptions): StorageDevice {
       }
     }
     if (command === "shell df -k /data") {
-      return Promise.resolve(execResult(dfOutput(free())));
+      return answer(command, dfOutput(free()));
     }
     if (command.startsWith("shell command -v fallocate")) {
       return Promise.resolve(
@@ -83,7 +97,7 @@ function storageDevice(options: StorageDeviceOptions): StorageDevice {
       );
     }
     if (command.startsWith("shell ls -d ")) {
-      return Promise.resolve(execResult(ballast === undefined ? "" : STORAGE_BALLAST_PATH));
+      return answer(command, ballast === undefined ? "" : STORAGE_BALLAST_PATH);
     }
     if (command.startsWith("shell fallocate -l ")) {
       if (options.fallocateNoEffect !== true) {
@@ -96,7 +110,7 @@ function storageDevice(options: StorageDeviceOptions): StorageDevice {
         ballast = undefined;
       }
     }
-    return Promise.resolve(execResult(""));
+    return answer(command, "");
   };
   return {
     adb,
@@ -111,6 +125,14 @@ function storageDevice(options: StorageDeviceOptions): StorageDevice {
     },
     ignoreNextRm: () => {
       ignoreRm = true;
+    },
+    holdNext: (match) => {
+      let release = (): void => undefined;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      held = { match, gate };
+      return release;
     },
   };
 }
@@ -179,16 +201,20 @@ describe("storage fault (#14066)", () => {
     expect(device.ballastBytes()).toBeUndefined();
   });
 
-  test("changing low to full re-sizes the one ballast and keeps a single reset", async () => {
+  test("changing low to full re-sizes the one ballast, and running both resets is harmless", async () => {
     const device = storageDevice({ baseFreeBytes: BASE });
     const injector = createStorageFaultInjector(device.adb);
     const first = await injector.apply("low");
     const second = await injector.apply("full");
-    expect(second.reset).toBeUndefined();
     expect(device.freeBytes()).toBe(STORAGE_FREE_BYTES_LEFT.full);
+    expect(second.reset).toBeDefined();
 
     await first.reset?.();
     expect(device.freeBytes()).toBe(BASE);
+    // The other reset is idempotent: it finds nothing to do and issues no commands.
+    const before = device.commands().length;
+    await second.reset?.();
+    expect(device.commands().length).toBe(before);
   });
 
   test("replaces a stale ballast from a crashed session and sizes against the real free space", async () => {
@@ -288,6 +314,31 @@ describe("storage fault (#14066)", () => {
     expect(device.freeBytes()).toBe(BASE);
   });
 
+  test("a new apply waits for an in-flight reset, so the reset cannot disown the new ballast", async () => {
+    const device = storageDevice({ baseFreeBytes: BASE });
+    const injector = createStorageFaultInjector(device.adb);
+    const first = await injector.apply("low");
+
+    // The reset removes the ballast, then stalls on its verification read.
+    const releaseVerification = device.holdNext("ls -d");
+    const resetting = first.reset?.() ?? Promise.resolve();
+    const applying = injector.apply("full");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // The apply has not started allocating while the reset is still running.
+    expect(device.ballastBytes()).toBeUndefined();
+
+    releaseVerification();
+    await resetting;
+    const second = await applying;
+    expect(second.status).toBe("applied");
+    expect(device.freeBytes()).toBe(STORAGE_FREE_BYTES_LEFT.full);
+
+    // Without serialization the stalled reset clears `owned` after the apply allocated and this leaks.
+    await second.reset?.();
+    expect(device.ballastBytes()).toBeUndefined();
+    expect(device.freeBytes()).toBe(BASE);
+  });
+
   describe("resizing through a registry-style resolver", () => {
     const android: BootedDevice = { name: "emu", platform: "android", deviceId: "emulator-5554" };
     const controllerFor = (device: StorageDevice): DeviceConditionController => {
@@ -353,7 +404,7 @@ describe("storage fault (#14066)", () => {
       expect(device.freeBytes()).toBe(BASE);
     });
 
-    test("a failed resize whose rollback fails too does not add a second reset", async () => {
+    test("a failed resize whose rollback fails too still clears with one unset", async () => {
       const device = storageDevice({ baseFreeBytes: BASE });
       const controller = controllerFor(device);
       await controller.apply({ faults: { storage: "low" } });

@@ -1,4 +1,5 @@
-import { cpus, loadavg, totalmem } from "node:os";
+import { nodeHostLoadReader } from "../../utils/hostLoadBudget";
+import { totalmem } from "node:os";
 import type { HostCommandExecutor } from "../../utils/HostCommandExecutor";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -34,12 +35,8 @@ export interface HostOsInfo {
 
 export const nodeHostOsInfo: HostOsInfo = {
   totalMemoryBytes: () => totalmem(),
-  cpuCount: () => cpus().length,
-  loadAverage1m: () => {
-    const load = loadavg()[0];
-    // Windows reports 0 for every sample; treat that as "no data", not an idle host.
-    return process.platform === "win32" ? null : load;
-  },
+  cpuCount: () => nodeHostLoadReader.cpuCount(),
+  loadAverage1m: () => nodeHostLoadReader.loadAverage1m(),
 };
 
 const MEMORY_PRESSURE_SYSCTL = ["-n", "kern.memorystatus_vm_pressure_level"];

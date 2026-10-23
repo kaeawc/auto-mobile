@@ -154,3 +154,6 @@ testOverrides.deviceReadinessProxyDriverProvider = () => ({
   isInstalled: async () => true,
   isVersionCompatible: async () => true,
 });
+
+// Unit tests must not scale budgets by the real host load.
+testOverrides.hostLoad = { loadAverage1m: () => 0, cpuCount: () => 1 };

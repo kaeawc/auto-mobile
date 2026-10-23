@@ -197,6 +197,7 @@ export async function validateRequestedAndroidIdentifiersBeforeBoot(
       operation: async (signal) => {
         const discovery = await deviceUtils.getBootedDevicesDetailed("android", {
           bypassAndroidDeviceListCache: true,
+          skipForeignEnrichment: true,
           signal,
         });
         if (signal.aborted) {
@@ -233,7 +234,8 @@ export async function validateRequestedAndroidIdentifiersBeforeBoot(
     return;
   }
   const running = discovery.devices.find(
-    (device) => device.platform === "android" && device.deviceId === deviceId,
+    (device) =>
+      !device.foreignOwned && device.platform === "android" && device.deviceId === deviceId,
   );
   if (running && isUnknownAndroidRuntimeName(running)) {
     // The serial is running but its AVD name is not resolvable yet; the
@@ -400,9 +402,11 @@ export async function resolveAndroidStartStableDeviceLifecycleTarget(
     "Android booted-device identity discovery did not complete",
     {
       requestAbortSignal: signal,
-      operation: async () => {
+      operation: async (signal) => {
         const discovery = await deviceUtils.getBootedDevicesDetailed("android", {
           bypassAndroidDeviceListCache: true,
+          skipForeignEnrichment: true,
+          signal,
         });
         // FUNNEL 1: lifecycle coordination resolves the AVD behind a serial, which
         // is exactly what the quarantine puts in doubt (#6863 review).
@@ -412,7 +416,8 @@ export async function resolveAndroidStartStableDeviceLifecycleTarget(
     },
   );
   const bootedMatches = bootedDiscovery.devices.filter(
-    (device) => device.platform === "android" && device.deviceId === deviceId,
+    (device) =>
+      !device.foreignOwned && device.platform === "android" && device.deviceId === deviceId,
   );
   if (bootedMatches.length > 1) {
     throw new ActionableError(

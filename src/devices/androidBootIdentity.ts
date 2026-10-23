@@ -10,6 +10,7 @@ export function assertAndroidAvdIdentityResolved(
   const unresolved = devices
     .filter(
       (device) =>
+        !device.foreignOwned &&
         device.platform === "android" &&
         isAndroidEmulatorSerial(device.deviceId) &&
         device.name === `Unknown (${device.deviceId})`,
@@ -35,7 +36,12 @@ export function assertExactAndroidImageDiscovery(
   }
   const occupiedSerial =
     image.deviceId && isAndroidEmulatorSerial(image.deviceId)
-      ? booted.find((device) => device.deviceId === image.deviceId && device.name !== image.name)
+      ? booted.find(
+          (device) =>
+            !device.foreignOwned &&
+            device.deviceId === image.deviceId &&
+            device.name !== image.name,
+        )
       : undefined;
   if (occupiedSerial) {
     throw new ActionableError(

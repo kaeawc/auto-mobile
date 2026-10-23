@@ -224,7 +224,15 @@ export class DefaultEmulatorLaunchCoordinator implements EmulatorLaunchCoordinat
         { bypassDeviceListCache: true },
         signal,
       );
-      if (runningEmulators.some((emulator) => emulator.name === avdName)) {
+      // Foreign placeholders carry no AVD name; the launcher's AVD lock still decides those.
+      if (runningEmulators.some((emulator) => emulator.foreignOwned && emulator.name === avdName)) {
+        throw new ActionableError(
+          `another daemon owns AVD '${avdName}'. Use another AVD or release it in that daemon before retrying.`,
+        );
+      }
+      if (
+        runningEmulators.some((emulator) => !emulator.foreignOwned && emulator.name === avdName)
+      ) {
         logger.info(`AVD '${avdName}' is already running - waiting for it to be ready`);
         return true;
       }

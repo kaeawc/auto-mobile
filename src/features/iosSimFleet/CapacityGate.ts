@@ -185,6 +185,7 @@ export class IosSimCapacityGate
     warmMatch: "substitute" | "hint",
     bootUdid?: string,
     window?: LedgerSampleWindow,
+    carriesOwnSlot = false,
   ): CapacityDecision {
     this.assertCountKnown(report);
     const heldUdids = report.simulators
@@ -203,6 +204,10 @@ export class IosSimCapacityGate
     const occupied = occupyingUdids(report, bootUdid);
     this.forgetExitedStarted(report);
     const bootedCount = occupied.length + this.inFlightBootCount(report, bootUdid, window);
+    // A replacement of an occupying target retains its slot even above the limit.
+    if (carriesOwnSlot) {
+      return { outcome: "allow", limits, bootedCount };
+    }
     const owned = new Set([...this.startedUdids, ...heldUdids]);
     const refused = atCapacityDecision(bootedCount, limits, this.retryAfterMs, {
       noun: "simulator",
@@ -263,7 +268,18 @@ export class IosSimCapacityGate
       },
       ledger: this.admittedBoots,
       decide: (report, window) =>
-        this.decide(report, undefined, "hint", options.replacingDeviceId, window),
+        this.decide(
+          report,
+          undefined,
+          "hint",
+          options.replacingDeviceId,
+          window,
+          // Only a reset re-boots the same device it stopped. Binding replacement deletes the old
+          // device and creates another, so it still needs capacity for the new one.
+          options.reason === "reset" &&
+            options.replacingDeviceId !== undefined &&
+            occupyingUdids(report).includes(options.replacingDeviceId),
+        ),
       admit: () => {
         admission = this.admittedBoots.admit(options.replacingDeviceId, true, options.reason);
         return admission.release;

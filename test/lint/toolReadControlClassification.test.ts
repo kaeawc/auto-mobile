@@ -137,6 +137,7 @@ const CLASSIFICATION: Classification = {
     "dragPath",
     "executePlan",
     "explore",
+    "focusNavigate",
     "highlight",
     "homeScreen",
     "installApp",

@@ -139,6 +139,47 @@ describe("DeviceConditionController (#14050)", () => {
     expect(controller.hasActiveConditions()).toBe(false);
   });
 
+  test("unset clears every reset registered for the key, newest first, and leaves other keys alone", async () => {
+    const battery = new FakeInjector("faults.battery");
+    const thermal = new FakeInjector("faults.thermal");
+    const controller = controllerWith(
+      new Map<DeviceConditionKey, DeviceConditionInjector>([
+        ["faults.battery", battery],
+        ["faults.thermal", thermal],
+      ]),
+    );
+    // Applying a key twice can register two resets (an injector that cannot tell the controller kept one).
+    await controller.apply({ faults: { battery: "unplug" } });
+    await controller.apply({ faults: { thermal: "critical" } });
+    await controller.apply({ faults: { battery: "low" } });
+
+    const cleared = await controller.apply({ faults: { battery: "unset" } });
+    expect(cleared.changes).toEqual([{ key: "faults.battery", status: "cleared" }]);
+    expect(battery.resetCount).toBe(2);
+    expect(thermal.resetCount).toBe(0);
+    expect(cleared.active).toEqual(["faults.thermal"]);
+  });
+
+  test("an unset whose newest reset fails keeps every reset for the key and a retry clears them all", async () => {
+    const battery = new FakeInjector("faults.battery");
+    const controller = controllerWith(
+      new Map<DeviceConditionKey, DeviceConditionInjector>([["faults.battery", battery]]),
+    );
+    await controller.apply({ faults: { battery: "unplug" } });
+    await controller.apply({ faults: { battery: "low" } });
+
+    battery.failReset = true;
+    const failed = await controller.apply({ faults: { battery: "unset" } });
+    expect(failed.changes[0]).toMatchObject({ key: "faults.battery", status: "unsupported" });
+    // Two resets are held, but it is one active condition.
+    expect(failed.active).toEqual(["faults.battery"]);
+
+    battery.failReset = false;
+    const retried = await controller.apply({ faults: { battery: "unset" } });
+    expect(retried.changes).toEqual([{ key: "faults.battery", status: "cleared" }]);
+    expect(retried.active).toEqual([]);
+  });
+
   test("reset:true restores everything before applying the same request's new fields", async () => {
     const injector = new FakeInjector("faults.battery");
     const controller = controllerWith(

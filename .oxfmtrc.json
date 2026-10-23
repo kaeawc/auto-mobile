@@ -5,6 +5,7 @@
     "ios/**",
     "android/**",
     "scratch/**",
+    "samples/prototype-embedding/**",
     "test/fixtures/accessibility-contrast/**",
     "test/fixtures/docs-site/**",
     "test/fixtures/intent-chooser/**",

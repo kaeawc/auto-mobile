@@ -35,6 +35,10 @@ Android Auto projects a phone's UI to a head unit; Automotive OS is a full Andro
 TV navigation is a focus problem; D-pad keys can be sent and the focused element comes back in every observation. Missing: a loop connecting them, and possibly one key.
 
 1. **Activate focused item.** Android treats `KEYCODE_ENTER` and `KEYCODE_DPAD_CENTER` both as select, so `enter` may suffice (test first, checklist row 3). If not, add `select` (`KEYCODE_DPAD_CENTER`) to **both** `SUPPORTED_INPUT_KEYS` and `INPUT_KEY_CODE_MAP`: `InputKeyName` derives from the first and the second is checked against it, so one entry alone does not compile.
+
+> [!NOTE]
+> Implemented (#14947) as `focusNavigate` (`src/features/action/FocusNavigate.ts`), Android only, matching `until` on `text`, `contentDesc` and `resourceId`. No `select` key was added: `enter` is the activation key until checklist row 3 shows otherwise on a TV image. Still unverified on a device, including whether `focused` appears for Leanback's focus ring.
+
 2. **`focusNavigate({ until, direction?, maxSteps?, settleMs? })`.** Observe; stop if the focused element matches `until`; else press one D-pad key and repeat. Returns the path of focused elements.
    - Direction: given `direction`, else the arrow from the focused element's bounds centre toward the nearest `until` match; with no match on screen, `arrow_down`.
    - Stops on match, `maxSteps` (default 30), or two consecutive presses leaving focus unchanged. Statuses: `focused`, `max_steps`, `stuck`.

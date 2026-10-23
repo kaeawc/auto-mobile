@@ -39,6 +39,25 @@ function defaultProbe(options: DoctorProbeOptions): SpotlightProbe {
   };
 }
 
+async function findIndexedDirs(
+  candidates: string[],
+  probe: SpotlightProbe,
+  options: DoctorProbeOptions,
+): Promise<string[]> {
+  const indexed: string[] = [];
+  for (const dir of candidates) {
+    if (!probe.exists(dir) || probe.hasMarker(dir)) {
+      continue;
+    }
+    const current = remainingDoctorProbe(options);
+    const status = await probe.indexingStatus(dir, current.timeoutMs ?? DOCTOR_EXEC_TIMEOUT_MS);
+    if (!status.includes("Indexing disabled")) {
+      indexed.push(dir);
+    }
+  }
+  return indexed;
+}
+
 export async function checkSpotlightIndexing(
   dependencies: SpotlightDependencies = {},
   options: DoctorProbeOptions = {},
@@ -59,13 +78,7 @@ export async function checkSpotlightIndexing(
       join(home, "Library/Developer/Xcode/DerivedData"),
       join(home, ".gradle"),
     ];
-    const indexed: string[] = [];
-    for (const dir of candidates) {
-      if (!probe.exists(dir) || probe.hasMarker(dir)) continue;
-      const current = remainingDoctorProbe(options);
-      const status = await probe.indexingStatus(dir, current.timeoutMs ?? DOCTOR_EXEC_TIMEOUT_MS);
-      if (!status.includes("Indexing disabled")) indexed.push(dir);
-    }
+    const indexed = await findIndexedDirs(candidates, probe, options);
     if (indexed.length === 0) {
       return {
         name,

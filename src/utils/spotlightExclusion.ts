@@ -11,7 +11,9 @@ export async function markSpotlightExcluded(
   fsLike: SpotlightFileSystem,
   platform: NodeJS.Platform = process.platform,
 ): Promise<void> {
-  if (platform !== "darwin") return;
+  if (platform !== "darwin") {
+    return;
+  }
   try {
     await fsLike.writeFile(join(dir, ".metadata_never_index"), "");
   } catch (error) {

@@ -60,6 +60,8 @@ export type StampedAvdNameProbeObservation = AvdNameProbeObservation &
   Pick<BootedDevice, "observedAt">;
 
 export interface BootedDevice {
+  /** Enrichment deliberately skipped because another live daemon owns this serial. */
+  foreignOwned?: true;
   name: string;
   platform: Platform;
   deviceId: string;

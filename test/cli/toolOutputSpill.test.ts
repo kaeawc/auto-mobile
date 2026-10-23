@@ -166,10 +166,11 @@ describe("CLI tool output never emits truncated JSON (#6870)", () => {
   });
 
   test("renders a non-serializable result as an explicit failure, not a crash", () => {
-    const cyclic: Record<string, unknown> = {};
-    cyclic.self = cyclic;
+    // A BigInt is non-serializable like a cycle but throws immediately; building the
+    // cyclic-reference error costs 450ms or more, which blew the 100ms unit budget.
+    const unserializable = { count: 1n };
 
-    const parsed = JSON.parse(renderCliToolOutput(cyclic, { tool: "tapOn" }));
+    const parsed = JSON.parse(renderCliToolOutput(unserializable, { tool: "tapOn" }));
 
     expect(parsed.truncated).toBe(true);
     expect(parsed.reason).toBeTruthy();

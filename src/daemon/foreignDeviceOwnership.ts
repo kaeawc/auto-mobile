@@ -1,3 +1,4 @@
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { closeSync, linkSync, openSync, readFileSync, unlinkSync, writeSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
@@ -48,7 +49,7 @@ export interface ForeignDeviceOwnership {
    * Re-read who owns these devices, asking each owner's daemon whether it is still alive and
    * using the device. {@link foreignOwnerPid} answers from each device's latest refresh.
    */
-  refresh(deviceIds: readonly string[]): Promise<void>;
+  refresh(deviceIds: readonly string[], signal?: AbortSignal): Promise<void>;
   /**
    * PID of another live process that owned `deviceId` at the latest refresh, or undefined when
    * no other process did (or the device was not refreshed).
@@ -360,12 +361,18 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
     private readonly forwardEvidence?: ForeignCtrlProxyForwardEvidence,
   ) {}
 
-  async refresh(deviceIds: readonly string[]): Promise<void> {
-    const entries = await Promise.all(
-      deviceIds.map(
-        async (deviceId) => [deviceId, await this.readOwnerWithForwardEvidence(deviceId)] as const,
+  async refresh(deviceIds: readonly string[], signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted();
+    const entries = await raceWithDeadline(
+      Promise.all(
+        deviceIds.map(
+          async (deviceId) =>
+            [deviceId, await this.readOwnerWithForwardEvidence(deviceId, signal)] as const,
+        ),
       ),
+      { timer: this.timer, signal, label: "Foreign ownership refresh" },
     );
+    signal?.throwIfAborted();
     for (const [deviceId, { pid, forwardUnreadable }] of entries) {
       if (pid === undefined) {
         this.owners.delete(deviceId);
@@ -383,19 +390,26 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
 
   private async readOwnerWithForwardEvidence(
     deviceId: string,
+    signal?: AbortSignal,
   ): Promise<{ pid: number | undefined; forwardUnreadable: boolean }> {
-    const fileOwnerPid = await this.readForeignOwner(deviceId);
+    const fileOwnerPid = await raceWithDeadline(this.readForeignOwner(deviceId), {
+      timer: this.timer,
+      signal,
+      label: "Foreign ownership files",
+    });
+    signal?.throwIfAborted();
     // A verified file owner decides this refresh; avoid a host forward probe when known (#12220).
     if (fileOwnerPid !== undefined) {
       return { pid: fileOwnerPid, forwardUnreadable: false };
     }
-    return this.readForwardEvidence(deviceId);
+    return this.readForwardEvidence(deviceId, signal);
   }
 
   private async readForwardEvidence(
     deviceId: string,
+    signal?: AbortSignal,
   ): Promise<{ pid: number | undefined; forwardUnreadable: boolean }> {
-    const forward = await this.forwardEvidence?.read(deviceId);
+    const forward = await this.forwardEvidence?.read(deviceId, signal);
     if (!forward || forward.kind === "none") {
       return { pid: undefined, forwardUnreadable: false };
     }

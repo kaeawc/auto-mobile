@@ -77,7 +77,15 @@ function dozeRestore(
       // Forced deep Doze only reads ACTIVE once the screen is awake, and the session's own screen
       // sleep is otherwise undone later by the screen field: wake first so the read-back below
       // judges a device that can settle (#15161).
-      await wakeSleptScreen(record, client);
+      try {
+        await wakeSleptScreen(record, client);
+      } catch (error) {
+        // The screen field retries the wake; the Doze read-back still says whether Doze left.
+        logger.warn(
+          `[power] Could not wake the screen before the Doze read-back: ${errorMessage(error)}`,
+          error,
+        );
+      }
       if (mode !== "off") {
         await client.forceDoze(mode);
       }

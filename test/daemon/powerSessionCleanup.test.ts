@@ -174,6 +174,34 @@ describe("registerPowerSessionCleanup", () => {
     expect(powerRestore).not.toHaveProperty("leftover");
   });
 
+  test("a failed wake before the Doze read-back does not fail the Doze restore (#15161)", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const { adb, manager, ops, options } = setup();
+      adb.idleLingersWhileAsleep = true;
+      adb.setScreenState(true);
+      await ops.write({ doze: "deep" });
+      adb.failing.add("KEYCODE_WAKEUP");
+      adb.failTimes.set("KEYCODE_WAKEUP", 1);
+
+      manager.release("s-1", DEVICE);
+      await manager.settle();
+
+      const { powerRestore } = await powerRestoreResult("s-1", options);
+      expect(powerRestore).toMatchObject({
+        status: "restored",
+        fields: [
+          { field: "doze", status: "restored", verified: true },
+          { field: "screen", status: "restored", verified: true },
+          { field: "battery", status: "restored", verified: true },
+        ],
+      });
+      expect(warn).toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   test("one failing field does not stop the others and the failure is reported loudly", async () => {
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {

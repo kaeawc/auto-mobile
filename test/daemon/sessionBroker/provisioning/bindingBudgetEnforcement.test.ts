@@ -274,8 +274,7 @@ describe("binding total-resource enforcement on SQLite", () => {
         platform: "android",
         deviceId: "orphan",
         name: bindingDeviceName(req.key, 1, "abcd"),
-        isRunning: false,
-        isRunningStateKnown: false,
+        isRunning: true,
         ...SPEC,
       });
       const result = await make().reconcile(req);
@@ -291,8 +290,7 @@ describe("binding total-resource enforcement on SQLite", () => {
       platform: "android",
       deviceId: "ambroker-other",
       name: "ambroker-other",
-      isRunning: false,
-      isRunningStateKnown: false,
+      isRunning: true,
     });
     const result = await make().reconcile(await request());
     expect(result).toMatchObject({

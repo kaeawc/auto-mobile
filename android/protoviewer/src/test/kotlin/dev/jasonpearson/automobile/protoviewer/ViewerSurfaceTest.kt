@@ -29,6 +29,7 @@ class ViewerSurfaceTest {
   @get:Rule val compose = createComposeRule()
   private val repository = FakeLibraryRepository()
   private val settings = FakeSettingsStore()
+  private val grant = FakeLocalNetworkGrant()
   private var controller: ActivityController<ViewerActivity>? = null
 
   @Before
@@ -41,6 +42,7 @@ class ViewerSurfaceTest {
         UnconfinedTestDispatcher(),
         LibraryClock { 42 },
         settings = settings,
+        localNetworkGrant = grant,
       )
     }
   }
@@ -125,6 +127,27 @@ class ViewerSurfaceTest {
     )
     launch()
     assertReservedBand("sheet-content")
+  }
+
+  @Test
+  fun revokedPermissionAtStartTurnsNetworkOffAndHidesProvenance() {
+    install("""{"type":"text","testTag":"plain","text":"Plain"}""")
+    grant.granted = false
+    launch()
+    assertFalse(settings.allowNetwork.value)
+    compose.onNodeWithTag("network-provenance").assertDoesNotExist()
+    compose.onNodeWithTag("plain").assertIsDisplayed()
+  }
+
+  @Test
+  fun revokedPermissionDetectedOnResumeTurnsNetworkOff() {
+    install("""{"type":"text","testTag":"plain","text":"Plain"}""")
+    launch()
+    compose.onNodeWithTag("network-provenance").assertIsDisplayed()
+    grant.granted = false
+    compose.runOnIdle { controller?.pause()?.resume() }
+    assertFalse(settings.allowNetwork.value)
+    compose.onNodeWithTag("network-provenance").assertDoesNotExist()
   }
 
   private fun install(root: String, placement: String = """{"type":"fullscreen"}""") {

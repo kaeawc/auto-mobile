@@ -221,6 +221,10 @@ data class RegexSite(val location: String, val line: Int, val pattern: String?, 
  */
 object RegexLiteralScanner {
   private val constructors = listOf("Regex(", "Pattern.compile(")
+  private const val CHECK_PATTERN_PATH =
+    "protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol/PrototypeCheckPattern.kt"
+  private const val CONTRACT_PATH =
+    "protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol/PrototypeSpecContract.kt"
 
   fun scan(source: String, path: String): List<RegexSite> {
     val sites = mutableListOf<RegexSite>()
@@ -252,14 +256,12 @@ object RegexLiteralScanner {
     path: String,
     sites: MutableList<RegexSite>,
   ): Int? {
-    val call = constructors.firstOrNull {
-      s.startsWith(it, i) && !isIdentifierPart(s.getOrNull(i - 1))
-    }
-    val afterParen = call?.let { i + it.length }
-    val next = afterParen?.let { p -> s.indexOfFirst(p) { c -> !c.isWhitespace() } }
-    val isLiteralArg = next != null && next >= 0 && s[next] == '"'
-    val isExempt = call != null && next != null && isValidatedPattern(s, i, call, path, next)
-    if (call != null && !isLiteralArg && !isExempt) {
+    val call =
+      constructors.firstOrNull { s.startsWith(it, i) && !isIdentifierPart(s.getOrNull(i - 1)) }
+        ?: return null
+    val afterParen = i + call.length
+    val next = s.indexOfFirst(afterParen) { c -> !c.isWhitespace() }
+    if (!isReviewedCall(s, i, path, call, next)) {
       sites +=
         RegexSite(
           "$path:${lineOf(s, i)}",
@@ -271,32 +273,31 @@ object RegexLiteralScanner {
     return afterParen
   }
 
-  /**
-   * Non-literal calls that are validated elsewhere: the portable-pattern gate in
-   * PrototypeCheckPattern and the contract JSON patterns (checked as strings by the contract test).
-   */
-  private fun isValidatedPattern(
+  /** True for a literal argument or one of the two explicitly reviewed dynamic compilations. */
+  private fun isReviewedCall(s: String, i: Int, path: String, call: String, next: Int): Boolean =
+    isLiteralArg(s, next) ||
+      isValidatedPortablePattern(s, i, path, call, next) ||
+      isContractPattern(s, path, call, next)
+
+  private fun isLiteralArg(s: String, next: Int): Boolean = next >= 0 && s[next] == '"'
+
+  private fun isValidatedPortablePattern(
     s: String,
     i: Int,
-    call: String,
     path: String,
+    call: String,
     next: Int,
   ): Boolean {
-    val portable =
-      call == "Pattern.compile(" &&
-        path.endsWith(
-          "protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol/PrototypeCheckPattern.kt",
-        ) &&
-        s.startsWith("source(pattern))", next) &&
-        s.substring(0, i).trimEnd().endsWith("if (!parse(pattern).ok) return false\n    return")
-    val contract =
-      call == "Regex(" &&
-        path.endsWith(
-          "protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol/PrototypeSpecContract.kt",
-        ) &&
-        s.startsWith("it.value.jsonPrimitive.content)", next)
-    return portable || contract
+    if (call != "Pattern.compile(" || !path.endsWith(CHECK_PATTERN_PATH)) return false
+    return s.startsWith("source(pattern))", next) &&
+      s.substring(0, i).trimEnd().endsWith("if (!parse(pattern).ok) return false\n    return")
   }
+
+  /** Contract JSON patterns are checked as strings by the contract test, not as source. */
+  private fun isContractPattern(s: String, path: String, call: String, next: Int): Boolean =
+    call == "Regex(" &&
+      path.endsWith(CONTRACT_PATH) &&
+      s.startsWith("it.value.jsonPrimitive.content)", next)
 
   private fun String.indexOfFirst(from: Int, predicate: (Char) -> Boolean): Int {
     var i = from

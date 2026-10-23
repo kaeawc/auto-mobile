@@ -17,6 +17,7 @@ import type { DeviceMutationResetContext, DeviceMutationResetPort } from "./muta
 import { planDeviceMutationRevert } from "./mutations/revertPlanner";
 import {
   assertDeviceMutationScope,
+  opaqueForcesFallback,
   type DeviceMutationEntry,
   type DeviceMutationJournal,
   type DeviceMutationScope,
@@ -120,6 +121,12 @@ export class IosKeepBootedReset {
         );
         if (!context.baseline?.completeKinds.includes("installed-app")) {
           throw new ActionableError("iOS reset requires a captured app baseline; erase required");
+        }
+        const opaque = entries.find(opaqueForcesFallback);
+        if (opaque) {
+          throw new ActionableError(
+            `iOS opaque journaled mutation (${opaque.toolName}) cannot be journal-reverted; erase required`,
+          );
         }
         await this.replayJournal(entries, context, step);
         await step("sanitize", () => this.dependencies.mutations.sanitize(context));

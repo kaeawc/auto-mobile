@@ -5,15 +5,17 @@ Host configuration selects iOS reuse independently of Android:
 ```json
 {
   "reuse": {
-    "ios": { "mode": "keep-booted", "maxUses": 20, "fallback": "erase" }
+    "ios": { "mode": "keep-booted", "maxUses": 10, "fallback": "erase" }
   }
 }
 ```
 
 This fragment supplements the existing contractVersion, limits and defaults.
 The other modes are `erase` and `off`. For `off`, omit maxUses and fallback.
-Enabled modes default to maxUses 20 and fallback `erase`; maxUses must be a
-positive safe integer. iOS reuse requires defaults.ios. The legacy
+Enabled modes default to fallback `erase`; maxUses defaults to 10 for
+`keep-booted` and 20 for `erase`, and must be a positive safe integer. The
+keep-booted cap bounds the residue that cleaning cannot see: every Nth release
+erases the device instead (#15017). iOS reuse requires defaults.ios. The legacy
 `reuseCleanDevices: true` selects iOS erase and cannot accompany keep-booted
 or off. On Android-only hosts the legacy flag is accepted but inert. This does
 not enable Android reuse or accept Android reuse keys.
@@ -81,7 +83,17 @@ Each release that is not due for maxUses erase runs:
    disabled increase contrast, and remove explicit global preference overrides
    so simulator defaults apply. Already-absent preference deletion and
    already-exited app termination are successful no-ops, not cleaning failures.
-6. Check fresh exact-UDID Booted/type/runtime/OS inventory and the existing
+6. Compare out-of-band state against the baseline captured at first use: the Photos
+   originals (`Media/DCIM`), device and Safari `Documents`, the user-configurable
+   `com.apple.Preferences` Keyboard\* defaults, and the `com.apple.Accessibility`
+   defaults `DarkenSystemColors` and `PointerIncreasedContrastEnabled`.
+   `simctl ui increase_contrast` writes the two accessibility defaults and leaves
+   them at 0 when contrast is turned off, so a pool simulator that never had them
+   gains them (#15017). Added Documents/Safari files are removed and changed or added
+   defaults are restored or deleted. Added or missing photos, missing files, a baseline
+   without these inventories, and residue that survives the revert are a cleaning
+   failure and fall back to erase.
+7. Check fresh exact-UDID Booted/type/runtime/OS inventory and the existing
    device-identified automation health endpoint. Only then report clean.
 
 Native commands have a 10-second bound. Journal loading, inventory, individual

@@ -26,6 +26,20 @@ final class FakeDaemonHTTPTokenProvider: DaemonHTTPTokenProviding, Sendable {
     }
 }
 
+final class FakeDaemonHTTPPortDiscovery: DaemonHTTPPortDiscovering, Sendable {
+    private let port: Int?
+    private let count = OSAllocatedUnfairLock(initialState: 0)
+
+    init(_ port: Int? = 3161) { self.port = port }
+
+    var reads: Int { count.withLock { $0 } }
+
+    func discoveredPort() -> Int? {
+        count.withLock { $0 += 1 }
+        return port
+    }
+}
+
 final class FakeDaemonTokenFileAccess: DaemonTokenFileAccessing, Sendable {
     struct Calls {
         var paths: [String] = []

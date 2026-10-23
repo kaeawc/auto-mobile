@@ -5,7 +5,10 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { Rotate } from "../../../src/features/action/Rotate";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
-import { ROTATION_READ_FLOOR_MS } from "../../../src/features/observe/Idle";
+import {
+  ROTATION_READ_FLOOR_MS,
+  ROTATION_WAIT_TIMEOUT_MS,
+} from "../../../src/features/observe/Idle";
 import type { BootedDevice } from "../../../src/models";
 import { createExecResult } from "../../../src/utils/execResult";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -179,10 +182,12 @@ describe("Rotate on a default display that ignores user_rotation (am-flip-6p7 O1
     const start = timer.now();
     const result = await rotate.execute("landscape");
     expect(result.success).toBe(false);
-    expect(result.error).toContain("Timeout waiting for rotation to 1 after 500ms");
+    expect(result.error).toContain(
+      `Timeout waiting for rotation to 1 after ${ROTATION_WAIT_TIMEOUT_MS}ms`,
+    );
     expect(result.currentOrientation).toBe("portrait");
     expect(adb.wasCommandExecuted("shell settings put system accelerometer_rotation 1")).toBe(true);
-    // waitForRotation (500ms) plus the 1000ms cleanup/confirmation deadlines bound the call.
-    expect(timer.now() - start).toBeLessThan(5000);
+    // The rotation wait plus the 1000ms cleanup/confirmation deadlines bound the call.
+    expect(timer.now() - start).toBeLessThan(ROTATION_WAIT_TIMEOUT_MS + 5000);
   });
 });

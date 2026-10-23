@@ -261,6 +261,8 @@ const EXEMPT_CODED_ERROR_MODULES: Readonly<Record<string, string>> = {
     "launchApp intent failures (#14080) are thrown as ActionableError through the generic tool-error path, which serializes only the message; the code reaches clients as the message's leading [code] text, not a structured wire field.",
   "utils/android-cmdline-tools/EmulatorConsolePortExcludedError":
     "Emulator launch refusal is thrown as an ActionableError through the generic tool-error path, which serializes only the message; the code is a property on the error, not a structured wire field.",
+  "features/deviceLifecycle/teardown/stuckEmulatorEscalation":
+    "Emulator teardown failure (#14018) is thrown as an ActionableError through the generic tool-error path, which serializes only the message; the code is a property on the error, not a structured wire field.",
   "features/prototype/ios/installerErrors/PrototypeInstallPhysicalDeviceError":
     INSTALLER_ERROR_EXEMPTION,
   "features/prototype/ios/installerErrors/InvalidPrototypeIdError": INSTALLER_ERROR_EXEMPTION,

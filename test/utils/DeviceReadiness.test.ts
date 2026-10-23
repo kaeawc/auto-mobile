@@ -21,6 +21,7 @@ import { FakeDeviceCreationGate } from "../fakes/FakeDeviceCreationGate";
 import { FakeVirtualDeviceLifecycleCoordinator } from "../fakes/FakeVirtualDeviceLifecycleCoordinator";
 import { FakeWindow } from "../fakes/FakeWindow";
 import { ActionableError, BootedDevice, AppearanceConfigInput, ExecResult } from "../../src/models";
+import { AmbiguousDeviceTargetError } from "../../src/daemon/ambiguousDeviceTargetRefusal";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { parseAppearanceConfig } from "../../src/features/appearance";
 import { DEFAULT_RUNNER_PROVISION_TIMEOUT_MS } from "../../src/utils/runnerReadinessConfig";
@@ -1350,6 +1351,23 @@ describe("DeviceReadiness dual-platform resolution", () => {
     await expect(readiness).rejects.toThrow(
       "Both Android and iOS devices are connected. For a device tool call, pass sessionUuid (from getAndroid/getApple), platform, or a bound device label on this call",
     );
+  });
+
+  test("mixed-platform ambiguity is the typed ambiguous_device_target with candidates (#15020)", async () => {
+    const manager = createTestSessionManager(buildProvider(), fakeAdbFactory);
+
+    const error = await manager
+      .ensureDeviceReady("either", undefined, { skipCtrlProxyDownload: true })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(AmbiguousDeviceTargetError);
+    const ambiguous = error as AmbiguousDeviceTargetError;
+    expect(ambiguous.code).toBe("ambiguous_device_target");
+    expect(ambiguous.candidates.map((candidate) => candidate.platform).sort()).toEqual([
+      "android",
+      "ios",
+    ]);
+    expect(ambiguous.candidates.every((candidate) => candidate.deviceId.length > 0)).toBe(true);
   });
 
   test("session-scoped readiness leaves sessionless mixed-platform selection ambiguous (#11810)", async () => {

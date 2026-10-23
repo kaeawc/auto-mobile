@@ -13,10 +13,12 @@ import java.nio.file.attribute.PosixFilePermissions
 import java.util.Optional
 import javax.net.ssl.SSLSession
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -49,14 +51,77 @@ class DaemonHttpTokenProviderTest {
       val fields = vector.jsonObject
       val url = fields.getValue("url").jsonPrimitive.content
       val daemon = fields.getValue("daemon").jsonPrimitive.content.toBooleanStrict()
+      val discoveredPort = fields.getValue("discoveredPort").jsonPrimitive.intOrNull
       val endpoint = URI.create(url)
-      assertEquals(daemon, isDaemonHttpEndpoint(endpoint), url)
+      assertEquals(daemon, isDaemonHttpEndpoint(endpoint, discoveredPort), url)
       // HttpRequest rejects schemes and authorities it cannot represent before sending.
       if (endpoint.scheme !in setOf("http", "https") || endpoint.host == null) continue
       for (caller in listOf(false, true)) {
-        assertEndpointAuthentication(url, daemon, caller)
+        assertEndpointAuthentication(url, daemon, caller, discoveredPort)
       }
     }
+  }
+
+  @Test
+  fun `the credential follows the discovered port at request time`() {
+    val url = "http://localhost:3161/auto-mobile/streamable"
+    assertEndpointAuthentication(url, daemon = true, caller = false, discoveredPort = 3161)
+    // The daemon restarted on a new port: the same URL is no longer the daemon.
+    assertEndpointAuthentication(url, daemon = false, caller = false, discoveredPort = 4000)
+    assertEndpointAuthentication(url, daemon = true, caller = false, discoveredPort = null)
+  }
+
+  @Test
+  fun `port mismatch missing port and non daemon route withhold the credential`() {
+    val streamable = URI.create("http://localhost:3161/auto-mobile/streamable")
+    assertTrue(isDaemonHttpEndpoint(streamable, 3161))
+    assertTrue(isDaemonHttpEndpoint(streamable, null))
+    assertFalse(isDaemonHttpEndpoint(streamable, 3162))
+    assertFalse(isDaemonHttpEndpoint(URI.create("http://localhost/auto-mobile/streamable"), 3161))
+    assertFalse(isDaemonHttpEndpoint(URI.create("http://localhost/auto-mobile/streamable"), null))
+    assertFalse(isDaemonHttpEndpoint(URI.create("http://localhost:3161/mcp"), 3161))
+    assertFalse(isDaemonHttpEndpoint(URI.create("http://localhost:80/mcp"), null))
+    assertTrue(isDaemonHttpEndpoint(URI.create("http://localhost:80/heartbeat"), 80))
+  }
+
+  @Test
+  fun `the provider reads the port from the isolation aware PID file path on every call`() {
+    assertEquals(3161, reader.discoveredPort())
+    files.pidContent = """{"pid":1,"port":4000}"""
+    assertEquals(4000, reader.discoveredPort())
+    env["AUTOMOBILE_AUX_SOCKET_DIR"] = Path.of("lane", "aux").toAbsolutePath().toString()
+    reader.discoveredPort()
+    val suffix = AutoMobileSocketPaths.daemonIsolationSuffix(env::get)
+    assertEquals(
+      listOf(
+        "/tmp/auto-mobile-daemon-501.pid",
+        "/tmp/auto-mobile-daemon-501.pid",
+        "/tmp/auto-mobile-daemon-501$suffix.pid",
+      ),
+      files.pidPaths,
+    )
+  }
+
+  @Test
+  fun `an unreadable or invalid PID file leaves the port unverifiable without logging contents`() {
+    fun port(text: String?, failure: Exception? = null) =
+      readDaemonPidPort(
+        pidPath = { "/pid" },
+        readText = {
+          failure?.let { throw it }
+          text
+        },
+        logUnavailable = logs::add,
+      )
+    assertNull(port(null))
+    assertNull(port("""{"pid":1}"""))
+    assertNull(port("""{"port":"secret"}"""))
+    assertNull(port("""{"port":0}"""))
+    assertNull(port("""{"port":70000}"""))
+    assertEquals(0, logs.size)
+    assertNull(port("not json secret"))
+    assertNull(port(null, IOException("secret")))
+    assertEquals(List(2) { "Daemon PID file port unavailable" }, logs)
   }
 
   @Test
@@ -66,7 +131,7 @@ class DaemonHttpTokenProviderTest {
     files.content = null
     val options =
       McpHttpClientOptions(
-          endpoint = "http://localhost/mcp",
+          endpoint = "http://localhost:3161/auto-mobile/streamable",
           tokenProvider = reader,
           requestSender =
             HttpRequestSender { request ->
@@ -94,7 +159,7 @@ class DaemonHttpTokenProviderTest {
       val delays = mutableListOf<Long>()
       val options =
         McpHttpClientOptions(
-            endpoint = "http://localhost/mcp",
+            endpoint = "http://localhost:3161/auto-mobile/streamable",
             tokenProvider = reader,
             requestSender =
               HttpRequestSender { request ->
@@ -117,7 +182,12 @@ class DaemonHttpTokenProviderTest {
     }
   }
 
-  private fun assertEndpointAuthentication(url: String, daemon: Boolean, caller: Boolean) {
+  private fun assertEndpointAuthentication(
+    url: String,
+    daemon: Boolean,
+    caller: Boolean,
+    discoveredPort: Int? = 3161,
+  ) {
     var reads = 0
     val requests = mutableListOf<HttpRequest>()
     val transport =
@@ -126,9 +196,13 @@ class DaemonHttpTokenProviderTest {
             endpoint = url,
             mcpSessionKey = "test-session",
             tokenProvider =
-              DaemonHttpTokenProvider {
-                reads++
-                "local"
+              object : DaemonHttpTokenProvider {
+                override fun read(): String {
+                  reads++
+                  return "local"
+                }
+
+                override fun discoveredPort() = discoveredPort
               },
             requestSender =
               HttpRequestSender { request ->
@@ -323,8 +397,15 @@ class DaemonHttpTokenProviderTest {
 
   private class FakeTokenFiles : DaemonHttpTokenFiles {
     val paths = mutableListOf<String>()
+    val pidPaths = mutableListOf<String>()
+    var pidContent: String? = """{"pid":1,"port":3161}"""
     var content: String? = "file-token"
     var failure: IOException? = null
+
+    override fun readPid(path: String): String? {
+      pidPaths.add(path)
+      return pidContent
+    }
 
     override fun read(path: String, windows: Boolean, userId: () -> String): String? {
       paths.add(path)
@@ -339,7 +420,11 @@ class DaemonHttpTokenProviderTest {
     fun warmReader() {
       // Initialize JDK request and serialization classes in setup, with a fake sender.
       DaemonHttpTokenProviderTest()
-        .assertEndpointAuthentication("http://localhost/mcp", daemon = true, caller = false)
+        .assertEndpointAuthentication(
+          "http://localhost:3161/auto-mobile/streamable",
+          daemon = true,
+          caller = false,
+        )
       val directory =
         Files.createTempDirectory(Files.createDirectories(Path.of("build")), "token-warmup-")
       val path = directory.resolve("daemon.token")

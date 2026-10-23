@@ -32,6 +32,14 @@ import type { DeviceInfo } from "../../../../../src/models/index";
 export class FakeInventory implements BindingInventory {
   runtimeDeviceId: NonNullable<BindingInventory["runtimeDeviceId"]> = async (device) =>
     device.deviceId;
+  /** Names the one-shot power probe was asked about, in call order. */
+  readonly probedRunning: string[] = [];
+  /** Names the probe proves running; any other name is not provably running. */
+  readonly provablyRunning = new Set<string>();
+  probeRunning: BindingInventory["probeRunning"] = async (device) => {
+    this.probedRunning.push(device.name);
+    return this.provablyRunning.has(device.name);
+  };
   complete = true;
   devices: DeviceInfo[] = [];
   beforeList:

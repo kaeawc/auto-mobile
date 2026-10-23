@@ -5,6 +5,8 @@ import UniformTypeIdentifiers
 struct LibraryView: View {
     let store: PrototypeLibraryStore
     let importService: PrototypeLibraryImportService
+    let networkSwitch: PrototypeLibraryNetworkSwitch
+    @State private var showsSettings = false
     @State private var importCount = 0
     @State private var entries: [PrototypeLibraryEntry] = []
     @State private var skippedCount = 0
@@ -62,11 +64,15 @@ struct LibraryView: View {
                 if importCount > 0 { ProgressView("Importing prototype…").padding().background(.regularMaterial) }
             }
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Settings", systemImage: "gearshape") { showsSettings = true }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Import", systemImage: "square.and.arrow.down") { importsFile = true }
                         .disabled(importCount > 0)
                 }
             }
+            .sheet(isPresented: $showsSettings) { LibrarySettingsView(networkSwitch: networkSwitch) }
             .onAppear(perform: refresh)
             .fileImporter(isPresented: $importsFile, allowedContentTypes: [
                 UTType(exportedAs: "dev.jasonpearson.automobile.prototype"), .json,
@@ -110,7 +116,7 @@ struct LibraryView: View {
                 }
             }
             .navigationDestination(for: PrototypeLibraryEntry.self) { entry in
-                PrototypeScreen(store: store, entry: entry)
+                PrototypeScreen(store: store, entry: entry, networkSwitch: networkSwitch)
             }
         }
     }

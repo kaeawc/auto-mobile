@@ -313,8 +313,14 @@ final class PrototypeLibraryTests: XCTestCase {
                 #"{"id":"request","window":{"placement":{"type":"fullscreen"}},"data":{},"root":{"type":"button","label":"Go","onTap":[{"type":"request","url":"https://example.test/feed","into":"/data/result","via":"host"}]}}"#
                     .utf8
             )
+        XCTAssertThrowsError(try PrototypeSpecStrictValidator.validate(data: host, library: true)) {
+            guard case let PrototypeLoadError.invalidSpec(path, _) = $0 else {
+                return XCTFail("Unexpected strict error: \($0)")
+            }
+            XCTAssertEqual(path, "root.onTap[0].via")
+        }
         XCTAssertThrowsError(try library.add(bundle(host), label: "Host", source: .file)) { error in
-            XCTAssertTrue((error as? PrototypeLibraryFailure)?.path.hasSuffix(".via") == true)
+            XCTAssertEqual((error as? PrototypeLibraryFailure)?.path, "root.onTap[0].via")
         }
         let privileged =
             Data(
@@ -383,8 +389,15 @@ final class PrototypeLibraryTests: XCTestCase {
             where path.pathExtension == "swift"
         {
             let source = try String(contentsOf: path, encoding: .utf8)
-            XCTAssertFalse(source.contains("URLSession"), path.lastPathComponent)
-            XCTAssertFalse(source.contains("PrototypeNetworkConfiguration.default"), path.lastPathComponent)
+            for forbidden in ["URLSession", "PrototypeURLSessionClient"] {
+                XCTAssertFalse(source.contains(forbidden), path.lastPathComponent)
+            }
+            for pattern in [
+                #"PrototypeNetworkConfiguration\s*\.\s*default\b"#,
+                #"(?<![A-Za-z0-9_])\.\s*default\b"#,
+            ] {
+                XCTAssertNil(source.range(of: pattern, options: .regularExpression), path.lastPathComponent)
+            }
         }
     }
 }

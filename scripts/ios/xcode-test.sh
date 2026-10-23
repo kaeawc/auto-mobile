@@ -27,7 +27,7 @@ IOS_DIR="${IOS_DIR:-${PROJECT_ROOT}/ios}"
 # so Xcode retains its normal per-user DerivedData behavior.
 DERIVED_DATA_ARGS=()
 if [ -n "${AUTOMOBILE_XCODE_DERIVED_DATA:-}" ]; then
-    mkdir_spotlight_excluded "${AUTOMOBILE_XCODE_DERIVED_DATA}"
+    mkdir_spotlight_excluded_within "${PROJECT_ROOT}" "${AUTOMOBILE_XCODE_DERIVED_DATA}"
     DERIVED_DATA_ARGS=(-derivedDataPath "${AUTOMOBILE_XCODE_DERIVED_DATA}")
 fi
 

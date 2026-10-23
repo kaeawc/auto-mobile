@@ -196,7 +196,7 @@ describe("DaemonManager file lock", () => {
         clientFactory: unavailableDaemonClient,
         timer: fakeTimer,
         lockFilePath: lockPath,
-        peerSocketReachability: { isReachable: async () => false },
+        peerSocketReachability: { probe: async () => "absent" },
       });
 
       await manager.start();
@@ -245,7 +245,7 @@ describe("DaemonManager file lock", () => {
         clientFactory: unavailableDaemonClient,
         timer: fakeTimer,
         lockFilePath: lockPath,
-        peerSocketReachability: { isReachable: async () => false },
+        peerSocketReachability: { probe: async () => "absent" },
       });
 
       await expect(manager.start()).rejects.toThrow(
@@ -298,7 +298,7 @@ describe("DaemonManager file lock", () => {
         clientFactory: unavailableDaemonClient,
         timer: fakeTimer,
         lockFilePath: lockPath,
-        peerSocketReachability: { isReachable: async () => false },
+        peerSocketReachability: { probe: async () => "absent" },
       });
 
       await expect(manager.start()).rejects.toThrow(
@@ -347,7 +347,7 @@ describe("DaemonManager file lock", () => {
         lockFilePath: lockPath,
         pidFilePath: pidPath,
         socketPath,
-        peerSocketReachability: { isReachable: async () => false },
+        peerSocketReachability: { probe: async () => "absent" },
       });
 
       await expect(manager.start()).rejects.toThrow();

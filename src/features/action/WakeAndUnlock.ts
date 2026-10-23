@@ -1,3 +1,5 @@
+import { getIosLockStateCache } from "../observe/ios/IosLockStateCacheRegistry";
+import type { IosLockStateInvalidator } from "../observe/ios/CachedIosLockStateProbe";
 import { throwIfAborted, awaitWhileRequestIsLive } from "../../utils/toolUtils";
 import { ActionableError, BootedDevice, type DeviceLockState } from "../../models";
 import { logger } from "../../utils/logger";
@@ -7,6 +9,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import {
   NotifyutilIosLockStateProbe,
+  lockStateOf,
   type IosLockStateProbe,
 } from "../observe/ios/IosLockStateProbe";
 import {
@@ -61,6 +64,7 @@ export interface WakeAndUnlockOptions {
   iosUnlocker?: IosScreenUnlocker;
   iosRunnerRecovery?: IosRunnerRecovery;
   iosLockStateProbe?: IosLockStateProbe;
+  iosLockStateInvalidator?: IosLockStateInvalidator;
 }
 
 // The daemon's default MCP request timeout is 30s (src/daemon/mcpRequestTimeout.ts:25).
@@ -89,6 +93,7 @@ const IOS_UNLOCK_POLL_MAX_MS = 2_500;
  * (simulators have no settable passcode).
  */
 export class WakeAndUnlock {
+  private readonly invalidateIosLockState: () => void;
   private readonly device: BootedDevice;
   private readonly androidUnlocker: AndroidWakeAndUnlock;
   private readonly timer: Timer;
@@ -103,6 +108,8 @@ export class WakeAndUnlock {
     options: WakeAndUnlockOptions = {},
   ) {
     this.device = device;
+    this.invalidateIosLockState = () =>
+      (options.iosLockStateInvalidator ?? getIosLockStateCache()).invalidate(device.deviceId);
     this.androidUnlocker = new AndroidWakeAndUnlock(device, adbFactoryOrExecutor, options);
     this.timer = options.timer ?? defaultTimer;
     this.wallClockNow = options.wallClockNow ?? (() => defaultTimer.now());
@@ -142,7 +149,12 @@ export class WakeAndUnlock {
       case "android":
         return this.androidUnlocker.execute(pin, signal);
       case "ios":
-        return this.executeIos(transportDeadlineMs, signal);
+        this.invalidateIosLockState();
+        try {
+          return await this.executeIos(transportDeadlineMs, signal);
+        } finally {
+          this.invalidateIosLockState();
+        }
       default:
         throw new ActionableError(`wakeAndUnlock: unsupported platform ${this.device.platform}`);
     }
@@ -422,12 +434,14 @@ export class WakeAndUnlock {
       return undefined;
     }
     try {
-      return await raceWithDeadline(() => probe.read(this.device.deviceId), {
-        timer: this.timer,
-        signal,
-        timeoutMs: remaining,
-        label: "iOS lock-state probe",
-      });
+      return lockStateOf(
+        await raceWithDeadline(() => probe.read(this.device.deviceId), {
+          timer: this.timer,
+          signal,
+          timeoutMs: remaining,
+          label: "iOS lock-state probe",
+        }),
+      );
     } catch (error) {
       throwIfAborted(signal);
       logger.warn(`[WakeAndUnlock] iOS lock-state probe exceeded unlock budget: ${error}`, error);

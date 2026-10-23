@@ -36,6 +36,7 @@ describe("AndroidBaselineReset", () => {
     };
     const baseline = new AndroidBaselineReset(host);
     await baseline.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-a", {
+      stableDeviceId: "stable-avd",
       timer,
     });
     const inventory = host.inventory.bind(host);
@@ -83,7 +84,7 @@ describe("AndroidBaselineReset", () => {
       ANDROID_RESET_DEVICE,
       ANDROID_RESET_PROFILE,
       "session-a",
-      { timer, timeoutMs: 30000 },
+      { stableDeviceId: "stable-avd", timer, timeoutMs: 30000 },
     );
     expect(budgets).toEqual([10000, 10000, 20000]);
     expect(targets).toEqual(Array(3).fill(ANDROID_RESET_DEVICE.deviceId));
@@ -103,6 +104,7 @@ describe("AndroidBaselineReset", () => {
     };
     const baseline = new AndroidBaselineReset(host);
     await baseline.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-a", {
+      stableDeviceId: "stable-avd",
       timer: new FakeTimer(),
     });
     host.devices = [
@@ -135,6 +137,7 @@ describe("AndroidBaselineReset", () => {
     };
     const baseline = new AndroidBaselineReset(host);
     await baseline.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-a", {
+      stableDeviceId: "stable-avd",
       timer: new FakeTimer(),
     });
     expect(host.closed).toBe(0);
@@ -205,7 +208,7 @@ describe("AndroidBaselineReset", () => {
         ANDROID_RESET_DEVICE,
         ANDROID_RESET_PROFILE,
         "session-a",
-        { timer: new FakeTimer() },
+        { stableDeviceId: "stable-avd", timer: new FakeTimer() },
       ),
     ).rejects.toThrow(message);
     expect(host.closed).toBe(1);
@@ -233,7 +236,7 @@ describe("AndroidBaselineReset", () => {
         ANDROID_RESET_DEVICE,
         ANDROID_RESET_PROFILE,
         "session-a",
-        { timer: new FakeTimer() },
+        { stableDeviceId: "stable-avd", timer: new FakeTimer() },
       ),
     ).rejects.toThrow("exact online reset target");
     expect(captured).toBe(false);
@@ -252,6 +255,7 @@ describe("AndroidBaselineReset", () => {
     };
     const baseline = new AndroidBaselineReset(host);
     await baseline.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-a", {
+      stableDeviceId: "stable-avd",
       timer,
     });
     await expect(
@@ -273,6 +277,7 @@ describe("AndroidBaselineReset", () => {
     };
     const baseline = new AndroidBaselineReset(host);
     await baseline.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-a", {
+      stableDeviceId: "stable-avd",
       timer,
     });
     const result = baseline.reset(
@@ -316,6 +321,7 @@ describe("AndroidBaselineReset", () => {
     };
     const reset = new AndroidBaselineReset(host);
     await reset.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-a", {
+      stableDeviceId: "stable-avd",
       timer,
       timeoutMs: 10_000,
     });
@@ -337,7 +343,9 @@ describe("AndroidBaselineReset", () => {
       reset: async () => {},
     };
     const reset = new AndroidBaselineReset(host);
-    await reset.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-a");
+    await reset.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-a", {
+      stableDeviceId: "stable-avd",
+    });
     await reset.forget("resource-a");
     expect(host.closed).toBe(1);
     await expect(
@@ -345,7 +353,9 @@ describe("AndroidBaselineReset", () => {
     ).rejects.toThrow("original session baseline");
     failCapture = true;
     await expect(
-      reset.capture("resource-b", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-b"),
+      reset.capture("resource-b", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-b", {
+        stableDeviceId: "stable-avd",
+      }),
     ).rejects.toThrow("original capture failure");
     expect(host.closed).toBe(2);
   });
@@ -384,7 +394,7 @@ describe("AndroidBaselineReset", () => {
       ANDROID_RESET_DEVICE,
       ANDROID_RESET_PROFILE,
       "session-a",
-      { timer: new FakeTimer(), timeoutMs: 30_000 },
+      { stableDeviceId: "stable-avd", timer: new FakeTimer(), timeoutMs: 30_000 },
     );
     expect(host.inventoryCalls).toBeGreaterThan(1);
     expect(host.closed).toBe(0);
@@ -402,7 +412,7 @@ describe("AndroidBaselineReset", () => {
         ANDROID_RESET_DEVICE,
         ANDROID_RESET_PROFILE,
         "session-a",
-        { timer: new FakeTimer(), timeoutMs: 30_000 },
+        { stableDeviceId: "stable-avd", timer: new FakeTimer(), timeoutMs: 30_000 },
       ),
     ).rejects.toThrow("timed out after 2000ms");
     expect(timedOut.inventoryCalls).toBe(3);
@@ -417,7 +427,7 @@ describe("AndroidBaselineReset", () => {
         ANDROID_RESET_DEVICE,
         ANDROID_RESET_PROFILE,
         "session-a",
-        { timer: new FakeTimer(), timeoutMs: 30_000 },
+        { stableDeviceId: "stable-avd", timer: new FakeTimer(), timeoutMs: 30_000 },
       ),
     ).rejects.toThrow("adb exploded");
     expect(broken.inventoryCalls).toBe(1);
@@ -446,7 +456,9 @@ describe("AndroidBaselineReset", () => {
     host.timer.enableAutoAdvance();
     host.strategy = { reset: async (_device, _packages, assertOwned) => assertOwned() };
     const reset = new AndroidBaselineReset(host);
-    await reset.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-a");
+    await reset.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-a", {
+      stableDeviceId: "stable-avd",
+    });
     host.commands = [];
     return { host, reset: { reset: reset.reset.bind(reset, "resource-a") } };
   }
@@ -586,7 +598,9 @@ describe("AndroidBaselineReset", () => {
         },
       },
     });
-    await reset.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-a");
+    await reset.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-a", {
+      stableDeviceId: "stable-avd",
+    });
     expect(
       await reset.reset("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, async () => {}),
     ).toBe("clean");
@@ -596,7 +610,9 @@ describe("AndroidBaselineReset", () => {
   test("without a strategy, capture skips native work and reset rejects unobservable state", async () => {
     const host = new FakeAndroidResetHost();
     const reset = new AndroidBaselineReset(host);
-    await reset.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-a");
+    await reset.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-a", {
+      stableDeviceId: "stable-avd",
+    });
     await expect(
       reset.reset("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, async () => {}),
     ).rejects.toThrow("cannot prove restoration of unobservable state");
@@ -609,8 +625,12 @@ describe("AndroidBaselineReset", () => {
     const host = new FakeAndroidResetHost();
     host.strategy = { reset: async (_device, _packages, assertOwned) => assertOwned() };
     const reset = new AndroidBaselineReset(host);
-    await reset.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-a");
-    await reset.capture("resource-b", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-b");
+    await reset.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-a", {
+      stableDeviceId: "stable-avd",
+    });
+    await reset.capture("resource-b", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-b", {
+      stableDeviceId: "stable-avd",
+    });
     await reset.forget("resource-a");
     expect(host.closed).toBe(1);
     expect(
@@ -628,6 +648,7 @@ describe("baseline reset under load", () => {
     host.strategy = { handlesSessionMutations: true, reset: async () => {} };
     const baseline = new AndroidBaselineReset(host);
     await baseline.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-a", {
+      stableDeviceId: "stable-avd",
       timer,
     });
     timer.enableAutoAdvance();
@@ -659,7 +680,7 @@ describe("baseline reset under load", () => {
         ANDROID_RESET_DEVICE,
         ANDROID_RESET_PROFILE,
         "session-a",
-        { timer },
+        { stableDeviceId: "stable-avd", timer },
       );
       timer.enableAutoAdvance();
       let calls = 0;

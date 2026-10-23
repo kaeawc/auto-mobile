@@ -257,7 +257,7 @@ export interface SimCtl {
   getBootedSimulatorsChecked(
     timeoutMs?: number,
     signal?: AbortSignal,
-    options?: { bypassCache?: boolean },
+    options?: { bypassCache?: boolean; maxCacheAgeMs?: number },
   ): Promise<BootedDevice[]>;
 
   /**
@@ -267,7 +267,7 @@ export interface SimCtl {
   getSimulatorListingChecked?(
     timeoutMs?: number,
     signal?: AbortSignal,
-    options?: { bypassCache?: boolean },
+    options?: { bypassCache?: boolean; maxCacheAgeMs?: number },
   ): Promise<{ booted: BootedDevice[]; transitional: TransitionalSimulator[] }>;
 
   /**

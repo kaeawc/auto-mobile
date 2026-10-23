@@ -1,3 +1,4 @@
+import { mutationIncarnation } from "./mutations/incarnation";
 import {
   ctrlProxyDeadlineMs,
   isTransientAdbTimeout,
@@ -131,6 +132,15 @@ export interface AndroidBaselineResetDependencies {
   timer?: Pick<Timer, "now" | "sleep" | "setTimeout" | "clearTimeout">;
 }
 
+interface AndroidBaselineCaptureOptions {
+  stableDeviceId: string;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  timer?: Pick<Timer, "now" | "sleep" | "setTimeout" | "clearTimeout">;
+  assertOwned?: () => Promise<void>;
+  fresh?: boolean;
+}
+
 interface AndroidBaseline {
   device: BootedDevice;
   profile: AndroidResetProfile;
@@ -138,7 +148,7 @@ interface AndroidBaseline {
   activity: AndroidResetSessionActivity;
   sessionId: string;
   incarnation: string;
-  incarnationKey: string;
+  stableDeviceId: string;
   bootId?: string;
   timer: Pick<Timer, "now" | "sleep" | "setTimeout" | "clearTimeout">;
 }
@@ -163,15 +173,8 @@ export class AndroidBaselineReset {
     device: BootedDevice,
     profile: AndroidResetProfile,
     sessionId: string,
-    options: {
-      signal?: AbortSignal;
-      timeoutMs?: number;
-      timer?: Pick<Timer, "now" | "sleep" | "setTimeout" | "clearTimeout">;
-      assertOwned?: () => Promise<void>;
-      fresh?: boolean;
-      incarnation?: string;
-    } = {},
-  ): Promise<void> {
+    options: AndroidBaselineCaptureOptions,
+  ): Promise<{ bootId: string | null } | undefined> {
     this.closeBaseline(resourceId);
     if (!this.dependencies.strategy) {
       return;
@@ -262,8 +265,12 @@ export class AndroidBaselineReset {
             "Android reset boot identity",
           )
         : undefined;
-      const incarnationKey = options.incarnation ?? resourceId;
-      const incarnation = JSON.stringify([resourceId, incarnationKey, bootId]);
+      const incarnation = mutationIncarnation({
+        platform: "android",
+        resourceId,
+        stableDeviceId: options.stableDeviceId,
+        bootId: bootId ?? null,
+      });
       if (this.dependencies.strategy.capture) {
         if (this.dependencies.strategy.fullBaseline && !options.assertOwned) {
           throw new ActionableError(
@@ -300,10 +307,11 @@ export class AndroidBaselineReset {
         activity,
         sessionId,
         incarnation,
-        incarnationKey,
+        stableDeviceId: options.stableDeviceId,
         bootId,
         timer,
       });
+      return { bootId: bootId ?? null };
     } catch (error) {
       activity.close();
       await this.forget(resourceId);
@@ -494,7 +502,12 @@ export class AndroidBaselineReset {
             const bootId = await this.bootIdentity(device, signal, undefined, budget);
             await assertOwned();
             baseline.bootId = bootId;
-            baseline.incarnation = JSON.stringify([resourceId, baseline.incarnationKey, bootId]);
+            baseline.incarnation = mutationIncarnation({
+              platform: "android",
+              resourceId,
+              stableDeviceId: baseline.stableDeviceId,
+              bootId: bootId ?? null,
+            });
             return baseline.incarnation;
           },
           healthCheck,

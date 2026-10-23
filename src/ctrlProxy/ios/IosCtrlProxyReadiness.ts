@@ -1,3 +1,6 @@
+import { IosRunnerLaunchWindow } from "./IosRunnerLaunchWindow";
+import type { RunnerLaunchProgressProbe } from "./IosRunnerLaunchProgress";
+import { exponentialBackoff, sequenceBackoff, type BackoffPolicy } from "../../utils/Backoff";
 import type { IosCtrlProxyRuntime } from "./IosCtrlProxyRuntime";
 import type { RunnerStartupProvenance, SharedCtrlProxyStart } from "./IosCtrlProxyLifecycleSteps";
 import { logger } from "../../utils/logger";
@@ -43,6 +46,7 @@ export class IosCtrlProxyReadiness {
   constructor(
     private readonly state: Pick<
       IosCtrlProxyRuntime,
+      | "runnerLaunchProgressProbe"
       | "timer"
       | "xcTestProcessId"
       | "steps"
@@ -55,6 +59,11 @@ export class IosCtrlProxyReadiness {
       | "tunnelClient"
     >,
     private readonly host: IosCtrlProxyReadinessHost,
+    private readonly policies: {
+      progressProbe?: RunnerLaunchProgressProbe;
+      extensionBackoff?: BackoffPolicy;
+      relaunchBackoff?: BackoffPolicy;
+    } = {},
   ) {}
 
   extendHealthPollDeadline(
@@ -93,7 +102,8 @@ export class IosCtrlProxyReadiness {
    * whole acquisition budget; without a per-launch window a runner frozen at
    * launch was polled for that entire budget and never replaced. When a window
    * elapses unanswered while the extended deadline still has time left, the
-   * runner is terminated and relaunched, at most
+   * runner is retained while its CPU usage grows, up to a bounded total launch
+   * duration. An idle runner is terminated and relaunched, at most
    * {@link MAX_UNRESPONSIVE_RUNNER_RELAUNCHES} times; after the last window it is
    * terminated and startup fails with an actionable error inside the deadline.
    *
@@ -119,23 +129,15 @@ export class IosCtrlProxyReadiness {
           ? windowMs * IOS_CTRL_PROXY_FIRST_LAUNCH_HEALTH_WINDOW_MULTIPLIER
           : windowMs;
       launchWindowsMs.push(launchWindowMs);
-      const bounded = this.state.xcTestProcessId !== null;
-      const launchDeadlineMs = bounded
-        ? this.state.timer.now() + launchWindowMs
-        : Number.POSITIVE_INFINITY;
-      this.extendFirstLaunchDeadline(
-        sharedStart,
-        firstLaunchOwned && launchWindowsMs.length === 1,
-        launchDeadlineMs,
-      );
-      if (
-        await this.state.steps.waitForHealthEndpoint(sharedStart, perf, delayMs, launchDeadlineMs)
-      ) {
+      const result = await this.pollRunnerLaunch(sharedStart, perf, delayMs, launchWindowMs, {
+        firstLaunch: firstLaunchOwned && launchWindowsMs.length === 1,
+        windowMs,
+      });
+      if (result.ready) {
         await this.state.steps.completeHealthStartup(sharedStart, perf);
         return true;
       }
-      const now = this.state.timer.now();
-      if (!bounded || now < launchDeadlineMs || (sharedStart.healthPollDeadlineMs ?? 0) <= now) {
+      if (!result.canRetire) {
         return false;
       }
       if (await this.adoptHealthyDefaultPortRunner(sharedStart)) {
@@ -152,7 +154,93 @@ export class IosCtrlProxyReadiness {
             `launch; check the device or simulator, then retry device acquisition.`,
         );
       }
+      if (!(await this.pauseBeforeRelaunch(sharedStart, launchWindowsMs.length))) {
+        return false;
+      }
       await this.relaunchUnresponsiveRunner(sharedStart, perf);
+    }
+  }
+
+  private async pauseBeforeRelaunch(
+    sharedStart: SharedCtrlProxyStart,
+    attempt: number,
+  ): Promise<boolean> {
+    const remainingMs = (sharedStart.healthPollDeadlineMs ?? 0) - this.state.timer.now();
+    if (remainingMs <= 0) {
+      return false;
+    }
+    await this.sleepForHealthPoll(
+      Math.min(
+        (this.policies.relaunchBackoff ?? sequenceBackoff([0])).delayForAttempt(attempt),
+        remainingMs,
+      ),
+      sharedStart.controller.signal,
+    );
+    return (sharedStart.healthPollDeadlineMs ?? 0) > this.state.timer.now();
+  }
+
+  private async pollRunnerLaunch(
+    sharedStart: SharedCtrlProxyStart,
+    perf: PerformanceTracker,
+    delayMs: number,
+    launchWindowMs: number,
+    options: { firstLaunch: boolean; windowMs: number },
+  ): Promise<{ ready: boolean; canRetire: boolean }> {
+    const launch = this.createLaunchWindow(launchWindowMs, options.windowMs);
+    const deadlineMs = launch?.deadlineMs ?? Number.POSITIVE_INFINITY;
+    this.extendFirstLaunchDeadline(sharedStart, options.firstLaunch, deadlineMs);
+    if (launch) {
+      await launch.initialize();
+    }
+    const ready = await this.waitForLaunchHealth(sharedStart, perf, delayMs, deadlineMs, launch);
+    const now = this.state.timer.now();
+    const canRetire =
+      launch !== undefined &&
+      now >= launch.deadlineMs &&
+      (launch.ceilingReached || (sharedStart.healthPollDeadlineMs ?? 0) > now);
+    return { ready, canRetire };
+  }
+
+  private createLaunchWindow(
+    launchWindowMs: number,
+    windowMs: number,
+  ): IosRunnerLaunchWindow | undefined {
+    if (this.state.xcTestProcessId === null) {
+      return undefined;
+    }
+    return new IosRunnerLaunchWindow(
+      this.state.timer,
+      this.policies.progressProbe ?? this.state.runnerLaunchProgressProbe,
+      this.policies.extensionBackoff ??
+        exponentialBackoff({ initialDelayMs: windowMs, maxDelayMs: 60_000 }),
+      { pid: this.state.xcTestProcessId, deviceId: this.state.device.deviceId },
+      launchWindowMs,
+    );
+  }
+
+  private async waitForLaunchHealth(
+    sharedStart: SharedCtrlProxyStart,
+    perf: PerformanceTracker,
+    delayMs: number,
+    initialDeadlineMs: number,
+    launch: IosRunnerLaunchWindow | undefined,
+  ): Promise<boolean> {
+    for (;;) {
+      const deadlineMs = launch?.deadlineMs ?? initialDeadlineMs;
+      if (await this.state.steps.waitForHealthEndpoint(sharedStart, perf, delayMs, deadlineMs)) {
+        return true;
+      }
+      if (!launch || this.state.timer.now() < deadlineMs || sharedStart.controller.signal.aborted) {
+        return false;
+      }
+      const callerDeadlineMs =
+        sharedStart.callerHealthPollDeadlinesMs.size > 0
+          ? Math.max(...sharedStart.callerHealthPollDeadlinesMs.values())
+          : Number.POSITIVE_INFINITY;
+      if (!(await launch.extend(callerDeadlineMs))) {
+        return false;
+      }
+      this.extendFirstLaunchDeadline(sharedStart, true, launch.deadlineMs);
     }
   }
 

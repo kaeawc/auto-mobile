@@ -1,7 +1,11 @@
+import { deviceToolMutations } from "../../../src/server/deviceMutationAdapters";
 import { SETTINGS_TIMEOUT } from "./fixtures/androidResetLoadTimeouts";
 
 import { describe, expect, test } from "bun:test";
-import { cleanAndroidBaseline } from "../../../src/daemon/sessionBroker/androidKeepBootedCleanup";
+import {
+  androidBaselineCleanCovers,
+  cleanAndroidBaseline,
+} from "../../../src/daemon/sessionBroker/androidKeepBootedCleanup";
 import type { DeviceMutationInput } from "../../../src/daemon/sessionBroker/mutations/types";
 import { AndroidDeviceMutationResetPort } from "../../../src/daemon/sessionBroker/androidDeviceMutationResetPort";
 import { AndroidKeepBootedReset } from "../../../src/daemon/sessionBroker/androidKeepBootedReset";
@@ -56,6 +60,140 @@ async function rig(users: readonly number[] = [0], fallback?: AndroidResetStrate
 }
 
 describe("Android unconditional keep-booted cleaning", () => {
+  test.each([
+    ["installed-app", "any"],
+    ["clipboard", "any"],
+    ["device-setting", "global:setting"],
+    ["device-setting", "secure:user:10:setting"],
+    ["device-setting", "system:accelerometer_rotation"],
+    ["device-setting", "display:density"],
+    ["device-setting", "density"],
+    ["device-setting", "nightMode"],
+    ["device-setting", "screen-state"],
+  ])("baseline cleaning covers %s:%s without a readable prior", (kind, key) => {
+    expect(androidBaselineCleanCovers({ kind, key, priorValue: { state: "unobservable" } })).toBe(
+      true,
+    );
+  });
+
+  test.each([
+    ["location", "provider:gps"],
+    ["contact", "row"],
+    ["media", "row"],
+    ["calendar", "row"],
+    ["notification", "row"],
+    ["network-condition", "network"],
+    ["device-setting", "appops:dev.example.app:op"],
+    ["device-setting", "prefix-global:setting"],
+  ])("baseline cleaning does not cover %s:%s", (kind, key) => {
+    expect(androidBaselineCleanCovers({ kind, key, priorValue: { state: "unobservable" } })).toBe(
+      false,
+    );
+  });
+
+  test("production shared-file intents are never baseline-covered", () => {
+    for (const target of [
+      { domain: "user_files", namespace: "test", reset: true },
+      { domain: "app_container", appId: "a.b", container: "files" },
+    ]) {
+      const rows = deviceToolMutations(
+        "putAppFile",
+        { target, files: [{ destinationPath: "x" }] },
+        "android",
+      );
+      expect(rows.length).toBeGreaterThan(0);
+      for (const row of rows) {
+        expect(Array.isArray(JSON.parse(row.key))).toBe(true);
+        for (const priorValue of [
+          { state: "absent" as const },
+          { state: "present" as const, value: "old" },
+        ]) {
+          expect(androidBaselineCleanCovers({ ...row, priorValue })).toBe(false);
+        }
+      }
+    }
+  });
+
+  test("production accessibility, font-scale and time-format rows require a journal revert", () => {
+    const rows = [
+      ...deviceToolMutations(
+        "displayConfig",
+        {
+          fontScale: 1.2,
+          increaseContrast: true,
+          reduceMotion: true,
+          boldText: true,
+          colorInversion: true,
+          colorCorrection: "grayscale",
+          magnification: true,
+          magnificationScale: 3,
+          extraDim: true,
+        },
+        "android",
+      ),
+      ...deviceToolMutations("changeLocalization", { timeFormat: "24" }, "android"),
+    ];
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(androidBaselineCleanCovers({ ...row, priorValue: { state: "unobservable" } })).toBe(
+        false,
+      );
+    }
+  });
+
+  test.each([
+    {
+      tool: "displayConfig",
+      args: { colorInversion: true },
+      namespace: "secure",
+      key: "accessibility_display_inversion_enabled",
+      value: "1",
+    },
+    {
+      tool: "displayConfig",
+      args: { reduceMotion: true },
+      namespace: "global",
+      key: "animator_duration_scale",
+      value: "0",
+    },
+    {
+      tool: "changeLocalization",
+      args: { timeFormat: "24" },
+      namespace: "system",
+      key: "time_12_24",
+      value: "24",
+    },
+  ])(
+    "$tool $args escalates before a non-critical settings restore can fail",
+    async ({ tool, args, namespace, key, value }) => {
+      let fallbacks = 0;
+      const { adb, reply, journal, reset } = await rig([0], {
+        reset: async () => {
+          fallbacks++;
+          return { outcome: "clean", mode: "snapshot", phases: {} };
+        },
+      });
+      reply(`shell settings --user 0 list ${namespace}`, `${key}=${value}`);
+      const failedCommand =
+        key === "animator_duration_scale"
+          ? "shell settings --user 0 put global animator_duration_scale '0.5'"
+          : `shell settings --user 0 delete ${namespace} ${key}`;
+      adb.setCommandResponse(failedCommand, createExecResult("Error: refused", ""));
+      const rows = deviceToolMutations(tool, args, "android");
+      expect(rows).toHaveLength(1);
+      for (const row of rows) {
+        await journal.record(SCOPE, {
+          ...row,
+          toolName: tool,
+          priorValue: { state: "unobservable" },
+        });
+      }
+      expect(await reset()).toMatchObject({ outcome: "fallback:snapshot" });
+      expect(fallbacks).toBe(1);
+      expect(adb.getExecutedCommands()).toEqual([]);
+    },
+  );
+
   async function displayRig(verify = true) {
     const { adb, reply } = androidBaselineRig();
     reply("shell wm density", "Physical density: 420");
@@ -225,18 +363,12 @@ describe("Android unconditional keep-booted cleaning", () => {
   });
 
   test("preserves baseline runtime grants and fixture data while revoking added grants", async () => {
-    const { adb, reply, reset, journal } = await rig([0, 10]);
+    const { adb, reply, reset } = await rig([0, 10]);
     const dump = androidPackageDump("com.example.probe", [0, 10]).replaceAll(
       "android.permission.CAMERA: granted=true, flags=[ USER_SET ]",
       "android.permission.CAMERA: granted=true, flags=[ USER_SET ]\n        android.permission.RECORD_AUDIO: granted=true, flags=[]",
     );
     reply("shell dumpsys package 'com.example.probe'", dump);
-    await journal.record(SCOPE, {
-      kind: "preference",
-      key: "app-data:0:com.example.probe",
-      priorValue: { state: "absent" },
-      toolName: "test",
-    });
     await reset();
     const commands = adb.getExecutedCommands();
     for (const user of [0, 10]) {
@@ -268,22 +400,14 @@ describe("Android unconditional keep-booted cleaning", () => {
     expect(commands).toContain("shell settings --user 0 put secure location_mode '3'");
   });
 
-  test.each([false, true])(
-    "setting put failure is hard only for a critical key (%s)",
-    async (critical) => {
-      const { adb, reply, reset } = await rig();
-      const key = critical ? "adb_enabled" : "optional_key";
-      reply("shell settings --user 0 list global", `${key}=0`);
-      const failedCommand = `shell settings --user 0 delete global ${key}`;
-      adb.setCommandResponse(failedCommand, createExecResult("Error: refused", ""));
-      if (critical) {
-        await expect(reset()).rejects.toThrow("non-clean");
-      } else {
-        expect(await reset()).toMatchObject({ outcome: "clean", mode: "keep-booted" });
-        expect(adb.getExecutedCommands()).toContain("shell cmd clipboard clear");
-      }
-    },
-  );
+  test.each([false, true])("persistent setting put failure is non-clean (%s)", async (critical) => {
+    const { adb, reply, reset } = await rig();
+    const key = critical ? "adb_enabled" : "optional_key";
+    reply("shell settings --user 0 list global", `${key}=0`);
+    const failedCommand = `shell settings --user 0 delete global ${key}`;
+    adb.setCommandResponse(failedCommand, createExecResult("Error: refused", ""));
+    await expect(reset()).rejects.toThrow("non-clean");
+  });
 
   test("removes only added files under inventory roots, preserving baseline contents", async () => {
     const { adb, reply, port, journal, reset } = await rig();
@@ -319,8 +443,14 @@ describe("Android unconditional keep-booted cleaning", () => {
     expect(port.certifiableKinds).not.toContain("shared-file");
   });
 
-  test("unsupported clipboard and unplannable journals do not force fallback", async () => {
-    const { adb, journal, reset } = await rig();
+  test("an uncovered unplannable account journal forces fallback despite unsupported clipboard", async () => {
+    let fallbacks = 0;
+    const { adb, journal, reset } = await rig([0], {
+      reset: async () => {
+        fallbacks++;
+        return { outcome: "clean", mode: "snapshot", phases: {} };
+      },
+    });
     adb.setCommandResponse(
       "shell cmd clipboard clear",
       createExecResult("", "Can't find service: clipboard"),
@@ -331,7 +461,11 @@ describe("Android unconditional keep-booted cleaning", () => {
       priorValue: { state: "absent" },
       toolName: "test",
     });
-    expect(await reset()).toMatchObject({ outcome: "clean", mode: "keep-booted" });
+    expect(await reset()).toMatchObject({
+      outcome: "fallback:snapshot",
+      fallbackReason: expect.stringContaining("account:external (test)"),
+    });
+    expect(fallbacks).toBe(1);
     expect(await journal.list(SCOPE)).toHaveLength(1);
   });
 
@@ -423,4 +557,53 @@ describe("cleaning adb under load", () => {
     expect(reads).toBe(2);
     expect(timer.getSleepHistory()).toEqual([250]);
   });
+});
+
+test.each([false, true])(
+  "non-critical setting restore re-read matches baseline (absent: %s)",
+  async (absent) => {
+    const { adb, reset } = await rig();
+    const key = absent ? "optional_key" : "animator_duration_scale";
+    adb.setCommandResponseSequence("shell settings --user 0 list global", [
+      createExecResult(`${key}=0`, ""),
+      createExecResult(absent ? "" : `${key}=0.5`, ""),
+    ]);
+    adb.setCommandResponse(
+      absent
+        ? `shell settings --user 0 delete global ${key}`
+        : `shell settings --user 0 put global ${key} '0.5'`,
+      createExecResult("Error: refused", ""),
+    );
+    expect(await reset()).toMatchObject({ outcome: "clean", mode: "keep-booted" });
+    expect(
+      adb
+        .getExecutedCommands()
+        .filter((command) => command === "shell settings --user 0 list global"),
+    ).toHaveLength(2);
+  },
+);
+
+test("persistent non-critical restore failures escalate and name every still-dirty key", async () => {
+  let fallbacks = 0;
+  const { adb, reset } = await rig([0], {
+    reset: async () => {
+      fallbacks++;
+      return { outcome: "clean", mode: "snapshot", phases: {} };
+    },
+  });
+  adb.setCommandResponseSequence("shell settings --user 0 list global", [
+    createExecResult("dirty_a=1\ndirty_b=2\nnow_clean=3", ""),
+    createExecResult("dirty_a=1\ndirty_b=2", ""),
+  ]);
+  for (const key of ["dirty_a", "dirty_b", "now_clean"]) {
+    adb.setCommandResponse(
+      `shell settings --user 0 delete global ${key}`,
+      createExecResult("Error: refused", ""),
+    );
+  }
+  const result = await reset();
+  expect(result.outcome).toBe("fallback:snapshot");
+  expect(result.fallbackReason).toContain("global:dirty_a, global:dirty_b");
+  expect(result.fallbackReason).not.toContain("now_clean");
+  expect(fallbacks).toBe(1);
 });

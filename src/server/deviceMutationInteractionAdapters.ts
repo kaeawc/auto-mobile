@@ -1,3 +1,4 @@
+import { opaqueIntentKey } from "../daemon/sessionBroker/mutations/types";
 import type { Platform } from "../models";
 import { SCREEN_STATE_MUTATION_KEY } from "../daemon/sessionBroker/mutations/screenStateMutation";
 import { isRecord } from "./pipeline/isRecord";
@@ -42,10 +43,10 @@ function opaqueBreadcrumb(...parts: readonly string[]): ToolMutation {
  * - `power` and `lock` (Android) sleep or lock the device. A reset can wake and dismiss a keyguard
  *   with no credential, so the screen state is journaled with a readable prior.
  * - `volume_up` and `volume_down` change the audio stream volume. Android persists it in settings
- *   rows the baseline clean restores; the live level and the iOS level have no revert. A plain
- *   (non-escalating) breadcrumb records the call.
+ *   rows the baseline clean restores; the live level and the iOS level have no revert. A fallback
+ *   intent prevents a clean keep-booted reset on both platforms.
  * - iOS `power` locks the simulator and iOS `action` runs the user's Action button shortcut; neither
- *   has a simctl revert, so they leave the same breadcrumb.
+ *   has a simctl revert, so they retain diagnostic breadcrumbs.
  * Back, home, recent, menu, camera and the transient system UI actions (power menu, quick settings,
  * shade dismissal, split screen) change nothing persistent; `screenshot` writes under
  * /sdcard/Pictures, which the baseline clean's file sweep removes.
@@ -53,7 +54,7 @@ function opaqueBreadcrumb(...parts: readonly string[]): ToolMutation {
 function pressButtonMutations(args: Record<string, unknown>, platform?: Platform): ToolMutation[] {
   const button = typeof args.button === "string" ? args.button.toLowerCase() : "";
   if (button === "volume_up" || button === "volume_down") {
-    return [opaqueBreadcrumb("pressButton", "volume")];
+    return [{ kind: "opaque", key: opaqueIntentKey("pressButton", "volume") }];
   }
   if (platform === "ios") {
     return button === "power" || button === "action"

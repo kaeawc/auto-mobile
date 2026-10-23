@@ -1,3 +1,4 @@
+import { InMemoryMutationRecordingGaps } from "../../../src/daemon/sessionBroker/mutations/recordingGaps";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   openSqliteBindingRegistry,
@@ -33,7 +34,7 @@ import { boundAndroidResetInventory } from "../../../src/daemon/sessionBroker/se
 import type { BootedDevice } from "../../../src/models/DeviceInfo";
 import { FakeNativePort } from "../../helpers/fakeSessionBrokerDevicePort";
 import type { Session } from "../../../src/daemon/sessionManager/sessionTypes";
-import { iosMutationIncarnation } from "../../../src/daemon/sessionBroker/mutations/recorder";
+import { mutationIncarnation } from "../../../src/daemon/sessionBroker/mutations/incarnation";
 import { logger } from "../../../src/utils/logger";
 import { DEFAULT_ANDROID_RESET_TIMEOUT_MS } from "../../../src/daemon/sessionBroker/androidBaselineReset";
 import { FakeAndroidKeepBootedResetPort } from "../../fakes/FakeAndroidKeepBootedResetPort";
@@ -413,7 +414,13 @@ describe("session broker service lifecycle", () => {
     expect(controller.signal.aborted).toBe(false);
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
-  test.each(["startup", "late recovery", "startup stale assignment", "startup registry error"])(
+  test.each([
+    "startup",
+    "late recovery",
+    "startup stale assignment",
+    "startup registry error",
+    "detached recorder",
+  ])(
     "%s reattaches the durable mutation recorder to a recovered live broker session",
     async (recovery) => {
       const timer = new FakeTimer();
@@ -462,11 +469,12 @@ describe("session broker service lifecycle", () => {
       const scope = {
         sessionUuid: session.sessionId,
         deviceId: session.assignedDevice,
-        incarnation: iosMutationIncarnation(
-          resource.scopeKey,
-          resource.allocationIndex,
-          assignment.stableDeviceId!,
-        ),
+        incarnation: mutationIncarnation({
+          platform: "ios",
+          scopeKey: resource.scopeKey,
+          allocationIndex: resource.allocationIndex,
+          stableDeviceId: assignment.stableDeviceId!,
+        }),
       };
       await registry.deviceMutationJournal().record(scope, {
         kind: "clipboard",
@@ -481,17 +489,30 @@ describe("session broker service lifecycle", () => {
           : recovery === "startup registry error"
             ? spyOn(registry, "getAssignment").mockRejectedValue(new Error("registry unavailable"))
             : undefined;
+      const gaps = new InMemoryMutationRecordingGaps();
       const service = await openSessionBrokerService({
         ...openOptions(timer, new RecordingLock()),
         deferStart: true,
+        recordingGaps: gaps,
         mutationSessions: {
-          peekSession: (uuid) => (visible && uuid === session.sessionId ? session : null),
+          peekSession: (uuid) =>
+            visible && uuid === session.sessionId
+              ? recovery === "detached recorder"
+                ? { ...session }
+                : session
+              : null,
           recordHeartbeat: () => {},
         },
         liveSessionIds: () => (visible ? [session.sessionId] : []),
       });
       try {
+        if (recovery === "detached recorder") {
+          expect(await service.recoverMutationRecorder(session.sessionId)).toBeUndefined();
+          expect(gaps.reasonFor(session.sessionId)).toContain("did not attach");
+          return;
+        }
         if (startupAssignmentRead) {
+          expect(gaps.reasonFor(session.sessionId)).toContain("recorder recovery:");
           expect(session.mutationRecorder).toBeUndefined();
           startupAssignmentRead.mockRestore();
           await service.recoverMutationRecorder(session.sessionId);
@@ -578,11 +599,34 @@ describe("session broker service lifecycle", () => {
     }
   });
 
+  test("recorder recovery failure marks the broker session without blocking the tool", async () => {
+    const gaps = new InMemoryMutationRecordingGaps();
+    const service = new SessionBrokerService(
+      new ControlledBroker(registry.sessionBrokerStore(BROKER_SCOPE_KEY)),
+      BROKER_SCOPE_KEY,
+      new RecordingLock(),
+      new FakeTimer(),
+      gaps,
+      async () => {
+        throw new Error("assignment unavailable");
+      },
+    );
+    expect(await service.recoverMutationRecorder("broker-session")).toBeUndefined();
+    expect(gaps.reasonFor("broker-session")).toBe("recorder recovery: assignment unavailable");
+    await service.close();
+  });
+
   test("close wakes an idle loop, closes the broker, and releases the lock once", async () => {
     const timer = new FakeTimer();
     const lock = new RecordingLock();
     const broker = new ControlledBroker(registry.sessionBrokerStore(BROKER_SCOPE_KEY));
-    const service = new SessionBrokerService(broker, BROKER_SCOPE_KEY, lock, timer);
+    const service = new SessionBrokerService(
+      broker,
+      BROKER_SCOPE_KEY,
+      lock,
+      timer,
+      new InMemoryMutationRecordingGaps(),
+    );
     service.start();
     await drainUntil(() => timer.getPendingTimeoutCount() === 1, {
       description: "idle recovery loop",
@@ -611,7 +655,13 @@ describe("session broker service lifecycle", () => {
     const lock = new RecordingLock();
     const broker = new ControlledBroker(registry.sessionBrokerStore(BROKER_SCOPE_KEY));
     broker.blockRecovery = true;
-    const service = new SessionBrokerService(broker, BROKER_SCOPE_KEY, lock, timer);
+    const service = new SessionBrokerService(
+      broker,
+      BROKER_SCOPE_KEY,
+      lock,
+      timer,
+      new InMemoryMutationRecordingGaps(),
+    );
     service.start();
     await broker.recoveryStarted.promise;
 
@@ -639,7 +689,13 @@ describe("session broker service lifecycle", () => {
     const timer = new FakeTimer();
     const lock = new RecordingLock();
     const broker = new ControlledBroker(registry.sessionBrokerStore(BROKER_SCOPE_KEY));
-    const service = new SessionBrokerService(broker, BROKER_SCOPE_KEY, lock, timer);
+    const service = new SessionBrokerService(
+      broker,
+      BROKER_SCOPE_KEY,
+      lock,
+      timer,
+      new InMemoryMutationRecordingGaps(),
+    );
     try {
       service.start();
       service.start();

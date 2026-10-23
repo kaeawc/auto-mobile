@@ -1,3 +1,5 @@
+import { InMemoryMutationRecordingGaps } from "../../../src/daemon/sessionBroker/mutations/recordingGaps";
+import { mutationIncarnation } from "../../../src/daemon/sessionBroker/mutations/incarnation";
 import { describe, expect, test } from "bun:test";
 import { AndroidKeepBootedReset } from "../../../src/daemon/sessionBroker/androidKeepBootedReset";
 import {
@@ -23,7 +25,12 @@ import {
 const SESSION = {
   resourceId: "resource-a",
   sessionId: "session-a",
-  incarnation: JSON.stringify(["resource-a", "resource-a", "12345678-1234-1234-1234-123456789abc"]),
+  incarnation: mutationIncarnation({
+    platform: "android",
+    resourceId: "resource-a",
+    stableDeviceId: "stable-avd",
+    bootId: "12345678-1234-1234-1234-123456789abc",
+  }),
 };
 const SCOPE = {
   deviceId: ANDROID_RESET_DEVICE.deviceId,
@@ -39,6 +46,7 @@ const SETTING: DeviceMutationInput = {
 
 async function rig(
   options: {
+    recordingGaps?: InMemoryMutationRecordingGaps;
     maxUses?: number;
     fallback?: AndroidResetStrategy;
     fallbackBudgetMs?: number;
@@ -696,6 +704,42 @@ describe("Android keep-booted strategy", () => {
     expect(fallbacks).toBe(1);
   });
 
+  test("a failed power-control revert escalates to the baseline fallback (#15110)", async () => {
+    let fallbacks = 0;
+    const { journal, port, reset } = await rig({
+      fallback: {
+        reset: async () => {
+          fallbacks++;
+        },
+      },
+    });
+    await journal.record(SCOPE, {
+      kind: "device-setting",
+      key: "power:doze",
+      priorValue: { state: "present", value: "off" },
+      toolName: "setDeviceState",
+    });
+    port.beforeWrite = async () => {
+      throw new Error("could not confirm power:doze was restored");
+    };
+    const outcome = await reset();
+    expect(outcome.outcome).toBe("fallback:snapshot");
+    expect(outcome.fallbackReason).toContain("could not confirm power:doze");
+    expect(fallbacks).toBe(1);
+  });
+
+  test.each(["global", "system", "secure"])(
+    "a failed covered %s settings revert is left to the baseline clean",
+    async (namespace) => {
+      const { journal, port, reset } = await rig();
+      await journal.record(SCOPE, { ...SETTING, key: `${namespace}:optional_key` });
+      port.beforeWrite = async () => {
+        throw new Error("settings write failed");
+      };
+      expect((await reset()).outcome).not.toContain("fallback");
+    },
+  );
+
   test("failed baseline fallback propagates rather than returning clean", async () => {
     const { reset } = await rig({
       maxUses: 1,
@@ -803,6 +847,7 @@ describe("Android keep-booted strategy", () => {
       ANDROID_RESET_DEVICE,
       ANDROID_RESET_PROFILE,
       SESSION.sessionId,
+      { stableDeviceId: "stable-avd" },
     );
     host.safe = false;
     await journal.record(SCOPE, SETTING);
@@ -830,6 +875,7 @@ describe("Android keep-booted strategy", () => {
       ANDROID_RESET_DEVICE,
       ANDROID_RESET_PROFILE,
       SESSION.sessionId,
+      { stableDeviceId: "stable-avd" },
     );
     await journal.record(SCOPE, SETTING);
     host.healthy = false;
@@ -851,6 +897,7 @@ describe("Android keep-booted strategy", () => {
       ANDROID_RESET_DEVICE,
       ANDROID_RESET_PROFILE,
       SESSION.sessionId,
+      { stableDeviceId: "stable-avd" },
     );
     host.commands = [];
     host.commandOptions = [];
@@ -893,7 +940,7 @@ describe("Android keep-booted strategy", () => {
       ANDROID_RESET_DEVICE,
       ANDROID_RESET_PROFILE,
       SESSION.sessionId,
-      { timer },
+      { stableDeviceId: "stable-avd", timer },
     );
     const reached = Promise.withResolvers<void>();
     let probeSignal: AbortSignal | undefined;
@@ -938,6 +985,7 @@ describe("Android keep-booted strategy", () => {
       ANDROID_RESET_DEVICE,
       ANDROID_RESET_PROFILE,
       SESSION.sessionId,
+      { stableDeviceId: "stable-avd" },
     );
     host.bootId = "87654321-1234-1234-1234-123456789abc";
     await expect(
@@ -972,6 +1020,7 @@ describe("Android keep-booted strategy", () => {
         ANDROID_RESET_DEVICE,
         ANDROID_RESET_PROFILE,
         SESSION.sessionId,
+        { stableDeviceId: "stable-avd" },
       );
       port.beforeClean = async () => {
         host.booted = failure !== "boot";
@@ -1010,6 +1059,7 @@ describe("Android keep-booted strategy", () => {
       ANDROID_RESET_DEVICE,
       ANDROID_RESET_PROFILE,
       SESSION.sessionId,
+      { stableDeviceId: "stable-avd" },
     );
     host.onHealth = () => {
       owned = false;
@@ -1036,6 +1086,7 @@ describe("Android keep-booted strategy", () => {
       ANDROID_RESET_DEVICE,
       ANDROID_RESET_PROFILE,
       SESSION.sessionId,
+      { stableDeviceId: "stable-avd" },
     );
     host.safe = false;
     host.installed.add("com.example.session");
@@ -1072,6 +1123,7 @@ describe("Android keep-booted strategy", () => {
       ANDROID_RESET_DEVICE,
       ANDROID_RESET_PROFILE,
       SESSION.sessionId,
+      { stableDeviceId: "stable-avd" },
     );
     host.installed.add("com.example.contamination");
     expect(
@@ -1222,3 +1274,46 @@ describe("keep-booted derived budgets", () => {
     expect(fallbackBudget).toBe(397_998);
   });
 });
+
+test("failed uncovered fontScale journal revert requires fallback", async () => {
+  const { journal, port, reset } = await rig({
+    fallback: { reset: async () => ({ outcome: "clean", mode: "snapshot", phases: {} }) },
+  });
+  await journal.record(SCOPE, { ...SETTING, key: "fontScale" });
+  port.beforeWrite = async () => {
+    throw new Error("fontScale write failed");
+  };
+  expect(await reset()).toMatchObject({
+    outcome: "fallback:snapshot",
+    fallbackReason: expect.stringContaining("fontScale write failed"),
+  });
+});
+
+test.each([false, true])(
+  "Android recording gap forces fallback and clears only after success: %s",
+  async (fail) => {
+    const gaps = new InMemoryMutationRecordingGaps();
+    gaps.mark(SCOPE.sessionUuid, "clipboard: unavailable");
+    const { reset, port } = await rig({
+      recordingGaps: gaps,
+      fallback: {
+        reset: async () => {
+          if (fail) {
+            throw new Error("snapshot failed");
+          }
+          return { outcome: "clean", mode: "snapshot", phases: {} };
+        },
+      },
+    });
+    if (fail) {
+      await expect(reset()).rejects.toThrow("snapshot failed");
+    } else {
+      expect(await reset()).toMatchObject({
+        outcome: "fallback:snapshot",
+        fallbackReason: expect.stringContaining("clipboard: unavailable"),
+      });
+    }
+    expect(port.cleanCount).toBe(0);
+    expect(gaps.reasonFor(SCOPE.sessionUuid)).toBe(fail ? "clipboard: unavailable" : undefined);
+  },
+);

@@ -19,6 +19,9 @@ const device: BootedDevice = { deviceId: "isolated-ios", name: "Fake", platform:
 test("storage handlers retain independent client dependencies across concurrent calls", async () => {
   const calls: string[] = [];
   const client = (owner: string): IosKeyValueClient => ({
+    deleteKeychainItemForIos: async () => {
+      throw new Error("unexpected keychain call");
+    },
     setPreference: async () => {
       calls.push(owner);
       return { resolvedStore: owner };

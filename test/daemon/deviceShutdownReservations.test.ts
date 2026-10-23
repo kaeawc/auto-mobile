@@ -34,15 +34,20 @@ async function flushUntil(condition: () => boolean): Promise<void> {
   throw new Error("Condition did not settle within 100 microtasks");
 }
 
-function harness() {
+function harness(afterLock?: () => void | Promise<void>) {
   const timer = new FakeTimer();
   const mutex = new Mutex();
   const devices = new Map<string, PooledDevice>();
   const intentional = new Map<string, number>();
   const calls: string[] = [];
   const port: DeviceShutdownReservationsPoolPort = {
+    now: () => timer.now(),
     getDevices: () => devices,
-    withAssignmentLock: (operation) => mutex.runExclusive(operation),
+    withAssignmentLock: async (operation) => {
+      const result = await mutex.runExclusive(operation);
+      await afterLock?.();
+      return result;
+    },
     getIntentionalShutdowns: () => intentional,
     assertReadinessReservationOwner: () => calls.push("owner"),
     assertRuntimeIdentity: () => calls.push("identity"),
@@ -129,7 +134,13 @@ describe("DeviceShutdownReservations", () => {
     h.devices.set(deviceId, pooled());
     const unlock = await h.mutex.acquire();
     const controller = new AbortController();
-    const pending = h.reservations.reserveDeviceForShutdown(deviceId, controller.signal);
+    const pending = h.reservations.reserveDeviceForShutdown(
+      deviceId,
+      controller.signal,
+      undefined,
+      undefined,
+      { fenceUnpooled: true },
+    );
     await flushUntil(() => h.calls.includes("capture"));
     const delayedAbort = h.timer.sleep(5).then(() => controller.abort(new Error("cancelled")));
     h.timer.advanceTime(5);
@@ -202,4 +213,41 @@ describe("readiness reservation owners (#11651)", () => {
     await second();
     expect(h.reservations.isReservedForReadiness(deviceId)).toBe(false);
   });
+});
+
+test("aborted unpooled shutdown clears its own fence after the lock", async () => {
+  const controller = new AbortController();
+  const h = harness(() => {
+    expect(h.reservations.isUnpooledShutdownFenced(deviceId)).toBe(true);
+    controller.abort(new Error("cancelled after reservation"));
+  });
+  await expect(
+    h.reservations.reserveDeviceForShutdown(deviceId, controller.signal, undefined, undefined, {
+      fenceUnpooled: true,
+    }),
+  ).rejects.toThrow("cancelled after reservation");
+  expect(h.reservations.isUnpooledShutdownFenced(deviceId)).toBe(false);
+});
+
+test("aborted unpooled shutdown preserves a newer concurrent kill fence", async () => {
+  const controller = new AbortController();
+  let replaced = false;
+  const h = harness(async () => {
+    if (replaced) {
+      return;
+    }
+    replaced = true;
+    expect(
+      await h.reservations.reserveDeviceForShutdown(deviceId, undefined, undefined, undefined, {
+        fenceUnpooled: true,
+      }),
+    ).toBeUndefined();
+    controller.abort(new Error("older kill cancelled"));
+  });
+  await expect(
+    h.reservations.reserveDeviceForShutdown(deviceId, controller.signal, undefined, undefined, {
+      fenceUnpooled: true,
+    }),
+  ).rejects.toThrow("older kill cancelled");
+  expect(h.reservations.isUnpooledShutdownFenced(deviceId)).toBe(true);
 });

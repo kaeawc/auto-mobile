@@ -1471,3 +1471,64 @@ describe("iOS out-of-band residue guard", () => {
     expect(rig.state.commands.some((args) => args.includes("com.apple.Preferences"))).toBe(false);
   });
 });
+
+test.each([
+  ["installed-app", "app"],
+  ["app-group", "app"],
+  ["keychain", "device"],
+  ["permission", "app"],
+  ["location", "device"],
+  ["status-bar", "device"],
+  ["clipboard", "device"],
+  ["certificate", "root"],
+  ["media", "photo"],
+  ["device-setting", "appearance"],
+  ["device-setting", "nightMode"],
+  ["device-setting", "contentSize"],
+  ["device-setting", "content-size"],
+  ["device-setting", "increaseContrast"],
+  ["device-setting", "increase-contrast"],
+  ["device-setting", "locale"],
+  ["device-setting", "language"],
+  ["device-setting", "calendarSystem"],
+  ["device-setting", "force-24-hour-time"],
+  ["device-setting", "force-12-hour-time"],
+])("sanitize provably covers %s:%s", (kind, key) => {
+  expect(
+    harness().port.sanitizeCovers({
+      kind,
+      key,
+      toolName: "test",
+      priorValue: { state: "unobservable" },
+    }),
+  ).toBe(true);
+});
+
+test.each([
+  ["device-setting", "reduceMotion"],
+  ["device-setting", "boldText"],
+  ["device-setting", "unknown"],
+  ["shared-file", "file"],
+  ["rotation", "device"],
+  ["screen-reader", "device"],
+  ["keep-awake", "device"],
+  ["opened-url", "url"],
+  ["contact", "row"],
+  ["calendar", "row"],
+  ["notification", "row"],
+  ["network-condition", "network"],
+  ["profile", "profile"],
+  ["account", "account"],
+  ["biometric-enrollment", "device"],
+  ["future-kind", "device"],
+  ["preference", "app:key"],
+])("sanitize does not claim uncovered %s:%s", (kind, key) => {
+  expect(
+    harness().port.sanitizeCovers({
+      kind,
+      key,
+      toolName: "test",
+      priorValue: { state: "unobservable" },
+    }),
+  ).toBe(false);
+});

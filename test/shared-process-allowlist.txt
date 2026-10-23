@@ -417,7 +417,6 @@ test/daemon/sessionBroker/androidResetComposition.test.ts
 test/daemon/sessionBroker/androidSnapshotReset.test.ts
 test/daemon/sessionBroker/androidSnapshotResetNativePort.test.ts
 test/daemon/sessionBroker/brokerAbortAfterActivate.test.ts
-test/daemon/sessionBroker/brokerAndroidReset.test.ts
 test/daemon/sessionBroker/brokerCleanReleaseRetry.test.ts
 test/daemon/sessionBroker/brokerPostActivationRead.test.ts
 test/daemon/sessionBroker/brokerRecoverySnapshot.test.ts

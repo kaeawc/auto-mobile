@@ -378,6 +378,14 @@ export class CtrlProxyRunnerRecovery {
         logger.info(
           `[IOSCtrlProxyClient] Target simulator ${this.host.deviceId} is no longer booted, skipping restart`,
         );
+        void this.host
+          .getManager()
+          .markSimulatorShutDownIfNotBooted?.("target simulator is no longer booted")
+          .catch((error) => {
+            logger.warn(
+              `[IOSCtrlProxyClient] Failed to stop shut-down simulator runner: ${errorMessage(error)}`,
+            );
+          });
         return false;
       }
       return true;

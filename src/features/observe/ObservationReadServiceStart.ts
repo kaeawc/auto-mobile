@@ -49,6 +49,23 @@ export const daemonObservationServiceOwnershipGuard: ObservationServiceOwnership
   },
 };
 
+export interface ObservationPoolPickup {
+  available(): boolean;
+  isPooled(device: BootedDevice): boolean;
+  ensurePooled(device: BootedDevice, signal?: AbortSignal): Promise<void>;
+}
+
+const daemonPoolPickup: ObservationPoolPickup = {
+  available: () => defaultDaemonContext.devicePoolWrites() !== undefined,
+  isPooled: (device) => Boolean(defaultDaemonContext.devicePool()?.getDevice(device.deviceId)),
+  ensurePooled: async (device) => {
+    await defaultDaemonContext.devicePoolWrites()?.pickUpRunningDevice(device);
+  },
+};
+
+// Foreign or non-assignable devices must not trigger pickup on every observe.
+const UNPOOLED_PICKUP_THROTTLE_MS = 10_000;
+
 export interface ObservationServiceStartRequest {
   device: BootedDevice;
   deadlineMs: number;
@@ -58,6 +75,9 @@ export interface ObservationServiceStartRequest {
 /** One flight per device. Individual reads abandon their wait without cancelling other readers. */
 export class ObservationReadServiceStart {
   private readonly flights = new SingleFlight<string, boolean>();
+  private readonly pickupFlights = new SingleFlight<string, string | undefined>();
+  private readonly unpooledPickupAt = new Map<string, number>();
+  private readonly poolPickup: ObservationPoolPickup;
   private readonly timer: Timer;
   private readonly guard: ObservationServiceOwnershipGuard;
 
@@ -65,6 +85,7 @@ export class ObservationReadServiceStart {
     private readonly options: {
       timer?: Timer;
       ownershipGuard?: ObservationServiceOwnershipGuard;
+      poolPickup?: ObservationPoolPickup;
       readiness?: Pick<RunnerReadinessService, "ensureReady">;
       skipCtrlProxyDownload?: () => boolean;
       isServiceConnected?: (device: BootedDevice) => boolean;
@@ -72,14 +93,20 @@ export class ObservationReadServiceStart {
   ) {
     this.timer = options.timer ?? defaultTimer;
     this.guard = options.ownershipGuard ?? daemonObservationServiceOwnershipGuard;
+    this.poolPickup = options.poolPickup ?? daemonPoolPickup;
   }
 
   async start(request: ObservationServiceStartRequest): Promise<boolean> {
     request.signal?.throwIfAborted();
     if (!this.guard.canStart(request.device)) {
-      throw new ActionableError(
-        "service start declined: ownership or pool transition cannot be excluded",
-      );
+      if (this.poolPickup.available() && !this.poolPickup.isPooled(request.device)) {
+        await this.pickupIfUnpooled(request);
+      }
+      if (!this.guard.canStart(request.device)) {
+        throw new ActionableError(
+          "service start declined: ownership or pool transition cannot be excluded",
+        );
+      }
     }
     const key = deviceReadinessLockKey(request.device.platform, request.device.deviceId);
     try {
@@ -104,6 +131,64 @@ export class ObservationReadServiceStart {
       request.signal?.throwIfAborted();
       logger.warn(`[observe] Hierarchy service start failed: ${errorMessage(error)}`, error);
       throw error;
+    }
+  }
+
+  private async pickupIfUnpooled(request: ObservationServiceStartRequest): Promise<void> {
+    const { device } = request;
+    if (this.poolPickup.isPooled(device)) {
+      return;
+    }
+    const remaining = request.deadlineMs - this.timer.now();
+    if (remaining <= 0) {
+      throw new ActionableError("Observer device pool pickup timed out before pickup");
+    }
+    const key = deviceReadinessLockKey(device.platform, device.deviceId);
+    // Bound each reader's wait; pickup stays shared when one reader leaves.
+    const failure = await raceWithDeadline(
+      () =>
+        this.pickupFlights.run(
+          key,
+          async () => {
+            const pickupAt = this.unpooledPickupAt.get(key);
+            if (
+              this.poolPickup.isPooled(device) ||
+              (pickupAt !== undefined && this.timer.now() - pickupAt < UNPOOLED_PICKUP_THROTTLE_MS)
+            ) {
+              return;
+            }
+            let failure: string | undefined;
+            try {
+              await this.poolPickup.ensurePooled(device);
+            } catch (error) {
+              failure = errorMessage(error);
+              logger.warn(`[observe] Device pool pickup failed: ${failure}`, error);
+            }
+            if (!this.poolPickup.isPooled(device)) {
+              this.unpooledPickupAt.set(key, this.timer.now());
+            } else {
+              this.unpooledPickupAt.delete(key);
+            }
+            return failure;
+          },
+          request.signal,
+        ),
+      {
+        timer: this.timer,
+        timeoutMs: remaining,
+        signal: request.signal,
+        label: "Observer device pool pickup",
+      },
+    );
+    if (!this.poolPickup.isPooled(device)) {
+      if (failure !== undefined) {
+        throw new ActionableError(
+          `Device ${device.deviceId} is running but could not be added to this daemon's device pool: ${failure}; call startDevice for it.`,
+        );
+      }
+      throw new ActionableError(
+        `Device ${device.deviceId} is running but not known to this daemon's device pool; call startDevice for it (or retry once the daemon has discovered it).`,
+      );
     }
   }
 

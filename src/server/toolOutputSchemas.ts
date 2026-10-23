@@ -16,7 +16,7 @@ export { viewHierarchyNodeSchema } from "./toolOutputSchemas/elements";
 export { viewHierarchyResultSchema } from "./toolOutputSchemas/elements";
 export { observeCropResultSchema } from "./toolOutputSchemas/observationContract";
 export { observationSummarySchema } from "./toolOutputSchemas/observation";
-export { deviceLockSchema } from "./toolOutputSchemas/observationMetadata";
+export { deviceLockSchema, deviceLockUnknownSchema } from "./toolOutputSchemas/observationMetadata";
 export { skeletonElementSchema } from "./toolOutputSchemas/elements";
 export { observeDiffSelectorSchema } from "./toolOutputSchemas/observation";
 export { observeDiffSchema } from "./toolOutputSchemas/observation";

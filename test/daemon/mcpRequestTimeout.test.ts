@@ -22,6 +22,7 @@ import {
   DEFAULT_PROTOTYPE_EVENT_TIMEOUT_MS,
   MAX_PROTOTYPE_EVENT_TIMEOUT_MS,
 } from "../../src/features/prototype/prototypeEventTimeout";
+import { PROTOVIEWER_DEFAULT_TIMEOUT_MS } from "../../src/features/prototype/protoViewer/AndroidProtoViewer";
 import {
   DEFAULT_PROTOTYPE_ASSET_TIMEOUT_MS,
   MAX_PROTOTYPE_ASSET_COUNT,
@@ -1582,6 +1583,17 @@ describe("argument budget deadline gaps", () => {
       }
       for (const args of [null, "wrong", [], undefined, {}]) {
         expect(resolve(args)).toBe(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
+      }
+    });
+    test("save and open may wait on ProtoViewer for their timeoutMs, bounded by the maximum", () => {
+      for (const action of ["save", "open"]) {
+        expect(resolve({ action, timeoutMs: 45_000 })).toBe(45_000 + headroom);
+        expect(resolve({ action, timeoutMs: 600_000 })).toBe(
+          MAX_PROTOTYPE_EVENT_TIMEOUT_MS + headroom,
+        );
+        expect(resolve({ action })).toBe(
+          Math.max(PROTOVIEWER_DEFAULT_TIMEOUT_MS + headroom, DEFAULT_MCP_REQUEST_TIMEOUT_MS),
+        );
       }
     });
     test("other prototype actions and a larger request timeout are unchanged", () => {

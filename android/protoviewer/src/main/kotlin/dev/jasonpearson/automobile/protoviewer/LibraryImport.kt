@@ -17,6 +17,7 @@ import java.util.logging.Level
 import java.util.logging.Logger
 
 const val PROTOTYPE_BUNDLE_MIME = "application/vnd.automobile.prototype+zip"
+const val UNSUPPORTED_PROTOTYPE_REASON = "This prototype needs a newer ProtoViewer"
 
 enum class ImportAction {
   View,
@@ -45,7 +46,17 @@ fun interface ImportAssetCheck {
 }
 
 fun interface LibraryImportCommit {
-  fun commit(bundle: PrototypeBundle, source: LibrarySource): LibraryResult<LibraryEntry>
+  /** A null label keeps the app's default label for imports. */
+  fun commit(
+    bundle: PrototypeBundle,
+    source: LibrarySource,
+    label: String?,
+  ): LibraryResult<LibraryEntry>
+}
+
+/** The validation and commit half of an import, for bytes the app has already read itself. */
+fun interface LibraryBytesImporter {
+  fun importBytes(bytes: ByteArray, source: LibrarySource, label: String?): LibraryImportResult
 }
 
 /** No Android or disk dependencies: the only side effect is the final injected commit. */
@@ -55,7 +66,7 @@ class ValidatedLibraryImporter(
   private val capabilities: Set<String>,
   private val assets: ImportAssetCheck,
   private val commit: LibraryImportCommit,
-) : LibraryImporter {
+) : LibraryImporter, LibraryBytesImporter {
   @Suppress(
     "TooGenericExceptionCaught",
   ) // Injected content/storage adapters may throw operational exceptions.
@@ -64,8 +75,26 @@ class ValidatedLibraryImporter(
       if (!allowed(request))
         return LibraryImportResult.Rejected("uri", "External content URI required")
       val bytes =
-        content.open(checkNotNull(request.uri)).use(::readLimited)
+        content.open(checkNotNull(request.uri)).use(::readImportLimited)
           ?: return LibraryImportResult.Rejected("content", "Content exceeds byte limit")
+      val source =
+        if (request.action == ImportAction.View) LibrarySource.file else LibrarySource.share
+      importBytes(bytes, source, null)
+    } catch (error: Exception) {
+      Logger.getLogger("ProtoViewerImport").log(Level.WARNING, "Import failed", error)
+      LibraryImportResult.Rejected("content", "Unable to read or commit prototype within limits")
+    }
+  }
+
+  @Suppress(
+    "TooGenericExceptionCaught",
+  ) // Injected content/storage adapters may throw operational exceptions.
+  override fun importBytes(
+    bytes: ByteArray,
+    source: LibrarySource,
+    label: String?,
+  ): LibraryImportResult {
+    return try {
       val bundle =
         when (val read = readBundle(bytes)) {
           is PrototypeBundleReadResult.Rejected ->
@@ -75,9 +104,7 @@ class ValidatedLibraryImporter(
       validate(bundle)?.let {
         return it
       }
-      val source =
-        if (request.action == ImportAction.View) LibrarySource.file else LibrarySource.share
-      when (val saved = commit.commit(bundle, source)) {
+      when (val saved = commit.commit(bundle, source, label)) {
         is LibraryResult.Success -> LibraryImportResult.Imported(saved.value)
         is LibraryResult.Failure -> LibraryImportResult.Rejected("library", saved.error.name)
       }
@@ -102,7 +129,7 @@ class ValidatedLibraryImporter(
       return LibraryImportResult.Rejected("spec.json:${policy.error.path}", policy.error.message)
     val supported = PrototypeSpecValidator.validate(bundle.spec, capabilities, library = true)
     if (supported is PrototypeSpecValidation.Failure || !capabilities.containsAll(bundle.requires))
-      return LibraryImportResult.Rejected("spec.json", "This prototype needs a newer ProtoViewer")
+      return LibraryImportResult.Rejected("spec.json", UNSUPPORTED_PROTOTYPE_REASON)
     return assets.invalidPath(bundle)?.let {
       LibraryImportResult.Rejected(it, "Invalid image dimensions")
     }
@@ -121,28 +148,29 @@ class ValidatedLibraryImporter(
       is PrototypeBundleExportResult.Success -> PrototypeBundleReader.read(exported.bytes)
     }
   }
-
-  private fun readLimited(stream: InputStream): ByteArray? {
-    val input = PushbackInputStream(stream, 2)
-    val first = input.read()
-    val second = input.read()
-    if (second >= 0) input.unread(second)
-    if (first >= 0) input.unread(first)
-    val signature = byteArrayOf(first.toByte(), second.toByte())
-    val limit =
-      if (zip(signature)) PrototypeBundleLimits.MAX_COMPRESSED_BYTES
-      else PrototypeBundleLimits.MAX_SPEC_BYTES
-    val output = ByteArrayOutputStream()
-    val buffer = ByteArray(8192)
-    while (true) {
-      val count = input.read(buffer, 0, minOf(buffer.size, limit - output.size() + 1))
-      if (count == -1) break
-      if (output.size() + count > limit) return null
-      output.write(buffer, 0, count)
-    }
-    return output.toByteArray()
-  }
-
-  private fun zip(bytes: ByteArray) =
-    bytes.size >= 2 && bytes[0] == 80.toByte() && bytes[1] == 75.toByte()
 }
+
+/** Reads at most the bundle cap (zip) or the spec cap (bare JSON); null when over the cap. */
+internal fun readImportLimited(stream: InputStream): ByteArray? {
+  val input = PushbackInputStream(stream, 2)
+  val first = input.read()
+  val second = input.read()
+  if (second >= 0) input.unread(second)
+  if (first >= 0) input.unread(first)
+  val signature = byteArrayOf(first.toByte(), second.toByte())
+  val limit =
+    if (zip(signature)) PrototypeBundleLimits.MAX_COMPRESSED_BYTES
+    else PrototypeBundleLimits.MAX_SPEC_BYTES
+  val output = ByteArrayOutputStream()
+  val buffer = ByteArray(8192)
+  while (true) {
+    val count = input.read(buffer, 0, minOf(buffer.size, limit - output.size() + 1))
+    if (count == -1) break
+    if (output.size() + count > limit) return null
+    output.write(buffer, 0, count)
+  }
+  return output.toByteArray()
+}
+
+private fun zip(bytes: ByteArray) =
+  bytes.size >= 2 && bytes[0] == 80.toByte() && bytes[1] == 75.toByte()

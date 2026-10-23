@@ -119,7 +119,7 @@ function harness(platform: "android" | "ios" = "android", singlePanel = false) {
       hierarchyCapture: new FakeHierarchyCapture(() => hierarchy.getViewHierarchy(), platform),
       cacheStore: cache,
       // Explicit fake: no notifyutil/simulator operation, including the setPosture UDID test.
-      iosLockStateProbe: { read: async () => undefined },
+      iosLockStateProbe: { read: async () => ({ kind: "unknown", reason: "error" }) },
     },
     timer,
     ids,

@@ -220,3 +220,5 @@ test/fixtures/ios-safari-url-field/*.json text eol=lf
 samples/prototype-embedding/** text eol=lf
 samples/prototype-embedding/**/*.png -text
 ios/prototype-agent/Fixtures/EmbedConsumer/Sources/EmbedConsumer/EmbeddingSamplePrototype.swift text eol=lf
+
+test/fixtures/ios-runner-progress/*.txt text eol=lf

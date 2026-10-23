@@ -2420,7 +2420,7 @@ jobs:
       # tested here.
       - uses: ./.github/actions/gradle-task-run
         with:
-          gradle-tasks: ":control-proxy:testDebugUnitTest :control-proxy:createDebugUnitTestCoverageReport :prototype-compose:testDebugUnitTest :prototype-compose:createDebugUnitTestCoverageReport :prototype-saved:testDebugUnitTest :prototype-saved:createDebugUnitTestCoverageReport :auto-mobile-sdk:testDebugUnitTest :auto-mobile-sdk:createDebugUnitTestCoverageReport :test-plan-validation:test :test-plan-validation:jacocoTestReport :protocol:test :protocol:jacocoTestReport :video-server:test :video-server:d8Dex"
+          gradle-tasks: ":control-proxy:testDebugUnitTest :control-proxy:createDebugUnitTestCoverageReport :prototype-compose:testDebugUnitTest :prototype-compose:createDebugUnitTestCoverageReport :prototype-saved:testDebugUnitTest :prototype-saved:createDebugUnitTestCoverageReport :protoviewer:testDebugUnitTest :protoviewer:createDebugUnitTestCoverageReport :protoviewer:verifyProtoViewerDependencies :auto-mobile-sdk:testDebugUnitTest :auto-mobile-sdk:createDebugUnitTestCoverageReport :test-plan-validation:test :test-plan-validation:jacocoTestReport :protocol:test :protocol:jacocoTestReport :video-server:test :video-server:d8Dex"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           reuse-configuration-cache: true
@@ -3409,7 +3409,8 @@ jobs:
         with:
           # Moved from Build CtrlProxy APK (#11578); the release variant from
           # #5228 still gates every Android PR through this required check.
-          gradle-tasks: ":junitRunner:assemble :control-proxy:assembleRelease"
+          # ProtoViewer's release variant is built here too (#15064).
+          gradle-tasks: ":junitRunner:assemble :control-proxy:assembleRelease :protoviewer:assembleRelease"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ env.GRADLE_BUILD_ACTION_CACHE_KEY_JOB }}"
           reuse-configuration-cache: true

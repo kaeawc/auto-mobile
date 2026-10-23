@@ -1,3 +1,13 @@
+import { ENV } from "../config/env";
+import { readEnvInt } from "../utils/envNumbers";
+import {
+  defaultHostLoadReader,
+  loadScaledBudget,
+  retryBudget,
+  describeLoadScaledBudget,
+  type HostLoadReader,
+  type LoadScaledBudget,
+} from "../utils/hostLoadBudget";
 import { DUMPSYS_MAX_BUFFER } from "../utils/android-cmdline-tools/dumpsysLimits";
 import { getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
 import { SingleFlight } from "../utils/cache/SingleFlight";
@@ -22,6 +32,7 @@ export const REBIND_BIND_WAIT_BUDGET_MS = 8_000;
  * request signal may already have aborted, so they need a cap of their own.
  */
 export const REBIND_MUTATION_COMMAND_TIMEOUT_MS = 5_000;
+export const REBIND_MUTATION_COMMAND_TIMEOUT_MAX_MS = 30_000;
 type RebindFlightKind = "check" | "force";
 interface RebindPlan {
   withoutCtrlProxy: string;
@@ -31,6 +42,8 @@ type AccessibilityServiceState = "bound" | "binding" | "crashed" | "absent" | "u
 
 /** Live manager dependencies; callbacks preserve manager overrides and test spies. */
 export interface AndroidCtrlProxyRebindHost {
+  readonly hostLoad?: HostLoadReader;
+  readonly env?: NodeJS.ProcessEnv;
   readonly adb: AdbExecutor;
   readonly timer: Timer;
   assertNotDrivenByOtherDaemon(signal?: AbortSignal): Promise<void>;
@@ -412,18 +425,80 @@ export class AndroidCtrlProxyRebind {
   }
 
   private async runShieldedCommand(command: string): Promise<ExecResult> {
+    const env = this.host.env ?? process.env;
+    const first = loadScaledBudget(
+      {
+        baseMs: readEnvInt(ENV.CTRL_PROXY_REBIND_WRITE_TIMEOUT_MS, env),
+        ceilingMs: readEnvInt(ENV.CTRL_PROXY_REBIND_WRITE_TIMEOUT_MAX_MS, env),
+      },
+      this.host.hostLoad ?? defaultHostLoadReader(),
+    );
+    return this.shieldedAttempt(command, first, first.budgetMs, false);
+  }
+
+  private async shieldedAttempt(
+    command: string,
+    first: LoadScaledBudget,
+    timeoutMs: number,
+    retry: boolean,
+  ): Promise<ExecResult> {
     const shield = new AbortController();
-    return raceWithDeadline(
-      () =>
-        this.host.adb.executeCommand(command, {
-          signal: shield.signal,
-          waitForProcessSettlementAfterAbort: true,
-        }),
+    let timedOut = false;
+    let started: Promise<ExecResult> | undefined;
+    const timeoutError = () =>
+      new ActionableError(
+        `CtrlProxy rebind write timed out after ${timeoutMs}ms (budget-driven: ${describeLoadScaledBudget(first)})`,
+      );
+    try {
+      return await raceWithDeadline(
+        () => {
+          started = this.host.adb.executeCommand(command, {
+            signal: shield.signal,
+            waitForProcessSettlementAfterAbort: true,
+          });
+          return started;
+        },
+        {
+          timer: this.host.timer,
+          timeoutMs,
+          label: "CtrlProxy rebind write",
+          timeoutError,
+          onTimeout: () => {
+            timedOut = true;
+            shield.abort(timeoutError());
+          },
+        },
+      );
+    } catch (error) {
+      if (!timedOut || retry) {
+        throw error;
+      }
+      logger.warn(`Retrying CtrlProxy rebind write: ${errorMessage(error)}`, error);
+      // Never overlap the abandoned attempt: a late-landing earlier write could undo the
+      // retry's successors (for example the re-add after the removal).
+      await this.waitForAbandonedWrite(started, retryBudget(first), error);
+      return this.shieldedAttempt(command, first, retryBudget(first), true);
+    }
+  }
+
+  private async waitForAbandonedWrite(
+    started: Promise<ExecResult> | undefined,
+    timeoutMs: number,
+    timeout: unknown,
+  ): Promise<void> {
+    if (!started) {
+      return;
+    }
+    await raceWithDeadline(
+      started.then(
+        () => undefined,
+        () => undefined,
+      ),
       {
         timer: this.host.timer,
-        timeoutMs: REBIND_MUTATION_COMMAND_TIMEOUT_MS,
-        label: "CtrlProxy rebind write",
-        onTimeout: () => shield.abort(new ActionableError("CtrlProxy rebind write timed out")),
+        timeoutMs,
+        label: "CtrlProxy abandoned rebind write settlement",
+        timeoutError: () => timeout,
       },
     );
   }

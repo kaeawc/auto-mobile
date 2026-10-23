@@ -58,6 +58,20 @@ export const DEVICE_MUTATION_TOOL_CASES: readonly {
     kind: "preference",
   },
   {
+    name: "deleteKeychainItem",
+    args: {
+      appId: "com.example",
+      selector: {
+        itemClass: "genericPassword",
+        service: "svc",
+        account: "acct",
+        accessGroup: "TEAM.com.example",
+      },
+      confirm: true,
+    },
+    kind: "preference",
+  },
+  {
     name: "removeKeyValue",
     args: { appId: "com.example", name: "settings", key: "enabled" },
     kind: "preference",

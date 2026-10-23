@@ -72,6 +72,7 @@ export type DevicePoolWrites = Pick<
   | "clearIntentionalShutdown"
   | "notifyDeviceReady"
   | "markIntentionalShutdown"
+  | "fenceUnpooledShutdown"
   | "reserveDeviceForShutdown"
   | "retireDeviceForShutdown"
   | "settlePooledRuntimeIdentity"
@@ -81,6 +82,7 @@ export type DevicePoolWrites = Pick<
   | "reserveRestartRecoveryReadiness"
   | "reserveDeviceForReadiness"
   | "reconcileDiscoveryObservation"
+  | "pickUpRunningDevice"
 >;
 
 /** The one session read a failed plan makes to explain a lost session base. */

@@ -257,12 +257,45 @@ Settled mode costs roughly 170 ms per Android observation and 20-70 ms per iOS
 observation over async. When only one call needs a matching screenshot, pass
 `observe({ screenshot: "settled" })` instead of setting the variable.
 
+## Screenshot retention
+
+<div class="environment-variable-table" markdown>
+
+| Variable                                    | Use and accepted values                                                                                  | Default    |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ---------- |
+| `AUTOMOBILE_SCREENSHOT_CACHE_MB`            | Base screenshot cache capacity; positive MiB.                                                            | `128` MiB  |
+| `AUTOMOBILE_SCREENSHOT_CACHE_PER_DEVICE_MB` | Capacity per active device; positive MiB.                                                                | `64` MiB   |
+| `AUTOMOBILE_SCREENSHOT_CACHE_CEILING_MB`    | Host cache ceiling; positive MiB, never lowers the base.                                                 | `1024` MiB |
+| `AUTOMOBILE_SCREENSHOT_KEEP_PER_DEVICE`     | Newest screenshots per device evicted only as a last resort; nonnegative integer, `0` disables fairness. | `3`        |
+
+</div>
+
+Capacity is the larger of the base and active devices × per-device capacity,
+limited by the ceiling (or the base if larger). A device is active while any of
+its screenshots has an unexpired retention guarantee; an incoming capture also
+counts. Files without a device identity do not increase capacity. Under pressure,
+the byte capacity stays fixed for the eviction pass and is recalculated on the
+next admission. Each device's newest screenshots are evicted last, with the incoming
+capture counting toward its device's allowance and files already being removed
+excluded from that allowance. Capture is still admitted if nothing fits.
+
 ## Device behavior
+
+Android rebind command and iOS keep-booted reset budgets scale by the one-minute host
+load per CPU core when it exceeds 1, up to the configured maximum. Unknown load uses
+the base budget. Setting MAX equal to the base disables scaling. A budget timeout
+allows one retry with up to twice the first budget, bounded by MAX. iOS waits for
+the abandoned step to settle before retrying; exhausted budgets are reported as
+budget-driven fallback reasons.
 
 <div class="environment-variable-table" markdown>
 
 | Variable                                                                              | Use and accepted values                                                                                                                                 | Default                                                           |
 | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `AUTOMOBILE_CTRL_PROXY_REBIND_WRITE_TIMEOUT_MS`                                       | Base timeout for each Android accessibility rebind command. Positive integer milliseconds.                                                              | `5000` ms                                                         |
+| `AUTOMOBILE_CTRL_PROXY_REBIND_WRITE_TIMEOUT_MAX_MS`                                   | Ceiling for Android accessibility rebind command timeouts. Positive integer milliseconds.                                                               | `30000` ms                                                        |
+| `AUTOMOBILE_IOS_RESET_STEP_BUDGET_MS`                                                 | Base budget for each iOS keep-booted reset step and health probe. Positive integer milliseconds.                                                        | `30000` ms                                                        |
+| `AUTOMOBILE_IOS_RESET_STEP_BUDGET_MAX_MS`                                             | Ceiling for iOS keep-booted reset step and health probe budgets. Positive integer milliseconds.                                                         | `120000` ms                                                       |
 | `AUTOMOBILE_IOS_WARMUP_DEVICES`                                                       | Comma-separated simulator UDIDs that get startup warm-up and observation streams without a session.                                                     | empty list                                                        |
 | `AUTOMOBILE_ANDROID_APPEARANCE_SYNC_DEVICES`                                          | Comma-separated Android serials that get appearance sync without a session.                                                                             | empty list                                                        |
 | `AUTOMOBILE_ANDROID_OBSERVATION_STREAM_DEVICES`                                       | Comma-separated Android serials that get observation streams without a session.                                                                         | empty list                                                        |
@@ -451,6 +484,7 @@ shutdown then stops it after active device sessions are released.
 | `AUTOMOBILE_SKIP_IOS_PROTOTYPE_VIEWER_DOWNLOAD`                                              | Do not download the viewer template when no verified cache exists; `1`/`true` enables.                                                                    | off                                                       |
 | `AUTOMOBILE_CTRLPROXY_VERBOSE`                                                               | Verbose iOS CtrlProxy output; `1`/`true` enables.                                                                                                         | off                                                       |
 | `AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS`, `AUTO_MOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS`    | iOS runner health poll attempts; positive integer.                                                                                                        | `60`                                                      |
+| `AUTOMOBILE_IOS_RUNNER_LAUNCH_CONCURRENCY`                                                   | Maximum concurrent iOS runner launches per daemon; positive integer. Invalid values use the default.                                                      | `2`                                                       |
 | `AUTOMOBILE_IPROXY_START_TIMEOUT_MS`, `AUTO_MOBILE_IPROXY_START_TIMEOUT_MS`                  | iOS USB iproxy tunnel startup timeout; positive integer milliseconds.                                                                                     | `5000` ms                                                 |
 | `AUTOMOBILE_CWEBP_PATH`                                                                      | Trusted `cwebp` executable; filesystem path. An invalid executable fails.                                                                                 | PATH, bundled or downloaded libwebp                       |
 | `AUTOMOBILE_DWEBP_PATH`                                                                      | Trusted `dwebp` executable; filesystem path. An invalid executable fails.                                                                                 | PATH, bundled or downloaded libwebp                       |

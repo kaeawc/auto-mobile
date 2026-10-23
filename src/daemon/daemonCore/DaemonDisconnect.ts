@@ -5,7 +5,6 @@ import { type Session } from "../sessionManager";
 import { SingleFlightInterval } from "../SingleFlightInterval";
 import { PlanDeviceLossMonitor, type PlanDeviceLossPort } from "../deviceDisconnectHandler";
 import { DevicePool, type PooledDevice } from "../devicePool";
-import { holderOf, isIdle } from "../deviceBinding";
 import { deviceLossCancellationReason } from "../emulatorLossIncident";
 import { PlanDeviceActivity } from "../planDeviceActivity";
 import { resolveToolSelectionBaseSessionUuid } from "../../features/toolSelection/selectionSessionResolver";
@@ -27,6 +26,7 @@ import {
   collectDisconnectCandidates,
   collectDisconnectedRecordings,
   discoverAndReconcile,
+  MONITOR_IOS_LIST_MAX_AGE_MS,
   getAndroidOfflineCanonicalIds,
   logDisconnectMisses,
   probeListedAndroidStates,
@@ -35,6 +35,7 @@ import {
 } from "../deviceLossDiscovery";
 import {
   DisconnectMonitorSchedule,
+  isHeldDisconnectDevice,
   eligibleIdleSweepSignature,
   type DisconnectMonitorCadence,
 } from "../disconnectMonitorCadence";
@@ -303,10 +304,7 @@ export class DaemonDisconnect {
               this.host.services.sessionManager().getAllSessions().length > 0 ||
               pool.getAllDevices().some(({ id }) => {
                 const device = pool.getDevice(id);
-                return (
-                  (device !== null && (!isIdle(device) || holderOf(device))) ||
-                  pool.isDeviceLeasedForAndroidStartup(id)
-                );
+                return isHeldDisconnectDevice(device, pool.isDeviceLeasedForAndroidStartup(id));
               }) ||
               serverConfig.isPlanExecutionActive() ||
               (await listRecordings()).length > 0;
@@ -874,13 +872,21 @@ export class DaemonDisconnect {
     ].some((id) => this.hasPlanExecution(id));
     const platform = sweep.selectPlatform(
       [
-        ...pooled.map((device) => device.platform),
+        ...pooled
+          .filter((device) =>
+            isHeldDisconnectDevice(
+              device,
+              this.host.services.devicePool().isDeviceLeasedForAndroidStartup(device.id),
+            ),
+          )
+          .map((device) => device.platform),
         ...sessions.map((session) => session.platform),
         ...activeRecordings.map((recording) => recording.platform),
       ],
       planOnTracked,
     );
     let discovery = await this.discoverAndReconcile(deviceManager, {
+      iosDeviceListMaxAgeMs: MONITOR_IOS_LIST_MAX_AGE_MS,
       platform,
       heldDevices,
     });
@@ -893,14 +899,17 @@ export class DaemonDisconnect {
     const ordinaryCandidateIds = new Set(
       [...candidateDeviceIds].filter((id) => !planDeviceIds.has(id)),
     );
-    const listed = await probeListedAndroidStates(
-      this.host.services.devicePool(),
-      deviceManager,
-      false,
-      ordinaryCandidateIds,
-      bootedDeviceIds,
-      candidatePlatforms,
-    );
+    const listed =
+      platform === "ios"
+        ? {}
+        : await probeListedAndroidStates(
+            this.host.services.devicePool(),
+            deviceManager,
+            false,
+            ordinaryCandidateIds,
+            bootedDeviceIds,
+            candidatePlatforms,
+          );
     if (
       await this.recoverOfflineCandidates(
         deviceManager,

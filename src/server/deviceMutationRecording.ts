@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/describeUnknownError";
 import { readFile } from "node:fs/promises";
 import type { BootedDevice } from "../models";
 import { ActionableError } from "../models/ActionableError";
@@ -30,22 +31,31 @@ export function createRecording(
     sessionBrokerService():
       | Pick<
           NonNullable<ReturnType<DaemonContext["sessionBrokerService"]>>,
-          "recoverMutationRecorder"
+          "recoverMutationRecorder" | "markMutationUnrecorded"
         >
       | undefined;
   },
   observationReaders: Partial<MutationObservationReaders> = {},
 ): DeviceMutationRecording {
   return new SessionDeviceMutationRecording(
-    (sessionUuid) => {
+    async (sessionUuid, device) => {
       const sessions = context.sessionManager();
-      if (sessions?.getBaseSessionOfDerivedLabel(sessionUuid)) {
+      const broker = context.sessionBrokerService();
+      const resolve = async (uuid: string) =>
+        sessions?.peekSession(uuid)?.mutationRecorder ??
+        (await broker?.recoverMutationRecorder(uuid));
+      const recorder = await resolve(sessionUuid);
+      if (recorder) {
+        return { recorder, ownerSessionUuid: sessionUuid };
+      }
+      const base = sessions?.getBaseSessionOfDerivedLabel(sessionUuid);
+      if (!base) {
         return undefined;
       }
-      return (
-        sessions?.peekSession(sessionUuid)?.mutationRecorder ??
-        context.sessionBrokerService()?.recoverMutationRecorder(sessionUuid)
-      );
+      const baseRecorder = await resolve(base);
+      return baseRecorder?.scope.deviceId === device.deviceId
+        ? { recorder: baseRecorder, ownerSessionUuid: base }
+        : undefined;
     },
     new DefaultMutationPriorReader(
       undefined,
@@ -55,6 +65,9 @@ export function createRecording(
       undefined,
       observationReaders,
     ),
+    undefined,
+    undefined,
+    (uuid, reason) => context.sessionBrokerService()?.markMutationUnrecorded(uuid, reason),
   );
 }
 
@@ -135,6 +148,15 @@ export interface DeviceMutationRecording {
   ): Promise<void>;
 }
 
+// The bare form supports callers/tests with a single session-owned recorder. `"recorder" in
+// resolved` discriminates the forms because MutationRecorder has no `recorder` member.
+type ResolvedMutationRecorder =
+  | MutationRecorder
+  | {
+      recorder: MutationRecorder;
+      ownerSessionUuid: string;
+    };
+
 /**
  * Captures intent and trustworthy priors for best-effort reverts, not keep-booted admission.
  * Unobservable priors remain journaled; keep-booted cleaning runs unconditionally.
@@ -143,10 +165,12 @@ export class SessionDeviceMutationRecording implements DeviceMutationRecording {
   constructor(
     private readonly recorderFor: (
       sessionUuid: string,
-    ) => MutationRecorder | undefined | Promise<MutationRecorder | undefined>,
+      device: BootedDevice,
+    ) => ResolvedMutationRecorder | undefined | Promise<ResolvedMutationRecorder | undefined>,
     private readonly reader: MutationPriorReader = new DefaultMutationPriorReader(),
     private readonly artifactReader: MutationArtifactReader = createDefaultMutationArtifactReader(),
     private readonly specReader: MutationSpecReader = readJsonSpecFile,
+    private readonly markUnrecorded?: (sessionUuid: string, reason: string) => void,
   ) {}
 
   async beforeToolCall(
@@ -164,27 +188,52 @@ export class SessionDeviceMutationRecording implements DeviceMutationRecording {
     if (!sessionUuid) {
       return;
     }
+    let matchingRecorder: MutationRecorder | undefined;
+    let ownerSessionUuid = sessionUuid;
     try {
-      const recorder = await this.recorderFor(sessionUuid);
+      const resolved = await this.recorderFor(sessionUuid, device);
       signal?.throwIfAborted();
-      if (!recorder) {
+      if (!resolved) {
         // Non-broker sessions intentionally have no recorder and need no recovery.
         return;
       }
+      const { recorder, ownerSessionUuid: owner } =
+        "recorder" in resolved ? resolved : { recorder: resolved, ownerSessionUuid: sessionUuid };
+      ownerSessionUuid = owner;
       if (
-        recorder.scope.sessionUuid !== sessionUuid ||
+        recorder.scope.sessionUuid !== ownerSessionUuid ||
         recorder.scope.deviceId !== device.deviceId
       ) {
         throw new ActionableError(
           "Device mutation recorder must match the admitted broker session and device",
         );
       }
+      matchingRecorder = recorder;
       mutations = await this.resolveMutations(name, args, device, mutations, signal);
       await this.recordMutations(name, device, recorder, mutations, signal);
     } catch (error) {
       signal?.throwIfAborted();
-      logger.warn("Device mutation recording failed; proceeding without recording", error);
+      await this.recordingFailed(name, ownerSessionUuid, matchingRecorder, error);
     }
+  }
+
+  private async recordingFailed(
+    name: string,
+    sessionUuid: string,
+    recorder: MutationRecorder | undefined,
+    error: unknown,
+  ): Promise<void> {
+    try {
+      this.markUnrecorded?.(sessionUuid, `${name}: ${errorMessage(error)}`);
+    } catch (markerError) {
+      // Marking is best effort: a failing gap sink must never block the tool call itself.
+      logger.warn(
+        "Cannot mark device mutation recording gap; proceeding without recording",
+        markerError,
+      );
+    }
+    await recorder?.markUnrecorded(name);
+    logger.warn("Device mutation recording failed; proceeding without recording", error);
   }
 
   /** Re-derives the intents once the host has read what the args only point at. */

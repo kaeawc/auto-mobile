@@ -3,6 +3,7 @@ import { DISPLAY_GEOMETRY_FIELDS } from "../features/utility/AndroidDisplayGeome
 import { ACCESSIBILITY_DISPLAY_FIELDS } from "../features/utility/AccessibilityDisplayPreferences";
 import type { DeviceSettingKey } from "../models/DeviceSettingDefaults";
 import type { Platform } from "../models";
+import { opaqueIntentKey } from "../daemon/sessionBroker/mutations/types";
 import type { DeviceMutationInput } from "../daemon/sessionBroker/mutations/types";
 import { isRecord } from "./pipeline/isRecord";
 import { KEYBOARD_READ_ACTIONS } from "./interactionToolTypes";
@@ -180,7 +181,7 @@ function mutationCallIsRead(
 
 function rotationMutations(args: Record<string, unknown>): ToolMutation[] {
   return typeof args.display === "number" && args.display !== 0
-    ? [mutation("opaque", `display:${args.display}`)]
+    ? [mutation("opaque", opaqueIntentKey("rotate", "display", args.display))]
     : [mutation("rotation")];
 }
 

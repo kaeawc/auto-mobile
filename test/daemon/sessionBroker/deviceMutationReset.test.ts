@@ -44,6 +44,28 @@ describe("device mutation reset contract", () => {
     await journal.captureBaseline(SCOPE, BASELINE);
   });
 
+  test("iOS shared revert refuses mutations under a different incarnation", async () => {
+    const scope = {
+      sessionUuid: SCOPE.sessionUuid,
+      deviceId: "ios-udid",
+      incarnation: JSON.stringify(["pool", 0, "ios-udid"]),
+    };
+    await journal.captureBaseline(scope, BASELINE);
+    await journal.record(
+      { ...scope, incarnation: JSON.stringify(["old-pool", 0, "ios-udid"]) },
+      CLIPBOARD,
+    );
+    expect(await revertDeviceMutations({ ...options, scope })).toEqual({
+      status: "non_clean",
+      reason: "non_revertible",
+      details: [
+        "journaled mutation clipboard:device (clipboard) recorded under a different incarnation",
+      ],
+    });
+    expect(port.captureCount).toBe(0);
+    expect(port.reverted).toEqual([]);
+  });
+
   test("an app installed outside tools is detected and generically uninstalled", async () => {
     port.snapshot.observations.push({
       kind: "installed-app",

@@ -30,7 +30,7 @@ class DirectoryLibraryImportTest {
 
   @Test
   fun stagedBundleCommitsIntoAppGeneratedLibraryIdentity() {
-    val entry = (commit.commit(bundle, LibrarySource.share) as LibraryResult.Success).value
+    val entry = (commit.commit(bundle, LibrarySource.share, null) as LibraryResult.Success).value
     assertEquals(FIRST, entry.libraryId)
     assertEquals(LibrarySource.share, entry.source)
     assertEquals(42L, entry.importedAt)
@@ -45,7 +45,7 @@ class DirectoryLibraryImportTest {
     files.failWrite = true
     assertEquals(
       LibraryResult.Failure(LibraryError.Storage),
-      commit.commit(bundle, LibrarySource.file),
+      commit.commit(bundle, LibrarySource.file, null),
     )
     assertTrue(metadata.documents.isEmpty())
     assertTrue(store.results.isEmpty())
@@ -73,7 +73,7 @@ class DirectoryLibraryImportTest {
       DirectoryLibraryImport(targetRepository, Path.of("/import"), files, IdGenerator { SECOND })
     assertEquals(
       LibraryResult.Failure(LibraryError.Storage),
-      target.commit(bundle, LibrarySource.file),
+      target.commit(bundle, LibrarySource.file, null),
     )
     assertTrue(store.results.isEmpty())
     assertTrue(files.documents.isEmpty())

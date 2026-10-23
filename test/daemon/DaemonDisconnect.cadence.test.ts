@@ -7,7 +7,10 @@ import type { Session } from "../../src/daemon/sessionManager";
 import type { VideoRecordingRecord } from "../../src/db/videoRecordingRepository";
 import type { DisconnectMonitorCadence } from "../../src/daemon/daemonCore/DaemonDisconnect";
 import type { BootedDevice } from "../../src/models";
-import type { BootedDeviceDiscovery } from "../../src/devices/deviceUtils";
+import type {
+  BootedDeviceDiscoveryOptions,
+  BootedDeviceDiscovery,
+} from "../../src/devices/deviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import { createPooledDevice, DaemonDisconnectHarness } from "./helpers/DaemonDisconnectHarness";
@@ -44,13 +47,17 @@ function monitor(
   let succeededPlatforms: Set<"android" | "ios"> | undefined;
   let extraDevices: BootedDevice[] = [];
   let offline = false;
+  let androidListedReads = 0;
   let recovered = 0;
+  const requests: BootedDeviceDiscoveryOptions[] = [];
   const scopes: ("ios" | "android" | "either" | undefined)[] = [];
   const manager = {
     getBootedDevicesDetailed: async (
       scope?: "ios" | "android" | "either",
+      options: BootedDeviceDiscoveryOptions = {},
     ): Promise<BootedDeviceDiscovery> => {
       scopes.push(scope);
+      requests.push(options);
       if (failDiscovery) {
         throw new Error("fake discovery failed");
       }
@@ -66,8 +73,10 @@ function monitor(
       };
     },
     getAndroidOfflineDeviceIds: async () => new Set<string>(),
-    getAndroidListedDeviceStates: async () =>
-      new Map<string, string>(offline ? [[pooled.id, "offline"]] : []),
+    getAndroidListedDeviceStates: async () => {
+      androidListedReads++;
+      return new Map<string, string>(offline ? [[pooled.id, "offline"]] : []);
+    },
     recoverAndroidOfflineDevices: async () => {
       recovered++;
     },
@@ -119,6 +128,8 @@ function monitor(
   return {
     tick,
     scopes,
+    requests,
+    androidListedReads: () => androidListedReads,
     recovered: () => recovered,
     setOffline: () => {
       offline = true;
@@ -322,10 +333,61 @@ describe("DaemonDisconnect adaptive discovery cadence", () => {
     },
   );
 
+  test.each(["ios", "android"] as const)(
+    "held %s session ignores an idle opposite-platform pool device until the full sweep",
+    async (platform) => {
+      const rig = monitor(undefined, platform);
+      const idle = createPooledDevice("idle-other", {
+        platform: platform === "ios" ? "android" : "ios",
+      });
+      rig.daemon.getDevicePool().getAllDevices = () => [rig.pooled, idle];
+      rig.setExtraDevices([{ platform: idle.platform, deviceId: idle.id, name: idle.name }]);
+      rig.holdSession();
+      try {
+        await rig.tick();
+        const androidReadsAfterFullSweep = rig.androidListedReads();
+        for (let tick = 0; tick < 5; tick++) {
+          await rig.tick();
+        }
+        if (platform === "ios") {
+          expect(rig.androidListedReads()).toBe(androidReadsAfterFullSweep);
+        }
+        await rig.tick();
+        expect(rig.scopes).toEqual([
+          "either",
+          platform,
+          platform,
+          platform,
+          platform,
+          platform,
+          "either",
+        ]);
+      } finally {
+        await rig.daemon.disconnectMonitor?.stop();
+      }
+    },
+  );
+
+  test("Android startup lease scopes watching beside an idle simulator", async () => {
+    const rig = monitor();
+    const idle = createPooledDevice("idle-sim", { platform: "ios" });
+    rig.daemon.getDevicePool().getAllDevices = () => [rig.pooled, idle];
+    rig.daemon.getDevicePool().isDeviceLeasedForAndroidStartup = (id) => id === rig.pooled.id;
+    rig.setExtraDevices([{ platform: "ios", deviceId: idle.id, name: idle.name }]);
+    try {
+      await rig.tick();
+      await rig.tick();
+      expect(rig.scopes).toEqual(["either", "android"]);
+    } finally {
+      await rig.daemon.disconnectMonitor?.stop();
+    }
+  });
+
   test("mixed session and pooled platforms always sweep either", async () => {
     const rig = monitor(undefined, "ios");
     try {
       rig.holdSession();
+      rig.pooled.status = "busy";
       rig.daemon.getSessionManager().getAllSessions()[0]!.platform = "android";
       await rig.tick();
       await rig.tick();
@@ -456,6 +518,13 @@ describe("DaemonDisconnect adaptive discovery cadence", () => {
       await rig.tick();
       expect(rig.recovered()).toBe(1);
       expect(rig.scopes).toEqual(["either", "android", "android", "android"]);
+      expect(rig.requests.map((request) => request.iosDeviceListMaxAgeMs)).toEqual([
+        15_000,
+        15_000,
+        undefined,
+        undefined,
+      ]);
+      expect(rig.requests[3]).not.toHaveProperty("iosDeviceListMaxAgeMs");
     } finally {
       await rig.daemon.disconnectMonitor?.stop();
     }

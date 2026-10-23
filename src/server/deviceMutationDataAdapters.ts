@@ -14,6 +14,13 @@ export function dataToolMutations(
     case "removeKeyValue":
     case "clearKeyValueFile":
       return keyValueMutations(name, args, platform);
+    case "deleteKeychainItem":
+      return [
+        {
+          kind: "preference",
+          key: JSON.stringify({ store: "keychain", appId: args.appId, selector: args.selector }),
+        },
+      ];
     case "setPreference":
       return preferenceMutations(args);
     case "sendBroadcast":
@@ -81,25 +88,39 @@ function opaqueDataToolMutations(
 ): ToolMutation[] | undefined {
   switch (name) {
     case "sqlQuery":
-      return [{ kind: "opaque", key: JSON.stringify(["sql", args.appId, args.databasePath]) }];
+      return [{ kind: "opaque", key: opaqueIntentKey("sql", args.appId, args.databasePath) }];
     case "mockNetwork":
     case "clearMockNetwork":
+      // NetworkState owns the host rules; networkStateSessionCleanup clears and pushes them on
+      // release. SDK rule stores use process memory only, so reset's reboot/app termination drops
+      // them. Accepted residual, not a journal concern: if that best-effort release push fails,
+      // times out or is skipped while an SDK app keeps running, stale rules last until the next
+      // sync or app restart, like other session-release cleanup. Keep this breadcrumb non-fallback.
       return [{ kind: "opaque", key: "network-mocks" }];
     case "phoneCall":
     case "sendSms":
-      return [{ kind: "opaque", key: `tool:${name}` }];
+      return [{ kind: "opaque", key: opaqueIntentKey(name) }];
     case "resetAppLogs":
       return Array.isArray(args.paths)
         ? args.paths.map((path) => ({
             kind: "opaque",
-            key: JSON.stringify(["app-logs", args.appId, args.container ?? "documents", path]),
+            key: opaqueIntentKey(
+              "resetAppLogs",
+              "app-logs",
+              args.appId,
+              args.container ?? "documents",
+              path,
+            ),
           }))
         : [];
     case "deviceSnapshot":
       return [
         {
           kind: "opaque",
-          key: JSON.stringify(["snapshot", args.action, args.snapshotName ?? null]),
+          key:
+            args.action === "restore"
+              ? opaqueIntentKey("deviceSnapshot", "restore", args.snapshotName)
+              : JSON.stringify(["snapshot", args.action, args.snapshotName ?? null]),
         },
       ];
     default:

@@ -11,12 +11,22 @@ import { logger } from "../../utils/logger";
 export const IOS_CLEAR_MAX_ATTEMPTS = 3;
 const clearBackoff = sequenceBackoff([100, 200]);
 
+/** WebKit page focus can remain unchanged while a native editor owns the keyboard. */
+function nativeEditableWasCleared(before?: FocusedTextField, after?: FocusedTextField): boolean {
+  return Object.entries(before?.nativeEditableValues ?? {}).some(
+    ([id, value]) => value !== "" && after?.nativeEditableValues?.[id] === "",
+  );
+}
+
 function classifyClearField(
   field: FocusedTextField | undefined,
   lastValue?: string,
   attempts = 1,
-  preClearValue?: string,
+  before?: FocusedTextField,
 ): TextActionResult | string {
+  if (nativeEditableWasCleared(before, field)) {
+    return { success: true };
+  }
   if (field?.secure) {
     return { success: true, warning: "iOS clear check skipped for a secure field." };
   }
@@ -34,18 +44,27 @@ function classifyClearField(
     };
   }
   if (field.value === lastValue) {
-    if (field.value !== "" && field.value === preClearValue) {
-      return {
-        success: false,
-        error: `iOS clear removed nothing after ${attempts} attempt(s): the runner acknowledged each clear, but the focused field still holds its pre-clear value; remaining value: ${JSON.stringify(field.value)}.`,
-      };
-    }
+    return classifyUnchangedClearValue(field.value, attempts, before?.value);
+  }
+
+  return field.value === "" ? { success: true } : field.value;
+}
+
+function classifyUnchangedClearValue(
+  value: string,
+  attempts: number,
+  preClearValue?: string,
+): TextActionResult {
+  if (value !== "" && value === preClearValue) {
     return {
-      success: true,
-      warning: `The field still holds ${JSON.stringify(field.value)} after the clear was acknowledged and retried; it may be a mask or permanent prefix at its cleared content, or the app may have refused the clear.`,
+      success: false,
+      error: `iOS clear removed nothing after ${attempts} attempt(s): the runner acknowledged each clear, but the focused field still holds its pre-clear value; remaining value: ${JSON.stringify(value)}.`,
     };
   }
-  return field.value === "" ? { success: true } : field.value;
+  return {
+    success: true,
+    warning: `The field still holds ${JSON.stringify(value)} after the clear was acknowledged and retried; it may be a mask or permanent prefix at its cleared content, or the app may have refused the clear.`,
+  };
 }
 
 /** Preserve the backoff admission check and re-check the live deadline after sleeping. */
@@ -108,7 +127,7 @@ export async function clearIosFieldWithVerification({
   if (before?.secure) {
     return { success: true, warning: "iOS clear check skipped for a secure field." };
   }
-  let remaining = classifyClearField(await read());
+  let remaining = classifyClearField(await read(), undefined, 1, before);
   let attempts = 1;
   while (typeof remaining === "string" && attempts < IOS_CLEAR_MAX_ATTEMPTS) {
     if (!(await waitForClearRetry(timer, attempts, requestSignal))) {
@@ -119,7 +138,7 @@ export async function clearIosFieldWithVerification({
     if (!result.success) {
       return { ...result, partialApplication: true };
     }
-    remaining = classifyClearField(await read(), remaining, attempts, before?.value);
+    remaining = classifyClearField(await read(), remaining, attempts, before);
   }
   return typeof remaining === "string"
     ? {

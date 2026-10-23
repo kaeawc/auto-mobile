@@ -51,6 +51,70 @@ function sameChain(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((id, index) => id === b[index]);
 }
 
+/** WebKit page focus does not identify a native browser input's keyboard focus. */
+function isInsideWebView(node: SearchableEntry, nodes: readonly SearchableEntry[]): boolean {
+  for (let parent = node.parentIndex; parent !== undefined; parent = nodes[parent].parentIndex) {
+    if (nodes[parent].className === "WKWebView") {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Expansion must enclose the compact target and exceed capture jitter in at least one axis. */
+function isExpandedFocusFrame(target: Element, candidate: Element): boolean {
+  const epsilon = ANDROID_PRE_TAP_BOUNDS_EPSILON_PX;
+  const before = target.bounds;
+  const after = candidate.bounds;
+  return (
+    after.left <= before.left + epsilon &&
+    after.top <= before.top + epsilon &&
+    after.right >= before.right - epsilon &&
+    after.bottom >= before.bottom - epsilon &&
+    (after.right - after.left > before.right - before.left + epsilon ||
+      after.bottom - after.top > before.bottom - before.top + epsilon)
+  );
+}
+
+/**
+ * Safari replaces its compact URL field with an expanded native editor without a focused flag.
+ * A sole native field of that class, expansion and non-conflicting labels identify the editor;
+ * another native field holding keyboard focus rules it out.
+ */
+function findSoleExpandedNativeFocusField(
+  target: Element,
+  nodes: readonly SearchableEntry[],
+  labelText?: string,
+): Element | undefined {
+  const nativeFields = distinctFocusFields(
+    nodes.filter(
+      (node) =>
+        node.element && isFocusEditableElement(node.properties) && !isInsideWebView(node, nodes),
+    ),
+  );
+  const candidates = nativeFields.filter((node) => node.className === target.class);
+  if (candidates.length !== 1) {
+    return undefined;
+  }
+  const candidate = candidates[0].element!;
+  if (
+    !isExpandedFocusFrame(target, candidate) ||
+    nativeFields.some(
+      (node) => node.element !== candidate && isElementKeyboardFocused(node.element!),
+    )
+  ) {
+    return undefined;
+  }
+  const targetLabel = labelText ?? target.text;
+  return typeof targetLabel === "string" &&
+    targetLabel.length > 0 &&
+    typeof candidate.text === "string" &&
+    candidate.text.length > 0 &&
+    targetLabel !== candidate.text
+    ? undefined
+    : candidate;
+}
+
 /** What the focus verifier needs from the owning tap action (kept narrow on purpose). */
 export interface FocusVerifierDeps {
   device: BootedDevice;
@@ -514,6 +578,12 @@ export class FocusVerifier {
       return true;
     }
     if (this.findSoleFocusedFieldAtTargetBounds(target, nodes, labelText)) {
+      return true;
+    }
+    if (
+      this.deps.device.platform === "ios" &&
+      findSoleExpandedNativeFocusField(target, nodes, labelText)
+    ) {
       return true;
     }
     if (!options.testTag && !(options.elementId && target["resource-id"])) {

@@ -81,3 +81,15 @@ test("settle never revives missing cleared or expired entries", () => {
   fences.settle("expired");
   expect(fences.isActive("expired")).toBe(false);
 });
+
+test("token-scoped settle preserves a newer hold and settles its own entry", () => {
+  const { timer, fences } = harness();
+  const first = fences.record("device");
+  const second = fences.record("device");
+  fences.settle("device", first);
+  timer.advanceTime(UNPOOLED_SHUTDOWN_FENCE_LIFETIME_MS);
+  expect(fences.isActive("device")).toBe(true);
+  fences.settle("device", second);
+  timer.advanceTime(UNPOOLED_SHUTDOWN_FENCE_LIFETIME_MS);
+  expect(fences.isActive("device")).toBe(false);
+});

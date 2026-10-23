@@ -1,3 +1,4 @@
+import { insertionWasFenced } from "./insertionFence";
 import { isErrored, holderOf } from "../deviceBinding";
 import { type BindDeviceRequest } from "../explicitDeviceBind";
 import { holderReleaseRemainingMs } from "../holderReleaseRemaining";
@@ -119,13 +120,17 @@ export class DevicePoolTargetDiscovery {
     shutdownMarker: number | undefined,
     shutdownReserved: boolean,
   ): boolean {
-    return (
-      removalFence.wasRemoved() ||
-      shutdownReserved ||
-      this.state.shutdownReservationCoordinator.isUnpooledShutdownFenced(deviceId) ||
-      this.state.shutdownReservationCoordinator.isDeviceUnderShutdown(deviceId) ||
-      shutdownMarker !== this.state.intentionalShutdowns.get(deviceId) ||
-      shutdownMarker !== undefined
+    return insertionWasFenced(
+      {
+        intentionalShutdowns: this.state.intentionalShutdowns,
+        isDeviceUnderShutdown: (id) =>
+          this.state.shutdownReservationCoordinator.isDeviceUnderShutdown(id),
+        isUnpooledShutdownFenced: (id) =>
+          this.state.shutdownReservationCoordinator.isUnpooledShutdownFenced(id),
+      },
+      deviceId,
+      removalFence,
+      { shutdownMarker, shutdownReserved },
     );
   }
 

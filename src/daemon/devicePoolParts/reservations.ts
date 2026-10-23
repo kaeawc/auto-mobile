@@ -16,6 +16,7 @@ import type { DevicePoolState } from "./state";
 
 export interface ReservationsOperations {
   clearUnpooledShutdown(deviceId: string): void;
+  fenceUnpooledShutdown(deviceId: string): () => void;
   settleUnpooledShutdown(deviceId: string): void;
   reserveDeviceForReadiness(
     deviceId: string,
@@ -180,6 +181,10 @@ export class DevicePoolReservations {
 
   clearUnpooledShutdown(deviceId: string): void {
     this.state.shutdownReservationCoordinator.clearUnpooledShutdown(deviceId);
+  }
+
+  fenceUnpooledShutdown(deviceId: string): () => void {
+    return this.state.shutdownReservationCoordinator.fenceUnpooledShutdown(deviceId);
   }
 
   settleUnpooledShutdown(deviceId: string): void {
@@ -410,6 +415,7 @@ export function connectReservations(
 ): ReservationsOperations {
   return {
     clearUnpooledShutdown: (...args) => part().clearUnpooledShutdown(...args),
+    fenceUnpooledShutdown: (...args) => part().fenceUnpooledShutdown(...args),
     settleUnpooledShutdown: (...args) => part().settleUnpooledShutdown(...args),
     reserveDeviceForReadiness: (...args) => seams.reserveDeviceForReadiness(...args),
     reserveRestartRecoveryReadiness: (...args) => seams.reserveRestartRecoveryReadiness(...args),

@@ -16,12 +16,11 @@ export class UnpooledShutdownFences {
     return token;
   }
 
-  /**
-   * Shorten a held fence to the discovery grace once its kill has finished. Not token-scoped:
-   * the per-device lifecycle lease serializes kills of one device until a late kill settles, so
-   * no second kill's fence can be replaced here.
-   */
-  settle(deviceId: string): void {
+  /** Settle only this owner when a token is supplied; legacy callers settle the current hold. */
+  settle(deviceId: string, token?: symbol): void {
+    if (token !== undefined && this.entries.get(deviceId)?.token !== token) {
+      return;
+    }
     const entry = this.isActive(deviceId) ? this.entries.get(deviceId) : undefined;
     if (entry) {
       entry.fenceEndsAt = this.now() + UNPOOLED_SHUTDOWN_FENCE_LIFETIME_MS;

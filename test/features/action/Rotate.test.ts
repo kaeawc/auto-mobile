@@ -323,6 +323,55 @@ describe("Rotate", () => {
       });
     }
 
+    test.each([false, true])(
+      "uses applied rotation after restore, lock=%s (#15024)",
+      async (locked) => {
+        const landscape = readFileSync(
+          join(
+            __dirname,
+            "..",
+            "observe",
+            "windowDumps",
+            "dumpsys-window-displays-nomirror-landscape.txt",
+          ),
+          "utf8",
+        );
+        // #15024 evidence: requested mRotation=1, applied 0 in line 7 after sensor restore.
+        const divergent = landscape.replace(
+          "mDisplayRotation=ROTATION_90",
+          "mDisplayRotation=ROTATION_0",
+        );
+        fakeAdb.setCommandResponseSequence("shell settings get system user_rotation", [
+          createExecResult("0"),
+          createExecResult("1"),
+        ]);
+        fakeAdb.setCommandResponse(
+          "shell settings get system accelerometer_rotation",
+          createExecResult(locked ? "0" : "1"),
+        );
+        scriptLandscapeRotation(() => {
+          fakeAdb.setCommandResponseSequence(liveCommand, [
+            createExecResult(locked ? landscape : divergent),
+          ]);
+        });
+        const result = await rotate.execute(
+          "landscape",
+          locked ? { lockOrientation: true } : undefined,
+        );
+        expect(result.success).toBe(locked);
+        expect(result.currentOrientation).toBe(locked ? "landscape" : "portrait");
+        if (!locked) {
+          expect(result.error).toContain("automatic rotation is on");
+          expect(fakeAdb.wasCommandExecuted("shell settings put system user_rotation 0")).toBe(
+            true,
+          );
+          expect(
+            fakeAdb.wasCommandExecuted("shell settings put system accelerometer_rotation 1"),
+          ).toBe(true);
+        }
+      },
+    );
+
     test("reports a direct auto-rotate reversion during post-action observation", async () => {
       let commandsAtObservation: string[] = [];
       let observationTime = 0;

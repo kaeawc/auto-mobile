@@ -5,6 +5,7 @@ import {
   SIMCTL_PUSH_PAYLOAD_LIMIT_BYTES,
   type IosPushPayloadOptions,
 } from "../../../src/features/utility/iosPushPayload";
+import { macOsOnlyTest } from "../../helpers/macOsHost";
 
 const BUNDLE = "com.example.App";
 
@@ -55,7 +56,7 @@ describe("buildIosPushPayload", () => {
     );
   });
 
-  test("an absolute host image path becomes a file URL", () => {
+  macOsOnlyTest("an absolute host image path becomes a file URL", () => {
     expect(parsed({ imagePath: "/tmp/images/a b.png" })[IOS_PUSH_IMAGE_URL_KEY]).toBe(
       "file:///tmp/images/a%20b.png",
     );

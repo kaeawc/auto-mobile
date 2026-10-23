@@ -1,3 +1,4 @@
+import { AdbCommandTimeoutError } from "./AdbCommandTimeoutError";
 import { errorMessage } from "../describeUnknownError";
 import type { FileSystem } from "../filesystem/DefaultFileSystem";
 import { ENV, readEnvRaw } from "../../config/env";
@@ -196,7 +197,12 @@ export interface AndroidEmulator {
   /** Resolve the AVD name from one runtime serial without scanning all devices. */
   resolveAvdNameForSerial(
     serial: string,
-    options: { signal?: AbortSignal; timeoutMs: number; consoleExclusiveOwner?: boolean },
+    options: {
+      signal?: AbortSignal;
+      timeoutMs: number;
+      consoleExclusiveOwner?: boolean;
+      throwOnTimeout?: boolean;
+    },
   ): Promise<string | undefined>;
 
   /**
@@ -780,9 +786,14 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
 
   async resolveAvdNameForSerial(
     serial: string,
-    options: { signal?: AbortSignal; timeoutMs: number; consoleExclusiveOwner?: boolean },
+    options: {
+      signal?: AbortSignal;
+      timeoutMs: number;
+      consoleExclusiveOwner?: boolean;
+      throwOnTimeout?: boolean;
+    },
   ): Promise<string | undefined> {
-    const { name } = await resolveRunningAvdNameOnce(
+    const result = await resolveRunningAvdNameOnce(
       {
         consoleBusyRegistry: this.consoleBusyRegistry,
         adbFactory: this.adbFactory,
@@ -793,7 +804,13 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       options.signal,
       options.consoleExclusiveOwner,
     );
-    return name || undefined;
+    // Reset retries need timeout evidence; inventory callers retain the unresolved-name result.
+    if (options.throwOnTimeout && result.nameProbeTimedOut) {
+      throw new AdbCommandTimeoutError(
+        `AVD name resolution timed out after ${options.timeoutMs}ms`,
+      );
+    }
+    return result.name || undefined;
   }
 
   private getRunningAVDName(

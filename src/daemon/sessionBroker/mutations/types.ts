@@ -64,6 +64,8 @@ export type DeviceStateObservation = DeviceBaseline["observations"][number];
 export interface DeviceMutationJournal {
   record(scope: DeviceMutationScope, mutation: DeviceMutationInput): Promise<void>;
   list(scope: DeviceMutationScope): Promise<readonly DeviceMutationEntry[]>;
+  /** Same device/session rows whose incarnation differs from the requested reset scope. */
+  listStrayIncarnations(scope: DeviceMutationScope): Promise<readonly DeviceMutationEntry[]>;
   deleteSession(scope: DeviceMutationScope): Promise<void>;
   captureBaseline(scope: DeviceIncarnationScope, baseline: DeviceBaseline): Promise<void>;
   getBaseline(scope: DeviceIncarnationScope): Promise<DeviceBaseline | null>;

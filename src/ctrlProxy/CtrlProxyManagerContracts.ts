@@ -72,6 +72,7 @@ export { CtrlProxyInspectionError } from "./CtrlProxyInspectionError";
 export {
   REBIND_BIND_WAIT_BUDGET_MS,
   REBIND_MUTATION_COMMAND_TIMEOUT_MS,
+  REBIND_MUTATION_COMMAND_TIMEOUT_MAX_MS,
 } from "./AndroidCtrlProxyRebind";
 
 export {

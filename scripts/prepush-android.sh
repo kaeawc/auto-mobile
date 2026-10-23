@@ -302,6 +302,9 @@ for module_path in "${modules[@]+"${modules[@]}"}"; do
   if [[ "${module_path}" == ":auto-mobile-sdk" || "${module_path}" == ":prototype-compose" ]]; then
     compile_tasks+=("${module_path}:apiCheck")
   fi
+  if [[ "${module_path}" == ":protoviewer" ]]; then
+    compile_tasks+=("${module_path}:verifyProtoViewerDependencies")
+  fi
   if [[ -d "${module_dir}/src/test" ]]; then
     test_tasks+=("${module_path}:test")
   fi

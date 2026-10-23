@@ -1258,7 +1258,7 @@ jobs:
 
       - uses: ./.github/actions/gradle-task-run
         with:
-          gradle-tasks: ":junit-runner:test :junit-runner:jacocoTestReport :control-proxy:testDebugUnitTest :control-proxy:createDebugUnitTestCoverageReport :prototype-compose:testDebugUnitTest :prototype-compose:createDebugUnitTestCoverageReport :prototype-saved:testDebugUnitTest :prototype-saved:createDebugUnitTestCoverageReport :auto-mobile-sdk:testDebugUnitTest :auto-mobile-sdk:createDebugUnitTestCoverageReport :test-plan-validation:test :test-plan-validation:jacocoTestReport :protocol:test :protocol:jacocoTestReport :video-server:test"
+          gradle-tasks: ":junit-runner:test :junit-runner:jacocoTestReport :control-proxy:testDebugUnitTest :control-proxy:createDebugUnitTestCoverageReport :prototype-compose:testDebugUnitTest :prototype-compose:createDebugUnitTestCoverageReport :prototype-saved:testDebugUnitTest :prototype-saved:createDebugUnitTestCoverageReport :protoviewer:testDebugUnitTest :protoviewer:createDebugUnitTestCoverageReport :protoviewer:verifyProtoViewerDependencies :auto-mobile-sdk:testDebugUnitTest :auto-mobile-sdk:createDebugUnitTestCoverageReport :test-plan-validation:test :test-plan-validation:jacocoTestReport :protocol:test :protocol:jacocoTestReport :video-server:test"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           reuse-configuration-cache: true

@@ -57,6 +57,26 @@ describe("Lifecycle journal intents (#14359)", () => {
     ]);
   });
 
+  test("keepData uninstall retains its fallback even for a session-installed app", async () => {
+    const rows = deviceToolMutations("uninstallApp", { appId: "a.b", keepData: true }, "android");
+    expect(rows).toEqual([
+      { kind: "installed-app", key: "a.b" },
+      { kind: "opaque", key: opaqueIntentKey("uninstallApp", "a.b", true) },
+    ]);
+    expect(
+      await withoutSessionCoveredFallbacks(
+        rows,
+        evidence({ installed: ["a.b"], baselineApps: [] }),
+      ),
+    ).toEqual(rows);
+    expect(
+      await withoutSessionCoveredFallbacks(
+        deviceToolMutations("uninstallApp", { appId: "a.b", keepData: false }, "android"),
+        evidence({ installed: ["a.b"], baselineApps: [] }),
+      ),
+    ).toEqual([{ kind: "installed-app", key: "a.b" }]);
+  });
+
   test("uninstallApp records the installed-app row and the fallback", () => {
     expect(deviceToolMutations("uninstallApp", { appId: "a.b" }, "ios")).toEqual([
       { kind: "installed-app", key: "a.b" },

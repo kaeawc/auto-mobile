@@ -46,8 +46,9 @@ import {
 } from "../helpers/livenessScenarioHarness";
 
 // The two-sided liveness scenario matrix (#10667, umbrella #10655). Every row asserts BOTH
-// sides on the same scenario, driven by the real producers (the stdio proxy's own keeper, tool
-// calls through the proxy, tokenless desktop heartbeats) on a FakeTimer:
+// sides on the same scenario (the #10656 pair below is split in two rows, one per side, to stay
+// inside the 100 ms unit budget, #15059), driven by the real producers (the stdio proxy's own
+// keeper, tool calls through the proxy, tokenless desktop heartbeats) on a FakeTimer:
 //
 //   held      the device stays with its session for as long as the policy says
 //   released  and is freed, with the right reason, within the policy's bound afterwards
@@ -216,23 +217,45 @@ function expectFreed(deviceId?: string): void {
 }
 
 describe("live stdio proxy", () => {
-  test("tool calls inside the window hold the device the whole time; the last call's window then frees it as idle (#10656)", async () => {
+  test("tool calls inside the window hold the device across consecutive idle windows (#10656)", async () => {
     scenario = await LivenessScenario.start();
+    const acquiredAt = scenario.timer.now();
     const session = await scenario.acquire();
 
-    // Held side: a call every 110 s keeps the session across three idle windows.
-    const callEvery = IDLE_WINDOW_MS - 10_000;
-    for (let call = 0; call < 3; call++) {
-      expect(await scenario.idleWhileHeld(session, scenario.timer.now() + callEvery, 30_000)).toBe(
+    // Held side: calls at 10 s and 70 s, then held at 150 s. No renewal frees the session by
+    // 128 s (window + slack) and a clock renewed only by the first call by 138 s, so holding at
+    // 150 s needs the second call's renewal; the next deadline is 190 s. Every 2 s keeper tick is
+    // a timer event, so this short span keeps the row inside the 100 ms unit budget on slow CI.
+    for (const [until, step] of [
+      [10_000, 10_000],
+      [60_000, 30_000],
+    ] as const) {
+      expect(await scenario.idleWhileHeld(session, scenario.timer.now() + until, step)).toBe(
         undefined,
       );
       expectHeld(session);
       await scenario.toolCall(session);
     }
+    expect(await scenario.idleWhileHeld(session, acquiredAt + 150_000, 30_000)).toBe(undefined);
+    expectHeld(session);
+    expect(scenario.reaped).toEqual([]);
+  });
+
+  test("the last call's own window, not the acquisition's, frees it as idle (#10656)", async () => {
+    scenario = await LivenessScenario.start();
+    const acquiredAt = scenario.timer.now();
+    const session = await scenario.acquire();
+
+    // One call 30 s in is enough: the acquisition's own window (plus every release slack) would
+    // have ended by 128 s, 22 s before the call's window can, so the release time tells them apart.
+    expect(await scenario.idleWhileHeld(session, acquiredAt + 30_000, 30_000)).toBe(undefined);
+    expectHeld(session);
+    await scenario.toolCall(session);
     const lastCallAt = scenario.timer.now();
 
-    // Released side: only the last call's own window frees it, and as an idle expiry.
+    // Released side: the last call resets the idle window beyond acquisition's deadline.
     const releasedAt = await scenario.idleUntilReleased(session, IDLE_WINDOW_MS + RELEASE_SLACK_MS);
+    expect(releasedAt).toBeGreaterThan(acquiredAt + IDLE_WINDOW_MS + RELEASE_SLACK_MS);
     expect(releasedAt).toBeGreaterThan(lastCallAt + IDLE_WINDOW_MS);
     expect(releasedAt).toBeLessThanOrEqual(lastCallAt + IDLE_WINDOW_MS + RELEASE_SLACK_MS);
     expect(IDLE_REASONS).toContain(scenario.releaseOf(session)?.reason!);

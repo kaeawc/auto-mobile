@@ -28,6 +28,8 @@ export class FakePowerAdb extends FakeAdbExecutor implements AdbExecutor {
   private awake = true;
   /** Commands (joined argv) containing any of these substrings fail with a device error. */
   failing = new Set<string>();
+  /** Commands containing these substrings succeed without changing state. */
+  ignoring = new Set<string>();
   /** Keep a command failing only this many more times (default: forever). */
   failTimes = new Map<string, number>();
 
@@ -49,6 +51,9 @@ export class FakePowerAdb extends FakeAdbExecutor implements AdbExecutor {
           return createExecResult(`Exception: simulated failure of ${pattern}\n`, "");
         }
       }
+    }
+    if ([...this.ignoring].some((pattern) => command.includes(pattern))) {
+      return createExecResult("", "");
     }
     return createExecResult(this.run(args.slice(1)), "");
   }
@@ -174,6 +179,9 @@ export class FakePowerAdb extends FakeAdbExecutor implements AdbExecutor {
   private runSettings(sub: string | undefined, rest: string[]): string {
     if (sub === "get") {
       return `${this.lowPower}\n`;
+    }
+    if (sub === "delete") {
+      this.lowPower = "null";
     }
     if (sub === "put") {
       const charging = this.battery.ac || this.battery.usb || this.battery.wireless;

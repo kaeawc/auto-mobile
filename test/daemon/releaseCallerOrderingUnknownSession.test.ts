@@ -116,7 +116,12 @@ describe("unknown-session release caller ordering", () => {
     const h = harness({ device: null });
     expect(await h.release()).toEqual({
       success: true,
-      result: { message: "Session s1 already released or never existed", alreadyReleased: true },
+      result: {
+        message:
+          "Session s1 is not known to this daemon (never issued, or its release record expired); nothing was released",
+        alreadyReleased: false,
+        known: false,
+      },
     });
     expect(h.events).toEqual([...lookup, release, ...lookup]);
   });

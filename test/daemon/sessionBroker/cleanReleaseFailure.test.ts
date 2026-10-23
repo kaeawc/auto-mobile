@@ -1,3 +1,6 @@
+import { ResetCapacityWaitExceededError } from "../../../src/models/ResetCapacityWaitExceededError";
+import { BootCapacityExhaustedError } from "../../../src/models/BootCapacityExhaustedError";
+import { SimctlCommandTimeoutError } from "../../../src/utils/ios-cmdline-tools/SimctlCommandTimeoutError";
 import { expect, test } from "bun:test";
 import { classifyCleanReleaseError } from "../../../src/daemon/sessionBroker/cleanReleaseFailure";
 import { drainFailureOutcome } from "../../../src/daemon/sessionBroker/brokerSupport";
@@ -44,4 +47,33 @@ test.each([
 ] as const)("%s keeps the unknown failure outcome", (_description, error) => {
   expect(classifyCleanReleaseError(error)).toBe("unknown");
   expect(drainFailureOutcome(error, "sess", false)).toBe("destroy");
+});
+
+test("bounded reset capacity wait destroys while ordinary capacity remains pending", () => {
+  const cause = new BootCapacityExhaustedError(
+    { platform: "ios", limit: 2, booted: 2, retryAfterMs: 1000 },
+    "full",
+  );
+  const error = new ResetCapacityWaitExceededError("device", 60_000, cause);
+  expect(drainFailureOutcome(error, "sess", false)).toBe("destroy");
+  expect(drainFailureOutcome(error, "sess", true)).toBe("destroy");
+  expect(drainFailureOutcome(cause, "sess", false)).toBe("pending");
+});
+
+test("native timeout before reset is still pending", () => {
+  expect(drainFailureOutcome(new SimctlCommandTimeoutError("timeout"), "sess", false)).toBe(
+    "pending",
+  );
+});
+
+test("terminal capacity error omits the external-owner sentence when none are reported", () => {
+  const cause = new BootCapacityExhaustedError(
+    { platform: "ios", limit: 1, booted: 1, retryAfterMs: 1000 },
+    "full",
+  );
+  const error = new ResetCapacityWaitExceededError("device", 60_000, cause);
+  expect(error).toBeInstanceOf(ActionableError);
+  expect(error.message).not.toContain("no AutoMobile owner");
+  expect(error.message).toContain("AUTOMOBILE_IOS_SIM_MAX_BOOTED");
+  expect(error.message).toContain("xcrun simctl shutdown <udid>");
 });

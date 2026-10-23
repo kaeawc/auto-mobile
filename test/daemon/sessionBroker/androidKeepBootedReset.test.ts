@@ -702,6 +702,39 @@ describe("Android keep-booted strategy", () => {
     expect(fallbacks).toBe(1);
   });
 
+  test("a failed power-control revert escalates to the baseline fallback (#15110)", async () => {
+    let fallbacks = 0;
+    const { journal, port, reset } = await rig({
+      fallback: {
+        reset: async () => {
+          fallbacks++;
+        },
+      },
+    });
+    await journal.record(SCOPE, {
+      kind: "device-setting",
+      key: "power:doze",
+      priorValue: { state: "present", value: "off" },
+      toolName: "setDeviceState",
+    });
+    port.beforeWrite = async () => {
+      throw new Error("could not confirm power:doze was restored");
+    };
+    const outcome = await reset();
+    expect(outcome.outcome).toBe("fallback:snapshot");
+    expect(outcome.fallbackReason).toContain("could not confirm power:doze");
+    expect(fallbacks).toBe(1);
+  });
+
+  test("a failed non-critical settings revert is still left to the baseline clean", async () => {
+    const { journal, port, reset } = await rig();
+    await journal.record(SCOPE, SETTING);
+    port.beforeWrite = async () => {
+      throw new Error("settings write failed");
+    };
+    expect((await reset()).outcome).not.toContain("fallback");
+  });
+
   test("failed baseline fallback propagates rather than returning clean", async () => {
     const { reset } = await rig({
       maxUses: 1,

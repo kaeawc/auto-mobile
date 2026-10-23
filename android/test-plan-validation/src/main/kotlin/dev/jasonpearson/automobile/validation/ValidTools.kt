@@ -90,6 +90,7 @@ object ValidTools {
         "systemTray",
         "tapOn",
         "deleteDevice",
+        "deleteKeychainItem",
         "terminateApp",
         "uninstallApp",
         "videoRecording",

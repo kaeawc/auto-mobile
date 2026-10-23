@@ -35,6 +35,48 @@ describe("CtrlProxyStorage (iOS)", function () {
     IOSCtrlProxyClient.resetInstances();
   });
 
+  test("deletes through the facade with exact selector and mutation credentials", async () => {
+    const { factory, getSocket } = createCapturingFactory(fakeTimer);
+    const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+    const selector = {
+      itemClass: "genericPassword",
+      service: "test.service",
+      account: "fixture",
+      accessGroup: "TEAM.app",
+    };
+    client.bindSession("session-1");
+    iosMutationTokens.set(testDevice.deviceId, "com.example.app", "launch-token");
+    try {
+      const pending = client.deleteKeychainItemForIos("com.example.app", selector, true);
+      const socket = await waitForSocket(getSocket);
+      await waitForSocketOpen(socket);
+      await waitForSentMessages(socket!, 1);
+      const sent = commandPayloads(socket!)[0];
+      expect(sent).toMatchObject({
+        type: "delete_keychain_item",
+        appId: "com.example.app",
+        selector,
+        confirm: true,
+        sessionId: "session-1",
+        mutationToken: "launch-token",
+        timeoutMs: 5000,
+      });
+      socket!.simulateMessage(
+        JSON.stringify({
+          type: "delete_keychain_item_result",
+          requestId: sent.requestId,
+          success: false,
+          outcome: "scope_not_authorized",
+          totalTimeMs: 1,
+        }),
+      );
+      expect(await pending).toEqual({ outcome: "scope_not_authorized", deletedScope: null });
+    } finally {
+      iosMutationTokens.clear(testDevice.deviceId, "com.example.app");
+      await client.close();
+    }
+  });
+
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------

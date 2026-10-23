@@ -73,6 +73,7 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationTool
       "setPosture",
       "setUIState",
       "clearKeyValueFile",
+      "deleteKeychainItem",
       "clearMockNetwork",
       "mockNetwork",
       "phoneCall",

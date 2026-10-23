@@ -98,6 +98,15 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
   return { requestId, result: message };
 }
 
+function decodeKeychainDeleteResult(message: WebSocketMessage) {
+  return {
+    success: message.success === true,
+    totalTimeMs: message.totalTimeMs ?? 0,
+    outcome: typeof message.outcome === "string" ? message.outcome : "sdk_unavailable",
+    deletedScope: message.deletedScope ?? null,
+  };
+}
+
 function decodeRunnerBusy(message: WebSocketMessage, requestId: string): DecodedCtrlProxyMessage {
   const blockingType =
     typeof message.blockingCommandType === "string" && message.blockingCommandType.length > 0
@@ -591,6 +600,7 @@ const messageDecoders = new Map<
   ["set_preference_result", decodeSetPreferenceResult],
   ["remove_preference_result", decodeSetPreferenceResult],
   ["clear_preferences_result", decodeSetPreferenceResult],
+  ["delete_keychain_item_result", decodeKeychainDeleteResult],
   ["set_network_mock_rules_result", decodeSetNetworkMockRulesResult],
   ["set_network_fault_rules_result", decodeSetNetworkFaultRulesResult],
   ["set_network_error_simulation_result", decodeSetNetworkFaultRulesResult],

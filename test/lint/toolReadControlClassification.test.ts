@@ -128,6 +128,7 @@ const CLASSIFICATION: Classification = {
     "biometricAuth",
     "changeLocalization",
     "clearKeyValueFile",
+    "deleteKeychainItem",
     "clearMockNetwork",
     "crashApp",
     "criticalSection",

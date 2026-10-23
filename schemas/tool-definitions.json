@@ -2609,6 +2609,118 @@
     }
   },
   {
+    "name": "deleteKeychainItem",
+    "title": "Delete Keychain Item",
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": true
+    },
+    "description": "Delete one exact, host-allowlisted, app-owned iOS generic-password Keychain item. Requires SDK opt-in, mutation authorization and explicit confirmation; never exports values.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "selector": {
+          "type": "object",
+          "properties": {
+            "itemClass": {
+              "type": "string",
+              "minLength": 1
+            },
+            "service": {
+              "type": "string",
+              "minLength": 1
+            },
+            "account": {
+              "type": "string",
+              "minLength": 1
+            },
+            "accessGroup": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": ["itemClass", "service", "account", "accessGroup"],
+          "additionalProperties": false
+        },
+        "confirm": {
+          "description": "Explicit confirmation to delete this exact Keychain item",
+          "type": "boolean",
+          "const": true
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["appId", "selector", "confirm"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "appId": {
+          "type": "string"
+        },
+        "outcome": {
+          "type": "string"
+        },
+        "deletedScope": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "itemClass": {
+                  "type": "string"
+                },
+                "service": {
+                  "type": "string"
+                },
+                "account": {
+                  "type": "string"
+                },
+                "accessGroup": {
+                  "type": "string"
+                }
+              },
+              "required": ["itemClass", "service", "account", "accessGroup"],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": ["appId", "outcome", "deletedScope"],
+      "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/embeddedSdkOnly": true
+    }
+  },
+  {
     "name": "deviceSnapshot",
     "title": "Manage Snapshot",
     "annotations": {
@@ -4511,6 +4623,7 @@
               "compareScreenshot",
               "crashApp",
               "deleteDevice",
+              "deleteKeychainItem",
               "deviceSnapshot",
               "displayConfig",
               "displayProfile",
@@ -4666,6 +4779,7 @@
               "compareScreenshot",
               "crashApp",
               "deleteDevice",
+              "deleteKeychainItem",
               "deviceSnapshot",
               "displayConfig",
               "displayProfile",
@@ -25701,6 +25815,7 @@
               "compareScreenshot",
               "crashApp",
               "deleteDevice",
+              "deleteKeychainItem",
               "deviceSnapshot",
               "displayConfig",
               "displayProfile",
@@ -33516,6 +33631,7 @@
             "compareScreenshot",
             "crashApp",
             "deleteDevice",
+            "deleteKeychainItem",
             "deviceSnapshot",
             "displayConfig",
             "displayProfile",
@@ -33633,6 +33749,7 @@
               "compareScreenshot",
               "crashApp",
               "deleteDevice",
+              "deleteKeychainItem",
               "deviceSnapshot",
               "displayConfig",
               "displayProfile",

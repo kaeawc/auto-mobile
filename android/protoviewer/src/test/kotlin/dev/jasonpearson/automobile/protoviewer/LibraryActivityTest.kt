@@ -24,12 +24,16 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.android.controller.ActivityController
 import org.robolectric.shadows.ShadowAppTask
 
+private const val DENIED_TEXT =
+  "Local-network permission denied. Network access is off. Enable the switch to request permission again."
+
 @RunWith(RobolectricTestRunner::class)
 class LibraryActivityTest {
   @get:Rule val compose = createComposeRule()
   private val repository = FakeLibraryRepository()
   private val settings = FakeSettingsStore()
   private val permission = FakeLocalNetworkPermission()
+  private val grant = FakeLocalNetworkGrant()
   private val exports = FakeExportFiles()
   private val sharer = CanonicalLibrarySharer(repository, exports, IdGenerator { SECOND })
   private var controller: ActivityController<LibraryActivity>? = null
@@ -44,6 +48,7 @@ class LibraryActivityTest {
         LibraryClock { 42 },
         settings = settings,
         localNetworkPermission = { _, result -> permission.apply { this.result = result } },
+        localNetworkGrant = grant,
         sharer = sharer,
       )
     }
@@ -95,6 +100,37 @@ class LibraryActivityTest {
         "Local-network permission denied. Network access is off. Enable the switch to request permission again.",
       )
       .assertDoesNotExist()
+  }
+
+  @Test
+  fun revokedPermissionAtStartTurnsSwitchOffAndExplainsDenial() {
+    settings.setAllowNetwork(true)
+    grant.granted = false
+    launch()
+    compose.onNodeWithTag("allow-network").assertIsOff()
+    assertFalse(settings.allowNetwork.value)
+    compose.onNodeWithText(DENIED_TEXT).assertIsDisplayed()
+  }
+
+  @Test
+  fun revokedPermissionDetectedOnResumeTurnsSwitchOff() {
+    settings.setAllowNetwork(true)
+    launch()
+    compose.onNodeWithTag("allow-network").assertIsOn()
+    grant.granted = false
+    compose.runOnIdle { controller?.pause()?.resume() }
+    compose.onNodeWithTag("allow-network").assertIsOff()
+    assertFalse(settings.allowNetwork.value)
+    compose.onNodeWithText(DENIED_TEXT).assertIsDisplayed()
+  }
+
+  @Test
+  fun grantedPermissionKeepsSwitchOn() {
+    settings.setAllowNetwork(true)
+    launch()
+    compose.onNodeWithTag("allow-network").assertIsOn()
+    assertTrue(settings.allowNetwork.value)
+    compose.onNodeWithText(DENIED_TEXT).assertDoesNotExist()
   }
 
   @Test

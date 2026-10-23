@@ -1,9 +1,21 @@
 package dev.jasonpearson.automobile.protoviewer
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.InternalComposeUiApi
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.node.RootForTest
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
@@ -107,6 +119,68 @@ class ViewerWatchdogTest {
   }
 
   @Test
+  fun layoutFailureShowsCorruptWithBackInsteadOfCrashing() {
+    renderer.layoutError = IllegalStateException("Broken spec layout")
+    val activity = launch()
+    assertCorruptWithWorkingBack(activity)
+  }
+
+  @Test
+  fun drawFailureShowsCorruptWithBackInsteadOfCrashing() {
+    renderer.drawError = IllegalStateException("Broken spec draw")
+    val activity = launch()
+    drawHierarchy(activity)
+    assertCorruptWithWorkingBack(activity)
+  }
+
+  @Test
+  fun stackOverflowDuringCompositionShowsCorruptWithBack() {
+    renderer.compositionError = StackOverflowError()
+    val activity = launch()
+    assertCorruptWithWorkingBack(activity)
+  }
+
+  @Test
+  fun stackOverflowDuringLayoutShowsCorruptWithBack() {
+    renderer.layoutError = StackOverflowError()
+    val activity = launch()
+    assertCorruptWithWorkingBack(activity)
+  }
+
+  @Test
+  fun stackOverflowDuringDrawShowsCorruptWithBack() {
+    renderer.drawError = StackOverflowError()
+    val activity = launch()
+    drawHierarchy(activity)
+    assertCorruptWithWorkingBack(activity)
+  }
+
+  @Test
+  fun laterLayoutFailureRemovesSpecAndShowsBack() {
+    launch()
+    compose.onNodeWithText("Prototype content").assertIsDisplayed()
+    compose.runOnIdle { renderer.layoutError = IllegalStateException("Broken spec layout") }
+    compose.onNodeWithText("This prototype could not be opened.").assertIsDisplayed()
+    compose.onNodeWithText("Prototype content").assertDoesNotExist()
+    compose.onNodeWithText("Back").assertIsDisplayed()
+  }
+
+  // Robolectric never runs a draw pass on its own; force the traversal's draw of the window.
+  private fun drawHierarchy(activity: ViewerActivity) {
+    compose.runOnIdle {
+      activity.window.decorView.draw(Canvas(Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)))
+    }
+  }
+
+  private fun assertCorruptWithWorkingBack(activity: ViewerActivity) {
+    compose.onNodeWithText("This prototype could not be opened.").assertIsDisplayed()
+    compose.onNodeWithText("Prototype content").assertDoesNotExist()
+    assertTrue(timer.tasks.all { it.cancelled })
+    compose.onNodeWithText("Back").performClick()
+    assertTrue(activity.isFinishing)
+  }
+
+  @Test
   fun lateLibraryLoadCannotResurrectExpiredRender() {
     val pendingIo = StandardTestDispatcher()
     io = pendingIo
@@ -143,6 +217,9 @@ class ViewerWatchdogTest {
 private class FakeViewerRenderer : ViewerRenderer {
   var waitForever = false
   var throwDuringComposition by mutableStateOf(false)
+  var compositionError: Throwable? by mutableStateOf(null)
+  var layoutError: Throwable? by mutableStateOf(null)
+  var drawError: Throwable? by mutableStateOf(null)
   var failures = 0
 
   @androidx.compose.runtime.Composable
@@ -156,9 +233,34 @@ private class FakeViewerRenderer : ViewerRenderer {
           if (throwDuringComposition) {
             failures++
             error("Broken spec composition")
-          } else content()
+          }
+          compositionError?.let { throw it }
+          ReleaseTestExceptionHandler()
+          Box(
+            Modifier.fillMaxSize()
+              .layout { measurable, constraints ->
+                layoutError?.let { throw it }
+                val placeable = measurable.measure(constraints)
+                layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+              }
+              .drawBehind { drawError?.let { throw it } },
+          ) {
+            content()
+          }
         },
         onFailure = onFailure,
       )
   }
+}
+
+/**
+ * The Compose test rule installs an uncaught-exception handler on every registered root, which
+ * swallows measure failures before they reach the view traversal. Production roots have none, so
+ * remove it from the isolated spec root to exercise the real view-level guard.
+ */
+@Composable
+@OptIn(InternalComposeUiApi::class)
+private fun ReleaseTestExceptionHandler() {
+  val root = LocalView.current as? RootForTest
+  SideEffect { root?.setUncaughtExceptionHandler(null) }
 }

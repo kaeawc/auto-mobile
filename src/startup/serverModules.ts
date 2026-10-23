@@ -60,6 +60,8 @@ export async function loadServerModules(onLoggerLoaded: (logger: LoadedLogger) =
     startDeviceSnapshotSocketServer: deviceSnapshotSocketServer.startDeviceSnapshotSocketServer,
     stopDeviceSnapshotSocketServer: deviceSnapshotSocketServer.stopDeviceSnapshotSocketServer,
     startAppearanceSocketServer: appearanceSocketServer.startAppearanceSocketServer,
+    createDirectModeAppearanceDeviceSource:
+      appearanceSocketServer.createDirectModeAppearanceDeviceSource,
     stopAppearanceSocketServer: appearanceSocketServer.stopAppearanceSocketServer,
     startWebRtcStreamSocketServer: webrtcStreamSocketServer.startWebRtcStreamSocketServer,
     stopWebRtcStreamSocketServer: webrtcStreamSocketServer.stopWebRtcStreamSocketServer,

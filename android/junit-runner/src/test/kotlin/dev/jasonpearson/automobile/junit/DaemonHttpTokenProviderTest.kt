@@ -12,9 +12,11 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.attribute.PosixFilePermissions
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -47,8 +49,74 @@ class DaemonHttpTokenProviderTest {
       val fields = vector.jsonObject
       val url = fields.getValue("url").jsonPrimitive.content
       val daemon = fields.getValue("daemon").jsonPrimitive.content.toBooleanStrict()
-      assertEndpointAuthentication(url, daemon)
+      val discoveredPort = fields.getValue("discoveredPort").jsonPrimitive.intOrNull
+      runCatching { URL(url) }
+        .getOrNull()
+        ?.let { assertEquals(daemon, isDaemonHttpEndpoint(it, discoveredPort), url) }
+      assertEndpointAuthentication(url, daemon, discoveredPort)
     }
+  }
+
+  @Test
+  fun `the credential follows the discovered port at request time`() {
+    val url = "http://localhost:3161/heartbeat"
+    assertEndpointAuthentication(url, daemon = true, discoveredPort = 3161)
+    // The daemon restarted on a new port: the same URL is no longer the daemon.
+    assertEndpointAuthentication(url, daemon = false, discoveredPort = 4000)
+    assertEndpointAuthentication(url, daemon = true, discoveredPort = null)
+  }
+
+  @Test
+  fun `port mismatch missing port and non daemon route withhold the credential`() {
+    val heartbeat = URL("http://localhost:3161/heartbeat")
+    assertTrue(isDaemonHttpEndpoint(heartbeat, 3161))
+    assertTrue(isDaemonHttpEndpoint(heartbeat, null))
+    assertFalse(isDaemonHttpEndpoint(heartbeat, 3162))
+    assertFalse(isDaemonHttpEndpoint(URL("http://localhost/heartbeat"), 3161))
+    assertFalse(isDaemonHttpEndpoint(URL("http://localhost/heartbeat"), null))
+    assertFalse(isDaemonHttpEndpoint(URL("http://localhost:80/other"), null))
+    assertFalse(isDaemonHttpEndpoint(URL("http://localhost:3161/mcp"), 3161))
+    assertTrue(isDaemonHttpEndpoint(URL("http://localhost:80/heartbeat"), 80))
+  }
+
+  @Test
+  fun `the provider reads the port from the isolation aware PID file path on every call`() {
+    assertEquals(3161, reader.discoveredPort())
+    files.pidContent = """{"pid":1,"port":4000}"""
+    assertEquals(4000, reader.discoveredPort())
+    env["AUTOMOBILE_AUX_SOCKET_DIR"] = Path.of("lane", "aux").toAbsolutePath().toString()
+    reader.discoveredPort()
+    val suffix = DaemonStatePaths.isolationSuffix(env::get, "/launch")
+    assertEquals(
+      listOf(
+        "/tmp/auto-mobile-daemon-501.pid",
+        "/tmp/auto-mobile-daemon-501.pid",
+        "/tmp/auto-mobile-daemon-501$suffix.pid",
+      ),
+      files.pidPaths,
+    )
+  }
+
+  @Test
+  fun `an unreadable or invalid PID file leaves the port unverifiable without logging contents`() {
+    fun port(text: String?, failure: Exception? = null) =
+      readDaemonPidPort(
+        pidPath = { "/pid" },
+        readText = {
+          failure?.let { throw it }
+          text
+        },
+        logUnavailable = logs::add,
+      )
+    assertNull(port(null))
+    assertNull(port("""{"pid":1}"""))
+    assertNull(port("""{"port":"secret"}"""))
+    assertNull(port("""{"port":0}"""))
+    assertNull(port("""{"port":70000}"""))
+    assertEquals(0, logs.size)
+    assertNull(port("not json secret"))
+    assertNull(port(null, IOException("secret")))
+    assertEquals(List(2) { "Daemon PID file port unavailable" }, logs)
   }
 
   @Test
@@ -62,7 +130,7 @@ class DaemonHttpTokenProviderTest {
       val endpoint =
         URL(
           null,
-          "http://localhost/heartbeat",
+          "http://localhost:3161/heartbeat",
           object : URLStreamHandler() {
             override fun openConnection(endpoint: URL): URLConnection =
               HeartbeatConnection(endpoint, if (connections.isEmpty() || repeated) 503 else 200)
@@ -105,7 +173,7 @@ class DaemonHttpTokenProviderTest {
     val endpoint =
       URL(
         null,
-        "http://localhost/heartbeat",
+        "http://localhost:3161/heartbeat",
         object : URLStreamHandler() {
           override fun openConnection(endpoint: URL): URLConnection {
             connections++
@@ -127,7 +195,7 @@ class DaemonHttpTokenProviderTest {
     assertEquals(1, connections)
   }
 
-  private fun assertEndpointAuthentication(url: String, daemon: Boolean) {
+  private fun assertEndpointAuthentication(url: String, daemon: Boolean, discoveredPort: Int?) {
     var reads = 0
     val connections = mutableListOf<HeartbeatConnection>()
     val endpoint =
@@ -146,9 +214,13 @@ class DaemonHttpTokenProviderTest {
         endpoint,
         "session",
         "owner",
-        DaemonHttpTokenProvider {
-          reads++
-          "local"
+        object : DaemonHttpTokenProvider {
+          override fun read(): String {
+            reads++
+            return "local"
+          }
+
+          override fun discoveredPort() = discoveredPort
         },
       )
     }
@@ -338,8 +410,15 @@ class DaemonHttpTokenProviderTest {
 
   private class FakeTokenFiles : DaemonHttpTokenFiles {
     val paths = mutableListOf<String>()
+    val pidPaths = mutableListOf<String>()
+    var pidContent: String? = """{"pid":1,"port":3161}"""
     var content: String? = "file-token"
     var failure: IOException? = null
+
+    override fun readPid(path: String): String? {
+      pidPaths.add(path)
+      return pidContent
+    }
 
     override fun read(path: String, windows: Boolean, userId: () -> String): String? {
       paths.add(path)

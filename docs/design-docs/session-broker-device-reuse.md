@@ -50,7 +50,7 @@ The mode table describes only `reuse.ios.mode`; Android uses
 
 `reuse.ios.mode` replaces the coarse legacy switch. In `keep-booted` mode,
 `maxUses` forces every Nth release to use erase instead of keep-booted cleanup;
-its default is 20. This bounds keep-booted reuse rather than capping sessions or
+its default is 10 (20 in `erase` mode, where it has no effect). This bounds keep-booted reuse rather than capping sessions or
 retiring the device. When that erase succeeds, the same device returns to the
 idle pool, and later releases can use keep-booted again. `maxUses` has no effect
 in `erase` mode. The only iOS fallback is `erase`.
@@ -60,7 +60,7 @@ in `erase` mode. The only iOS fallback is `erase`.
   "reuse": {
     "ios": {
       "mode": "keep-booted",
-      "maxUses": 20,
+      "maxUses": 10,
       "fallback": "erase"
     }
   },

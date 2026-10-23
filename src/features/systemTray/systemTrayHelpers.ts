@@ -46,5 +46,11 @@ export {
   clearIosSystemTrayNotifications,
   readClearAllTerminalObservation,
 } from "./helpers/dismissal";
-export { listSystemTrayNotifications, readActiveNotificationKeysForApp } from "./helpers/listing";
+export {
+  listSystemTrayNotifications,
+  listSystemTrayNotificationsForClear,
+  readActiveNotificationKeysForApp,
+} from "./helpers/listing";
+export { retryTransientPreSwipe } from "./helpers/transientRetry";
+export { TransientPreSwipeError } from "./TransientPreSwipeError";
 export { NotificationShadeNotOpenError } from "./systemTrayNotificationList";

@@ -58,6 +58,7 @@ public enum WebSocketRequest: Decodable, Sendable {
     case setPreference(RequestSetPreference)
     case removePreference(RequestRemovePreference)
     case clearPreferences(RequestClearPreferences)
+    case deleteKeychainItem(RequestDeleteKeychainItem)
 
     case setNetworkMockRules(RequestSetNetworkMockRules)
     case setNetworkFaultRules(RequestSetNetworkFaultRules)
@@ -107,7 +108,7 @@ public enum WebSocketRequest: Decodable, Sendable {
              .setVoiceOverState, .requestAccessibilityAudit:
             return try decodeAccessibility(requestType, from: decoder)
         case .listPreferenceFiles, .getPreferences, .getPreference, .setPreference, .removePreference,
-             .clearPreferences:
+             .clearPreferences, .deleteKeychainItem:
             return try decodePreferences(requestType, from: decoder)
         case .setNetworkMockRules, .setNetworkFaultRules, .setNetworkErrorSimulation, .getSdkCapabilities:
             return try decodeNetwork(requestType, from: decoder)
@@ -250,6 +251,8 @@ public enum WebSocketRequest: Decodable, Sendable {
             return try .setPreference(RequestSetPreference(from: decoder))
         case .removePreference:
             return try .removePreference(RequestRemovePreference(from: decoder))
+        case .deleteKeychainItem:
+            return try .deleteKeychainItem(RequestDeleteKeychainItem(from: decoder))
         case .clearPreferences:
             return try .clearPreferences(RequestClearPreferences(from: decoder))
         default:
@@ -339,6 +342,7 @@ public enum WebSocketRequest: Decodable, Sendable {
         case .getPreference: return .getPreference
         case .setPreference: return .setPreference
         case .removePreference: return .removePreference
+        case .deleteKeychainItem: return .deleteKeychainItem
         case .clearPreferences: return .clearPreferences
         case .setNetworkMockRules: return .setNetworkMockRules
         case .setNetworkFaultRules: return .setNetworkFaultRules
@@ -408,6 +412,7 @@ public enum WebSocketRequest: Decodable, Sendable {
         case let .getPreference(payload): return payload
         case let .setPreference(payload): return payload
         case let .removePreference(payload): return payload
+        case let .deleteKeychainItem(payload): return payload
         case let .clearPreferences(payload): return payload
         case let .setNetworkMockRules(payload): return payload
         case let .setNetworkFaultRules(payload): return payload

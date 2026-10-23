@@ -21,6 +21,7 @@
 		0DD80B9475700E816D970365 /* GesturePerformer+ImeActionPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2782EB695F1EF1147BEF7163 /* GesturePerformer+ImeActionPolicy.swift */; };
 		0E36260B360CCACB7542B8C5 /* CommandHandler+Accessibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE7FA458DAC40E12AE86DA3C /* CommandHandler+Accessibility.swift */; };
 		0F18CF79A1D6FB34EA0ED2E7 /* RotationChangeMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4DB0F5963FB13B4552C5079 /* RotationChangeMonitor.swift */; };
+		11354BBB04E7256850D21CC2 /* SdkKeychainClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84BD14DE24A3F18128896619 /* SdkKeychainClient.swift */; };
 		129585C7E33692129498B3EA /* TableStructureResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = E02C9A6724C1E5D1F9835F17 /* TableStructureResponse.swift */; };
 		13B663645C4D918051C2B40A /* UIElementInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3CC889417C8E15712EEAA07 /* UIElementInfo.swift */; };
 		141E5CD4FAF4509F538E736C /* OSLogReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBA97A6C3A1240A055D9876C /* OSLogReader.swift */; };
@@ -59,6 +60,7 @@
 		31F1240C231FDB3863FFACE1 /* SdkHierarchyCaching.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95A9245F6A92C3914733C348 /* SdkHierarchyCaching.swift */; };
 		32028A4C18B265A7EF4E7657 /* NWByteChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DD2EDC3CEC352F034F617F2 /* NWByteChannel.swift */; };
 		32DE9012B3E8EEC85671F827 /* RequestSetPreference.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C3A5D14CAE92CDAF6FC88BE /* RequestSetPreference.swift */; };
+		3302BDB77A4CD0D3F8A4E948 /* RequestDeleteKeychainItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7959EEB007627D6313F75E92 /* RequestDeleteKeychainItem.swift */; };
 		3452B2C13713364AC75057AE /* RotationOrientationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C38A7234C20C5AE0671BD0AA /* RotationOrientationTests.swift */; };
 		361650C79D63D455E899D568 /* SdkCapabilitiesResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1C170D1FD9A1FC54F273861 /* SdkCapabilitiesResponse.swift */; };
 		36C7351E66779CDAFEEA4CDE /* XCTestQueryTimeout.swift in Sources */ = {isa = PBXBuildFile; fileRef = A91597D263B954E126B75D19 /* XCTestQueryTimeout.swift */; };
@@ -437,6 +439,7 @@
 		76B6036D11F7EBD1770C4829 /* CommandHandler+Gestures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CommandHandler+Gestures.swift"; sourceTree = "<group>"; };
 		77305F40F85694E983987E68 /* CommandHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandHandler.swift; sourceTree = "<group>"; };
 		78BDAD23DB6F5A6EFE292387 /* VoiceOverToggleError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceOverToggleError.swift; sourceTree = "<group>"; };
+		7959EEB007627D6313F75E92 /* RequestDeleteKeychainItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestDeleteKeychainItem.swift; sourceTree = "<group>"; };
 		7DD23568A5A503FA738E32FE /* RequestType.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestType.swift; sourceTree = "<group>"; };
 		7F0B1F0C936331F2645EDDD1 /* CommandError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandError.swift; sourceTree = "<group>"; };
 		7F3465671C6B22A68F3935E7 /* PinchGesturePath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinchGesturePath.swift; sourceTree = "<group>"; };
@@ -445,6 +448,7 @@
 		802717F6B1F37809C4806C23 /* CtrlProxyUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CtrlProxyUITests.swift; sourceTree = "<group>"; };
 		80E5ED3D4A2CFE516DD39B00 /* GesturePerformer+Orientation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "GesturePerformer+Orientation.swift"; sourceTree = "<group>"; };
 		837CF68121A4C4E037079302 /* KeyboardWait.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardWait.swift; sourceTree = "<group>"; };
+		84BD14DE24A3F18128896619 /* SdkKeychainClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkKeychainClient.swift; sourceTree = "<group>"; };
 		86E304C3C42FE1AECFDB293B /* SemanticLinkActivation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SemanticLinkActivation.swift; sourceTree = "<group>"; };
 		87BF50949E1F545C8F299839 /* CommandHandler+DeviceControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CommandHandler+DeviceControl.swift"; sourceTree = "<group>"; };
 		8934AB12DE931554222D5789 /* ForegroundTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForegroundTracker.swift; sourceTree = "<group>"; };
@@ -636,6 +640,7 @@
 				C599F44DAEA9347F57E2EA28 /* RequestClearPreferences.swift */,
 				A5C591A7872C60CF46EF7E7D /* RequestClearText.swift */,
 				1109493F9E82B16E72003659 /* RequestClipboard.swift */,
+				7959EEB007627D6313F75E92 /* RequestDeleteKeychainItem.swift */,
 				4FD06E04E4DAD7745A2F21B0 /* RequestDrag.swift */,
 				89723B832FD33BA2934F84BC /* RequestEnvelope.swift */,
 				636BAFCBC24251336C417FA0 /* RequestExecuteSql.swift */,
@@ -905,6 +910,7 @@
 				3B35220FC3CB4240C50A6E53 /* SdkHierarchyExtractor.swift */,
 				1AA0F355DDDA77EDBF4DF329 /* SdkHierarchyFetching.swift */,
 				56C8A075A731AEC8F43CDBA4 /* SdkHighlightOutcome.swift */,
+				84BD14DE24A3F18128896619 /* SdkKeychainClient.swift */,
 				3EB1E06878A9A325A53E9EF8 /* SdkPreferenceClient.swift */,
 				86E304C3C42FE1AECFDB293B /* SemanticLinkActivation.swift */,
 				D7073280136076204B2B9D82 /* ServerListening.swift */,
@@ -1225,6 +1231,7 @@
 				E77BAF0FF263D39F857ECF0D /* RequestClearPreferences.swift in Sources */,
 				5C9A3E3A419E184D20C21DD1 /* RequestClearText.swift in Sources */,
 				C5A0B4115B3235ADAFE86F61 /* RequestClipboard.swift in Sources */,
+				3302BDB77A4CD0D3F8A4E948 /* RequestDeleteKeychainItem.swift in Sources */,
 				AA76F8085A4F0501588E9C92 /* RequestDrag.swift in Sources */,
 				523CC9580021585B89759C4E /* RequestEnvelope.swift in Sources */,
 				881D80A9A2E56F1790F4132F /* RequestExecuteSql.swift in Sources */,
@@ -1288,6 +1295,7 @@
 				E1F9B8AC5EFD2B0F1A2A4E3B /* SdkHierarchyFetching.swift in Sources */,
 				BB46C21F652BB4C5AC05146F /* SdkHierarchyServerInfo.swift in Sources */,
 				BF25CF634A78023CA14C550D /* SdkHighlightOutcome.swift in Sources */,
+				11354BBB04E7256850D21CC2 /* SdkKeychainClient.swift in Sources */,
 				7809BE0CE95F9F03B1DC1AFE /* SdkPreferenceClient.swift in Sources */,
 				A505BE7CF909A5A3A8FF39B3 /* SdkStorageCapabilities.swift in Sources */,
 				5D9A83BAD6DF57ED65C11AC0 /* SdkStorageDiagnostic.swift in Sources */,

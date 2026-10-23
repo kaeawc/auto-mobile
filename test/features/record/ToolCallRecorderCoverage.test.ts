@@ -93,6 +93,7 @@ const EXCLUDED_TOOLS: Record<string, string> = {
   setKeyValue: EMBEDDED_SDK_ONLY,
   removeKeyValue: EMBEDDED_SDK_ONLY,
   clearKeyValueFile: EMBEDDED_SDK_ONLY,
+  deleteKeychainItem: EMBEDDED_SDK_ONLY,
   network: EMBEDDED_SDK_ONLY,
   mockNetwork: EMBEDDED_SDK_ONLY,
   clearMockNetwork: EMBEDDED_SDK_ONLY,

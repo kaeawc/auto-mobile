@@ -822,6 +822,12 @@ export abstract class IosCtrlProxyDelegatingFacade extends IosCtrlProxyDiagnosti
     return this.storage.removePreference(...args);
   }
 
+  async deleteKeychainItemForIos(
+    ...args: Parameters<CtrlProxyStorage["deleteKeychainItemForIos"]>
+  ): ReturnType<CtrlProxyStorage["deleteKeychainItemForIos"]> {
+    return this.storage.deleteKeychainItemForIos(...args);
+  }
+
   async clearPreferenceStore(
     ...args: Parameters<CtrlProxyStorage["clearPreferenceStore"]>
   ): ReturnType<CtrlProxyStorage["clearPreferenceStore"]> {

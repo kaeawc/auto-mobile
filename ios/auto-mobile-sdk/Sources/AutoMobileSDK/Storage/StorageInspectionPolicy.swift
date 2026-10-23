@@ -14,6 +14,19 @@ public struct CoreDataStoreRegistration: Sendable, Codable {
     }
 }
 
+/// One exact generic-password item that the host permits test-only deletion of.
+public struct KeychainDeletionEntry: Hashable, Sendable {
+    public let service: String
+    public let account: String
+    public let accessGroup: String
+
+    public init(service: String, account: String, accessGroup: String) {
+        self.service = service
+        self.account = account
+        self.accessGroup = accessGroup
+    }
+}
+
 /// Limits and access boundaries applied to storage inspection routes.
 public struct StorageInspectionConfiguration: Sendable {
     public var allowedDatabasePaths: Set<String>
@@ -22,6 +35,8 @@ public struct StorageInspectionConfiguration: Sendable {
     public var sensitiveKeys: Set<String>
     public var maxRows: Int
     public var maxBytes: Int
+    public var allowKeychainDeletion: Bool
+    public var allowedKeychainDeletionEntries: Set<KeychainDeletionEntry>
     public var allowMutations: Bool
 
     public init(
@@ -31,7 +46,9 @@ public struct StorageInspectionConfiguration: Sendable {
         sensitiveKeys: Set<String> = [],
         maxRows: Int = 500,
         maxBytes: Int = 512 * 1024,
-        allowMutations: Bool = false
+        allowMutations: Bool = false,
+        allowKeychainDeletion: Bool = false,
+        allowedKeychainDeletionEntries: Set<KeychainDeletionEntry> = []
     ) {
         self.allowedDatabasePaths = allowedDatabasePaths
         self.registeredAppGroupSuites = registeredAppGroupSuites
@@ -39,6 +56,8 @@ public struct StorageInspectionConfiguration: Sendable {
         self.sensitiveKeys = sensitiveKeys
         self.maxRows = max(1, maxRows)
         self.maxBytes = max(1, maxBytes)
+        self.allowKeychainDeletion = allowKeychainDeletion
+        self.allowedKeychainDeletionEntries = allowedKeychainDeletionEntries
         self.allowMutations = allowMutations
     }
 }

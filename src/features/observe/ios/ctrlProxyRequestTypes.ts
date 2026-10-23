@@ -83,6 +83,7 @@ export const IOS_KNOWN_REQUEST_TYPES = [
   "set_preference",
   "remove_preference",
   "clear_preferences",
+  "delete_keychain_item",
 
   // Network mocking
   "set_network_mock_rules",

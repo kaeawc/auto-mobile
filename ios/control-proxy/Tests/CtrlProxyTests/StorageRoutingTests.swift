@@ -20,6 +20,29 @@ private struct PreferenceHierarchyServer: SdkHierarchyFetching {
     func addHighlight(id _: String, shape _: HighlightShape) async -> SdkHighlightOutcome { .unavailable }
 }
 
+private actor RecordingKeychainClient: SdkKeychainDeleting {
+    var requests: [KeychainDeleteRequest] = []
+    func recorded() -> [KeychainDeleteRequest] { requests }
+    func deleteKeychainItem(
+        appId: String,
+        sessionId: String?,
+        mutationToken: String?,
+        confirm: Bool,
+        selector: KeychainItemSelector
+    )
+        async throws -> KeychainDeleteOutcome
+    {
+        requests.append(KeychainDeleteRequest(
+            appId: appId,
+            sessionId: sessionId,
+            mutationToken: mutationToken,
+            confirm: confirm,
+            selector: selector
+        ))
+        return KeychainDeleteOutcome(outcome: "scope_not_authorized")
+    }
+}
+
 private actor RecordingPreferenceClient: SdkPreferenceFetching {
     private let resolvedStore: String?
     private let effectiveValueDiffers: Bool?
@@ -126,6 +149,51 @@ final class StorageRoutingTests: XCTestCase {
         payload["requestId"] = "storage-test"
         payload["appId"] = "com.example.app"
         return try JSONDecoder().decode(WebSocketRequest.self, from: JSONSerialization.data(withJSONObject: payload))
+    }
+
+    func testKeychainRoutingPreservesSelectorCredentialsAndDenial() async throws {
+        let selector = KeychainItemSelector(itemClass: "genericPassword", service: "s", account: "a", accessGroup: "g")
+        for (foreground, sdkBundle, expected) in [
+            ("com.example.app", "com.example.app", "scope_not_authorized"),
+            ("other.app", "com.example.app", "app_id_mismatch"),
+            ("com.example.app", "other.app", "app_id_mismatch"),
+            ("com.example.app", nil, "sdk_unavailable"),
+        ] {
+            let locator = FakeElementLocator()
+            locator.foregroundBundleId = foreground
+            let client = RecordingKeychainClient()
+            let handler = CommandHandler(
+                elementLocator: locator,
+                gesturePerformer: FakeGesturePerformer(),
+                perf: PerfProvider(),
+                sdkHierarchyClient: PreferenceHierarchyServer(bundleId: sdkBundle),
+                sdkKeychainClient: client
+            )
+            let result = try await handler.handle(request(
+                "delete_keychain_item",
+                fields: [
+                    "selector": ["itemClass": "genericPassword", "service": "s", "account": "a", "accessGroup": "g"],
+                    "confirm": true,
+                    "sessionId": "session",
+                    "mutationToken": "token",
+                ]
+            ))
+            let response = try XCTUnwrap(result as? DeleteKeychainItemResponse)
+            XCTAssertEqual(response.outcome, expected)
+            XCTAssertFalse(response.success)
+            let calls = await client.recorded()
+            XCTAssertEqual(
+                calls,
+                expected == "scope_not_authorized" ?
+                    [KeychainDeleteRequest(
+                        appId: "com.example.app",
+                        sessionId: "session",
+                        mutationToken: "token",
+                        confirm: true,
+                        selector: selector
+                    )] : []
+            )
+        }
     }
 
     func testRoutesAllOperationsToSdkPreferenceClient() async throws {

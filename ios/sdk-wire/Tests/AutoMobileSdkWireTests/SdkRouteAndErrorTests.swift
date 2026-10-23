@@ -4,7 +4,7 @@ import XCTest
 
 final class SdkRouteAndErrorTests: XCTestCase {
     func testRoutesAreUniqueAbsolutePathsWithAMethodEach() {
-        XCTAssertEqual(SdkRoute.allCases.count, 16)
+        XCTAssertEqual(SdkRoute.allCases.count, 17)
         XCTAssertEqual(Set(SdkRoute.allCases.map(\.path)).count, SdkRoute.allCases.count)
         for route in SdkRoute.allCases {
             XCTAssertTrue(route.path.hasPrefix("/"), route.path)

@@ -576,6 +576,26 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
     resolveWith: { success: true },
   },
   {
+    name: "delete_keychain_item",
+    builder: "CtrlProxyStorage.deleteKeychainItemForIos",
+    invoke: (h) =>
+      new CtrlProxyStorage(
+        h.context,
+        () => "fixture-session-id",
+        () => "fixture-mutation-token",
+      ).deleteKeychainItemForIos(
+        "com.example.app",
+        {
+          itemClass: "genericPassword",
+          service: "test.service",
+          account: "fixture",
+          accessGroup: "TEAM.app",
+        },
+        true,
+      ),
+    resolveWith: { success: true, outcome: "deleted", deletedScope: null },
+  },
+  {
     name: "clear_preferences",
     builder: "CtrlProxyStorage.clearPreferenceStore",
     invoke: (h) =>
@@ -784,6 +804,7 @@ describe("iOS control-proxy — request snapshot fixture matches live TS builder
       "set_preference",
       "remove_preference",
       "clear_preferences",
+      "delete_keychain_item",
       // database
       "execute_sql",
       "list_databases",

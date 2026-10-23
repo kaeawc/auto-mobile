@@ -64,6 +64,7 @@ object ValidTools {
         "pressButton",
         "provisionDevice",
         "recentApps",
+        "rotaryScroll",
         "recordDeviceGestures",
         "recordToolCalls",
         "removeKeyValue",

@@ -414,6 +414,12 @@ export const observeResultSchema = z
     ...observationScreenshotOutputFields,
     crop: observeCropResultSchema.optional(),
     screenSize: screenSizeSchema.optional(),
+    isScreenRound: z
+      .boolean()
+      .optional()
+      .describe(
+        "Wear OS (watch devices) only: true when the display is round, so the corners are cut off.",
+      ),
     systemInsets: systemInsetsSchema.optional(),
     insets: observationInsetsSchema.optional(),
     layoutWarnings: z

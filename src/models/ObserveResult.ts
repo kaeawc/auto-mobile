@@ -259,6 +259,13 @@ export type ObserveResult = {
   /** Screen dimensions in the coordinate space identified by `units` when present. */
   screenSize: ScreenSizeWithUnits;
 
+  /**
+   * Wear OS: the default display is round, so its corners are cut off (#14948). Read from
+   * `dumpsys display` for `watch` devices only; absent elsewhere or when the display record
+   * is unreadable.
+   */
+  isScreenRound?: boolean;
+
   /** System UI insets */
   systemInsets: SystemInsets;
 

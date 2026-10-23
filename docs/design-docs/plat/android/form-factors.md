@@ -23,7 +23,7 @@ Android Auto projects a phone's UI to a head unit; Automotive OS is a full Andro
 - **CtrlProxy.** `minSdk` 24 (`android/gradle/libs.versions.toml`) is not a blocker. The manifest declares no `<uses-feature>` and only a `LAUNCHER` category (no `LEANBACK_LAUNCHER`). The accessibility config requests window content, interactive windows and gesture dispatch.
 - **Input.** `sendKeys` supports arrows (`KEYCODE_DPAD_*`), enter, tab, escape, backspace, delete (`INPUT_KEY_CODE_MAP`, `src/features/action/InputKey.ts`); there is no D-pad centre, menu or media key. `pressButton` sends back/home/recent as global actions with ADB fallback, plus volume/power via ADB.
 - **Focus.** `observe` returns `focusedElement` (`ActiveWindowAttribution.ts`, `HierarchyFocus.ts`) from the `focused` property; TalkBack focus is separate (`accessibility-focused`).
-- Nothing reads `isScreenRound` or handles ambient mode.
+- Nothing reads `isScreenRound` or handles ambient mode (as written; see the Wear status below).
 
 ## Hypotheses to confirm
 
@@ -51,6 +51,15 @@ Hierarchy and tap path should match a phone's; the gaps are three Wear-specific 
 - **Ambient (hypothesis).** Entered by screen timeout into always-on display; no documented shell command. Try `KEYCODE_SLEEP` then wake, and the AOD settings key. If none works, ambient testing is no-go and the rest of Wear is unaffected.
 - **Round screens.** `observe` should report `isScreenRound` (`Configuration.isScreenRound`); a new display-info field.
 - **Swipe-to-dismiss.** Wear OS 3+ back is a right-swipe from the left edge; the `back` global action should work; check a left-edge `swipeOn`.
+
+### Status (#14948)
+
+Implemented host-side and unit-tested against a fake adb; **nothing has run on a Wear emulator**, so rows 6-8 stay open.
+
+- **`rotaryScroll({ delta })`** (`src/server/rotaryScrollTool.ts`, `src/features/wear/RotaryScroll.ts`; opt-in like `windowMode`). Candidates, in order: `adb shell input rotaryencoder scroll <delta>`, `adb emu event send EV_REL:REL_WHEEL:<delta>` (emulator serials only), then a vertical centre-column `input swipe` sized from `wm size`. Each is followed by a CtrlProxy hierarchy read-back (the structural fingerprint, `hierarchyFingerprint`, differs from before); the result lists `method` (first that moved the screen) and every attempt. The read-back is "the visible tree changed", not a scroll offset: the hierarchy carries none, so a list that is already at its end reports `unchanged`. The `emu event send` command is the least-grounded candidate: the Wear emulator's mapping of `REL_WHEEL` to the crown is a guess, and the sign of `delta` is unverified for the first two candidates (only the swipe's direction is by construction).
+- **`isScreenRound`** in `observe`, for `watch` devices only (`BootedDevice.formFactor`, so a watch whose form factor was not resolved reports nothing). Read from `dumpsys display`: `FLAG_ROUND` on the default display's `DisplayInfo`/`DisplayDeviceInfo` record. It is not read from the CtrlProxy, so there is no `Configuration.isScreenRound` and no Kotlin change. The fixtures under `test/fixtures/wear-os/` are hand-reconstructed, not captured.
+- **Ambient mode: not implemented.** No reliable enter/leave command is known (row 7 unrun). `observe` already reports `wakefulness: "Dozing"` when the device reports ambient/doze, which may be enough to observe the state; a toggle is dropped until row 7 finds a command, per the issue.
+- **Swipe-to-dismiss:** unchanged, row 8 still to run.
 
 ## Android Auto (DHU): no-go
 
@@ -89,6 +98,6 @@ Record command, image id and API level.
 
 - **#14946** form-factor vocabulary (`tv`, `watch`, `automotive`); buildable first.
 - **#14947** TV: `focusNavigate`, `select` key if needed (rows 1-4).
-- **#14948** Wear OS: rotary scroll, `isScreenRound`, ambient toggle if row 7 finds a command (rows 5-8).
+- **#14948** Wear OS: rotary scroll, `isScreenRound`, ambient toggle if row 7 finds a command (rows 5-8). Host side landed; rows 5-8 and the Wear sample screen still need an emulator.
 
 Android Auto projection is a documented no-go; Automotive OS has no follow-up until rows 9 and 10 run.

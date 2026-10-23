@@ -133,6 +133,7 @@ const FORMER_PLAN_RELEVANT_TOOLS = [
   "pressButton",
   "putAppFile",
   "recentApps",
+  "rotaryScroll",
   "resetAppLogs",
   "resetKeychain",
   "rotate",

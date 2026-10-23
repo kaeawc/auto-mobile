@@ -81,6 +81,7 @@
     "measureStartup",
     "mediaSession",
     "windowMode",
+    "rotaryScroll",
     "highlight",
     "prototype",
     "sqlQuery",
@@ -190,6 +191,7 @@
     "measureStartup",
     "mediaSession",
     "windowMode",
+    "rotaryScroll",
     "highlight",
     "prototype",
     "sqlQuery",
@@ -329,7 +331,8 @@
     "mediaSession",
     "resetAppLogs",
     "performanceTrace",
-    "windowMode"
+    "windowMode",
+    "rotaryScroll"
   ],
   "measurementScripts": [
     "observe",

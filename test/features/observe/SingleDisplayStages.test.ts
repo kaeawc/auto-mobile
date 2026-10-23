@@ -111,14 +111,18 @@ describe("SingleDisplayCaptureStage.resolveSingleDisplayIntent", () => {
 });
 
 describe("SingleDisplayEnrichStage", () => {
-  function stage(deferred: WeakMap<ObserveResult, number>, audits: { count: number }) {
+  function stage(
+    deferred: WeakMap<ObserveResult, number>,
+    audits: { count: number },
+    options: { device?: BootedDevice; round?: boolean } = {},
+  ) {
     const auditor = {
       run: async () => {
         audits.count += 1;
       },
     };
     return new SingleDisplayEnrichStage({
-      device: () => android,
+      device: () => options.device ?? android,
       timer: () => new FakeTimer(),
       platformTraits: () => platformObservationTraits("android", () => android),
       screenshotRecorder: () => unused("screenshotRecorder"),
@@ -141,6 +145,7 @@ describe("SingleDisplayEnrichStage", () => {
       predictiveUIState: () => unused("predictiveUIState"),
       safeAreaAuditor: () => new SafeAreaAuditor(),
       elementsBuilder: () => new ObserveElementsBuilder(),
+      screenRound: () => ({ isScreenRound: async () => options.round }),
       deferredBackStackDisplays: () => deferred,
       stampScreenSizeUnits: () => undefined,
       processRecomposition: async () => undefined,
@@ -176,6 +181,23 @@ describe("SingleDisplayEnrichStage", () => {
 
     expect(run.result.screenshotCaptureAttempted).toBe(false);
     expect(audits.count).toBe(0);
+  });
+
+  test("a watch read reports isScreenRound; a phone read never asks", async () => {
+    const watch: BootedDevice = { ...android, formFactor: "watch" };
+    const onWatch = fakeRun();
+    await stage(new WeakMap(), { count: 0 }, { device: watch, round: true }).enrichSingleDisplay(
+      onWatch,
+    );
+    expect(onWatch.result.isScreenRound).toBe(true);
+
+    const onPhone = fakeRun();
+    await stage(new WeakMap(), { count: 0 }, { round: true }).enrichSingleDisplay(onPhone);
+    expect(onPhone.result.isScreenRound).toBeUndefined();
+
+    const unreadable = fakeRun();
+    await stage(new WeakMap(), { count: 0 }, { device: watch }).enrichSingleDisplay(unreadable);
+    expect(unreadable.result.isScreenRound).toBeUndefined();
   });
 
   test("an ordinary read runs the performance, accessibility and state audits", async () => {

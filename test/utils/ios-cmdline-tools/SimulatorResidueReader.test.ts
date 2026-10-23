@@ -94,7 +94,9 @@ describe("SimulatorResidueReader", () => {
       PointerIncreasedContrastEnabled: 1,
     });
     const disabled = harness();
-    disabled.state.accessibility = fixture("residue-accessibility-increase-contrast-disabled.plist");
+    disabled.state.accessibility = fixture(
+      "residue-accessibility-increase-contrast-disabled.plist",
+    );
     expect((await disabled.reader.read(UDID, disabled.signal)).accessibility).toEqual({
       DarkenSystemColors: 0,
       PointerIncreasedContrastEnabled: 0,

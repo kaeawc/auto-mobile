@@ -127,7 +127,11 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotationEntry>> = {
   // Recording an audit baseline can replace an existing host-side baseline.
   audit: entry("Audit Current Screen", destructiveDevice),
   backgroundWork: entry("Control Background Jobs", destructiveDevice),
+  // start/stop is a mixed-action tool: stop pulls the trace and deletes the device copy.
+  captureTrace: entry("Capture Trace", destructiveDevice),
   displayProfile: entry("Set Display Profile", destructiveDevice),
+  // Pauses the app while dumping; leaves only a host file, no app or device state is lost.
+  heapDump: entry("Heap Dump", controlDevice),
   killProfile: entry("Set Kill Policy", destructiveDevice),
   manufacturerProfile: entry("Set OEM Profile", destructiveDevice),
   measureStartup: entry("Measure Startup", destructiveDevice),

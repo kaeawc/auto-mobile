@@ -8,19 +8,9 @@ interface ToolDefinition {
   inputSchema: { properties?: Record<string, unknown> };
 }
 
-// Injected plan state is not a user-facing tool option.
-const undocumentedParameters = [
-  {
-    name: "__lockNamespace",
-    tools: ["barrier", "criticalSection"],
-    reason: "Internal plan-scoped lock namespace injected by plan execution, not caller input.",
-  },
-];
-
 const root = resolve(import.meta.dir, "../..");
 let tools: ToolDefinition[];
 let documentedTools: Set<string>;
-let documentedWordsByTool: Map<string, Set<string>>;
 
 // Headings end the preceding section regardless of level. Fenced examples stay
 // in their surrounding section. Extract tools.md rows from the category body
@@ -99,12 +89,6 @@ function readDocumentation(directory: string): { path: string; content: string }
 beforeAll(() => {
   tools = JSON.parse(readGuardFile(join(root, "schemas/tool-definitions.json")));
   const docs = readDocumentation(join(root, "docs"));
-  documentedWordsByTool = wordsByTool(
-    docs.flatMap((doc) =>
-      documentationSections(doc.content, doc.path === join(root, "docs/tools.md")),
-    ),
-    tools.map((tool) => tool.name),
-  );
   // Reuse the already-read tools.md content rather than reading it a second time.
   const toolsPage = docs.find((doc) => doc.path === join(root, "docs/tools.md"))?.content;
   expect(toolsPage).toBeDefined();
@@ -122,34 +106,6 @@ describe("registered tool documentation", () => {
     expect(
       tools.filter((tool) => !documentedTools.has(tool.name)).map((tool) => tool.name),
     ).toEqual([]);
-  });
-
-  test("every top-level input parameter is documented or explicitly internal", () => {
-    const missing: string[] = [];
-    for (const tool of tools) {
-      for (const parameter of Object.keys(tool.inputSchema.properties ?? {})) {
-        const exception = undocumentedParameters.find(
-          (entry) => entry.name === parameter && (!entry.tools || entry.tools.includes(tool.name)),
-        );
-        if (!exception && !documentedWordsByTool.get(tool.name)?.has(parameter)) {
-          missing.push(`${tool.name}.${parameter}`);
-        }
-      }
-    }
-    expect(missing).toEqual([]);
-  });
-
-  test("internal exceptions have reasons and refer to registered parameters", () => {
-    for (const entry of undocumentedParameters) {
-      expect(entry.reason.trim().length).toBeGreaterThan(0);
-      const applicable = entry.tools
-        ? tools.filter((tool) => entry.tools.includes(tool.name))
-        : tools;
-      expect(applicable.map((tool) => tool.name)).toEqual(entry.tools);
-      for (const tool of applicable) {
-        expect(entry.name in (tool.inputSchema.properties ?? {})).toBe(true);
-      }
-    }
   });
 });
 

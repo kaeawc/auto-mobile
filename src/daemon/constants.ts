@@ -397,6 +397,22 @@ export const DAEMON_RESTART_HANDOFF_TIMEOUT_MS =
   DAEMON_RESTART_HANDOFF_DELAY_MS;
 
 /**
+ * Bound on ONE proxy-to-daemon connection attempt (#15019). A restart may legitimately spend a
+ * startup wait and a restart handoff reconciling a daemon; an attempt still unsettled after both
+ * (plus slack) is stalled, and every caller sharing the single-flight attempt would otherwise
+ * wait on it until an unrelated outer deadline.
+ */
+export const DAEMON_CONNECT_ATTEMPT_TIMEOUT_MS =
+  DAEMON_STARTUP_TIMEOUT_MS + DAEMON_RESTART_HANDOFF_TIMEOUT_MS + 30_000;
+
+/**
+ * How long a broker acquisition keeps reconnecting after it loses the daemon (#15019) before it
+ * answers a typed retryable `daemon_unavailable` instead of waiting out its whole preparation
+ * budget: room for two attempts, so one stalled attempt is replaced once.
+ */
+export const DAEMON_RECONNECT_OUTAGE_BUDGET_MS = 2 * DAEMON_CONNECT_ATTEMPT_TIMEOUT_MS;
+
+/**
  * Minimum age (ms since startedAt) before the proxy will restart a daemon on
  * version mismatch. Prevents thrash when concurrent agents on different versions
  * each try to "fix" the daemon to their own version.

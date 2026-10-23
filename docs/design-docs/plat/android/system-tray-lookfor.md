@@ -6,10 +6,7 @@
 > open/close/list/find/tap/dismiss/clearAll actions. Collapsed notification groups
 > are automatically expanded before tapping.
 
-## Goal
-
-Enable agents to open the notification shade and wait for a matching
-notification by text.
+Goal: let agents open the notification shade and wait for a matching notification by text.
 
 ## MCP tool
 
@@ -118,21 +115,8 @@ bound the operation.
 
 ## Android implementation
 
-Open/close the tray (preferred, emulator):
-
-- `adb -s <device> shell cmd statusbar expand-notifications`
-- `adb -s <device> shell cmd statusbar collapse` (also exposed as `systemTray` action `close`)
-
-Fallback (gesture):
-
-- Swipe down from status bar if `cmd statusbar` is unavailable.
-
-Finding notifications:
-
-- Use AccessibilityService to read the System UI node tree.
-- Search for a node with matching text or resource ID in
-  `com.android.systemui`.
-- Return bounding box + hierarchy path for use in follow-up taps.
+- Open/close (preferred): `adb -s <device> shell cmd statusbar expand-notifications` / `cmd statusbar collapse` (also `systemTray` action `close`). Fallback: swipe down from the status bar when `cmd statusbar` is unavailable.
+- Find: read the `com.android.systemui` node tree via the AccessibilityService, match text or resource ID, and return bounding box plus hierarchy path for follow-up taps.
 
 ### Collapsed notification group handling
 
@@ -228,29 +212,12 @@ notification candidates):
 - `shared_notification_container` — another broad wrapper with full-screen
   bounds
 
-## ADB validation (API 35)
+## ADB commands (confirmed on API 35)
 
-Status:
-
-- API 29 not validated yet (no local AVD available).
-
-Confirmed commands:
-
-- Expand/collapse notification shade:
-  - `adb -s <device> shell cmd statusbar expand-notifications`
-  - `adb -s <device> shell uiautomator dump /sdcard/notification_dump.xml`
-  - `adb -s <device> shell cat /sdcard/notification_dump.xml`
-  - `adb -s <device> shell cmd statusbar collapse`
-
-Observed results:
-
-- Notification shade expands and collapses on command.
-- uiautomator dump contains notification text suitable for lookFor matching.
-
-Notes:
-
-- `adb shell cmd statusbar expand-settings` is also available to expand quick
-  settings when needed.
+`cmd statusbar expand-notifications`, `cmd statusbar collapse` and
+`cmd statusbar expand-settings` (quick settings) work as expected, and a
+`uiautomator dump` of the open shade contains notification text suitable for
+matching. API 29 is not validated.
 
 ## Risks
 

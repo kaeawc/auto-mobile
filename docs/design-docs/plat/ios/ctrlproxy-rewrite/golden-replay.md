@@ -1,8 +1,7 @@
 # Golden capture and replay for the iOS CtrlProxy
 
-**Issue:** #5837. **Status:** capture and replay are in place, and the nearest-match
-tie-break was checked against real hierarchy pairs. Across the corpus the change
-alters no merged output.
+**Issue:** #5837. The nearest-match tie-break was checked against real hierarchy pairs;
+across the corpus it alters no merged output.
 
 Unit tests can replay real runner traffic at two layers:
 
@@ -41,7 +40,7 @@ contents, so nothing is redacted.
 ## Capturing or refreshing
 
 Use a simulator you create for the purpose. The committed corpus came from an
-iPhone 17 on iOS 26.5 (Xcode 26.6).
+iPhone 17 on iOS 26.5.
 
 1. Build the runner from your checkout:
    `AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA=/tmp/golden/dd bash scripts/ios/ctrl-proxy-build-for-testing.sh`.
@@ -85,10 +84,8 @@ first; see `docs/using/environment-variables.md`.
   replays them through a real `IOSCtrlProxyClient`.
 - `test/fixtures/ios/merger-pairs/` holds seven Playground pairs: the four tabs
   (`--fresh` launch into each) and the SDK Status, Scroll Performance and
-  Animations demo screens (`--fresh --tap`). The Playground binary was a Debug
-  simulator build of main from 2026-09-28. A fresh build was blocked locally by a
-  missing Metal toolchain. The merger only consumes the SDK tree's wire shape, so
-  the build date does not affect the result.
+  Animations demo screens (`--fresh --tap`). The merger only consumes the SDK
+  tree's wire shape, so the Playground build date does not affect the result.
 
 ## Nearest-match tie-break results
 
@@ -117,9 +114,9 @@ Performance navigation title (`UILabel` at `[124, 73, 277, 94]`). Its candidates
 are three wrappers at `[125, 74, 278, 95]` and one `UILabel` at
 `[125, 74, 277, 95]`. The exact-class pass sees only the `UILabel`, so both orders
 pick it. In all 50 tolerance-only queries the nearest SDK candidate is exactly
-1 pt away, which is consistent with the same frame rounded differently. In practice the nearest-match change is a no-op on real Playground
-hierarchies. It matters only for synthetic layouts where differently sized views
-sit within 2 pt of an element, as `HierarchyMergerToleranceMatchTests` shows.
+1 pt away, which is consistent with the same frame rounded differently. The nearest-match change is a no-op on real Playground hierarchies; it matters only
+for synthetic layouts where differently sized views sit within 2 pt of an element
+(`HierarchyMergerToleranceMatchTests`).
 
 `testCorpusToleranceCoverageIsAsDocumented` pins the coverage columns, so an empty
 diff cannot pass vacuously. Making the legacy matcher always miss turns

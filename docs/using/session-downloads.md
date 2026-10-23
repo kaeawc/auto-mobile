@@ -1,10 +1,7 @@
 # Session Downloads fixtures
 
 `stageSessionDownloads` is a deprecated session-bound alias of `putAppFile`
-`target.domain: "user_files"`. It remains available with unchanged defaults,
-schemas, and session ownership checks until equivalent workflows are device-verified.
-See [the unified call shape and target policy](../tools.md). Its stored overrides
-remain attached to this exact name; it does not grant unified private writes.
+`target.domain: "user_files"`. It remains available. See [the unified call shape and target policy](../tools.md).
 
 Stage the files a system picker (documents, gallery, media) would open from the
 device's shared **Downloads** tree, bound to the caller's device session. The
@@ -52,8 +49,7 @@ removed tools' Android indexing default; `putAppFile` defaults it to false.
 
 - **Android only.** iOS has no user-visible shared Downloads tree; an iOS
   session returns `{ success: false, status: "unavailable" }`.
-- **Session-bound.** The device is resolved from `sessionUuid` through the same
-  resolver the session-log family uses. A request without a bound session is
+- **Session-bound.** The device is resolved from `sessionUuid`. A request without a bound session is
   refused with `SESSION_NOT_BOUND`, and one whose session no longer owns a
   device with `SESSION_NOT_ACTIVE` — both **before any device is touched**.
 - **Downloads only.** `directory` is a single normalized segment, so `reset`

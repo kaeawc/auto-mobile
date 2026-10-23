@@ -33,8 +33,7 @@ The requirement names only the Apple anchor, the bundle identifier, and the team
 still matches after an AutoMobile upgrade or a Developer ID certificate renewal, so you
 upload the profile once. The payload identifiers and UUIDs are fixed: if the profile ever
 changes, uploading the new file replaces the installed one instead of adding a second
-copy. Every release build checks that the signed app still satisfies this requirement and
-fails if it doesn't.
+copy.
 
 ## Upload it to your MDM
 
@@ -96,24 +95,8 @@ After the profile is installed and `activate` has run:
    "/Applications/AutoMobile Network Identity Probe.app/Contents/MacOS/network-filter-controller" status
    ```
 
-3. Once the iOS simulator `networkCondition` backend ships (#10588), `getDeviceState`
-   reports its `networkCondition` backend as ready on that Mac.
+3. `getDeviceState` reports the `networkCondition` backend as ready on that Mac.
 
 If the controller still reports `approval_required`, check that `profiles status -type
 enrollment` shows an MDM enrollment and that the profile appears in `profiles show`. A
 profile installed by hand doesn't count.
-
-## For contributors
-
-`scripts/network-filter/generate-mdm-profile.ts` generates the profile from the Team ID in
-`scripts/network-filter/appleTeam.ts` and the bundle identifiers in `ios/network-filter/Packaging/`.
-Tests check that the committed file matches the generator byte for byte and that
-`plutil -lint` accepts it. After changing an identifier, regenerate it:
-
-```bash
-bun scripts/network-filter/generate-mdm-profile.ts
-```
-
-The release workflow runs `scripts/ci/verify-network-filter-requirement.sh` on the signed
-app. It reads the requirement from the committed profile, so a release that would stop
-matching the profile fails before it ships.

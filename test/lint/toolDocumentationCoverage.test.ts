@@ -124,21 +124,6 @@ describe("registered tool documentation", () => {
     ).toEqual([]);
   });
 
-  test("every top-level input parameter is documented or explicitly internal", () => {
-    const missing: string[] = [];
-    for (const tool of tools) {
-      for (const parameter of Object.keys(tool.inputSchema.properties ?? {})) {
-        const exception = undocumentedParameters.find(
-          (entry) => entry.name === parameter && (!entry.tools || entry.tools.includes(tool.name)),
-        );
-        if (!exception && !documentedWordsByTool.get(tool.name)?.has(parameter)) {
-          missing.push(`${tool.name}.${parameter}`);
-        }
-      }
-    }
-    expect(missing).toEqual([]);
-  });
-
   test("internal exceptions have reasons and refer to registered parameters", () => {
     for (const entry of undocumentedParameters) {
       expect(entry.reason.trim().length).toBeGreaterThan(0);

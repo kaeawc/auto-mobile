@@ -23,29 +23,10 @@ emulator lane (#12273).
 | IME `TextAttribute.Builder.setTextSuggestionSelected()`     | Follow-up, not required           | `CtrlProxyIme.kt` commits text with `commitText` and uses no `TextAttribute`. An optional accessibility improvement, API 37 only, so it must be `SDK_INT`-guarded.                                                                                                                                                                                                                                                                                                                                                                                            |
 | Memory limits (`MemoryLimiter:AnonSwap` exits)              | Device check                      | No `ApplicationExitInfo` use in `android/control-proxy/src/main`. Owed: read `ActivityManager.getHistoricalProcessExitReasons` for CtrlProxy after a long soak on the API 37 lane (#12273).                                                                                                                                                                                                                                                                                                                                                                   |
 
-## Checklist for #12276 (the bump)
+## Owed to the API 37 lane (#12273)
 
-- [x] Set `build-android-targetSdk = "37"` and `build-android-buildTools = "37.0.0"` in #12276; keep `compileSdk` at 37 and the Robolectric pins unchanged.
-- [ ] Run the `control-proxy` unit tests, `detektMain detektTest` and `scripts/prepush-android.sh` (driver validation; no Gradle run in this implementation lane).
-- [ ] On the API 37 emulator, confirm the WebSocket over `adb forward` works with no `ACCESS_LOCAL_NETWORK` grant (owed: API 37 lane (#12273)).
-- [ ] After a long soak, check `ApplicationExitInfo` for `MemoryLimiter:AnonSwap` exits (owed: API 37 lane (#12273)).
-- [ ] Verify `MainActivity` and the IME keyboard in multi-window and large-screen configurations (owed: API 37 lane (#12273)).
-- [x] Repeat the non-test source re-grep and check the `SavedPrototypeActivity` manifest on this base (results below).
-- [ ] Sequence after #12271 (non-SDK reflection) and #12272 (Robolectric SDK pins).
+- `observe` over the `adb forward` WebSocket works with no `ACCESS_LOCAL_NETWORK` grant.
+- After a long soak, `ApplicationExitInfo` shows no `MemoryLimiter:AnonSwap` exits.
+- `MainActivity` and the IME keyboard in multi-window and large-screen configurations.
 
-## Bump-time re-grep (#12276)
-
-Repeated on 2026-10-15 across `android/control-proxy/src/main` and
-`android/playground`, excluding `test`, `androidTest`, `testFixtures` and `build`
-directories: no matches for `IntentSender`, `MODE_BACKGROUND_ACTIVITY_START`,
-`setAccessible`, `MessageQueue`, `System.load`, `ContactsContract` or `TrustManager`.
-`SavedPrototypeActivity` exists in `control-proxy/src/main/kotlin/.../prototype/`.
-Its `control-proxy/src/main/AndroidManifest.xml` entry has no `screenOrientation`,
-`resizeableActivity`, `minAspectRatio` or `maxAspectRatio`; no source orientation
-lock was found either. Device verification remains owed: API 37 lane (#12273).
-
-## Not done here
-
-The reflective call sites owned by #12271 were not touched. No device or emulator
-checks were run in the #12276 implementation lane; Gradle validation is delegated
-to the driver.
+Reflective call sites owned by #12271 were not touched. A non-test re-grep of `android/control-proxy/src/main` and `android/playground` at bump time (2026-10-15) found no `IntentSender`, `MODE_BACKGROUND_ACTIVITY_START`, `setAccessible`, `MessageQueue`, `System.load`, `ContactsContract` or `TrustManager`, and the `SavedPrototypeActivity` manifest entry has no orientation, resizability or aspect-ratio locks.

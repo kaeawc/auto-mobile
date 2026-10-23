@@ -3,34 +3,31 @@
 Most users can use the defaults. Set these variables when you need a different
 state directory, logs, tool set, or device behavior.
 
-Tables list every public environment read in `src/`, including supported legacy
-aliases. In a cell with two names, the first spelling takes precedence when set
-(even if empty); exceptions are explained in that row. Defaults are effective
-behavior with the variable unset. A flag whose row says `1`/`true` enables
-accepts `1`, `true`, `yes` or `on`, trimmed and case-insensitive; any other value
-is off. A row that says _exact_ accepts only the values it shows.
-Unknown numeric values usually fall back unless the row states otherwise.
-Internal test/acceptance hooks, benchmark harness settings, and manager-injected
-launch metadata are intentionally excluded.
+Each name below with an `AUTO_MOBILE_` spelling is a legacy alias; when a cell
+lists two names, the first takes precedence when set. Defaults are the behavior
+with the variable unset. A flag whose row says `1`/`true` accepts `1`, `true`,
+`yes` or `on`, trimmed and case-insensitive; any other value is off. A row that
+says _exact_ accepts only the values it shows. Unknown numeric values usually
+fall back to the default unless the row says otherwise.
 
 ## State and logs
 
 <div class="environment-variable-table" markdown>
 
-| Variable                                                                            | Use and accepted values                                                                                                                                                                                                       | Default                                                    |
-| ----------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| `AUTOMOBILE_DATA_DIR`, `AUTO_MOBILE_DATA_DIR`                                       | Base directory for observe, accessibility, navigation, CtrlProxy builds, screen streaming, WebRTC, tool outputs, daemon failure artifacts and downloaded libwebp tools; filesystem path, relative to daemon launch directory. | `~/.auto-mobile` (OS temp fallback if home is unavailable) |
-| `AUTOMOBILE_LOG_DIR`, `AUTO_MOBILE_LOG_DIR`                                         | Daemon and client log directory; filesystem path, relative to daemon launch directory.                                                                                                                                        | `$AUTOMOBILE_DATA_DIR/logs`                                |
-| `AUTOMOBILE_PLAN_HEALTH_DIR`                                                        | Opt-in: each `executePlan` run writes a JSON health summary (per-tool step latency, failures, skips) here and attaches it as `healthSummary` in the result; filesystem path.                                                  | unset (no summary)                                         |
-| `AUTOMOBILE_LOG_FORMAT`, `AUTO_MOBILE_LOG_FORMAT`                                   | Log serialization: `text` or newline-delimited `json`; case-insensitive, trimmed.                                                                                                                                             | `text`                                                     |
-| `AUTOMOBILE_LOG_SINK`, `AUTO_MOBILE_LOG_SINK`                                       | Log destination: `file`, `stderr`, `both`; case-insensitive, trimmed.                                                                                                                                                         | `file`                                                     |
-| `AUTOMOBILE_LOG_LEVEL`, `AUTO_MOBILE_LOG_LEVEL`                                     | Initial logging threshold: `debug`, `info`, `warn`/`warning`, `error`, `none`/`silent`; case-insensitive, trimmed.                                                                                                            | `info`                                                     |
-| `AUTOMOBILE_COORDINATION_DIR`, `AUTO_MOBILE_COORDINATION_DIR`                       | Shared cross-process CtrlProxy forwarding lease root, iOS CtrlProxy bundle cache (`ctrl-proxy-ios`), and signing entitlements (`ctrl-proxy/entitlements`); must be an absolute path shared by cooperating agents.             | OS account home `.auto-mobile`                             |
-| `AUTOMOBILE_ADB_SERVER_COORDINATION_DIR`, `AUTO_MOBILE_ADB_SERVER_COORDINATION_DIR` | Root of per-ADB-server device allocation claims and Android boot admissions, and of the broker binding registry; all ignore `AUTOMOBILE_COORDINATION_DIR`. Must be an absolute path shared by every daemon on one ADB server. | OS account home `.auto-mobile/adb-servers`                 |
-| `AUTOMOBILE_TOOL_OUTPUTS_DIR`, `AUTO_MOBILE_TOOL_OUTPUTS_DIR`                       | Directory for large CLI tool-output artifacts; filesystem path. CLI `--tool-outputs-dir` wins.                                                                                                                                | resolved data directory `tool_outputs`                     |
-| `AUTOMOBILE_DEBUG`                                                                  | Enable CLI debug logging; `1`/`true` enables; debug mode also asks a capable control-proxy for the IME commit trace and attaches it to `sendKeys` command results as `imeTrace`.                                              | off                                                        |
-| `AUTOMOBILE_DEBUG_PERF`                                                             | Enable UI performance debug tracking; `1`/`true` enables (also `--debug-perf`/`--ui-perf-debug`).                                                                                                                             | off                                                        |
-| `AUTOMOBILE_DOCTOR_TIMEOUT_MS`                                                      | Doctor command execution timeout; positive base-10 integer milliseconds; anything else (zero, `1e3`, `5s`) is ignored with a warning and falls back to `5000`.                                                                | `5000` ms                                                  |
+| Variable                                                                            | Use and accepted values                                                                                                                                                                                                  | Default                                                    |
+| ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------- |
+| `AUTOMOBILE_DATA_DIR`, `AUTO_MOBILE_DATA_DIR`                                       | Base directory for observations, navigation data, CtrlProxy builds, streaming, tool outputs and downloaded tools; filesystem path, relative to the daemon launch directory.                                              | `~/.auto-mobile` (OS temp fallback if home is unavailable) |
+| `AUTOMOBILE_LOG_DIR`, `AUTO_MOBILE_LOG_DIR`                                         | Daemon and client log directory; filesystem path.                                                                                                                                                                        | `$AUTOMOBILE_DATA_DIR/logs`                                |
+| `AUTOMOBILE_PLAN_HEALTH_DIR`                                                        | Each `executePlan` run writes a JSON health summary (per-tool step latency, failures, skips) here and attaches it as `healthSummary` in the result; filesystem path.                                                     | unset (no summary)                                         |
+| `AUTOMOBILE_LOG_FORMAT`, `AUTO_MOBILE_LOG_FORMAT`                                   | Log format: `text` or newline-delimited `json`.                                                                                                                                                                          | `text`                                                     |
+| `AUTOMOBILE_LOG_SINK`, `AUTO_MOBILE_LOG_SINK`                                       | Log destination: `file`, `stderr`, `both`.                                                                                                                                                                               | `file`                                                     |
+| `AUTOMOBILE_LOG_LEVEL`, `AUTO_MOBILE_LOG_LEVEL`                                     | Logging threshold: `debug`, `info`, `warn`/`warning`, `error`, `none`/`silent`.                                                                                                                                          | `info`                                                     |
+| `AUTOMOBILE_COORDINATION_DIR`, `AUTO_MOBILE_COORDINATION_DIR`                       | Shared directory for coordination between AutoMobile agents, including the iOS CtrlProxy bundle cache and signing entitlements; absolute path shared by cooperating agents. Set it when the home directory is read-only. | OS account home `.auto-mobile`                             |
+| `AUTOMOBILE_ADB_SERVER_COORDINATION_DIR`, `AUTO_MOBILE_ADB_SERVER_COORDINATION_DIR` | Directory where daemons sharing one ADB server record device claims and emulator boots; absolute path, the same for every daemon on that server.                                                                         | OS account home `.auto-mobile/adb-servers`                 |
+| `AUTOMOBILE_TOOL_OUTPUTS_DIR`, `AUTO_MOBILE_TOOL_OUTPUTS_DIR`                       | Directory for large CLI tool-output files; filesystem path. CLI `--tool-outputs-dir` wins.                                                                                                                               | data directory `tool_outputs`                              |
+| `AUTOMOBILE_DEBUG`                                                                  | CLI debug logging; `1`/`true` enables. Also attaches an input-method commit trace to `sendKeys` results as `imeTrace` when the device supports it.                                                                       | off                                                        |
+| `AUTOMOBILE_DEBUG_PERF`                                                             | UI performance debug tracking; `1`/`true` enables (also `--debug-perf`/`--ui-perf-debug`).                                                                                                                               | off                                                        |
+| `AUTOMOBILE_DOCTOR_TIMEOUT_MS`                                                      | `doctor` command timeout; positive integer milliseconds. Anything else is ignored with a warning.                                                                                                                        | `5000` ms                                                  |
 
 </div>
 
@@ -44,146 +41,99 @@ export AUTOMOBILE_LOG_SINK=stderr
 export AUTOMOBILE_ALLOW_SHARED_DAEMON_NAMESPACE=1
 ```
 
-Device snapshots, video archives and downloaded libwebp tools default to stores
-under `AUTOMOBILE_DATA_DIR`. This setting does not move the SQLite database
-(`AUTOMOBILE_DB_DIR` / `AUTOMOBILE_DB_PATH`), auxiliary daemon sockets
-(`AUTOMOBILE_AUX_SOCKET_DIR`), or coordination directories, which remain under
-the home directory regardless of `AUTOMOBILE_DATA_DIR`. Set
-`AUTOMOBILE_COORDINATION_DIR` to relocate coordination state, including the iOS
-CtrlProxy bundle cache (`ctrl-proxy-ios`) and signing entitlements
-(`ctrl-proxy/entitlements`). The iOS bundle cache can also be relocated with
-`AUTOMOBILE_CTRL_PROXY_IOS_CACHE_DIR`. ADB server coordination also accepts
-`AUTOMOBILE_ADB_SERVER_COORDINATION_DIR`.
-
-Set `AUTOMOBILE_COORDINATION_DIR` when the OS account home is read-only or when
-AutoMobile agents that share an ADB server need an explicit shared lease root.
-All cooperating agents must use the same absolute path. The legacy
-`AUTO_MOBILE_COORDINATION_DIR` alias is accepted when the preferred name is
-unset.
+`AUTOMOBILE_DATA_DIR` does not move the SQLite database (`AUTOMOBILE_DB_DIR` /
+`AUTOMOBILE_DB_PATH`), auxiliary daemon sockets (`AUTOMOBILE_AUX_SOCKET_DIR`), or
+coordination directories. Set `AUTOMOBILE_COORDINATION_DIR` to move coordination
+state. The iOS bundle cache can also be moved with
+`AUTOMOBILE_CTRL_PROXY_IOS_CACHE_DIR`.
 
 ## Daemon namespace
 
 <div class="environment-variable-table" markdown>
 
-| Variable                                                                                                    | Use and accepted values                                                                                                                                                                                                                                                                                                                                                                                                                 | Default                                         |
-| ----------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
-| `AUTOMOBILE_DAEMON_SOCKET_PATH`, `AUTO_MOBILE_DAEMON_SOCKET_PATH`                                           | Daemon control socket; filesystem path.                                                                                                                                                                                                                                                                                                                                                                                                 | `/tmp/auto-mobile-daemon-<uid>.sock`            |
-| `AUTOMOBILE_DAEMON_PID_FILE_PATH`, `AUTO_MOBILE_DAEMON_PID_FILE_PATH`                                       | Daemon PID record; filesystem path.                                                                                                                                                                                                                                                                                                                                                                                                     | `/tmp/auto-mobile-daemon-<uid>.pid`             |
-| `AUTOMOBILE_DAEMON_LOCK_FILE_PATH`, `AUTO_MOBILE_DAEMON_LOCK_FILE_PATH`                                     | Daemon start lock; filesystem path.                                                                                                                                                                                                                                                                                                                                                                                                     | `/tmp/auto-mobile-daemon-<uid>.lock`            |
-| `AUTOMOBILE_DAEMON_TOKEN_FILE_PATH`                                                                         | Per-daemon HTTP ingress token file (mode 0600); filesystem path. Clients read it to authenticate.                                                                                                                                                                                                                                                                                                                                       | `/tmp/auto-mobile-daemon-<uid>.token`           |
-| `AUTOMOBILE_DAEMON_HTTP_TOKEN`                                                                              | Client-side override: the daemon HTTP ingress bearer token to send, instead of reading the token file.                                                                                                                                                                                                                                                                                                                                  | unset                                           |
-| `AUTOMOBILE_AUX_SOCKET_DIR`                                                                                 | Directory for auxiliary stream/push sockets; filesystem path. When set, the daemon control socket, PID and lock files also move to `/tmp/auto-mobile-daemon-<uid>-<hash of dir>.*` so a private daemon never touches the resident daemon's files (an explicit `AUTOMOBILE_DAEMON_*_PATH` still wins). The JUnit runner, desktop app and XCTestRunner apply the same rule, so exporting the var to them reaches the same private daemon. | `~/.auto-mobile`                                |
-| `AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH`, `AUTO_MOBILE_WEBRTC_STREAM_SOCKET_PATH`                             | Override WebRTC stream socket; filesystem path.                                                                                                                                                                                                                                                                                                                                                                                         | auxiliary socket directory `webrtc-stream.sock` |
-| `AUTOMOBILE_DAEMON_TIMEOUT_MS`, `AUTO_MOBILE_DAEMON_TIMEOUT_MS`                                             | Connection/request timeout; positive base-10 integer milliseconds.                                                                                                                                                                                                                                                                                                                                                                      | `120000` ms                                     |
-| `AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS`, `AUTO_MOBILE_DAEMON_STARTUP_TIMEOUT_MS`                             | Cold startup budget; positive base-10 integer prefix in milliseconds, capped at `2147483647`.                                                                                                                                                                                                                                                                                                                                           | `30000` ms                                      |
-| `AUTOMOBILE_DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS`, `AUTO_MOBILE_DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS` | Reachability wait for an already-live daemon; positive base-10 integer milliseconds, capped at two-thirds of the startup budget (minimum 1 ms).                                                                                                                                                                                                                                                                                         | `10000` ms, subject to cap                      |
-| `AUTOMOBILE_DAEMON_DISABLE_HANDSHAKE`, `AUTO_MOBILE_DAEMON_DISABLE_HANDSHAKE`                               | Disable version/build identity handshake with `1`/`true`.                                                                                                                                                                                                                                                                                                                                                                               | off; handshake enabled                          |
-| `AUTOMOBILE_DAEMON_STREAM_AUTH`                                                                             | Require session authentication on video/WebRTC sockets; `0`, `false`, `no`, `off` disable (case-insensitive, trimmed).                                                                                                                                                                                                                                                                                                                  | on                                              |
-| `AUTOMOBILE_OPEN_LINK_MCP_TIMEOUT_MS`, `AUTO_MOBILE_OPEN_LINK_MCP_TIMEOUT_MS`                               | `openLink` MCP budget in positive base-10 integer ms. The daemon decides: an explicit value in either process applies; the daemon wins if both set. The client connection timeout (default 120 s) is bypassed only when an explicit value is set in the client or daemon process; with neither set it still floors the budget.                                                                                                          | `90000` ms                                      |
-| `AUTOMOBILE_OBSERVE_MCP_TIMEOUT_MS`, `AUTO_MOBILE_OBSERVE_MCP_TIMEOUT_MS`                                   | `observe` MCP budget in positive base-10 integer ms. The daemon decides: an explicit value in either process applies; the daemon wins if both set. The client connection timeout (default 120 s) is bypassed only when an explicit value is set in the client or daemon process; with neither set it still floors the budget.                                                                                                           | `90000` ms                                      |
-| `AUTOMOBILE_RUNNER_READINESS_TIMEOUT_MS`, `AUTO_MOBILE_RUNNER_READINESS_TIMEOUT_MS`                         | Steady-state CtrlProxy readiness budget; integer milliseconds in `1000..120000`; CLI flag wins.                                                                                                                                                                                                                                                                                                                                         | `30000` ms                                      |
-| `AUTOMOBILE_CTRL_PROXY_LEASE_IDLE_MS`                                                                       | Idle period after which a daemon closes a device's CtrlProxy connection and gives up its forwarding lease (no session, stream, tool call or CtrlProxy request); also how recent its own use must be for it to refuse another process's request to give the lease up; positive base-10 integer milliseconds; anything else is ignored with a warning and the default is used.                                                            | `60000` ms                                      |
-| `AUTOMOBILE_PRIVATE_DAEMON_ORPHAN_IDLE_MS`                                                                  | Idle timeout after which a harness private daemon (`AUTOMOBILE_HARNESS_PRIVATE_DAEMON=1`, or an explicit non-default `AUTOMOBILE_DAEMON_SOCKET_PATH` with `AUTOMOBILE_AUX_SOCKET_DIR` set) whose launching parent exited, with no clients or sessions, shuts itself down; non-negative milliseconds, `0` disables.                                                                                                                      | `900000` ms                                     |
-| `AUTOMOBILE_ALLOW_SHARED_DAEMON_NAMESPACE`                                                                  | Lets daemon lifecycle and release commands, and automatic client restarts, act on the shared daemon while a state directory is relocated without a private namespace (see "Shared-namespace guard"); exact `1` enables.                                                                                                                                                                                                                 | unset                                           |
-| `AUTOMOBILE_HARNESS_PRIVATE_DAEMON`                                                                         | Marks a test/lane private daemon for the orphan watchdog; `1` arms it, `0` exempts a daemon that would otherwise qualify.                                                                                                                                                                                                                                                                                                               | unset                                           |
-| `AUTOMOBILE_DAEMON_LAUNCHER_PID`                                                                            | Pid of the process that launched a private daemon, for the orphan watchdog; defaults to the parent pid read at process entry. Values that are not a pid above 1 are ignored.                                                                                                                                                                                                                                                            | unset                                           |
+| Variable                                                                                                    | Use and accepted values                                                                                                                                                                                                                                       | Default                                         |
+| ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| `AUTOMOBILE_DAEMON_SOCKET_PATH`, `AUTO_MOBILE_DAEMON_SOCKET_PATH`                                           | Daemon control socket; filesystem path.                                                                                                                                                                                                                       | `/tmp/auto-mobile-daemon-<uid>.sock`            |
+| `AUTOMOBILE_DAEMON_PID_FILE_PATH`, `AUTO_MOBILE_DAEMON_PID_FILE_PATH`                                       | Daemon PID record; filesystem path.                                                                                                                                                                                                                           | `/tmp/auto-mobile-daemon-<uid>.pid`             |
+| `AUTOMOBILE_DAEMON_LOCK_FILE_PATH`, `AUTO_MOBILE_DAEMON_LOCK_FILE_PATH`                                     | Daemon start lock; filesystem path.                                                                                                                                                                                                                           | `/tmp/auto-mobile-daemon-<uid>.lock`            |
+| `AUTOMOBILE_DAEMON_TOKEN_FILE_PATH`                                                                         | Daemon HTTP token file (mode 0600) that clients read to authenticate; filesystem path.                                                                                                                                                                        | `/tmp/auto-mobile-daemon-<uid>.token`           |
+| `AUTOMOBILE_DAEMON_HTTP_TOKEN`                                                                              | Client-side: the daemon HTTP bearer token to send instead of reading the token file.                                                                                                                                                                          | unset                                           |
+| `AUTOMOBILE_AUX_SOCKET_DIR`                                                                                 | Directory for auxiliary stream sockets; filesystem path. When set, the control socket, PID and lock files also move to a per-directory name, so a second daemon never touches the default daemon's files (an explicit `AUTOMOBILE_DAEMON_*_PATH` still wins). | `~/.auto-mobile`                                |
+| `AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH`, `AUTO_MOBILE_WEBRTC_STREAM_SOCKET_PATH`                             | WebRTC stream socket; filesystem path.                                                                                                                                                                                                                        | auxiliary socket directory `webrtc-stream.sock` |
+| `AUTOMOBILE_DAEMON_TIMEOUT_MS`, `AUTO_MOBILE_DAEMON_TIMEOUT_MS`                                             | Connection and request timeout; positive integer milliseconds.                                                                                                                                                                                                | `120000` ms                                     |
+| `AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS`, `AUTO_MOBILE_DAEMON_STARTUP_TIMEOUT_MS`                             | Cold startup budget; positive integer milliseconds, capped at `2147483647`.                                                                                                                                                                                   | `30000` ms                                      |
+| `AUTOMOBILE_DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS`, `AUTO_MOBILE_DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS` | How long to wait for an already-running daemon to answer; positive integer milliseconds, capped at two-thirds of the startup budget.                                                                                                                          | `10000` ms, subject to cap                      |
+| `AUTOMOBILE_DAEMON_DISABLE_HANDSHAKE`, `AUTO_MOBILE_DAEMON_DISABLE_HANDSHAKE`                               | Disable the version and build handshake with the daemon; `1`/`true` disables.                                                                                                                                                                                 | off; handshake enabled                          |
+| `AUTOMOBILE_DAEMON_STREAM_AUTH`                                                                             | Require session authentication on video and WebRTC sockets; `0`, `false`, `no`, `off` disable.                                                                                                                                                                | on                                              |
+| `AUTOMOBILE_OPEN_LINK_MCP_TIMEOUT_MS`, `AUTO_MOBILE_OPEN_LINK_MCP_TIMEOUT_MS`                               | `openLink` time budget; positive integer milliseconds. Set it in the daemon environment (the daemon wins if both client and daemon set it).                                                                                                                   | `90000` ms                                      |
+| `AUTOMOBILE_OBSERVE_MCP_TIMEOUT_MS`, `AUTO_MOBILE_OBSERVE_MCP_TIMEOUT_MS`                                   | `observe` time budget; same rules as `openLink`.                                                                                                                                                                                                              | `90000` ms                                      |
+| `AUTOMOBILE_RUNNER_READINESS_TIMEOUT_MS`, `AUTO_MOBILE_RUNNER_READINESS_TIMEOUT_MS`                         | CtrlProxy readiness timeout; integer milliseconds in `1000..120000`. CLI flag wins.                                                                                                                                                                           | `30000` ms                                      |
+| `AUTOMOBILE_CTRL_PROXY_LEASE_IDLE_MS`                                                                       | Idle time after which the daemon closes a device's CtrlProxy connection and releases its port forwarding; positive integer milliseconds.                                                                                                                      | `60000` ms                                      |
+| `AUTOMOBILE_ALLOW_SHARED_DAEMON_NAMESPACE`                                                                  | Let daemon lifecycle commands and automatic client restarts act on the default daemon while a state directory is relocated (see "Shared-namespace guard"); exact `1` enables.                                                                                 | unset                                           |
 
 </div>
 
 Set `AUTOMOBILE_DAEMON_SOCKET_PATH`, `AUTOMOBILE_DAEMON_PID_FILE_PATH`, and
 `AUTOMOBILE_DAEMON_LOCK_FILE_PATH` to distinct absolute paths for each concurrent
-instance. Relative paths resolve from the daemon launch directory. The legacy
-`AUTO_MOBILE_` aliases are also accepted.
+instance. Relative paths resolve from the daemon launch directory.
 
 ### Shared-namespace guard
 
-`AUTOMOBILE_DATA_DIR`, `AUTOMOBILE_DB_DIR` and `AUTOMOBILE_DB_PATH` (and their
-`AUTO_MOBILE_` aliases) relocate a daemon's state, but not its namespace.
-With any of them set and neither `AUTOMOBILE_AUX_SOCKET_DIR` nor an
-`AUTOMOBILE_DAEMON_SOCKET_PATH` that differs from the default, `--daemon start`,
-`stop`, `restart`, `restart-admitted`, `restart-acceptance-session`,
-`release-session` and `release-liveness-ownership` refuse with
-`[shared_daemon_namespace]`: they would act on the shared daemon, which runs on
-different state. MCP and `--cli` clients refuse an automatic version, build or
-startup-option restart for the same reason; they still auto-start a daemon when
-none is running. `AUTOMOBILE_LOG_DIR` does not count (it only moves log files),
-nor do the coordination directories, which cooperating daemons share.
+`AUTOMOBILE_DATA_DIR`, `AUTOMOBILE_DB_DIR` and `AUTOMOBILE_DB_PATH` relocate a
+daemon's state, but not its socket. With any of them set and neither
+`AUTOMOBILE_AUX_SOCKET_DIR` nor a non-default `AUTOMOBILE_DAEMON_SOCKET_PATH`,
+`--daemon start`, `stop`, `restart` and `release-session` refuse with
+`[shared_daemon_namespace]`, because they would act on the default daemon, which
+runs on different state. MCP and `--cli` clients likewise refuse an automatic
+restart, though they still start a daemon when none is running.
+`AUTOMOBILE_LOG_DIR` and the coordination directories do not count.
 
-After a daemon self-exit, a replacement started on the same socket inherits the
-previous daemon's bound port and startup flags. Explicit `--daemon start` and
-`--daemon restart` after a self-exit inherit just like an auto-start. The starting
-client's explicit flags win per option, but a boolean startup flag cannot be
-turned off on the inheriting start. An explicit tool enable list removes those
-tools from the inherited disable list, and an explicit disable list removes them
-from the inherited enable list. For a fresh set, run `--daemon stop` (which clears
-the record), then start with the desired flags. The exit record is consumed by
-the first replacement launch and is ignored
-when it is older than 30 minutes or names a different build id. If another
-process has taken the inherited port, the replacement can select an available
-port instead of requiring that port strictly. `--daemon stop` clears the record.
-
-Environment variables are not inherited: the replacement runs with the new
-client's environment, so env-only settings such as APK and runner overrides
-follow the new client. A setting the previous daemon already resolved into a
-startup option is carried as that option. `kill -9` or any externally delivered
-signal leaves no exit record, so the next start uses the client's own settings.
-A daemon that fails before it finishes entering daemon mode, for example during
-database preflight, also leaves no record.
-
-Set `AUTOMOBILE_AUX_SOCKET_DIR` to reach a private daemon instead. To act on the
-shared daemon deliberately, pass `--allow-shared-namespace` after the daemon
+Set `AUTOMOBILE_AUX_SOCKET_DIR` to use a separate daemon instead. To act on the
+default daemon deliberately, pass `--allow-shared-namespace` after the daemon
 command, or set `AUTOMOBILE_ALLOW_SHARED_DAEMON_NAMESPACE=1` on hosts whose only
 daemon uses the relocated state, such as a container.
 
-Start, stop, and restart operate only on that namespace. A live process in
-another namespace is ignored, even when it uses the default TCP port. Lost PID
-records can still be recovered when the daemon answers on this socket or carries
-this socket's launch marker. An unmarked process that does not answer on this
-socket is left alone. Restart verifies and stops the namespace's current
-process generation before launching its replacement; it reuses the recorded
-bound port unless explicitly overridden, and fails if shutdown or identity
-cannot be verified.
+A daemon that exits on its own is replaced with the same port and startup flags.
+The replacement runs with the new client's environment, so environment-only
+settings follow the new client. Run `--daemon stop` first for a fresh set of
+flags.
 
 ## Database
 
 <div class="environment-variable-table" markdown>
 
-| Variable                                                                        | Use and accepted values                                                                                                                                                                           | Default                                  |
-| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
-| `AUTOMOBILE_DB_PATH`, `AUTO_MOBILE_DB_PATH`                                     | Exact SQLite database file; filesystem path, takes precedence over DB directory. `:memory:` is test-only.                                                                                         | `~/.auto-mobile/auto-mobile.db`          |
-| `AUTOMOBILE_DB_DIR`, `AUTO_MOBILE_DB_DIR`                                       | Directory containing `auto-mobile.db`; filesystem path.                                                                                                                                           | unset; `~/.auto-mobile`                  |
-| `AUTOMOBILE_MIGRATIONS_DIR`, `AUTO_MOBILE_MIGRATIONS_DIR`                       | Directory of migration `.ts` modules; filesystem path. The package does not ship a migrations folder, so provide one yourself (it needs `../eventTables.ts` beside it and a resolvable `kysely`). | bundled static migrations (no directory) |
-| `AUTOMOBILE_MIGRATION_RECOVERY`, `AUTO_MOBILE_MIGRATION_RECOVERY`               | Safe migration-history recovery is enabled unless `0`, `false`, `no`, `off` (case-insensitive, trimmed). Only exact trimmed `1` also permits destructive table reset.                             | safe recovery on; destructive reset off  |
-| `AUTOMOBILE_MIGRATION_LOCK_TIMEOUT_MS`, `AUTO_MOBILE_MIGRATION_LOCK_TIMEOUT_MS` | File-scoped migration lock wait; positive base-10 integer milliseconds.                                                                                                                           | `60000` ms                               |
+| Variable                                                                        | Use and accepted values                                                                                                        | Default                                 |
+| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------- |
+| `AUTOMOBILE_DB_PATH`, `AUTO_MOBILE_DB_PATH`                                     | Exact SQLite database file; filesystem path. Takes precedence over the DB directory.                                           | `~/.auto-mobile/auto-mobile.db`         |
+| `AUTOMOBILE_DB_DIR`, `AUTO_MOBILE_DB_DIR`                                       | Directory containing `auto-mobile.db`; filesystem path.                                                                        | `~/.auto-mobile`                        |
+| `AUTOMOBILE_MIGRATIONS_DIR`, `AUTO_MOBILE_MIGRATIONS_DIR`                       | Directory of migration modules; filesystem path.                                                                               | bundled migrations                      |
+| `AUTOMOBILE_MIGRATION_RECOVERY`, `AUTO_MOBILE_MIGRATION_RECOVERY`               | Safe migration-history recovery is on unless `0`, `false`, `no`, `off`. Only exact `1` also permits a destructive table reset. | safe recovery on; destructive reset off |
+| `AUTOMOBILE_MIGRATION_LOCK_TIMEOUT_MS`, `AUTO_MOBILE_MIGRATION_LOCK_TIMEOUT_MS` | How long to wait for the migration lock; positive integer milliseconds.                                                        | `60000` ms                              |
 
 </div>
 
-`AUTOMOBILE_DB_PATH` takes precedence over `AUTOMOBILE_DB_DIR`. Relative paths
-are resolved from the daemon's launch directory. Use a path unique to each
-concurrent instance:
+Relative paths resolve from the daemon's launch directory. Use a path unique to
+each concurrent instance:
 
 ```bash
 export AUTOMOBILE_DB_PATH="$PWD/.auto-mobile/auto-mobile.db"
 ```
 
-Do not use `AUTOMOBILE_DB_PATH=:memory:` in production. It is allowed only
-for tests that also set `AUTOMOBILE_ALLOW_IN_MEMORY_DB` to `1`, `true` or `yes`.
-
 ## Tool defaults
 
 <div class="environment-variable-table" markdown>
 
-| Variable                                        | Use and accepted values                                                                                                                                                                                                                                                                                                                                                                        | Default            |
-| ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
-| `AUTOMOBILE_ENABLED_TOOLS`                      | Enable comma-separated exact, case-sensitive tool names; unknown names and conflicts fail startup. CLI flags win; persisted choices override startup defaults.                                                                                                                                                                                                                                 | unset; no override |
-| `AUTOMOBILE_DISABLED_TOOLS`                     | Disable comma-separated exact, case-sensitive tool names; same validation and precedence as enabled tools.                                                                                                                                                                                                                                                                                     | unset; no override |
-| `AUTOMOBILE_ALWAYS_LOAD_TOOLS`                  | Register optional tool definitions eagerly; `1`/`true` enables.                                                                                                                                                                                                                                                                                                                                | off                |
-| `AUTOMOBILE_OBSERVE_RESULT_INCLUDE_ELEMENTS`    | Include flattened `elements` in observations; exact `1` enables, or corresponding CLI flag.                                                                                                                                                                                                                                                                                                    | off                |
-| `AUTOMOBILE_TOOL_RESULTS_NO_STRUCTURED_CONTENT` | Omit structured tool content; exact `1` enables, or corresponding CLI flag.                                                                                                                                                                                                                                                                                                                    | off                |
-| `AUTOMOBILE_ACTIONS_DIFF_OBSERVE`               | Use differential action observations; exact `1` enables, or corresponding CLI flag.                                                                                                                                                                                                                                                                                                            | off                |
-| `AUTOMOBILE_ACTIONS_NO_OBSERVE`                 | Skip post-action observation; exact `1` enables, or corresponding CLI flag.                                                                                                                                                                                                                                                                                                                    | off                |
-| `AUTOMOBILE_ACTIONS_COMPACT_METADATA`           | Omit unchanged metadata per session/device and duplicate matches. Exact `0` opts out, `1` opts in. CLI negative wins over positive, then env, persisted state, default on. Unset/other values relay no preference or restart request. `actions-compact-metadata=false` persists an opt-out. First/changed/new-session/device-switch blocks remain full; diff/no-observe behavior is unchanged. | on                 |
-| `AUTOMOBILE_EVENT_ALL_MARKERS`                  | Comma-separated, trimmed event markers that promote matching events to all-event capture; `--event-all-markers` wins.                                                                                                                                                                                                                                                                          | empty list         |
+| Variable                                        | Use and accepted values                                                                                               | Default    |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ---------- |
+| `AUTOMOBILE_ENABLED_TOOLS`                      | Comma-separated tool names to enable; exact, case-sensitive. Unknown names and enable/disable conflicts fail startup. | unset      |
+| `AUTOMOBILE_DISABLED_TOOLS`                     | Comma-separated tool names to disable; same rules.                                                                    | unset      |
+| `AUTOMOBILE_ALWAYS_LOAD_TOOLS`                  | Register optional tool definitions up front; `1`/`true` enables.                                                      | off        |
+| `AUTOMOBILE_OBSERVE_RESULT_INCLUDE_ELEMENTS`    | Include a flattened `elements` list in observations; exact `1` enables, or the matching CLI flag.                     | off        |
+| `AUTOMOBILE_TOOL_RESULTS_NO_STRUCTURED_CONTENT` | Omit structured tool content; exact `1` enables, or the matching CLI flag.                                            | off        |
+| `AUTOMOBILE_ACTIONS_DIFF_OBSERVE`               | Return differential observations after actions; exact `1` enables, or the matching CLI flag.                          | off        |
+| `AUTOMOBILE_ACTIONS_NO_OBSERVE`                 | Skip the observation after actions; exact `1` enables, or the matching CLI flag.                                      | off        |
+| `AUTOMOBILE_ACTIONS_COMPACT_METADATA`           | Omit unchanged metadata and duplicate matches from action results; exact `0` opts out, `1` opts in. CLI flags win.    | on         |
+| `AUTOMOBILE_EVENT_ALL_MARKERS`                  | Comma-separated event markers that switch capture to all events; `--event-all-markers` wins.                          | empty list |
 
 </div>
 
@@ -192,685 +142,236 @@ export AUTOMOBILE_ENABLED_TOOLS=clipboard,sqlQuery
 export AUTOMOBILE_DISABLED_TOOLS=observe
 ```
 
-Tool names are exact and case-sensitive. Unknown names and same-layer
-enable/disable conflicts fail startup. Repeatable `--enable-tool` and
-`--disable-tool` flags override these environment values; persisted
+Repeatable `--enable-tool` and `--disable-tool` flags override these values, and
 `setToolEnabled` choices override startup defaults.
 
 ## Experimental session broker
 
 <div class="environment-variable-table" markdown>
 
-| Variable                           | Use and accepted values                                                                                                                                                                | Default                     |
-| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- |
-| `AUTOMOBILE_SESSION_BROKER_CONFIG` | Operator-owned JSON configuration file path, resolved relative to daemon launch directory. Enables the experimental session-only broker and supplies private caps and device defaults. | unset; ordinary daemon mode |
-| `AUTOMOBILE_SESSION_CONFIG`        | Consumer session request as inline JSON or a JSON file path. `--session-config` takes precedence. Cannot be combined with `--initial-session-uuid` or `--no-proxy`.                    | unset; ordinary proxy mode  |
+| Variable                           | Use and accepted values                                                                                                                                                        | Default                     |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------- |
+| `AUTOMOBILE_SESSION_BROKER_CONFIG` | Path to a JSON configuration file, relative to the daemon launch directory. Enables the experimental session-only broker and supplies its capacity limits and device defaults. | unset; ordinary daemon mode |
+| `AUTOMOBILE_SESSION_CONFIG`        | A session request as inline JSON or a JSON file path. `--session-config` takes precedence. Cannot be combined with `--initial-session-uuid` or `--no-proxy`.                   | unset; ordinary proxy mode  |
 
 </div>
 
-These are separate operator and consumer inputs. A session requester does not
-need the provider's capacity or pool configuration. See
-[the session broker experiment](../design-docs/session-broker-experiment.md)
-for their versioned formats and release obligations.
+See [the session broker experiment](../design-docs/session-broker-experiment.md)
+for the file formats.
 
 ## Session heartbeat timeout
 
 <div class="environment-variable-table" markdown>
 
-| Variable                                                                                              | Use and accepted values                                                                                    | Default     |
-| ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ----------- |
-| `AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS`, `AUTO_MOBILE_SESSION_HEARTBEAT_TIMEOUT_MS`                 | Heartbeat leash; positive base-10 integer milliseconds.                                                    | `4000` ms   |
-| `AUTOMOBILE_SESSION_HEARTBEAT_CHECK_INTERVAL_MS`, `AUTO_MOBILE_SESSION_HEARTBEAT_CHECK_INTERVAL_MS`   | Heartbeat expiry sweep cadence; positive base-10 integer milliseconds.                                     | `2000` ms   |
-| `AUTOMOBILE_SESSION_IDLE_TIMEOUT_MS`, `AUTO_MOBILE_SESSION_IDLE_TIMEOUT_MS`                           | Idle window after the last tool call ends; positive base-10 integer milliseconds.                          | `120000` ms |
-| `AUTOMOBILE_SESSION_HEARTBEAT_INITIAL_GRACE_MS`, `AUTO_MOBILE_SESSION_HEARTBEAT_INITIAL_GRACE_MS`     | Initial grace for custom-heartbeat sessions before first heartbeat; positive base-10 integer milliseconds. | `20000` ms  |
-| `AUTOMOBILE_SESSION_PRE_FIRST_HEARTBEAT_GRACE_MS`, `AUTO_MOBILE_SESSION_PRE_FIRST_HEARTBEAT_GRACE_MS` | Grace for default-policy sessions that never heartbeat; positive base-10 integer milliseconds.             | `5000` ms   |
+| Variable                                                                                              | Use and accepted values                                                                                                           | Default     |
+| ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| `AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS`, `AUTO_MOBILE_SESSION_HEARTBEAT_TIMEOUT_MS`                 | How long a session owner may go without a heartbeat before the session is at risk of release; positive integer milliseconds.      | `4000` ms   |
+| `AUTOMOBILE_SESSION_HEARTBEAT_CHECK_INTERVAL_MS`, `AUTO_MOBILE_SESSION_HEARTBEAT_CHECK_INTERVAL_MS`   | How often the daemon checks for expired heartbeats; positive integer milliseconds.                                                | `2000` ms   |
+| `AUTOMOBILE_SESSION_IDLE_TIMEOUT_MS`, `AUTO_MOBILE_SESSION_IDLE_TIMEOUT_MS`                           | Idle window after a session's last control call; positive integer milliseconds. Set it in both the daemon and proxy environments. | `120000` ms |
+| `AUTOMOBILE_SESSION_HEARTBEAT_INITIAL_GRACE_MS`, `AUTO_MOBILE_SESSION_HEARTBEAT_INITIAL_GRACE_MS`     | Grace period before the first heartbeat of a custom-heartbeat session; positive integer milliseconds.                             | `20000` ms  |
+| `AUTOMOBILE_SESSION_PRE_FIRST_HEARTBEAT_GRACE_MS`, `AUTO_MOBILE_SESSION_PRE_FIRST_HEARTBEAT_GRACE_MS` | Grace period for default sessions that never send a heartbeat; positive integer milliseconds.                                     | `5000` ms   |
 
 </div>
-
-`AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS` (alias
-`AUTO_MOBILE_SESSION_HEARTBEAT_TIMEOUT_MS`) defaults to `4000` ms. It controls
-the heartbeat leash for heartbeat-policy sessions, not `cli-idle` sessions.
-A device session is released about 10 s after its owner's last heartbeat: the
-4 s lease, then a 4 s suspect grace, then at most one 2 s expiry sweep. The
-proxy heartbeats every 2 s, so one late or lost beat never lapses the lease and
-an owner must miss four beats before its session can be released. When the
-timeout is set explicitly, the proxy's cadence is half of it.
 
 ```bash
 export AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS=20000
 ```
 
-Liveness ownership has a single token per session, and the daemon protects it.
-A claim from a different token is rejected while the current owner's lease is
-live. The lease is the session's heartbeat timeout measured from the owner's
-last heartbeat (or its recorded claim), the same deadline the heartbeat monitor
-reaps on, so a claim succeeds exactly when the session would otherwise be
-released. Only the owner's own heartbeats extend the owner's lease: a tool call
-that names the session, from any caller, keeps the session in use but does not
-keep a dead owner's lease alive, so a restarted proxy with a new token can claim
-once the lease plus the 4 s grace window have passed even while it is already
-working on the session. A healthy single proxy is unaffected, since its own
-heartbeats keep the lease live. Two claimants racing for a lapsed session are
-serialised: the first records the takeover and its lease in the same step, and
-the second is refused. A claim succeeds
-when the session is unowned, the owner's lease has expired, or the token matches
-the current owner (a restarted owner resuming). A session on the CLI idle policy
-never has a live lease for this purpose: its one-shot CLI owners exit between
-invocations, so the next invocation's new token can always claim it.
+A device session is released about 10 s after its owner's last heartbeat at the
+default settings. The MCP proxy heartbeats automatically, so a late or lost beat
+does not lapse the session.
 
-Heartbeats prove liveness, not use (owner decision 2026-10-08, #10656). A
-heartbeat-policy session also has a 2-minute idle window measured from the end
-of its last control call, and heartbeats never extend it: they renew only the owner
-lease and its grace window. Only control calls extend the idle deadline, so a
-heartbeat from an idle but live owner does not. No read counts as activity, not
-even the owner's own (owner decision 2026-10-09, #10964): `observe` and the other
-read-only tools never extend the idle window, so an agent that only observes its
-device for longer than the window loses it. Read-only access never requires a
-session (#10965); see [device ownership](device-ownership.md) for which tools and
-argument forms are reads. Only a control call in flight holds the idle release,
-and the idle window restarts when that control call ends (#10694). That hold is
-bounded: it lasts until the latest in-flight control call's request deadline plus
-10 s, or the 30 min ceiling when a control call has no deadline, so a call that
-never settles cannot hold a device forever. A read in flight never holds or extends
-an idle or owner-disconnect release; the release cuts it with the typed terminal
-refusal `session_ownership_lost` (#11381). An agent that
-acquires a device and then makes no tool calls for 2 minutes loses the session
-and its device even while its proxy stays open and keeps heartbeating; the
-release reason is `cleanup-expired` whichever path discovers it, not `heartbeat-timeout`.
-Watching is not use, and desktop input is (owner decisions 2026-10-08, #10693,
-#10730). A desktop or IDE window that only watches a device holds no session on it: it
-registers an observer session, which the idle window does not apply to. Its
-first tap, swipe, key or text input on a free device allocates the device, and
-each later input restarts the idle window. When the user stops sending input,
-the daemon releases the device after the window as `cleanup-expired`, and the
-window drops back to watching without re-acquiring it; the next input
-allocates it again. The desktop may watch any device whichever session owns it
-(owner decision 2026-10-08, #10698, #10731, #8902), as a read-only viewer;
-control stays with the owner. `input/*` for a held device is accepted only from a
-frame that names the holding session, and is refused with
-`device_owned_by_other_session` otherwise (#10743). A device nobody holds takes
-input from anyone.
-`AUTOMOBILE_SESSION_IDLE_TIMEOUT_MS` (alias `AUTO_MOBILE_SESSION_IDLE_TIMEOUT_MS`)
-changes the window, for example to check idle release live; a value that is not a
-positive base-10 integer is ignored. Set it in both the daemon's and the proxy's
-environment. The proxy's replay of a remembered session binding and its eviction
-of held sessions nothing has used follow the same window: only forwarded tool
-calls refresh them, including a call that selects the device with `platform` or
-`deviceId` instead of naming the session (#10692). Once the window passes, the
-proxy stops heartbeating the binding even if it missed the daemon's release
-notification, and it also stops when the daemon answers a heartbeat with
-`daemon_session_not_found`; a call that names the released session is told to
-call `getAndroid` or `getApple`, which works on the same transport (#10702).
-A session held from the CLI keeps its own 2-minute default idle window
-(`AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS`); the owner chose not to raise it
-(2026-10-09, #10982), and `--cli help` prints the same value.
-`session-info` reports `lastUsedAt` as the last tool activity
-and `expiresAt` as the stored idle deadline. Managed executions report
-`idleReleaseAt: null` while their owner lease is live or suspect: neither that stored
-deadline nor the proxy's local idle window ends them. `idleTimeoutMs` stays validated
-and reported, but a hung living owner with heartbeats may hold indefinitely. When a session's device restarts, the daemon
-waits up to three minutes for it to come back. Tool calls that start, wait on, or
-fail because of that recovery count as activity, so the idle window only ends the
-recovery once the client has made no calls for the whole window. A call waiting
-inside the recovery is bounded by the three minutes alone.
+A session also has an idle window (2 minutes by default). Only control calls
+(taps, swipes, typing and similar) extend it; heartbeats and read-only calls such
+as `observe` do not. An agent that acquires a device and then makes no control
+calls for the whole window loses the session and its device, even while its proxy
+stays connected. Raise `AUTOMOBILE_SESSION_IDLE_TIMEOUT_MS` if your workflow only
+observes for long stretches. See [device ownership](device-ownership.md) for which
+tools count as reads.
 
-A daemon restart gives a session it rehydrates a fresh idle window: the session
-is recreated with `lastUsedAt` set to the restart time and its deadline one idle
-window later, because the persisted `last_used_at_ms` is not restored. This is
-intended, so an idle session that outlives a restart can hold its device for up
-to one more window. A persisted session whose deadline had already passed when
-the daemon restarted is not rehydrated, except a `managed-execution` row: its idle
-deadline is ignored on recovery, and the existing awaiting-owner timeout bounds
-a proxy that never returns. Terminal reasons and fixed restart windows still apply.
+Idle time includes host sleep, so a laptop that sleeps longer than the window may
+lose its session. The next call then fails with `bound_session_lost`; acquire a
+new session with `getAndroid` or `getApple`.
 
-A rejected claim returns
-`{ success: false, code: "liveness_owner_conflict", error: "..." }` naming the
-session and changes nothing: the owner, policy, and every deadline stay as the
-owner left them. A claim from a token that already claimed and was displaced
-returns `{ success: false, code: "liveness_owner_superseded", error: "..." }`
-and records nothing; it cannot take an owned session back. An explicit release
-opens the session to a new claim, including one from a previously used token.
-To take a session from a displaced owner, claim with a fresh token after
-that owner's lease has expired.
+If the proxy cannot get heartbeats acknowledged after three recovery attempts, it
+returns a structured error on the next call that uses the session:
 
-On clean proxy close (stdin EOF, transport close or SIGTERM), ordinary sessions
-that proxy acquired and heartbeats are explicitly released under its current
-owner token before the daemon connection closes. Releases run in parallel with
-a 1.5 s bound; failure leaves the existing disconnect/heartbeat fallback. A
-configured `--initial-session-uuid`, a harness-supplied stable owner token and
-CLI-owned sessions retain their existing resume/idle behavior; managed executions
-use their separate release path and end on owner exit, heartbeat loss or explicit
-release. Plain heartbeat and CLI sessions retain their idle rules. A predecessor cannot release a session whose
-liveness ownership was handed off (#11920).
+- `daemon_stalled`: the daemon stopped answering. Restart the daemon, then resume
+  by passing the same `sessionUuid` on a tool call.
+- `proxy_stalled`: the proxy itself stalled and the daemon released the session.
+  Reacquire the device with `getAndroid` or `getApple`.
 
-A stdio/HTTP proxy claims and heartbeats only the sessions it acquired itself
-(from a `getAndroid`, `getApple`, `startDevice` or `provisionDevice` result, which
-includes a `provisionDevice` call that returns an error but keeps its session) or was started with
-through `--initial-session-uuid`. A session UUID that the proxy learns from a `setActiveDevice` result is bound
-for routing like one named in call args, and is not claimed or heartbeated
-unless this proxy minted it. A `sessionUuid` that is only passed to a tool
-call is forwarded with that call but never claimed or heartbeated, so a proxy
-cannot inherit a session another owner holds, even after that owner's lease
-lapses (#10664). A proxy bound with `--initial-session-uuid` claims on its first
-heartbeat and restores the strict heartbeat policy. By default the proxy mints a
-new owner token per process, so a restarted proxy is a different token and is
-locked out while the previous process's lease is live. It keeps claiming for as
-long as the daemon reports the previous owner's hold (the daemon's lease for the
-session plus its suspect grace, whatever the proxy's own lease setting) and wins
-once that hold lapses. Only a previous owner that is still renewing its lease a
-minute after the conflict began counts as a live owner; the new proxy then stops
-claiming and its tool calls report the session as lost (#10701). A harness that restarts
-its proxy passes a stable token with `--liveness-owner-token <token>` (alongside
-`--initial-session-uuid`); the restarted proxy then claims with the same token
-and resumes the session without a conflict. Use a distinct token per harness.
-One-shot CLI sessions need no keeper (owner decision 2026-10-09, #11096): every
-`--cli` call re-declares the session's CLI idle policy, and its idle window runs
-from tool calls, not heartbeats. `--daemon heartbeat S` on a CLI idle session is a
-successful no-op whatever token or `--claim-liveness-ownership` it carries: it
-claims nothing, changes nothing and says so. It is refused on a proxy-owned
-session (see "Supported liveness stack"). Ordinary ticks from the current owner
-renew its lease without changing the policy or the idle deadline.
+To restart a proxy and keep its sessions, start it with `--initial-session-uuid`
+and a stable `--liveness-owner-token <token>`; use a distinct token per harness.
+A one-shot `--cli` call needs no keeper, and `--daemon heartbeat` on a CLI session
+is a no-op.
 
-A displaced token's non-claiming `daemon/heartbeat` returns
-`{ success: false, code: "liveness_owner_superseded", error: "..." }` and changes
-no activity, heartbeat, expiry or policy. The heartbeat CLI exits non-zero with
-guidance to re-claim or stop, instead of printing `heartbeat recorded`; it never
-does so for a CLI idle session, where the heartbeat is a no-op. There is no
-co-ownership.
-
-The proxy reports lost ownership once at warn level and continues without
-fencing, reconnecting or re-claiming the session. This acknowledgement proves
-transport reachability only; its keeper no longer protects the deadline. Only the
-current owner's ticks protect liveness: a proxy stall past the heartbeat timeout
-can therefore reap the session even while a displaced external keeper ticks.
-Legacy tokenless heartbeats after a token has claimed ownership remain
-successful no-ops. Missing or releasing sessions still return
-`daemon_session_not_found`. A keeper cannot currently claim through the
-heartbeat CLI without adopting its CLI policy.
-
-### Explicit liveness handoff
-
-A one-shot CLI exits after declaring the CLI idle policy, retaining its token.
-An independent MCP proxy can immediately adopt that session with
-`--initial-session-uuid S`: CLI idle sessions do not block a different token's
-claim. That claim switches the session back to heartbeat policy.
-
-A harness that owns liveness through a proxy can deliberately hand the session
-to another client:
-
-```bash
-auto-mobile --daemon release-liveness-ownership S --liveness-owner-token T
-```
-
-The equivalent daemon method is `daemon/releaseLivenessOwnership` with
-`{ sessionId: S, livenessOwnerToken: T }`. On an owned session, only its current
-token can release. A foreign or stale token returns `liveness_owner_not_owner`
-and changes nothing. A missing session returns `daemon_session_not_found`.
-Releasing an already-unowned session is a successful no-op for any valid token.
-The result is `{ sessionId: S, alreadyUnowned: false }` on the first release and
-`{ sessionId: S, alreadyUnowned: true }` on a no-op.
-
-**Unowned** means the existing owner-token column is empty. Release changes only
-that token: it retains the session UUID, device reservation, liveness policy,
-activity clocks and existing deadline, including heartbeat suspect grace. It
-adds no schema state or former-owner proof. On restart the row follows the usual
-unowned rehydration path. A tokenless keeper tick does not adopt ownership.
-While the daemon keeps running, former-owner ticks cannot adopt the released
-session: they return `liveness_owner_unowned` with guidance to make an explicit
-claim. After a daemon restart, a released session can be re-adopted by its former
-owner's token-bearing keeper tick, because the daemon's claim history is empty;
-on a CLI idle row that tick is a no-op like any keeper heartbeat.
-Legacy recovery of rows without ownership continues to follow the existing rules.
-
-Stop the old keeper after release. The next proxy's explicit claim succeeds and
-moves the session to heartbeat policy; any second proxy with another token is
-refused while the first proxy's lease or grace window is live. An unclaimed CLI
-idle session is reaped on its usual idle deadline. Tool activity and daemon-stall
-forgiveness continue to use the existing policy rules.
-
-Ownership and lease state are separate. A session is token-owned or unowned;
-startup admission is `awaiting-owner` until the owner returns. For heartbeat
-policy, `session-info` reports all three lease states: `live` (lease remains),
-`suspect` (lease expired but grace remains), and `lapsed` (lease and grace ended,
-remaining time is zero). CLI idle policy uses its activity-based idle deadline
-and has no lease field in `session-info`. Release adds no session-info fields.
-
-### Supported liveness stack
-
-The only supported liveness stack is harness → stdio proxy → daemon. The harness
-proves liveness to its proxy over stdio; the proxy is the only liveness owner of
-the sessions it holds, and heartbeats and claims them at the daemon with its
-owner token. Nothing else should heartbeat a proxy's session.
-
-`--daemon heartbeat` refuses a proxy-owned session. A session is proxy-owned when a token has
-claimed it under the strict `heartbeat` policy. The command sends a keeper
-marker, and the daemon answers every claim or tick against such a session with
-`{ success: false, code: "liveness_owner_is_proxy", error: "..." }` before
-any ownership logic runs, whatever token the keeper presents and whether or not
-the proxy's lease is still live. The refusal changes nothing: owner, policy and
-every deadline stay as the proxy left them. The command exits non-zero and prints
-the message, the `[liveness_owner_is_proxy]` code, and the instruction to stop
-the keeper. This is distinct from `liveness_owner_conflict`, which is a
-different token's claim on a live lease and can succeed once the lease expires.
-On a one-shot CLI session `--daemon heartbeat` is a successful no-op (#11096): the
-CLI idle timeout counts from the end of the last tool call, so a session with no
-tool calls is released when it elapses however often anything heartbeats. Do not
-run a keeper loop for CLI sessions.
-
-A harness checks a session's state with `--daemon session-info <session-id>`. It
-prints the session's `assignedDevice`, `platform`, `lastUsedAt`, `expiresAt` and,
-while the session is being released, `releasing: true`. A missing session fails
-with `daemon_session_not_found`. The harness reads this to decide whether a session
-survived; it must not heartbeat the session itself to find out. It also prints
-`liveness`: `{ state: "live" | "suspect" | "lapsed", remainingMs }`, the time
-left on the lease or grace window, or zero once lapsed.
-
-To tell an idle holder from an active one, `session-info` also prints:
-
-| Field                  | Meaning                                                                      |
-| ---------------------- | ---------------------------------------------------------------------------- |
-| `lastToolActivityAt`   | Start or end of the session's last tool call; heartbeats never move it.      |
-| `lastOwnerHeartbeatAt` | The owner's last heartbeat, or `null` before the first.                      |
-| `idleReleaseAt`        | When idle release is due, or null for an idle-exempt managed execution.      |
-| `holderKind`           | `stdio-proxy`, `desktop`, `ide`, `cli`, `junit` or `unknown`.                |
-| `activeExecutions`     | Calls in flight, reads included. Only a control call holds the idle release. |
-
-`holderKind` comes from the session's liveness policy (`cli` for a one-shot
-`--cli` owner), the client name a client sent to `daemon/registerSession`, and
-the owner token (a token-claimed heartbeat session is a `stdio-proxy`). The
-desktop app and the IDE plugin register under the same name today, so both
-report `desktop`.
-
-`--daemon active-sessions` prints every held session with the same fields plus
-`sessionId`, `assignedDevice` and `platform`, so one command answers which
-client holds which device and when it will be released.
-`scripts/live-idle-release-check.sh` uses it to check idle release against a real
-emulator with a private daemon.
-
-### Stalled liveness: `daemon_stalled` and `proxy_stalled`
-
-When a lease expires the daemon does not release the session at once: it holds
-it as suspect for a 4 s grace window with its device still reserved for the
-owner token. A heartbeat from the owner token inside the window restores the
-session with the same UUID; no tool call runs against a suspect session until
-then. The proxy uses that window for its own recovery, so a stall is reported to
-the harness only when recovery has failed. Recovery always fits inside the lease
-plus the grace window (8 s at the default 4 s timeout) at the default 2 s
-heartbeat cadence. The proxy applies this to every session it holds, one
-session at a time. The daemon does not hold its own stalls against owners: when
-its heartbeat monitor runs more than 2 s later than scheduled it moves a
-session's lease forward by exactly that lateness, so a daemon stall of a few
-seconds cannot push a heartbeating owner past lease plus grace. Only owners whose
-lease was still live when the stall began (within one lease of their last
-heartbeat) are excused (#11080): an owner that had already gone silent is
-released near the usual 10 s even while every scan runs late. Lease and idle
-time are measured on the monotonic clock, so stepping the wall clock (an NTP
-correction) neither extends nor shortens them; on macOS a forward step cannot
-be told from host sleep and counts as sleep.
-
-Idle time is wall-clock, host sleep included (owner decision 2026-10-08,
-#10661; classification of sleep versus a daemon stall in #10699). A stall that on its own outlasts a
-session's idle window (its timeout; the suspect grace never extends it), such as a laptop
-asleep for longer than that, is idleness and is not forgiven, so waking the host
-may release the session. The verdict does not depend on which timer runs first
-after the wake: the monitor tick, an owner heartbeat, a tool call and the
-periodic sweep all apply the same stall check before judging expiry. The owner's
-next call fails with `bound_session_lost` and a message saying the session was
-released after sitting idle (time asleep counts) and that it must acquire a new
-device session.
-
-When the lease and grace are already spent by the time recovery starts (a long
-proxy stall, such as a sleeping laptop), the daemon may have forgiven its own
-stall and still hold the sessions, so each attempt is given the heartbeat
-request timeout (half the lease, at most twice the heartbeat interval) instead
-of a share of the exhausted budget.
-
-Two distinct states, each with exactly three automatic recovery attempts:
-
-- `daemon_stalled`: the daemon's socket is open or reconnectable but heartbeat
-  acknowledgements stop. Each attempt reconnects if needed and heartbeats again
-  with the same owner token. From the second attempt a silent socket may be
-  replaced with a fresh one, but at most once per recovery episode (shared by
-  every session recovering together, because the socket is one connection for
-  all of them) and never while a tool call is in flight on it, unless an attempt
-  has already seen the socket fail at the transport level. A held session the
-  daemon answers "not found" is dropped once rather than retried, and a session
-  that failed recovery is not recovered again before its handover. An attempt that is acknowledged ends the episode and the
-  session stays usable; nothing is surfaced to the harness and the recovery is
-  logged. The proxy also starts this recovery when a tool call is refused with
-  `daemon_session_suspect`, the daemon's signal that the session still exists and
-  its owner can restore it.
-- `proxy_stalled`: the proxy's own heartbeat tick fired later than the lease
-  allows, which it can only notice after it resumes. It re-heartbeats every
-  session it holds with the same owner token. A session the daemon kept as suspect
-  is restored with the same UUID. A session is lost only when the daemon says so:
-  it answers that the session was released, or that another token has taken it
-  over while this proxy was stalled (the session is fenced and listed in the
-  handover). A daemon that does not answer any of the three attempts is stalled,
-  not the proxy: those sessions are handed over as `daemon_stalled`.
-
-After the third failed attempt the proxy hands over. It stops heartbeating the
-affected sessions and returns this structured error on the next tool call that
-names an affected session (or reaches it implicitly), and it sends the same body
-as an MCP `notifications/message` (`level: "error"`,
-`logger: "auto-mobile.liveness"`, `data: <the error body>`) so a harness that is
-idle between calls is told too. The notification honours a level the client set
-with `logging/setLevel`: a client that asked for `critical` or above is not sent
-it and learns from the tool-call error:
-
-```json
-{
-  "error": {
-    "code": "daemon_stalled",
-    "message": "...",
-    "sessions": [
-      {
-        "sessionUuid": "…",
-        "deviceId": "emulator-5554",
-        "lastAcknowledgedHeartbeatAt": 1760000000000
-      }
-    ],
-    "attempts": 3,
-    "maxAttempts": 3,
-    "lastAcknowledgedHeartbeatAt": 1760000000000,
-    "retryable": true,
-    "recovery": { "action": "restart_daemon_then_resume_by_session_uuid" }
-  }
-}
-```
-
-| Field                                    | Meaning                                                                                                                                                                               |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `code`                                   | `daemon_stalled` or `proxy_stalled`.                                                                                                                                                  |
-| `sessions[]`                             | `daemon_stalled`: the sessions that could not be reached. `proxy_stalled`: the sessions that were lost. Each has `sessionUuid` and `deviceId` (`null` if the proxy never learned it). |
-| `sessions[].lastAcknowledgedHeartbeatAt` | When the daemon last acknowledged that session's heartbeat, in milliseconds on the proxy's clock.                                                                                     |
-| `attempts`, `maxAttempts`                | Recovery attempts made (most of any listed session) and the limit, always 3.                                                                                                          |
-| `lastAcknowledgedHeartbeatAt`            | The latest of the listed sessions' last acknowledgements.                                                                                                                             |
-| `recovery.action`                        | `daemon_stalled`: `restart_daemon_then_resume_by_session_uuid`. `proxy_stalled`: `reacquire_lost_sessions`.                                                                           |
-
-For `daemon_stalled` on a generic connection the harness restarts the daemon, then resumes each session
-by passing its `sessionUuid` on a tool call: the first call after the error
-re-claims it with the same owner token. For `proxy_stalled` the listed sessions and devices are gone;
-reacquire them with `getAndroid` or `getApple`. During a liveness recovery episode
-or while a session remains handed over, **the proxy never starts or restarts the
-daemon**: it is shared, and restarting it is a harness action. Tool calls and resource reads wait for automatic recovery;
-successful recovery surfaces no error, and exhausted recovery returns the structured
-handover on calls/reads and by notification. Discovery does not wait for recovery or
-report the handover: it serves cached/static lists when unreachable, and uncached
-direct lists may observe the daemon unbound. Discovery never starts or restarts the
-daemon during an episode or handover. A named resume uses an observation-only connection
-and ends the handover on a definitive daemon answer: acknowledgement of the same
-UUID and owner token resumes it; `daemon_session_not_found`, `liveness_owner_superseded`,
-or `liveness_owner_conflict` confirms it was released or taken by another owner
-after the ownership grace window. A `session-released` notification also ends it,
-regardless of the current binding. A definitive loss delivers `proxy_stalled` once
-on the next tool call for that session, naming the sessions and devices to
-reacquire, then normal lifecycle behavior returns. An unreachable daemon retains
-the handover and the no-start fence; on a generic connection the harness must restart it. Recovery cannot join a pending
-connection allowed to start or restart the daemon. Healthy proxies and proxies
-without device sessions retain normal auto-start and skew reconciliation.
-
-Managed reclaim awaits reasonless not-found and recoverable daemon handoff answers
-(`daemon-shutdown` or `daemon-restart`) for one existing rehydration window per
-answering daemon process; silence does not reset it, and only an answer naming a
-different daemon instance opens a new window.
-A managed execution's terminal answers and notification both name
-the daemon's release reason, falling back to `session-not-found` when none was named.
-
-A claim the daemon refuses with `liveness_owner_conflict` keeps being retried for
-the other owner's lease plus its grace window (plus one heartbeat interval), so a
-restarted proxy can win a session whose previous owner has gone.
+`--daemon session-info <session-id>` prints a session's device, platform,
+`lastToolActivityAt`, `idleReleaseAt` and lease `liveness`. `--daemon
+active-sessions` prints the same for every held session.
 
 ## CLI session lifetime
 
 <div class="environment-variable-table" markdown>
 
-| Variable                                                                            | Use and accepted values                                                                                                                                                                                                     | Default     |
-| ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
-| `AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS`, `AUTO_MOBILE_CLI_SESSION_IDLE_TIMEOUT_MS` | CLI idle leash; positive base-10 integer milliseconds (digits only; `2m` or `1e5` is ignored with a warning), at least `120000`: a smaller value is ignored, never shortens the window. Daemon adoption clamps to one hour. | `120000` ms |
+| Variable                                                                            | Use and accepted values                                                                                                                                                | Default     |
+| ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| `AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS`, `AUTO_MOBILE_CLI_SESSION_IDLE_TIMEOUT_MS` | Idle timeout for sessions held from `--cli`; integer milliseconds of at least `120000` (smaller or non-numeric values are ignored with a warning), capped at one hour. | `120000` ms |
 
 </div>
 
-Each `--cli` invocation is its own process, so it cannot send the periodic
-heartbeat a long-running MCP connection does. A session acquired or used by
-`--cli` is therefore held on a wall-clock idle timeout instead of the heartbeat
-lease, measured from the end of the last `--cli` tool call that touched it:
+Each `--cli` call is its own process and cannot send heartbeats, so a session
+used from `--cli` is released after this much time since its last `--cli` tool
+call:
 
 ```bash
 export AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS=600000
 ```
 
-The default is 2 minutes, the same as the ordinary idle window, and the ceiling
-is 1 hour. Heartbeats do not refresh it, and `--daemon heartbeat` on such a
-session is a no-op, so no keeper loop is needed (#11096). The value is read from the
-`--cli` process, not the daemon's, and travels with the invocation, so changing
-it takes effect on the very next call — no daemon restart. Sessions owned by a
-long-lived MCP client (stdio or HTTP) are unaffected and keep the heartbeat
-contract; if such a client takes over a session a `--cli` call had held, that
-session goes back to the heartbeat contract and stops occupying its device for
-the idle window once the client disconnects.
+The value is read per invocation, so a change applies on the next call with no
+daemon restart.
 
 ## Automatic observation screenshots
 
 <div class="environment-variable-table" markdown>
 
-| Variable                                        | Use and accepted values                                                                                                                            | Default                                  |
-| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
-| `AUTOMOBILE_ACTION_OBSERVATION_SKIP_SCREENSHOT` | Skip automatic post-action screenshots; `false` (case-insensitive, trimmed) or `0` opts into final screenshot.                                     | skip                                     |
-| `AUTOMOBILE_OBSERVE_WAIT_FOR_SKIP_SCREENSHOT`   | Skip final `observe.waitFor` screenshot; `false` (case-insensitive, trimmed) or `0` enables it; intermediate polls still skip.                     | skip                                     |
-| `AUTOMOBILE_OBSERVE_SETTLED_SCREENSHOT`         | Override persisted screenshot mode: `true`/`1` selects settled; any other set value selects async (case-insensitive, trimmed). Per-call mode wins. | unset; persisted flag, otherwise `async` |
-| `AUTOMOBILE_MAX_OBSERVATION_AGE_MS`             | Hierarchy freshness budget; positive base-10 integer milliseconds.                                                                                 | `5000` ms                                |
+| Variable                                        | Use and accepted values                                                                                                                                   | Default        |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------- |
+| `AUTOMOBILE_ACTION_OBSERVATION_SKIP_SCREENSHOT` | Skip the automatic screenshot after actions; `false` or `0` takes a final screenshot.                                                                     | skip           |
+| `AUTOMOBILE_OBSERVE_WAIT_FOR_SKIP_SCREENSHOT`   | Skip the final `observe.waitFor` screenshot; `false` or `0` enables it. Intermediate polls still skip.                                                    | skip           |
+| `AUTOMOBILE_OBSERVE_SETTLED_SCREENSHOT`         | Screenshot mode: `true`/`1` waits for a fresh screenshot that matches the observation (settled); any other set value selects async. A per-call mode wins. | unset; `async` |
+| `AUTOMOBILE_MAX_OBSERVATION_AGE_MS`             | How old a cached view hierarchy may be before it is refreshed; positive integer milliseconds.                                                             | `5000` ms      |
 
 </div>
 
-Explicit `observe` calls retain their existing screenshot behavior. Automatic
-observations taken after an action or while resolving `observe.waitFor` skip
-screenshots by default. Opt in to one screenshot from the final result by
-setting either skip flag to `false` (or `0`):
+Explicit `observe` calls keep their own screenshot behavior. Observations taken
+automatically after an action, or while resolving `observe.waitFor`, skip
+screenshots by default. To get one screenshot from the final result:
 
 ```bash
 export AUTOMOBILE_ACTION_OBSERVATION_SKIP_SCREENSHOT=false
 export AUTOMOBILE_OBSERVE_WAIT_FOR_SKIP_SCREENSHOT=false
 ```
 
-`observe.waitFor` suppresses screenshots for all intermediate polls; enabling
-its flag captures only once, after the condition resolves or times out.
-
-The default screenshot mode is `async`. Set
-`AUTOMOBILE_OBSERVE_SETTLED_SCREENSHOT=true` (or `1`) to opt in to awaiting a fresh,
-validated screenshot for each final observation. `false` (or `0`) disables
-settled mode. This setting overrides the persisted `observe-settled-screenshot`
-feature flag; when settled mode is enabled it also overrides the two legacy
-skip flags. A per-call `observe({ screenshot: "settled" })` takes precedence over
-both. The resolver's code comment documents the full precedence.
-
-In a 30-iteration emulator/simulator benchmark, settled mode added about
-170 ms per Android observation and 20–70 ms per iOS observation compared with
-async mode. Use `observe({ screenshot: "settled" })` when a particular call needs
-a validated screenshot that matches its observation.
-
-```bash
-export AUTOMOBILE_OBSERVE_SETTLED_SCREENSHOT=true
-```
+Settled mode costs roughly 170 ms per Android observation and 20-70 ms per iOS
+observation over async. When only one call needs a matching screenshot, pass
+`observe({ screenshot: "settled" })` instead of setting the variable.
 
 ## Device behavior
 
 <div class="environment-variable-table" markdown>
 
-| Variable                                                                              | Use and accepted values                                                                                                                                               | Default                                                            |
-| ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| `AUTOMOBILE_IOS_WARMUP_DEVICES`                                                       | Comma-separated simulator UDIDs allowed passive startup warm-up and observation streams without sessions.                                                             | empty list                                                         |
-| `AUTOMOBILE_ANDROID_APPEARANCE_SYNC_DEVICES`                                          | Comma-separated Android serials allowed appearance sync without sessions.                                                                                             | empty list                                                         |
-| `AUTOMOBILE_ANDROID_OBSERVATION_STREAM_DEVICES`                                       | Comma-separated Android serials allowed passive observation streams without sessions.                                                                                 | empty list                                                         |
-| `AUTOMOBILE_APPEARANCE_SYNC`                                                          | Enable appearance sync; `0`, `false`, `off`, `no` disable (case-insensitive, trimmed).                                                                                | on                                                                 |
-| `AUTOMOBILE_ALLOW_DEVICE_CREATE`                                                      | Permit emulator/simulator creation; `1`/`true` enables. Explicit creation flag wins.                                                                                  | off                                                                |
-| `AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS`, `AUTO_MOBILE_DEVICE_RECOVERY_ON_LOSS`           | Exact `0` disables session continuity; exact `1` additionally opts eligible Android emulators into active restart. Other values warn and disable active restart.      | passive continuity on; active restart off                          |
-| `AUTOMOBILE_ANDROID_REBOOT_ON_DEATH`, `AUTO_MOBILE_ANDROID_REBOOT_ON_DEATH`           | Deprecated fallback for device recovery on loss, after both platform-neutral spellings; same `0`/`1` semantics.                                                       | unset                                                              |
-| `AUTOMOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS`, `AUTO_MOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS` | Rolling active restart budget; integer `1..10`, invalid values fall back.                                                                                             | `2`                                                                |
-| `AUTOMOBILE_DEVICE_RECOVERY_WINDOW_MS`, `AUTO_MOBILE_DEVICE_RECOVERY_WINDOW_MS`       | Rolling recovery budget window; positive integer milliseconds (digits, no leading zero).                                                                              | `900000` ms                                                        |
-| `AUTOMOBILE_DEVICE_POOL_MATCHING`, `AUTO_MOBILE_DEVICE_POOL_MATCHING`                 | Device selection: exact `LATEST`, `RANDOM`, `MINIMUM`; invalid values fall back.                                                                                      | `LATEST`                                                           |
-| `AUTOMOBILE_DEVICE_POOL_AUTOLOCK`, `AUTO_MOBILE_DEVICE_POOL_AUTOLOCK`                 | Require acquired device session UUID and auto-release on idle; exact `1` enables.                                                                                     | off                                                                |
-| `AUTOMOBILE_DEVICE_POOL_TIMEOUT`, `AUTO_MOBILE_DEVICE_POOL_TIMEOUT`                   | Autolock idle timeout in **seconds**, parsed as a positive base-10 integer prefix.                                                                                    | `60` seconds                                                       |
-| `AUTOMOBILE_EMULATOR_HEADLESS`                                                        | Exact `true` forces headless, `false` forces windowed; other values use platform detection.                                                                           | headless on macOS and Linux without a display; otherwise windowed  |
-| `AUTOMOBILE_EMULATOR_AUDIO`                                                           | Exact `false` adds `-no-audio`; other values keep emulator audio.                                                                                                     | audio on                                                           |
-| `AUTOMOBILE_EMULATOR_ARGS`                                                            | Extra emulator argv as a JSON array of nonempty strings; malformed JSON/entries fail.                                                                                 | empty array                                                        |
-| `AUTOMOBILE_EMULATOR_EXCLUDED_CONSOLE_PORTS`                                          | Excluded even console ports (5554–5682) or `emulator-<port>` serials, comma/whitespace-separated. Explicit values replace the default; blank opts out.                | `5554` when broker config is non-blank; otherwise empty            |
-| `AUTOMOBILE_BUNDLETOOL_JAR`                                                           | bundletool-all jar run with `java` for `installApp` `.aab`/`.apks` installs; else `bundletool` on `PATH`. Never downloaded.                                           | unset                                                              |
-| `AUTOMOBILE_IOS_HEADLESS`                                                             | On macOS exact `true`/`1` forces headless; any other set value forces windowed. Non-macOS is always headless.                                                         | detect graphical login session                                     |
-| `AUTOMOBILE_BOOT_CAPACITY_GATE`                                                       | Boot admission gate for emulator and simulator cold boots; exact `0` disables it on both platforms. See [Boot capacity](#boot-capacity).                              | on                                                                 |
-| `AUTOMOBILE_IOS_SIM_CAPACITY_GATE`                                                    | iOS-only override of `AUTOMOBILE_BOOT_CAPACITY_GATE`: exact `0` disables, exact `1` enables; other values defer to the shared switch.                                 | unset (follows the shared switch)                                  |
-| `AUTOMOBILE_ANDROID_MAX_BOOTED`                                                       | Cap on concurrently booted Android emulators used by the boot admission gate; positive integer. Invalid values are ignored with a warning.                            | min(RAM x 0.5 / measured per-emulator RSS, cores / 2), at least 1  |
-| `AUTOMOBILE_IOS_SIM_MAX_BOOTED`                                                       | Cap on concurrently booted iOS Simulators used by the fleet capacity report and the boot admission gate; positive integer. Invalid values are ignored with a warning. | min(RAM x 0.5 / measured per-simulator RSS, cores / 2), at least 1 |
-| `AUTOMOBILE_WORK_PROFILE_POLL_INTERVAL_MS`                                            | Android work-profile package polling interval; base-10 integer milliseconds. Use positive values; this read has no invalid-value fallback.                            | `5000` ms                                                          |
-
-Invalid `AUTOMOBILE_EMULATOR_EXCLUDED_CONSOLE_PORTS` entries fail at launch. Explicit excluded ports are refused before host probes. With exclusions active, automatic allocation requires a complete emulator device snapshot; restore device discovery or specify an allowed `-port` if discovery is incomplete.
-
-The Android boot limit is shared by every daemon using the same adb server on one host. Admissions are coordinated through the adb-server directory configured by `AUTOMOBILE_ADB_SERVER_COORDINATION_DIR`; every daemon sharing a server must use the same directory. `AUTOMOBILE_COORDINATION_DIR`, `AUTOMOBILE_DATA_DIR` and `AUTOMOBILE_DB_DIR` do not move it, so daemons isolated only by those still share one limit. Daemons on one adb server that are given different `AUTOMOBILE_ADB_SERVER_COORDINATION_DIR` values do not see each other's admitted boots (or device claims): each counts only the emulators adb or the process table already shows, and two boots started seconds apart can exceed the limit. The default root is under the home directory the runtime reports for the account, which follows `HOME` under Bun, so daemons started with different `HOME` values must set the variable to one shared path. To isolate a daemon's boot limit, give it its own adb server as well. An unreadable coordination directory refuses boots with retryable `discovery_incomplete`.
+| Variable                                                                              | Use and accepted values                                                                                                                                 | Default                                                           |
+| ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `AUTOMOBILE_IOS_WARMUP_DEVICES`                                                       | Comma-separated simulator UDIDs that get startup warm-up and observation streams without a session.                                                     | empty list                                                        |
+| `AUTOMOBILE_ANDROID_APPEARANCE_SYNC_DEVICES`                                          | Comma-separated Android serials that get appearance sync without a session.                                                                             | empty list                                                        |
+| `AUTOMOBILE_ANDROID_OBSERVATION_STREAM_DEVICES`                                       | Comma-separated Android serials that get observation streams without a session.                                                                         | empty list                                                        |
+| `AUTOMOBILE_APPEARANCE_SYNC`                                                          | Sync the host's light/dark appearance to devices; `0`, `false`, `off`, `no` disable.                                                                    | on                                                                |
+| `AUTOMOBILE_ALLOW_DEVICE_CREATE`                                                      | Permit emulator and simulator creation; `1`/`true` enables. An explicit `--create-if-missing` flag wins.                                                | off                                                               |
+| `AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS`, `AUTO_MOBILE_DEVICE_RECOVERY_ON_LOSS`           | Exact `0` disables session continuity; exact `1` also lets eligible Android emulators be restarted. Other values warn and disable restart.              | continuity on; restart off                                        |
+| `AUTOMOBILE_ANDROID_REBOOT_ON_DEATH`, `AUTO_MOBILE_ANDROID_REBOOT_ON_DEATH`           | Deprecated fallback for `AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS`; same values.                                                                              | unset                                                             |
+| `AUTOMOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS`, `AUTO_MOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS` | Emulator restarts allowed per window; integer `1..10`.                                                                                                  | `2`                                                               |
+| `AUTOMOBILE_DEVICE_RECOVERY_WINDOW_MS`, `AUTO_MOBILE_DEVICE_RECOVERY_WINDOW_MS`       | Window for the restart budget; positive integer milliseconds.                                                                                           | `900000` ms                                                       |
+| `AUTOMOBILE_DEVICE_POOL_MATCHING`, `AUTO_MOBILE_DEVICE_POOL_MATCHING`                 | Which matching device to pick: exact `LATEST`, `RANDOM`, `MINIMUM`.                                                                                     | `LATEST`                                                          |
+| `AUTOMOBILE_DEVICE_POOL_AUTOLOCK`, `AUTO_MOBILE_DEVICE_POOL_AUTOLOCK`                 | Require a session UUID for an acquired device and release it when idle; exact `1` enables.                                                              | off                                                               |
+| `AUTOMOBILE_DEVICE_POOL_TIMEOUT`, `AUTO_MOBILE_DEVICE_POOL_TIMEOUT`                   | Autolock idle timeout in **seconds**; positive integer.                                                                                                 | `60` seconds                                                      |
+| `AUTOMOBILE_EMULATOR_HEADLESS`                                                        | Exact `true` forces headless, `false` forces a window; other values detect.                                                                             | headless on macOS and Linux without a display; otherwise windowed |
+| `AUTOMOBILE_EMULATOR_AUDIO`                                                           | Exact `false` launches with `-no-audio`.                                                                                                                | audio on                                                          |
+| `AUTOMOBILE_EMULATOR_ARGS`                                                            | Extra emulator arguments as a JSON array of nonempty strings; malformed values fail.                                                                    | empty array                                                       |
+| `AUTOMOBILE_EMULATOR_EXCLUDED_CONSOLE_PORTS`                                          | Even emulator console ports (5554-5682) or `emulator-<port>` serials AutoMobile must not use, comma- or whitespace-separated. A blank value allows all. | `5554` when a session broker config is set; otherwise empty       |
+| `AUTOMOBILE_BUNDLETOOL_JAR`                                                           | bundletool-all jar, run with `java`, for `installApp` of `.aab`/`.apks`; otherwise `bundletool` on `PATH`. Never downloaded.                            | unset                                                             |
+| `AUTOMOBILE_IOS_HEADLESS`                                                             | On macOS, exact `true`/`1` runs headless and any other set value shows a window. Non-macOS is always headless.                                          | detect a graphical login session                                  |
+| `AUTOMOBILE_BOOT_CAPACITY_GATE`                                                       | Boot limit check for emulator and simulator cold boots; exact `0` disables it on both platforms. See [Boot capacity](#boot-capacity).                   | on                                                                |
+| `AUTOMOBILE_IOS_SIM_CAPACITY_GATE`                                                    | iOS-only override of the gate above: exact `0` disables, exact `1` enables.                                                                             | unset (follows the shared switch)                                 |
+| `AUTOMOBILE_ANDROID_MAX_BOOTED`                                                       | Cap on concurrently booted Android emulators; positive integer. Invalid values are ignored with a warning.                                              | derived from host RAM and cores, at least 1                       |
+| `AUTOMOBILE_IOS_SIM_MAX_BOOTED`                                                       | Cap on concurrently booted iOS simulators; positive integer. Invalid values are ignored with a warning.                                                 | derived from host RAM and cores, at least 1                       |
+| `AUTOMOBILE_WORK_PROFILE_POLL_INTERVAL_MS`                                            | Android work-profile package polling interval; positive integer milliseconds.                                                                           | `5000` ms                                                         |
 
 </div>
 
-Broker provisioning counts distinct native resources across active and idle bindings,
-pending creation/deletion journals, and product-owned inventory. Its resource budget
-uses the broker host configuration's `limits.totalDeviceCap`, independently of boot
-limits. An omitted cap disables total-device enforcement; zero refuses new devices.
-Broker admission and the native resource ledger each enforce that same cap without
-adding their counts together. Either can refuse creation, so unaccounted native
-devices and unconfirmed deletions remain charged. A budget refusal is retryable
-`binding_budget_exhausted`; free unused broker resources or raise `limits.totalDeviceCap`
-before retrying. The former
-free-pool eviction and declarative launch configuration are no longer available.
-
-The daemon's passive device work is limited to devices with a session in this
-daemon. At startup, it warms iOS CtrlProxy only for rehydrated sessions. An
-explicit acquisition can also start a runner for its device. Previously an unset
-`AUTOMOBILE_IOS_WARMUP_DEVICES` warmed every booted simulator; now unset or
-empty means no extra simulators. Set it to a comma-separated list of simulator
-UDIDs to allow iOS startup warm-up and observation-stream connections for those
-devices even without a session. The live-acceptance startup secret suppresses
-both iOS passive paths, including allowlisted devices.
+By default the daemon only does background work (iOS warm-up, Android appearance
+sync, observation streams) for devices that have a session. List devices in
+`AUTOMOBILE_IOS_WARMUP_DEVICES`, `AUTOMOBILE_ANDROID_APPEARANCE_SYNC_DEVICES` or
+`AUTOMOBILE_ANDROID_OBSERVATION_STREAM_DEVICES` to include session-less devices,
+for example when only an IDE is attached:
 
 ```bash
 export AUTOMOBILE_IOS_WARMUP_DEVICES=00000000-0000-0000-0000-000000000001
-```
-
-Android appearance sync also defaults to session-owned devices. It runs when a
-session acquires a device and on later scheduler ticks. IDE-only use without a
-session no longer syncs appearance unless the device serial is in
-`AUTOMOBILE_ANDROID_APPEARANCE_SYNC_DEVICES`. Set `AUTOMOBILE_APPEARANCE_SYNC` to
-`0`, `false`, `off`, or `no` (case-insensitive, with surrounding whitespace
-ignored) to turn off scheduled host appearance sync in the daemon. Android
-observation-stream initial connections and cadence refreshes follow the same
-session-owned default; use
-`AUTOMOBILE_ANDROID_OBSERVATION_STREAM_DEVICES` to opt in unowned serials.
-These Android settings do not affect iOS warm-up. Each device list is a
-comma-separated list of IDs; an empty value adds no devices.
-
-```bash
 export AUTOMOBILE_ANDROID_APPEARANCE_SYNC_DEVICES=emulator-5554
 export AUTOMOBILE_ANDROID_OBSERVATION_STREAM_DEVICES=emulator-5554
 ```
 
-AutoMobile does not create an emulator or simulator by default. The legacy
-compatibility path can opt in:
+AutoMobile does not create an emulator or simulator by default. To allow it:
 
 ```bash
 export AUTOMOBILE_ALLOW_DEVICE_CREATE=1
 auto-mobile --cli startDevice --platform ios --create-if-missing
 ```
 
-An explicit `--create-if-missing false` disables creation even when the
-environment variable is set. Created devices can be removed with
-`xcrun simctl delete <udid>` or `avdmanager delete avd -n <name>`.
+An explicit `--create-if-missing false` disables creation even when the variable
+is set. Remove created devices with `xcrun simctl delete <udid>` or
+`avdmanager delete avd -n <name>`.
 
-Session continuity is enabled by default for any session bound to an Android
-emulator or iOS simulator, regardless of how that binding happened -- an
-explicit `startDevice`/`getAndroid`, or a client-supplied or runner-minted
-session UUID that the daemon allocated from the idle pool. What matters is
-whether discovery resolved a stable identity for the device (its AVD name, or
-its simulator UDID), not who launched it. If the runtime connection
-disappears, AutoMobile retains the session for that stable identity and waits
-for it to reappear. To disable that continuity explicitly:
+Invalid `AUTOMOBILE_EMULATOR_EXCLUDED_CONSOLE_PORTS` entries fail at launch.
+
+Session continuity is on by default for sessions bound to an Android emulator or
+iOS simulator. If the device connection disappears, AutoMobile keeps the session
+and waits for the same AVD or simulator UDID to come back. To turn that off:
 
 ```bash
 export AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS=0
-export AUTOMOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS=2
 ```
 
-Actively restarting the AVD process on loss is a stricter, separate opt-in:
-`AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS=1` additionally requires the emulator's
-configured image to have been recorded, which only happens on a
-`startDevice`/`getAndroid` path with successful image enrichment. A pool-
-allocated or enrichment-failed emulator still gets passive continuity
-(reattach when it returns) but is never actively relaunched. Physical devices
-and externally started Android emulators are not restarted. iOS simulators are
-never actively restarted by session continuity; their recovery is always
-passive, waiting for the same simulator UDID to become booted again.
-
-`AUTOMOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS` is a rolling budget, not a lifetime
-one: only restarts within the last `AUTOMOBILE_DEVICE_RECOVERY_WINDOW_MS`
-(default 15 minutes) count against it, so isolated crashes days apart don't
-exhaust the budget of a long-lived daemon. A recovery cancelled before it
-touches the emulator (an ADB-reset takeover, or an intentional `killDevice`)
-does not spend an attempt either way.
+`AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS=1` additionally restarts an Android emulator
+that AutoMobile started with `startDevice` or `getAndroid`. Physical devices,
+emulators started outside AutoMobile, and iOS simulators are never restarted;
+they are only waited for. Restarts are limited by
+`AUTOMOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS` within
+`AUTOMOBILE_DEVICE_RECOVERY_WINDOW_MS`.
 
 ### Ambient Android and OS variables
 
-Not AutoMobile-specific; used for platform toolchains and host configuration.
+Not AutoMobile-specific; these configure platform toolchains and the host.
 
-| Variable                                                                     | Use                                                                                                                                                                                                                          | Default          |
-| ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
-| `ANDROID_HOME`, `ANDROID_SDK_ROOT`, `ANDROID_SDK_HOME`                       | Android SDK root used to find `emulator/emulator`; the first that is set and exists wins, in that order. `ANDROID_SDK_HOME` is the last-resort fallback and also names the user-data home in emulator-not-found diagnostics. | unset            |
-| `HOME`                                                                       | POSIX home directory; used to probe the default Android SDK locations.                                                                                                                                                       | unset            |
-| `USERPROFILE`                                                                | Windows home directory, consulted when `HOME` is unset or empty.                                                                                                                                                             | unset            |
-| `PATH`                                                                       | Executable search path; only reported in emulator-not-found diagnostics.                                                                                                                                                     | unset            |
-| `JAVA_HOME`                                                                  | Java installation root checked by `doctor`; its `bin/java` runs `AUTOMOBILE_BUNDLETOOL_JAR`.                                                                                                                                 | unset            |
-| `DEVELOPER_DIR`                                                              | Xcode developer directory or Xcode.app used for simulator profile cache invalidation. Defaults to the `xcode-select` filesystem link; unreadable selection/version metadata falls back to live lookups.                      | unset            |
-| `DISPLAY`, `WAYLAND_DISPLAY`                                                 | Linux display servers; when neither is set (or both blank) emulator launches default to `-no-window`.                                                                                                                        | unset            |
-| `USER`, `LOGNAME`                                                            | POSIX account name (`USER` first) used to find the running emulator's advertisement directory.                                                                                                                               | unset            |
-| `XDG_RUNTIME_DIR`                                                            | Linux per-user runtime directory searched for running emulator advertisements.                                                                                                                                               | unset            |
-| `ANTHROPIC_API_KEY`                                                          | Anthropic API key used by vision features when none is configured explicitly.                                                                                                                                                | unset            |
-| `AUTOMOBILE_UNIT_TEST_ISOLATED_DATA_DIR`                                     | Test-only: the data directory the unit-test preload isolated; not for normal use.                                                                                                                                            | unset            |
-| `ANDROID_USER_HOME`, `ANDROID_AVD_HOME`, `ANDROID_EMULATOR_HOME`             | Android user, AVD and emulator home overrides used to locate AVD definitions.                                                                                                                                                | unset            |
-| `CI`, `GITHUB_ACTIONS`                                                       | Both exactly `true` on a GitHub Actions runner, where AutoMobile owns the iOS simulator lifecycle.                                                                                                                           | unset            |
-| `GITHUB_WORKSPACE`                                                           | GitHub Actions checkout directory, searched for `schemas/test-plan.schema.json`.                                                                                                                                             | unset            |
-| `ComSpec`, `COMSPEC`                                                         | Windows command interpreter used to run `.bat` Android tools (`ComSpec` first).                                                                                                                                              | `cmd.exe`        |
-| `LOCALAPPDATA`                                                               | Windows local app data directory used to find the default Android SDK.                                                                                                                                                       | unset            |
-| `Path`                                                                       | Windows spelling of the executable search path; consulted when `PATH` is unset.                                                                                                                                              | unset            |
-| `PATHEXT`                                                                    | Windows executable extensions used to locate `bunx`; only `.com` and `.exe` entries count.                                                                                                                                   | `.COM;.EXE`      |
-| `USERNAME`                                                                   | Windows account name, used instead of a UID in the default daemon state-file names.                                                                                                                                          | unset            |
-| `ADB_SERVER_SOCKET`, `ANDROID_ADB_SERVER_ADDRESS`, `ANDROID_ADB_SERVER_PORT` | The variables `adb` itself reads; they identify the ADB server so daemons sharing one share its device claims. The socket spec wins, then address and port.                                                                  | `localhost:5037` |
-| `GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`                                 | The variables `git` itself reads; a source build stamps `+g<sha>` from the same repository its `git status`/`git diff` probes see. Relative values resolve against the module directory.                                     | unset            |
-| `CTRL_PROXY_IOS_BUNDLE_ID`, `CTRL_PROXY_IOS_TIMEOUT`                         | Target app bundle id and runner lifetime in seconds, passed to the iOS CtrlProxy runner.                                                                                                                                     | unset, `86400`   |
-| `NODE_ENV`                                                                   | Exact `test` arms the test-only guards and test defaults.                                                                                                                                                                    | unset            |
-| `MCP_SERVER_VERSION`                                                         | Exact override of the reported MCP server version (CI and test pin).                                                                                                                                                         | unset            |
-| `npm_package_version`                                                        | Package version exported by npm; used only when the manifest version is unavailable.                                                                                                                                         | unset            |
-| `DEBUG_ADB_EXEC`                                                             | Any value logs real adb execution with stack traces.                                                                                                                                                                         | unset            |
-| `EMULATOR_POLLING_INTERVAL_MS`                                               | Emulator readiness polling interval in ms; minimum `100`.                                                                                                                                                                    | `500`            |
+| Variable                                                                     | Use                                                                                                                                                                        | Default                  |
+| ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
+| `ANDROID_HOME`, `ANDROID_SDK_ROOT`, `ANDROID_SDK_HOME`                       | Android SDK root used to find the emulator; the first that is set and exists wins.                                                                                         | unset                    |
+| `HOME`                                                                       | POSIX home directory; used to find the default Android SDK.                                                                                                                | unset                    |
+| `USERPROFILE`                                                                | Windows home directory, used when `HOME` is unset or empty.                                                                                                                | unset                    |
+| `PATH`                                                                       | Executable search path; reported in emulator-not-found diagnostics.                                                                                                        | unset                    |
+| `JAVA_HOME`                                                                  | Java installation checked by `doctor`; its `bin/java` runs `AUTOMOBILE_BUNDLETOOL_JAR`.                                                                                    | unset                    |
+| `DEVELOPER_DIR`                                                              | Xcode developer directory used for the simulator profile cache.                                                                                                            | `xcode-select` selection |
+| `DISPLAY`, `WAYLAND_DISPLAY`                                                 | Linux display servers; when neither is set, emulators launch with `-no-window`.                                                                                            | unset                    |
+| `USER`, `LOGNAME`                                                            | POSIX account name (`USER` first), used to find the running emulator's advertisement directory.                                                                            | unset                    |
+| `XDG_RUNTIME_DIR`                                                            | Linux per-user runtime directory searched for running emulators.                                                                                                           | unset                    |
+| `ANTHROPIC_API_KEY`                                                          | Anthropic API key used by vision features when none is configured explicitly.                                                                                              | unset                    |
+| `ANDROID_USER_HOME`, `ANDROID_AVD_HOME`, `ANDROID_EMULATOR_HOME`             | Android user, AVD and emulator home overrides used to locate AVD definitions.                                                                                              | unset                    |
+| `ComSpec`, `COMSPEC`                                                         | Windows command interpreter used to run `.bat` Android tools (`ComSpec` first).                                                                                            | `cmd.exe`                |
+| `LOCALAPPDATA`                                                               | Windows local app data directory used to find the default Android SDK.                                                                                                     | unset                    |
+| `Path`                                                                       | Windows spelling of `PATH`, used when `PATH` is unset.                                                                                                                     | unset                    |
+| `PATHEXT`                                                                    | Windows executable extensions used to locate `bunx`; only `.com` and `.exe` count.                                                                                         | `.COM;.EXE`              |
+| `USERNAME`                                                                   | Windows account name, used in the default daemon state-file names.                                                                                                         | unset                    |
+| `ADB_SERVER_SOCKET`, `ANDROID_ADB_SERVER_ADDRESS`, `ANDROID_ADB_SERVER_PORT` | The variables `adb` itself reads. AutoMobile uses them to identify the ADB server so daemons sharing one share device claims. The socket spec wins, then address and port. | `localhost:5037`         |
+| `GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`                                 | The variables `git` itself reads; a source build uses them to stamp its version.                                                                                           | unset                    |
+| `CTRL_PROXY_IOS_BUNDLE_ID`, `CTRL_PROXY_IOS_TIMEOUT`                         | Target app bundle id and runner lifetime in seconds, passed to the iOS CtrlProxy runner.                                                                                   | unset, `86400`           |
+| `MCP_SERVER_VERSION`                                                         | Override the reported MCP server version.                                                                                                                                  | unset                    |
+| `npm_package_version`                                                        | Package version exported by npm; used only when the manifest version is unavailable.                                                                                       | unset                    |
+| `DEBUG_ADB_EXEC`                                                             | Any value logs adb execution with stack traces.                                                                                                                            | unset                    |
+| `EMULATOR_POLLING_INTERVAL_MS`                                               | Emulator readiness polling interval in milliseconds; minimum `100`.                                                                                                        | `500`                    |
 
 ### Boot capacity
 
-Emulator and simulator cold boots are checked against host capacity by default (#11181).
-Android and iOS each have their own limit: the smaller of half the host RAM
-divided by the per-device memory and half the CPU cores, at least 1. Android
-measures per-emulator memory from the `qemu-system-*` processes (4 GiB when it
-cannot); iOS measures each simulator's process tree (3 GiB when it cannot).
-Every booted device of the platform counts, including ones started outside
-AutoMobile: for Android, the larger of the emulators adb lists and the
-`qemu-system-*` processes on the host, so emulators still booting or on another
-adb server count too.
-On iOS, simulators that are Booting or Shutting Down count as well, and a
-simulator inventory that cannot be read refuses the boot with the retryable
-`discovery_incomplete` rather than counting zero. A failed `ps` read does not
-lower the iOS limit: it is still derived from host RAM and cores.
+Emulator and simulator cold boots are checked against host capacity by default.
+Android and iOS each have a limit: the smaller of half the host RAM divided by the
+per-device memory, and half the CPU cores, at least 1. Every booted device of
+that platform counts, including ones started outside AutoMobile. A simulator
+inventory that cannot be read refuses the boot with the retryable
+`discovery_incomplete`.
 
-Only the device-count limit refuses a boot: iOS host memory/CPU pressure is
-reported (`hostPressure` in the capacity snapshot) but never refuses one.
-
-A boot over the limit is refused at once; it does not queue against the boot
-budget (#11209). It fails with a retryable error whose `retryAfterMs` (a fixed 5
-seconds: capacity frees when another device shuts down, which takes seconds) says
-when to try again. When emulators AutoMobile did not start occupy boot capacity, the
-message lists them and `externalDevices` carries their serials:
+A boot over the limit is refused at once with a retryable error whose
+`retryAfterMs` (5 seconds) says when to try again. When emulators AutoMobile did
+not start occupy capacity, the message lists them and `externalDevices` carries
+their serials:
 
 ```json
 {
@@ -886,24 +387,17 @@ message lists them and `externalDevices` carries their serials:
 }
 ```
 
-For iOS `capacity_exhausted` refusals, `externalDevices` lists occupying simulator
-UDIDs with no known AutoMobile owner. `heldDevices` separately lists occupying
-UDIDs owned by AutoMobile admissions, live sessions or persisted broker bindings
-and journals, including after a daemon restart. Each field is an array of strings
-and is omitted when empty. Both groups count toward the same limit. A held device
-is not a stray simulator to shut down; release its session or binding first. Warm
-simulator hints exclude live-session and broker-held devices. An unreadable broker
-registry only affects labels and hints: boots below the limit still proceed, and
-capacity refusals use retained or in-memory ownership, mark unclassifiable devices
-external and state that ownership could not be read. See
-[device ownership](device-ownership.md) for the reader's coverage and fallback.
+For iOS refusals, `heldDevices` lists simulators owned by an AutoMobile session or
+broker binding. They count toward the limit, but are not strays: release their
+session or binding first. See [device ownership](device-ownership.md).
 
-Adopting an emulator or simulator that is already running or starting is never
-refused. An admitted boot holds its slot until adb lists the new emulator (or the
-simulator boot finishes), the launch fails or is cancelled, or the boot deadline
-passes. `listDevices` reports `capacity` per gated platform as
-`{ limit, booted, inFlight }`.
-Android also reports optional `processTable` diagnostics when the current sample lacks the host process table or this daemon has admitted a boot on the adb-only count: availability, the most recent failure reason, detail and attempt count, plus the number and last time of such admissions. Transient `ps` failures are retried with exponential backoff within the sample deadline; exhausted retries retain the adb-only fallback. On Linux, deterministic `ps` failures fall back to a bounded `/proc` read; after a successful fallback, later samples use `/proc` directly. Unknown non-zero `ps` exits stop retrying after three consecutive exhausted samples, until a successful `ps` read resets that latch. Capacity checks and reports share the 15-second sample bound.
+Adopting an emulator or simulator that is already running is never refused.
+`listDevices` reports `capacity` per platform as `{ limit, booted, inFlight }`.
+
+The Android limit is shared by every daemon using the same ADB server on one
+host. Daemons given different `AUTOMOBILE_ADB_SERVER_COORDINATION_DIR` values do
+not see each other's boots, so they can exceed the limit; give each its own ADB
+server as well to isolate their limits.
 
 ```bash
 export AUTOMOBILE_ANDROID_MAX_BOOTED=3     # fixed Android limit
@@ -916,25 +410,25 @@ export AUTOMOBILE_IOS_SIM_CAPACITY_GATE=0  # turn it off for iOS only
 
 <div class="environment-variable-table" markdown>
 
-| Variable                                                          | Use and accepted values                                                                                                | Default |
-| ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ------- |
-| `AUTOMOBILE_MANAGED_ADB_SERVER`, `AUTO_MOBILE_MANAGED_ADB_SERVER` | Declare process ownership of ADB server; `1`/`true` enable (case-insensitive, trimmed), stopping it on clean shutdown. | off     |
+| Variable                                                          | Use and accepted values                                                                         | Default |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | ------- |
+| `AUTOMOBILE_MANAGED_ADB_SERVER`, `AUTO_MOBILE_MANAGED_ADB_SERVER` | Declare that this process owns the ADB server so a clean shutdown stops it; `1`/`true` enables. | off     |
 
 </div>
 
 By default AutoMobile leaves the local ADB server running. Set
-`AUTOMOBILE_MANAGED_ADB_SERVER=1` only when this process owns the server; a
-clean shutdown then stops it after active device sessions are released.
+`AUTOMOBILE_MANAGED_ADB_SERVER=1` only when this process owns the server; a clean
+shutdown then stops it after active device sessions are released.
 
 ## Port allocation
 
 <div class="environment-variable-table" markdown>
 
-| Variable                                                      | Use and accepted values                                                                                                                    | Default |
-| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------- |
-| `AUTOMOBILE_PORT_RANGE_START`, `AUTO_MOBILE_PORT_RANGE_START` | First CtrlProxy host port; positive base-10 integer.                                                                                       | `8765`  |
-| `AUTOMOBILE_PORT_RANGE_END`, `AUTO_MOBILE_PORT_RANGE_END`     | Inclusive last CtrlProxy host port; base-10 integer at least the start. Takes precedence over size; invalid values fall back to 100 ports. | unset   |
-| `AUTOMOBILE_PORT_RANGE_SIZE`, `AUTO_MOBILE_PORT_RANGE_SIZE`   | Number of CtrlProxy host ports; positive base-10 integer, used only without end.                                                           | `100`   |
+| Variable                                                      | Use and accepted values                                                                                                      | Default |
+| ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------- |
+| `AUTOMOBILE_PORT_RANGE_START`, `AUTO_MOBILE_PORT_RANGE_START` | First CtrlProxy host port; positive integer.                                                                                 | `8765`  |
+| `AUTOMOBILE_PORT_RANGE_END`, `AUTO_MOBILE_PORT_RANGE_END`     | Last CtrlProxy host port (inclusive), at least the start. Takes precedence over size; invalid values fall back to 100 ports. | unset   |
+| `AUTOMOBILE_PORT_RANGE_SIZE`, `AUTO_MOBILE_PORT_RANGE_SIZE`   | Number of CtrlProxy host ports; positive integer, used only without an end.                                                  | `100`   |
 
 </div>
 
@@ -942,77 +436,60 @@ clean shutdown then stops it after active device sessions are released.
 
 <div class="environment-variable-table" markdown>
 
-| Variable                                                                                     | Use and accepted values                                                                                                                                                                                                                                 | Default                                                             |
-| -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| `AUTOMOBILE_VERSION`                                                                         | Trimmed concrete asset release version; unset, empty or `latest` uses newest registry release. Unknown explicit pins fail closed on integrity checks.                                                                                                   | newest release registry entry                                       |
-| `AUTOMOBILE_ASSET_BASE_URL`                                                                  | Release asset mirror base; absolute HTTPS URL without query or fragment, trailing slash removed.                                                                                                                                                        | `https://github.com/kaeawc/auto-mobile/releases/download`           |
-| `AUTOMOBILE_ALLOW_INSECURE_ASSET_URL`                                                        | Permit plaintext HTTP asset URLs with `1`/`true`; other non-HTTPS schemes still fail.                                                                                                                                                                   | off                                                                 |
-| `AUTOMOBILE_CTRL_PROXY_APK_PATH`                                                             | Local Android APK override; trimmed filesystem path, resolved from daemon launch directory; bypasses published APK checksum baseline.                                                                                                                   | released/cached APK                                                 |
-| `AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM`, `AUTO_MOBILE_ACCESSIBILITY_SERVICE_SHA_SKIP_CHECK` | Skip Android APK checksum enforcement with `1`/`true`.                                                                                                                                                                                                  | off                                                                 |
-| `AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED`                                        | Accept an installed APK unchecked outside readiness; readiness still upgrades (see below). `1`/`true`.                                                                                                                                                  | off                                                                 |
-| `AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD`                                                        | Use local CtrlProxy sources without downloading; `1`/`true` enables; CLI skip flag also enables.                                                                                                                                                        | off                                                                 |
-| `AUTOMOBILE_IOS_PROTOTYPE_AGENT`                                                             | Local iOS simulator prototype-agent dylib override; filesystem path (not trimmed), must exist or resolution fails; wins over a local build and the release download.                                                                                    | local build output, then verified release download                  |
-| `AUTOMOBILE_SKIP_IOS_PROTOTYPE_AGENT_DOWNLOAD`                                               | Refuse to download the prototype-agent dylib when no verified cached copy exists; `1`/`true` enables.                                                                                                                                                   | off                                                                 |
-| `AUTOMOBILE_IOS_PROTOTYPE_VIEWER`                                                            | Local viewer template override; app directory containing `Info.plist`, resolved relative to the daemon launch directory. Invalid overrides fail; build with `scripts/ios/prototype-viewer-build.sh`.                                                    | unset; configured local build, then verified release cache/download |
-| `AUTOMOBILE_SKIP_IOS_PROTOTYPE_VIEWER_DOWNLOAD`                                              | Refuse viewer template downloads without a verified cache; `1`/`true` enables. Overrides and configured local builds remain available.                                                                                                                  | off                                                                 |
-| `AUTOMOBILE_IOS_CTRLPROXY_RECORD_DIR`                                                        | Record every iOS CtrlProxy request/response as JSON into this directory for golden replay; trimmed filesystem path. Password-field text is redacted. Also set `CTRL_PROXY_IOS_HIERARCHY_PAIR_DIR` to make a simulator runner record merger input pairs. | off                                                                 |
-| `AUTOMOBILE_CTRLPROXY_VERBOSE`                                                               | Verbose iOS CtrlProxy output; `1`/`true` enables.                                                                                                                                                                                                       | off                                                                 |
-| `AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS`, `AUTO_MOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS`    | iOS runner health poll attempts; positive base-10 integer.                                                                                                                                                                                              | `60`                                                                |
-| `AUTOMOBILE_IPROXY_START_TIMEOUT_MS`, `AUTO_MOBILE_IPROXY_START_TIMEOUT_MS`                  | iOS USB iproxy tunnel startup timeout; positive base-10 integer milliseconds.                                                                                                                                                                           | `5000` ms                                                           |
-| `AUTOMOBILE_CWEBP_PATH`                                                                      | Trusted executable cwebp override; trimmed filesystem path; invalid executable fails.                                                                                                                                                                   | PATH, bundled vendor or downloaded libwebp                          |
-| `AUTOMOBILE_DWEBP_PATH`                                                                      | Trusted executable dwebp override; trimmed filesystem path; invalid executable fails.                                                                                                                                                                   | PATH, bundled vendor or downloaded libwebp                          |
-| `AUTOMOBILE_FFMPEG`                                                                          | ffmpeg executable override; executable path/name (not trimmed); explicit resolver option wins.                                                                                                                                                          | `ffmpeg` on PATH                                                    |
+| Variable                                                                                     | Use and accepted values                                                                                                                                   | Default                                                   |
+| -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| `AUTOMOBILE_VERSION`                                                                         | Release version of downloaded assets; unset, empty or `latest` uses the newest release. Unknown pins fail integrity checks.                               | newest release                                            |
+| `AUTOMOBILE_ASSET_BASE_URL`                                                                  | Release asset mirror; absolute HTTPS URL without query or fragment.                                                                                       | `https://github.com/kaeawc/auto-mobile/releases/download` |
+| `AUTOMOBILE_ALLOW_INSECURE_ASSET_URL`                                                        | Permit plaintext HTTP asset URLs; `1`/`true` enables.                                                                                                     | off                                                       |
+| `AUTOMOBILE_CTRL_PROXY_APK_PATH`                                                             | Use a local Android CtrlProxy APK instead of the released one; filesystem path. Skips the published checksum check.                                       | released/cached APK                                       |
+| `AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM`, `AUTO_MOBILE_ACCESSIBILITY_SERVICE_SHA_SKIP_CHECK` | Skip Android APK checksum checks; `1`/`true` enables.                                                                                                     | off                                                       |
+| `AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED`                                        | Accept an already-installed APK without checking it during auto-setup and `doctor`; `1`/`true` enables. Device readiness still upgrades a mismatched APK. | off                                                       |
+| `AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD`                                                        | Use local CtrlProxy sources instead of downloading; `1`/`true` enables.                                                                                   | off                                                       |
+| `AUTOMOBILE_IOS_PROTOTYPE_AGENT`                                                             | Local iOS simulator prototype-agent dylib; filesystem path that must exist.                                                                               | local build, then verified release download               |
+| `AUTOMOBILE_SKIP_IOS_PROTOTYPE_AGENT_DOWNLOAD`                                               | Do not download the prototype-agent dylib when no verified cached copy exists; `1`/`true` enables.                                                        | off                                                       |
+| `AUTOMOBILE_IOS_PROTOTYPE_VIEWER`                                                            | Local viewer template; app directory containing `Info.plist`, relative to the daemon launch directory. Invalid values fail.                               | local build, then verified release download               |
+| `AUTOMOBILE_SKIP_IOS_PROTOTYPE_VIEWER_DOWNLOAD`                                              | Do not download the viewer template when no verified cache exists; `1`/`true` enables.                                                                    | off                                                       |
+| `AUTOMOBILE_CTRLPROXY_VERBOSE`                                                               | Verbose iOS CtrlProxy output; `1`/`true` enables.                                                                                                         | off                                                       |
+| `AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS`, `AUTO_MOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS`    | iOS runner health poll attempts; positive integer.                                                                                                        | `60`                                                      |
+| `AUTOMOBILE_IPROXY_START_TIMEOUT_MS`, `AUTO_MOBILE_IPROXY_START_TIMEOUT_MS`                  | iOS USB iproxy tunnel startup timeout; positive integer milliseconds.                                                                                     | `5000` ms                                                 |
+| `AUTOMOBILE_CWEBP_PATH`                                                                      | Trusted `cwebp` executable; filesystem path. An invalid executable fails.                                                                                 | PATH, bundled or downloaded libwebp                       |
+| `AUTOMOBILE_DWEBP_PATH`                                                                      | Trusted `dwebp` executable; filesystem path. An invalid executable fails.                                                                                 | PATH, bundled or downloaded libwebp                       |
+| `AUTOMOBILE_FFMPEG`                                                                          | `ffmpeg` executable path or name.                                                                                                                         | `ffmpeg` on PATH                                          |
 
 </div>
 
-`AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED` does not stop a CtrlProxy
-upgrade when the installed APK's checksum differs from the expected release.
-It applies only to paths that do not request a download: CtrlProxy auto-setup
-(including reconnect recovery) and `doctor` status reads accept an installed APK
-as `skipped` without reading its checksum or queuing a background refresh.
-Runner readiness (`startDevice`, observing a device by `deviceId`, and other
-calls that wait for a ready runner) and the IDE "update service" action request
-the download explicitly, so they ignore this variable and upgrade a mismatched
-APK. It is also ignored when `AUTOMOBILE_VERSION` pins a known release and
-`AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM` is unset; a mismatch then fails closed.
-To keep an installed APK through readiness, set
-`AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD=1` (readiness never downloads and reports a
-version mismatch as a failure) together with
-`AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM=1` (the installed version is accepted).
+To keep an installed CtrlProxy APK through device readiness, set
+`AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD=1` together with
+`AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM=1`.
 
 ## iOS builds and signing
 
 <div class="environment-variable-table" markdown>
 
-| Variable                                         | Use and accepted values                                                                                                                                                                              | Default                                                             |
-| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| `AUTOMOBILE_PROJECT_ROOT`                        | Root used by local iOS CtrlProxy source builds; filesystem path.                                                                                                                                     | process working directory at module load                            |
-| `AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA`         | Local iOS CtrlProxy derived-data root; filesystem path.                                                                                                                                              | data directory `derived-data`                                       |
-| `AUTOMOBILE_CTRL_PROXY_IOS_CACHE_DIR`            | iOS CtrlProxy bundle cache directory; filesystem path.                                                                                                                                               | coordination directory `ctrl-proxy-ios`                             |
-| `AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_URL`           | Trimmed custom iOS bundle download URL; HTTPS unless insecure asset URL opt-in.                                                                                                                      | release bundle URL                                                  |
-| `AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH`             | Trimmed local iOS archive/bundle override; filesystem path; wins over bundle-path override.                                                                                                          | unset; released bundle                                              |
-| `AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH`          | Trimmed local iOS runner bundle or archive override; filesystem path.                                                                                                                                | unset; released bundle                                              |
-| `AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256`        | Trimmed 64-character hexadecimal executable SHA256 for local/custom runner; wins over local-build derivation.                                                                                        | release registry checksum                                           |
-| `AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256_TARGET` | Checksum executable: exact trimmed `runner` or `xctest`; other nonempty values fail.                                                                                                                 | release registry target                                             |
-| `AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD`      | Derive and pin local runner executable hash after build/extract, then reverify before launch; `1`/`true` enables.                                                                                    | off                                                                 |
-| `AUTOMOBILE_IOS_CTRL_PROXY_APP_HASH`             | Trimmed expected device app bundle hash; device-specific override wins.                                                                                                                              | released device app hash                                            |
-| `AUTOMOBILE_IOS_CTRL_PROXY_APP_HASH_DEVICE`      | Trimmed expected device app bundle hash; overrides generic/device release hash.                                                                                                                      | generic override or released device app hash                        |
-| `AUTOMOBILE_IOS_CTRL_PROXY_APP_HASH_SIMULATOR`   | Trimmed expected simulator app bundle hash.                                                                                                                                                          | unset; no simulator app hash verification                           |
-| `AUTOMOBILE_IOS_SKIP_CTRL_PROXY_APP_HASH`        | Skip iOS app bundle hash enforcement; `1`/`true` enables.                                                                                                                                            | off                                                                 |
-| `AUTOMOBILE_IOS_HELPER_REQUIRE_CODESIGN`         | Make codesign, Gatekeeper or pinned Team ID failures fatal; `1`/`true` enables.                                                                                                                      | off; failures warn                                                  |
-| `AUTOMOBILE_IOS_HELPER_TEAM_ID`                  | Trimmed Apple Team ID to verify on downloaded runner bundle; warn or refuse according to require-codesign.                                                                                           | unset                                                               |
-| `AUTOMOBILE_IOS_TEAM_IDS`                        | Comma-separated signing Team IDs, trimmed; wins over single Team ID.                                                                                                                                 | auto-detected signing teams                                         |
-| `AUTOMOBILE_IOS_TEAM_ID`                         | Single signing Team ID, also parsed as a comma-separated list; used without plural setting.                                                                                                          | auto-detected signing teams                                         |
-| `AUTOMOBILE_IOS_PROFILE_UUID`                    | Provisioning profile UUID; wins over name and specifier.                                                                                                                                             | automatic profile discovery                                         |
-| `AUTOMOBILE_IOS_PROFILE_NAME`                    | Provisioning profile name; used without UUID, wins over specifier.                                                                                                                                   | automatic profile discovery                                         |
-| `AUTOMOBILE_IOS_PROFILE_SPECIFIER`               | Provisioning profile specifier; used without UUID or name.                                                                                                                                           | automatic profile discovery                                         |
-| `AUTOMOBILE_IOS_CODE_SIGN_IDENTITY`              | Trimmed signing identity string.                                                                                                                                                                     | auto-detected identity                                              |
-| `AUTOMOBILE_IOS_CODE_SIGN_ENTITLEMENTS_PATH`     | Entitlements file path for signing; filesystem path.                                                                                                                                                 | runner/app entitlements discovery                                   |
-| `AUTOMOBILE_IOS_TAP_STRATEGY`                    | Diagnostic tap strategy (only at debug log level): exact `legacy`, `appRelative`, `appRelativeObserved`, `displayTargeted`, `displayTargetedObserved`.                                               | runner default strategy                                             |
-| `AUTOMOBILE_IOS_PROTOTYPE_AGENT`                 | Local iOS simulator prototype-agent dylib override; filesystem path that must exist; wins over local build output and release download.                                                              | unset; local build output, then released dylib                      |
-| `AUTOMOBILE_SKIP_IOS_PROTOTYPE_AGENT_DOWNLOAD`   | Refuse to download the released prototype-agent dylib when no verified cached copy exists; `1`/`true` enables.                                                                                       | off; download on first prototype use                                |
-| `AUTOMOBILE_IOS_PROTOTYPE_VIEWER`                | Local viewer template override; app directory containing `Info.plist`, resolved relative to the daemon launch directory. Invalid overrides fail; build with `scripts/ios/prototype-viewer-build.sh`. | unset; configured local build, then verified release cache/download |
-| `AUTOMOBILE_SKIP_IOS_PROTOTYPE_VIEWER_DOWNLOAD`  | Refuse viewer template downloads without a verified cache; `1`/`true` enables. Overrides and configured local builds remain available.                                                               | off                                                                 |
+| Variable                                         | Use and accepted values                                                                             | Default                                 |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------------- | --------------------------------------- |
+| `AUTOMOBILE_PROJECT_ROOT`                        | Root used by local iOS CtrlProxy source builds; filesystem path.                                    | process working directory               |
+| `AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA`         | Derived-data root for local iOS CtrlProxy builds; filesystem path.                                  | data directory `derived-data`           |
+| `AUTOMOBILE_CTRL_PROXY_IOS_CACHE_DIR`            | iOS CtrlProxy bundle cache; filesystem path.                                                        | coordination directory `ctrl-proxy-ios` |
+| `AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_URL`           | Custom iOS bundle download URL; HTTPS unless the insecure asset URL opt-in is set.                  | release bundle URL                      |
+| `AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH`             | Local iOS archive or bundle; filesystem path. Wins over the bundle-path override.                   | released bundle                         |
+| `AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH`          | Local iOS runner bundle or archive; filesystem path.                                                | released bundle                         |
+| `AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256`        | Expected 64-character hex SHA256 of a local or custom runner executable.                            | release checksum                        |
+| `AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256_TARGET` | Which executable the checksum applies to: exact `runner` or `xctest`.                               | release target                          |
+| `AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD`      | Pin the hash of a local build after it is built, and reverify it before launch; `1`/`true` enables. | off                                     |
+| `AUTOMOBILE_IOS_CTRL_PROXY_APP_HASH`             | Expected device app bundle hash; the device-specific variable wins.                                 | released device app hash                |
+| `AUTOMOBILE_IOS_CTRL_PROXY_APP_HASH_DEVICE`      | Expected device app bundle hash.                                                                    | generic override or released hash       |
+| `AUTOMOBILE_IOS_CTRL_PROXY_APP_HASH_SIMULATOR`   | Expected simulator app bundle hash.                                                                 | unset; not verified                     |
+| `AUTOMOBILE_IOS_SKIP_CTRL_PROXY_APP_HASH`        | Skip iOS app bundle hash checks; `1`/`true` enables.                                                | off                                     |
+| `AUTOMOBILE_IOS_HELPER_REQUIRE_CODESIGN`         | Make codesign, Gatekeeper or Team ID failures fatal; `1`/`true` enables.                            | off; failures warn                      |
+| `AUTOMOBILE_IOS_HELPER_TEAM_ID`                  | Apple Team ID to verify on the downloaded runner bundle.                                            | unset                                   |
+| `AUTOMOBILE_IOS_TEAM_IDS`                        | Comma-separated signing Team IDs; wins over the single Team ID.                                     | auto-detected                           |
+| `AUTOMOBILE_IOS_TEAM_ID`                         | Single signing Team ID (a comma-separated list also works).                                         | auto-detected                           |
+| `AUTOMOBILE_IOS_PROFILE_UUID`                    | Provisioning profile UUID; wins over name and specifier.                                            | automatic discovery                     |
+| `AUTOMOBILE_IOS_PROFILE_NAME`                    | Provisioning profile name; wins over specifier.                                                     | automatic discovery                     |
+| `AUTOMOBILE_IOS_PROFILE_SPECIFIER`               | Provisioning profile specifier.                                                                     | automatic discovery                     |
+| `AUTOMOBILE_IOS_CODE_SIGN_IDENTITY`              | Signing identity.                                                                                   | auto-detected                           |
+| `AUTOMOBILE_IOS_CODE_SIGN_ENTITLEMENTS_PATH`     | Entitlements file for signing; filesystem path.                                                     | automatic discovery                     |
 
 </div>
 
@@ -1020,27 +497,27 @@ version mismatch as a failure) together with
 
 <div class="environment-variable-table" markdown>
 
-| Variable                                                                                  | Use and accepted values                                                                                                                                                                                       | Default                                    |
-| ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
-| `AUTOMOBILE_VIDEO_QUALITY_PRESET`, `AUTO_MOBILE_VIDEO_QUALITY_PRESET`                     | Exact `low`, `medium`, `high` recording preset; CLI and per-call options win.                                                                                                                                 | `low`                                      |
-| `AUTOMOBILE_VIDEO_TARGET_BITRATE_KBPS`, `AUTO_MOBILE_VIDEO_TARGET_BITRATE_KBPS`           | Positive base-10 integer prefix via `parseInt(value, 10)` in kbps (`999.9` becomes `999`, `29abc` becomes `29`); invalid/nonpositive values warn and are ignored; empty ignored. Throughput cap may lower it. | `1000` kbps                                |
-| `AUTOMOBILE_VIDEO_MAX_THROUGHPUT_MBPS`, `AUTO_MOBILE_VIDEO_MAX_THROUGHPUT_MBPS`           | Positive finite `Number(value)` (fractions allowed, trailing junk rejected), recording throughput cap; invalid/nonpositive values warn and are ignored; empty ignored.                                        | `5` Mbps                                   |
-| `AUTOMOBILE_VIDEO_FPS`, `AUTO_MOBILE_VIDEO_FPS`                                           | Positive base-10 integer prefix via `parseInt(value, 10)` in frames/second (`29.9` or `29abc` becomes `29`); invalid/nonpositive values warn and are ignored; empty ignored. Backend may clamp.               | `15` fps                                   |
-| `AUTOMOBILE_VIDEO_MAX_ARCHIVE_MB`, `AUTO_MOBILE_VIDEO_MAX_ARCHIVE_MB`                     | Positive finite `Number(value)` (fractions allowed, trailing junk rejected), archive storage limit; invalid/nonpositive values warn and are ignored; empty ignored.                                           | `100` MB                                   |
-| `AUTOMOBILE_VIDEO_FORMAT`, `AUTO_MOBILE_VIDEO_FORMAT`                                     | Exact `mp4`; other values warn and are ignored.                                                                                                                                                               | `mp4`                                      |
-| `AUTOMOBILE_VIDEO_RETENTION_DAYS`, `AUTO_MOBILE_VIDEO_RETENTION_DAYS`                     | Finite nonnegative recording TTL in days; `0` disables age expiry.                                                                                                                                            | `7` days                                   |
-| `AUTOMOBILE_VIDEO_RETENTION_SWEEP_MINUTES`, `AUTO_MOBILE_VIDEO_RETENTION_SWEEP_MINUTES`   | Positive finite sweep period in minutes; timer minimum 1 second.                                                                                                                                              | `60` minutes                               |
-| `AUTOMOBILE_VIDEO_INPROGRESS_CHECK_SECONDS`, `AUTO_MOBILE_VIDEO_INPROGRESS_CHECK_SECONDS` | Positive finite active recording size-check period in seconds; timer minimum 1 second.                                                                                                                        | `15` seconds                               |
-| `AUTOMOBILE_ANDROID_VIDEO_USE_FFMPEG_PIPE`                                                | Android exec-out screenrecord to ffmpeg recording backend; `1`/`true` enables.                                                                                                                                | off                                        |
-| `AUTOMOBILE_VIDEO_SERVER_JAR`                                                             | Local Android persistent encoder JAR; untrimmed filesystem path, used only if it exists. Surrounding whitespace is significant; nonexistent paths silently fall through.                                      | cached/released JAR, then source-built JAR |
-| `AUTOMOBILE_REQUIRE_VIDEO_SERVER`                                                         | Make unavailable/invalid video-server JAR fatal instead of degrading; `1`/`true` enables.                                                                                                                     | off                                        |
-| `AUTOMOBILE_SKIP_VIDEO_SERVER_DOWNLOAD`                                                   | Resolve video-server JAR locally only; `1`/`true` enables.                                                                                                                                                    | off                                        |
-| `AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER`, `AUTO_MOBILE_IOS_SCREEN_CAPTURE_HELPER`           | Local screen-capture-helper executable path; bypasses release prefetch.                                                                                                                                       | released helper                            |
-| `AUTOMOBILE_NETWORK_FILTER_APP_PATH`                                                      | Local signed Network Filter `.app` used by `auto-mobile --ios-network-filter install` instead of the release download.                                                                                        | release download                           |
-| `AUTOMOBILE_NETWORK_FILTER_TEAM_ID`                                                       | Optional Apple Team ID the Network Filter app and its provider must both be signed by.                                                                                                                        | shared Developer ID team required          |
-| `AUTOMOBILE_IOS_WEBRTC_FFMPEG`, `AUTO_MOBILE_IOS_WEBRTC_FFMPEG`                           | iOS WebRTC ffmpeg executable path/name (not trimmed); first nonempty spelling wins; explicit resolver option wins.                                                                                            | `ffmpeg` on PATH                           |
-| `AUTOMOBILE_IOS_WEBRTC_FORCE_RAW`, `AUTO_MOBILE_IOS_WEBRTC_FORCE_RAW`                     | Force raw iOS capture path instead of native H.264; `1`/`true` enables.                                                                                                                                       | off                                        |
-| `AUTOMOBILE_IOS_SIMULATOR_WINDOW_TIMEOUT_MS`                                              | Simulator capture window target resolution budget; positive base-10 integer milliseconds.                                                                                                                     | `2000` ms                                  |
+| Variable                                                                                  | Use and accepted values                                                                                         | Default                                |
+| ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| `AUTOMOBILE_VIDEO_QUALITY_PRESET`, `AUTO_MOBILE_VIDEO_QUALITY_PRESET`                     | Recording preset: exact `low`, `medium`, `high`. CLI and per-call options win.                                  | `low`                                  |
+| `AUTOMOBILE_VIDEO_TARGET_BITRATE_KBPS`, `AUTO_MOBILE_VIDEO_TARGET_BITRATE_KBPS`           | Target bitrate in kbps; positive integer. Invalid values warn and are ignored. The throughput cap may lower it. | `1000` kbps                            |
+| `AUTOMOBILE_VIDEO_MAX_THROUGHPUT_MBPS`, `AUTO_MOBILE_VIDEO_MAX_THROUGHPUT_MBPS`           | Recording throughput cap in Mbps; positive number. Invalid values warn and are ignored.                         | `5` Mbps                               |
+| `AUTOMOBILE_VIDEO_FPS`, `AUTO_MOBILE_VIDEO_FPS`                                           | Frames per second; positive integer. The device may clamp it.                                                   | `15` fps                               |
+| `AUTOMOBILE_VIDEO_MAX_ARCHIVE_MB`, `AUTO_MOBILE_VIDEO_MAX_ARCHIVE_MB`                     | Recording archive size limit in MB; positive number.                                                            | `100` MB                               |
+| `AUTOMOBILE_VIDEO_FORMAT`, `AUTO_MOBILE_VIDEO_FORMAT`                                     | Exact `mp4`; other values warn and are ignored.                                                                 | `mp4`                                  |
+| `AUTOMOBILE_VIDEO_RETENTION_DAYS`, `AUTO_MOBILE_VIDEO_RETENTION_DAYS`                     | Days to keep recordings; nonnegative number, `0` disables age expiry.                                           | `7` days                               |
+| `AUTOMOBILE_VIDEO_RETENTION_SWEEP_MINUTES`, `AUTO_MOBILE_VIDEO_RETENTION_SWEEP_MINUTES`   | How often expired recordings are removed, in minutes; positive number.                                          | `60` minutes                           |
+| `AUTOMOBILE_VIDEO_INPROGRESS_CHECK_SECONDS`, `AUTO_MOBILE_VIDEO_INPROGRESS_CHECK_SECONDS` | How often an active recording's size is checked, in seconds; positive number.                                   | `15` seconds                           |
+| `AUTOMOBILE_ANDROID_VIDEO_USE_FFMPEG_PIPE`                                                | Record Android video by piping `screenrecord` through ffmpeg; `1`/`true` enables.                               | off                                    |
+| `AUTOMOBILE_VIDEO_SERVER_JAR`                                                             | Local Android video encoder JAR; filesystem path, used only if it exists.                                       | cached/released JAR, then source build |
+| `AUTOMOBILE_REQUIRE_VIDEO_SERVER`                                                         | Fail when the video encoder JAR is unavailable instead of degrading; `1`/`true` enables.                        | off                                    |
+| `AUTOMOBILE_SKIP_VIDEO_SERVER_DOWNLOAD`                                                   | Resolve the video encoder JAR locally only; `1`/`true` enables.                                                 | off                                    |
+| `AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER`, `AUTO_MOBILE_IOS_SCREEN_CAPTURE_HELPER`           | Local screen-capture helper executable; filesystem path.                                                        | released helper                        |
+| `AUTOMOBILE_NETWORK_FILTER_APP_PATH`                                                      | Local signed Network Filter `.app` for `auto-mobile --ios-network-filter install`.                              | release download                       |
+| `AUTOMOBILE_NETWORK_FILTER_TEAM_ID`                                                       | Apple Team ID the Network Filter app and its provider must both be signed by.                                   | shared Developer ID team required      |
+| `AUTOMOBILE_IOS_WEBRTC_FFMPEG`, `AUTO_MOBILE_IOS_WEBRTC_FFMPEG`                           | `ffmpeg` executable path or name for iOS WebRTC.                                                                | `ffmpeg` on PATH                       |
+| `AUTOMOBILE_IOS_WEBRTC_FORCE_RAW`, `AUTO_MOBILE_IOS_WEBRTC_FORCE_RAW`                     | Force raw iOS capture instead of native H.264; `1`/`true` enables.                                              | off                                    |
+| `AUTOMOBILE_IOS_SIMULATOR_WINDOW_TIMEOUT_MS`                                              | How long to wait to find the simulator window for capture; positive integer milliseconds.                       | `2000` ms                              |
 
 </div>
 
@@ -1048,19 +525,19 @@ version mismatch as a failure) together with
 
 <div class="environment-variable-table" markdown>
 
-| Variable                                 | Use and accepted values                                                                                                                | Default                                                    |
-| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| `AUTOMOBILE_WEBRTC_WHIP_ENDPOINT`        | WHIP ingest URL; HTTPS, or loopback HTTP; remote HTTP requires insecure-WHIP opt-in. Per-call options win.                             | unset; required to stream                                  |
-| `AUTOMOBILE_WEBRTC_WHIP_TOKEN`           | Bearer token string for WHIP ingest.                                                                                                   | unset                                                      |
-| `AUTOMOBILE_WEBRTC_ICE_SERVERS`          | JSON array of RTCIceServer objects (`urls`, optional `username`/`credential`) or comma-separated STUN/TURN URLs.                       | `stun:stun.l.google.com:19302`                             |
-| `AUTOMOBILE_WEBRTC_BITRATE_KBPS`         | Positive finite encoder bitrate, rounded to integer kbps.                                                                              | unset; encoder/source default (iOS uses pixel-rate budget) |
-| `AUTOMOBILE_WEBRTC_MAX_SIZE`             | `WIDTHxHEIGHT`; positive even safe integers within H.264 Level 4.2 frame limit.                                                        | unset; source dimensions                                   |
-| `AUTOMOBILE_WEBRTC_IOS_SIMULATOR_FPS`    | Integer `5..60` capture rate.                                                                                                          | `15` fps                                                   |
-| `AUTOMOBILE_WEBRTC_ANDROID_FPS`          | Integer `1..60` capture rate.                                                                                                          | `30` fps                                                   |
-| `AUTOMOBILE_WEBRTC_TRICKLE_ICE`          | WHIP PATCH trickle ICE; `1`, `true`, `yes`, `on` enable (case-insensitive, trimmed).                                                   | off                                                        |
-| `AUTOMOBILE_WEBRTC_AUDIO`                | Add audio track; `1`, `true`, `yes`, `on` enable (case-insensitive, trimmed).                                                          | off                                                        |
-| `AUTOMOBILE_WEBRTC_ALLOW_INSECURE_WHIP`  | Permit non-loopback HTTP and arbitrary wire WHIP overrides; `1`, `true`, `yes`, `on` enable (case-insensitive, trimmed).               | off                                                        |
-| `AUTOMOBILE_WEBRTC_WHIP_ALLOWED_ORIGINS` | Comma-separated origins or bare `host[:port]` allowed for wire WHIP overrides; loopback and configured WHIP origin are always trusted. | empty additional allowlist                                 |
+| Variable                                 | Use and accepted values                                                                                                                        | Default                        |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| `AUTOMOBILE_WEBRTC_WHIP_ENDPOINT`        | WHIP ingest URL; HTTPS, or loopback HTTP. Remote HTTP requires the insecure-WHIP opt-in. Per-call options win.                                 | unset; required to stream      |
+| `AUTOMOBILE_WEBRTC_WHIP_TOKEN`           | Bearer token for WHIP ingest.                                                                                                                  | unset                          |
+| `AUTOMOBILE_WEBRTC_ICE_SERVERS`          | JSON array of RTCIceServer objects (`urls`, optional `username`/`credential`) or comma-separated STUN/TURN URLs.                               | `stun:stun.l.google.com:19302` |
+| `AUTOMOBILE_WEBRTC_BITRATE_KBPS`         | Encoder bitrate in kbps; positive number.                                                                                                      | encoder/source default         |
+| `AUTOMOBILE_WEBRTC_MAX_SIZE`             | Maximum frame size as `WIDTHxHEIGHT`; positive even integers within the H.264 Level 4.2 limit.                                                 | source dimensions              |
+| `AUTOMOBILE_WEBRTC_IOS_SIMULATOR_FPS`    | iOS simulator capture rate; integer `5..60`.                                                                                                   | `15` fps                       |
+| `AUTOMOBILE_WEBRTC_ANDROID_FPS`          | Android capture rate; integer `1..60`.                                                                                                         | `30` fps                       |
+| `AUTOMOBILE_WEBRTC_TRICKLE_ICE`          | Use WHIP PATCH trickle ICE; `1`, `true`, `yes`, `on` enable.                                                                                   | off                            |
+| `AUTOMOBILE_WEBRTC_AUDIO`                | Add an audio track; `1`, `true`, `yes`, `on` enable.                                                                                           | off                            |
+| `AUTOMOBILE_WEBRTC_ALLOW_INSECURE_WHIP`  | Permit non-loopback HTTP and arbitrary per-call WHIP overrides; `1`, `true`, `yes`, `on` enable.                                               | off                            |
+| `AUTOMOBILE_WEBRTC_WHIP_ALLOWED_ORIGINS` | Comma-separated origins or bare `host[:port]` allowed for per-call WHIP overrides. Loopback and the configured WHIP origin are always allowed. | empty                          |
 
 </div>
 
@@ -1068,14 +545,14 @@ version mismatch as a failure) together with
 
 <div class="environment-variable-table" markdown>
 
-| Variable                                            | Use and accepted values                                                                                    | Default                   |
-| --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------- |
-| `AUTOMOBILE_NAV_RETENTION_SCREENSHOT_TTL_MS`        | Screenshot retention TTL; positive safe integer milliseconds.                                              | `604800000` ms (7 days)   |
-| `AUTOMOBILE_NAV_RETENTION_STRUCTURE_TTL_MS`         | Structure retention TTL; positive safe integer milliseconds.                                               | `7776000000` ms (90 days) |
-| `AUTOMOBILE_NAV_RETENTION_PER_APP_MAX_OBSERVATIONS` | Per-app observation cap; positive safe integer.                                                            | `50000`                   |
-| `AUTOMOBILE_NAV_RETENTION_GLOBAL_MAX_OBSERVATIONS`  | Global observation cap; positive safe integer.                                                             | `500000`                  |
-| `AUTOMOBILE_NAV_RETENTION_EVICTION_CHUNK_SIZE`      | Rows per eviction batch; positive safe integer clamped to `10000`.                                         | `5000`                    |
-| `AUTOMOBILE_NAV_RETENTION_INTERVAL_MS`              | Retention sweep cadence; positive safe integer milliseconds at most `2147483647`; larger values fall back. | `21600000` ms (6 hours)   |
+| Variable                                            | Use and accepted values                                                      | Default                   |
+| --------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------- |
+| `AUTOMOBILE_NAV_RETENTION_SCREENSHOT_TTL_MS`        | How long navigation screenshots are kept; positive integer milliseconds.     | `604800000` ms (7 days)   |
+| `AUTOMOBILE_NAV_RETENTION_STRUCTURE_TTL_MS`         | How long navigation structure is kept; positive integer milliseconds.        | `7776000000` ms (90 days) |
+| `AUTOMOBILE_NAV_RETENTION_PER_APP_MAX_OBSERVATIONS` | Observation cap per app; positive integer.                                   | `50000`                   |
+| `AUTOMOBILE_NAV_RETENTION_GLOBAL_MAX_OBSERVATIONS`  | Observation cap across all apps; positive integer.                           | `500000`                  |
+| `AUTOMOBILE_NAV_RETENTION_EVICTION_CHUNK_SIZE`      | Rows removed per cleanup batch; positive integer, at most `10000`.           | `5000`                    |
+| `AUTOMOBILE_NAV_RETENTION_INTERVAL_MS`              | How often cleanup runs; positive integer milliseconds, at most `2147483647`. | `21600000` ms (6 hours)   |
 
 </div>
 
@@ -1083,12 +560,30 @@ version mismatch as a failure) together with
 
 <div class="environment-variable-table" markdown>
 
-| Variable                                                                  | Use and accepted values                                                                                                                 | Default                         |
-| ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
-| `AUTOMOBILE_OBSERVE_PERF_SNAPSHOT`, `AUTO_MOBILE_OBSERVE_PERF_SNAPSHOT`   | Attach rolling performance snapshot to observe results; `1`/`true` enables.                                                             | off                             |
-| `AUTOMOBILE_OBSERVE_PERF_WINDOW_MS`, `AUTO_MOBILE_OBSERVE_PERF_WINDOW_MS` | Positive finite snapshot window milliseconds, rounded and clamped to `1000..30000`; invalid values fall back.                           | `5000` ms                       |
-| `AUTOMOBILE_DISABLE_PERF_AUDIT`                                           | Disable UI performance audit with `1`/`true`; audit otherwise requires UI perf mode and debug-perf.                                     | off                             |
-| `AUTOMOBILE_TOUCH_LATENCY_SAMPLING`                                       | Opt into synthetic tap latency sampling; `1`/`true` enables.                                                                            | off                             |
-| `AUTOMOBILE_TRACE_PROCESSOR`                                              | Perfetto `trace_processor_shell` executable that summarises Android `performanceTrace` traces; trimmed filesystem path or command name. | `trace_processor_shell` on PATH |
+| Variable                                                                  | Use and accepted values                                                                                     | Default                         |
+| ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| `AUTOMOBILE_OBSERVE_PERF_SNAPSHOT`, `AUTO_MOBILE_OBSERVE_PERF_SNAPSHOT`   | Attach a rolling performance snapshot to observe results; `1`/`true` enables.                               | off                             |
+| `AUTOMOBILE_OBSERVE_PERF_WINDOW_MS`, `AUTO_MOBILE_OBSERVE_PERF_WINDOW_MS` | Snapshot window in milliseconds, clamped to `1000..30000`; invalid values fall back.                        | `5000` ms                       |
+| `AUTOMOBILE_DISABLE_PERF_AUDIT`                                           | Disable the UI performance audit; `1`/`true` disables.                                                      | off                             |
+| `AUTOMOBILE_TOUCH_LATENCY_SAMPLING`                                       | Sample synthetic tap latency; `1`/`true` enables.                                                           | off                             |
+| `AUTOMOBILE_TRACE_PROCESSOR`                                              | Perfetto `trace_processor_shell` used to summarize Android `performanceTrace` traces; path or command name. | `trace_processor_shell` on PATH |
+
+</div>
+
+## Testing and internal
+
+These are read by AutoMobile but are meant for testing and diagnostics, not
+normal use.
+
+<div class="environment-variable-table" markdown>
+
+| Variable                                   | Use                                                                                                                                                 | Default        |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- | -------------- |
+| `AUTOMOBILE_HARNESS_PRIVATE_DAEMON`        | Marks a daemon as a short-lived private test daemon: `1` arms the orphan watchdog, `0` exempts it.                                                  | unset          |
+| `AUTOMOBILE_DAEMON_LAUNCHER_PID`           | Pid of the process that launched a private test daemon, for the orphan watchdog.                                                                    | parent pid     |
+| `AUTOMOBILE_PRIVATE_DAEMON_ORPHAN_IDLE_MS` | Idle time after which an orphaned private test daemon exits; milliseconds, `0` disables.                                                            | `900000` ms    |
+| `AUTOMOBILE_IOS_CTRLPROXY_RECORD_DIR`      | Record iOS CtrlProxy requests and responses as JSON in this directory; filesystem path.                                                             | off            |
+| `AUTOMOBILE_IOS_TAP_STRATEGY`              | Diagnostic iOS tap strategy, at debug log level only: `legacy`, `appRelative`, `appRelativeObserved`, `displayTargeted`, `displayTargetedObserved`. | runner default |
+| `AUTOMOBILE_UNIT_TEST_ISOLATED_DATA_DIR`   | Data directory isolated by the unit-test preload.                                                                                                   | unset          |
 
 </div>

@@ -65,12 +65,12 @@ export interface SimCtlInventoryContext {
   getBootedSimulatorsChecked(
     timeoutMs?: number,
     signal?: AbortSignal,
-    options?: { bypassCache?: boolean },
+    options?: { bypassCache?: boolean; maxCacheAgeMs?: number },
   ): Promise<BootedDevice[]>;
   getSimulatorListingChecked(
     timeoutMs?: number,
     signal?: AbortSignal,
-    options?: { bypassCache?: boolean },
+    options?: { bypassCache?: boolean; maxCacheAgeMs?: number },
   ): Promise<{ booted: BootedDevice[]; transitional: TransitionalSimulator[] }>;
   listSimulators(timeoutMs?: number, signal?: AbortSignal): Promise<SimulatorList>;
   listSimulatorImages(
@@ -160,6 +160,8 @@ export class SimCtlInventory {
     observedAt: number;
   } | null = null;
 
+  private static lastLoggedDeviceListSignature: string | undefined;
+
   private static readonly DEVICE_LIST_CACHE_TTL = 5000;
   // 5 seconds
   // Last-known-good device list, retained past a failed listing so a transient
@@ -201,6 +203,7 @@ export class SimCtlInventory {
   >();
 
   static invalidateDeviceListCache(): void {
+    SimCtlInventory.lastLoggedDeviceListSignature = undefined;
     SimCtlInventory.simulatorDisplays.clear();
     SimCtlInventory.deviceListCache = null;
     SimCtlInventory.lastGoodDeviceList = null;
@@ -447,13 +450,30 @@ export class SimCtlInventory {
     deadlineMs: number | undefined,
     signal: AbortSignal | undefined,
   ): Promise<DeviceInfo[]> {
+    const listedDevices = Object.values(simulatorList.devices).flat();
+    const signature = JSON.stringify(
+      listedDevices
+        .map(({ udid, state, isAvailable, name }): [string, string, boolean, string] => [
+          udid,
+          state,
+          isAvailable,
+          name,
+        ])
+        .sort(([a], [b]) => a.localeCompare(b)),
+    );
+    const changed = signature !== SimCtlInventory.lastLoggedDeviceListSignature;
+    if (!changed) {
+      logger.debug(`iOS simulator listing unchanged (${listedDevices.length} simulators)`);
+    }
     this.retireStoppedSimulatorDisplays(simulatorList);
     const devices = await Promise.all(
       Object.entries(simulatorList.devices).flatMap(([runtimeId, runtimeDevices]) =>
         runtimeDevices.map(async (device): Promise<DeviceInfo> => {
-          logger.debug(
-            `Found iOS simulator: ${device.name} (${device.udid}) state=${device.state}`,
-          );
+          if (changed) {
+            logger.debug(
+              `Found iOS simulator: ${device.name} (${device.udid}) state=${device.state}`,
+            );
+          }
           const iosVersion = normalizeIosVersion(runtimeId, device.os_version);
           const [profile, displays] = await Promise.all([
             device.deviceTypeIdentifier
@@ -493,6 +513,7 @@ export class SimCtlInventory {
         }),
       ),
     );
+    SimCtlInventory.lastLoggedDeviceListSignature = signature;
     devices.sort((a, b) => (a.deviceId || "").localeCompare(b.deviceId || ""));
     return devices;
   }
@@ -716,7 +737,7 @@ export class SimCtlInventory {
   async getBootedSimulatorsChecked(
     timeoutMs?: number,
     signal?: AbortSignal,
-    options: { bypassCache?: boolean } = {},
+    options: { bypassCache?: boolean; maxCacheAgeMs?: number } = {},
   ): Promise<BootedDevice[]> {
     return (await this.context.getSimulatorListingChecked(timeoutMs, signal, options)).booted;
   }
@@ -729,7 +750,7 @@ export class SimCtlInventory {
   async getSimulatorListingChecked(
     timeoutMs?: number,
     signal?: AbortSignal,
-    options: { bypassCache?: boolean } = {},
+    options: { bypassCache?: boolean; maxCacheAgeMs?: number } = {},
   ): Promise<{ booted: BootedDevice[]; transitional: TransitionalSimulator[] }> {
     // An already-aborted caller must fail even on a cache hit below -- a cached
     // "success" for a request the caller has already given up on is silently
@@ -740,7 +761,8 @@ export class SimCtlInventory {
     const devices =
       !options.bypassCache &&
       cached &&
-      this.context.timer.now() - cached.timestamp < SimCtlInventory.DEVICE_LIST_CACHE_TTL
+      this.context.timer.now() - cached.timestamp <
+        (options.maxCacheAgeMs ?? SimCtlInventory.DEVICE_LIST_CACHE_TTL)
         ? cached.devices
         : options.bypassCache
           ? await this.listDevicesForBootedCheck(timeoutMs, signal, true)

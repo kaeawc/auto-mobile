@@ -6,6 +6,7 @@ import {
   getSharedDevicectlDeviceLister,
   type IosPhysicalDeviceLister,
 } from "../../utils/ios-cmdline-tools/DevicectlDeviceLister";
+import { parseSimctlDeviceList } from "../../utils/ios-cmdline-tools/simctlDeviceList";
 import { buildSimctlArgs } from "../../utils/ios-cmdline-tools/simctlArgs";
 import type { Timer } from "../../utils/SystemTimer";
 
@@ -35,6 +36,47 @@ export class IosDeviceDetector {
   private warnedIdeviceIdUnavailable = false;
 
   constructor(private readonly options: IosDeviceDetectorOptions) {}
+
+  /** Unknown listings never establish a simulator state. */
+  async getSimulatorState(): Promise<string | undefined> {
+    try {
+      let stdout: string;
+      if (this.options.useRemoteRunner()) {
+        const result = await this.options.remoteRunner.runSimctl(["list", "devices", "--json"]);
+        if (!result.success || !result.data) {
+          return undefined;
+        }
+        stdout = result.data.stdout;
+      } else {
+        ({ stdout } = await this.options.processExecutor.executeCommand(
+          "xcrun",
+          buildSimctlArgs(["list", "devices", "--json"]),
+        ));
+      }
+      if (!stdout.trim()) {
+        return undefined;
+      }
+      const listing = parseSimctlDeviceList(stdout);
+      if (!listing.devices || Array.isArray(listing.devices)) {
+        return undefined;
+      }
+      const device = Object.values(listing.devices)
+        .filter(Array.isArray)
+        .flat()
+        .find((device) => device?.udid === this.options.deviceId);
+      return typeof device?.state === "string" && device.state.trim() ? device.state : undefined;
+    } catch (error) {
+      // Unknown simulator state cannot justify blocking a launch or retiring a runner.
+      logger.debug(`[IOSCtrlProxy] Simulator state probe failed: ${errorMessage(error)}`, error);
+      return undefined;
+    }
+  }
+
+  /** Only a positive shutdown listing may prevent a runner launch. */
+  async isSimulatorShutDown(): Promise<boolean> {
+    const state = await this.getSimulatorState();
+    return state === "Shutdown" || state === "Shutting Down";
+  }
 
   async isDeviceDetected(): Promise<boolean> {
     if (this.options.isSimulator()) {

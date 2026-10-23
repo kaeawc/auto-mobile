@@ -10,6 +10,7 @@ import {
 import { rethrowRealCtrlProxyWebSocketInTestError } from "../DeviceServiceClient";
 import type { CtrlProxySyncedHierarchy } from "./types";
 import { logger } from "../../../utils/logger";
+import { errorMessage } from "../../../utils/describeUnknownError";
 type ConnectionFailure = { reason: IosHierarchyUnavailableReason; detail?: string };
 interface ConnectionHost {
   readonly deviceId: string;
@@ -153,6 +154,7 @@ export class CtrlProxyConnection {
           logger.info(
             `[IOSCtrlProxyClient] Target simulator ${this.host.deviceId} is no longer booted, skipping auto-setup`,
           );
+          this.stopRunnerForSimulatorShutdown(manager);
           this.host.lastConnectFailure = { reason: "simulator_not_booted" };
           return false;
         }
@@ -200,6 +202,16 @@ export class CtrlProxyConnection {
           : "auto_setup_failed",
       detail: result.recoveryInterrupted ? (result.error ?? result.message) : result.message,
     };
+  }
+
+  private stopRunnerForSimulatorShutdown(manager: CtrlProxyIosManager): void {
+    void manager
+      .markSimulatorShutDownIfNotBooted?.("target simulator is no longer booted")
+      .catch((error) => {
+        logger.warn(
+          `[IOSCtrlProxyClient] Failed to stop shut-down simulator runner: ${errorMessage(error)}`,
+        );
+      });
   }
 
   private async reconnectAfterSetup(perf: PerformanceTracker): Promise<boolean> {

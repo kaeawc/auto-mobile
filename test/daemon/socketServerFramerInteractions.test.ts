@@ -369,7 +369,7 @@ describe("the real reachability probe against a framer-backed server (#10107 x #
     const reachability = new DaemonSocketReachability();
 
     for (let i = 0; i < 3; i++) {
-      expect(await reachability.isReachable(target.getSocketPath(), 1_000)).toBe(true);
+      expect(await reachability.probe(target.getSocketPath(), 1_000)).toBe("answered");
     }
     for (let i = 0; i < 50 && target.closes < 3; i++) {
       await new Promise<void>((resolve) => setImmediate(resolve));

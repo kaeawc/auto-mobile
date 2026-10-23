@@ -16,6 +16,9 @@ import {
 } from "./IosCtrlProxyContracts";
 
 interface IosCtrlProxyLaunchHost {
+  assertSimulatorNotShutDown(): Promise<void>;
+  isSimulatorNotBooted(): Promise<boolean>;
+  markSimulatorShutDown(reason?: string): Promise<void>;
   useRemoteRunner(): boolean;
   adoptServicePort(port: number): void;
   ensureRemoteServicePortAvailable(options?: { allowReallocation?: boolean }): Promise<void>;
@@ -155,6 +158,7 @@ export class IosCtrlProxyLaunch {
   }
 
   async startOnSimulator(): Promise<RunnerLaunchProvenance> {
+    await this.host.assertSimulatorNotShutDown();
     logger.info("[IOSCtrlProxy] Starting CtrlProxy on simulator");
 
     if (this.host.useRemoteRunner()) {
@@ -631,6 +635,14 @@ export class IosCtrlProxyLaunch {
       }
       this.resetHealthMissStreak();
       return true;
+    }
+    const notBooted = await this.host.isSimulatorNotBooted();
+    if (!probe.isCurrent()) {
+      return false;
+    }
+    if (notBooted) {
+      await this.host.markSimulatorShutDown("health endpoint missed after simulator shutdown");
+      return false;
     }
     const pid = this.state.xcTestProcessId;
     if (!pid) {

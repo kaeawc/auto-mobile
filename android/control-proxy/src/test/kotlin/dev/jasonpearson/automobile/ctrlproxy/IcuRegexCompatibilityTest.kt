@@ -258,23 +258,9 @@ object RegexLiteralScanner {
     val afterParen = call?.let { i + it.length }
     val next = afterParen?.let { p -> s.indexOfFirst(p) { c -> !c.isWhitespace() } }
     val isLiteralArg = next != null && next >= 0 && s[next] == '"'
-    val validatedPortablePattern =
-      call == "Pattern.compile(" &&
-        path.endsWith(
-          "protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol/PrototypeCheckPattern.kt",
-        ) &&
-        next != null &&
-        s.startsWith("source(pattern))", next) &&
-        s.substring(0, i).trimEnd().endsWith("if (!parse(pattern).ok) return false\n    return")
-    // Contract JSON patterns are checked as strings by the contract test, not as source.
-    val contractPatterns =
-      call == "Regex(" &&
-        path.endsWith(
-          "protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol/PrototypeSpecContract.kt",
-        ) &&
-        next != null &&
-        s.startsWith("it.value.jsonPrimitive.content)", next)
-    if (call != null && !isLiteralArg && !validatedPortablePattern && !contractPatterns) {
+    val exempt =
+      isValidatedPortablePattern(call, path, s, i, next) || isContractPattern(call, path, s, next)
+    if (call != null && !isLiteralArg && !exempt) {
       sites +=
         RegexSite(
           "$path:${lineOf(s, i)}",
@@ -285,6 +271,30 @@ object RegexLiteralScanner {
     }
     return afterParen
   }
+
+  private fun isValidatedPortablePattern(
+    call: String?,
+    path: String,
+    s: String,
+    i: Int,
+    next: Int?,
+  ): Boolean =
+    call == "Pattern.compile(" &&
+      path.endsWith(
+        "protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol/PrototypeCheckPattern.kt",
+      ) &&
+      next != null &&
+      s.startsWith("source(pattern))", next) &&
+      s.substring(0, i).trimEnd().endsWith("if (!parse(pattern).ok) return false\n    return")
+
+  /** Contract JSON patterns are checked as strings by the contract test, not as source. */
+  private fun isContractPattern(call: String?, path: String, s: String, next: Int?): Boolean =
+    call == "Regex(" &&
+      path.endsWith(
+        "protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol/PrototypeSpecContract.kt",
+      ) &&
+      next != null &&
+      s.startsWith("it.value.jsonPrimitive.content)", next)
 
   private fun String.indexOfFirst(from: Int, predicate: (Char) -> Boolean): Int {
     var i = from

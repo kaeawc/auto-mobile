@@ -51,18 +51,7 @@ export function sumRunnerLaunchCpuMs(
   if (!processes.has(rootPid)) {
     return null;
   }
-  // The runner app lives under the device's data container, so its command line
-  // carries both the udid and the CtrlProxy bundle name. The device's launchd_sim
-  // (udid only) is deliberately excluded: an idle booted simulator burns CPU all
-  // the time and would make a frozen runner look like it is progressing.
-  const roots = [rootPid];
-  if (deviceId.length > 0) {
-    for (const [pid, row] of processes) {
-      if (row.command.includes(deviceId) && row.command.includes("CtrlProxy")) {
-        roots.push(pid);
-      }
-    }
-  }
+  const roots = launchRootPids(processes, rootPid, deviceId);
   const included = descendantPids(children, roots);
   let total = 0;
   for (const pid of included) {
@@ -83,4 +72,25 @@ function descendantPids(children: Map<number, number[]>, rootPids: number[]): Se
     queue.push(...(children.get(pid) ?? []));
   }
   return included;
+}
+
+// The runner app lives under the device's data container, so its command line
+// carries both the udid and the CtrlProxy bundle name. The device's launchd_sim
+// (udid only) is deliberately excluded: an idle booted simulator burns CPU all
+// the time and would make a frozen runner look like it is progressing.
+function launchRootPids(
+  processes: Map<number, { command: string }>,
+  rootPid: number,
+  deviceId: string,
+): number[] {
+  const roots = [rootPid];
+  if (deviceId.length === 0) {
+    return roots;
+  }
+  for (const [pid, row] of processes) {
+    if (row.command.includes(deviceId) && row.command.includes("CtrlProxy")) {
+      roots.push(pid);
+    }
+  }
+  return roots;
 }

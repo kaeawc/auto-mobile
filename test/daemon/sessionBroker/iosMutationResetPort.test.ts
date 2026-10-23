@@ -46,7 +46,7 @@ function result(stdout: string): ExecResult {
   };
 }
 
-const RESIDUE_KINDS = ["media", "shared-file", "keyboard"];
+const RESIDUE_KINDS = ["media", "shared-file", "keyboard", "accessibility"];
 
 function harness() {
   const timer = new FakeTimer();
@@ -1163,6 +1163,7 @@ describe("iOS out-of-band residue guard", () => {
     documents: ["snapshot-gallery.jpeg"],
     safariDocuments: [],
     keyboard: {},
+    accessibility: {},
   };
 
   async function rigWithBaseline() {
@@ -1208,7 +1209,11 @@ describe("iOS out-of-band residue guard", () => {
     rig.residue.readError = new Error("Unable to lookup in current state: Shutdown");
     const baseline = await rig.port.capture(rig.context);
     expect(baseline.completeKinds).toEqual(["installed-app", "device-setting"]);
-    expect(baseline.unobservable).toEqual(expect.arrayContaining(RESIDUE_KINDS));
+    // `accessibility` is a residue inventory, not a journaled mutation kind, so only the
+    // mutation kinds among the residue kinds are reported unobservable.
+    expect(baseline.unobservable).toEqual(
+      expect.arrayContaining(RESIDUE_KINDS.filter((kind) => kind !== "accessibility")),
+    );
   });
 
   test("sanitize removes out-of-band Documents and Safari files added since the baseline", async () => {
@@ -1255,6 +1260,74 @@ describe("iOS out-of-band residue guard", () => {
       "true",
     ]);
     expect(rig.residue.snapshot.keyboard).toEqual({ KeyboardPrediction: true });
+  });
+
+  test("baseline capture records the increase-contrast defaults as an accessibility kind", async () => {
+    const rig = harness();
+    rig.residue.snapshot = {
+      ...structuredClone(PLANTED),
+      accessibility: { DarkenSystemColors: 0 },
+    };
+    const baseline = await rig.port.capture(rig.context);
+    expect(baseline.observations).toContainEqual({
+      kind: "accessibility",
+      key: "defaults",
+      value: { state: "present", value: { DarkenSystemColors: 0 } },
+    });
+  });
+
+  // simctl writes DarkenSystemColors (and PointerIncreasedContrastEnabled) when increase contrast
+  // is toggled and leaves them at 0 when it is turned off; the pool baseline has neither (#15017).
+  test("sanitize deletes the increase-contrast defaults left behind after contrast is turned off", async () => {
+    const rig = await rigWithBaseline();
+    rig.residue.snapshot.accessibility = {
+      DarkenSystemColors: 0,
+      PointerIncreasedContrastEnabled: 0,
+    };
+    await rig.port.sanitize(rig.context);
+    for (const key of ["DarkenSystemColors", "PointerIncreasedContrastEnabled"]) {
+      expect(rig.state.commands).toContainEqual([
+        "spawn",
+        UDID,
+        "defaults",
+        "delete",
+        "com.apple.Accessibility",
+        key,
+      ]);
+    }
+    expect(rig.residue.snapshot.accessibility).toEqual({});
+  });
+
+  test("sanitize restores an increase-contrast default the baseline already had", async () => {
+    const rig = harness();
+    rig.residue.snapshot = {
+      ...structuredClone(PLANTED),
+      accessibility: { DarkenSystemColors: 0 },
+    };
+    rig.context.baseline = await rig.port.capture(rig.context);
+    rig.residue.snapshot.accessibility = { DarkenSystemColors: 1 };
+    await rig.port.sanitize(rig.context);
+    expect(rig.state.commands).toContainEqual([
+      "spawn",
+      UDID,
+      "defaults",
+      "write",
+      "com.apple.Accessibility",
+      "DarkenSystemColors",
+      "-int",
+      "0",
+    ]);
+    expect(rig.residue.snapshot.accessibility).toEqual({ DarkenSystemColors: 0 });
+  });
+
+  test("sanitize requires erase when an increase-contrast default survives the revert", async () => {
+    const rig = await rigWithBaseline();
+    rig.residue.snapshot.accessibility = { DarkenSystemColors: 0 };
+    rig.state.commandErrors.set(
+      `spawn ${UDID} defaults delete com.apple.Accessibility DarkenSystemColors`,
+      new Error("defaults delete failed"),
+    );
+    await expect(rig.port.sanitize(rig.context)).rejects.toThrow("defaults delete failed");
   });
 
   test("sanitize requires erase when a photo was added, since simctl cannot remove one", async () => {
@@ -1319,6 +1392,13 @@ describe("iOS out-of-band residue guard", () => {
       name: "an added autocorrect default",
       plant: (r: FakeIosResidueInspector) => {
         r.snapshot.keyboard = { KeyboardAutocorrection: false };
+      },
+      erased: false,
+    },
+    {
+      name: "a DarkenSystemColors default left by increase contrast",
+      plant: (r: FakeIosResidueInspector) => {
+        r.snapshot.accessibility = { DarkenSystemColors: 0 };
       },
       erased: false,
     },

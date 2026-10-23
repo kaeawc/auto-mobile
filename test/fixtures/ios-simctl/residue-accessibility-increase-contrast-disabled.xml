@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>AXSDidResetD22Preferences</key>
+	<true/>
+	<key>AXSScrollActionDomainMigrationCompleted</key>
+	<true/>
+	<key>AXSSystemUIProcessAppSmartInvertEnabledPreference</key>
+	<false/>
+	<key>DarkenSystemColors</key>
+	<integer>0</integer>
+	<key>GrayscaleDisplay</key>
+	<integer>0</integer>
+	<key>HearingAidCompliance</key>
+	<integer>0</integer>
+	<key>InvertColorsEnabled</key>
+	<integer>0</integer>
+	<key>PointerAllowAppCustomizationEnabled</key>
+	<integer>1</integer>
+	<key>PointerEffectScalingEnabled</key>
+	<integer>1</integer>
+	<key>PointerIncreasedContrastEnabled</key>
+	<integer>0</integer>
+	<key>ReduceMotionEnabled</key>
+	<integer>0</integer>
+</dict>
+</plist>

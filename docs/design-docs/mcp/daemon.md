@@ -61,12 +61,20 @@ Local clients read the UTF-8 token file and trim whitespace. On POSIX, the file
 must be a regular file owned by the current uid with mode `0600`; symlinks are
 refused. Writes use an exclusive `0600` temporary file in the same directory and
 rename it into place. The parent directory is created with mode `0700` where
-supported. Windows uses the same publication rules without POSIX uid/mode checks.
+supported. Windows uses the same publication rules without POSIX uid/mode checks,
+and retries a rename that fails with a transient sharing violation (`EPERM`, `EBUSY`,
+`EACCES`) only while the public token file is unchanged since publication began; if
+another daemon publishes during the backoff, publication fails without overwriting it
+and the aborted store never claims ownership (`remove()` leaves that token alone).
 External clients must discover the file using the daemon's
 launch environment and read it again after a daemon restart. TypeScript clients
 can use `readDaemonHttpToken(env)` or `daemonHttpAuthHeaders(endpoint, env)`, which
-returns the Authorization header only for a daemon loopback endpoint (and `{}` for any
-other URL); the client-only
+returns the Authorization header only for a daemon endpoint (and `{}` for any
+other URL): an exact loopback host (`localhost`, `127.0.0.1`, `[::1]`), an explicit
+port in the original URL spelling, and path `/auto-mobile/streamable` or `/heartbeat`.
+When the daemon PID file (same isolation-aware path as the token) records an HTTP
+port, the URL port must equal it; with no discoverable port any explicit port passes.
+The PID file is re-read per request. The client-only
 `AUTOMOBILE_DAEMON_HTTP_TOKEN` override takes precedence over file discovery.
 Keep the token and Authorization header out of logs and error reports.
 

@@ -12,7 +12,7 @@ import type { IdGenerator } from "../utils/IdGenerator";
 import { executionTracker } from "./executionTracker";
 import { forgetDaemonSessionBindingScope } from "./daemonSessionBindingScopes";
 import type { ObserverSessionRegistry } from "./observerSessionRegistry";
-import { MCP_STREAMABLE_PATH } from "./constants";
+import { HEARTBEAT_PATH, MCP_STREAMABLE_PATH } from "./constants";
 import {
   DAEMON_HANDOFF_INTERRUPTED_MESSAGE,
   DaemonHandoffInterruptionError,
@@ -404,7 +404,7 @@ export class DaemonHttpIngress {
 
     const url = new URL(req.url!, `http://${req.headers.host}`);
 
-    if (url.pathname === "/heartbeat") {
+    if (url.pathname === HEARTBEAT_PATH) {
       return this.handleHeartbeatHttpRequest(req, res);
     }
 

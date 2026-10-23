@@ -12,7 +12,12 @@ export const APP_TRIM_MEMORY_LEVELS = [
   "COMPLETE",
 ] as const;
 export type AppTrimMemoryLevel = (typeof APP_TRIM_MEMORY_LEVELS)[number];
-export type AppLifecycleMechanism = "home" | "am-kill" | "am-send-trim-memory" | "unsupported";
+export type AppLifecycleMechanism =
+  | "home"
+  | "am-kill"
+  | "am-send-trim-memory"
+  | "ios-sigkill"
+  | "unsupported";
 export type AppLifecycleErrorCode =
   | "app_not_running"
   | "app_in_foreground"

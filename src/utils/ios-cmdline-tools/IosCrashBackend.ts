@@ -15,6 +15,8 @@ export interface IosCrashCommandOptions {
 export interface IosCrashKillOptions extends IosCrashCommandOptions {
   serviceLabel: string;
   uid: number;
+  /** Defaults to SIGABRT (crashApp); appLifecycle sends SIGKILL (#14098). */
+  signalName?: "SIGABRT" | "SIGKILL";
 }
 
 export interface IosCrashBackend {
@@ -51,7 +53,7 @@ export class SimulatorIosCrashBackend implements IosCrashBackend {
         this.deviceId,
         "launchctl",
         "kill",
-        "SIGABRT",
+        options.signalName ?? "SIGABRT",
         `user/${options.uid}/${options.serviceLabel}`,
       ],
       options.timeoutMs,

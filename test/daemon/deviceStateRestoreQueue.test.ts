@@ -105,11 +105,15 @@ test.each(causeTable)(
     });
     const deviceId = "emulator-5554";
     const internals = {
-      clockRestores: manager["stateRestore"].clockRestores,
-      rotationRestores: manager["stateRestore"].rotationRestores,
-      screenReaderRestores: manager["stateRestore"].screenReaderRestores,
-      abandonedRotations: manager["stateRestore"].abandonedRotations as Map<string, object>,
-      abandonedScreenReaders: manager["stateRestore"].abandonedScreenReaders as Map<string, object>,
+      clockRestores: manager.testHooks.wiring.host.stateRestore.clockRestores,
+      rotationRestores: manager.testHooks.wiring.host.stateRestore.rotationRestores,
+      screenReaderRestores: manager.testHooks.wiring.host.stateRestore.screenReaderRestores,
+      abandonedRotations: manager.testHooks.wiring.host.stateRestore.abandonedRotations as Map<
+        string,
+        object
+      >,
+      abandonedScreenReaders: manager.testHooks.wiring.host.stateRestore
+        .abandonedScreenReaders as Map<string, object>,
     };
     const queues: Record<Kind, DeviceStateRestoreQueue<object>> = {
       clock: internals.clockRestores,

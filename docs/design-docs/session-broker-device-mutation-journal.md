@@ -11,15 +11,11 @@ journal adapter yet; `notJournaled` tools are intentional host-only or transient
 UI/prompt exemptions. Pending adapters and exemptions include their reasons.
 Its registry enumeration test includes mixed, hidden and SDK
 tools, and rejects a new control tool without an explicit justification.
-The 37 journaled tools include the original 26 tool adapters plus 11 data/provider
+The 36 journaled tools include the original 26 tool adapters plus 11 data/provider
 adapters: `setKeyValue`, `removeKeyValue`, `clearKeyValueFile`, `setPreference`,
 `sqlQuery`, `mockNetwork`, `clearMockNetwork`, `sendSms`, `phoneCall`,
 `resetAppLogs` and `deviceSnapshot`. The coverage proof exercises every journaled
-classification through record-before-act dispatch. `stageSessionDownloads` is
-still pending: its deprecated alias runs via `nonDeviceHandler` and resolves the
-device inside the service, bypassing the recorded device dispatcher. A mapping
-alone would not journal that production path; service-side wiring is required.
-
+classification through record-before-act dispatch.
 For a `journaled` mutation, production tool dispatch records its intent before
 the action under the broker recorder scope, whose incarnation is
 `resourceId + assignmentGeneration`. The iOS and Android keep-booted reset paths

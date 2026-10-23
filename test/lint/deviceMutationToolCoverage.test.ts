@@ -65,7 +65,6 @@ describe("device mutation tool coverage", () => {
 
   test("journaled adapters and notJournaled justifications are distinct, and nothing is left pending", () => {
     expect(DEVICE_MUTATION_TOOL_COVERAGE.clipboard.status).toBe("journaled");
-    expect(DEVICE_MUTATION_TOOL_COVERAGE.stageSessionDownloads.status).toBe("journaled");
     expect(DEVICE_MUTATION_TOOL_COVERAGE.setActiveDevice.status).toBe("notJournaled");
     for (const [name, entry] of Object.entries(DEVICE_MUTATION_TOOL_COVERAGE)) {
       expect({ name, status: entry.status }).toEqual({

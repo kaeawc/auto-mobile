@@ -112,6 +112,3 @@ export const DEVICE_MUTATION_TOOL_CASES: readonly {
   { name: "reconcileDeviceResources", args: { repair: true }, kind: "opaque" },
   { name: "prototype", args: { action: "save" }, kind: "opaque" },
 ];
-
-/** Journaled tools that record from their own service path, not from the dispatch boundary. */
-export const SERVICE_RECORDED_TOOLS: readonly string[] = ["stageSessionDownloads"];

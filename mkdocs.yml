@@ -125,7 +125,6 @@ nav:
       - "Test prep tools": using/test-prep-tools.md
       - "Manufacturer profiles": using/oem-personas.md
       - "Session execution logs": using/session-logs.md
-      - "Session Downloads fixtures": using/session-downloads.md
       - "Storage capabilities": using/storage-capabilities.md
       - "SDK capabilities": using/sdk-capabilities.md
       - "Live device acceptance": using/live-device-acceptance.md

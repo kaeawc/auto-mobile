@@ -84,6 +84,8 @@ done
 # Derived variables
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
+# shellcheck source=scripts/lib/spotlight-exclude.sh
+source "${ROOT_DIR}/scripts/lib/spotlight-exclude.sh"
 AWAIT_IDLE_SCRIPT="$SCRIPT_DIR/await_idle.sh"
 SCRATCH_DIR="$ROOT_DIR/android/scratch"
 REPORT_FILE="$SCRATCH_DIR/launch_app_perf_test_$(date +%Y%m%d_%H%M%S).json"
@@ -118,7 +120,7 @@ if [[ -n "${AUTOMOBILE_SESSION_UUID:-}" ]]; then
 fi
 
 # Create scratch directory if needed
-mkdir -p "$SCRATCH_DIR"
+mkdir_spotlight_excluded "$SCRATCH_DIR"
 
 # Logging functions
 log_info() {

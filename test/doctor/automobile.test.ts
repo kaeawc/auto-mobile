@@ -1174,6 +1174,11 @@ describe("post-repair read-only Android verification", () => {
 
 describe("runAutoMobileChecks", () => {
   const stubChecks = {
+    checkSpotlightIndexing: async () => ({
+      name: "Spotlight Indexing",
+      status: "warn" as const,
+      message: "Indexed scratch",
+    }),
     checkImageBackend: async () => ({
       name: "Image Backend",
       status: "pass" as const,
@@ -1219,6 +1224,11 @@ describe("runAutoMobileChecks", () => {
     expect(ctrlProxy?.status).toBe("skip");
     expect(ctrlProxy?.message).toBe("Skipped for iOS-only doctor run");
     expect(ctrlProxy?.message).not.toContain("emulator-5554");
+  });
+
+  test("includes injected Spotlight advice", async () => {
+    const results = await runAutoMobileChecks({ ios: true }, stubChecks);
+    expect(results.find((result) => result.name === "Spotlight Indexing")?.status).toBe("warn");
   });
 
   test("includes the daemon build identity check", async () => {

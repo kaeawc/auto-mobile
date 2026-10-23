@@ -133,6 +133,9 @@ function iosProvisioningFormFactor(formFactor: FormFactor | undefined): IosProvi
     case "tablet":
       return "tablet";
     case "foldable":
+    case "tv":
+    case "watch":
+    case "automotive":
     case "unknown":
       throw new ActionableError(
         `iOS provisioning supports only phone or tablet form factors, not '${formFactor}'.`,

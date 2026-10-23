@@ -81,6 +81,7 @@ teardown() {
   LIST_CHECKS_FIXTURE="$(mktemp -d)"
   mkdir -p "${LIST_CHECKS_FIXTURE}/scripts/lib"
   cp "${ABS_SCRIPT}" "${LIST_CHECKS_FIXTURE}/scripts/all_fast_validate_checks.sh"
+  cp "scripts/lib/spotlight-exclude.sh" "${LIST_CHECKS_FIXTURE}/scripts/lib/"
   cp "scripts/lib/shell-core.sh" "${LIST_CHECKS_FIXTURE}/scripts/lib/shell-core.sh"
 
   run "${LIST_CHECKS_FIXTURE}/scripts/all_fast_validate_checks.sh" --list-checks

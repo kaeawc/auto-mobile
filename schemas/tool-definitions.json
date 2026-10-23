@@ -4569,6 +4569,7 @@
               "removeKeyValue",
               "resetAppLogs",
               "resetKeychain",
+              "rotaryScroll",
               "rotate",
               "selectAllText",
               "sendBroadcast",
@@ -4723,6 +4724,7 @@
               "removeKeyValue",
               "resetAppLogs",
               "resetKeychain",
+              "rotaryScroll",
               "rotate",
               "selectAllText",
               "sendBroadcast",
@@ -14896,6 +14898,10 @@
         },
         "screenSize": {
           "$ref": "#/$defs/__schema1"
+        },
+        "isScreenRound": {
+          "description": "Wear OS (watch devices) only: true when the display is round, so the corners are cut off.",
+          "type": "boolean"
         },
         "systemInsets": {
           "$ref": "#/$defs/__schema11"
@@ -25753,6 +25759,7 @@
               "removeKeyValue",
               "resetAppLogs",
               "resetKeychain",
+              "rotaryScroll",
               "rotate",
               "selectAllText",
               "sendBroadcast",
@@ -27549,6 +27556,92 @@
       },
       "required": ["appId", "confirm"],
       "additionalProperties": false
+    }
+  },
+  {
+    "name": "rotaryScroll",
+    "title": "Scroll Rotary Input",
+    "annotations": {
+      "destructiveHint": true
+    },
+    "description": "Wear OS: scroll with the rotary crown. Tries `input rotaryencoder scroll`, the emulator console and finally a vertical swipe, in that order, and after each reads the screen back; success means the screen changed. Returns the method that worked and every attempt. The commands are unconfirmed on real images (see docs/design-docs/plat/android/form-factors.md), so check attempts. A screen that does not move when scrolled (already at the end) reports unchanged.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "delta": {
+          "description": "Crown detents: positive scrolls content down (clockwise), negative scrolls up",
+          "type": "integer",
+          "minimum": -50,
+          "maximum": 50
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["delta"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string"
+        },
+        "delta": {
+          "type": "number"
+        },
+        "method": {
+          "description": "The first candidate whose read-back showed the screen change",
+          "type": "string",
+          "enum": ["input_rotaryencoder", "emulator_rotary", "swipe"]
+        },
+        "attempts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "method": {
+                "type": "string",
+                "enum": ["input_rotaryencoder", "emulator_rotary", "swipe"]
+              },
+              "command": {
+                "type": "string"
+              },
+              "outcome": {
+                "type": "string",
+                "enum": ["scrolled", "unchanged", "failed"]
+              },
+              "error": {
+                "type": "string"
+              }
+            },
+            "required": ["method", "command", "outcome"],
+            "additionalProperties": false
+          }
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": ["success", "message", "delta", "attempts"],
+      "additionalProperties": {}
     }
   },
   {
@@ -33481,6 +33574,7 @@
             "removeKeyValue",
             "resetAppLogs",
             "resetKeychain",
+            "rotaryScroll",
             "rotate",
             "selectAllText",
             "sendBroadcast",
@@ -33597,6 +33691,7 @@
               "removeKeyValue",
               "resetAppLogs",
               "resetKeychain",
+              "rotaryScroll",
               "rotate",
               "selectAllText",
               "sendBroadcast",

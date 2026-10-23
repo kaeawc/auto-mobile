@@ -60,8 +60,8 @@ export async function checkAndroidIntegritySignals(
     return {
       name: "Android Integrity Signals",
       status: "pass",
+      // No `value`: the console formatter prints `value` instead of `message`, which would hide the signals.
       message: `${lines.join(" | ")} (* = image-fixed, cannot be hidden)`,
-      value: devices.length,
     };
   } catch (error) {
     logger.warn(`Android integrity signal check failed: ${errorMessage(error)}`, error);

@@ -40,6 +40,12 @@ describe("checkAndroidIntegritySignals (#14062)", () => {
     expect(result.message).toContain("image-fixed");
   });
 
+  test("leaves `value` unset so the console formatter prints the signal summary, not a count", async () => {
+    const result = await checkAndroidIntegritySignals(factoryFor([emulator]));
+    expect(result.value).toBeUndefined();
+    expect(result.message).toContain("emulator-5554");
+  });
+
   test("passes with a note when no devices are connected", async () => {
     const result = await checkAndroidIntegritySignals(factoryFor([]));
     expect(result.status).toBe("pass");

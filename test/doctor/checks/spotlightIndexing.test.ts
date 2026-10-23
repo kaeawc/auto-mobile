@@ -47,6 +47,11 @@ describe("Spotlight Indexing", () => {
     expect((await run(probe)).status).toBe("pass");
     expect(probe.calls).toEqual([{ dir: "/repo/scratch", timeoutMs: 17 }]);
   });
+  test("mdutil indexing-and-searching disabled also counts as excluded", async () => {
+    const probe = new FakeSpotlightProbe();
+    probe.status = "/repo/scratch:\n Indexing and searching disabled.";
+    expect((await run(probe)).status).toBe("pass");
+  });
   test("indexed directory warns with manual remedies", async () => {
     const result = await run(new FakeSpotlightProbe());
     expect(result.status).toBe("warn");

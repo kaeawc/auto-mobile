@@ -51,7 +51,8 @@ async function findIndexedDirs(
     }
     const current = remainingDoctorProbe(options);
     const status = await probe.indexingStatus(dir, current.timeoutMs ?? DOCTOR_EXEC_TIMEOUT_MS);
-    if (!status.includes("Indexing disabled")) {
+    // mdutil prints "Indexing disabled." or, with search off too, "Indexing and searching disabled.".
+    if (!/Indexing (?:and searching )?disabled/.test(status)) {
       indexed.push(dir);
     }
   }

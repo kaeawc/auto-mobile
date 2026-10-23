@@ -1,4 +1,5 @@
 import { expect, test, spyOn } from "bun:test";
+import { join } from "node:path";
 import { markSpotlightExcluded } from "../../src/utils/spotlightExclusion";
 import { logger } from "../../src/utils/logger";
 
@@ -13,7 +14,7 @@ test("Darwin creates a marker through injected fs", async () => {
     },
     "darwin",
   );
-  expect(paths).toEqual(["/cache/.metadata_never_index"]);
+  expect(paths).toEqual([join("/cache", ".metadata_never_index")]);
 });
 test("non-Darwin performs no IO", async () => {
   const paths: string[] = [];

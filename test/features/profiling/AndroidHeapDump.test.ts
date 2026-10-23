@@ -170,4 +170,27 @@ describe("AndroidHeapDump (#14113)", () => {
     expect(device.deviceFiles.size).toBe(0);
     expect(store.removed).toHaveLength(1);
   });
+
+  test("a dump that keeps growing is reported unfinished, never pulled, and the device copy is removed (#14113 review)", async () => {
+    const { device, store, registry, dump } = setup();
+    let size = 0;
+    const original = device.execute.bind(device);
+    device.execute = async (args) => {
+      if (args.join(" ").startsWith("shell wc -c")) {
+        size += 1000;
+        device.deviceFiles.set(REMOTE, size);
+      }
+      return original(args);
+    };
+
+    await expect(dump.dump({ appId: APP, deviceId: DEVICE, sessionId: "s-1" })).rejects.toThrow(
+      "heap_dump_incomplete",
+    );
+
+    expect(device.commands.some((c) => c.startsWith("pull"))).toBe(false);
+    expect(device.commands).toContain(`shell rm -f ${REMOTE}`);
+    expect(device.commands.some((c) => c.startsWith("shell cmd activity"))).toBe(false);
+    expect(store.removed).toHaveLength(1);
+    expect(registry.takeOwnedBy(DEVICE, "s-1").deviceFiles).toEqual([]);
+  });
 });

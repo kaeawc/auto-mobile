@@ -6,7 +6,7 @@ import { ActionableError } from "../models/ActionableError";
 import { logger } from "../utils/logger";
 
 /** The session fields the wrapper reads. */
-interface PowerSessionView {
+export interface PowerSessionView {
   sessionId: string;
   assignedDevice: string;
 }
@@ -21,7 +21,7 @@ export interface SessionPowerHost<S extends PowerSessionView = Session> extends 
   trackSessionSetup(session: S, createSetup: () => Promise<void>): Promise<void>;
 }
 
-function isLiveOn<S extends PowerSessionView>(
+export function isLiveOn<S extends PowerSessionView>(
   host: SessionPowerHost<S>,
   sessionUuid: string,
   session: S,

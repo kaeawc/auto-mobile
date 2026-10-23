@@ -23,6 +23,9 @@ import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { defineDeviceTool } from "./defineTool";
+import { defaultDaemonContext } from "../daemon/daemonContext";
+import { runTrackedTraceStart } from "./sessionProfiling";
+import type { PowerSessionView, SessionPowerHost } from "./sessionPower";
 import { createToolOutputsProfilingStore } from "./profilingArtifactStore";
 import { captureTraceResultSchema, heapDumpResultSchema } from "./profilingToolOutputSchemas";
 
@@ -76,6 +79,8 @@ export interface ProfilingDependencies {
   idGenerator: IdGenerator;
   registry: ProfilingRegistry;
   store: ProfilingArtifactStore;
+  /** The session manager, resolved per call; absent outside a daemon. */
+  sessionHost: () => SessionPowerHost<PowerSessionView> | undefined;
 }
 
 const defaultDependencies = (): ProfilingDependencies => ({
@@ -84,6 +89,7 @@ const defaultDependencies = (): ProfilingDependencies => ({
   idGenerator: defaultIdGenerator,
   registry: defaultProfilingRegistry,
   store: createToolOutputsProfilingStore(),
+  sessionHost: () => defaultDaemonContext.sessionManager(),
 });
 
 function assertAndroid(device: BootedDevice, tool: string): void {
@@ -115,15 +121,22 @@ export const createCaptureTraceHandler =
         message: `Trace ${stopped.traceId} saved to ${stopped.path} (${stopped.sizeBytes} bytes, ${stopped.durationMs} ms)`,
       });
     }
-    const started = await capture.start({
-      deviceId: device.deviceId,
-      sessionId: args.sessionUuid,
-      appId: args.appId,
-      categories: args.categories,
-      bufferMb: args.bufferMb,
-      maxDurationMs: args.maxDurationMs,
-      signal,
-    });
+    const adb = deps.adbFor(device);
+    const started = await runTrackedTraceStart(
+      { host: deps.sessionHost(), registry: deps.registry, adb, timer: deps.timer },
+      args.sessionUuid,
+      device.deviceId,
+      () =>
+        capture.start({
+          deviceId: device.deviceId,
+          sessionId: args.sessionUuid,
+          appId: args.appId,
+          categories: args.categories,
+          bufferMb: args.bufferMb,
+          maxDurationMs: args.maxDurationMs,
+          signal,
+        }),
+    );
     return createStructuredToolResponse({
       success: true as const,
       action: "start" as const,

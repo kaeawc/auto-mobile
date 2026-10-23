@@ -173,7 +173,11 @@ export class AndroidHeapDump {
     );
   }
 
-  /** `am dumpheap` returns before the app finishes on older releases: wait for a stable size. */
+  /**
+   * `am dumpheap` returns before the app finishes on older releases: wait for a stable size.
+   * Returns 0 when no file appeared. A file that is still growing when the budget ends is an
+   * unfinished dump, never a result, so it throws instead of returning its last size.
+   */
   private async awaitDumpWritten(remotePath: string, signal?: AbortSignal): Promise<number> {
     const attempts = this.deps.sizePollAttempts ?? 60;
     let previous = 0;
@@ -185,6 +189,11 @@ export class AndroidHeapDump {
       previous = size;
       await this.deps.timer.sleep(this.deps.sizePollIntervalMs ?? 500);
     }
-    return previous;
+    if (previous > 0) {
+      throw new ActionableError(
+        `heap_dump_incomplete: ${remotePath} was still growing (${previous} bytes) when the wait ended, so the dump is unfinished and was not pulled. The device copy is removed; retry, or dump a smaller heap.`,
+      );
+    }
+    return 0;
   }
 }

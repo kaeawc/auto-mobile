@@ -97,16 +97,27 @@ export class AndroidTraceCapture {
     if (!record || record.deviceId !== deviceId) {
       throw new ActionableError(`No captureTrace with id ${traceId} is recording on ${deviceId}.`);
     }
-    record.stopping ??= this.finish(record.traceId, signal);
-    return record.stopping;
+    const stopping = (record.stopping ??= this.finish(record.traceId, signal));
+    try {
+      return await stopping;
+    } catch (error) {
+      // Still registered means the recorder was never confirmed stopped: let a retry try again.
+      if (this.deps.registry.getTrace(traceId)) {
+        record.stopping = undefined;
+      }
+      throw error;
+    }
   }
 
   private async finish(traceId: string, signal?: AbortSignal): Promise<TraceStopResult> {
     const { adb, timer, registry, store, poll } = this.deps;
     const record = registry.getTrace(traceId)!;
     const warnings = [...record.warnings];
+    // The SIGTERM must reach the device before anything is unregistered: if it cannot be
+    // dispatched (cancellation, adb error) the recorder is still running, and the trace stays
+    // registered so a retry or the session's release cleanup can still stop it.
+    await stopPerfettoRecorder(adb, timer, record.pid, warnings, poll, signal);
     try {
-      await stopPerfettoRecorder(adb, timer, record.pid, warnings, poll, signal);
       await awaitFlushedDeviceFile(adb, timer, record.remotePath, poll ?? {}, LOG_TAG, signal);
       await adb.execute(["pull", record.remotePath, record.hostPath], {
         timeoutMs: PULL_TIMEOUT_MS,

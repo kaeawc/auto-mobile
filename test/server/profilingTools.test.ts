@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
+import type { SessionPowerHost } from "../../src/server/sessionPower";
 import { ProfilingRegistry } from "../../src/features/profiling/ProfilingRegistry";
 import {
   captureTraceSchema,
@@ -19,7 +20,22 @@ const APP = "dev.jasonpearson.automobile.playground";
 const android: BootedDevice = { name: "Pixel", deviceId: "emulator-5554", platform: "android" };
 const ios: BootedDevice = { name: "iPhone", deviceId: "sim-1", platform: "ios" };
 
-function setup() {
+type TestSession = { sessionId: string; assignedDevice: string };
+type Host = SessionPowerHost<TestSession>;
+
+/** A session host whose one session can be ended mid-start; trackSessionSetup just runs the setup. */
+function fakeHost(session: TestSession) {
+  let live = true;
+  const host: Host = {
+    getSession: () => (live ? session : null),
+    isAdmittedForAutomation: () => live,
+    trackSessionSetup: async (_session, setup) => setup(),
+    registerPendingDeviceCleanup: () => {},
+  };
+  return { host, end: () => void (live = false) };
+}
+
+function setup(sessionHost: () => Host | undefined = () => undefined) {
   const device = new FakeProfilingDevice();
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
@@ -30,6 +46,7 @@ function setup() {
     idGenerator: new FakeIdGenerator(["x1", "x2"]),
     registry,
     store: new FakeProfilingStore(device),
+    sessionHost,
   };
   return {
     device,
@@ -86,6 +103,48 @@ describe("captureTrace tool", () => {
     expect(captureTraceSchema.safeParse({ ...ok, bufferMb: 1000 }).success).toBe(false);
     expect(captureTraceSchema.safeParse({ ...ok, maxDurationMs: 1 }).success).toBe(false);
     expect(captureTraceSchema.safeParse({ ...ok, appId: "x; rm -rf /" }).success).toBe(false);
+  });
+});
+
+describe("captureTrace start under a session (#14113 review)", () => {
+  const session = { sessionId: "s-1", assignedDevice: android.deviceId };
+
+  test("a start that completes after the session ended stops the recorder and registers nothing", async () => {
+    const { host, end } = fakeHost(session);
+    const { trace, device, registry } = setup(() => host);
+    const original = device.execute.bind(device);
+    device.execute = async (args) => {
+      const result = await original(args);
+      if (args.join(" ").includes("perfetto --background")) {
+        end();
+      }
+      return result;
+    };
+
+    await expect(trace(android, { action: "start", sessionUuid: "s-1" })).rejects.toThrow(
+      "session ended while the trace was starting",
+    );
+
+    expect(registry.traceOnDevice(android.deviceId)).toBeUndefined();
+    expect(device.runningPids.size).toBe(0);
+    expect(device.deviceFiles.size).toBe(0);
+  });
+
+  test("a live session's start is registered to it", async () => {
+    const { host } = fakeHost(session);
+    const { trace, registry } = setup(() => host);
+    await trace(android, { action: "start", sessionUuid: "s-1" });
+    expect(registry.getTrace("trace-x1")).toMatchObject({ sessionId: "s-1" });
+  });
+
+  test("a start for a session that is already released is refused before any device command", async () => {
+    const { host, end } = fakeHost(session);
+    const { trace, device } = setup(() => host);
+    end();
+    await expect(trace(android, { action: "start", sessionUuid: "s-1" })).rejects.toThrow(
+      "session is released",
+    );
+    expect(device.commands).toEqual([]);
   });
 });
 

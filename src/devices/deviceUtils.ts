@@ -29,6 +29,7 @@ import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { logger } from "../utils/logger";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { createForeignAndroidSerialResolver } from "./foreignAndroidSerialResolver";
 import { bootAdmissionServices, type AndroidColdBootAdmitter } from "./bootAdmissionServices";
 import {
   type ForeignAndroidSerialSource,
@@ -80,7 +81,7 @@ export { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
 export type { DeviceDiscoveryError };
 
 export class MultiPlatformDeviceManager implements PlatformDeviceManager {
-  private foreignAndroidSerialSource?: ForeignAndroidSerialSource;
+  private foreignSource?: ForeignAndroidSerialSource;
   private adb: AdbExecutor;
   private emulator: AndroidEmulatorForDeviceManager;
   private simctl: DeviceManagerSimCtl;
@@ -117,30 +118,12 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
   }
 
   withForeignAndroidSerialSource(source: ForeignAndroidSerialSource): this {
-    this.foreignAndroidSerialSource = source;
-    this.emulator.withForeignInventoryResolver?.(this.resolveForeignAndroidSerials);
+    this.foreignSource = source;
+    this.emulator.withForeignInventoryResolver?.(this.foreignResolver);
     return this;
   }
 
-  private readonly resolveForeignAndroidSerials = async (
-    serials: readonly string[],
-    signal?: AbortSignal,
-  ): Promise<ReadonlySet<string>> => {
-    try {
-      return await raceWithDeadline(
-        this.foreignAndroidSerialSource?.foreignSerials(serials, signal) ??
-          Promise.resolve(new Set<string>()),
-        { timer: defaultTimer, signal, label: "Android inventory ownership refresh" },
-      );
-    } catch (error) {
-      signal?.throwIfAborted();
-      logger.warn(
-        `[DeviceManager] Android ownership refresh failed: ${errorMessage(error)}`,
-        error,
-      );
-      return new Set<string>();
-    }
-  };
+  private readonly foreignResolver = createForeignAndroidSerialResolver(() => this.foreignSource);
 
   /** Overrides the devicectl sweep budget and its timer (tests, embedders). */
   withPhysicalIosScanBudget(
@@ -329,7 +312,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
         {
           readinessOnly: true,
           coalesceInventoryEnrichment: options.coalesceInventoryEnrichment,
-          resolveForeignSerials: this.resolveForeignAndroidSerials,
+          resolveForeignSerials: this.foreignResolver,
         },
         options.signal,
       );
@@ -635,9 +618,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
         devices: await this.emulator.getBootedDevicesChecked(
           false,
           {
-            resolveForeignSerials: options.skipForeignEnrichment
-              ? this.resolveForeignAndroidSerials
-              : undefined,
+            resolveForeignSerials: options.skipForeignEnrichment ? this.foreignResolver : undefined,
             coalesceInventoryEnrichment: options.coalesceInventoryEnrichment,
             memoizeReadAvdNames: options.memoizeReadAvdNames,
             bypassDeviceListCache: options.bypassAndroidDeviceListCache,

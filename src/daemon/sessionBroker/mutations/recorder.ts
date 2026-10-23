@@ -1,4 +1,5 @@
 import type {
+  DeviceBaseline,
   DeviceMutationInput,
   DeviceMutationJournal,
   DeviceMutationScope,
@@ -71,6 +72,8 @@ export interface MutationRecorder {
     mutations: readonly Pick<DeviceMutationInput, "kind" | "key">[],
   ): Promise<Pick<DeviceMutationInput, "kind" | "key">[]>;
   baselinePrior(kind: string, key: string): Promise<MutationValue>;
+  /** The device baseline this session started from, when the recorder can read it. */
+  readBaseline?(): Promise<DeviceBaseline | null>;
 }
 
 export class SessionMutationRecorder implements MutationRecorder {
@@ -96,6 +99,10 @@ export class SessionMutationRecorder implements MutationRecorder {
     return mutations.filter(
       (mutation) => !recorded.has(JSON.stringify([mutation.kind, mutation.key])),
     );
+  }
+
+  readBaseline(): Promise<DeviceBaseline | null> {
+    return this.journal.getBaseline(this.scope);
   }
 
   async baselinePrior(kind: string, key: string): Promise<MutationValue> {

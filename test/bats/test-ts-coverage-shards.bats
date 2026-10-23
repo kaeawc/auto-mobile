@@ -21,6 +21,8 @@ EOF
 
 setup() {
   export AUTOMOBILE_RUNNER_CALIBRATION=0
+  # Stub lanes assert the full discovered file set on every OS (see test-ts.bats for the skip tests).
+  export AUTOMOBILE_MACOS_ONLY_TESTS=include
   # The supervisor declines a retry on a loaded host; pin the load so retry
   # policy tests do not depend on the machine running them.
   export AUTOMOBILE_TEST_LOADAVG_FILE="$BATS_TEST_TMPDIR/loadavg"

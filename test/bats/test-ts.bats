@@ -84,6 +84,10 @@ setup() {
   # The portable watchdog's TERM-to-KILL grace is 2s in production; every
   # timeout test would pay it, so tests shrink it (the escalation still runs).
   export AUTOMOBILE_WATCHDOG_KILL_GRACE_SECONDS=0.2
+  # Stubbed lanes assert the full discovered file set on every OS. The macOS-only
+  # (iOS) skip has its own tests at the end of this file, which set
+  # AUTOMOBILE_MACOS_ONLY_TESTS=skip.
+  export AUTOMOBILE_MACOS_ONLY_TESTS=include
   STUB_BIN="$(mktemp -d)"
   REAL_BUN="$(command -v bun)"
   export REAL_BUN
@@ -137,6 +141,9 @@ printf '%b' "${TIMING_CHANGED_FILES:-}"
 EOF
 cat > "$STUB_BIN/bun" <<'EOF'
 #!/usr/bin/env bash
+if [[ "$1" == */scripts/lib/macOsOnlyTests.ts ]]; then
+  exec "$REAL_BUN" "$@"
+fi
 if [[ "$1" == */scripts/lib/changedUnitTests.ts ]]; then
   printf '%s\n' "$2" > "$BUN_ARGS_FILE.selection"
   for ((i=0; i<${STUB_SELECTED_COUNT:-12}; i+=1)); do printf 'test/fixture%02d.test.ts\n' "$i"; done
@@ -3413,4 +3420,99 @@ EOF
     [ "$status" -eq 2 ]
     [[ "$output" == *"$name must be a positive integer without leading zeros"* ]]
   done
+}
+
+# macOS-only (iOS) tests: owner rule 2026-10-23, classified in test/macos-only-tests.txt.
+
+@test "macOS-only skip exits cleanly when every explicit unit target is an iOS file" {
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_MACOS_ONLY_TESTS=skip \
+    bash "$SCRIPT" unit test/utils/ios-cmdline-tools/simctl.test.ts
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"all 1 requested test file(s) are macOS-only"* ]]
+  ! grep -q '^test ' "$BUN_ARGS_FILE"
+}
+
+@test "macOS-only skip keeps portable files among explicit unit targets" {
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_MACOS_ONLY_TESTS=skip TEST_TS_PRINT_CMD=1 \
+    bash "$SCRIPT" unit test/utils/ios-cmdline-tools/simctl.test.ts test/lint/iosDeviceKindRouting.test.ts
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"test/lint/iosDeviceKindRouting.test.ts"* ]]
+  [[ "$output" != *"simctl.test.ts"* ]]
+}
+
+@test "macOS hosts run iOS files by default" {
+  run env PATH="$STUB_BIN:$PATH" RUNNER_OS=macOS UNAME_S=Darwin AUTOMOBILE_MACOS_ONLY_TESTS=auto \
+    TEST_TS_PRINT_CMD=1 bash "$SCRIPT" unit test/utils/ios-cmdline-tools/simctl.test.ts
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"test/utils/ios-cmdline-tools/simctl.test.ts"* ]]
+}
+
+@test "non-macOS hosts skip iOS files by default" {
+  run env PATH="$STUB_BIN:$PATH" RUNNER_OS=Linux UNAME_S=Linux AUTOMOBILE_MACOS_ONLY_TESTS=auto \
+    bash "$SCRIPT" unit test/utils/ios-cmdline-tools/simctl.test.ts
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"macOS-only"* ]]
+}
+
+@test "unit discovery on a skipping host removes macOS-only files from the shard file list" {
+  cat > "$STUB_BIN/find" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$*" == "test -type f -name *.test.ts -print" ]]; then
+  printf '%s\n' test/utils/ios-cmdline-tools/simctl.test.ts test/lint/iosDeviceKindRouting.test.ts test/server/toolRegistry.test.ts
+  exit 0
+fi
+exec "$REAL_FIND" "$@"
+EOF
+  chmod +x "$STUB_BIN/find"
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_MACOS_ONLY_TESTS=skip AUTOMOBILE_UNIT_TEST_WORKERS=1 \
+    AUTOMOBILE_UNIT_SHARD_RETRIES=0 bash "$SCRIPT" unit
+  [ "$status" -eq 0 ]
+  files="$(grep '^test ' "$BUN_ARGS_FILE" | tr ' ' '\n' | grep '\.test\.ts$' | sort)"
+  [ "$files" = $'test/lint/iosDeviceKindRouting.test.ts\ntest/server/toolRegistry.test.ts' ]
+  [[ "$output" == *"skipping "*" macOS-only (iOS) test files on this host"* ]]
+}
+
+@test "Windows unit shards get a bunfig that also ignores macOS-only files" {
+  run env RUNNER_OS=Windows PATH="$STUB_BIN:$PATH" AUTOMOBILE_MACOS_ONLY_TESTS=skip TEST_TS_PRINT_CMD=1 \
+    bash "$SCRIPT" unit
+  [ "$status" -eq 0 ]
+  config="$SHARD_SCRATCH/bunfig.macos-only.toml"
+  [[ "$output" == *"--config=$config"* ]]
+  grep -q '"test/utils/ios-cmdline-tools/simctl.test.ts"' "$config"
+  grep -q '"scratch/\*\*"' "$config"
+  ! grep -q '"test/lint/iosDeviceKindRouting.test.ts"' "$config"
+}
+
+@test "macOS-only integration files are ignored through the same bunfig" {
+  windows_tier_fixture
+  run env RUNNER_OS=Windows PATH="$STUB_BIN:$PATH" AUTOMOBILE_MACOS_ONLY_TESTS=skip TEST_TS_PRINT_CMD=1 \
+    bash "$SCRIPT" integration
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--config=$SHARD_SCRATCH/bunfig.macos-only.toml"* ]]
+  grep -q '"test/integration/iosVideoRecordingStartStop.integration.test.ts"' "$SHARD_SCRATCH/bunfig.macos-only.toml"
+}
+
+@test "include mode never consults the classification and writes no bunfig" {
+  run env RUNNER_OS=Windows PATH="$STUB_BIN:$PATH" AUTOMOBILE_MACOS_ONLY_TESTS=include TEST_TS_PRINT_CMD=1 \
+    bash "$SCRIPT" unit
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"bunfig.macos-only"* ]]
+  [ ! -e "$SHARD_SCRATCH/bunfig.macos-only.toml" ]
+}
+
+@test "an unknown AUTOMOBILE_MACOS_ONLY_TESTS value is rejected" {
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_MACOS_ONLY_TESTS=maybe bash "$SCRIPT" unit
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"AUTOMOBILE_MACOS_ONLY_TESTS must be auto, include or skip"* ]]
+}
+
+@test "Bun honors the skip config over explicit file arguments, in the --config= form the lane uses" {
+  dir="$BATS_TEST_TMPDIR/bunproj"
+  mkdir -p "$dir/test"
+  printf 'import { test } from "bun:test";\ntest("ios", () => { throw new Error("must not run"); });\n' > "$dir/test/ios.test.ts"
+  printf 'import { test } from "bun:test";\ntest("ok", () => {});\n' > "$dir/test/ok.test.ts"
+  printf '[test]\npathIgnorePatterns = ["test/ios.test.ts"]\n' > "$dir/skip.toml"
+  run bash -c 'cd "$1" && "$REAL_BUN" test --config=skip.toml test/ios.test.ts test/ok.test.ts' _ "$dir"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"1 pass"* ]]
 }

@@ -283,8 +283,8 @@ final class PrototypeLibraryNetworkTests: XCTestCase {
             var policy = PrototypeNWWaitPolicy()
             _ = policy.observe(.waiting(.dns(-65570)))
             var reports = 0
-            for _ in 0 ..< 3 {
-                if policy.teardown() { reports += 1 }
+            for _ in 0 ..< 3 where policy.teardown() {
+                reports += 1
             }
             XCTAssertEqual(reports, 1)
             guard case .none = policy.observe(.waiting(.dns(-65570))) else {

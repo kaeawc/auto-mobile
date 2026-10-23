@@ -214,3 +214,7 @@ android/protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol/PrototypeS
 ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeSpecModels.generated.swift text eol=lf
 test/fixtures/android-sdkmanager/*.txt text eol=lf
 test/fixtures/ios-safari-url-field/*.json text eol=lf
+# Generated prototype embedding samples are compared byte-for-byte with the
+# native resource output (#13732), so a Windows CRLF checkout must not rewrite them.
+samples/prototype-embedding/** text eol=lf
+ios/prototype-agent/Fixtures/EmbedConsumer/Sources/EmbedConsumer/EmbeddingSamplePrototype.swift text eol=lf

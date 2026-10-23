@@ -63,6 +63,26 @@ describe("AndroidEmulatorClient typed config enrichment characterization", () =>
       expected: { ...device, deviceType: "pixel_fold", formFactor: "foldable" },
     },
     {
+      name: "tv image is a tv, not a tablet",
+      config: {
+        deviceName: "tv_1080p",
+        systemImagePackage: "system-images;android-34;android-tv;x86",
+        screenWidth: 1920,
+        screenHeight: 1080,
+        screenDensity: 160,
+      },
+      expected: {
+        ...device,
+        deviceType: "tv_1080p",
+        runtimeId: "system-images;android-34;android-tv;x86",
+        architecture: "x86",
+        screenWidth: 1920,
+        screenHeight: 1080,
+        screenDensity: 160,
+        formFactor: "tv",
+      },
+    },
+    {
       name: "all metadata overrides",
       config: {
         apiLevel: 36,

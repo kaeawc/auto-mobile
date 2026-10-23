@@ -721,6 +721,9 @@ describe("device description projections", () => {
     ["phone", "phone"],
     ["tablet", "tablet"],
     ["foldable", "foldable"],
+    ["tv", "tv"],
+    ["watch", "watch"],
+    ["automotive", "automotive"],
     [undefined, "unknown"],
   ])("maps form factor %p to %s", (value, expected) => {
     const image: DeviceInfo = {
@@ -736,9 +739,22 @@ describe("device description projections", () => {
   // FormFactor vocabulary can only reach the classifier, which accepts arbitrary hint strings.
   test.each<[string | null, FormFactor]>([
     [null, "unknown"],
-    ["watch", "unknown"],
+    ["toaster", "unknown"],
   ])("classifies out-of-vocabulary form factor hint %p as %s", (hint, expected) => {
     expect(formFactorFrom({ hint })).toBe(expected);
+  });
+
+  test("classifies an Android TV image from its system-image tag, not its geometry", () => {
+    const image: DeviceInfo = {
+      name: "TV fixture",
+      platform: "android",
+      isRunning: false,
+      runtimeId: "system-images;android-34;android-tv;x86",
+      screenWidth: 1920,
+      screenHeight: 1080,
+      screenDensity: 160,
+    };
+    expect(describeDevice({ kind: "image", image }).formFactor).toBe("tv");
   });
 
   test("normalizes missing form factors without adding a display alias", () => {

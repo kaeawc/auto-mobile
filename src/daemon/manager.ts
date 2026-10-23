@@ -741,6 +741,23 @@ export class DaemonManager implements DaemonManagerLike {
     return this.collaborators.daemonShutdown.isProcessRunning(pid);
   }
 
+  /** @internal Typed view of recovery/startup-lock internals for unit tests; production code must not use it. */
+  get testHooks() {
+    return {
+      identityRecoveryIO: this.identityRecoveryIO,
+      launcher: this.launcher,
+      isProcessRunning: (pid: number) => this.isProcessRunning(pid),
+      readStartupLockHolder: () => this.readStartupLockHolder(),
+      readSettledStartupLockHolder: (deadline: number, signal?: AbortSignal) =>
+        this.readSettledStartupLockHolder(deadline, signal),
+      markStartupLockRecovering: () => this.markStartupLockRecovering(),
+      recoverSocketIdentity: () => this.recoverSocketIdentity(),
+      replaceRecoveryOwner: (owner: DaemonStatus) => this.replaceRecoveryOwner(owner),
+      startUnlocked: (options: DaemonOptions) => this.startUnlocked(options),
+      daemonLaunchEnvironment: (options: DaemonOptions) => this.daemonLaunchEnvironment(options),
+    };
+  }
+
   private isRecordedDaemonRunning(
     record: {
       pid: number;

@@ -44,7 +44,7 @@ public struct PrototypeNetworkConfiguration: Sendable {
     /// The returned body is bounded by the renderer before it enters prototype data.
     public typealias Client = @Sendable (URLRequest) async throws -> (Data, HTTPURLResponse)
 
-    private let device: any PrototypeHttpClient
+    let device: any PrototypeHttpClient
     private let handler: (any PrototypeHttpClient)?
 
     /// The renderer's bounded, ephemeral URLSession client and its standard egress checks.
@@ -53,14 +53,15 @@ public struct PrototypeNetworkConfiguration: Sendable {
     #if canImport(Network)
         /// A transport that enforces the egress policy by dialing only checked IP addresses.
         public static func pinned(allowsCleartext: Bool = false) -> PrototypeNetworkConfiguration {
-            PrototypeNetworkConfiguration(pinnedClient: PrototypePinnedHttpClient(allowsCleartext: allowsCleartext))
-        }
-
-        private init(pinnedClient: any PrototypeHttpClient) {
-            device = pinnedClient
-            handler = pinnedClient
+            PrototypeNetworkConfiguration(device: PrototypePinnedHttpClient(allowsCleartext: allowsCleartext))
         }
     #endif
+
+    /// Core-owned clients share one route; no embedded host handler can bypass their policy.
+    init(device: any PrototypeHttpClient) {
+        self.device = device
+        handler = nil
+    }
 
     /// Uses the standard URLSession client unless `deviceClient` is supplied. A host handler
     /// receives only host-routed requests (including omitted `via`); explicit device requests

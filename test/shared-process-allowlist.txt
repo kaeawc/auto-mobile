@@ -1802,7 +1802,6 @@ test/server/deviceToolsShutdown.blankName.test.ts
 test/server/deviceToolsShutdown.offlineHold.test.ts
 test/server/deviceToolsSystemUiAnr.processStop.test.ts
 test/server/displayProfileTools.test.ts
-test/server/downloadsFixtureContract.test.ts
 test/server/dragAndDropSchema.test.ts
 test/server/earlyStartTransport.test.ts
 test/server/elementSelectorSchemas.property.test.ts

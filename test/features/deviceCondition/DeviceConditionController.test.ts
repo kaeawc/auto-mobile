@@ -4,6 +4,7 @@ import {
   type DeviceConditionInjector,
   type DeviceConditionApplyOutcome,
 } from "../../../src/features/deviceCondition/DeviceConditionController";
+import { OwedResetError } from "../../../src/features/deviceCondition/OwedResetError";
 import type { DeviceConditionKey } from "../../../src/features/deviceCondition/DeviceConditionTypes";
 
 /** A recording injector whose apply/reset/isClean behaviour the test drives. */
@@ -13,9 +14,20 @@ class FakeInjector implements DeviceConditionInjector {
   clean = true;
   failReset = false;
   failApply = false;
+  failApplyWithOwedReset = false;
   constructor(readonly key: DeviceConditionKey) {}
 
   apply(value: string): Promise<DeviceConditionApplyOutcome> {
+    if (this.failApplyWithOwedReset) {
+      this.clean = false;
+      return Promise.reject(
+        new OwedResetError("half applied", () => {
+          this.resetCount += 1;
+          this.clean = true;
+          return Promise.resolve();
+        }),
+      );
+    }
     if (this.failApply) {
       return Promise.reject(new Error("injector refused"));
     }
@@ -136,5 +148,18 @@ describe("DeviceConditionController (#14050)", () => {
     const result = await controller.apply({ reset: true });
     expect(result.restore?.restored).toEqual(["faults.battery"]);
     expect(controller.hasActiveConditions()).toBe(false);
+  });
+
+  test("an apply that fails with an owed reset is unsupported but still restorable", async () => {
+    const injector = new FakeInjector("rootState");
+    injector.failApplyWithOwedReset = true;
+    const controller = controllerWith(new Map([["rootState", injector]]));
+    const result = await controller.apply({ rootState: "rooted-detectable" });
+    expect(result.changes[0].status).toBe("unsupported");
+    expect(controller.hasActiveConditions()).toBe(true);
+
+    const report = await controller.restore();
+    expect(injector.resetCount).toBe(1);
+    expect(report.verifiedClean).toBe(true);
   });
 });

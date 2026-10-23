@@ -37,9 +37,12 @@ NC='\033[0m' # No Color
 
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib/spotlight-exclude.sh
+source "${SCRIPT_DIR}/../lib/spotlight-exclude.sh"
 
 # Default paths and settings
 DERIVED_DATA="/tmp/automobile-ctrl-proxy"
+spotlight_exclude_dir "${DERIVED_DATA}"
 PORT="${CTRL_PROXY_IOS_PORT:-8765}"
 TIMEOUT="${CTRL_PROXY_IOS_TIMEOUT:-3600}"
 RUNNER_BINARY="${DERIVED_DATA}/Build/Products/Debug-iphonesimulator/CtrlProxyUITests-Runner.app/CtrlProxyUITests-Runner"

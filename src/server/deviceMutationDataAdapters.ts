@@ -95,9 +95,6 @@ function opaqueDataToolMutations(
             key: JSON.stringify(["app-logs", args.appId, args.container ?? "documents", path]),
           }))
         : [];
-    case "stageSessionDownloads":
-      // The service records its own putAppFile-shaped intents before its first device write.
-      return [];
     case "deviceSnapshot":
       return [
         {
@@ -179,29 +176,4 @@ function backgroundWorkMutations(
         },
       ]
     : [];
-}
-
-/**
- * `stageSessionDownloads` is the deprecated alias of `putAppFile` with `target.domain:
- * "user_files"`. It resolves its device inside the service, so the device dispatcher never
- * records it: the service records these `putAppFile` arguments itself, so the alias journals
- * exactly the shared-file and media intents `putAppFile` does for the same Downloads directory
- * and files (`deviceToolMutations("putAppFile", ...)`). The adapter map stays free of this
- * tool name on purpose: a second mapping there would duplicate `putAppFile`'s.
- */
-export function stageSessionDownloadsAsPutAppFile(request: {
-  directory: string;
-  reset?: boolean;
-  indexMedia?: boolean;
-  files: readonly unknown[];
-}): Record<string, unknown> {
-  return {
-    target: {
-      domain: "user_files",
-      namespace: request.directory,
-      reset: request.reset,
-      indexMedia: request.indexMedia,
-    },
-    files: request.files,
-  };
 }

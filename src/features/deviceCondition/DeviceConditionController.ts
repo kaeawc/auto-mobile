@@ -1,5 +1,6 @@
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
+import { OwedResetError } from "./OwedResetError";
 import {
   DEVICE_CONDITION_SCHEMA_VERSION,
   DEVICE_CONDITION_UNSET,
@@ -131,6 +132,14 @@ export class DeviceConditionController {
         ...(outcome.detail ? { detail: outcome.detail } : {}),
       };
     } catch (error) {
+      if (error instanceof OwedResetError) {
+        // The injector left partial state it could not undo; keep the reset so release retries it.
+        this.resets.push({
+          key: change.key,
+          reset: error.owedReset,
+          isClean: (s) => injector.isClean(s),
+        });
+      }
       logger.warn(
         `[deviceCondition] applying ${change.key}=${change.value} failed: ${errorMessage(error)}`,
         error,

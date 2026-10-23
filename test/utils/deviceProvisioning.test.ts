@@ -924,4 +924,23 @@ describe("DefaultDeviceProvisioner", () => {
       /iOS simulator tools \(xcrun simctl\) are not available/,
     );
   });
+  it.each(["tv", "watch", "automotive"] as const)(
+    "refuses to create a handheld AVD for a %s request",
+    async (formFactor) => {
+      const avd = new FakeAndroidAvdCreator([
+        systemImage(35, "google_apis", "x86_64"),
+        systemImage(35, "android-tv", "x86"),
+      ]);
+      const provisioner = new DefaultDeviceProvisioner({
+        iosCreator: () => undefined,
+        androidCreator: () => avd,
+        idGenerator: new CountingIdGenerator("uuid"),
+      });
+
+      await expect(provisioner.provision({ platform: "android", formFactor })).rejects.toThrow(
+        new RegExp(`'${formFactor}' AVD is not supported yet`),
+      );
+      expect(avd.createCalls).toEqual([]);
+    },
+  );
 });

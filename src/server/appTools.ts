@@ -865,7 +865,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
 
   ToolRegistry.registerDeviceAware(
     "appLifecycle",
-    "State-preserving background-process kill for saved-state restoration tests (background, killBackgrounded); trimMemory sends onTrimMemory(level) to the running app without killing it.",
+    "State-preserving background-process kill for saved-state restoration tests (background, killBackgrounded; iOS kills with SIGKILL after Home); trimMemory (Android only) sends onTrimMemory(level) to the running app without killing it.",
     appLifecycleSchema,
     appLifecycleHandler,
     { ...PLAN_RELEVANT, defaultEnabled: true, outputSchema: appLifecycleResultSchema },

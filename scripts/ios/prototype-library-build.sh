@@ -4,8 +4,10 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=scripts/lib/spotlight-exclude.sh
+source "${repo_root}/scripts/lib/spotlight-exclude.sh"
 out_dir="${1:-${repo_root}/scratch/prototype-library}"
-mkdir -p "${out_dir}"
+mkdir_spotlight_excluded_within "${repo_root}" "${out_dir}"
 out_dir="$(cd "${out_dir}" && pwd)"
 
 # shellcheck source=scripts/ios/local-sim-build-args.sh

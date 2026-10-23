@@ -34,7 +34,10 @@ data class PickerDevice(
   val deviceSessionUuid: String? = null,
   /** Retained after an incomplete sweep; absence is not evidence of shutdown. */
   val inventoryUncertain: Boolean = false,
-  /** Device form factor ("phone"/"tablet"/"foldable"); unknown is absent. */
+  /**
+   * Device form factor ("phone"/"tablet"/"foldable"/"tv"/"watch"/"automotive"); unknown is absent.
+   * Free-form string: new values need no change here.
+   */
   val formFactor: String? = null,
 ) {
   /** UI identity is platform scoped; id remains the raw daemon command target. */

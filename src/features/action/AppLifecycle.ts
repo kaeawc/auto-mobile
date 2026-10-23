@@ -22,6 +22,7 @@ import { shellQuote } from "../../utils/shellQuote";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { awaitWhileRequestIsLive } from "../../utils/toolUtils";
 import { HomeScreen } from "./HomeScreen";
+import { IosAppLifecycle, type IosAppProcessControl } from "./IosAppLifecycle";
 import {
   DefaultDeviceWindowCacheInvalidator,
   type DeviceWindowCacheInvalidator,
@@ -41,6 +42,8 @@ export interface AppLifecycleDependencies {
   timer?: Timer;
   home?: AppLifecycleHome;
   cacheInvalidator?: DeviceWindowCacheInvalidator;
+  /** iOS process lookup and SIGKILL (#14098); defaults to simctl or devicectl for the device. */
+  iosProcesses?: IosAppProcessControl;
 }
 export interface AppLifecycleExecutionOptions {
   signal?: AbortSignal;
@@ -100,6 +103,7 @@ export class AppLifecycle {
   private readonly timer: Timer;
   private readonly home: AppLifecycleHome;
   private readonly cacheInvalidator: DeviceWindowCacheInvalidator;
+  private readonly ios: IosAppLifecycle | null;
 
   constructor(
     private readonly device: BootedDevice,
@@ -115,6 +119,15 @@ export class AppLifecycle {
     };
     this.cacheInvalidator =
       dependencies.cacheInvalidator ?? new DefaultDeviceWindowCacheInvalidator();
+    this.ios =
+      device.platform === "ios"
+        ? new IosAppLifecycle(device, {
+            home: this.home,
+            timer: this.timer,
+            cacheInvalidator: this.cacheInvalidator,
+            control: dependencies.iosProcesses,
+          })
+        : null;
   }
 
   async execute(
@@ -122,8 +135,18 @@ export class AppLifecycle {
     action: AppLifecycleAction,
     options: AppLifecycleExecutionOptions = {},
   ): Promise<AppLifecycleResult> {
+    options.signal?.throwIfAborted();
+    return this.ios
+      ? this.ios.execute(appId, action, options)
+      : this.executeAndroid(appId, action, options);
+  }
+
+  private async executeAndroid(
+    appId: string,
+    action: AppLifecycleAction,
+    options: AppLifecycleExecutionOptions,
+  ): Promise<AppLifecycleResult> {
     const { signal } = options;
-    signal?.throwIfAborted();
     const base = this.initialResult(appId, action, options.trimLevel);
     const refused = this.preflightRefusal(base, action, options);
     if (refused) {
@@ -203,7 +226,7 @@ export class AppLifecycle {
   ): AppLifecycleResult {
     return {
       success: false,
-      supported: this.device.platform === "android",
+      supported: true,
       action,
       platform: this.device.platform,
       appId,
@@ -219,17 +242,6 @@ export class AppLifecycle {
     options: AppLifecycleExecutionOptions,
   ): AppLifecycleResult | null {
     const { appId } = base;
-    if (this.device.platform === "ios") {
-      // D23 makes BOTH actions unsupported: no verified iOS PID/state-preserving termination contract.
-      return {
-        ...base,
-        mechanism: "unsupported",
-        error:
-          action === "trimMemory"
-            ? "iOS has no onTrimMemory equivalent to send"
-            : "No verified state-preserving termination mechanism on iOS; use homeScreen for Home or terminateApp for force-stop",
-      };
-    }
     if (!ANDROID_PACKAGE_NAME_PATTERN.test(appId)) {
       return {
         ...base,

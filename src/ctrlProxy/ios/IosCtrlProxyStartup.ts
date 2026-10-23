@@ -1,3 +1,4 @@
+import type { IosRunnerLaunchSlot } from "./IosRunnerLaunchGate";
 import { CtrlProxyLaunchTimeoutError } from "./CtrlProxyLaunchTimeoutError";
 import type { IosCtrlProxyRuntime } from "./IosCtrlProxyRuntime";
 import { RemoteServicePortUnavailableError } from "./RemoteServicePortUnavailableError";
@@ -91,6 +92,7 @@ export class IosCtrlProxyStartup {
   constructor(
     private readonly state: Pick<
       IosCtrlProxyRuntime,
+      | "runnerLaunchGate"
       | "forceRestartGeneration"
       | "forceRestartInFlight"
       | "steps"
@@ -108,6 +110,9 @@ export class IosCtrlProxyStartup {
     >,
     private readonly host: IosCtrlProxyStartupHost,
   ) {}
+
+  private launchSlot?: IosRunnerLaunchSlot;
+  private launchStart?: SharedCtrlProxyStart;
 
   // MARK: - Service Control
 
@@ -237,6 +242,43 @@ export class IosCtrlProxyStartup {
    * Internal start implementation (called within mutex)
    */
   async startInternal(sharedStart: SharedCtrlProxyStart): Promise<void> {
+    this.launchStart = sharedStart;
+    try {
+      await this.startWithLaunchSlot(sharedStart);
+    } finally {
+      this.launchSlot?.release();
+      this.launchSlot = undefined;
+      this.launchStart = undefined;
+    }
+  }
+
+  private async acquireLaunchSlot(): Promise<void> {
+    if (this.launchSlot) {
+      return;
+    }
+    const sharedStart = this.launchStart ?? this.state.sharedStart;
+    if (!sharedStart) {
+      throw new Error("Runner launch requires a shared startup");
+    }
+    const queuedAt = this.state.timer.now();
+    // Only callers already waiting when the queue began are owed the credit; a
+    // later joiner's budget starts at its own join time.
+    const queuedCallers = new Set(sharedStart.callerHealthPollDeadlinesMs.keys());
+    this.launchSlot = await this.state.runnerLaunchGate.acquire(sharedStart.controller.signal);
+    const waitedMs = this.state.timer.now() - queuedAt;
+    if (waitedMs > 0) {
+      logger.info(`[IOSCtrlProxy] Runner launch queued for ${waitedMs}ms`);
+      for (const [caller, deadline] of sharedStart.callerHealthPollDeadlinesMs) {
+        if (queuedCallers.has(caller)) {
+          sharedStart.callerHealthPollDeadlinesMs.set(caller, deadline + waitedMs);
+        }
+      }
+      this.host.refreshHealthPollDeadline(sharedStart);
+    }
+    sharedStart.controller.signal.throwIfAborted();
+  }
+
+  private async startWithLaunchSlot(sharedStart: SharedCtrlProxyStart): Promise<void> {
     // Authoritative fail-closed gate (#4221): this is the single chokepoint every
     // launch path funnels through (startDevice, session-reuse in toolRegistry, and
     // discovery-pooled devices that never hit verifyIosDevice/ensureCtrlProxyReady).
@@ -481,6 +523,7 @@ export class IosCtrlProxyStartup {
       logger.warn(
         "[IOSCtrlProxy] Existing CtrlProxy process uses a host port that is no longer available; restarting",
       );
+      await this.acquireLaunchSlot();
       perf.startOperation("spawnRunner");
       restarted = await this.host.restartDeviceProcessAfterHostPortCollision();
       perf.endOperation("spawnRunner");
@@ -520,6 +563,7 @@ export class IosCtrlProxyStartup {
       }
       return "deferred";
     }
+    await this.acquireLaunchSlot();
     perf.startOperation("spawnRunner");
     const provenance = await this.state.steps.startOnDevice();
     perf.endOperation("spawnRunner");
@@ -575,6 +619,7 @@ export class IosCtrlProxyStartup {
       return "adopted";
     }
     await this.host.ensureServicePortReadyForLaunch();
+    await this.acquireLaunchSlot();
     perf.startOperation("spawnRunner");
     const provenance = await this.state.steps.startOnSimulator();
     perf.endOperation("spawnRunner");

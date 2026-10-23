@@ -500,3 +500,12 @@ describe("data mutation prior recording", () => {
     expect(await journal.list(SCOPE)).toEqual([]);
   });
 });
+
+test("keychain deletion journals exact scope without values", () => {
+  const selector = { itemClass: "genericPassword", service: "s", account: "a", accessGroup: "g" };
+  expect(
+    deviceToolMutations("deleteKeychainItem", { appId: "app", selector, confirm: true }, "ios"),
+  ).toEqual([
+    { kind: "preference", key: JSON.stringify({ store: "keychain", appId: "app", selector }) },
+  ]);
+});

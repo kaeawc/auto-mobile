@@ -1,3 +1,4 @@
+import AutoMobileSdkWire
 @testable import CtrlProxy
 import CtrlProxyTestSupport
 import Foundation
@@ -309,6 +310,30 @@ final class ResponseContractFixtureTests: XCTestCase {
                 blockingCommandType: "request_activate_accessibility_link",
                 blockingElapsedMs: 35000,
                 blockingDeadlineRemainingMs: -5000
+            )
+        )
+        try append(
+            "delete_keychain_item_result",
+            DeleteKeychainItemResponse(
+                requestId: requestId,
+                outcome: KeychainDeleteOutcome(
+                    outcome: "deleted",
+                    deletedScope: KeychainItemSelector(
+                        itemClass: "genericPassword",
+                        service: "test.service",
+                        account: "fixture",
+                        accessGroup: "TEAM.app"
+                    )
+                ),
+                totalTimeMs: 17
+            )
+        )
+        try append(
+            "delete_keychain_item_denied",
+            DeleteKeychainItemResponse(
+                requestId: requestId,
+                outcome: KeychainDeleteOutcome(outcome: "mutation_not_authorized"),
+                totalTimeMs: 17
             )
         )
         let root: [String: Any] = [

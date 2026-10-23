@@ -98,6 +98,7 @@ public final class CtrlProxy {
             sdkHierarchyClient: sdkHierarchyClient,
             sdkHierarchyCache: sdkHierarchyCache,
             sdkDatabaseClient: sdkDatabaseClient,
+            sdkKeychainClient: SdkKeychainClient(endpointResolver: sdkEndpointResolver),
             sdkPreferenceClient: sdkPreferenceClient,
             hierarchyDebouncer: hierarchyDebouncer,
             frameContext: frameContext,

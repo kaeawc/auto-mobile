@@ -1,4 +1,5 @@
 import { MapDeviceClientRegistry } from "./deviceClientRegistry";
+import { DefaultIosRunnerLaunchGate } from "./ios/IosRunnerLaunchGate";
 import { type IosTunnelClient } from "./ios/IosTunnelClient";
 import type { IosCtrlProxyManagerDiagnostics } from "./ios/IosCtrlProxyManagerDiagnostics";
 import type {
@@ -361,6 +362,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       tunnelClient,
       processExecutor,
       physicalDeviceLister: NO_PHYSICAL_DEVICES,
+      // A fresh gate per test manager: a start left pending must not exhaust the
+      // process-wide gate for later tests sharing this process.
+      runnerLaunchGate: new DefaultIosRunnerLaunchGate(),
     });
   }
 
@@ -393,6 +397,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         ),
       processClient: options.processClient ?? new IosCtrlProxyProcessClient(processExecutor, timer),
       physicalDeviceLister: options.physicalDeviceLister ?? NO_PHYSICAL_DEVICES,
+      runnerLaunchGate: options.runnerLaunchGate ?? new DefaultIosRunnerLaunchGate(),
     });
   }
 

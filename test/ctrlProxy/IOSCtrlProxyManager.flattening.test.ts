@@ -643,6 +643,7 @@ describe("IOSCtrlProxyManager flattening characterization", () => {
       "CtrlProxy failed to start within timeout (30s)",
     );
     expect(events).toEqual([
+      "[IOSCtrlProxy] Runner launch progress sample unavailable",
       "[IOSCtrlProxy] Deferred-to CtrlProxy runner (PID 123) never became healthy within 30s; terminating it so the next start spawns a fresh runner",
       "remote stop",
       "[IOSCtrlProxy] Remote runner stop of hung runner 123 failed: remote stop unavailable",

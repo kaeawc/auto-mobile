@@ -61,6 +61,7 @@ final class CommandHandler: CommandHandling {
     let sdkHierarchyClient: (any SdkHierarchyFetching)?
     let sdkHierarchyCache: (any SdkHierarchyCaching)?
     let sdkDatabaseClient: (any SdkDatabaseFetching)?
+    let sdkKeychainClient: (any SdkKeychainDeleting)?
     let sdkPreferenceClient: (any SdkPreferenceFetching)?
     let hierarchyDebouncer: (any HierarchyDebouncing)?
     let voiceOverStateProvider: any VoiceOverStateProviding
@@ -80,6 +81,7 @@ final class CommandHandler: CommandHandling {
         sdkHierarchyClient: (any SdkHierarchyFetching)? = nil,
         sdkHierarchyCache: (any SdkHierarchyCaching)? = nil,
         sdkDatabaseClient: (any SdkDatabaseFetching)? = nil,
+        sdkKeychainClient: (any SdkKeychainDeleting)? = nil,
         sdkPreferenceClient: (any SdkPreferenceFetching)? = nil,
         hierarchyDebouncer: (any HierarchyDebouncing)? = nil,
         voiceOverStateProvider: any VoiceOverStateProviding = DefaultVoiceOverStateProvider(),
@@ -98,6 +100,7 @@ final class CommandHandler: CommandHandling {
         self.sdkHierarchyClient = sdkHierarchyClient
         self.sdkHierarchyCache = sdkHierarchyCache
         self.sdkDatabaseClient = sdkDatabaseClient
+        self.sdkKeychainClient = sdkKeychainClient
         self.sdkPreferenceClient = sdkPreferenceClient
         self.hierarchyDebouncer = hierarchyDebouncer
         self.voiceOverStateProvider = voiceOverStateProvider
@@ -180,7 +183,7 @@ final class CommandHandler: CommandHandling {
              .setVoiceOverState, .accessibilityAudit:
             return try await dispatchAccessibility(request, startTime: startTime)
         case .listPreferenceFiles, .getPreferences, .getPreference, .setPreference, .removePreference,
-             .clearPreferences:
+             .clearPreferences, .deleteKeychainItem:
             return try await dispatchPreferences(request, startTime: startTime)
         case .setNetworkMockRules, .setNetworkFaultRules, .setNetworkErrorSimulation, .getSdkCapabilities:
             return try await dispatchNetwork(request, startTime: startTime)
@@ -355,6 +358,8 @@ final class CommandHandler: CommandHandling {
             return try await handleSetPreference(payload, startTime: startTime)
         case let .removePreference(payload):
             return try await handleRemovePreference(payload, startTime: startTime)
+        case let .deleteKeychainItem(payload):
+            return await handleDeleteKeychainItem(payload, startTime: startTime)
         case let .clearPreferences(payload):
             return try await handleClearPreferences(payload, startTime: startTime)
         default:

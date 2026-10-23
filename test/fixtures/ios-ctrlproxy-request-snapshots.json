@@ -15,7 +15,7 @@
   "snapshots": [
     {
       "name": "get_sdk_capabilities",
-      "builder": "IOSCtrlProxyClient.requestSdkCapabilities",
+      "builder": "CtrlProxySdkCapabilities.requestSdkCapabilities",
       "wire": {
         "type": "get_sdk_capabilities",
         "requestId": "fixture-request-id"
@@ -71,7 +71,7 @@
     },
     {
       "name": "set_network_error_simulation",
-      "builder": "IOSCtrlProxyClient.setNetworkErrorSimulation",
+      "builder": "CtrlProxyNetworkSync.setNetworkErrorSimulation",
       "wire": {
         "type": "set_network_error_simulation",
         "requestId": "fixture-request-id",
@@ -199,9 +199,21 @@
         "type": "request_path_gesture",
         "requestId": "fixture-request-id",
         "points": [
-          { "x": 12.5, "y": 24.25, "offsetMs": 0 },
-          { "x": 12.5, "y": 24.25, "offsetMs": 300 },
-          { "x": 40.75, "y": 80.5, "offsetMs": 700 }
+          {
+            "x": 12.5,
+            "y": 24.25,
+            "offsetMs": 0
+          },
+          {
+            "x": 12.5,
+            "y": 24.25,
+            "offsetMs": 300
+          },
+          {
+            "x": 40.75,
+            "y": 80.5,
+            "offsetMs": 700
+          }
         ],
         "frameContext": "frame-42"
       }
@@ -532,6 +544,24 @@
         "fileName": "Standard",
         "key": "launch_count",
         "sessionId": "fixture-session-id"
+      }
+    },
+    {
+      "name": "delete_keychain_item",
+      "builder": "CtrlProxyStorage.deleteKeychainItemForIos",
+      "wire": {
+        "type": "delete_keychain_item",
+        "requestId": "fixture-request-id",
+        "appId": "com.example.app",
+        "selector": {
+          "itemClass": "genericPassword",
+          "service": "test.service",
+          "account": "fixture",
+          "accessGroup": "TEAM.app"
+        },
+        "confirm": true,
+        "sessionId": "fixture-session-id",
+        "mutationToken": "fixture-mutation-token"
       }
     },
     {

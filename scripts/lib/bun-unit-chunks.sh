@@ -80,7 +80,7 @@ add_group_chunks 0 "$shared_count" 1
 add_group_chunks "$shared_count" "${#files[@]}" 0
 total="${#chunk_offsets[@]}"
 if [[ -n "$coverage_root" ]]; then
-  mkdir_spotlight_excluded "$coverage_root"
+  mkdir_spotlight_excluded_within "$root" "$coverage_root"
   printf '%s\n' "$total" > "$coverage_root/shard-${shard}.chunks"
 fi
 

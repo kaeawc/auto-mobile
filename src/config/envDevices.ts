@@ -256,6 +256,13 @@ export const DEVICES_ENV = {
     default: "off",
     doc: "Promote all iOS CtrlProxy output to info logs (1/true).",
   },
+  IOS_RUNNER_LAUNCH_CONCURRENCY: {
+    name: "AUTOMOBILE_IOS_RUNNER_LAUNCH_CONCURRENCY",
+    kind: "int",
+    default: "2",
+    min: 1,
+    doc: "Maximum concurrent iOS runner launches per daemon; positive integer.",
+  },
   CTRL_PROXY_HEALTH_MAX_ATTEMPTS: {
     name: "AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS",
     legacyName: "AUTO_MOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS",

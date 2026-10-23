@@ -23,7 +23,7 @@ Android Auto projects a phone's UI to a head unit; Automotive OS is a full Andro
 - **CtrlProxy.** `minSdk` 24 (`android/gradle/libs.versions.toml`) is not a blocker. The manifest declares no `<uses-feature>` and only a `LAUNCHER` category (no `LEANBACK_LAUNCHER`). The accessibility config requests window content, interactive windows and gesture dispatch.
 - **Input.** `sendKeys` supports arrows (`KEYCODE_DPAD_*`), enter, tab, escape, backspace, delete (`INPUT_KEY_CODE_MAP`, `src/features/action/InputKey.ts`); there is no D-pad centre, menu or media key. `pressButton` sends back/home/recent as global actions with ADB fallback, plus volume/power via ADB.
 - **Focus.** `observe` returns `focusedElement` (`ActiveWindowAttribution.ts`, `HierarchyFocus.ts`) from the `focused` property; TalkBack focus is separate (`accessibility-focused`).
-- Nothing reads `isScreenRound` or handles ambient mode.
+- `observe` reports `isScreenRound` for `watch` devices; nothing handles ambient mode.
 
 ## Hypotheses to confirm
 
@@ -32,14 +32,10 @@ Android Auto projects a phone's UI to a head unit; Automotive OS is a full Andro
 
 ## Android TV: go
 
-TV navigation is a focus problem; D-pad keys can be sent and the focused element comes back in every observation. Missing: a loop connecting them, and possibly one key.
+TV navigation is a focus problem: D-pad keys can be sent and the focused element comes back in every observation. `focusNavigate` is the loop that connects them.
 
-1. **Activate focused item.** Android treats `KEYCODE_ENTER` and `KEYCODE_DPAD_CENTER` both as select, so `enter` may suffice (test first, checklist row 3). If not, add `select` (`KEYCODE_DPAD_CENTER`) to **both** `SUPPORTED_INPUT_KEYS` and `INPUT_KEY_CODE_MAP`: `InputKeyName` derives from the first and the second is checked against it, so one entry alone does not compile.
-
-> [!NOTE]
-> Implemented (#14947) as `focusNavigate` (`src/features/action/FocusNavigate.ts`), Android only, matching `until` on `text`, `contentDesc` and `resourceId`. No `select` key was added: `enter` is the activation key until checklist row 3 shows otherwise on a TV image. Still unverified on a device, including whether `focused` appears for Leanback's focus ring.
-
-2. **`focusNavigate({ until, direction?, maxSteps?, settleMs? })`.** Observe; stop if the focused element matches `until`; else press one D-pad key and repeat. Returns the path of focused elements.
+1. **Activate focused item.** Android treats `KEYCODE_ENTER` and `KEYCODE_DPAD_CENTER` both as select, so `enter` is the activation key and no `select` key exists. If checklist row 3 shows `enter` does not activate on a TV image, add `select` (`KEYCODE_DPAD_CENTER`) to **both** `SUPPORTED_INPUT_KEYS` and `INPUT_KEY_CODE_MAP`: `InputKeyName` derives from the first and the second is checked against it, so one entry alone does not compile.
+2. **`focusNavigate({ until, direction?, maxSteps?, settleMs? })`** (`src/features/action/FocusNavigate.ts`, Android only). Observe; stop if the focused element matches `until`; else press one D-pad key and repeat. `until` matches on `text`, `contentDesc` and `resourceId`. Returns the path of focused elements.
    - Direction: given `direction`, else the arrow from the focused element's bounds centre toward the nearest `until` match; with no match on screen, `arrow_down`.
    - Stops on match, `maxSteps` (default 30), or two consecutive presses leaving focus unchanged. Statuses: `focused`, `max_steps`, `stuck`.
    - Why a tool, not an agent loop: one call replaces up to 30 round-trips, and stuck detection needs the previous observation.
@@ -51,9 +47,9 @@ Open on-device: does `tapOn`/`swipeOn` work with no touchscreen (gesture dispatc
 
 Hierarchy and tap path should match a phone's; the gaps are three Wear-specific inputs, none confirmed.
 
-- **Rotary (hypothesis).** Candidates in order, each verified by a changed scroll position in the next `observe`: `adb shell input rotaryencoder scroll <delta>` (first API level unknown); the emulator console rotary control; `KEYCODE_STEM_*` (buttons, not scroll). Fallback: vertical `swipeOn`.
-- **Ambient (hypothesis).** Entered by screen timeout into always-on display; no documented shell command. Try `KEYCODE_SLEEP` then wake, and the AOD settings key. If none works, ambient testing is no-go and the rest of Wear is unaffected.
-- **Round screens.** `observe` should report `isScreenRound` (`Configuration.isScreenRound`); a new display-info field.
+- **Rotary.** `rotaryScroll({ delta })` (`src/features/wear/RotaryScroll.ts`, opt-in like `windowMode`) tries, in order, `adb shell input rotaryencoder scroll <delta>`, `adb emu event send EV_REL:REL_WHEEL:<delta>` (emulator serials only) and a vertical centre-column `input swipe` sized from `wm size`. After each it re-reads the CtrlProxy hierarchy; a candidate counts only if the structural fingerprint changed. The result names the first working `method` and lists every attempt. The hierarchy has no scroll offset, so a list already at its end reports `unchanged`, and an unreadable hierarchy (CtrlProxy disconnected) makes no attempt. None of the commands is confirmed on a device (checklist row 6); the emulator `REL_WHEEL` mapping and the sign of `delta` for the first two are guesses.
+- **Ambient: not supported.** Entered by screen timeout into always-on display; no documented shell command, so there is no toggle. `observe` reports `wakefulness: "Dozing"` when the device reports it. Candidates to try if row 7 is run: `KEYCODE_SLEEP` then wake, and the AOD settings key.
+- **Round screens.** `observe` reports `isScreenRound` for `watch` devices (`BootedDevice.formFactor`), read over adb from `dumpsys display` (`FLAG_ROUND` on the default display's `DisplayInfo`/`DisplayDeviceInfo` record), not from the CtrlProxy. The flag name is unconfirmed on a Wear image (row 8); fixtures under `test/fixtures/wear-os/` are hand-reconstructed.
 - **Swipe-to-dismiss.** Wear OS 3+ back is a right-swipe from the left edge; the `back` global action should work; check a left-edge `swipeOn`.
 
 ## Android Auto (DHU): no-go
@@ -89,10 +85,6 @@ Record command, image id and API level.
 | 9   | Automotive (`android-automotive`)        | Install, enable and `observe`; behavior of the secondary displays                                                                                                   |
 | 10  | Any                                      | `sdkmanager --list` shows the tags named above; `avdmanager list device` shows the profile ids                                                                      |
 
-## Follow-ups (under #14072)
-
-- **#14946** form-factor vocabulary (`tv`, `watch`, `automotive`); buildable first.
-- **#14947** TV: `focusNavigate`, `select` key if needed (rows 1-4).
-- **#14948** Wear OS: rotary scroll, `isScreenRound`, ambient toggle if row 7 finds a command (rows 5-8).
+## Not covered
 
 Android Auto projection is a documented no-go; Automotive OS has no follow-up until rows 9 and 10 run.

@@ -1,3 +1,4 @@
+import { sumRunnerLaunchCpuMs, type RunnerLaunchProgressProbe } from "./IosRunnerLaunchProgress";
 import type { HostCommandExecutor } from "../../utils/HostCommandExecutor";
 import { trackAmbient } from "../../utils/PerfContext";
 import { DefaultHostCommandExecutor } from "../../utils/HostCommandExecutor";
@@ -46,7 +47,17 @@ type TerminationIdentities = {
  * Keeping PID discovery, ownership checks and signaling here prevents device IDs,
  * ports and PIDs from being interpolated into shell commands by lifecycle callers.
  */
-export class IosCtrlProxyProcessClient {
+export class IosCtrlProxyProcessClient implements RunnerLaunchProgressProbe {
+  async sample(pid: number, deviceId: string): Promise<number | null> {
+    try {
+      const { stdout } = await this.executeCommand("ps", ["-axo", "pid=,ppid=,time=,args=", "-ww"]);
+      return sumRunnerLaunchCpuMs(stdout, pid, deviceId);
+    } catch (error) {
+      logger.warn(`[IOSCtrlProxy] Launch progress sampling failed: ${errorMessage(error)}`);
+      return null;
+    }
+  }
+
   private static readonly DEFAULT_PORT = 8765;
   private readonly releaseAttempts: number;
   private readonly releaseGraceMs: number;

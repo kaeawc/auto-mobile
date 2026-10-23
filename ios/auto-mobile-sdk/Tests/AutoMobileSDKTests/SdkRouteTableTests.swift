@@ -24,6 +24,9 @@ final class SdkRouteTableTests: XCTestCase {
             return nil
         }
         XCTAssertEqual(Set(storageRoutes), [.dbList, .dbCapabilities])
-        XCTAssertEqual(Set(bodyStorageRoutes), [.dbExecute, .dbTables, .dbTableData, .dbTableStructure, .preferences])
+        XCTAssertEqual(
+            Set(bodyStorageRoutes),
+            [.dbExecute, .dbTables, .dbTableData, .dbTableStructure, .preferences, .keychainDelete]
+        )
     }
 }

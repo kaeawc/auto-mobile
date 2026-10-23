@@ -7,9 +7,10 @@ export class AuxiliarySocketBindConflict extends ActionableError {
   constructor(
     readonly socketPath: string,
     serverName: string,
+    readonly reason: "listening" | "unverified" = "listening",
   ) {
     super(
-      `[${serverName}] Refusing to bind auxiliary socket ${socketPath}: another daemon is listening. Stop the daemon that owns it or use \`--daemon restart\` to replace it.`,
+      `[${serverName}] Refusing to bind auxiliary socket ${socketPath}: ${reason === "unverified" ? "the socket could not be verified as dead (probe inconclusive)" : "another daemon is listening"}. Stop the daemon that owns it or use \`--daemon restart\` to replace it.`,
     );
   }
 }

@@ -315,7 +315,8 @@ export class DaemonReadiness {
       );
       if (
         probeBudget > 0 &&
-        (await this.host.peerSocketReachability.isReachable(this.host.socketPath, probeBudget))
+        (await this.host.peerSocketReachability.probe(this.host.socketPath, probeBudget)) ===
+          "answered"
       ) {
         stderrLog("Reusing a peer daemon that became ready after our launch exited");
         return true;
@@ -357,7 +358,8 @@ export class DaemonReadiness {
         );
         if (
           finalBudget > 0 &&
-          (await this.host.peerSocketReachability.isReachable(this.host.socketPath, finalBudget))
+          (await this.host.peerSocketReachability.probe(this.host.socketPath, finalBudget)) ===
+            "answered"
         ) {
           stderrLog("Reusing a peer daemon that became ready after our launch exited");
           return true;

@@ -65,7 +65,7 @@ function harness() {
     sleepUnlessAborted: (ms) => timer.sleep(ms),
     verifyDaemonConnection: async () => true,
     isIsolatedSocketNamespace: () => true,
-    peerSocketReachability: { isReachable: async () => true },
+    peerSocketReachability: { probe: async () => "answered" },
     findNamespaceDaemonProcessRecords: async () => [],
     createClient: (options) => {
       expect(options?.clientIdentity).toBeNull();

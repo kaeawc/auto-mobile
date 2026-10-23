@@ -214,18 +214,20 @@ export class SocketLifecycle {
   }
   /**
    * Reclaim an existing socket file before `listen()`, refusing to clobber a live
-   * sibling (issue #6232). A startup lock is not ownership evidence, and a
-   * failed probe is inconclusive. Reclaim requires both an unreachable probe and
-   * a positively dead recorded owner.
+   * sibling (issue #6232). A startup lock is not ownership evidence, and an
+   * inconclusive probe never authorizes reclaim. Reclaim requires both definite
+   * socket absence and a positively dead recorded owner.
    */
   async reclaimExistingSocketBeforeBind(): Promise<void> {
-    const reachable = await this.state.socketReachability.isReachable(
+    const reachability = await this.state.socketReachability.probe(
       this.state.socketPath,
       SOCKET_BIND_LIVENESS_PROBE_TIMEOUT_MS,
     );
-    if (reachable || this.state.socketOwnerLiveness.getOwnerStatus() !== "dead") {
+    if (reachability !== "absent" || this.state.socketOwnerLiveness.getOwnerStatus() !== "dead") {
       throw new ActionableError(
-        `Refusing to bind: the AutoMobile daemon socket ${this.state.socketPath} is still reachable or its former owner is not positively known to be dead. ` +
+        (reachability === "unknown"
+          ? `Refusing to bind: the AutoMobile daemon socket ${this.state.socketPath} probe is inconclusive; the socket could not be verified as dead. `
+          : `Refusing to bind: the AutoMobile daemon socket ${this.state.socketPath} is still reachable or its former owner is not positively known to be dead. `) +
           "A startup lock and an inconclusive liveness probe do not authorize unlinking a socket that may still be live. Stop the running daemon or run `--daemon restart` to replace it.",
       );
     }

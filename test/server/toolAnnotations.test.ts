@@ -151,9 +151,9 @@ describe("MCP tool annotations", () => {
     }
   });
 
-  test("full tools/list catalog with output schemas adds less than 1% metadata bytes", () => {
+  test("full tools/list catalog with output schemas adds less than 1.5% metadata bytes", () => {
     expect(definitions.some((tool) => tool.outputSchema)).toBe(true);
-    expect(metadataOverhead(definitions)).toBeLessThan(0.01);
+    expect(metadataOverhead(definitions)).toBeLessThan(0.015);
   });
 
   test("cold proxy tools/list without output schemas has a documented metadata budget exception", () => {

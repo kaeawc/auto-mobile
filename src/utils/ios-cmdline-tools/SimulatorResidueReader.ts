@@ -1,5 +1,5 @@
 import { rm } from "node:fs/promises";
-import { join, posix, sep } from "node:path";
+import { posix } from "node:path";
 import { ActionableError } from "../../models/ActionableError";
 import { errorMessage } from "../describeUnknownError";
 import { sortedReaddir, sortedReaddirEntries } from "../io";
@@ -121,7 +121,8 @@ async function listNodeFiles(directory: string, prefix = ""): Promise<string[] |
   const files = await Promise.all(
     entries.map(async (entry) =>
       entry.isDirectory()
-        ? ((await listNodeFiles(join(directory, entry.name), `${prefix}${entry.name}/`)) ?? [])
+        ? ((await listNodeFiles(posix.join(directory, entry.name), `${prefix}${entry.name}/`)) ??
+          [])
         : [`${prefix}${entry.name}`],
     ),
   );
@@ -151,9 +152,9 @@ export class SimulatorResidueReader implements IosResidueInspector {
     const dataRoot = this.dataRoot(deviceId);
     const { files } = this.dependencies;
     signal.throwIfAborted();
-    const photos = (await files.listFiles(join(dataRoot, "Media", "DCIM"))) ?? [];
+    const photos = (await files.listFiles(posix.join(dataRoot, "Media", "DCIM"))) ?? [];
     signal.throwIfAborted();
-    const documents = (await files.listEntries(join(dataRoot, "Documents"))) ?? [];
+    const documents = (await files.listEntries(posix.join(dataRoot, "Documents"))) ?? [];
     const safariRoot = await this.safariDocumentsRoot(deviceId, signal);
     const safariDocuments = safariRoot ? ((await files.listEntries(safariRoot)) ?? []) : [];
     signal.throwIfAborted();
@@ -184,20 +185,20 @@ export class SimulatorResidueReader implements IosResidueInspector {
   ): Promise<void> {
     const root =
       area === "documents"
-        ? join(this.dataRoot(deviceId), "Documents")
+        ? posix.join(this.dataRoot(deviceId), "Documents")
         : await this.safariDocumentsRoot(deviceId, signal);
     if (!root || names.some((name) => !this.isSingleEntryName(name))) {
       throw new ActionableError("iOS residue cleanup refused an unproven file path");
     }
     for (const name of names) {
       signal.throwIfAborted();
-      await this.dependencies.files.remove(join(root, name));
+      await this.dependencies.files.remove(posix.join(root, name));
     }
   }
 
   private isSingleEntryName(name: string): boolean {
     return (
-      name !== "" && name !== "." && name !== ".." && !name.includes("/") && !name.includes(sep)
+      name !== "" && name !== "." && name !== ".." && !name.includes("/") && !name.includes("\\")
     );
   }
 
@@ -207,7 +208,7 @@ export class SimulatorResidueReader implements IosResidueInspector {
         `iOS residue lookup requires a simulator UDID, received ${deviceId}`,
       );
     }
-    return join(this.dependencies.deviceSetRoot, deviceId, "data");
+    return posix.join(this.dependencies.deviceSetRoot, deviceId, "data");
   }
 
   /** Safari's data container `Documents` path, or null when Safari has no container yet. */
@@ -229,11 +230,11 @@ export class SimulatorResidueReader implements IosResidueInspector {
       }
       throw error;
     }
-    const containers = join(dataRoot, "Containers", "Data", "Application");
-    if (!stdout.startsWith(`${containers}${sep}`) || posix.normalize(stdout) !== stdout) {
+    const containers = posix.join(dataRoot, "Containers", "Data", "Application");
+    if (!stdout.startsWith(`${containers}/`) || posix.normalize(stdout) !== stdout) {
       throw new ActionableError("iOS residue cleanup refused an unproven file path");
     }
-    return join(stdout, "Documents");
+    return posix.join(stdout, "Documents");
   }
 
   private async readDefaults(

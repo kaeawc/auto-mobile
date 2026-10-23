@@ -87,6 +87,14 @@ describe("rootState injector (#14060)", () => {
     );
   });
 
+  test("a remount that exits nonzero still explains how to boot writable", async () => {
+    const adb = adbWith(ROOTABLE);
+    failFirst(adb, "remount", 1);
+    await expect(createRootStateInjector(adb).apply("rooted-detectable")).rejects.toThrow(
+      /-writable-system/,
+    );
+  });
+
   test("reset removes artifacts, restores SELinux and unroots", async () => {
     const adb = adbWith(ROOTABLE);
     const outcome = await createRootStateInjector(adb).apply("rooted-detectable");

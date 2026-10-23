@@ -51,7 +51,19 @@ async function assertRootableImage(adb: AdbExecutor, signal?: AbortSignal): Prom
 
 /** `adb remount`, refusing with guidance when /system stays read-only. */
 async function remountSystem(adb: AdbExecutor, signal?: AbortSignal): Promise<void> {
-  const out = await adbCommand(adb, ["remount"], signal);
+  let out: string;
+  try {
+    out = await adbCommand(adb, ["remount"], signal);
+  } catch (error) {
+    if (signal?.aborted) {
+      throw error;
+    }
+    // A refused remount exits nonzero; keep the boot-writable guidance instead of the bare adb error.
+    throw new ActionableError(
+      `adb remount failed (${errorMessage(error)}). Boot the AVD with ` +
+        "-writable-system, or run `adb disable-verity` and reboot first.",
+    );
+  }
   if (
     /remount failed|verity|not permitted|read-only/i.test(out) &&
     !/remount succeeded/i.test(out)

@@ -1,3 +1,5 @@
+import { logger } from "../../../utils/logger";
+import { opaqueIntentKey } from "./types";
 import type {
   DeviceBaseline,
   DeviceMutationInput,
@@ -57,6 +59,8 @@ export function brokerSessionMutationScope(input: {
 export interface MutationRecorder {
   readonly scope: Readonly<DeviceMutationScope>;
   record(mutation: DeviceMutationInput): Promise<void>;
+  /** Never throws: best-effort persistence that logs its own failure. */
+  markUnrecorded(toolName: string): Promise<void>;
   missingMutations(
     mutations: readonly Pick<DeviceMutationInput, "kind" | "key">[],
   ): Promise<Pick<DeviceMutationInput, "kind" | "key">[]>;
@@ -78,6 +82,21 @@ export class SessionMutationRecorder implements MutationRecorder {
 
   record(mutation: DeviceMutationInput): Promise<void> {
     return this.journal.record(this.scope, mutation);
+  }
+
+  async markUnrecorded(toolName: string): Promise<void> {
+    try {
+      await this.record({
+        kind: "opaque",
+        key: opaqueIntentKey("recording-failed", toolName),
+        priorValue: { state: "unobservable" },
+        toolName,
+      });
+    } catch (error) {
+      // Best effort by contract: the in-memory recording gap already forces the session's
+      // fallback, and the tool call must not fail because its failure marker did.
+      logger.warn("Cannot persist device mutation recording failure marker", error);
+    }
   }
 
   async missingMutations(

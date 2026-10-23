@@ -33,13 +33,14 @@ journaling.
 
 Keep-booted resets run baseline cleaning unconditionally when journal checks allow
 it. Fallback-prefixed opaque rows force baseline fallback. Unrevertible journal
-rows also force fallback unless baseline cleaning already restores their effects:
-packages, clipboard, rotation, screen reader, keep-awake, raw global/system/secure
-settings, verified display rows (`density`, `nightMode` and `display:*`), transient
+rows also force fallback unless baseline cleaning already restores their effects.
+On Android this covers packages, clipboard, rotation, screen reader, keep-awake,
+raw global/system/secure settings, verified display rows (`density`, `nightMode` and `display:*`), transient
 opened URLs, and screen state via the next wakeAndUnlock. Settings-backed adapter
 keys (`fontScale`, `timeFormat` and accessibility display preferences) require a
-journal revert or fallback: non-critical settings restore failures only warn and
-are not re-verified.
+journal revert or fallback. A failed non-critical Android settings restore escalates
+unless a single post-loop re-read of its namespace confirms the baseline value; any
+differing key forces fallback. Critical settings restore failures force fallback immediately.
 Preferences are skipped by replay and require fallback unless their JSON key
 identifies an app absent from the readable baseline inventory, which cleaning
 uninstalls with its data. The app-owned interaction breadcrumbs
@@ -48,16 +49,31 @@ Permission rows require a journal revert or fallback, including for apps absent
 from the baseline: notification-policy access can persist for a never-installed
 package.
 
+On iOS, sanitize covers session-installed apps and app groups through inventory
+cleaning, absolute keychain/permission/location/status-bar/clipboard resets,
+certificate inspection that refuses surviving user-trusted roots, appearance,
+content size, increase contrast and global locale/language/calendar/time-format
+settings. Photo residue is inspected and forces erase when changed; keyboard and
+increase-contrast defaults are restored and verified. `reduceMotion`, `boldText` and
+unknown settings have no sanitize coverage. `shared-file` (`putAppFile`) and
+`opened-url` (`openLink`) rows force erase even for a session-installed app: sanitize
+does not cover them. So do the frequent `rotate`, VoiceOver (`accessibility`),
+`postNotification`, keep-awake and `windowMode` rows, whose effects persist. This deliberately fails closed until a narrower proof exists.
+Other non-revertible effects require erase. Non-fallback opaque rows and the app-owned
+interaction breadcrumbs are exempt; non-revertible store preferences are covered
+only for apps absent from the baseline inventory, whose data sanitize removes.
+
 Production shared-file intents have JSON-array keys and require a journal revert;
 the public-root file sweep does not cover those intents. CtrlProxy keyboard rows
 (`keyboard:tool:keyboard` and `keyboard:profile`) are not restored by settings
 cleaning and require a revert. Power controls also require their verified journal
 revert; baseline cleaning never covers `power:*`.
 
-SMS, phone calls, SQL writes or unclassified queries, app-log deletion and
-secondary-display rotation record fallback opaque intents. Read-only SQL records
-nothing. iOS keep-booted also escalates to erase on the `fallback:` intents
-recorded by `sqlQuery` writes, `resetAppLogs`, `sendSms` and `phoneCall`.
+SMS, phone calls, SQL writes or unclassified queries, app-log deletion,
+secondary-display rotation and `deviceSnapshot` restore record fallback opaque
+intents. Read-only SQL records nothing. iOS keep-booted also escalates to erase on the `fallback:` intents
+recorded by `sqlQuery` writes, `resetAppLogs`, `sendSms`, `phoneCall` and
+`deviceSnapshot` restore.
 A data-kept uninstall always retains its fallback intent, including for
 a session-installed app, because the clean's package inventory cannot see removed
 packages whose data remains. Plain uninstalls of session-installed apps absent
@@ -66,11 +82,18 @@ Other opaque rows remain best-effort breadcrumbs. Missing inventory coverage alo
 does not block Android cleaning; uncovered journaled effects cannot silently
 survive a clean reset (#15105).
 
-**Recorder failure policy**: unavailable recorder for a broker session means
-recovery failed; recorder binding/recovery failures, scope mismatches and journal
-I/O failures warn and let the action proceed unrecorded. A missing recorder for a
-non-broker session is expected (no warning). Success keeps first-write-wins and
-record-before-act ordering; an aborted call signal still prevents the action.
+**Recorder failure policy**: broker recorder binding/recovery failures, scope
+mismatches and journal I/O failures warn and let the action proceed, but mark the call's broker session as having an incomplete journal.
+Keep-booted reset must then use erase or Android baseline fallback. A matching
+recorder also attempts a fallback opaque row, independently warning if that write
+fails. The in-memory gap is keyed by session UUID and is lost on daemon restart;
+the best-effort `recording-failed` row survives when the journal is writable.
+Only a confirmed clean fallback clears the mark. Gaps for sessions that never
+reach a keep-booted reset remain until process exit. A missing recorder for a non-broker session is expected
+(no warning or gap).
+Success keeps first-write-wins and record-before-act ordering; an aborted call
+signal still prevents the action. Prior-value read failures warn and record
+`unobservable` priors; reset applies its usual revert or baseline-coverage checks.
 
 ## Identity and persistence
 
@@ -199,8 +222,8 @@ capture like other admission work.
 - SQL uses the read-only classifier: proven reads do not journal; mutations and
   unproven statements record opaque intent (no inferred inverse). Network mocks
   share opaque intent (no invented prior from host-owned rules). Telephony, log
-  deletion (including rotated siblings) and snapshot capture/restore record opaque
-  intent. None implement restorers or change cleaning; unreadable priors never block
+  deletion (including rotated siblings) and snapshot restore record fallback opaque
+  intent; snapshot capture/delete retain diagnostic opaque rows. None implement restorers or change cleaning; unreadable priors never block
   the action.
 
 **Other tools**
@@ -229,8 +252,8 @@ capture like other admission work.
 **Recovery**
 
 - Uses the registry's unique session-id index, not an all-receipts scan. Startup
-  warns and continues for an unrecoverable session (its later mutations warn and go
-  unrecorded). A fatal startup error closes the broker before releasing the host
+  warns and continues for an unrecoverable session, marking a recording gap so its
+  later mutations run unrecorded but its next keep-booted reset falls back. A fatal startup error closes the broker before releasing the host
   lock. A rebound session discards its old recorder and resolves the new native
   assignment before the next mutation.
 - Derived label routing sessions do not record into the base recorder (they may

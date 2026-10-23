@@ -226,6 +226,7 @@ describe("durable broker timing", () => {
         journal,
         mutations: Object.assign(mutations, {
           sanitize: async () => {},
+          sanitizeCovers: () => false,
           assertSettled: async () => {},
         }),
         timer: harness.timer,

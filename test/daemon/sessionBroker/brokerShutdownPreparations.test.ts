@@ -1,3 +1,4 @@
+import { InMemoryMutationRecordingGaps } from "../../../src/daemon/sessionBroker/mutations/recordingGaps";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { SessionBroker, type SessionBrokerOptions } from "../../../src/daemon/sessionBroker/broker";
 import { SessionBrokerFailureError } from "../../../src/daemon/sessionBroker/devicePort";
@@ -85,6 +86,7 @@ describe("preparations crossing restart handoff", () => {
       "shutdown-scope",
       { acquire: () => {}, release },
       timer,
+      new InMemoryMutationRecordingGaps(),
     );
   }
 

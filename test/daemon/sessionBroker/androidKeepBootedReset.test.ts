@@ -1,3 +1,4 @@
+import { InMemoryMutationRecordingGaps } from "../../../src/daemon/sessionBroker/mutations/recordingGaps";
 import { mutationIncarnation } from "../../../src/daemon/sessionBroker/mutations/incarnation";
 import { describe, expect, test } from "bun:test";
 import { AndroidKeepBootedReset } from "../../../src/daemon/sessionBroker/androidKeepBootedReset";
@@ -45,6 +46,7 @@ const SETTING: DeviceMutationInput = {
 
 async function rig(
   options: {
+    recordingGaps?: InMemoryMutationRecordingGaps;
     maxUses?: number;
     fallback?: AndroidResetStrategy;
     fallbackBudgetMs?: number;
@@ -726,14 +728,17 @@ describe("Android keep-booted strategy", () => {
     expect(fallbacks).toBe(1);
   });
 
-  test("a failed non-critical settings revert is still left to the baseline clean", async () => {
-    const { journal, port, reset } = await rig();
-    await journal.record(SCOPE, SETTING);
-    port.beforeWrite = async () => {
-      throw new Error("settings write failed");
-    };
-    expect((await reset()).outcome).not.toContain("fallback");
-  });
+  test.each(["global", "system", "secure"])(
+    "a failed covered %s settings revert is left to the baseline clean",
+    async (namespace) => {
+      const { journal, port, reset } = await rig();
+      await journal.record(SCOPE, { ...SETTING, key: `${namespace}:optional_key` });
+      port.beforeWrite = async () => {
+        throw new Error("settings write failed");
+      };
+      expect((await reset()).outcome).not.toContain("fallback");
+    },
+  );
 
   test("failed baseline fallback propagates rather than returning clean", async () => {
     const { reset } = await rig({
@@ -1269,3 +1274,46 @@ describe("keep-booted derived budgets", () => {
     expect(fallbackBudget).toBe(397_998);
   });
 });
+
+test("failed uncovered fontScale journal revert requires fallback", async () => {
+  const { journal, port, reset } = await rig({
+    fallback: { reset: async () => ({ outcome: "clean", mode: "snapshot", phases: {} }) },
+  });
+  await journal.record(SCOPE, { ...SETTING, key: "fontScale" });
+  port.beforeWrite = async () => {
+    throw new Error("fontScale write failed");
+  };
+  expect(await reset()).toMatchObject({
+    outcome: "fallback:snapshot",
+    fallbackReason: expect.stringContaining("fontScale write failed"),
+  });
+});
+
+test.each([false, true])(
+  "Android recording gap forces fallback and clears only after success: %s",
+  async (fail) => {
+    const gaps = new InMemoryMutationRecordingGaps();
+    gaps.mark(SCOPE.sessionUuid, "clipboard: unavailable");
+    const { reset, port } = await rig({
+      recordingGaps: gaps,
+      fallback: {
+        reset: async () => {
+          if (fail) {
+            throw new Error("snapshot failed");
+          }
+          return { outcome: "clean", mode: "snapshot", phases: {} };
+        },
+      },
+    });
+    if (fail) {
+      await expect(reset()).rejects.toThrow("snapshot failed");
+    } else {
+      expect(await reset()).toMatchObject({
+        outcome: "fallback:snapshot",
+        fallbackReason: expect.stringContaining("clipboard: unavailable"),
+      });
+    }
+    expect(port.cleanCount).toBe(0);
+    expect(gaps.reasonFor(SCOPE.sessionUuid)).toBe(fail ? "clipboard: unavailable" : undefined);
+  },
+);

@@ -112,7 +112,10 @@ function opaqueDataToolMutations(
       return [
         {
           kind: "opaque",
-          key: JSON.stringify(["snapshot", args.action, args.snapshotName ?? null]),
+          key:
+            args.action === "restore"
+              ? opaqueIntentKey("deviceSnapshot", "restore", args.snapshotName)
+              : JSON.stringify(["snapshot", args.action, args.snapshotName ?? null]),
         },
       ];
     default:

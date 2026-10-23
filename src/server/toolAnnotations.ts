@@ -171,6 +171,7 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotationEntry>> = {
   clearKeyValueFile: entry("Clear Key Value File", clearDevice),
   clearMockNetwork: entry("Clear Mock Network Rules", clearDevice),
   deleteDevice: entry("Delete Device", clearDevice),
+  deleteKeychainItem: entry("Delete Keychain Item", clearDevice),
   killDevice: entry("Kill Device", clearDevice),
   removeKeyValue: entry("Remove Key Value", clearDevice),
   resetAppLogs: entry("Reset Logs", clearDevice),

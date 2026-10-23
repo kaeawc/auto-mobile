@@ -17,6 +17,7 @@ import {
   clearKeyValueFileResultSchema,
   getDataStoreResultSchema,
   listDataStoresResultSchema,
+  deleteKeychainItemResultSchema,
   removeKeyValueResultSchema,
   setKeyValueResultSchema,
 } from "./storageToolOutputSchemas";
@@ -660,7 +661,7 @@ export function registerStorageTools(overrides: Partial<StorageToolsDependencies
     "Delete one exact, host-allowlisted, app-owned iOS generic-password Keychain item. Requires SDK opt-in, mutation authorization and explicit confirmation; never exports values.",
     deleteKeychainItemSchema,
     (device, args) => deleteKeychainItemHandler(device, args, deps),
-    { defaultEnabled: false, embeddedSdkOnly: true },
+    { defaultEnabled: false, outputSchema: deleteKeychainItemResultSchema, embeddedSdkOnly: true },
   );
   ToolRegistry.registerDeviceAware(
     "setKeyValue",

@@ -2606,6 +2606,11 @@
   },
   {
     "name": "deleteKeychainItem",
+    "title": "Delete Keychain Item",
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": true
+    },
     "description": "Delete one exact, host-allowlisted, app-owned iOS generic-password Keychain item. Requires SDK opt-in, mutation authorization and explicit confirmation; never exports values.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -2663,6 +2668,49 @@
       },
       "required": ["appId", "selector", "confirm"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "appId": {
+          "type": "string"
+        },
+        "outcome": {
+          "type": "string"
+        },
+        "deletedScope": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "itemClass": {
+                  "type": "string"
+                },
+                "service": {
+                  "type": "string"
+                },
+                "account": {
+                  "type": "string"
+                },
+                "accessGroup": {
+                  "type": "string"
+                }
+              },
+              "required": ["itemClass", "service", "account", "accessGroup"],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": ["appId", "outcome", "deletedScope"],
+      "additionalProperties": {}
     },
     "_meta": {
       "automobile/embeddedSdkOnly": true

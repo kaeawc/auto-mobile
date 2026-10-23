@@ -73,6 +73,12 @@ export interface BindingInventory {
     device: DeviceInfo,
     options: { signal?: AbortSignal },
   ): Promise<string | undefined>;
+  /**
+   * One live read to settle an image whose running state the listing could not establish
+   * (`isRunningStateKnown: false`). Resolves true only when a fresh, complete booted-device
+   * listing proves the image is running; false means "not proven", never "proven off".
+   */
+  probeRunning?(device: DeviceInfo, options: { signal?: AbortSignal }): Promise<boolean>;
   list(
     platform: BindingPlatform,
     options: { signal?: AbortSignal },
@@ -149,6 +155,12 @@ export type BindingDeletionResult =
       kind: "failed";
       message: string;
       evidence?: unknown;
+      /**
+       * The teardown's bounded soft kills and its process-level SIGTERM/SIGKILL escalation both ran
+       * and the device stayed (#14018). Retrying repeats the same escalation, so the journal
+       * quarantines the entry instead of redriving it on the normal backoff.
+       */
+      escalationExhausted?: true;
       notAttempted?: {
         reason:
           | "workflow_unavailable"

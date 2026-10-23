@@ -78,6 +78,8 @@ class HeartbeatAuthenticationTest {
     var token: String? = "file-token\n"
     var reads = 0
 
+    override fun readPid(path: String) = """{"port":${server.address.port}}"""
+
     override fun read(path: String, windows: Boolean, userId: () -> String): String? {
       reads++
       return token

@@ -22,6 +22,15 @@ export function resolveDirectSessionDevice(sessionUuid: string): DirectSessionDe
     : undefined;
 }
 
+/** Every device a direct session holds, one entry per device. */
+export function listDirectSessionDevices(): BootedDevice[] {
+  const byId = new Map<string, BootedDevice>();
+  for (const device of sessions.values()) {
+    byId.set(device.deviceId, { ...device });
+  }
+  return [...byId.values()];
+}
+
 /**
  * Drop one session's mapping. Used when an acquisition that minted `sessionUuid`
  * is cancelled in direct (non-daemon) mode, where there is no SessionManager to

@@ -9,7 +9,15 @@ import {
 } from "../../utils/ChildProcessTracker";
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { SimCtl, SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
-import { SimulatorTccSqliteClient } from "../../utils/ios-cmdline-tools/SimulatorTccSqliteClient";
+import { homedir } from "node:os";
+import {
+  nodeSimulatorResidueFileSystem,
+  SimulatorResidueReader,
+} from "../../utils/ios-cmdline-tools/SimulatorResidueReader";
+import {
+  resolveDeviceSetRoot,
+  SimulatorTccSqliteClient,
+} from "../../utils/ios-cmdline-tools/SimulatorTccSqliteClient";
 import type { Timer } from "../../utils/SystemTimer";
 import type { IosResetHealthPort } from "./iosKeepBootedReset";
 import { IosDeviceMutationResetPort } from "./mutations/iosResetPort";
@@ -26,6 +34,11 @@ export function nativeIosMutationResetPort(
       simctl,
       privacyGrants: tcc,
       trustStore: tcc,
+      residue: new SimulatorResidueReader({
+        simctl,
+        files: nodeSimulatorResidueFileSystem,
+        deviceSetRoot: resolveDeviceSetRoot(homedir()),
+      }),
       files: { realpath, remove: (path) => rm(path, { recursive: true, force: false }) },
       pasteboard: {
         assertSettled: (deviceId) => {

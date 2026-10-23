@@ -24,6 +24,7 @@ import { diffDeviceBaseline } from "../../../src/daemon/sessionBroker/mutations/
 import { planDeviceMutationRevert } from "../../../src/daemon/sessionBroker/mutations/revertPlanner";
 import { IosKeepBootedReset } from "../../../src/daemon/sessionBroker/iosKeepBootedReset";
 import { FakeDeviceMutationJournal } from "../../fakes/FakeDeviceMutationJournal";
+import { FakeIosResidueInspector } from "../../fakes/FakeIosResidueInspector";
 
 const GLOBALS = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -45,8 +46,11 @@ function result(stdout: string): ExecResult {
   };
 }
 
+const RESIDUE_KINDS = ["media", "shared-file", "keyboard", "accessibility"];
+
 function harness() {
   const timer = new FakeTimer();
+  const residue = new FakeIosResidueInspector();
   const state = {
     owned: true,
     privacyRows: [] as (TccPermissionRow[] | Error)[],
@@ -84,7 +88,11 @@ function harness() {
     pasteboardError: undefined as Error | undefined,
   };
   const context: DeviceMutationResetContext = {
-    baseline: { completeKinds: ["installed-app"], observations: [], unobservable: [] },
+    baseline: {
+      completeKinds: ["installed-app", ...RESIDUE_KINDS],
+      observations: [],
+      unobservable: [],
+    },
     scope: { deviceId: UDID, incarnation: "generation-1", sessionUuid: "session-a" },
     signal: new AbortController().signal,
     recordPhase: (phase, durationMs) => {
@@ -112,6 +120,7 @@ function harness() {
         executeCommandArgs: async (args, _timeout, signal) => {
           signal?.throwIfAborted();
           state.commands.push(args);
+          residue.applyDefaultsCommand(args);
           timer.advanceTime(1);
           if (state.error) {
             throw state.error;
@@ -168,6 +177,7 @@ function harness() {
           return rows;
         },
       },
+      residue,
       trustStore: {
         readUserTrustedCertificates: async (deviceId, signal) => {
           state.trustStoreReads.push({ deviceId, signal });
@@ -208,7 +218,7 @@ function harness() {
     key = "device",
     priorValue: DeviceMutationInput["priorValue"] = { state: "absent" },
   ) => port.revert({ kind, key, priorValue, toolName: "test" }, context);
-  return { port, context, state, revert };
+  return { port, context, state, revert, residue };
 }
 
 describe("iOS mutation reset adapter", () => {
@@ -408,7 +418,7 @@ describe("iOS mutation reset adapter", () => {
     const rig = harness();
     rig.context.baseline = undefined;
     const baseline = await rig.port.capture(rig.context);
-    expect(baseline.completeKinds).toEqual(["installed-app", "device-setting"]);
+    expect(baseline.completeKinds).toEqual(["installed-app", "device-setting", ...RESIDUE_KINDS]);
     expect(baseline.unobservable).toEqual(
       DEVICE_MUTATION_KINDS.filter((kind) => !baseline.completeKinds.includes(kind)),
     );
@@ -520,7 +530,7 @@ describe("iOS mutation reset adapter", () => {
   test("old incomplete baselines do not acquire destructive default certification", async () => {
     const rig = harness();
     const baseline = await rig.port.capture(rig.context);
-    expect(baseline.completeKinds).toEqual(["installed-app", "device-setting"]);
+    expect(baseline.completeKinds).toEqual(["installed-app", "device-setting", ...RESIDUE_KINDS]);
     expect(rig.state.commands.every((args) => ["ui", "spawn"].includes(args[0]))).toBe(true);
     expect(rig.state.clipboard).toEqual([]);
   });
@@ -531,7 +541,7 @@ describe("iOS mutation reset adapter", () => {
         const rig = harness();
         const observation = { kind, key: "device", value: { state: "absent" as const } };
         const baseline: DeviceBaseline = {
-          completeKinds: ["installed-app", kind],
+          completeKinds: ["installed-app", ...RESIDUE_KINDS, kind],
           observations: [observation],
           unobservable: [],
         };
@@ -590,7 +600,7 @@ describe("iOS mutation reset adapter", () => {
       const rig = harness();
       rig.state.globals = globals;
       const baseline = await rig.port.capture(rig.context);
-      expect(baseline.completeKinds).toEqual(["installed-app"]);
+      expect(baseline.completeKinds).toEqual(["installed-app", ...RESIDUE_KINDS]);
       expect(baseline.unobservable).toContain("device-setting");
     }
   });
@@ -730,7 +740,7 @@ describe("iOS mutation reset adapter", () => {
       "baseline.app": { ApplicationType: "User" },
     };
     rig.context.baseline = {
-      completeKinds: ["installed-app"],
+      completeKinds: ["installed-app", ...RESIDUE_KINDS],
       unobservable: DEVICE_MUTATION_KINDS.filter((kind) => kind !== "installed-app"),
       observations: [
         {
@@ -1144,5 +1154,320 @@ describe("iOS mutation reset adapter", () => {
         String(value),
       ]);
     }
+  });
+});
+
+describe("iOS out-of-band residue guard", () => {
+  const PLANTED = {
+    photos: ["100APPLE/IMG_0001.JPG"],
+    documents: ["snapshot-gallery.jpeg"],
+    safariDocuments: [],
+    keyboard: {},
+    accessibility: {},
+  };
+
+  async function rigWithBaseline() {
+    const rig = harness();
+    rig.residue.snapshot = structuredClone(PLANTED);
+    rig.context.baseline = await rig.port.capture(rig.context);
+    rig.state.commands.length = 0;
+    return rig;
+  }
+
+  test("baseline capture records the photo library, file areas and keyboard defaults as complete kinds", async () => {
+    const rig = harness();
+    rig.residue.snapshot = { ...structuredClone(PLANTED), keyboard: { KeyboardPrediction: true } };
+    const baseline = await rig.port.capture(rig.context);
+    expect(baseline.completeKinds).toEqual(
+      expect.arrayContaining(["installed-app", ...RESIDUE_KINDS]),
+    );
+    expect(baseline.observations).toContainEqual({
+      kind: "media",
+      key: "dcim",
+      value: { state: "present", value: ["100APPLE/IMG_0001.JPG"] },
+    });
+    expect(baseline.observations).toContainEqual({
+      kind: "shared-file",
+      key: "documents",
+      value: { state: "present", value: ["snapshot-gallery.jpeg"] },
+    });
+    expect(baseline.observations).toContainEqual({
+      kind: "shared-file",
+      key: "safari-documents",
+      value: { state: "present", value: [] },
+    });
+    expect(baseline.observations).toContainEqual({
+      kind: "keyboard",
+      key: "defaults",
+      value: { state: "present", value: { KeyboardPrediction: true } },
+    });
+    expect(baseline.unobservable).not.toEqual(expect.arrayContaining(RESIDUE_KINDS));
+  });
+
+  test("an unreadable residue area leaves the residue kinds incomplete without losing app coverage", async () => {
+    const rig = harness();
+    rig.residue.readError = new Error("Unable to lookup in current state: Shutdown");
+    const baseline = await rig.port.capture(rig.context);
+    expect(baseline.completeKinds).toEqual(["installed-app", "device-setting"]);
+    // `accessibility` is a residue inventory, not a journaled mutation kind, so only the
+    // mutation kinds among the residue kinds are reported unobservable.
+    expect(baseline.unobservable).toEqual(
+      expect.arrayContaining(RESIDUE_KINDS.filter((kind) => kind !== "accessibility")),
+    );
+  });
+
+  test("sanitize removes out-of-band Documents and Safari files added since the baseline", async () => {
+    const rig = await rigWithBaseline();
+    rig.residue.snapshot.documents.push("dirty-oob-1.txt");
+    rig.residue.snapshot.safariDocuments.push("dirty-safari-1.txt");
+    await rig.port.sanitize(rig.context);
+    expect(rig.residue.removals).toEqual([
+      { area: "documents", names: ["dirty-oob-1.txt"] },
+      { area: "safari-documents", names: ["dirty-safari-1.txt"] },
+    ]);
+    expect(rig.residue.snapshot).toEqual(PLANTED);
+  });
+
+  test("sanitize deletes a keyboard default the session added", async () => {
+    const rig = await rigWithBaseline();
+    rig.residue.snapshot.keyboard = { KeyboardAutocorrection: false };
+    await rig.port.sanitize(rig.context);
+    expect(rig.state.commands).toContainEqual([
+      "spawn",
+      UDID,
+      "defaults",
+      "delete",
+      "com.apple.Preferences",
+      "KeyboardAutocorrection",
+    ]);
+    expect(rig.residue.snapshot.keyboard).toEqual({});
+  });
+
+  test("sanitize restores a keyboard default the session changed", async () => {
+    const rig = harness();
+    rig.residue.snapshot = { ...structuredClone(PLANTED), keyboard: { KeyboardPrediction: true } };
+    rig.context.baseline = await rig.port.capture(rig.context);
+    rig.residue.snapshot.keyboard = { KeyboardPrediction: false };
+    await rig.port.sanitize(rig.context);
+    expect(rig.state.commands).toContainEqual([
+      "spawn",
+      UDID,
+      "defaults",
+      "write",
+      "com.apple.Preferences",
+      "KeyboardPrediction",
+      "-bool",
+      "true",
+    ]);
+    expect(rig.residue.snapshot.keyboard).toEqual({ KeyboardPrediction: true });
+  });
+
+  test("baseline capture records the increase-contrast defaults as an accessibility kind", async () => {
+    const rig = harness();
+    rig.residue.snapshot = {
+      ...structuredClone(PLANTED),
+      accessibility: { DarkenSystemColors: 0 },
+    };
+    const baseline = await rig.port.capture(rig.context);
+    expect(baseline.observations).toContainEqual({
+      kind: "accessibility",
+      key: "defaults",
+      value: { state: "present", value: { DarkenSystemColors: 0 } },
+    });
+  });
+
+  // simctl writes DarkenSystemColors (and PointerIncreasedContrastEnabled) when increase contrast
+  // is toggled and leaves them at 0 when it is turned off; the pool baseline has neither (#15017).
+  test("sanitize deletes the increase-contrast defaults left behind after contrast is turned off", async () => {
+    const rig = await rigWithBaseline();
+    rig.residue.snapshot.accessibility = {
+      DarkenSystemColors: 0,
+      PointerIncreasedContrastEnabled: 0,
+    };
+    await rig.port.sanitize(rig.context);
+    for (const key of ["DarkenSystemColors", "PointerIncreasedContrastEnabled"]) {
+      expect(rig.state.commands).toContainEqual([
+        "spawn",
+        UDID,
+        "defaults",
+        "delete",
+        "com.apple.Accessibility",
+        key,
+      ]);
+    }
+    expect(rig.residue.snapshot.accessibility).toEqual({});
+  });
+
+  test("sanitize restores an increase-contrast default the baseline already had", async () => {
+    const rig = harness();
+    rig.residue.snapshot = {
+      ...structuredClone(PLANTED),
+      accessibility: { DarkenSystemColors: 0 },
+    };
+    rig.context.baseline = await rig.port.capture(rig.context);
+    rig.residue.snapshot.accessibility = { DarkenSystemColors: 1 };
+    await rig.port.sanitize(rig.context);
+    expect(rig.state.commands).toContainEqual([
+      "spawn",
+      UDID,
+      "defaults",
+      "write",
+      "com.apple.Accessibility",
+      "DarkenSystemColors",
+      "-int",
+      "0",
+    ]);
+    expect(rig.residue.snapshot.accessibility).toEqual({ DarkenSystemColors: 0 });
+  });
+
+  test("sanitize requires erase when an increase-contrast default survives the revert", async () => {
+    const rig = await rigWithBaseline();
+    rig.residue.snapshot.accessibility = { DarkenSystemColors: 0 };
+    rig.state.commandErrors.set(
+      `spawn ${UDID} defaults delete com.apple.Accessibility DarkenSystemColors`,
+      new Error("defaults delete failed"),
+    );
+    await expect(rig.port.sanitize(rig.context)).rejects.toThrow("defaults delete failed");
+  });
+
+  test("sanitize requires erase when a photo was added, since simctl cannot remove one", async () => {
+    const rig = await rigWithBaseline();
+    rig.residue.snapshot.photos.push("100APPLE/IMG_0007.PNG");
+    await expect(rig.port.sanitize(rig.context)).rejects.toThrow(
+      "iOS reset cannot revert 1 added photo(s); erase required",
+    );
+  });
+
+  test("sanitize requires erase when a baseline photo or file went missing", async () => {
+    const rig = await rigWithBaseline();
+    rig.residue.snapshot.photos = [];
+    await expect(rig.port.sanitize(rig.context)).rejects.toThrow("erase required");
+    const files = await rigWithBaseline();
+    files.residue.snapshot.documents = [];
+    await expect(files.port.sanitize(files.context)).rejects.toThrow(
+      "iOS reset cannot restore 1 removed Documents file(s); erase required",
+    );
+  });
+
+  test("sanitize requires erase when a removal did not take effect", async () => {
+    const rig = await rigWithBaseline();
+    rig.residue.snapshot.documents.push("dirty-oob-1.txt");
+    rig.residue.removalTakesEffect = false;
+    await expect(rig.port.sanitize(rig.context)).rejects.toThrow(
+      "iOS out-of-band residue survived reset; erase required",
+    );
+  });
+
+  test("sanitize requires erase when the baseline never captured the residue areas", async () => {
+    const rig = harness();
+    rig.context.baseline = {
+      completeKinds: ["installed-app"],
+      observations: [],
+      unobservable: [],
+    };
+    await expect(rig.port.sanitize(rig.context)).rejects.toThrow(
+      "iOS reset requires a residue baseline; erase required",
+    );
+    expect(rig.residue.reads).toBe(0);
+  });
+
+  test("sanitize requires erase when the residue cannot be read", async () => {
+    const rig = await rigWithBaseline();
+    rig.residue.readError = new Error("simctl timed out");
+    await expect(rig.port.sanitize(rig.context)).rejects.toThrow("simctl timed out");
+  });
+
+  test.each([
+    {
+      name: "an added photo",
+      plant: (r: FakeIosResidueInspector) => r.snapshot.photos.push("x.PNG"),
+      erased: true,
+    },
+    {
+      name: "an added Documents file",
+      plant: (r: FakeIosResidueInspector) => r.snapshot.documents.push("dirty-oob-1.txt"),
+      erased: false,
+    },
+    {
+      name: "an added autocorrect default",
+      plant: (r: FakeIosResidueInspector) => {
+        r.snapshot.keyboard = { KeyboardAutocorrection: false };
+      },
+      erased: false,
+    },
+    {
+      name: "a DarkenSystemColors default left by increase contrast",
+      plant: (r: FakeIosResidueInspector) => {
+        r.snapshot.accessibility = { DarkenSystemColors: 0 };
+      },
+      erased: false,
+    },
+  ])(
+    "keep-booted reset after $name never reports clean with residue",
+    async ({ plant, erased }) => {
+      const rig = await rigWithBaseline();
+      const journal = new FakeDeviceMutationJournal(new FakeTimer());
+      await journal.captureBaseline(rig.context.scope, rig.context.baseline!);
+      plant(rig.residue);
+      let eraseCalls = 0;
+      const profile = {
+        platform: "ios",
+        metadataState: "current",
+        simulatorDeviceTypeIdentifier: "iphone",
+        archetype: "phone",
+        modelType: { family: "iphone", variant: "pro" },
+        runtimeId: "com.apple.CoreSimulator.SimRuntime.iOS-27-0",
+        osVersion: "27",
+        compatibility: "supported",
+      } as const;
+      const reset = new IosKeepBootedReset({
+        journal,
+        mutations: rig.port,
+        timer: new FakeTimer(),
+        maxUses: 20,
+        simctl: {
+          readSimulatorTarget: async () => ({
+            udid: UDID,
+            name: "phone",
+            state: "Booted",
+            isAvailable: true,
+            deviceTypeIdentifier: profile.simulatorDeviceTypeIdentifier,
+            runtime: profile.runtimeId,
+            os_version: "27.0",
+          }),
+        },
+        health: { probe: async () => true },
+        erase: {
+          resetWithTiming: async () => {
+            eraseCalls++;
+            return { outcome: "clean", mode: "erase", phases: {} };
+          },
+        },
+      });
+      const outcome = await reset.resetWithTiming(
+        { deviceId: UDID, platform: "ios", name: "phone" },
+        profile,
+        rig.context.assertOwned,
+        rig.context.scope,
+        0,
+      );
+      if (erased) {
+        expect(outcome).toMatchObject({ outcome: "fallback:erase", mode: "erase" });
+        expect(outcome.fallbackReason).toContain("erase required");
+        expect(eraseCalls).toBe(1);
+      } else {
+        expect(outcome).toMatchObject({ outcome: "clean", mode: "keep-booted" });
+        expect(eraseCalls).toBe(0);
+        expect(rig.residue.snapshot).toEqual(PLANTED);
+      }
+    },
+  );
+
+  test("an unchanged simulator needs no residue cleanup commands", async () => {
+    const rig = await rigWithBaseline();
+    await rig.port.sanitize(rig.context);
+    expect(rig.residue.removals).toEqual([]);
+    expect(rig.residue.reads).toBe(2);
+    expect(rig.state.commands.some((args) => args.includes("com.apple.Preferences"))).toBe(false);
   });
 });

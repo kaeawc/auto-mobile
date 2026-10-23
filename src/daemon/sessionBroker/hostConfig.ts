@@ -83,12 +83,21 @@ const androidDefaults = z
   })
   .strict();
 const cap = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+/** Keep-booted cleaning cannot revert everything, so every Nth release erases instead (#15017). */
+export const DEFAULT_IOS_KEEP_BOOTED_MAX_USES = 10;
 const iosReuse = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("off") }).strict(),
   z
     .object({
-      mode: z.enum(["erase", "keep-booted"]),
+      mode: z.literal("erase"),
       maxUses: cap.positive().default(20),
+      fallback: z.literal("erase").default("erase"),
+    })
+    .strict(),
+  z
+    .object({
+      mode: z.literal("keep-booted"),
+      maxUses: cap.positive().default(DEFAULT_IOS_KEEP_BOOTED_MAX_USES),
       fallback: z.literal("erase").default("erase"),
     })
     .strict(),

@@ -3,6 +3,11 @@ import type { AdbCommandRunner } from "../../utils/android-cmdline-tools/interfa
 import type { Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
+import {
+  effectiveSize,
+  parseWmSize,
+  wmSizeReadCommand,
+} from "../utility/androidDisplayGeometryCommands";
 
 /**
  * Wear OS rotary (crown) scroll (#14948). Every command here is a hypothesis from
@@ -66,13 +71,6 @@ interface Candidate {
   command: string;
 }
 
-export function parseWmSize(output: string): { width: number; height: number } | undefined {
-  const override = /Override size:\s*(\d+)x(\d+)/.exec(output);
-  const physical = /Physical size:\s*(\d+)x(\d+)/.exec(output);
-  const match = override ?? physical;
-  return match ? { width: Number(match[1]), height: Number(match[2]) } : undefined;
-}
-
 /** A vertical centre-column swipe; a positive delta moves the finger up so content scrolls down. */
 export function swipeCommand(size: { width: number; height: number }, delta: number): string {
   const x = Math.round(size.width / 2);
@@ -126,7 +124,10 @@ export class AdbRotaryScroller implements RotaryScroller {
         command: `emu event send EV_REL:REL_WHEEL:${delta}`,
       });
     }
-    const size = parseWmSize(await this.run("shell wm size", signal).catch(() => ""));
+    const wmSize = parseWmSize(
+      await this.run(wmSizeReadCommand(undefined), signal).catch(() => ""),
+    );
+    const size = wmSize && effectiveSize(wmSize);
     if (size) {
       candidates.push({ method: "swipe", command: swipeCommand(size, delta) });
     }

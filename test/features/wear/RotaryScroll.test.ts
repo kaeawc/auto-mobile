@@ -1,9 +1,5 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import {
-  AdbRotaryScroller,
-  parseWmSize,
-  swipeCommand,
-} from "../../../src/features/wear/RotaryScroll";
+import { AdbRotaryScroller, swipeCommand } from "../../../src/features/wear/RotaryScroll";
 import type {
   AdbCommandRunner,
   AdbExecuteOptions,
@@ -26,11 +22,12 @@ class FakeRotaryAdb implements AdbCommandRunner {
   readonly commands: string[] = [];
   readonly rules: Array<{ pattern: RegExp; run: () => string }> = [];
   screen = "list@0";
+  wmSize = "Physical size: 384x384\n";
 
   async executeCommand(command: string, _options?: AdbExecuteOptions): Promise<ExecResult> {
     this.commands.push(command);
     if (command === "shell wm size") {
-      return exec("Physical size: 384x384\n");
+      return exec(adb.wmSize);
     }
     const rule = this.rules.find((candidate) => candidate.pattern.test(command));
     return exec(rule ? rule.run() : "");
@@ -171,11 +168,15 @@ describe("swipe geometry", () => {
     );
   });
 
-  test("parseWmSize prefers the override size", () => {
-    expect(parseWmSize("Physical size: 384x384\nOverride size: 300x300\n")).toEqual({
-      width: 300,
-      height: 300,
-    });
-    expect(parseWmSize("garbage")).toBeUndefined();
+  test("the swipe fallback sizes from the override over the physical size", async () => {
+    adb.wmSize = "Physical size: 384x384\nOverride size: 200x200\n";
+    await scroller("R5CT1234").scroll({ delta: 2 });
+    expect(adb.commands).toContain("shell input swipe 100 120 100 80 250");
+  });
+
+  test("malformed wm size output drops the swipe candidate", async () => {
+    adb.wmSize = "Physical size: garbage\n";
+    const result = await scroller("R5CT1234").scroll({ delta: 2 });
+    expect(result.attempts.map((a) => a.method)).toEqual(["input_rotaryencoder"]);
   });
 });

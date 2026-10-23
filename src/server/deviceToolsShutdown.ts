@@ -47,6 +47,8 @@ import {
   stopVideoRecordingsBeforeShutdown,
   waitForDeviceShutdown,
 } from "../features/deviceLifecycle/deviceLifecycleCore";
+import { waitForEmulatorShutdownWithEscalation } from "../features/deviceLifecycle/teardown/stuckEmulatorEscalation";
+import { exponentialBackoff } from "../utils/Backoff";
 import {
   AndroidObserverShutdownState,
   stopIosCtrlProxyBeforeShutdown,
@@ -62,6 +64,8 @@ export {
 } from "../features/deviceLifecycle/deviceLifecycleCore";
 
 const IOS_SHUTDOWN_CONFIRMATION_MIN_MS = 2_000;
+/** Pause between soft emulator-console re-sends while the guest ignores `emu kill` (#14018). */
+const SOFT_KILL_RESEND_BACKOFF = exponentialBackoff({ initialDelayMs: 500, maxDelayMs: 2_000 });
 
 export function createKillDeviceResponse(
   args: KillDeviceArgs,
@@ -444,6 +448,47 @@ function androidKillProcessStop(
     : undefined;
 }
 
+/**
+ * Android emulators that ignore the soft console kill escalate to a process-level stop (#14018);
+ * every other platform just waits for the device to leave discovery.
+ */
+async function confirmPlatformShutdown(
+  options: ShutdownDiscoveryContext & {
+    killTarget: BootedDevice;
+    force: boolean;
+    processStop: DeviceShutdownOptions["processStop"];
+  },
+): Promise<BootedDevice | undefined> {
+  const { killTarget, force, processStop, ...discovery } = options;
+  const context = {
+    ...discovery,
+    // simctl accepted shutdown; give the confirming observation its own minimum budget.
+    deadlineMs:
+      discovery.device.platform === "ios"
+        ? Math.max(discovery.deadlineMs, discovery.timer.now() + IOS_SHUTDOWN_CONFIRMATION_MIN_MS)
+        : discovery.deadlineMs,
+  };
+  if (!processStop) {
+    return await waitForDeviceShutdown(context, force);
+  }
+  return await waitForEmulatorShutdownWithEscalation({
+    context,
+    skipAndroidNameEnrichment: force,
+    stopper: processStop.stopper,
+    avdName: isUnknownAndroidRuntimeName(killTarget)
+      ? processStop.expectedAvdName
+      : killTarget.name,
+    backoff: SOFT_KILL_RESEND_BACKOFF,
+    redispatchSoftKill: ({ timeoutMs }) =>
+      context.deviceManager.killDevice(killTarget, {
+        signal: context.requestAbortSignal,
+        timeoutMs,
+        force,
+        processStop,
+      }),
+  });
+}
+
 async function killProcessAndRetireOwnership(
   context: ShutdownEntryContext &
     Pick<
@@ -553,23 +598,19 @@ async function killProcessAndRetireOwnership(
   let shutdownWasConfirmed = false;
   try {
     perf.startOperation("waitForShutdown");
-    const confirmationDeadlineMs =
-      device.platform === "ios"
-        ? Math.max(shutdownDeadlineMs, dependencies.timer.now() + IOS_SHUTDOWN_CONFIRMATION_MIN_MS)
-        : shutdownDeadlineMs;
     const observedReplacement = confirmedAfterCommandError
       ? undefined
-      : await waitForDeviceShutdown(
-          {
-            deviceManager,
-            device: shutdownDevice,
-            timer: dependencies.timer,
-            deadlineMs: confirmationDeadlineMs,
-            requestAbortSignal,
-            timeoutMs,
-          },
+      : await confirmPlatformShutdown({
+          deviceManager,
+          device: shutdownDevice,
+          timer: dependencies.timer,
+          deadlineMs: shutdownDeadlineMs,
+          requestAbortSignal,
+          timeoutMs,
+          killTarget,
           force,
-        );
+          processStop,
+        });
     perf.endOperation("waitForShutdown");
     shutdownWasConfirmed = true;
     await commitStoppedRestartHold(context, dependencies, commitRestartHoldStop, timeoutMs);

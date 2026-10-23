@@ -90,6 +90,7 @@ class ProtoViewerServices(
   val renderer: ViewerRenderer = GuardedViewerRenderer,
   val localNetworkPermission: (ComponentActivity, (Boolean) -> Unit) -> LocalNetworkPermission =
     ::AndroidLocalNetworkPermission,
+  val localNetworkGrant: LocalNetworkGrant = AndroidLocalNetworkGrant,
 ) {
   val networkClient = SettingsPrototypeHttpClient(settings, allowedClient)
 

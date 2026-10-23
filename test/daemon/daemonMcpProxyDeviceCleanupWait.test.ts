@@ -83,6 +83,9 @@ async function setup(
     cleanupWaitBudgetMs: options.budgetMs,
     cleanupWaitBackoff: options.backoff,
   });
+  // Connect first: a connection attempt holds its stall watchdog timer (#15019), and the waits
+  // below count pending timers.
+  await proxy.ensureConnected();
   return {
     timer,
     client,

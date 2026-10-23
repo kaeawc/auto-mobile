@@ -402,21 +402,24 @@ export class AndroidKeepBootedReset implements AndroidResetStrategy {
     if (opaque) {
       return `opaque journaled mutation (${opaque.toolName}) cannot be journal-reverted`;
     }
-    const preferences = entries.filter((entry) => entry.kind === "preference");
-    if (preferences.length > 0) {
+    const appState = entries.filter(
+      (entry) =>
+        entry.kind === "preference" && !["tool:setUIState", "focused-field"].includes(entry.key),
+    );
+    if (appState.length > 0) {
       let baseline: DeviceBaseline | null;
       try {
         baseline = await this.dependencies.journal.getBaseline(mutationContext.scope);
       } catch (error) {
-        logger.warn("Android preference baseline is unreadable; baseline fallback required", error);
-        return "journaled preferences have an unreadable baseline";
+        logger.warn("Android app-state baseline is unreadable; baseline fallback required", error);
+        return "journaled app state has an unreadable baseline";
       }
-      const uncovered = preferences.find((entry) => {
-        const appId = this.preferenceAppId(entry.key);
+      const uncovered = appState.find((entry) => {
+        const appId = this.storeAppId(entry.key);
         return !baseline || !appId || baselineHoldsApp(baseline, appId);
       });
       if (uncovered) {
-        return `journaled preference (${uncovered.toolName}) cannot be baseline-cleaned`;
+        return `journaled ${uncovered.kind} (${uncovered.toolName}) cannot be baseline-cleaned`;
       }
     }
     // Non-fallback opaque rows are diagnostic breadcrumbs, not persistent-state claims.
@@ -433,7 +436,7 @@ export class AndroidKeepBootedReset implements AndroidResetStrategy {
     return this.cleanWithDeadline(port, mutationContext, context, phases);
   }
 
-  private preferenceAppId(key: string): string | undefined {
+  private storeAppId(key: string): string | undefined {
     try {
       const parsed: unknown = JSON.parse(key);
       return typeof parsed === "object" &&
@@ -444,10 +447,7 @@ export class AndroidKeepBootedReset implements AndroidResetStrategy {
         ? parsed.appId
         : undefined;
     } catch (error) {
-      logger.warn(
-        "Android preference journal key is unreadable; baseline fallback required",
-        error,
-      );
+      logger.warn("Android app-state journal key is unreadable; baseline fallback required", error);
       return undefined;
     }
   }

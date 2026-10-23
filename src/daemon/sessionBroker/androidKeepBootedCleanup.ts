@@ -24,22 +24,18 @@ export function isAndroidCriticalSetting(key: string): boolean {
 }
 
 /**
- * Baseline cleaning covers installed apps and clipboard; absent-prior shared files in swept
- * public roots; rotation, screen-reader and keep-awake settings; settings-backed keyboard rows;
- * transient opened URLs; and device-setting global:/secure:/system: rows, display: overrides,
- * density, size, fontScale and nightMode. Screen state is left to the reset's wakeAndUnlock readiness pass.
- * CtrlProxy keyboard profiles, app files and overwritten files require stronger restoration.
+ * Baseline cleaning covers installed apps, clipboard, rotation, screen-reader, keep-awake,
+ * transient opened URLs, raw global/secure/system settings and verified display rows
+ * (density, nightMode and display:*). Settings-backed adapter keys (fontScale, timeFormat
+ * and accessibility display fields) require a journal revert because non-critical settings
+ * restore failures are only warnings. Screen state is restored by wakeAndUnlock.
+ * App-owned interaction breadcrumbs are exempted separately from store preferences.
+ * Production file intents use JSON keys and require a revert; CtrlProxy keyboard profiles
+ * are not settings rows. Power controls also require their verified journal revert.
  */
 export function androidBaselineCleanCovers(
   entry: Pick<DeviceMutationInput, "kind" | "key" | "priorValue">,
 ): boolean {
-  if (entry.kind === "shared-file") {
-    return (
-      entry.priorValue.state === "absent" &&
-      isAndroidResetFile(entry.key) &&
-      ANDROID_BASELINE_FILE_ROOTS.some((root) => entry.key.startsWith(`${root}/`))
-    );
-  }
   if (
     [
       "installed-app",
@@ -54,12 +50,11 @@ export function androidBaselineCleanCovers(
   }
   const settingsKey = /^(?:global|secure|system):/.test(entry.key);
   return (
-    (entry.kind === "keyboard" && settingsKey) ||
-    (entry.kind === "device-setting" &&
-      (settingsKey ||
-        entry.key.startsWith("display:") ||
-        entry.key === SCREEN_STATE_MUTATION_KEY ||
-        ["density", "size", "fontScale", "nightMode"].includes(entry.key)))
+    entry.kind === "device-setting" &&
+    (settingsKey ||
+      entry.key.startsWith("display:") ||
+      entry.key === SCREEN_STATE_MUTATION_KEY ||
+      ["density", "nightMode"].includes(entry.key))
   );
 }
 

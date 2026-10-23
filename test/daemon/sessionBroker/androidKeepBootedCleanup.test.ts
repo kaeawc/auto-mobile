@@ -1,3 +1,4 @@
+import { deviceToolMutations } from "../../../src/server/deviceMutationAdapters";
 import { SETTINGS_TIMEOUT } from "./fixtures/androidResetLoadTimeouts";
 
 import { describe, expect, test } from "bun:test";
@@ -66,6 +67,8 @@ describe("Android unconditional keep-booted cleaning", () => {
     ["device-setting", "secure:user:10:setting"],
     ["device-setting", "system:accelerometer_rotation"],
     ["device-setting", "display:density"],
+    ["device-setting", "density"],
+    ["device-setting", "nightMode"],
     ["device-setting", "screen-state"],
   ])("baseline cleaning covers %s:%s without a readable prior", (kind, key) => {
     expect(androidBaselineCleanCovers({ kind, key, priorValue: { state: "unobservable" } })).toBe(
@@ -87,6 +90,109 @@ describe("Android unconditional keep-booted cleaning", () => {
       false,
     );
   });
+
+  test("production shared-file intents are never baseline-covered", () => {
+    for (const target of [
+      { domain: "user_files", namespace: "test", reset: true },
+      { domain: "app_container", appId: "a.b", container: "files" },
+    ]) {
+      const rows = deviceToolMutations(
+        "putAppFile",
+        { target, files: [{ destinationPath: "x" }] },
+        "android",
+      );
+      expect(rows.length).toBeGreaterThan(0);
+      for (const row of rows) {
+        expect(Array.isArray(JSON.parse(row.key))).toBe(true);
+        for (const priorValue of [
+          { state: "absent" as const },
+          { state: "present" as const, value: "old" },
+        ]) {
+          expect(androidBaselineCleanCovers({ ...row, priorValue })).toBe(false);
+        }
+      }
+    }
+  });
+
+  test("production accessibility, font-scale and time-format rows require a journal revert", () => {
+    const rows = [
+      ...deviceToolMutations(
+        "displayConfig",
+        {
+          fontScale: 1.2,
+          increaseContrast: true,
+          reduceMotion: true,
+          boldText: true,
+          colorInversion: true,
+          colorCorrection: "grayscale",
+          magnification: true,
+          magnificationScale: 3,
+          extraDim: true,
+        },
+        "android",
+      ),
+      ...deviceToolMutations("changeLocalization", { timeFormat: "24" }, "android"),
+    ];
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(androidBaselineCleanCovers({ ...row, priorValue: { state: "unobservable" } })).toBe(
+        false,
+      );
+    }
+  });
+
+  test.each([
+    {
+      tool: "displayConfig",
+      args: { colorInversion: true },
+      namespace: "secure",
+      key: "accessibility_display_inversion_enabled",
+      value: "1",
+    },
+    {
+      tool: "displayConfig",
+      args: { reduceMotion: true },
+      namespace: "global",
+      key: "animator_duration_scale",
+      value: "0",
+    },
+    {
+      tool: "changeLocalization",
+      args: { timeFormat: "24" },
+      namespace: "system",
+      key: "time_12_24",
+      value: "24",
+    },
+  ])(
+    "$tool $args escalates before a non-critical settings restore can fail",
+    async ({ tool, args, namespace, key, value }) => {
+      let fallbacks = 0;
+      const { adb, reply, journal, reset } = await rig([0], {
+        reset: async () => {
+          fallbacks++;
+          return { outcome: "clean", mode: "snapshot", phases: {} };
+        },
+      });
+      reply(`shell settings --user 0 list ${namespace}`, `${key}=${value}`);
+      const failedCommand =
+        key === "animator_duration_scale"
+          ? "shell settings --user 0 put global animator_duration_scale '0.5'"
+          : `shell settings --user 0 delete ${namespace} ${key}`;
+      adb.setCommandResponse(failedCommand, createExecResult("Error: refused", ""));
+      const rows = deviceToolMutations(tool, args, "android");
+      expect(rows).toHaveLength(1);
+      for (const row of rows) {
+        await journal.record(SCOPE, {
+          ...row,
+          toolName: tool,
+          priorValue: { state: "unobservable" },
+        });
+      }
+      expect(await reset()).toMatchObject({ outcome: "fallback:snapshot" });
+      expect(fallbacks).toBe(1);
+      expect(adb.getExecutedCommands()).toEqual([]);
+    },
+  );
 
   async function displayRig(verify = true) {
     const { adb, reply } = androidBaselineRig();

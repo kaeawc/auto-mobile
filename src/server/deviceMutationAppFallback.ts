@@ -19,7 +19,7 @@ export interface AppFallbackEvidence {
 
 function fallbackTarget(
   mutation: ToolMutation,
-): { tool: (typeof APP_FALLBACK_TOOLS)[number]; appId: string | null } | null {
+): { tool: (typeof APP_FALLBACK_TOOLS)[number]; appId: string | null; keepData: boolean } | null {
   if (!opaqueForcesFallback(mutation)) {
     return null;
   }
@@ -27,7 +27,13 @@ function fallbackTarget(
     const parts: unknown = JSON.parse(mutation.key.slice(FALLBACK_OPAQUE_KEY_PREFIX.length));
     const tool = Array.isArray(parts) ? APP_FALLBACK_TOOLS.find((name) => name === parts[0]) : null;
     const appId = Array.isArray(parts) && typeof parts[1] === "string" ? parts[1] : null;
-    return tool ? { tool, appId } : null;
+    return tool
+      ? {
+          tool,
+          appId,
+          keepData: tool === "uninstallApp" && Array.isArray(parts) && parts[2] === true,
+        }
+      : null;
   } catch (error) {
     // Another family's opaque intent need not parse as an app key; it is kept as recorded.
     logger.debug(
@@ -41,7 +47,8 @@ function fallbackTarget(
  * Drops an app `fallback:` intent when the keep-booted clean already covers it, so the common
  * install, clear, test, uninstall flow does not escalate every reset. An app the baseline did not
  * hold and the session installed is removed (data included) by the clean; anything else, or an
- * unreadable baseline, keeps the intent.
+ * unreadable baseline, keeps the intent. Data-kept uninstalls always keep it because removed
+ * packages are invisible to the clean inventory.
  */
 export async function withoutSessionCoveredFallbacks<Mutation extends ToolMutation>(
   mutations: readonly Mutation[],
@@ -50,7 +57,7 @@ export async function withoutSessionCoveredFallbacks<Mutation extends ToolMutati
   const kept: Mutation[] = [];
   for (const mutation of mutations) {
     const target = fallbackTarget(mutation);
-    if (!target) {
+    if (!target || target.keepData) {
       kept.push(mutation);
       continue;
     }

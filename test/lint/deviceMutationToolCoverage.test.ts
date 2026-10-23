@@ -82,6 +82,11 @@ describe("device mutation tool coverage", () => {
   });
 
   test.each([
+    "sendSms",
+    "phoneCall",
+    "sqlQuery",
+    "resetAppLogs",
+    "rotate",
     "sendBroadcast",
     "backgroundWork",
     "launchApp",

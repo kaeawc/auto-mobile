@@ -34,15 +34,37 @@ journaling.
 Keep-booted resets run baseline cleaning unconditionally when journal checks allow
 it. Fallback-prefixed opaque rows force baseline fallback. Unrevertible journal
 rows also force fallback unless baseline cleaning already restores their effects:
-packages, absent-prior files in swept public roots, clipboard, rotation, screen
-reader, keep-awake, settings-backed keyboard rows, settings and display, transient
-opened URLs, and screen state via the next wakeAndUnlock. Preferences are skipped
-by replay and require fallback unless their JSON key identifies an app absent
-from the readable baseline inventory, which cleaning uninstalls with its data.
-CtrlProxy keyboard profiles and overwritten or app-scoped files are not covered
-by baseline cleaning. Other opaque rows remain best-effort breadcrumbs. Missing inventory coverage alone does not block Android
-cleaning; uncovered journaled effects cannot silently survive a clean reset
-(#15105).
+packages, clipboard, rotation, screen reader, keep-awake, raw global/system/secure
+settings, verified display rows (`density`, `nightMode` and `display:*`), transient
+opened URLs, and screen state via the next wakeAndUnlock. Settings-backed adapter
+keys (`fontScale`, `timeFormat` and accessibility display preferences) require a
+journal revert or fallback: non-critical settings restore failures only warn and
+are not re-verified.
+Preferences are skipped by replay and require fallback unless their JSON key
+identifies an app absent from the readable baseline inventory, which cleaning
+uninstalls with its data. The app-owned interaction breadcrumbs
+`preference:tool:setUIState` and `preference:focused-field` make no store claims.
+Permission rows require a journal revert or fallback, including for apps absent
+from the baseline: notification-policy access can persist for a never-installed
+package.
+
+Production shared-file intents have JSON-array keys and require a journal revert;
+the public-root file sweep does not cover those intents. CtrlProxy keyboard rows
+(`keyboard:tool:keyboard` and `keyboard:profile`) are not restored by settings
+cleaning and require a revert. Power controls also require their verified journal
+revert; baseline cleaning never covers `power:*`.
+
+SMS, phone calls, SQL writes or unclassified queries, app-log deletion and
+secondary-display rotation record fallback opaque intents. Read-only SQL records
+nothing. iOS keep-booted also escalates to erase on the `fallback:` intents
+recorded by `sqlQuery` writes, `resetAppLogs`, `sendSms` and `phoneCall`.
+A data-kept uninstall always retains its fallback intent, including for
+a session-installed app, because the clean's package inventory cannot see removed
+packages whose data remains. Plain uninstalls of session-installed apps absent
+from the baseline remain covered; installs over baseline-held apps escalate.
+Other opaque rows remain best-effort breadcrumbs. Missing inventory coverage alone
+does not block Android cleaning; uncovered journaled effects cannot silently
+survive a clean reset (#15105).
 
 **Recorder failure policy**: unavailable recorder for a broker session means
 recovery failed; recorder binding/recovery failures, scope mismatches and journal

@@ -1,5 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import type { Kysely } from "kysely";
+import { SessionDeviceMutationRecording } from "../../../src/server/deviceMutationRecording";
+import { FamilyMutationPriorReader } from "../../../src/server/deviceMutationFamilyPriorReader";
+import { androidBaselineCleanCovers } from "../../../src/daemon/sessionBroker/androidKeepBootedCleanup";
 import { deviceToolMutations } from "../../../src/server/deviceMutationAdapters";
 import { AndroidBaselineReset } from "../../../src/daemon/sessionBroker/androidBaselineReset";
 import { AndroidKeepBootedReset } from "../../../src/daemon/sessionBroker/androidKeepBootedReset";
@@ -66,6 +69,7 @@ describe("Android journal writer/reset scope", () => {
     // Model the production port's unsupported/unobservable prior values explicitly.
     for (const kind of [
       "installed-app",
+      "permission",
       "location",
       "opaque",
       "device-setting",
@@ -116,6 +120,7 @@ describe("Android journal writer/reset scope", () => {
     });
     return {
       journal,
+      port,
       scope,
       recorder: new SessionMutationRecorder(journal, scope),
       reset: () =>
@@ -239,7 +244,62 @@ describe("Android journal writer/reset scope", () => {
     heldApp?: string;
   }[] = [
     { name: "rotate", args: { orientation: "landscape" }, clean: true },
-    { name: "displayConfig", args: { density: 320, theme: "dark", fontScale: 1.2 }, clean: true },
+    { name: "rotate", args: { display: 2 }, clean: false },
+    { name: "sendSms", args: { to: "123", message: "hello" }, clean: false },
+    { name: "phoneCall", args: { phoneNumber: "123" }, clean: false },
+    {
+      name: "sqlQuery",
+      args: { appId: "a.b", databasePath: "db", query: "UPDATE t SET x=1" },
+      heldApp: "a.b",
+      clean: false,
+    },
+    { name: "resetAppLogs", args: { appId: "a.b", paths: ["a.log"] }, clean: false },
+    { name: "setUIState", args: { appId: "a.b" }, heldApp: "a.b", clean: true },
+    { name: "clipboard", args: { action: "paste" }, heldApp: "a.b", clean: true },
+    {
+      name: "setAppPermissions",
+      args: { appId: "new.app", permissions: ["android.permission.CAMERA"] },
+      clean: false,
+    },
+    {
+      name: "setAppPermissions",
+      args: { appId: "a.b", permissions: ["android.permission.CAMERA"] },
+      heldApp: "a.b",
+      clean: false,
+    },
+    {
+      name: "setAppPermissions",
+      args: { appId: "never.installed", notificationPolicyAccess: true },
+      clean: false,
+    },
+    { name: "keyboard", args: { action: "press", key: "enter" }, clean: false },
+    ...[
+      "increaseContrast",
+      "reduceMotion",
+      "boldText",
+      "colorInversion",
+      "colorCorrection",
+      "magnification",
+      "magnificationScale",
+      "extraDim",
+    ].map((key) => ({
+      name: "displayConfig",
+      args: {
+        [key]: key === "magnificationScale" ? 2 : key === "colorCorrection" ? "grayscale" : true,
+      },
+      clean: false,
+    })),
+    { name: "changeLocalization", args: { timeFormat: "24" }, clean: false },
+    {
+      name: "putAppFile",
+      args: {
+        target: { domain: "user_files", namespace: "test" },
+        files: [{ destinationPath: "/sdcard/Download/x" }],
+      },
+      clean: false,
+    },
+    { name: "displayConfig", args: { density: 320, theme: "dark" }, clean: true },
+    { name: "displayConfig", args: { fontScale: 1.2 }, clean: false },
     { name: "openLink", args: { url: "https://example.com" }, clean: true },
     { name: "accessibility", args: { talkback: true }, clean: true },
     { name: "keyboard", args: { action: "setProfile", profile: "default" }, clean: false },
@@ -273,6 +333,84 @@ describe("Android journal writer/reset scope", () => {
     },
     { name: "setPreference", args: { scope: "sharedPreferences", key: "x" }, clean: false },
   ];
+
+  test.each([
+    { tool: "uninstallApp", keepData: true, held: false, clean: false },
+    { tool: "uninstallApp", keepData: false, held: false, clean: true },
+    { tool: "installApp", keepData: false, held: true, clean: false },
+  ])(
+    "production $tool keepData=$keepData held=$held through app filtering and reset",
+    async ({ tool, keepData, held, clean }) => {
+      const r = await rig(held ? "a.b" : undefined);
+      const recording = new SessionDeviceMutationRecording(
+        () => r.recorder,
+        new FamilyMutationPriorReader([]),
+        { appId: async () => "a.b" },
+      );
+      // The production recording layer calls adapters, withoutSessionCoveredFallbacks and recorder.
+      // After uninstall, pm list packages -3 cannot see a removed package with data kept.
+      await recording.beforeToolCall(
+        "installApp",
+        { artifactPath: "/fixture.apk" },
+        ANDROID_RESET_DEVICE,
+        r.scope.sessionUuid,
+      );
+      await recording.beforeToolCall(
+        tool,
+        { appId: "a.b", keepData },
+        ANDROID_RESET_DEVICE,
+        r.scope.sessionUuid,
+      );
+      const rows = await r.journal.list(r.scope);
+      expect(rows.some((row) => row.kind === "opaque")).toBe(!clean);
+      if (keepData) {
+        expect(rows).toContainEqual(
+          expect.objectContaining({
+            kind: "opaque",
+            key: opaqueIntentKey("uninstallApp", "a.b", true),
+          }),
+        );
+      }
+      expect(await r.reset()).toMatchObject({ outcome: clean ? "clean" : "fallback:snapshot" });
+      expect(r.fallbacks()).toBe(clean ? 0 : 1);
+    },
+  );
+
+  test.each(["power:battery", "power:standby:a.b"])(
+    "%s requires a revert and replays when revertible",
+    async (key) => {
+      const r = await rig();
+      const row = {
+        kind: "device-setting",
+        key,
+        toolName: "setDeviceState",
+        priorValue: {
+          state: "present" as const,
+          value: key === "power:battery" ? { powered: true, status: 2, level: 100 } : "active",
+        },
+      };
+      expect(androidBaselineCleanCovers(row)).toBe(false);
+      r.port.unsupportedKinds.delete("device-setting");
+      await r.recorder.record(row);
+      expect(await r.reset()).toMatchObject({ outcome: "clean" });
+      expect(r.port.reverted).toContainEqual(expect.objectContaining({ kind: row.kind, key }));
+    },
+  );
+
+  test.each(["power:battery", "power:standby:a.b"])(
+    "%s escalates without a revert",
+    async (key) => {
+      const r = await rig();
+      await r.recorder.record({
+        kind: "device-setting",
+        key,
+        toolName: "setDeviceState",
+        priorValue: { state: "unobservable" },
+      });
+      expect(await r.reset()).toMatchObject({ outcome: "fallback:snapshot" });
+    },
+  );
+
   test.each(adapterCases)(
     "production $name $args => clean=$clean",
     async ({ name, args, clean, heldApp }) => {
@@ -289,24 +427,11 @@ describe("Android journal writer/reset scope", () => {
 
   test.each([
     {
-      kind: "shared-file",
-      key: "/sdcard/Download/x",
-      priorValue: { state: "absent" },
-      clean: true,
-    },
-    {
-      kind: "shared-file",
-      key: "/sdcard/Download/x",
-      priorValue: { state: "present", value: "original" },
-      clean: false,
-    },
-    {
       kind: "notification",
       key: "system:fake",
       priorValue: { state: "unobservable" },
       clean: false,
     },
-    { kind: "shared-file", key: "/sdcard/Other/x", priorValue: { state: "absent" }, clean: false },
     { kind: "clock", key: "device", priorValue: { state: "unobservable" }, clean: false },
     {
       kind: "preference",
@@ -314,7 +439,6 @@ describe("Android journal writer/reset scope", () => {
       priorValue: { state: "unobservable" },
       clean: false,
     },
-    { kind: "opaque", key: "tool:sendSms", priorValue: { state: "unobservable" }, clean: true },
   ] satisfies (Pick<DeviceMutationInput, "kind" | "key" | "priorValue"> & { clean: boolean })[])(
     "$kind:$key $priorValue => clean=$clean",
     async ({ clean, ...entry }) => {

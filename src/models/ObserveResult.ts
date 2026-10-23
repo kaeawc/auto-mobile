@@ -1,3 +1,4 @@
+import type { DeviceLockUnknown } from "./DeviceLockState";
 import { Element } from "./Element";
 import { DeviceLockState } from "./DeviceLockState";
 import { ScreenSize } from "./ScreenSize";
@@ -383,11 +384,12 @@ export type ObserveResult = {
 
   /**
    * Structured device-lock signal (Android and iOS simulators). Present when the lock state
-   * could be read; absent when it could not. Lets an agent detect it is looking
+   * could be read; iOS simulator failures carry deviceLockUnknown instead. Lets an agent detect it is looking
    * at the keyguard rather than the app, and decide whether to dismiss a swipe
    * lock itself or stop and ask the user for a PIN (issue #4235).
    */
   deviceLock?: DeviceLockState;
+  deviceLockUnknown?: DeviceLockUnknown;
 
   /**
    * Android user ID for the foreground app (Android only)

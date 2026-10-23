@@ -41,7 +41,7 @@ test("wakeAndUnlock renders the no-swipe-needed message after a post-wake unlock
         async read() {
           calls.push("read");
           const locked = ++reads === 1;
-          return { locked, keyguardShowing: locked };
+          return { kind: "known", lock: { locked, keyguardShowing: locked } };
         },
       },
       iosUnlocker: new IosLockScreenUnlocker(

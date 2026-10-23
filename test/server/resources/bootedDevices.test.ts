@@ -1028,8 +1028,11 @@ describe("MCP Booted Device Resources", () => {
               throw new Error("fake iOS lock failure");
             }
             return scenario.locked === undefined
-              ? undefined
-              : { locked: scenario.locked, keyguardShowing: scenario.locked };
+              ? { kind: "unknown", reason: "error" }
+              : {
+                  kind: "known",
+                  lock: { locked: scenario.locked, keyguardShowing: scenario.locked },
+                };
           },
         };
         const read = spyOn(probe, "read");

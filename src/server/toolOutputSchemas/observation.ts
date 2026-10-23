@@ -36,6 +36,7 @@ import {
   observeScopeMetadataSchema,
   predictionsSchema,
   deviceLockSchema,
+  deviceLockUnknownSchema,
   perfSnapshotSchema,
 } from "./observationMetadata";
 import { accessibilityStateSchema } from "./accessibility";
@@ -484,6 +485,7 @@ export const observeResultSchema = z
     predictions: predictionsSchema.optional(),
     accessibilityState: accessibilityStateSchema.optional(),
     deviceLock: deviceLockSchema.optional(),
+    deviceLockUnknown: deviceLockUnknownSchema.optional(),
     perfSnapshot: perfSnapshotSchema.optional(),
     observeScope: observeScopeMetadataSchema.optional(),
   })

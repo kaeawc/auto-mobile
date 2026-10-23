@@ -15455,6 +15455,20 @@
           "required": ["locked", "keyguardShowing"],
           "additionalProperties": false
         },
+        "deviceLockUnknown": {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "type": "string",
+              "enum": ["timeout", "pending", "error", "unparseable"]
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": ["reason"],
+          "additionalProperties": false
+        },
         "perfSnapshot": {
           "type": "object",
           "properties": {

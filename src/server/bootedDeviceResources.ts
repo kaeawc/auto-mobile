@@ -61,6 +61,7 @@ import { IOSCtrlProxyManager } from "../ctrlProxy/IOSCtrlProxyManager";
 import type { ForcedRestartSnapshot } from "../ctrlProxy/ForcedRestartBudget";
 import {
   NotifyutilIosLockStateProbe,
+  lockStateOf,
   type IosLockStateProbe,
 } from "../features/observe/ios/IosLockStateProbe";
 import { resolveIosDeviceKind } from "../utils/ios-cmdline-tools/IosDeviceKind";
@@ -382,8 +383,7 @@ async function realDeviceLockProbe(device: BootedDevice, signal?: AbortSignal): 
       return undefined;
     }
     const probe = injectedIosLockStateProbe ?? new NotifyutilIosLockStateProbe();
-    const lock = await probe.read(device.deviceId, signal);
-    return lock?.locked;
+    return lockStateOf(await probe.read(device.deviceId, signal))?.locked;
   }
   const lock = await defaultAdbClientFactory.create(device).getDeviceLock();
   return lock?.locked;

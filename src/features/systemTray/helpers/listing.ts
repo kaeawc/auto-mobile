@@ -41,6 +41,22 @@ export const listSystemTrayNotifications = (
   signal?: AbortSignal,
 ) => listNotifications({ device, appId, appLabel, awaitTimeoutMs, signal }, trayListingContext);
 
+/**
+ * The pass clearAll takes before swiping: it ends with the shade collapsed and no read of it,
+ * since the drain opens and reads the shade itself.
+ */
+export const listSystemTrayNotificationsForClear = (
+  device: BootedDevice,
+  appId: string,
+  appLabel: string | null,
+  awaitTimeoutMs: number,
+  signal?: AbortSignal,
+) =>
+  listNotifications(
+    { device, appId, appLabel, awaitTimeoutMs, signal, skipTerminalObservation: true },
+    trayListingContext,
+  );
+
 export const readActiveNotificationKeysForApp = (
   device: BootedDevice,
   appId: string,

@@ -3,6 +3,10 @@ import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { expect, test } from "bun:test";
+import {
+  createDirectModeAppearanceDeviceSource,
+  type AppearanceDeviceSource,
+} from "../../src/daemon/appearanceSocketServer";
 import { startDirectModeServices } from "../../src/startup/stdioServer";
 
 test("direct-mode services start sockets without host appearance sync", async () => {
@@ -10,6 +14,8 @@ test("direct-mode services start sockets without host appearance sync", async ()
   const readiness = DeviceReadiness.createInstance(
     new FakeDeviceClientProvider(new FakeAdbExecutor(), new FakeDeviceUtils()),
   );
+  const pinned = { deviceId: "emulator-5556", name: "Pinned", platform: "android" } as const;
+  readiness.setExplicitDevicePin(pinned);
   const modules = {
     startVideoRecordingSocketServer: async () => {
       calls.push("video");
@@ -23,9 +29,12 @@ test("direct-mode services start sockets without host appearance sync", async ()
     startDeviceSnapshotSocketServer: async () => {
       calls.push("snapshot");
     },
-    startAppearanceSocketServer: async () => {
+    startAppearanceSocketServer: async (source?: AppearanceDeviceSource) => {
       calls.push("appearance");
+      // The sessionless targets of a direct process are its explicit pin (#14375).
+      expect(source?.getSessionlessDevices?.()).toEqual([pinned]);
     },
+    createDirectModeAppearanceDeviceSource: createDirectModeAppearanceDeviceSource,
     startWebRtcStreamSocketServer: async () => {
       calls.push("webrtc");
     },

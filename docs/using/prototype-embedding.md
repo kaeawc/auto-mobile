@@ -31,13 +31,14 @@ server, so the server that authored the spec names the first library version tha
 
 ## Read the native resource
 
-Ask the agent to read `automobile:prototype/native?id=<id>` for a prototype it has shown or saved.
-Optional parameters:
+Ask the agent to read `automobile:prototype/native?id=<id>` for a prototype it is showing, or
+`automobile:prototype/native?id=<id>&deviceId=<device>` for one that is saved but no longer shown.
+Parameters:
 
-| Parameter  | Meaning                                                                                       |
-| ---------- | --------------------------------------------------------------------------------------------- |
-| `platform` | `android` or `ios`. Defaults to the platform of the device that showed the prototype.         |
-| `deviceId` | The device that showed or saved it. Needed only when the id is shown on more than one device. |
+| Parameter  | Meaning                                                                                                                                                             |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `platform` | `android` or `ios`. Defaults to the platform of the device that showed the prototype.                                                                               |
+| `deviceId` | The device that showed or saved it. Required for a saved prototype that no device is showing, and when the id is shown on more than one device; otherwise optional. |
 
 The JSON result holds:
 
@@ -45,7 +46,8 @@ The JSON result holds:
 - `requiredCapabilities` and `minimumLibraryVersion`: what the spec needs from the renderer.
 - `files`: the spec (`spec.json`) and the host file, each with the path it goes to.
 - `assets`: each referenced image or font, its path, and whether the host has its bytes. Read a
-  saved prototype's bytes from `automobile:prototype/native/asset?id=<id>&assetId=<asset>`.
+  saved prototype's bytes from the asset's `uri`, which is
+  `automobile:prototype/native/asset?id=<id>&assetId=<asset>&deviceId=<device>`.
 - `notes`: anything the app must still do, such as supplying asset files or an HTTP client.
 
 ## Where the files go

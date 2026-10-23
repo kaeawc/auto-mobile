@@ -32,14 +32,10 @@ Android Auto projects a phone's UI to a head unit; Automotive OS is a full Andro
 
 ## Android TV: go
 
-TV navigation is a focus problem; D-pad keys can be sent and the focused element comes back in every observation. Missing: a loop connecting them, and possibly one key.
+TV navigation is a focus problem: D-pad keys can be sent and the focused element comes back in every observation. `focusNavigate` is the loop that connects them.
 
-1. **Activate focused item.** Android treats `KEYCODE_ENTER` and `KEYCODE_DPAD_CENTER` both as select, so `enter` may suffice (test first, checklist row 3). If not, add `select` (`KEYCODE_DPAD_CENTER`) to **both** `SUPPORTED_INPUT_KEYS` and `INPUT_KEY_CODE_MAP`: `InputKeyName` derives from the first and the second is checked against it, so one entry alone does not compile.
-
-> [!NOTE]
-> Implemented (#14947) as `focusNavigate` (`src/features/action/FocusNavigate.ts`), Android only, matching `until` on `text`, `contentDesc` and `resourceId`. No `select` key was added: `enter` is the activation key until checklist row 3 shows otherwise on a TV image. Still unverified on a device, including whether `focused` appears for Leanback's focus ring.
-
-2. **`focusNavigate({ until, direction?, maxSteps?, settleMs? })`.** Observe; stop if the focused element matches `until`; else press one D-pad key and repeat. Returns the path of focused elements.
+1. **Activate focused item.** Android treats `KEYCODE_ENTER` and `KEYCODE_DPAD_CENTER` both as select, so `enter` is the activation key and no `select` key exists. If checklist row 3 shows `enter` does not activate on a TV image, add `select` (`KEYCODE_DPAD_CENTER`) to **both** `SUPPORTED_INPUT_KEYS` and `INPUT_KEY_CODE_MAP`: `InputKeyName` derives from the first and the second is checked against it, so one entry alone does not compile.
+2. **`focusNavigate({ until, direction?, maxSteps?, settleMs? })`** (`src/features/action/FocusNavigate.ts`, Android only). Observe; stop if the focused element matches `until`; else press one D-pad key and repeat. `until` matches on `text`, `contentDesc` and `resourceId`. Returns the path of focused elements.
    - Direction: given `direction`, else the arrow from the focused element's bounds centre toward the nearest `until` match; with no match on screen, `arrow_down`.
    - Stops on match, `maxSteps` (default 30), or two consecutive presses leaving focus unchanged. Statuses: `focused`, `max_steps`, `stuck`.
    - Why a tool, not an agent loop: one call replaces up to 30 round-trips, and stuck detection needs the previous observation.
@@ -89,10 +85,6 @@ Record command, image id and API level.
 | 9   | Automotive (`android-automotive`)        | Install, enable and `observe`; behavior of the secondary displays                                                                                                   |
 | 10  | Any                                      | `sdkmanager --list` shows the tags named above; `avdmanager list device` shows the profile ids                                                                      |
 
-## Follow-ups (under #14072)
-
-- **#14946** form-factor vocabulary (`tv`, `watch`, `automotive`); buildable first.
-- **#14947** TV: `focusNavigate`, `select` key if needed (rows 1-4).
-- **#14948** Wear OS: rotary scroll, `isScreenRound`, ambient toggle if row 7 finds a command (rows 5-8).
+## Not covered
 
 Android Auto projection is a documented no-go; Automotive OS has no follow-up until rows 9 and 10 run.

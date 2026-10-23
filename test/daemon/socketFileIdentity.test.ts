@@ -47,20 +47,51 @@ describe("socket file identity", () => {
     });
 
     test("owned when the path still holds the recorded file", () => {
-      expect(classifySocketPath(recorded, "p", fsWith(() => recorded))).toBe("owned");
+      expect(
+        classifySocketPath(
+          recorded,
+          "p",
+          fsWith(() => recorded),
+        ),
+      ).toBe("owned");
     });
 
     test("gone when nothing exists at the path", () => {
-      expect(classifySocketPath(recorded, "p", fsWith(() => recorded, false))).toBe("gone");
+      expect(
+        classifySocketPath(
+          recorded,
+          "p",
+          fsWith(() => recorded, false),
+        ),
+      ).toBe("gone");
     });
 
     test("replaced when the path holds a different file", () => {
       const other = { dev: 7n, ino: 10n };
-      expect(classifySocketPath(recorded, "p", fsWith(() => other))).toBe("replaced");
+      expect(
+        classifySocketPath(
+          recorded,
+          "p",
+          fsWith(() => other),
+        ),
+      ).toBe("replaced");
     });
 
     test("replaced when the identity was never recorded but the path is readable now", () => {
-      expect(classifySocketPath(null, "p", fsWith(() => recorded))).toBe("replaced");
+      expect(
+        classifySocketPath(
+          null,
+          "p",
+          fsWith(() => recorded),
+        ),
+      ).toBe("replaced");
+    });
+
+    test("gone when a recorded path is unlinked between the exists check and the stat", () => {
+      const raced = fsWith(() => {
+        throw errno("ENOENT");
+      });
+      expect(classifySocketPath(recorded, "p", raced)).toBe("gone");
     });
 
     test("replaced when a recorded identity can no longer be read", () => {

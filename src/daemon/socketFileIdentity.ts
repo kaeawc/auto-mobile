@@ -44,11 +44,12 @@ export function classifySocketPath(
     // An unreadable bound socket is expected on Windows; preserve uncertainty when
     // no bind identity exists, but never assume ownership after losing a known identity.
     logger.debug(`Socket path identity unavailable at ${socketPath}: ${error}`, error);
-    if (recorded !== null) {
-      return "replaced";
-    }
     const code = error !== null && typeof error === "object" && "code" in error ? error.code : null;
-    return code === "ENOENT" || code === "ENOTDIR" ? "gone" : "unverifiable";
+    if (code === "ENOENT" || code === "ENOTDIR") {
+      // Unlinked between the exists check and the stat: nothing is left to protect.
+      return "gone";
+    }
+    return recorded !== null ? "replaced" : "unverifiable";
   }
 }
 

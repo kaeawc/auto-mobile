@@ -9,6 +9,7 @@ import {
 import { AuxiliarySocketBindConflict } from "../auxiliarySocketAvailability";
 import { AuxiliarySocketOwner } from "../auxiliarySocketOwner";
 import {
+  classifySocketPath,
   isOwnedSocketFile,
   readSocketFileIdentity,
   type SocketFileIdentity,
@@ -182,13 +183,14 @@ export abstract class BaseSocketServer {
     // (fast restart) we must NOT close — that would remove their socket and sever
     // live subscribers (e.g. IDE-plugin observation streams). Instead unref and
     // leave the dead listener for process teardown.
-    const ownsSocketPath = this.isOwnedSocketFile();
+    const state = classifySocketPath(this.socketFileIdentity, this.socketPath);
+    const ownsSocketPath = state === "owned";
 
     if (ownsSocketPath) {
       this.socketOwner.remove(this.socketPath);
     }
 
-    if (ownsSocketPath || !existsSync(this.socketPath)) {
+    if (state !== "replaced") {
       await new Promise<void>((resolve) => {
         this.server!.close(() => resolve());
       });
@@ -229,12 +231,13 @@ export abstract class BaseSocketServer {
   }
 
   /**
-   * Return true only while this server is listening through the same socket file
-   * it created. A listening Unix server whose path was unlinked or replaced is
+   * Return true while the socket path is owned or its identity cannot be verified.
+   * A listening Unix server whose path was unlinked or replaced is
    * still alive for existing connections, but new clients cannot reach it there.
    */
   hasActiveSocketPath(): boolean {
-    return this.isOwnedSocketFile();
+    const state = classifySocketPath(this.socketFileIdentity, this.socketPath);
+    return state === "owned" || state === "unverifiable";
   }
 
   /**

@@ -44,6 +44,7 @@ A read never writes settings on a device another session holds. A sessionless re
 | 🤌 <code>pinchOn</code>       | Pinch to zoom                                                                                |
 | 🖐️ <code>multiTouch</code>    | Simultaneous 2-5 finger tap, long press, or swipe at a screen point                          |
 | ⌨️ <code>sendKeys</code>      | Execute ordered typing, clear, raw-key, and semantic IME commands                            |
+| 🧭 <code>focusNavigate</code> | Move D-pad focus to an element on Android TV; stops `focused`, `max_steps` or `stuck`        |
 | 🎛️ <code>setUIState</code>    | Set multiple form fields by desired state                                                    |
 | 📝 <code>selectAllText</code> | Select all text in focused input                                                             |
 | 🔘 <code>pressButton</code>   | Press a device or navigation button                                                          |
@@ -154,6 +155,17 @@ A read never writes settings on a device another session holds. A sessionless re
 | ✅ <code>accessibilityAudit</code>  | Run the platform's own accessibility audit engine on the current screen |
 | 🧾 <code>audit</code>               | Audit the current screen on demand                                      |
 | 🧩 <code>setToolEnabled</code>      | Show or hide tools in discovery                                         |
+
+## 📺 Android TV focus navigation
+
+`focusNavigate({ until, direction?, maxSteps?, settleMs? })` (#14947) drives focus-based UIs. It observes, and
+while the input-focused element (`focusedElement`) does not match `until` (`text`, `contentDesc` and/or `resourceId`) it
+presses the D-pad arrow toward the nearest match, or `direction` when given, then observes again. With no focused
+element or no match on screen it presses down. It returns the `path` of focused elements and a `status`: `focused`,
+`max_steps` (default 30, at most 100) or `stuck` (two presses left focus unchanged). Activate the focused item
+afterwards with `sendKeys` key `enter`; Android treats `KEYCODE_ENTER` and `KEYCODE_DPAD_CENTER` both as select, so no
+separate `select` key exists. Android only; not yet verified on a TV image
+(see `docs/design-docs/plat/android/form-factors.md`).
 
 ## 📝 Notes
 

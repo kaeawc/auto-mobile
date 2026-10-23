@@ -43,6 +43,7 @@ import { registerPerformanceTraceTools } from "./performanceTraceTools";
 import { registerFormTools } from "./formTools";
 import { registerAccessibilityTools } from "./accessibilityTools";
 import { registerAccessibilityFocusTools } from "./accessibilityFocusTools";
+import { focusNavigateTool } from "./focusNavigateTool";
 import { registerNetworkTools } from "./networkTools";
 import { registerKillProfileTools } from "./killProfileTools";
 import { registerSystemAlertTools } from "./systemAlertTools";
@@ -127,6 +128,7 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerFormTools();
   registerAccessibilityTools();
   registerAccessibilityFocusTools();
+  focusNavigateTool.register();
   registerNetworkTools();
   registerKillProfileTools();
   registerSystemAlertTools();

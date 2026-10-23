@@ -120,6 +120,7 @@ const FORMER_PLAN_RELEVANT_TOOLS = [
   "displayProfile",
   "dragAndDrop",
   "dragPath",
+  "focusNavigate",
   "homeScreen",
   "getLogs",
   "keyboard",

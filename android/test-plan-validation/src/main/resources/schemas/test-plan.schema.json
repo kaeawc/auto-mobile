@@ -1913,6 +1913,7 @@
                 "lowPower": { "type": "string", "enum": ["on", "unset"] },
                 "doze": { "type": "string", "enum": ["on", "unset"] },
                 "thermal": { "type": "string", "enum": ["throttling", "critical", "unset"] },
+                "storage": { "type": "string", "enum": ["low", "full", "unset"] },
                 "dontKeepActivities": { "type": "string", "enum": ["on", "unset"] }
               },
               "additionalProperties": false

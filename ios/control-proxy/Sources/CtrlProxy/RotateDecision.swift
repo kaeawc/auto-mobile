@@ -84,8 +84,10 @@ struct RotateDecision: Sendable {
         let deviceAxis = AppAxis.from(orientation: deviceBefore)
         let matches: Bool
         if let appAxisBefore {
-            matches = appAxisBefore == target.axis &&
-                (target.isCoarse || (deviceAxis != nil && deviceBefore == target.orientation))
+            // A known device axis that contradicts the target is stale state the next app inherits.
+            let deviceAgrees = deviceAxis == nil || deviceAxis == target.axis
+            let exactDevice = deviceAxis != nil && deviceBefore == target.orientation
+            matches = appAxisBefore == target.axis && ((target.isCoarse && deviceAgrees) || exactDevice)
         } else {
             matches = deviceAxis != nil &&
                 (deviceBefore == target.orientation || (target.isCoarse && deviceAxis == target.axis))

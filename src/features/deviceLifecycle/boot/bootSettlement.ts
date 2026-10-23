@@ -83,19 +83,24 @@ export function stopUnownedColdBoot(boot: DeviceBootResult | undefined): Promise
     // Unnamed: cancelling an unowned cold boot is not the session giving the device up.
     defaultDaemonContext.devicePoolWrites()?.markIntentionalShutdown(boot.device.deviceId);
   }
+  const settleFence = defaultDaemonContext
+    .devicePoolWrites()
+    ?.fenceUnpooledShutdown(boot.device.deviceId);
   const termination = terminateColdBootProcess(
     boot.processHandle,
     boot.device.deviceId,
     getDeviceToolsDependencies().timer,
   );
-  return termination.confirmed.then((confirmed) => {
-    if (!confirmed) {
-      logger.warn(
-        `[DeviceTools] Unowned cold boot ${boot.device.deviceId} still running after SIGKILL; ` +
-          "releasing its deferred resources anyway",
-      );
-    }
-  });
+  return termination.confirmed
+    .then((confirmed) => {
+      if (!confirmed) {
+        logger.warn(
+          `[DeviceTools] Unowned cold boot ${boot.device.deviceId} still running after SIGKILL; ` +
+            "releasing its deferred resources anyway",
+        );
+      }
+    })
+    .finally(() => settleFence?.());
 }
 
 export function cancelUnownedColdBoot(

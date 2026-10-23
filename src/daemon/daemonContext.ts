@@ -72,6 +72,7 @@ export type DevicePoolWrites = Pick<
   | "clearIntentionalShutdown"
   | "notifyDeviceReady"
   | "markIntentionalShutdown"
+  | "fenceUnpooledShutdown"
   | "reserveDeviceForShutdown"
   | "retireDeviceForShutdown"
   | "settlePooledRuntimeIdentity"

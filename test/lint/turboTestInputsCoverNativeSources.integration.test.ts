@@ -53,6 +53,8 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     "android/build-logic/src/main/kotlin/dev/jasonpearson/automobile/buildlogic/apisignature/ApiSignatureTasks.kt",
     // nativePrototype.test.ts pins the renderer library version to VERSION_NAME (#13729).
     "android/gradle.properties",
+    // androidModulesCiUnitTests.test.ts parses the module list out of it.
+    "android/settings.gradle.kts",
     // nativePrototypeSamples.test.ts compares the committed embedding samples with the
     // resource output (#13732).
     "samples/prototype-embedding/**",
@@ -660,6 +662,10 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
    * blanket allow-list.
    */
   const NOT_READ_EXEMPTIONS: ReadonlyMap<string, string> = new Map([
+    [
+      "android",
+      "androidModulesCiUnitTests.test.ts joins it with module paths from settings.gradle.kts (a declared input) to probe src/test existence; no native tree is read",
+    ],
     [
       "android/protocol",
       "named only in comments of prototypeAppearance.test.ts and CtrlProxyPrototypes.test.ts that cite the Kotlin WebSocketResponseTest; the kotlin tree under it is a declared input",

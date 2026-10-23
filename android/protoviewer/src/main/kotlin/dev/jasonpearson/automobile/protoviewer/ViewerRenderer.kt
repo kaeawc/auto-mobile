@@ -72,9 +72,9 @@ object GuardedViewerRenderer : ViewerRenderer {
 }
 
 /**
- * Hosts the spec's [ComposeView] and stops a measure, layout or draw failure from reaching the
- * view traversal (which would crash the process). The first failure detaches the spec from the
- * traversal and reports once; the activity then replaces this surface with the error screen.
+ * Hosts the spec's [ComposeView] and stops a measure, layout or draw failure from reaching the view
+ * traversal (which would crash the process). The first failure detaches the spec from the traversal
+ * and reports once; the activity then replaces this surface with the error screen.
  */
 // Only constructed in code, never inflated from a layout, so the XML constructors are unneeded.
 @SuppressLint("ViewConstructor")

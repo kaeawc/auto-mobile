@@ -21,7 +21,11 @@ import {
 import type { DaemonSocketReachabilityLike } from "../../../src/daemon/daemonSocketReachability";
 import { AuxiliarySocketHeldError } from "../../../src/daemon/AuxiliarySocketHeldError";
 import { AuxiliarySocketOwner } from "../../../src/daemon/auxiliarySocketOwner";
-import { statFileIdentity, type SocketFileIdentity } from "../../../src/daemon/socketFileIdentity";
+import {
+  statFileIdentity,
+  type SocketFileIdentity,
+  type SocketPathFs,
+} from "../../../src/daemon/socketFileIdentity";
 import { ActionableError } from "../../../src/models/ActionableError";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { DEVICE_DATA_STREAM_SOCKET_CONFIG } from "../../../src/daemon/daemonFiles";
@@ -41,6 +45,16 @@ class TestServer extends BaseSocketServer {
   protected async processLine(_socket: Socket, _line: string): Promise<void> {
     // This test only exercises the bind lifecycle.
   }
+}
+
+class WindowsStatDeniedTestServer extends TestServer {
+  protected override readonly platform: NodeJS.Platform = "win32";
+  protected override readonly socketPathFs: SocketPathFs = {
+    exists: existsSync,
+    stat: () => {
+      throw Object.assign(new Error("stat denied"), { code: "EACCES" });
+    },
+  };
 }
 
 function listenOnSocket(socketPath: string): Promise<NetServer> {
@@ -281,4 +295,47 @@ describe("BaseSocketServer bind guard", () => {
 
     expect(server.hasActiveSocketPath()).toBe(true);
   });
+
+  (isWindows ? test.skip : test)(
+    "reclaims a Windows stat-denied stale path after two probes",
+    async () => {
+      directory = mkdtempSync(join(tmpdir(), "aux-socket-bind-"));
+      const socketPath = join(directory, "stream.sock");
+      writeFileSync(socketPath, "stale");
+      const probes: Array<{ socketPath: string; timeoutMs: number }> = [];
+      server = new WindowsStatDeniedTestServer(socketPath, {
+        isReachable: async (path, timeoutMs) => {
+          probes.push({ socketPath: path, timeoutMs });
+          return false;
+        },
+      });
+
+      await expect(server.start()).resolves.toBeUndefined();
+
+      expect(probes).toEqual([
+        { socketPath, timeoutMs: AUX_SOCKET_BIND_LIVENESS_PROBE_TIMEOUT_MS },
+        { socketPath, timeoutMs: AUX_SOCKET_BIND_LIVENESS_PROBE_TIMEOUT_MS },
+      ]);
+      expect(statSync(socketPath).isSocket()).toBe(true);
+    },
+  );
+
+  (isWindows ? test.skip : test)(
+    "preserves a Windows stat-denied path when the second probe answers",
+    async () => {
+      directory = mkdtempSync(join(tmpdir(), "aux-socket-bind-"));
+      const socketPath = join(directory, "stream.sock");
+      writeFileSync(socketPath, "stale");
+      let probes = 0;
+      server = new WindowsStatDeniedTestServer(socketPath, {
+        isReachable: async () => ++probes === 2,
+      });
+
+      await expect(server.start()).rejects.toBeInstanceOf(AuxiliarySocketHeldError);
+
+      expect(probes).toBe(2);
+      expect(readFileSync(socketPath, "utf8")).toBe("stale");
+      expect(server.isListening()).toBe(false);
+    },
+  );
 });

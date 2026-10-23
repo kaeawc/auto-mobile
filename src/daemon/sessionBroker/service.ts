@@ -1,3 +1,7 @@
+import {
+  InMemoryMutationRecordingGaps,
+  type MutationRecordingGaps,
+} from "./mutations/recordingGaps";
 import { ENV } from "../../config/env";
 import { readEnvInt } from "../../utils/envNumbers";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
@@ -116,6 +120,7 @@ export function sessionBrokerHostLock(
 }
 
 export interface OpenSessionBrokerServiceOptions {
+  recordingGaps?: MutationRecordingGaps;
   mutationSessions?: {
     peekSession(
       sessionUuid: string,
@@ -172,6 +177,14 @@ function nativeCatalogReader(config: SessionBrokerHostConfig) {
   };
 }
 
+/** Share one gap tracker between service recovery and both platform resets. */
+function serviceDependencies(options: OpenSessionBrokerServiceOptions) {
+  return {
+    recordingGaps: options.recordingGaps ?? new InMemoryMutationRecordingGaps(),
+    lock: options.hostLock ?? sessionBrokerHostLock(options.owner),
+  };
+}
+
 /**
  * Opens one exclusive host service using the existing native assignment/journal authority.
  * Legacy binding/free-pool inventory must be drained before opting in; it cannot disappear from cap
@@ -180,7 +193,7 @@ function nativeCatalogReader(config: SessionBrokerHostConfig) {
 export async function openSessionBrokerService(
   options: OpenSessionBrokerServiceOptions,
 ): Promise<SessionBrokerService> {
-  const lock = options.hostLock ?? sessionBrokerHostLock(options.owner);
+  const { recordingGaps, lock } = serviceDependencies(options);
   lock.acquire();
   let broker: SessionBroker | undefined;
   try {
@@ -196,7 +209,13 @@ export async function openSessionBrokerService(
     const store = options.registry.sessionBrokerStore(scopeKey);
     const reuse = iosReusePolicy(options.config);
     const journal = options.registry.deviceMutationJournal();
-    const reset = nativeBaselineReset(options.config, options.androidReset, options.timer, journal);
+    const reset = nativeBaselineReset(
+      options.config,
+      options.androidReset,
+      options.timer,
+      journal,
+      recordingGaps,
+    );
     const iosReset = reset?.ios;
     let resetIosBaseline: NonNullable<ManagedDevicePortDependencies["resetBaseline"]>["ios"] =
       iosReset
@@ -209,6 +228,7 @@ export async function openSessionBrokerService(
     if (reuse.mode === "keep-booted" && iosReset) {
       const mutations = nativeIosMutationResetPort(new SimCtlClient(null), options.timer);
       const fast = new IosKeepBootedReset({
+        recordingGaps,
         journal,
         mutations,
         simctl: new SimCtlClient(null),
@@ -297,12 +317,13 @@ export async function openSessionBrokerService(
     await broker.recoverReceipts();
     const recoverMutationRecorder = (sessionUuid: string) =>
       recoverSessionMutationRecorder(options, store, scopeKey, bindMutationRecorder, sessionUuid);
-    await recoverActiveMutationRecorders(store, recoverMutationRecorder);
+    await recoverActiveMutationRecorders(store, recoverMutationRecorder, recordingGaps);
     const service = new SessionBrokerService(
       broker,
       scopeKey,
       lock,
       options.timer,
+      recordingGaps,
       recoverMutationRecorder,
     );
     if (!options.deferStart) {
@@ -331,6 +352,7 @@ async function closeFailedStartupBroker(
 async function recoverActiveMutationRecorders(
   store: Pick<SqliteSessionBrokerStore, "listRecoverableRequests">,
   recover: (sessionUuid: string) => Promise<MutationRecorder | undefined>,
+  recordingGaps: Pick<MutationRecordingGaps, "mark">,
 ): Promise<void> {
   let requests: Awaited<ReturnType<typeof store.listRecoverableRequests>>;
   try {
@@ -346,6 +368,7 @@ async function recoverActiveMutationRecorders(
     try {
       await recover(request.sessionId!);
     } catch (error) {
+      recordingGaps.mark(request.sessionId, `recorder recovery: ${errorMessage(error)}`);
       logger.warn(`Cannot recover mutation recorder for session ${request.sessionId}`, error);
     }
   }
@@ -381,7 +404,13 @@ async function recoverSessionMutationRecorder(
   bindMutationRecorder(
     recoveredMutationScope(sessionUuid, session.assignedDevice, resource, assignment),
   );
-  return options.mutationSessions.peekSession(sessionUuid)?.mutationRecorder;
+  const recorder = options.mutationSessions.peekSession(sessionUuid)?.mutationRecorder;
+  if (!recorder) {
+    throw new ActionableError(
+      "Broker mutation recorder recovery did not attach a recorder to the active session",
+    );
+  }
+  return recorder;
 }
 
 /** An iOS journal shares the reset scope's incarnation, or the keep-booted reset cannot find it. */
@@ -429,6 +458,7 @@ function nativeBaselineReset(
   androidReset: OpenSessionBrokerServiceOptions["androidReset"],
   timer: Timer,
   journal: DeviceMutationJournal,
+  recordingGaps: MutationRecordingGaps,
 ) {
   if (config.reuseAndroidCleanDevices && config.defaults.android && !androidReset) {
     throw new ActionableError("Android baseline reset requires the daemon readiness ports");
@@ -439,7 +469,7 @@ function nativeBaselineReset(
         ios: reuseIos ? nativeIosBaselineReset() : undefined,
         android:
           config.reuseAndroidCleanDevices && config.defaults.android
-            ? nativeAndroidBaselineReset(androidReset!, timer, config, journal)
+            ? nativeAndroidBaselineReset(androidReset!, timer, config, journal, recordingGaps)
             : undefined,
       }
     : undefined;
@@ -469,6 +499,7 @@ function nativeAndroidBaselineReset(
   timer: Timer,
   config: SessionBrokerHostConfig,
   journal: DeviceMutationJournal,
+  recordingGaps: MutationRecordingGaps,
 ): AndroidBaselineReset {
   const configReader = new FileAvdConfigReader();
   const inventory = boundAndroidResetInventory(ports.inventory, timer);
@@ -552,6 +583,7 @@ function nativeAndroidBaselineReset(
     );
   }
   const strategy = createAndroidResetStrategy(config, {
+    recordingGaps,
     journal,
     timer,
     snapshot,
@@ -589,7 +621,7 @@ export function createAndroidResetStrategy(
   {
     snapshot,
     ...dependencies
-  }: Pick<AndroidKeepBootedResetDependencies, "journal" | "timer" | "port"> & {
+  }: Pick<AndroidKeepBootedResetDependencies, "journal" | "timer" | "port" | "recordingGaps"> & {
     snapshot?: AndroidResetStrategy;
   },
 ): AndroidResetStrategy | undefined {
@@ -706,10 +738,15 @@ export class SessionBrokerService {
     readonly scopeKey: string,
     private readonly lock: SessionBrokerHostLock,
     private readonly timer: Pick<Timer, "setTimeout" | "clearTimeout" | "now">,
+    private readonly recordingGaps: Pick<MutationRecordingGaps, "mark">,
     private readonly recorderFor: (
       sessionUuid: string,
     ) => Promise<MutationRecorder | undefined> = async () => undefined,
   ) {}
+
+  markMutationUnrecorded(sessionUuid: string, reason: string): void {
+    this.recordingGaps.mark(sessionUuid, reason);
+  }
 
   async recoverMutationRecorder(sessionUuid: string): Promise<MutationRecorder | undefined> {
     try {
@@ -720,6 +757,7 @@ export class SessionBrokerService {
       }
       return await this.recorderFor(sessionUuid);
     } catch (error) {
+      this.markMutationUnrecorded(sessionUuid, `recorder recovery: ${errorMessage(error)}`);
       logger.warn(
         `Cannot recover mutation recorder for session ${sessionUuid}; proceeding without recording`,
         error,

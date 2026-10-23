@@ -1,3 +1,5 @@
+import type { MutationRecordingGaps } from "./mutations/recordingGaps";
+import { storePreferenceCoveredByBaseline } from "./mutations/appInventory";
 import {
   defaultHostLoadReader,
   loadScaledBudget,
@@ -27,6 +29,7 @@ import {
   assertDeviceMutationScope,
   opaqueForcesFallback,
   type DeviceMutationEntry,
+  type DeviceMutationInput,
   type DeviceMutationJournal,
   type DeviceMutationScope,
 } from "./mutations/types";
@@ -40,10 +43,12 @@ export interface IosKeepBootedMutationPort extends Pick<
   "canRevert" | "revert"
 > {
   assertSettled(context: DeviceMutationResetContext): Promise<void>;
+  sanitizeCovers(entry: DeviceMutationInput): boolean;
   sanitize(context: DeviceMutationResetContext): Promise<void>;
 }
 
 export interface IosKeepBootedResetDependencies {
+  recordingGaps?: Pick<MutationRecordingGaps, "reasonFor" | "clear">;
   journal: Pick<
     DeviceMutationJournal,
     "list" | "getBaseline" | "deleteSession" | "listStrayIncarnations"
@@ -122,6 +127,7 @@ export class IosKeepBootedReset {
         this.cleaningStep(context, signal, phase, phases, operation);
       const entries = await this.loadJournal(context, step, phases);
       try {
+        this.assertCompleteRecording(scope.sessionUuid);
         await step("inventory", () =>
           readExpectedIosResetTarget(
             this.dependencies.simctl,
@@ -190,6 +196,7 @@ export class IosKeepBootedReset {
       }
       await this.dependencies.journal.deleteSession(scope);
       await owned();
+      this.dependencies.recordingGaps?.clear(scope.sessionUuid);
       this.eraseReasons.delete(
         JSON.stringify([scope.deviceId, scope.incarnation, scope.sessionUuid]),
       );
@@ -244,24 +251,59 @@ export class IosKeepBootedReset {
     context: DeviceMutationResetContext,
     step: (phase: string, operation: () => Promise<void>) => Promise<void>,
   ): Promise<void> {
-    for (const entry of [...entries].sort((left, right) => right.sequence - left.sequence)) {
-      const plan = planDeviceMutationRevert(
-        [entry],
-        { dirty: [], changes: [] },
-        this.dependencies.mutations,
-      );
-      if (plan.status === "non_revertible") {
-        logger.warn(`iOS reset skipped journal revert: ${plan.reasons.join("; ")}`);
-        continue;
+    const plans = [...entries]
+      .sort((left, right) => right.sequence - left.sequence)
+      .map((entry) => ({
+        entry,
+        plan: planDeviceMutationRevert(
+          [entry],
+          { dirty: [], changes: [] },
+          this.dependencies.mutations,
+        ),
+      }));
+    for (const { entry, plan } of plans) {
+      if (
+        !["installed-app", "app-group"].includes(entry.kind) &&
+        plan.status === "non_revertible" &&
+        !this.sanitizeCovers(entry, context)
+      ) {
+        throw new ActionableError(
+          `iOS journaled mutation ${entry.kind}:${entry.key} (${entry.toolName}) cannot be journal-reverted or sanitized; erase required`,
+        );
       }
+    }
+    for (const { entry, plan } of plans) {
       if (["installed-app", "app-group"].includes(entry.kind)) {
         logger.warn(`iOS reset handles ${entry.kind}:${entry.key} through app inventory cleaning`);
+        continue;
+      }
+      if (plan.status === "non_revertible") {
+        logger.warn(`iOS reset skipped journal revert: ${plan.reasons.join("; ")}`);
         continue;
       }
       await step(`revert:${entry.kind}:${entry.key}`, () =>
         this.dependencies.mutations.revert(entry, context),
       );
     }
+  }
+
+  private assertCompleteRecording(sessionUuid: string): void {
+    const gap = this.dependencies.recordingGaps?.reasonFor(sessionUuid);
+    if (gap !== undefined) {
+      throw new ActionableError(
+        `iOS device mutation recording failed (${gap}); journal is incomplete; erase required`,
+      );
+    }
+  }
+
+  private sanitizeCovers(entry: DeviceMutationInput, context: DeviceMutationResetContext): boolean {
+    if (entry.kind === "opaque") {
+      return !opaqueForcesFallback(entry);
+    }
+    if (entry.kind === "preference") {
+      return storePreferenceCoveredByBaseline(entry, context.baseline);
+    }
+    return this.dependencies.mutations.sanitizeCovers(entry);
   }
 
   /**

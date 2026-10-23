@@ -1,4 +1,7 @@
-import { opaqueIntentKey } from "../../src/daemon/sessionBroker/mutations/types";
+import {
+  opaqueIntentKey,
+  opaqueForcesFallback,
+} from "../../src/daemon/sessionBroker/mutations/types";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
 import type {
@@ -228,6 +231,17 @@ describe("data mutation identities", () => {
         key: opaqueIntentKey("resetAppLogs", "app-logs", "com.example", "documents", "b.log"),
       },
     ]);
+    for (const platform of ["ios", "android"] as const) {
+      const rows = deviceToolMutations(
+        "deviceSnapshot",
+        { action: "restore", snapshotName: "baseline" },
+        platform,
+      );
+      expect(rows).toEqual([
+        { kind: "opaque", key: opaqueIntentKey("deviceSnapshot", "restore", "baseline") },
+      ]);
+      expect(rows.every(opaqueForcesFallback)).toBe(true);
+    }
     expect(deviceToolMutations("deviceSnapshot", { action: "capture" })).not.toEqual(
       deviceToolMutations("deviceSnapshot", { action: "restore", snapshotName: "baseline" }),
     );

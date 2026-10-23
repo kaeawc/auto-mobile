@@ -1,3 +1,5 @@
+import { logger } from "../../../src/utils/logger";
+import { opaqueIntentKey } from "../../../src/daemon/sessionBroker/mutations/types";
 import { describe, expect, spyOn, test } from "bun:test";
 import {
   brokerSessionMutationScope,
@@ -108,4 +110,29 @@ describe("session mutation recorder scope", () => {
       list.mockRestore();
     }
   });
+});
+
+test("markUnrecorded persists a fallback row and warns when its own write fails", async () => {
+  const journal = new FakeDeviceMutationJournal(new FakeTimer());
+  const scope = { sessionUuid: "session", deviceId: "device", incarnation: "native" };
+  const recorder = new SessionMutationRecorder(journal, scope);
+  await recorder.markUnrecorded("clipboard");
+  expect(await journal.list(scope)).toMatchObject([
+    {
+      kind: "opaque",
+      key: opaqueIntentKey("recording-failed", "clipboard"),
+      priorValue: { state: "unobservable" },
+      toolName: "clipboard",
+    },
+  ]);
+  journal.record = async () => {
+    throw new Error("journal unavailable");
+  };
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  try {
+    await expect(recorder.markUnrecorded("clipboard")).resolves.toBeUndefined();
+    expect(warn).toHaveBeenCalled();
+  } finally {
+    warn.mockRestore();
+  }
 });

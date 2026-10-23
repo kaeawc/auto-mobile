@@ -1,3 +1,4 @@
+import { InMemoryMutationRecordingGaps } from "../../../src/daemon/sessionBroker/mutations/recordingGaps";
 import { logger } from "../../../src/utils/logger";
 import { SessionBrokerService } from "../../../src/daemon/sessionBroker/service";
 import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
@@ -440,6 +441,7 @@ describe("broker background recovery", () => {
       "scope",
       { acquire: () => {}, release: () => {} },
       timer,
+      new InMemoryMutationRecordingGaps(),
     );
     try {
       service.start();

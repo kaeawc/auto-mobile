@@ -522,6 +522,23 @@ export class IosDeviceMutationResetPort implements DeviceMutationResetPort {
     ];
   }
 
+  sanitizeCovers(entry: DeviceMutationInput): boolean {
+    if (
+      ["installed-app", "app-group", ...RESET_DEFAULT_KINDS, "certificate", "media"].includes(
+        entry.kind,
+      )
+    ) {
+      return true;
+    }
+    return (
+      entry.kind === "device-setting" &&
+      (["appearance", "nightMode", "content-size", "increase-contrast"].includes(
+        iosSettingKey(entry.key),
+      ) ||
+        Object.hasOwn(IOS_GLOBAL_SETTING_KEYS, entry.key))
+    );
+  }
+
   async sanitize(context: DeviceMutationResetContext): Promise<void> {
     await context.assertOwned();
     if (!context.baseline?.completeKinds.includes("installed-app")) {

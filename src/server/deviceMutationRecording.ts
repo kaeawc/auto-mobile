@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/describeUnknownError";
 import { readFile } from "node:fs/promises";
 import type { BootedDevice } from "../models";
 import { ActionableError } from "../models/ActionableError";
@@ -30,7 +31,7 @@ export function createRecording(
     sessionBrokerService():
       | Pick<
           NonNullable<ReturnType<DaemonContext["sessionBrokerService"]>>,
-          "recoverMutationRecorder"
+          "recoverMutationRecorder" | "markMutationUnrecorded"
         >
       | undefined;
   },
@@ -55,6 +56,9 @@ export function createRecording(
       undefined,
       observationReaders,
     ),
+    undefined,
+    undefined,
+    (uuid, reason) => context.sessionBrokerService()?.markMutationUnrecorded(uuid, reason),
   );
 }
 
@@ -147,6 +151,7 @@ export class SessionDeviceMutationRecording implements DeviceMutationRecording {
     private readonly reader: MutationPriorReader = new DefaultMutationPriorReader(),
     private readonly artifactReader: MutationArtifactReader = createDefaultMutationArtifactReader(),
     private readonly specReader: MutationSpecReader = readJsonSpecFile,
+    private readonly markUnrecorded?: (sessionUuid: string, reason: string) => void,
   ) {}
 
   async beforeToolCall(
@@ -164,6 +169,7 @@ export class SessionDeviceMutationRecording implements DeviceMutationRecording {
     if (!sessionUuid) {
       return;
     }
+    let matchingRecorder: MutationRecorder | undefined;
     try {
       const recorder = await this.recorderFor(sessionUuid);
       signal?.throwIfAborted();
@@ -179,12 +185,32 @@ export class SessionDeviceMutationRecording implements DeviceMutationRecording {
           "Device mutation recorder must match the admitted broker session and device",
         );
       }
+      matchingRecorder = recorder;
       mutations = await this.resolveMutations(name, args, device, mutations, signal);
       await this.recordMutations(name, device, recorder, mutations, signal);
     } catch (error) {
       signal?.throwIfAborted();
-      logger.warn("Device mutation recording failed; proceeding without recording", error);
+      await this.recordingFailed(name, sessionUuid, matchingRecorder, error);
     }
+  }
+
+  private async recordingFailed(
+    name: string,
+    sessionUuid: string,
+    recorder: MutationRecorder | undefined,
+    error: unknown,
+  ): Promise<void> {
+    try {
+      this.markUnrecorded?.(sessionUuid, `${name}: ${errorMessage(error)}`);
+    } catch (markerError) {
+      // Marking is best effort: a failing gap sink must never block the tool call itself.
+      logger.warn(
+        "Cannot mark device mutation recording gap; proceeding without recording",
+        markerError,
+      );
+    }
+    await recorder?.markUnrecorded(name);
+    logger.warn("Device mutation recording failed; proceeding without recording", error);
   }
 
   /** Re-derives the intents once the host has read what the args only point at. */

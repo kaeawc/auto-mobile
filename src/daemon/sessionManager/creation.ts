@@ -1,3 +1,4 @@
+import type { CleanupReceiptRecorder } from "../sessionCleanupReceipts";
 import {
   DeviceSessionRowChangedError,
   type MarkReleasedOptions,
@@ -33,6 +34,7 @@ import {
 } from "./internalContracts";
 
 export interface SessionCreationHost {
+  readonly cleanupReceipts: Pick<CleanupReceiptRecorder, "bind">;
   readonly timer: Timer;
   persistSession(
     session: Session,
@@ -50,7 +52,7 @@ export interface SessionCreationHost {
   ): SessionReleaseSnapshot | undefined;
   readonly sessionSlots: Pick<
     SessionLifecycleSlots,
-    "setTerminalSnapshot" | "getTerminalSnapshot" | "hasTerminalSnapshot"
+    "setTerminalSnapshot" | "getTerminalSnapshot" | "hasTerminalSnapshot" | "hasRecovery"
   >;
   readonly daemonSessionId: string | undefined;
   readonly planLabels: Pick<PlanLabelRegistry, "isMinting" | "markRunning">;
@@ -222,6 +224,8 @@ export class SessionCreation {
       this.host.planLabels.markRunning(session.sessionId);
     }
     this.host.sessions.set(session.sessionId, session);
+    // Creation has no synchronous pooled-device view; qualify using the binding platform.
+    this.host.cleanupReceipts.bind(session, this.host.sessionSlots.hasRecovery(session.sessionId));
     this.host.rowWriter.noteLive(session.sessionId);
     this.host.slotShadowProbe.check(session.sessionId, "published");
     this.host.deviceSessionMap.set(session.assignedDevice, session.sessionId);

@@ -443,6 +443,7 @@ export class DevicePoolConnectionSessions {
         logger.info(`Released device ${deviceId} from session ${sessionId}`);
       })
       .catch((error) => {
+        this.state.sessionManager.cleanupReceipts.poolReleaseFailed(sessionId);
         logger.warn(`Failed to release expired-session device ${deviceId}: ${error}`, error);
       });
   }

@@ -191,12 +191,14 @@ export abstract class SessionManagerForwarders {
     retry: () => Promise<void>,
     retryTimeoutMs: number,
     retryKey?: string,
+    sessionId?: string,
   ): void {
     return this.forwardersHost.restoreHealth.markDeviceNeedsAppCleanup(
       deviceId,
       retry,
       retryTimeoutMs,
       retryKey,
+      sessionId,
     );
   }
 
@@ -205,12 +207,14 @@ export abstract class SessionManagerForwarders {
     retry: () => Promise<void>,
     retryTimeoutMs: number,
     retryKey?: string,
+    sessionId?: string,
   ): () => void {
     return this.forwardersHost.restoreHealth.markDeviceNeedsRecorderTeardown(
       deviceId,
       retry,
       retryTimeoutMs,
       retryKey,
+      sessionId,
     );
   }
 

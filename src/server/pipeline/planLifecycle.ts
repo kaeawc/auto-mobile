@@ -278,6 +278,7 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
     devices: BootedDevice[],
     cleanupService: AppCleanupService,
     config: AppCleanupConfig,
+    cleanupSessionUuids: ReadonlyMap<string, string>,
   ): void {
     const dirty = new Set([
       ...outcome.failures.map((failure) => failure.deviceId),
@@ -300,6 +301,7 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
         },
         PLAN_APP_CLEANUP_RETRY_DEADLINE_MS,
         `${config.appId}:${config.clearAppData ? "clearAppData" : "terminateApp"}`,
+        cleanupSessionUuids.get(cleanupDevice.deviceId),
       );
     }
   }
@@ -380,10 +382,26 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
       // those plans still clean every device they own (#10022).
       const devices = this.getCleanupDevices(device, lifecycleSessionUuid);
       const cleanupConfig = { appId: args.cleanupAppId, clearAppData: args.cleanupClearAppData };
+      // Keep the originating family member even if cleanup outlives its binding.
+      const sessionManager = poolSessionManager ?? defaultDaemonContext.sessionManager();
+      const cleanupSessionUuids = new Map(
+        [...(lifecycleSessionUuid ? this.planSessionFamily(lifecycleSessionUuid) : [])].flatMap(
+          (uuid) => {
+            const deviceId = sessionManager?.getDeviceForSession(uuid);
+            return deviceId ? [[deviceId, uuid] as const] : [];
+          },
+        ),
+      );
       const runCleanup = async (targets: BootedDevice[]): Promise<void> => {
         const outcome = await this.cleanupDevicesShielded(targets, cleanupService, cleanupConfig);
         this.reportIncompleteCleanup(outcome, cleanupConfig.appId, lifecycleSessionUuid);
-        this.markIncompleteCleanupDevices(outcome, targets, cleanupService, cleanupConfig);
+        this.markIncompleteCleanupDevices(
+          outcome,
+          targets,
+          cleanupService,
+          cleanupConfig,
+          cleanupSessionUuids,
+        );
       };
       if (poolSessionManager && heldForRecovery) {
         // The caller's recovery and resumed plan need the app as the failure left it (#11139):

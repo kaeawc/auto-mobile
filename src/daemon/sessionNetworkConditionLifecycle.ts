@@ -1,3 +1,4 @@
+import type { CleanupReceiptRecorder } from "./sessionCleanupReceipts";
 import { ActionableError } from "../models/ActionableError";
 import type {
   IosAppNetworkRule,
@@ -18,7 +19,9 @@ import type {
 interface SessionNetworkConditionLifecycleHost extends Pick<
   SessionDeviceStateRestoreHost,
   "timer" | "sessionNow" | "isPublished" | "isAdmittedForAutomation"
-> {}
+> {
+  readonly cleanupReceipts: Pick<CleanupReceiptRecorder, "invalidate">;
+}
 interface NetworkConditionRestoreCallbacks {
   onExpiry(session: Session, clearIfOwned: () => void): void;
 }
@@ -190,6 +193,7 @@ export class SessionNetworkConditionLifecycle {
       return;
     }
     state.installedRevision = rule.revision;
+    this.host.cleanupReceipts.invalidate(session.sessionId, "network_lease_not_joined");
     this.iosAppNetworkLeases.start(session.sessionId, rule, () => {
       const current = session.cacheData.networkCondition?.iosAppRule;
       return (
@@ -232,6 +236,7 @@ export class SessionNetworkConditionLifecycle {
     rule: IosAppNetworkRule,
     isCurrent: () => boolean,
   ): void {
+    this.host.cleanupReceipts.invalidate(sessionId, "network_lease_not_joined");
     this.iosAppNetworkLeases.start(sessionId, rule, isCurrent);
   }
 

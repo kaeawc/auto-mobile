@@ -1,3 +1,4 @@
+import type { CleanupReceiptRecorder } from "../sessionCleanupReceipts";
 import { type MarkReleasedOptions } from "../../db/deviceSessionRepository";
 import { toActionableError } from "../../models/ActionableError";
 import { logger } from "../../utils/logger";
@@ -29,6 +30,7 @@ import {
 } from "./internalContracts";
 
 export interface SessionReleaseCommitHost {
+  readonly cleanupReceipts: Pick<CleanupReceiptRecorder, "invalidateDevice">;
   readonly stateRestore: SessionDeviceStateRestore;
   revokeSupersededIdentityReplacement(operation?: SessionReleaseOperation): boolean;
   abandonSupersededRelease(
@@ -356,6 +358,7 @@ export class SessionReleaseCommit {
     // Retire the replaced serial captured at mark, even if an awaiting rebind published another
     // device. Its generations/retries are independent of the session's new binding (#12063).
     const deviceId = operation?.identityReplacement?.deviceId ?? session.assignedDevice;
+    this.host.cleanupReceipts.invalidateDevice(deviceId, "device_identity_replaced");
     this.host.replacedRestoreGenerations.set(
       deviceId,
       (this.host.replacedRestoreGenerations.get(deviceId) ?? 0) + 1,

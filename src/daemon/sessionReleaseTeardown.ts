@@ -1,3 +1,4 @@
+import type { CleanupReceiptRecorder } from "./sessionCleanupReceipts";
 import { ActionableError } from "../models/ActionableError";
 import { runWithAbortSignal } from "../utils/AbortContext";
 import { logger } from "../utils/logger";
@@ -28,7 +29,9 @@ interface SessionReleaseTeardownHost extends Pick<
   | "waitForSessionSetup"
   | "noteTeardownBound"
   | "abandonRestore"
-> {}
+> {
+  readonly cleanupReceipts: Pick<CleanupReceiptRecorder, "track" | "failOwner">;
+}
 interface SessionReleaseRestorers extends Pick<
   SessionDeviceStateRestore,
   | "abandonedScreenReaders"
@@ -82,6 +85,11 @@ export class SessionReleaseTeardown {
     const forcedSignal = operation?.forcedAbort?.signal;
     return this.runUnderTeardownShield(async () => {
       const stages = await this.startReleaseTeardown(sessionId, session, operation, options);
+      for (const stage of stages) {
+        if (stage.pending) {
+          this.host.cleanupReceipts.track(sessionId, stage.pending);
+        }
+      }
       // Setup remains in flight; skipped/aborted restores must arm neither quarantine nor retries.
       return options.deviceIdentityReplaced ? stages.filter((stage) => stage.setup) : stages;
     }, forcedSignal);
@@ -223,13 +231,15 @@ export class SessionReleaseTeardown {
       async () => ({
         pending: (await this.restores.restoreKeepScreenAwakeBestEffort(session, forced)).pending,
         // A forced release (#11058) may already have handed the device to its next owner.
-        abandon: () =>
-          forced()
-            ? logger.warn(
-                `Gave up restoring keep-awake state on ${deviceId} after a forced release; ` +
-                  `the screen may stay awake`,
-              )
-            : this.abandonCappedRestore(keepScreenAwakeTarget, "keep-screen-awake"),
+        abandon: () => {
+          if (forced()) {
+            return logger.warn(
+              `Gave up restoring keep-awake state on ${deviceId} after a forced release; ` +
+                `the screen may stay awake`,
+            );
+          }
+          this.abandonCappedRestore(keepScreenAwakeTarget, "keep-screen-awake");
+        },
       }),
       async () => ({
         pending: session.cacheData.biometricEnrollment
@@ -351,6 +361,7 @@ export class SessionReleaseTeardown {
     if (!target) {
       return;
     }
+    this.host.cleanupReceipts.failOwner(target, `restoration_abandoned:${reason}`);
     logger.warn(
       `Session release teardown exceeded ${SESSION_RELEASE_TEARDOWN_CAP_MS}ms before the ${reason} ` +
         `restore finished on ${target.deviceId}; the device may hold session-modified state`,

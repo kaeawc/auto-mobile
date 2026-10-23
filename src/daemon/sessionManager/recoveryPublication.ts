@@ -1,3 +1,4 @@
+import type { CleanupReceiptOwner, CleanupReceiptRecorder } from "../sessionCleanupReceipts";
 import {
   DeviceSessionRowNotRewritableError,
   type DeviceSessionPersistence,
@@ -50,6 +51,7 @@ import type { SupersededRowReasserts } from "../supersededRowReasserts";
 import { type SessionLifecycleSlots } from "./internalContracts";
 
 export interface SessionRecoveryPublicationHost {
+  readonly cleanupReceipts: Pick<CleanupReceiptRecorder, "trackOwner">;
   recoveryTargetFromPersisted(
     sessionId: string,
     persisted: DeviceSession | undefined,
@@ -481,6 +483,24 @@ export class SessionRecoveryPublication {
       });
     }
     return existing;
+  }
+
+  dispatchDeviceRestoreWithReceipt(
+    deviceId: string,
+    restore: (
+      signal: AbortSignal,
+      identitySignal: AbortSignal,
+      acknowledge: () => void,
+    ) => Promise<void>,
+    generation = this.host.replacedRestoreGenerations.get(deviceId) ?? 0,
+    teardownStep?: number,
+    owner?: CleanupReceiptOwner,
+  ): Promise<void> {
+    const work = this.dispatchDeviceRestore(deviceId, restore, generation, teardownStep);
+    if (owner) {
+      this.host.cleanupReceipts.trackOwner(owner, work);
+    }
+    return work;
   }
 
   /** Pause rather than consume a retry: a superseded handoff still owns its original baseline. */

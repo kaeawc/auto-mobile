@@ -392,6 +392,29 @@ export class SessionDeviceStateRestore {
     return this.network.forgetSession(sessionId);
   }
 
+  /** Retire saved baselines at the actual device identity transition, never in a polled predicate. */
+  retireRestorations(
+    deviceId: string,
+    cause: "removal" | "incarnation-bump",
+    sessionId?: string,
+  ): void {
+    if (sessionId !== undefined) {
+      this.host.cleanupReceipts.invalidate(
+        sessionId,
+        cause === "removal" ? "device_removed" : "device_incarnation_changed",
+      );
+    }
+    this.host.cleanupReceipts.invalidateDevice(
+      deviceId,
+      cause === "removal" ? "device_removed" : "device_incarnation_changed",
+    );
+    for (const queue of [this.clockRestores, this.rotationRestores, this.screenReaderRestores]) {
+      if (cause === "removal" || queue.policy.retiredOnIncarnationBump) {
+        queue.retire(deviceId);
+      }
+    }
+  }
+
   stopAll(): void {
     return this.network.stopAll();
   }
@@ -406,7 +429,10 @@ export class SessionDeviceStateRestore {
     }
     const restoration = this.restoreKeepScreenAwakeTarget(target).then(
       () => ({ outcome: "restored" as const }),
-      (error: unknown) => ({ outcome: "failed" as const, error }),
+      (error: unknown) => {
+        this.host.cleanupReceipts.fail(session.sessionId, "restoration_failed:keep_awake");
+        return { outcome: "failed" as const, error };
+      },
     );
     const timeout = new Error("Keep-awake restore timed out");
     const result = await raceWithDeadline(restoration, {
@@ -522,6 +548,7 @@ export class SessionDeviceStateRestore {
           }),
       target.restoreGeneration,
       1,
+      target,
     );
     this.host.clearRestoreHealth(target, "keep-screen-awake");
   }
@@ -622,6 +649,7 @@ export class SessionDeviceStateRestore {
         this.biometricEnrollmentRestorer(device).restore(target.enrollment).then(acknowledge),
       target.restoreGeneration,
       2,
+      target,
     );
     this.host.clearRestoreHealth(target, "biometric-enrollment");
   }
@@ -820,7 +848,9 @@ export class SessionDeviceStateRestore {
       if (!this.host.restoreIncarnationIsCurrent(target)) {
         return;
       }
-      await this.iosAppNetworkRuleRestorer.reset(target.iosAppRule);
+      const work = this.iosAppNetworkRuleRestorer.reset(target.iosAppRule);
+      this.host.cleanupReceipts.trackOwner(target, work);
+      await work;
       this.host.clearRestoreHealth(target, "network-condition");
       return;
     }
@@ -838,6 +868,7 @@ export class SessionDeviceStateRestore {
         this.networkConditionRestorer(device).restore(target.profile).then(acknowledge),
       target.restoreGeneration,
       3,
+      target,
     );
     this.host.clearRestoreHealth(target, "network-condition");
   }

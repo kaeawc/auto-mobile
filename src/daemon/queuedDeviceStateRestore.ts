@@ -1,3 +1,4 @@
+import type { CleanupReceiptRecorder } from "./sessionCleanupReceipts";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import type { BootedDevice } from "../models";
 import { SCREEN_READER_RESTORE_TIMEOUT_MS } from "../features/accessibility/ScreenReaderRestore";
@@ -106,7 +107,9 @@ interface QueuedDeviceStateRestoreHost extends Pick<
   | "trackSessionSetup"
   | "isPublished"
   | "trackPendingDeviceCleanup"
-> {}
+> {
+  readonly cleanupReceipts: Pick<CleanupReceiptRecorder, "failOwner">;
+}
 
 /** Owns queued clock, rotation and screen-reader restoration. */
 export class QueuedDeviceStateRestore {
@@ -364,7 +367,10 @@ export class QueuedDeviceStateRestore {
           delete session.cacheData[slot];
         }
       },
-      (target) => start(deviceId, target),
+      (target) => {
+        target.sessionId = session.sessionId;
+        return start(deviceId, target);
+      },
     );
   }
 
@@ -495,6 +501,7 @@ export class QueuedDeviceStateRestore {
         await raceWithDeadline(
           this.host.dispatchDeviceRestore(
             deviceId,
+            // The baseline belongs to an earlier session; never fan it out to current receipts.
             (signal) => spec.restore(deviceId, state, AbortSignal.any([signal, controller.signal])),
             generation,
           ),
@@ -602,6 +609,7 @@ export class QueuedDeviceStateRestore {
         },
         generation,
         6,
+        target,
       );
     return {
       restore,
@@ -625,6 +633,7 @@ export class QueuedDeviceStateRestore {
     if (target.removed) {
       return;
     }
+    this.host.cleanupReceipts.failOwner(target, "restoration_abandoned:screen-reader");
     const { platform, previousEnabled } = target.state;
     logger.warn(
       `Gave up restoring the screen reader on ${deviceId} after ` +
@@ -703,6 +712,7 @@ export class QueuedDeviceStateRestore {
         },
         generation,
         5,
+        target,
       );
     return {
       restore,
@@ -725,6 +735,7 @@ export class QueuedDeviceStateRestore {
     if (target.removed) {
       return;
     }
+    this.host.cleanupReceipts.failOwner(target, "restoration_abandoned:rotation");
     const { userRotation, accelerometerRotation, deviceStateRotationLock } = target.state;
     const lock =
       deviceStateRotationLock === undefined
@@ -824,6 +835,7 @@ export class QueuedDeviceStateRestore {
           ),
         generation,
         4,
+        target,
       );
     return {
       restore,

@@ -186,6 +186,7 @@ export function createRecorderTeardownRecoveryMarker(
       () => retryGivenUpRecordings(giveUp.deviceId, deps),
       INCOMPLETE_MARK_GRACE_MS,
       "release-give-ups",
+      giveUp.sessionId,
     );
   };
 }

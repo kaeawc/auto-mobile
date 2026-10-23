@@ -1,3 +1,4 @@
+import type { CleanupReceiptRecorder } from "../sessionCleanupReceipts";
 import { DeviceSessionRowNotRewritableError } from "../../db/deviceSessionRepository";
 import { type IosAppNetworkRule } from "../../features/networkFilter/IosAppNetworkRuleClient";
 import { type Platform } from "../../models";
@@ -21,6 +22,7 @@ import { SessionSlotShadowProbe } from "../sessionSlotShadowProbe";
 import { type SessionLifecycleSlots } from "./internalContracts";
 
 export interface SessionRebindingHost {
+  readonly cleanupReceipts: Pick<CleanupReceiptRecorder, "invalidate">;
   rejectRefusedRebind(
     existing: Session,
     rebind: { session: Session; promise: Promise<Session> },
@@ -121,6 +123,7 @@ export class SessionRebinding {
       return existing;
     }
 
+    this.host.cleanupReceipts.invalidate(sessionId, "session_rebound");
     const pendingRebind = this.host.sessionSlots.getRebind(sessionId);
     if (pendingRebind) {
       await pendingRebind.promise;

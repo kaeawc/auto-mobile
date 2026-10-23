@@ -1,3 +1,7 @@
+import {
+  SESSION_CLEANUP_RECEIPT_METHOD,
+  sessionCleanupReceiptParams,
+} from "./sessionCleanupReceipts";
 import { holderOf } from "./deviceBinding";
 import {
   SESSION_BROKER_CAPABILITY,
@@ -115,6 +119,9 @@ export async function handleDaemonRequest(
   // This is daemon self-description, not a pool operation. Keep it available while startup is
   // still settling so a client can decide whether to issue an optional request before forwarding.
   if (request.method === DAEMON_CAPABILITIES_METHOD) {
+    const daemonGeneration = state.isInitialized()
+      ? state.getSessionManager().cleanupReceipts?.getGeneration()
+      : undefined;
     return {
       success: true,
       result: {
@@ -122,10 +129,12 @@ export async function handleDaemonRequest(
           INPUT_TYPE_TEXT_APPEND_CAPABILITY,
           INPUT_GESTURE_STREAM_CAPABILITY,
           DAEMON_REGISTER_SESSION_METHOD,
+          ...(daemonGeneration ? [SESSION_CLEANUP_RECEIPT_METHOD] : []),
           ...(state.isSessionBrokerMode?.()
             ? [SESSION_BROKER_CAPABILITY, SESSION_BROKER_EXPORT_CAPABILITY]
             : []),
         ],
+        ...(daemonGeneration ? { daemonGeneration } : {}),
       },
     };
   }
@@ -144,6 +153,7 @@ export async function handleDaemonRequest(
 const INITIALIZED_DAEMON_METHOD_HANDLERS: ReadonlyMap<string, InitializedDaemonMethodHandler> =
   new Map<string, InitializedDaemonMethodHandler>([
     ...BROKER_DAEMON_METHOD_HANDLERS,
+    [SESSION_CLEANUP_RECEIPT_METHOD, handleSessionCleanupReceipt],
     [DAEMON_REGISTER_SESSION_METHOD, handleRegisterSession],
     [DAEMON_RELEASE_LIVENESS_OWNERSHIP_METHOD, handleReleaseLivenessOwnership],
     [DAEMON_HEARTBEAT_METHOD, handleHeartbeat],
@@ -165,6 +175,23 @@ const INITIALIZED_DAEMON_METHOD_HANDLERS: ReadonlyMap<string, InitializedDaemonM
     [DAEMON_DEVICE_LEASE_STATUS_METHOD, handleDeviceLeaseStatus],
     [DAEMON_RELINQUISH_DEVICE_LEASE_METHOD, handleRelinquishDeviceLease],
   ]);
+
+function handleSessionCleanupReceipt(
+  request: DaemonRequest,
+  state: DaemonStateAccess,
+): DaemonMethodResult {
+  const parsed = sessionCleanupReceiptParams.safeParse(request.params);
+  if (!parsed.success) {
+    return { success: false, error: `Invalid cleanup receipt parameters: ${parsed.error.message}` };
+  }
+  const receipts = state.getSessionManager().cleanupReceipts;
+  return {
+    success: true,
+    result: receipts
+      ? receipts.query(parsed.data)
+      : { ...parsed.data, state: "unknown", reason: "receipts_unavailable" },
+  };
+}
 
 async function handleInitializedDaemonRequest(
   request: DaemonRequest,

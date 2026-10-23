@@ -266,7 +266,10 @@ app's release plus the capability gates. There are no migrations.
 policy):** one global switch, "Allow network for imported prototypes", **default off**. When off,
 `request` actions fail with a typed error shown to the prototype (`statusKey` `error`). Switching
 network off cancels in-flight Android and iOS requests and drops late responses, even after a quick
-off/on cycle. Per-host consent is later work. MCP-direct `show` keeps today's behaviour. When on:
+off/on cycle. On iOS, permission-denial callbacks are bound to the request's consent epoch and
+rechecked on the main actor; response delivery rechecks consent in the same turn that updates
+prototype state, replacing obsolete successes and failures with the network-disabled error.
+Per-host consent is later work. MCP-direct `show` keeps today's behaviour. When on:
 
 - The egress check runs in the HTTP client on the resolved address, at every hop. It blocks
   loopback, link-local ranges, the emulator host alias `10.0.2.2`, and the AutoMobile daemon ports.

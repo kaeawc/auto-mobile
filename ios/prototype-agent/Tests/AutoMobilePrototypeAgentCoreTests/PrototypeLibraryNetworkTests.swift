@@ -6,6 +6,151 @@ import XCTest
 
 @MainActor
 final class PrototypeLibraryNetworkTests: XCTestCase {
+    func testDriverDeliversCurrentDenialGuidance() async throws {
+        try await checkDriverDenial(reenable: false)
+    }
+
+    func testDriverReplacesDenialAfterReenable() async throws {
+        try await checkDriverDenial(reenable: true)
+    }
+
+    private func checkDriverDenial(reenable: Bool) async throws {
+        let setting = PrototypeLibraryNetworkSwitch(store: MemoryNetworkSettingStore())
+        setting.enabled = true
+        let connector = FakePinnedConnector(outcomes: [.failure(PrototypeLocalNetworkDenied())])
+        let client = PausedLibraryDeliveryClient(client: enabledConfiguration(setting, connector: connector).device)
+        let driver = PrototypeNetworkConfiguration(device: client).driver(clock: ManualRequestClock())
+        var response: PrototypeRequestResponse?
+        driver.onComplete = { _, result in response = result }
+        driver.perform([.start(PrototypeRequestJob(
+            requestId: "r", prototypeId: "p", via: .device, method: .get, url: "https://public.example/",
+            headers: [:], body: nil, timeoutMs: 1000
+        ))])
+        await client.completed.wait()
+        XCTAssertFalse(setting.enabled)
+        XCTAssertTrue(setting.localNetworkDenied)
+        if reenable {
+            // Stay in this main-actor turn until the new consent is installed.
+            setting.enabled = false
+            setting.enabled = true
+        }
+        client.release.release()
+        await driver.settled()
+        guard case let .failed(error, _) = response else { return XCTFail("Denial was not delivered") }
+        XCTAssertEqual(
+            error.message,
+            reenable ? PrototypeLibraryGatedClient.disabled.error.message : PrototypeLocalNetworkDenied.message
+        )
+        XCTAssertEqual(setting.enabled, reenable)
+        XCTAssertEqual(setting.localNetworkDenied, !reenable)
+    }
+
+    func testDriverDropsCompletedSuccessAfterOffOn() async throws {
+        let setting = PrototypeLibraryNetworkSwitch(store: MemoryNetworkSettingStore())
+        setting.enabled = true
+        let late = LateLibraryClient()
+        let configuration = PrototypeLibraryNetwork.configuration(gate: setting.gate, allowsCleartext: false) { _, _ in
+            PrototypeNetworkConfiguration(device: late)
+        }
+        let client = PausedLibraryDeliveryClient(client: configuration.device)
+        let driver = PrototypeNetworkConfiguration(device: client).driver(clock: ManualRequestClock())
+        var response: PrototypeRequestResponse?
+        driver.onComplete = { _, result in response = result }
+        driver.perform([.start(PrototypeRequestJob(
+            requestId: "r", prototypeId: "p", via: .device, method: .get, url: "https://public.example/",
+            headers: [:], body: nil, timeoutMs: 1000
+        ))])
+        await late.started.wait()
+        late.release.release()
+        await client.completed.wait()
+        setting.enabled = false
+        setting.enabled = true
+        client.release.release()
+        await driver.settled()
+        guard case let .failed(error, _) = response else { return XCTFail("Stale 200 was delivered") }
+        XCTAssertEqual(error, PrototypeLibraryGatedClient.disabled.error)
+        XCTAssertTrue(setting.enabled)
+    }
+
+    func testDenialOnlyRevokesItsCapturedConsentEpoch() throws {
+        let store = MemoryNetworkSettingStore()
+        let setting = PrototypeLibraryNetworkSwitch(store: store)
+        setting.enabled = true
+        let epoch = try XCTUnwrap(setting.gate.snapshot())
+        setting.enabled = false
+        setting.enabled = true
+        setting.denyLocalNetwork(epoch: epoch)
+        XCTAssertTrue(setting.enabled)
+        XCTAssertFalse(setting.localNetworkDenied)
+        XCTAssertEqual(store.values[PrototypeLibraryNetworkSwitch.key], true)
+        try setting.denyLocalNetwork(epoch: XCTUnwrap(setting.gate.snapshot()))
+        XCTAssertFalse(setting.enabled)
+        XCTAssertTrue(setting.localNetworkDenied)
+        XCTAssertEqual(store.values[PrototypeLibraryNetworkSwitch.key], false)
+    }
+
+    func testLateDenialCannotRevokeNewConsentThroughEitherCallbackPath() async throws {
+        // Keep the direct callback path as a regression guard alongside the main-actor hop.
+        for hopped in [false, true] {
+            let setting = PrototypeLibraryNetworkSwitch(store: MemoryNetworkSettingStore())
+            setting.enabled = true
+            let connector = FakePinnedConnector(outcomes: [
+                .failure(PrototypeLocalNetworkDenied()), .success(FakePinnedConnection()),
+            ])
+            let started = FakePinnedSignal()
+            let release = FakePinnedSignal()
+            let notified = FakePinnedSignal()
+            connector.started = started
+            connector.pause = release
+            let configuration = hopped ? PrototypeLibraryNetwork.configuration(
+                gate: setting.gate, allowsCleartext: false,
+                onLocalNetworkDenied: { setting.denyLocalNetwork(epoch: $0) },
+                pinned: { _, epoch in
+                    PrototypeNetworkConfiguration(device: PrototypePinnedHttpClient(
+                        resolver: FakeHostResolver(), connector: connector,
+                        deadlines: FakePinnedDeadline(), nowMs: { 0 },
+                        onLocalNetworkDenied: {
+                            Task { @MainActor in
+                                setting.denyLocalNetwork(epoch: epoch)
+                                notified.release()
+                            }
+                        }
+                    ))
+                }
+            ) : enabledConfiguration(setting, connector: connector)
+            let task = Task { try await configuration.device.perform(pinnedRequest()) }
+            await started.wait()
+            setting.enabled = false
+            setting.enabled = true
+            release.release()
+            do { _ = try await task.value; XCTFail("Obsolete denial escaped") }
+            catch { XCTAssertEqual(error as? PrototypeHttpFailure, PrototypeLibraryGatedClient.disabled) }
+            if hopped { await notified.wait() }
+            // A fresh call also waits for the old dial to consume its failure deterministically.
+            await connector.finished.wait()
+            XCTAssertTrue(setting.enabled)
+            XCTAssertFalse(setting.localNetworkDenied)
+            let response = try await configuration.device.perform(pinnedRequest())
+            XCTAssertEqual(response.status, 200)
+        }
+    }
+
+    func testDeliveryCheckRejectsCompletedResponseAfterOffOn() async throws {
+        let gate = PrototypeLibraryNetworkGate(enabled: true)
+        let connector = FakePinnedConnector([FakePinnedConnection()])
+        let configuration = PrototypeLibraryNetwork.configuration(gate: gate, allowsCleartext: false) { _, _ in
+            self.pinnedConfiguration(FakeHostResolver(), connector)
+        }
+        let delivery = PrototypeDeliveryCheck()
+        XCTAssertNil(delivery.obsoleteFailure())
+        let response = try await configuration.device.perform(pinnedRequest(), delivery: delivery)
+        XCTAssertEqual(response.status, 200)
+        XCTAssertNil(delivery.obsoleteFailure())
+        gate.setEnabled(false)
+        gate.setEnabled(true)
+        XCTAssertEqual(delivery.obsoleteFailure(), PrototypeLibraryGatedClient.disabled)
+    }
+
     func testSettingDefaultsOffAndPersistsBothDirectionsAcrossInstances() {
         let store = MemoryNetworkSettingStore()
         let setting = PrototypeLibraryNetworkSwitch(store: store)
@@ -26,7 +171,7 @@ final class PrototypeLibraryNetworkTests: XCTestCase {
             let connector = FakePinnedConnector([])
             var constructions = 0
             let configuration = PrototypeLibraryNetwork
-                .configuration(gate: PrototypeLibraryNetworkGate(), allowsCleartext: true) { cleartext in
+                .configuration(gate: PrototypeLibraryNetworkGate(), allowsCleartext: true) { cleartext, _ in
                     constructions += 1
                     return self.pinnedConfiguration(resolver, connector, cleartext: cleartext)
                 }
@@ -65,9 +210,9 @@ final class PrototypeLibraryNetworkTests: XCTestCase {
                 let configuration = PrototypeLibraryNetwork.configuration(
                     gate: PrototypeLibraryNetworkGate(enabled: true),
                     allowsCleartext: cleartext
-                ) {
-                    flags.append($0)
-                    return self.pinnedConfiguration(resolver, connector, cleartext: $0)
+                ) { cleartext, _ in
+                    flags.append(cleartext)
+                    return self.pinnedConfiguration(resolver, connector, cleartext: cleartext)
                 }
                 let scheme = cleartext ? "http" : "https"
                 let response = await perform(configuration, url: "\(scheme)://lan.example/", via: via)
@@ -125,8 +270,8 @@ final class PrototypeLibraryNetworkTests: XCTestCase {
             let configuration = PrototypeLibraryNetwork.configuration(
                 gate: PrototypeLibraryNetworkGate(enabled: true),
                 allowsCleartext: true
-            ) {
-                self.pinnedConfiguration(resolver, connector, cleartext: $0)
+            ) { cleartext, _ in
+                self.pinnedConfiguration(resolver, connector, cleartext: cleartext)
             }
             let response = await perform(configuration)
             guard case let .failed(error, _) = response else { return XCTFail("Followed \(location)") }
@@ -151,8 +296,8 @@ final class PrototypeLibraryNetworkTests: XCTestCase {
         let connector = FakePinnedConnector([FakePinnedConnection()])
         let resolver = FakeHostResolver()
         func configuration() -> PrototypeNetworkConfiguration {
-            PrototypeLibraryNetwork.configuration(gate: setting.gate, allowsCleartext: false) {
-                self.pinnedConfiguration(resolver, connector, cleartext: $0)
+            PrototypeLibraryNetwork.configuration(gate: setting.gate, allowsCleartext: false) { cleartext, _ in
+                self.pinnedConfiguration(resolver, connector, cleartext: cleartext)
             }
         }
         let spec = try requestSpec(via: "device")
@@ -194,7 +339,7 @@ final class PrototypeLibraryNetworkTests: XCTestCase {
         for reenable in [false, true] {
             let gate = PrototypeLibraryNetworkGate(enabled: true)
             let late = LateLibraryClient()
-            let configuration = PrototypeLibraryNetwork.configuration(gate: gate, allowsCleartext: false) { _ in
+            let configuration = PrototypeLibraryNetwork.configuration(gate: gate, allowsCleartext: false) { _, _ in
                 PrototypeNetworkConfiguration(device: late)
             }
             let task = Task { try await configuration.device.perform(pinnedRequest()) }
@@ -343,8 +488,8 @@ final class PrototypeLibraryNetworkTests: XCTestCase {
     {
         PrototypeLibraryNetwork.configuration(
             gate: setting.gate, allowsCleartext: false,
-            onLocalNetworkDenied: { setting.denyLocalNetwork() },
-            pinned: { _ in self.pinnedConfiguration(FakeHostResolver(), connector) }
+            onLocalNetworkDenied: { setting.denyLocalNetwork(epoch: $0) },
+            pinned: { _, _ in self.pinnedConfiguration(FakeHostResolver(), connector) }
         )
     }
 
@@ -374,8 +519,8 @@ final class PrototypeLibraryNetworkTests: XCTestCase {
         -> PrototypeNetworkConfiguration
     {
         PrototypeLibraryNetwork
-            .configuration(gate: PrototypeLibraryNetworkGate(enabled: true), allowsCleartext: false) {
-                self.pinnedConfiguration(resolver, connector, cleartext: $0)
+            .configuration(gate: PrototypeLibraryNetworkGate(enabled: true), allowsCleartext: false) { cleartext, _ in
+                self.pinnedConfiguration(resolver, connector, cleartext: cleartext)
             }
     }
 
@@ -414,5 +559,29 @@ private actor LateLibraryClient: PrototypeHttpClient {
         await release.wait()
         finished.release()
         return PrototypeHttpResponse(status: 200, headers: [:], body: Data(), durationMs: 0)
+    }
+}
+
+/// Holds a completed gated result before the driver's main-actor delivery, forwarding its check.
+private struct PausedLibraryDeliveryClient: PrototypeHttpClient {
+    let client: any PrototypeHttpClient
+    let completed = FakePinnedSignal()
+    let release = FakePinnedSignal()
+
+    func perform(_ request: PrototypeHttpRequest) async throws -> PrototypeHttpResponse {
+        try await perform(request, delivery: PrototypeDeliveryCheck())
+    }
+
+    func perform(
+        _ request: PrototypeHttpRequest, delivery: PrototypeDeliveryCheck
+    )
+        async throws -> PrototypeHttpResponse
+    {
+        let result: Result<PrototypeHttpResponse, Error>
+        do { result = try .success(await client.perform(request, delivery: delivery)) }
+        catch { result = .failure(error) }
+        completed.release()
+        await release.wait()
+        return try result.get()
     }
 }

@@ -257,6 +257,28 @@ Settled mode costs roughly 170 ms per Android observation and 20-70 ms per iOS
 observation over async. When only one call needs a matching screenshot, pass
 `observe({ screenshot: "settled" })` instead of setting the variable.
 
+## Screenshot retention
+
+<div class="environment-variable-table" markdown>
+
+| Variable                                    | Use and accepted values                                                                                  | Default    |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ---------- |
+| `AUTOMOBILE_SCREENSHOT_CACHE_MB`            | Base screenshot cache capacity; positive MiB.                                                            | `128` MiB  |
+| `AUTOMOBILE_SCREENSHOT_CACHE_PER_DEVICE_MB` | Capacity per active device; positive MiB.                                                                | `64` MiB   |
+| `AUTOMOBILE_SCREENSHOT_CACHE_CEILING_MB`    | Host cache ceiling; positive MiB, never lowers the base.                                                 | `1024` MiB |
+| `AUTOMOBILE_SCREENSHOT_KEEP_PER_DEVICE`     | Newest screenshots per device evicted only as a last resort; nonnegative integer, `0` disables fairness. | `3`        |
+
+</div>
+
+Capacity is the larger of the base and active devices × per-device capacity,
+limited by the ceiling (or the base if larger). A device is active while any of
+its screenshots has an unexpired retention guarantee; an incoming capture also
+counts. Files without a device identity do not increase capacity. Under pressure,
+the byte capacity stays fixed for the eviction pass and is recalculated on the
+next admission. Each device's newest screenshots are evicted last, with the incoming
+capture counting toward its device's allowance and files already being removed
+excluded from that allowance. Capture is still admitted if nothing fits.
+
 ## Device behavior
 
 <div class="environment-variable-table" markdown>

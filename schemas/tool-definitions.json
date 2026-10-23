@@ -1461,6 +1461,10 @@
   },
   {
     "name": "captureTrace",
+    "title": "Capture Trace",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Android: record a Perfetto trace from typed categories (sched, gfx, view, am, wm, binder_driver, memory, app). start returns a traceId; drive the flow; stop pulls the .perfetto-trace to the host. Released sessions stop their trace.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -6673,6 +6677,10 @@
   },
   {
     "name": "heapDump",
+    "title": "Dump Heap",
+    "annotations": {
+      "destructiveHint": false
+    },
     "description": "Android: dump a running debuggable or profileable app's heap (am dumpheap) to a host .hprof; refuses other apps with heap_dump_not_debuggable.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

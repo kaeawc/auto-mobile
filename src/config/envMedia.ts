@@ -2,6 +2,38 @@ import type { EnvVarSpec } from "./envSpec";
 
 /** Observation, screenshot, video, WebRTC and logging variables. */
 export const MEDIA_ENV = {
+  SCREENSHOT_CACHE_MB: {
+    name: "AUTOMOBILE_SCREENSHOT_CACHE_MB",
+    kind: "number",
+    default: "128",
+    min: 0,
+    minExclusive: true,
+    doc: "Base screenshot cache capacity in MiB; positive number.",
+  },
+  SCREENSHOT_CACHE_PER_DEVICE_MB: {
+    name: "AUTOMOBILE_SCREENSHOT_CACHE_PER_DEVICE_MB",
+    kind: "number",
+    default: "64",
+    min: 0,
+    minExclusive: true,
+    doc: "Screenshot cache capacity per active device in MiB; positive number.",
+  },
+  SCREENSHOT_CACHE_CEILING_MB: {
+    name: "AUTOMOBILE_SCREENSHOT_CACHE_CEILING_MB",
+    kind: "number",
+    default: "1024",
+    min: 0,
+    minExclusive: true,
+    doc: "Host screenshot cache ceiling in MiB; never lowers the base capacity.",
+  },
+  SCREENSHOT_KEEP_PER_DEVICE: {
+    name: "AUTOMOBILE_SCREENSHOT_KEEP_PER_DEVICE",
+    kind: "int",
+    default: "3",
+    min: 0,
+    doc: "Newest screenshots per device evicted only as a last resort; 0 disables fairness.",
+  },
+
   LOG_DIR: {
     name: "AUTOMOBILE_LOG_DIR",
     legacyName: "AUTO_MOBILE_LOG_DIR",

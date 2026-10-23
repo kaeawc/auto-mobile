@@ -33,6 +33,11 @@ import {
   stopRecordingAfterDeviceDisconnect,
   transitionalCandidateIds,
 } from "../deviceLossDiscovery";
+import {
+  DisconnectMonitorSchedule,
+  eligibleIdleSweepSignature,
+  type DisconnectMonitorCadence,
+} from "../disconnectMonitorCadence";
 import { serverConfig } from "../../utils/ServerConfig";
 import { onAdbMissingDevice } from "../../utils/android-cmdline-tools/AdbDeviceHealth";
 import type { DaemonSessions } from "./DaemonSessions";
@@ -60,9 +65,12 @@ interface CapturedDisconnectRecoveryOptions {
 const DEVICE_DISCONNECT_POLL_INTERVAL_MS = 5000;
 const DEVICE_DISCONNECT_IDLE_INTERVAL_MS = 30_000;
 
-export interface DisconnectMonitorCadence {
-  activeIntervalMs: number;
-  idleIntervalMs: number;
+export type { DisconnectMonitorCadence } from "../disconnectMonitorCadence";
+
+interface DisconnectSweep {
+  adbServerResetCohort: readonly PooledDevice[];
+  selectPlatform: (platforms: ("android" | "ios")[]) => "android" | "ios" | "either";
+  idleSignature?: string;
 }
 
 /** The pool reads used to decide whether disconnect discovery must stay on its active cadence. */
@@ -254,14 +262,20 @@ export class DaemonDisconnect {
       transportRestarts,
     );
 
-    let lastSweepAt = this.host.services.timer().now();
+    const schedule = new DisconnectMonitorSchedule(cadence, this.host.services.timer().now());
     this.host.lifecycle.setDeviceDisconnectMonitor(
       new SingleFlightInterval(
         this.host.services.timer(),
         cadence.activeIntervalMs,
         async () => {
-          const sweep: { adbServerResetCohort: readonly PooledDevice[] } = {
+          const sweep: DisconnectSweep = {
             adbServerResetCohort: [],
+            selectPlatform: (platforms) =>
+              schedule.selectPlatform(
+                platforms,
+                this.host.services.timer().now(),
+                serverConfig.isPlanExecutionActive(),
+              ),
           };
           try {
             await this.checkDisconnects(
@@ -271,7 +285,9 @@ export class DaemonDisconnect {
               checkPlanDeviceLoss,
               sweep,
             );
+            schedule.recordSuccess(sweep.idleSignature);
           } catch (error) {
+            schedule.recordFailure();
             logger.warn(`[Daemon] Device disconnect monitor failed: ${error}`);
           } finally {
             if (sweep.adbServerResetCohort.length > 0) {
@@ -295,12 +311,7 @@ export class DaemonDisconnect {
               }) ||
               serverConfig.isPlanExecutionActive() ||
               (await listRecordings()).length > 0;
-            const now = this.host.services.timer().now();
-            if (!watching && now - lastSweepAt < cadence.idleIntervalMs) {
-              return false;
-            }
-            lastSweepAt = now;
-            return true;
+            return schedule.shouldRun(watching, this.host.services.timer().now());
           },
         },
       ),
@@ -845,7 +856,7 @@ export class DaemonDisconnect {
     listRecordings: DaemonDisconnectHost["listActiveVideoRecordings"],
     transportRestarts: AdbTransportRestartLookup,
     checkPlanDeviceLoss: ReturnType<DaemonDisconnect["createPlanDeviceLossCheck"]>,
-    sweep: { adbServerResetCohort: readonly PooledDevice[] },
+    sweep: DisconnectSweep,
   ): Promise<void> {
     this.startDeferredSessionRecoverySweep();
     const activeRecordings = await listRecordings();
@@ -853,7 +864,19 @@ export class DaemonDisconnect {
       assignedDevice: deviceId,
       platform,
     }));
+    const platform = sweep.selectPlatform([
+      ...this.host.services
+        .devicePool()
+        .getAllDevices()
+        .map((device) => device.platform),
+      ...this.host.services
+        .sessionManager()
+        .getAllSessions()
+        .map((session) => session.platform),
+      ...activeRecordings.map((recording) => recording.platform),
+    ]);
     let discovery = await this.discoverAndReconcile(deviceManager, {
+      platform,
       heldDevices,
     });
     let succeededPlatforms = discovery.succeededPlatforms;
@@ -884,6 +907,7 @@ export class DaemonDisconnect {
       // Reconnect may restore a transport; discard the pre-recovery absence.
       discovery = await this.discoverAndReconcile(deviceManager, {
         heldDevices,
+        platform,
         bypassAndroidDeviceListCache: true,
       });
       succeededPlatforms = discovery.succeededPlatforms;
@@ -933,6 +957,16 @@ export class DaemonDisconnect {
     for (const deviceId of disconnectResult.disconnected.filter((id) => !planDeviceIds.has(id))) {
       missingByDevice.set(deviceId, []);
     }
+    sweep.idleSignature = eligibleIdleSweepSignature(
+      discovery.succeededPlatforms,
+      this.host.lifecycle.deviceDisconnectMisses().size,
+      candidateDeviceIds,
+      bootedDeviceIds,
+      this.host.services
+        .devicePool()
+        .getAllDevices()
+        .map((device) => device.id),
+    );
     await this.cleanupDisconnects(
       bootedDeviceIds,
       succeededPlatforms,

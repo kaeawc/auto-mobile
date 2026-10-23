@@ -21,3 +21,8 @@ export interface DeviceLockState {
    */
   secure?: boolean;
 }
+
+export interface DeviceLockUnknown {
+  reason: "timeout" | "pending" | "error" | "unparseable";
+  message?: string;
+}

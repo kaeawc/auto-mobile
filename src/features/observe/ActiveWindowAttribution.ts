@@ -631,6 +631,7 @@ export class DefaultActiveWindowAttributionReconciler implements ActiveWindowAtt
     // overlay recapture path. Clear first so a failed re-read yields "unknown"
     // rather than the stale value, then re-read paired with the replacement tree.
     delete result.deviceLock;
+    delete result.deviceLockUnknown;
     await this.deviceStateCollector.collectDeviceLock(result, signal);
     // `backStack` was sampled with the original tree (collectAllData). A recapture
     // that replaced the tree — including the bounded gap-2 second recapture that
@@ -789,6 +790,7 @@ export class DefaultActiveWindowAttributionReconciler implements ActiveWindowAtt
   ): Promise<NonNullable<ObserveResult["activeWindow"]>> {
     const { signal, readOnly = false } = options;
     delete result.deviceLock;
+    delete result.deviceLockUnknown;
     const [confirmedWindow] = await Promise.all([
       // Elsewhere `layoutSeqSum` is the accessibility-path zero: nothing to refresh.
       bootstrapAttribution

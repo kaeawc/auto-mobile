@@ -703,7 +703,7 @@ export class BaseVisualChange {
    * tap is exactly how an agent recovers — but the result must never read as a
    * clean success when it likely never reached the app. We attach the pre-action
    * lock state (so an agent can branch on `secure`) plus a human-readable
-   * warning. Android-only: `deviceLock` is only collected on Android observe.
+   * warning. This warning applies only to Android interactions.
    */
   protected annotateDeviceLock(
     result: ObservedEnvelope,
@@ -716,6 +716,7 @@ export class BaseVisualChange {
     if (!lock?.locked) {
       return;
     }
+    delete result.deviceLockUnknown;
     result.deviceLock = lock;
     result.deviceLockWarning = buildDeviceLockWarning(lock);
     logger.warn(`[BaseVisualChange] ${result.deviceLockWarning}`);

@@ -49,8 +49,8 @@ describe("iOS simulator lock-state probe", () => {
       executor.output = readFileSync(join(fixtures, filename), "utf8");
       const signal = new AbortController().signal;
       expect(await new NotifyutilIosLockStateProbe(executor).read(deviceId, signal)).toEqual({
-        locked: true,
-        keyguardShowing: true,
+        kind: "known",
+        lock: { locked: true, keyguardShowing: true },
       });
       expect(executor.command).toBe(
         `spawn ${deviceId} notifyutil -g com.apple.springboard.lockstate`,
@@ -64,20 +64,53 @@ describe("iOS simulator lock-state probe", () => {
     const executor = new FakeExecutor();
     executor.output = readFileSync(join(fixtures, "notifyutil-unlocked.txt"), "utf8");
     expect(await new NotifyutilIosLockStateProbe(executor).read(deviceId)).toEqual({
-      locked: false,
-      keyguardShowing: false,
+      kind: "known",
+      lock: { locked: false, keyguardShowing: false },
     });
   });
 
-  test("returns undefined for unparseable output", async () => {
+  test("returns explicit unknown for unparseable output", async () => {
     const executor = new FakeExecutor();
     executor.output = "garbage";
-    expect(await new NotifyutilIosLockStateProbe(executor).read(deviceId)).toBeUndefined();
+    expect(await new NotifyutilIosLockStateProbe(executor).read(deviceId)).toMatchObject({
+      kind: "unknown",
+      reason: "unparseable",
+    });
   });
 
-  test("returns undefined when the executor fails", async () => {
+  test("returns explicit unknown when the executor fails", async () => {
     const executor = new FakeExecutor();
     executor.failure = new Error("simctl unavailable");
-    expect(await new NotifyutilIosLockStateProbe(executor).read(deviceId)).toBeUndefined();
+    expect(await new NotifyutilIosLockStateProbe(executor).read(deviceId)).toMatchObject({
+      kind: "unknown",
+      reason: "error",
+    });
   });
+});
+
+test("classifies the actual SimCtlClient deadline error with an override", async () => {
+  const { SimCtlClient } = await import("../../../src/utils/ios-cmdline-tools/SimCtlClient");
+  const { FakeTimer } = await import("../../fakes/FakeTimer");
+  const timer = new FakeTimer();
+  const client = new SimCtlClient(null, async () => new Promise<ExecResult>(() => {}), { timer });
+  const reading = new NotifyutilIosLockStateProbe(client, { timeoutMs: 4000 }).read(deviceId);
+  timer.advanceTime(3999);
+  let complete = false;
+  void reading.then(() => {
+    complete = true;
+  });
+  await Promise.resolve();
+  expect(complete).toBe(false);
+  timer.advanceTime(1);
+  expect(await reading).toMatchObject({ kind: "unknown", reason: "timeout" });
+});
+test("returns unknown on caller cancellation", async () => {
+  const executor = new FakeExecutor();
+  executor.failure = new Error("aborted");
+  const controller = new AbortController();
+  const reason = new DOMException("cancelled", "AbortError");
+  controller.abort(reason);
+  await expect(
+    new NotifyutilIosLockStateProbe(executor).read(deviceId, controller.signal),
+  ).resolves.toMatchObject({ kind: "unknown", reason: "error" });
 });

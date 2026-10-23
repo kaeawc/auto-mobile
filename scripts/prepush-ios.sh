@@ -2,6 +2,7 @@
 # Fast, simulator-free iOS validation for a Swift change before it is pushed.
 # PREPUSH_IOS_SKIP_CTRL_PROXY_RUNNER_BUILD=1 skips the CtrlProxy Xcode runner
 # compile for ios/control-proxy/Sources changes when a local Xcode build is unavailable.
+# PREPUSH_IOS_SKIP_PROTOVIEWER=1 skips ProtoViewer tests/build without the iphonesimulator SDK.
 set -euo pipefail
 
 usage() {
@@ -10,7 +11,10 @@ Usage: scripts/prepush-ios.sh
 
 Runs the pinned SwiftFormat lint, SwiftLint, XCTestRunner build, and its
 simulator-free XCTestRunnerTests subset. CtrlProxy source changes also compile
-the Xcode UI test runner. Run it from any directory.
+the Xcode UI test runner. ProtoViewer package or build-script changes also run
+simulator-free prototype-agent tests and compile the app. Run it from any directory.
+PREPUSH_IOS_SKIP_PROTOVIEWER=1 skips both ProtoViewer checks (partial attestation)
+for hosts without the iphonesimulator SDK.
 EOF
 }
 
@@ -95,6 +99,20 @@ if [[ ${git_diff_status} -ne 0 ]]; then
   exit 1
 fi
 
+protoviewer_changed=false
+while IFS= read -r -d '' relative_path; do
+  case "${relative_path}" in
+    ios/prototype-agent/*|scripts/ios/protoviewer-build.sh) protoviewer_changed=true ;;
+  esac
+done < <(
+  git -C "${repo_root}" diff --name-only -z "${base_ref}...HEAD" -- ios/prototype-agent/ scripts/ios/protoviewer-build.sh \
+    || printf '%s' "$?" > "${git_diff_status_file}"
+)
+if [[ -s "${git_diff_status_file}" ]]; then
+  echo "prepush-ios.sh: git diff against '${base_ref}' failed" >&2
+  exit 1
+fi
+
 ctrl_proxy_sources_changed=false
 for swift_file in ${swift_files[@]+"${swift_files[@]}"}; do
   if [[ "${swift_file}" == "${project_root}/ios/control-proxy/Sources/"* ]]; then
@@ -107,9 +125,14 @@ attestation_scope=full
 attestation_note=""
 attestation_lint=pass
 attestation_runner=skip
+attestation_protoviewer=skip
 if [[ "${PREPUSH_IOS_SKIP_CTRL_PROXY_RUNNER_BUILD:-0}" == 1 ]]; then
   attestation_scope=partial
   attestation_note="CtrlProxy runner build disabled"
+fi
+if [[ "${PREPUSH_IOS_SKIP_PROTOVIEWER:-0}" == 1 ]]; then
+  attestation_scope=partial
+  attestation_note="${attestation_note:+${attestation_note}; }ProtoViewer build/tests disabled"
 fi
 if [[ ${#swift_files[@]} -eq 0 ]]; then
   attestation_scope=partial
@@ -172,4 +195,23 @@ if [[ "${ctrl_proxy_sources_changed}" == true && "${PREPUSH_IOS_SKIP_CTRL_PROXY_
   AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA="${AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA:-${project_root}/scratch/ctrl-proxy-prepush-derived-data}" \
     "${project_root}/scripts/ios/ctrl-proxy-build-for-testing.sh"
 fi
-"${project_root}/scripts/ci/record-attestations.sh" ios "${attestation_options[@]}" --scope "$attestation_scope" --scope-note "$attestation_note" "SwiftFormat=${attestation_lint}:0" "SwiftLint=${attestation_lint}:0" "CtrlProxy runner build=${attestation_runner}:0" 'XCTestRunner build/tests and API baseline=pass:0' || true
+if [[ "${protoviewer_changed}" == true && "${PREPUSH_IOS_SKIP_PROTOVIEWER:-0}" != 1 ]]; then
+  echo "Testing prototype-agent and building ProtoViewer for changed package/build script"
+  if test_output="$(cd "${project_root}/ios/prototype-agent" && swift test -Xswiftc -warnings-as-errors 2>&1)"; then
+    test_rc=0
+  else
+    test_rc=$?
+  fi
+  echo "${test_output}"
+  executed_test_count "${test_output}"
+  if [[ ${test_rc} -ne 0 ]]; then
+    exit "${test_rc}"
+  fi
+  if [[ ${EXECUTED_TESTS} -eq 0 ]]; then
+    echo "prepush-ios.sh: prototype-agent executed 0 tests" >&2
+    exit 1
+  fi
+  "${project_root}/scripts/ios/protoviewer-build.sh" "${project_root}/scratch/protoviewer-prepush"
+  attestation_protoviewer=pass
+fi
+"${project_root}/scripts/ci/record-attestations.sh" ios "${attestation_options[@]}" --scope "$attestation_scope" --scope-note "$attestation_note" "SwiftFormat=${attestation_lint}:0" "SwiftLint=${attestation_lint}:0" "CtrlProxy runner build=${attestation_runner}:0" "ProtoViewer build/tests=${attestation_protoviewer}:0" 'XCTestRunner build/tests and API baseline=pass:0' || true

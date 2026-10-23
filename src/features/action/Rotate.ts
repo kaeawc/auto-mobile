@@ -26,6 +26,7 @@ import { OBSERVED_INTERACTION_PROFILES, SETTLE_BUDGET_MS } from "./observedInter
 import { RotationSettingsStore } from "./RotationSettingsStore";
 import {
   RotationOrientationReader,
+  ERROR_RECOVERY_SETTLE_PROFILE,
   SETTLE_WAIT_POLL_INTERVAL_MS,
 } from "./RotationOrientationReader";
 import { RotationOutcomes, type AutoRotatePlan } from "./RotationOutcomes";
@@ -42,6 +43,11 @@ import {
 
 export { unlockDeviceStateRotationEntry } from "./RotationSupport";
 export type { RotationRestoreSlot, RotationRestoreState } from "./RotationSupport";
+
+interface AndroidRotationWrites {
+  settings?: RotationCallSettings;
+  restoreOnFailure: (result: RotateResult) => Promise<RotateResult>;
+}
 
 export interface RotateOptions {
   deadlineMs?: number;
@@ -96,7 +102,11 @@ export class Rotate extends BaseVisualChange {
     requestedOrientation: "portrait" | "landscape",
     signal?: AbortSignal,
   ): Promise<number | null> {
-    return this.reader.readLiveRotationWithSettleWait(requestedOrientation, signal);
+    return this.reader.readLiveRotationWithSettleWait(
+      requestedOrientation,
+      signal,
+      ERROR_RECOVERY_SETTLE_PROFILE,
+    );
   }
 
   getCurrentOrientation(signal?: AbortSignal): Promise<string> {
@@ -469,7 +479,7 @@ export class Rotate extends BaseVisualChange {
       skipUiStability: true,
     };
     // The call's own user_rotation write, kept so the end-of-call check can undo it (#14955).
-    const written: { settings?: RotationCallSettings } = {};
+    const written: AndroidRotationWrites = { restoreOnFailure: async (result) => result };
     const result: RotateResult = await this.observedInteraction(
       // The read-auto-rotate -> disable -> rotate -> restore-auto-rotate
       // sequence below must run atomically per device: interleaving it with
@@ -510,6 +520,7 @@ export class Rotate extends BaseVisualChange {
       orientation,
       signal,
       settings: written.settings,
+      restoreOnFailure: written.restoreOnFailure,
     });
   }
 
@@ -536,8 +547,9 @@ export class Rotate extends BaseVisualChange {
     orientation: "portrait" | "landscape";
     signal?: AbortSignal;
     settings?: RotationCallSettings;
+    restoreOnFailure: (result: RotateResult) => Promise<RotateResult>;
   }): Promise<RotateResult> {
-    const { result, orientation, signal, settings } = options;
+    const { result, orientation, signal, settings, restoreOnFailure } = options;
     if (!result.success || result.currentOrientation !== orientation) {
       return result;
     }
@@ -546,12 +558,15 @@ export class Rotate extends BaseVisualChange {
     const rotation = await this.readRotationAtReturn({ signal });
     if (rotation === null) {
       const warning = `The end-of-call orientation could not be confirmed (live rotation read failed); the requested ${orientation} orientation may not be held.`;
-      return {
+      const failed = {
         ...result,
+        success: false,
+        error: warning,
         currentOrientation: "unknown",
         warning: [result.warning, warning].filter(Boolean).join(" "),
         message: warning,
       };
+      return restoreOnFailure(failed);
     }
     const actual = await this.reader.orientationOfRotation(rotation, signal);
     if (actual === orientation) {
@@ -576,7 +591,7 @@ export class Rotate extends BaseVisualChange {
         })
       : undefined;
     const warning = [result.warning, rollbackWarning].filter(Boolean).join(" ") || undefined;
-    return {
+    const failed = {
       ...result,
       success: false,
       currentOrientation: actual,
@@ -584,6 +599,7 @@ export class Rotate extends BaseVisualChange {
       message: error,
       ...(warning ? { warning } : {}),
     };
+    return restoreOnFailure(failed);
   }
 
   private async captureSessionRotationOriginals(options: {
@@ -709,7 +725,7 @@ export class Rotate extends BaseVisualChange {
     lockOrientation: boolean | undefined,
     signal?: AbortSignal,
     slot?: RotationRestoreSlot,
-    written?: { settings?: RotationCallSettings },
+    written?: AndroidRotationWrites,
   ): Promise<RotateResult> {
     throwIfAborted(signal);
     // Read the natural axes first so the requested value and every orientation read agree.
@@ -742,6 +758,21 @@ export class Rotate extends BaseVisualChange {
         slot?.get();
       },
     };
+    if (written) {
+      written.restoreOnFailure = (result) =>
+        this.outcomes.restoreAutoRotateAfterFailedLock(
+          result,
+          plan,
+          settings,
+          cleanup,
+          slot !== undefined,
+        );
+    }
+    await this.planDeviceStateLock(cleanup, {
+      shouldRestoreAutoRotate: !slot && preserveLock && wasAutoRotateEnabled,
+      autoRotateState,
+      signal,
+    });
     const alreadyApplied = await this.outcomes.handleAlreadyAppliedOrientation(
       orientation,
       value,
@@ -751,6 +782,13 @@ export class Rotate extends BaseVisualChange {
       signal,
     );
     if (alreadyApplied.kind === "handled") {
+      await this.outcomes.restoreAutoRotateAfterFailedLock(
+        alreadyApplied.result,
+        plan,
+        settings,
+        cleanup,
+        slot !== undefined,
+      );
       return this.finishAndroidRotation(
         alreadyApplied.result,
         settings,
@@ -832,6 +870,13 @@ export class Rotate extends BaseVisualChange {
         wasAutoRotateEnabled,
         signal,
       });
+      await this.outcomes.restoreAutoRotateAfterFailedLock(
+        result,
+        plan,
+        settings,
+        cleanup,
+        slot !== undefined,
+      );
       return this.finishAndroidRotation(result, settings, lockOrientation, slot, signal);
     } catch (error) {
       return this.recoverAndroidRotation({
@@ -1009,9 +1054,16 @@ export class Rotate extends BaseVisualChange {
         wasAutoRotateEnabled,
         signal,
       });
+      await this.outcomes.restoreAutoRotateAfterFailedLock(
+        result,
+        plan,
+        settings,
+        cleanup,
+        slot !== undefined,
+      );
       return this.finishAndroidRotation(result, settings, lockOrientation, slot, signal);
     }
-    if (achievedOrientation !== "unknown" && achievedOrientation !== orientation) {
+    if (achievedOrientation !== "unknown") {
       const rollbackWarning = await this.store.rollbackUserRotation({
         previous: settings.previousUserRotation,
         written: settings.writtenUserRotation,
@@ -1021,17 +1073,23 @@ export class Rotate extends BaseVisualChange {
       warning = [warning, rollbackWarning].filter(Boolean).join(" ") || undefined;
     }
     warning = [warning, restoreFailure?.message].filter(Boolean).join(" ") || undefined;
-    return {
-      success: false,
-      warning,
-      orientation,
-      value,
-      currentOrientation: achievedOrientation,
-      previousOrientation: currentOrientation,
-      rotationPerformed: false,
-      orientationLockHandled: wasAutoRotateEnabled,
-      orientationLockState: await this.reader.getOrientationLockState(signal),
-      error: `Failed to change device orientation: ${error}`,
-    };
+    return this.outcomes.restoreAutoRotateAfterFailedLock(
+      {
+        success: false,
+        warning,
+        orientation,
+        value,
+        currentOrientation: achievedOrientation,
+        previousOrientation: currentOrientation,
+        rotationPerformed: false,
+        orientationLockHandled: wasAutoRotateEnabled,
+        orientationLockState: await this.reader.getOrientationLockState(signal),
+        error: `Failed to change device orientation: ${error}`,
+      },
+      plan,
+      settings,
+      cleanup,
+      slot !== undefined,
+    );
   }
 }

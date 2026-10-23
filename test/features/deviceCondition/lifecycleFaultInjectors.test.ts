@@ -24,6 +24,8 @@ interface SettingsAdb {
   adb: FakeAdbExecutor;
   /** The current value of the setting; "null" when it is unset. */
   value(): string;
+  /** Change the stored value behind the injector's back (the user or another tool flipped it). */
+  setValue(value: string): void;
   commands(): string[];
   /** Make reads report this value instead of the stored one (something else flipped the setting). */
   readAs(value: string | undefined): void;
@@ -90,6 +92,9 @@ function settingsAdb(
   return {
     adb,
     value: () => current,
+    setValue: (value) => {
+      current = value;
+    },
     commands: () => [...log],
     readAs: (value) => {
       readOverride = value;
@@ -275,6 +280,36 @@ describe("dontKeepActivities fault (#14068)", () => {
     const restored = await controller.restore();
     expect(restored.verifiedClean).toBe(true);
     expect(device.value()).toBe("0");
+  });
+
+  test("the resolver reuses one injector per device, so a drifted repeat apply still clears with one unset", async () => {
+    const device = settingsAdb("0");
+    const android: BootedDevice = { name: "emu", platform: "android", deviceId: "emulator-5554" };
+    const cache = new Map();
+    const factory = { create: () => device.adb };
+    // Like the registry: resolve again on every apply.
+    const controller = new DeviceConditionController((key) =>
+      resolveLifecycleFaultInjector(android, key, { adbFactory: factory, cache }),
+    );
+
+    await controller.apply({ faults: { dontKeepActivities: "on" } });
+    device.setValue("0");
+    await controller.apply({ faults: { dontKeepActivities: "on" } });
+    expect(device.value()).toBe("1");
+
+    const cleared = await controller.apply({ faults: { dontKeepActivities: "unset" } });
+    expect(cleared.changes).toEqual([{ key: "faults.dontKeepActivities", status: "cleared" }]);
+    expect(cleared.active).toEqual([]);
+    expect(device.value()).toBe("0");
+  });
+
+  test("the resolver keeps separate injectors for separate devices", () => {
+    const first: BootedDevice = { name: "a", platform: "android", deviceId: "emulator-5554" };
+    const second: BootedDevice = { name: "b", platform: "android", deviceId: "emulator-5556" };
+    const deps = { adbFactory: { create: () => new FakeAdbExecutor() }, cache: new Map() };
+    const one = resolveLifecycleFaultInjector(first, "faults.dontKeepActivities", deps);
+    expect(resolveLifecycleFaultInjector(first, "faults.dontKeepActivities", deps)).toBe(one);
+    expect(resolveLifecycleFaultInjector(second, "faults.dontKeepActivities", deps)).not.toBe(one);
   });
 
   test("the resolver serves only this key, only on Android", () => {

@@ -126,14 +126,20 @@ export function createDontKeepActivitiesFaultInjector(adb: AdbExecutor): DeviceC
   };
 }
 
-/** The injectable seams a test overrides; production uses the default adb factory. */
+/** The injectable seams a test overrides; production uses the default adb factory and cache. */
 export interface LifecycleFaultInjectorDeps {
   adbFactory?: AdbClientFactory;
+  cache?: Map<string, DeviceConditionInjector>;
 }
 
+/** One injector per device, so every apply shares its baseline and registers a single reset. */
+const injectorsByDevice = new Map<string, DeviceConditionInjector>();
+
 /**
- * Build the injector for one lifecycle `faults.*` key on an Android device, or
- * undefined when the key is not one of them or the device is not Android.
+ * Build (once per device) the injector for one lifecycle `faults.*` key on an Android
+ * device, or undefined when the key is not one of them or the device is not Android.
+ * The registry resolves on every apply, so without the cache a repeat apply after the
+ * setting drifted would create a second injector that registers a second reset.
  */
 export function resolveLifecycleFaultInjector(
   device: BootedDevice,
@@ -143,7 +149,13 @@ export function resolveLifecycleFaultInjector(
   if (device.platform !== "android" || key !== "faults.dontKeepActivities") {
     return undefined;
   }
-  return createDontKeepActivitiesFaultInjector(
-    (deps.adbFactory ?? defaultAdbClientFactory).create(device),
-  );
+  const cache = deps.cache ?? injectorsByDevice;
+  let injector = cache.get(device.deviceId);
+  if (!injector) {
+    injector = createDontKeepActivitiesFaultInjector(
+      (deps.adbFactory ?? defaultAdbClientFactory).create(device),
+    );
+    cache.set(device.deviceId, injector);
+  }
+  return injector;
 }

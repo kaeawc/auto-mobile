@@ -397,6 +397,9 @@ function recoveredMutationScope(
     stableDeviceId: assignment.stableDeviceId ?? assignedDevice,
     transportId: assignedDevice,
     assignmentGeneration: assignment.generation,
+    // Android has no boot ID or in-memory baseline after restart; reset already fails closed
+    // with "lacks the original session baseline".
+    bootId: null,
   });
 }
 

@@ -1,3 +1,4 @@
+import { mutationIncarnation } from "../../../src/daemon/sessionBroker/mutations/incarnation";
 import { describe, expect, test } from "bun:test";
 import {
   AndroidBaselineReset,
@@ -53,6 +54,7 @@ async function rig(fallback?: AndroidResetStrategy, resetTimeoutMs?: number) {
   };
   const capture = (sessionId: string, fresh = false) =>
     baseline.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, sessionId, {
+      stableDeviceId: "stable-avd",
       timer,
       timeoutMs: 60_000,
       assertOwned,
@@ -63,7 +65,12 @@ async function rig(fallback?: AndroidResetStrategy, resetTimeoutMs?: number) {
   const scope = () => ({
     deviceId: ANDROID_RESET_DEVICE.deviceId,
     sessionUuid: "session-a",
-    incarnation: JSON.stringify(["resource-a", "resource-a", host.bootId]),
+    incarnation: mutationIncarnation({
+      platform: "android",
+      resourceId: "resource-a",
+      stableDeviceId: "stable-avd",
+      bootId: host.bootId,
+    }),
   });
   await capture("session-a", true);
   port.beforeClean = async () => {

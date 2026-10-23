@@ -60,14 +60,25 @@ export class SqliteDeviceMutationJournal implements DeviceMutationJournal {
       .execute();
   }
 
-  async list(scope: DeviceMutationScope): Promise<readonly DeviceMutationEntry[]> {
+  list(scope: DeviceMutationScope): Promise<readonly DeviceMutationEntry[]> {
+    return this.listIncarnations(scope, "=");
+  }
+
+  listStrayIncarnations(scope: DeviceMutationScope): Promise<readonly DeviceMutationEntry[]> {
+    return this.listIncarnations(scope, "!=");
+  }
+
+  private async listIncarnations(
+    scope: DeviceMutationScope,
+    comparison: "=" | "!=",
+  ): Promise<readonly DeviceMutationEntry[]> {
     assertScope(scope, scope.sessionUuid);
     const rows = await this.db
       .selectFrom("device_mutation_journal")
       .selectAll()
       .where("session_uuid", "=", scope.sessionUuid)
       .where("device_id", "=", scope.deviceId)
-      .where("incarnation", "=", scope.incarnation)
+      .where("incarnation", comparison, scope.incarnation)
       .orderBy("sequence", "asc")
       .execute();
     return rows.map((row) => ({

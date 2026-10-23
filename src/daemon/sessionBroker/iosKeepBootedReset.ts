@@ -36,7 +36,10 @@ export interface IosKeepBootedMutationPort extends Pick<
 }
 
 export interface IosKeepBootedResetDependencies {
-  journal: Pick<DeviceMutationJournal, "list" | "getBaseline" | "deleteSession">;
+  journal: Pick<
+    DeviceMutationJournal,
+    "list" | "getBaseline" | "deleteSession" | "listStrayIncarnations"
+  >;
   mutations: IosKeepBootedMutationPort;
   simctl: Pick<SimCtl, "readSimulatorTarget">;
   health: IosResetHealthPort;
@@ -126,6 +129,12 @@ export class IosKeepBootedReset {
         if (opaque) {
           throw new ActionableError(
             `iOS opaque journaled mutation (${opaque.toolName}) cannot be journal-reverted; erase required`,
+          );
+        }
+        const strays = await this.dependencies.journal.listStrayIncarnations(context.scope);
+        if (strays.length > 0) {
+          throw new ActionableError(
+            `iOS journaled mutations recorded under a different incarnation (${strays.length}) cannot be journal-reverted; erase required`,
           );
         }
         await this.replayJournal(entries, context, step);

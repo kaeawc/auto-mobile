@@ -143,6 +143,27 @@ async function recordClipboard(rig: Awaited<ReturnType<typeof harness>>) {
 }
 
 describe("iOS keep-booted best-effort cleaning", () => {
+  test("legacy incarnation rows require erase before reverts or sanitation", async () => {
+    const rig = await harness();
+    await rig.journal.record(
+      { ...SCOPE, incarnation: JSON.stringify(["resource", 3]) },
+      {
+        kind: "clipboard",
+        key: "device",
+        toolName: "clipboard",
+        priorValue: { state: "absent" },
+      },
+    );
+    expect(await rig.run()).toMatchObject({
+      outcome: "fallback:erase",
+      fallbackReason:
+        "iOS journaled mutations recorded under a different incarnation (1) cannot be journal-reverted; erase required",
+    });
+    expect(rig.state.eraseCalls).toBe(1);
+    expect(rig.mutations.reverted).toEqual([]);
+    expect(rig.mutations.sanitizeCount).toBe(0);
+  });
+
   test("partial native coverage stays booted, sanitizes and probes without baseline readback", async () => {
     const rig = await harness();
     await recordClipboard(rig);

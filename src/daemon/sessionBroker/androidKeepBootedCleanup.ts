@@ -1,3 +1,4 @@
+import { SCREEN_STATE_MUTATION_KEY } from "./mutations/screenStateMutation";
 import { ActionableError } from "../../models/ActionableError";
 import { isDeepStrictEqual } from "node:util";
 import { parseAndroidRuntimePermissions } from "../../features/action/parseAndroidRuntimePermissions";
@@ -19,6 +20,46 @@ import type { DeviceBaseline, DeviceMutationInput, MutationValue } from "./mutat
 export function isAndroidCriticalSetting(key: string): boolean {
   return /^(?:global|secure):(?:user:\d+:)?(?:adb_enabled|adb_wifi_enabled|development_settings_enabled|airplane_mode_on|wifi_on|mobile_data|enabled_accessibility_services|accessibility_enabled)$/.test(
     key,
+  );
+}
+
+/**
+ * Baseline cleaning covers installed apps and clipboard; absent-prior shared files in swept
+ * public roots; rotation, screen-reader and keep-awake settings; settings-backed keyboard rows;
+ * transient opened URLs; and device-setting global:/secure:/system: rows, display: overrides,
+ * density, size, fontScale and nightMode. Screen state is left to the reset's wakeAndUnlock readiness pass.
+ * CtrlProxy keyboard profiles, app files and overwritten files require stronger restoration.
+ */
+export function androidBaselineCleanCovers(
+  entry: Pick<DeviceMutationInput, "kind" | "key" | "priorValue">,
+): boolean {
+  if (entry.kind === "shared-file") {
+    return (
+      entry.priorValue.state === "absent" &&
+      isAndroidResetFile(entry.key) &&
+      ANDROID_BASELINE_FILE_ROOTS.some((root) => entry.key.startsWith(`${root}/`))
+    );
+  }
+  if (
+    [
+      "installed-app",
+      "clipboard",
+      "rotation",
+      "screen-reader",
+      "keep-awake",
+      "opened-url",
+    ].includes(entry.kind)
+  ) {
+    return true;
+  }
+  const settingsKey = /^(?:global|secure|system):/.test(entry.key);
+  return (
+    (entry.kind === "keyboard" && settingsKey) ||
+    (entry.kind === "device-setting" &&
+      (settingsKey ||
+        entry.key.startsWith("display:") ||
+        entry.key === SCREEN_STATE_MUTATION_KEY ||
+        ["density", "size", "fontScale", "nightMode"].includes(entry.key)))
   );
 }
 

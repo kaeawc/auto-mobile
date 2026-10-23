@@ -1,3 +1,4 @@
+import { baselineHoldsApp } from "./mutations/appInventory";
 import { ANDROID_RESET_MIN_ATTEMPT_MS, ANDROID_RESET_SETTLEMENT_MS } from "./androidResetBudget";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import type { BootedDevice } from "../../models/DeviceInfo";
@@ -18,7 +19,7 @@ import {
 } from "./mutations/reset";
 import type { ResetOutcome } from "./devicePort";
 import { ResetFailureError } from "./ResetFailureError";
-import { isAndroidCriticalSetting } from "./androidKeepBootedCleanup";
+import { androidBaselineCleanCovers, isAndroidCriticalSetting } from "./androidKeepBootedCleanup";
 import {
   opaqueForcesFallback,
   type DeviceBaseline,
@@ -33,7 +34,7 @@ export interface AndroidKeepBootedResetPort extends DeviceMutationResetPort {
 export interface AndroidKeepBootedResetDependencies {
   journal: Pick<
     DeviceMutationJournal,
-    "getBaseline" | "captureBaseline" | "list" | "deleteResource"
+    "getBaseline" | "captureBaseline" | "list" | "deleteResource" | "listStrayIncarnations"
   >;
   port(device: BootedDevice): AndroidKeepBootedResetPort;
   timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
@@ -391,13 +392,63 @@ export class AndroidKeepBootedReset implements AndroidResetStrategy {
     if (context.opaquePersistentChanges) {
       return "opaque persistent changes (deviceSnapshot) cannot be journal-reverted";
     }
-    const opaque = (await this.dependencies.journal.list(mutationContext.scope)).find(
-      opaqueForcesFallback,
-    );
+    const strays = await this.dependencies.journal.listStrayIncarnations(mutationContext.scope);
+    if (strays.length > 0) {
+      return `journaled mutations recorded under a different incarnation (${strays.length}) cannot be journal-reverted`;
+    }
+    const entries = await this.dependencies.journal.list(mutationContext.scope);
+    const opaque = entries.find(opaqueForcesFallback);
     if (opaque) {
       return `opaque journaled mutation (${opaque.toolName}) cannot be journal-reverted`;
     }
+    const preferences = entries.filter((entry) => entry.kind === "preference");
+    if (preferences.length > 0) {
+      let baseline: DeviceBaseline | null;
+      try {
+        baseline = await this.dependencies.journal.getBaseline(mutationContext.scope);
+      } catch (error) {
+        logger.warn("Android preference baseline is unreadable; baseline fallback required", error);
+        return "journaled preferences have an unreadable baseline";
+      }
+      const uncovered = preferences.find((entry) => {
+        const appId = this.preferenceAppId(entry.key);
+        return !baseline || !appId || baselineHoldsApp(baseline, appId);
+      });
+      if (uncovered) {
+        return `journaled preference (${uncovered.toolName}) cannot be baseline-cleaned`;
+      }
+    }
+    // Non-fallback opaque rows are diagnostic breadcrumbs, not persistent-state claims.
+    const unrevertible = entries.find(
+      (entry) =>
+        entry.kind !== "opaque" &&
+        entry.kind !== "preference" &&
+        !androidBaselineCleanCovers(entry) &&
+        !port.canRevert(entry),
+    );
+    if (unrevertible) {
+      return `journaled mutation ${unrevertible.kind}:${unrevertible.key} (${unrevertible.toolName}) cannot be journal-reverted`;
+    }
     return this.cleanWithDeadline(port, mutationContext, context, phases);
+  }
+
+  private preferenceAppId(key: string): string | undefined {
+    try {
+      const parsed: unknown = JSON.parse(key);
+      return typeof parsed === "object" &&
+        parsed !== null &&
+        "appId" in parsed &&
+        typeof parsed.appId === "string" &&
+        parsed.appId.length > 0
+        ? parsed.appId
+        : undefined;
+    } catch (error) {
+      logger.warn(
+        "Android preference journal key is unreadable; baseline fallback required",
+        error,
+      );
+      return undefined;
+    }
   }
 
   private resetFailure(

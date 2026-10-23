@@ -33,7 +33,7 @@ import { boundAndroidResetInventory } from "../../../src/daemon/sessionBroker/se
 import type { BootedDevice } from "../../../src/models/DeviceInfo";
 import { FakeNativePort } from "../../helpers/fakeSessionBrokerDevicePort";
 import type { Session } from "../../../src/daemon/sessionManager/sessionTypes";
-import { iosMutationIncarnation } from "../../../src/daemon/sessionBroker/mutations/recorder";
+import { mutationIncarnation } from "../../../src/daemon/sessionBroker/mutations/incarnation";
 import { logger } from "../../../src/utils/logger";
 import { DEFAULT_ANDROID_RESET_TIMEOUT_MS } from "../../../src/daemon/sessionBroker/androidBaselineReset";
 import { FakeAndroidKeepBootedResetPort } from "../../fakes/FakeAndroidKeepBootedResetPort";
@@ -462,11 +462,12 @@ describe("session broker service lifecycle", () => {
       const scope = {
         sessionUuid: session.sessionId,
         deviceId: session.assignedDevice,
-        incarnation: iosMutationIncarnation(
-          resource.scopeKey,
-          resource.allocationIndex,
-          assignment.stableDeviceId!,
-        ),
+        incarnation: mutationIncarnation({
+          platform: "ios",
+          scopeKey: resource.scopeKey,
+          allocationIndex: resource.allocationIndex,
+          stableDeviceId: assignment.stableDeviceId!,
+        }),
       };
       await registry.deviceMutationJournal().record(scope, {
         kind: "clipboard",

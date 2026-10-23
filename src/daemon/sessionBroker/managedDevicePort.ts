@@ -10,7 +10,8 @@ import type { BrokerDeviceAcquisition } from "./provisioning/deviceAcquisition";
 import type { BindingJournal } from "./registry/bindingJournal";
 import { defaultBindingExecOwnerLiveness } from "./registry/ownerLiveness";
 import { runAsBindingReconciler } from "./provisioning/exclusion";
-import { brokerSessionMutationScope, iosMutationIncarnation } from "./mutations/recorder";
+import { brokerSessionMutationScope } from "./mutations/recorder";
+import { mutationIncarnation } from "./mutations/incarnation";
 import type { DeviceMutationScope } from "./mutations/types";
 import {
   computeBindingScopeKey,
@@ -267,7 +268,7 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
         generation: entry.assignmentGeneration,
         stableDeviceId: binding.stableId,
       });
-      await runAsBindingReconciler(this.key(resource), () =>
+      const captured = await runAsBindingReconciler(this.key(resource), () =>
         android.capture(resource.resourceId, device, profile, sessionId, {
           fresh: entry.disposition === "created" || entry.disposition === "replaced",
           signal: options.signal,
@@ -276,7 +277,7 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
             options.deadlineMs - (this.dependencies.timer ?? defaultTimer).now(),
           ),
           timer: this.dependencies.timer ?? defaultTimer,
-          incarnation: JSON.stringify([resource.resourceId, binding.stableId]),
+          stableDeviceId: binding.stableId,
           assertOwned: async () => {
             options.signal?.throwIfAborted();
             const current = await this.dependencies.registry.getAssignment(this.key(resource));
@@ -299,6 +300,9 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
           },
         }),
       );
+      if (captured) {
+        this.bindSessionMutationRecorder(entry, resource, profile, captured.bootId);
+      }
     } catch (error) {
       await this.handleAndroidBaselineCaptureFailure(resource.resourceId, android, options, error);
     }
@@ -472,25 +476,7 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
       result.bindings.length === 1,
     ].every(Boolean);
     if (resultReady && this.isReadyBinding(binding, profile)) {
-      if (this.dependencies.bindMutationRecorder) {
-        try {
-          this.dependencies.bindMutationRecorder(
-            brokerSessionMutationScope({
-              platform: profile.platform,
-              sessionUuid: binding.sessionUuid,
-              resource,
-              stableDeviceId: binding.device!.stableId,
-              transportId: binding.device!.transportId,
-              assignmentGeneration: binding.assignmentGeneration,
-            }),
-          );
-        } catch (error) {
-          logger.warn(
-            "Failed to bind broker device mutation recorder; acquiring without recording",
-            error,
-          );
-        }
-      }
+      this.bindSessionMutationRecorder(binding, resource, profile);
       return binding.sessionUuid;
     }
     const sessionId = binding === undefined ? null : binding.sessionUuid;
@@ -504,6 +490,35 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
         message: "Managed device preparation did not return an automation-ready session",
       };
     throw new SessionBrokerFailureError({ code, retryable, message });
+  }
+
+  private bindSessionMutationRecorder(
+    binding: BrokerDeviceAcquisitionEntry,
+    resource: BrokerResourceRecord,
+    profile: BrokerNativeProfile,
+    bootId: string | null = null,
+  ): void {
+    if (!this.dependencies.bindMutationRecorder) {
+      return;
+    }
+    try {
+      this.dependencies.bindMutationRecorder(
+        brokerSessionMutationScope({
+          platform: profile.platform,
+          sessionUuid: binding.sessionUuid!,
+          resource,
+          stableDeviceId: binding.device!.stableId,
+          transportId: binding.device!.transportId,
+          assignmentGeneration: binding.assignmentGeneration,
+          bootId,
+        }),
+      );
+    } catch (error) {
+      logger.warn(
+        "Failed to bind broker device mutation recorder; acquiring without recording",
+        error,
+      );
+    }
   }
 
   private isReadyBinding(
@@ -660,11 +675,12 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     }
     return {
       deviceId: assignment.stableDeviceId,
-      incarnation: iosMutationIncarnation(
-        resource.scopeKey,
-        resource.allocationIndex,
-        assignment.stableDeviceId,
-      ),
+      incarnation: mutationIncarnation({
+        platform: "ios",
+        scopeKey: resource.scopeKey,
+        allocationIndex: resource.allocationIndex,
+        stableDeviceId: assignment.stableDeviceId,
+      }),
     };
   }
 

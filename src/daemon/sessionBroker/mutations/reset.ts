@@ -39,7 +39,7 @@ export type DeviceMutationResetResult =
 
 export interface DeviceMutationResetOptions {
   scope: DeviceMutationScope;
-  journal: Pick<DeviceMutationJournal, "list" | "getBaseline">;
+  journal: Pick<DeviceMutationJournal, "list" | "getBaseline" | "listStrayIncarnations">;
   port: DeviceMutationResetPort;
   assertOwned(): Promise<void>;
   timer: Pick<Timer, "setTimeout" | "clearTimeout">;
@@ -100,6 +100,17 @@ async function runRevert(
   const baseline = await options.journal.getBaseline(context.scope);
   if (!baseline) {
     return { status: "non_clean", reason: "baseline_missing", details: [] };
+  }
+  const strays = await options.journal.listStrayIncarnations(context.scope);
+  if (strays.length > 0) {
+    return {
+      status: "non_clean",
+      reason: "non_revertible",
+      details: strays.map(
+        (entry) =>
+          `journaled mutation ${entry.kind}:${entry.key} (${entry.toolName}) recorded under a different incarnation`,
+      ),
+    };
   }
   context.baseline = baseline;
   const incomplete = DEVICE_MUTATION_KINDS.filter(

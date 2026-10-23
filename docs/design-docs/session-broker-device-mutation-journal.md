@@ -21,21 +21,28 @@ journaling.
 - Pending: `manufacturerProfile`,
   `statusBar` (appearance intent/prior adapters not wired). This limits journal
   intent coverage, not baseline capture, tool execution or keep-booted reuse.
-- Recording uses the broker recorder scope, incarnation `resourceId +
-  assignmentGeneration`. The iOS and Android keep-booted resets do not read that
-  scope today, so tool-recorded intents are not replayed by them. A prior is
-  revertible only when `deviceMutationPriorReader.ts` has a reader for the
-  mutation's kind and key; otherwise it is `unobservable`/opaque (best-effort
-  reverts only).
-- Acceptance criterion 2 (all adapters) and 3 (journal-backed release/read-through)
-  remain unmet; #14359 is not fully delivered by this slice.
+- Recording and reset use one typed `mutationIncarnation` constructor. Android
+  uses `[resourceId, stableDeviceId, bootId]`; iOS retains
+  `[scopeKey, allocationIndex, stableDeviceId]`. Android binds an interim null
+  boot ID at readiness, then rebinds the recorder with the captured boot ID before
+  applying the device profile. Session UUIDs isolate successive session rows.
+- Reset checks for journal rows from the same device and session under different
+  incarnations and fails closed, including legacy Android generation-shaped rows.
+  No migration is needed: daemon restart loses the Android in-memory baseline and
+  already fails closed; resource retirement prunes old tuples by element zero.
 
-**Owner decision**: keep-booted resets run their cleaning operations
-unconditionally. The journal is neither an admission gate nor a cleaning
-prerequisite; unknown kinds, unobservable priors, missing adapters and incomplete
-coverage must not add blocking. Follow-up under #14359: align recorder/reset scopes
-and make revert failures warn-and-continue instead of forcing fallback. Existing
-main reset ownership, readiness, cleanup and publication checks are unchanged.
+Keep-booted resets run baseline cleaning unconditionally when journal checks allow
+it. Fallback-prefixed opaque rows force baseline fallback. Unrevertible journal
+rows also force fallback unless baseline cleaning already restores their effects:
+packages, absent-prior files in swept public roots, clipboard, rotation, screen
+reader, keep-awake, settings-backed keyboard rows, settings and display, transient
+opened URLs, and screen state via the next wakeAndUnlock. Preferences are skipped
+by replay and require fallback unless their JSON key identifies an app absent
+from the readable baseline inventory, which cleaning uninstalls with its data.
+CtrlProxy keyboard profiles and overwritten or app-scoped files are not covered
+by baseline cleaning. Other opaque rows remain best-effort breadcrumbs. Missing inventory coverage alone does not block Android
+cleaning; uncovered journaled effects cannot silently survive a clean reset
+(#15105).
 
 **Recorder failure policy**: unavailable recorder for a broker session means
 recovery failed; recorder binding/recovery failures, scope mismatches and journal

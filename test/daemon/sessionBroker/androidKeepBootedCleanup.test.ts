@@ -1,7 +1,10 @@
 import { SETTINGS_TIMEOUT } from "./fixtures/androidResetLoadTimeouts";
 
 import { describe, expect, test } from "bun:test";
-import { cleanAndroidBaseline } from "../../../src/daemon/sessionBroker/androidKeepBootedCleanup";
+import {
+  androidBaselineCleanCovers,
+  cleanAndroidBaseline,
+} from "../../../src/daemon/sessionBroker/androidKeepBootedCleanup";
 import type { DeviceMutationInput } from "../../../src/daemon/sessionBroker/mutations/types";
 import { AndroidDeviceMutationResetPort } from "../../../src/daemon/sessionBroker/androidDeviceMutationResetPort";
 import { AndroidKeepBootedReset } from "../../../src/daemon/sessionBroker/androidKeepBootedReset";
@@ -56,6 +59,35 @@ async function rig(users: readonly number[] = [0], fallback?: AndroidResetStrate
 }
 
 describe("Android unconditional keep-booted cleaning", () => {
+  test.each([
+    ["installed-app", "any"],
+    ["clipboard", "any"],
+    ["device-setting", "global:setting"],
+    ["device-setting", "secure:user:10:setting"],
+    ["device-setting", "system:accelerometer_rotation"],
+    ["device-setting", "display:density"],
+    ["device-setting", "screen-state"],
+  ])("baseline cleaning covers %s:%s without a readable prior", (kind, key) => {
+    expect(androidBaselineCleanCovers({ kind, key, priorValue: { state: "unobservable" } })).toBe(
+      true,
+    );
+  });
+
+  test.each([
+    ["location", "provider:gps"],
+    ["contact", "row"],
+    ["media", "row"],
+    ["calendar", "row"],
+    ["notification", "row"],
+    ["network-condition", "network"],
+    ["device-setting", "appops:dev.example.app:op"],
+    ["device-setting", "prefix-global:setting"],
+  ])("baseline cleaning does not cover %s:%s", (kind, key) => {
+    expect(androidBaselineCleanCovers({ kind, key, priorValue: { state: "unobservable" } })).toBe(
+      false,
+    );
+  });
+
   async function displayRig(verify = true) {
     const { adb, reply } = androidBaselineRig();
     reply("shell wm density", "Physical density: 420");
@@ -225,18 +257,12 @@ describe("Android unconditional keep-booted cleaning", () => {
   });
 
   test("preserves baseline runtime grants and fixture data while revoking added grants", async () => {
-    const { adb, reply, reset, journal } = await rig([0, 10]);
+    const { adb, reply, reset } = await rig([0, 10]);
     const dump = androidPackageDump("com.example.probe", [0, 10]).replaceAll(
       "android.permission.CAMERA: granted=true, flags=[ USER_SET ]",
       "android.permission.CAMERA: granted=true, flags=[ USER_SET ]\n        android.permission.RECORD_AUDIO: granted=true, flags=[]",
     );
     reply("shell dumpsys package 'com.example.probe'", dump);
-    await journal.record(SCOPE, {
-      kind: "preference",
-      key: "app-data:0:com.example.probe",
-      priorValue: { state: "absent" },
-      toolName: "test",
-    });
     await reset();
     const commands = adb.getExecutedCommands();
     for (const user of [0, 10]) {
@@ -319,8 +345,14 @@ describe("Android unconditional keep-booted cleaning", () => {
     expect(port.certifiableKinds).not.toContain("shared-file");
   });
 
-  test("unsupported clipboard and unplannable journals do not force fallback", async () => {
-    const { adb, journal, reset } = await rig();
+  test("an uncovered unplannable account journal forces fallback despite unsupported clipboard", async () => {
+    let fallbacks = 0;
+    const { adb, journal, reset } = await rig([0], {
+      reset: async () => {
+        fallbacks++;
+        return { outcome: "clean", mode: "snapshot", phases: {} };
+      },
+    });
     adb.setCommandResponse(
       "shell cmd clipboard clear",
       createExecResult("", "Can't find service: clipboard"),
@@ -331,7 +363,11 @@ describe("Android unconditional keep-booted cleaning", () => {
       priorValue: { state: "absent" },
       toolName: "test",
     });
-    expect(await reset()).toMatchObject({ outcome: "clean", mode: "keep-booted" });
+    expect(await reset()).toMatchObject({
+      outcome: "fallback:snapshot",
+      fallbackReason: expect.stringContaining("account:external (test)"),
+    });
+    expect(fallbacks).toBe(1);
     expect(await journal.list(SCOPE)).toHaveLength(1);
   });
 

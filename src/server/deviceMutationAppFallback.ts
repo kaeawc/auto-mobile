@@ -1,3 +1,4 @@
+import { baselineHoldsApp } from "../daemon/sessionBroker/mutations/appInventory";
 import type { DeviceBaseline } from "../daemon/sessionBroker/mutations/types";
 import {
   FALLBACK_OPAQUE_KEY_PREFIX,
@@ -36,16 +37,6 @@ function fallbackTarget(
   }
 }
 
-/** Whether the baseline's installed-app inventory lists `appId` (Android `user:N:id`, iOS `id`). */
-function baselineHolds(baseline: DeviceBaseline, appId: string): boolean {
-  return baseline.observations.some(
-    (entry) =>
-      entry.kind === "installed-app" &&
-      entry.value.state === "present" &&
-      (entry.key === appId || (entry.key.startsWith("user:") && entry.key.endsWith(`:${appId}`))),
-  );
-}
-
 /**
  * Drops an app `fallback:` intent when the keep-booted clean already covers it, so the common
  * install, clear, test, uninstall flow does not escalate every reset. An app the baseline did not
@@ -65,7 +56,7 @@ export async function withoutSessionCoveredFallbacks<Mutation extends ToolMutati
     }
     const baseline = await evidence.baseline();
     const held =
-      baseline && target.appId !== null ? baselineHolds(baseline, target.appId) : undefined;
+      baseline && target.appId !== null ? baselineHoldsApp(baseline, target.appId) : undefined;
     const covered =
       held === undefined || target.appId === null
         ? false

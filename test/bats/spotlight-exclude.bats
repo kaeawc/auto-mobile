@@ -145,3 +145,38 @@ SCRIPTS
   run bash -c 'source "$1"; mkdir() { return 23; }; if mkdir_spotlight_excluded_within "$2" "$2/nested"; then exit 99; else exit $?; fi' _ "$HELPER" "$DIR"
   [ "$status" -eq 23 ]
 }
+
+@test "caller-selected output paths use the repository-bounded marker" {
+  # Each entry: script | exact bounded invocation required for the caller-supplied path (#15070).
+  while IFS='|' read -r script expected; do
+    grep -F -- "$expected" "$REPO_ROOT/scripts/$script" > /dev/null || {
+      echo "Missing bounded Spotlight marker in $script: $expected"
+      return 1
+    }
+  done <<'SITES'
+ios/xcode-build.sh|mkdir_spotlight_excluded_within "${PROJECT_ROOT}" "${AUTOMOBILE_XCODE_DERIVED_DATA}"
+ios/xcode-test.sh|mkdir_spotlight_excluded_within "${PROJECT_ROOT}" "${AUTOMOBILE_XCODE_DERIVED_DATA}"
+ios/ctrl-proxy-build-for-testing.sh|mkdir_spotlight_excluded_within "${PROJECT_ROOT}" "${DERIVED_DATA}"
+prepush-ios.sh|mkdir_spotlight_excluded_within "${project_root}" "${AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA:-
+lib/bun-unit-chunks.sh|mkdir_spotlight_excluded_within "$root" "$coverage_root"
+test-ts.sh|mkdir_spotlight_excluded_within "$ROOT" "${AUTOMOBILE_TEST_TS_SCRATCH_DIR:-$ROOT/scratch}"
+test-ts.sh|mkdir_spotlight_excluded_within "$ROOT" "$coverage_root"
+test-ts.sh|mkdir_spotlight_excluded_within "$ROOT" "$shard_root"
+SITES
+}
+
+@test "unbounded marker never receives a caller-supplied override" {
+  run grep -En 'mkdir_spotlight_excluded .*(AUTOMOBILE_[A-Z_]*(DIR|ROOT|DATA|PATH)|\$coverage_root|\$shard_root)' \
+    "$REPO_ROOT/scripts/ios/xcode-build.sh" "$REPO_ROOT/scripts/ios/xcode-test.sh" \
+    "$REPO_ROOT/scripts/ios/ctrl-proxy-build-for-testing.sh" "$REPO_ROOT/scripts/prepush-ios.sh" \
+    "$REPO_ROOT/scripts/lib/bun-unit-chunks.sh" "$REPO_ROOT/scripts/test-ts.sh"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+}
+
+@test "the fixed /tmp ctrl-proxy default stays on the unconditional marker" {
+  run grep -F 'mkdir_spotlight_excluded "${DERIVED_DATA}"' "$REPO_ROOT/scripts/ios/ctrl-proxy-build-for-testing.sh"
+  [ "$status" -eq 0 ]
+  run grep -F 'mkdir_spotlight_excluded "${DEFAULT_DERIVED_DATA}"' "$REPO_ROOT/scripts/ios/ctrl-proxy-build-for-testing.sh"
+  [ "$status" -eq 0 ]
+}

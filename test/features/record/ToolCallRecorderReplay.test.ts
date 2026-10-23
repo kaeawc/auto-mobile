@@ -172,16 +172,16 @@ describe("recording export warnings (#10052)", () => {
     startToolCallRecording({ timer });
     recordPlanCall(
       getToolCallRecorder()!,
-      "stageSessionDownloads",
+      "putAppFile",
       {
-        directory: "fixtures",
+        target: { domain: "user_files", namespace: "fixtures" },
         files: [{ destinationPath: "a.txt", sourcePath: "/tmp/a.txt" }],
       },
       STAGES_FILES,
     );
 
     expect(() => stopToolCallRecording({ timer })).toThrow(
-      /No MCP tool calls were recorded\. 1 call\(s\) were skipped: stageSessionDownloads was not recorded .*sourcePath/,
+      /No MCP tool calls were recorded\. 1 call\(s\) were skipped: putAppFile was not recorded .*sourcePath/,
     );
   });
 

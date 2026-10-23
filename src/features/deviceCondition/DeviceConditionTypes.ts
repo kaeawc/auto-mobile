@@ -29,7 +29,7 @@ export const DEVICE_CONDITION_UNSET = "unset";
  */
 export interface DeviceConditionInput {
   version?: typeof DEVICE_CONDITION_SCHEMA_VERSION;
-  rootState?: typeof DEVICE_CONDITION_UNSET;
+  rootState?: "rooted-detectable" | typeof DEVICE_CONDITION_UNSET;
   integrityState?: typeof DEVICE_CONDITION_UNSET;
   /**
    * Power-domain fault injectors (#14063), each optional and each clearable with
@@ -41,6 +41,8 @@ export interface DeviceConditionInput {
     lowPower?: "on" | typeof DEVICE_CONDITION_UNSET;
     doze?: "on" | typeof DEVICE_CONDITION_UNSET;
     thermal?: "throttling" | "critical" | typeof DEVICE_CONDITION_UNSET;
+    /** Process-lifecycle fault (#14068). */
+    dontKeepActivities?: "on" | typeof DEVICE_CONDITION_UNSET;
   };
   expiresInSeconds?: number;
   reset?: true;
@@ -53,10 +55,10 @@ export const deviceConditionInputSchema: z.ZodType<DeviceConditionInput> = z
       .optional()
       .describe("Request shape version; only 1 exists."),
     rootState: z
-      .literal(DEVICE_CONDITION_UNSET)
+      .enum(["rooted-detectable", DEVICE_CONDITION_UNSET])
       .optional()
       .describe(
-        "Root fixture state. Only 'unset' (clear) is available until a root injector lands.",
+        "Root fixture: 'rooted-detectable' plants inert su/busybox stubs and sets SELinux permissive so root-detection checks trip (Android, non-Play image, needs a writable /system); 'unset' restores.",
       ),
     integrityState: z
       .literal(DEVICE_CONDITION_UNSET)
@@ -82,10 +84,16 @@ export const deviceConditionInputSchema: z.ZodType<DeviceConditionInput> = z
           .enum(["throttling", "critical", DEVICE_CONDITION_UNSET])
           .optional()
           .describe("Override thermal status via `cmd thermalservice override-status`, or unset."),
+        dontKeepActivities: z
+          .enum(["on", DEVICE_CONDITION_UNSET])
+          .optional()
+          .describe(
+            "Developer options 'Don't keep activities' via `settings global always_finish_activities`, restored to its prior value, or unset. Applies to activities left after the change.",
+          ),
       })
       .strict()
       .optional()
-      .describe("Power-domain fault injectors (Android only, behind the feature flag)."),
+      .describe("Power and lifecycle fault injectors (Android only, behind the feature flag)."),
     expiresInSeconds: z
       .number()
       .int()

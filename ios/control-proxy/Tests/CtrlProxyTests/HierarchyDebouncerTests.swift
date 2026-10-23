@@ -34,6 +34,60 @@ final class HierarchyDebouncerTests: XCTestCase {
         XCTAssertTrue(harness.transitions.isEmpty)
     }
 
+    func testHeavyExtractionSpacesPollsAndBackoffCanExceedCostFloor() {
+        let harness = DebouncerHarness(steps: [.hierarchy(hierarchy("idle"))], pollIntervalMs: 2000)
+        harness.extractor.onCapture = { [timer = harness.timer] in timer.advance(by: 1500) }
+        harness.debouncer.start()
+        harness.timer.advance(by: 4500)
+        harness.timer.advance(by: 4500)
+        XCTAssertEqual(harness.timer.scheduledDelays, [4500, 4500, 8000])
+    }
+
+    func testEverySuccessfulPollUpdatesExtractionCost() {
+        let harness = DebouncerHarness(steps: [.hierarchy(hierarchy("idle"))])
+        harness.debouncer.start()
+        harness.extractor.onCapture = { [timer = harness.timer] in timer.advance(by: 1500) }
+        harness.timer.advance(by: 1000)
+        harness.extractor.onCapture = nil
+        harness.timer.advance(by: 4500)
+        XCTAssertEqual(harness.timer.scheduledDelays, [1000, 4500, 4000])
+    }
+
+    func testHugePausedIntervalWinsOverExtractionCostAndBackoffDoesNotOverflow() {
+        let harness = DebouncerHarness(steps: [.hierarchy(hierarchy("idle"))])
+        harness.extractor.onCapture = { [timer = harness.timer] in timer.advance(by: 1500) }
+        harness.debouncer.start()
+        let pausedInterval = Int64.max / 4 + 1
+        harness.debouncer.updatePollIntervalMs(pausedInterval)
+        harness.timer.advance(by: pausedInterval)
+        XCTAssertEqual(harness.timer.scheduledDelays, [4500, pausedInterval, pausedInterval * 2])
+    }
+
+    func testFailedExtractionRaisesCostFloorAndStopResetsIt() {
+        for failsInitially in [true, false] {
+            let steps: [ScriptedHierarchyExtractor.Step] = failsInitially
+                ? [.failure] : [.hierarchy(hierarchy("idle")), .failure]
+            let harness = DebouncerHarness(steps: steps)
+            if !failsInitially {
+                harness.debouncer.start()
+            }
+            harness.extractor.onCapture = { [timer = harness.timer] in timer.advance(by: 1500) }
+            if failsInitially {
+                harness.debouncer.start()
+            } else {
+                harness.timer.advance(by: 1000)
+            }
+            XCTAssertGreaterThanOrEqual(harness.timer.scheduledDelays.last ?? 0, 4500)
+
+            harness.extractor.onCapture = nil
+            harness.timer.advance(by: 4500)
+            XCTAssertGreaterThanOrEqual(harness.timer.scheduledDelays.last ?? 0, 4500)
+            harness.debouncer.stop()
+            harness.debouncer.start()
+            XCTAssertEqual(harness.timer.scheduledDelays.last, 1000)
+        }
+    }
+
     func testChangedHashResetsBackoffToBase() throws {
         let initial = hierarchy("initial")
         let changed = hierarchy("changed")

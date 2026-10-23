@@ -7,7 +7,7 @@ import { McpTimeoutError } from "../McpTimeoutError";
 import { DaemonRequest } from "../types";
 
 import { AndroidCtrlProxyClient, type AndroidCtrlProxy } from "../../features/observe/android";
-import { IOSCtrlProxyClient } from "../../features/observe/ios";
+import { IOSCtrlProxyClient, type IosCtrlProxy } from "../../features/observe/ios";
 import { PressButton } from "../../features/action/PressButton";
 import {
   INPUT_KEY_IOS_UNSUPPORTED_ERROR,
@@ -34,7 +34,7 @@ import type { SocketServerRuntime } from "./SocketServerRuntime";
 import type { SocketServerOperations } from "./socketServerOperations";
 /** The two calls the iOS input-coordinate scale probe makes. */
 type IosRunnerScaleClient = Pick<
-  IOSCtrlProxyClient,
+  IosCtrlProxy,
   "getScreenScaleMetadata" | "requestHierarchySyncWithoutObservationStreamPush"
 >;
 type State = Pick<SocketServerRuntime, "timer" | "confirmedLegacyScaleDevices" | "ownedGestures">;

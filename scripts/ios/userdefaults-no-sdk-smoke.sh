@@ -3,13 +3,15 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=scripts/lib/spotlight-exclude.sh
+source "${repo_root}/scripts/lib/spotlight-exclude.sh"
 device_id="${1:-}"
 if [[ $# -ne 1 || -z "${device_id}" ]]; then
     echo "Usage: bash scripts/ios/userdefaults-no-sdk-smoke.sh <booted-simulator-udid>" >&2
     exit 2
 fi
 
-mkdir -p "${repo_root}/scratch"
+mkdir_spotlight_excluded "${repo_root}/scratch"
 build_dir="$(mktemp -d "${repo_root}/scratch/userdefaults-no-sdk.XXXXXX")"
 cleanup() {
     rm -rf "${build_dir}"

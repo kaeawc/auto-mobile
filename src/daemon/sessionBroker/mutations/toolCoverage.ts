@@ -111,11 +111,6 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationTool
     "journaled",
   ),
   ...tools(
-    ["stageSessionDownloads"],
-    "The deprecated Downloads alias resolves its device inside the service; the service records the same shared-file and media intents as putAppFile before its first device write.",
-    "journaled",
-  ),
-  ...tools(
     ["pressButton", "sendKeys"],
     "Only some calls persist: power/lock journal the screen state with a readable prior, volume presses leave a breadcrumb, a typed keyboardProfile journals the keyboard profile row. Every other button or text call is transient input.",
     "journaled",

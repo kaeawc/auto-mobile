@@ -222,31 +222,6 @@ describe("CLI transparently enables gated tools", () => {
     expect(enable?.params).toMatchObject({ toolName: "resetAppLogs", enabled: true });
   });
 
-  test("enables a gated tool (stageSessionDownloads) before calling it", async () => {
-    const calls: Array<{ name: string; params: unknown }> = [];
-    recordProxy(calls);
-
-    await runCliCommand([
-      "stageSessionDownloads",
-      "--sessionUuid",
-      "00000000-0000-4000-8000-000000000abc",
-      "--directory",
-      "fixtures",
-      "--files",
-      JSON.stringify([{ destinationPath: "hello.txt", contentText: "hello" }]),
-    ]);
-
-    const names = calls.map((c) => c.name);
-    expect(names).toContain("setToolEnabled");
-    expect(names).toContain("stageSessionDownloads");
-    expect(names.indexOf("setToolEnabled")).toBeLessThan(names.indexOf("stageSessionDownloads"));
-    const enable = calls.find((c) => c.name === "setToolEnabled");
-    expect(enable?.params).toMatchObject({
-      toolName: "stageSessionDownloads",
-      enabled: true,
-    });
-  });
-
   test("reuses one minted profile across separate CLI invocations", async () => {
     const calls: Array<{ name: string; params: unknown }> = [];
     recordProxy(calls);

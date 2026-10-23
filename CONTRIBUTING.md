@@ -10,7 +10,7 @@ project MCP configuration and should not be modified for local development. Clau
 Code's private project MCP scope is managed by the Claude CLI; `.claude/settings*.json`
 files configure Claude behavior and permissions, not MCP servers.
 
-For isolated manual batches, use the [manual-test harness](docs/using/manual-test-harness.md).
+For isolated manual batches, use the [manual-test harness](docs/design-docs/manual-test-harness.md).
 
 ## SDK public API baselines
 

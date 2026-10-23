@@ -78,3 +78,6 @@ research/
 __pycache__/
 .pack-trim-backup/
 *.orig
+
+# Spotlight exclusions for generated directories and worktree roots
+.metadata_never_index

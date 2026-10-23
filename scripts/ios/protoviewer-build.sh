@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
-# Build the offline ProtoViewer library app (Core + Agent + ProtoViewer, no Loader.c).
+# Build the dev-signed ProtoViewer library app (Core + Agent + ProtoViewer, no Loader.c).
 # Usage: scripts/ios/protoviewer-build.sh [output-dir]
 # Env: PROTOVIEWER_ARCHS (default "arm64 x86_64"), PROTOVIEWER_MIN_IOS (default 17.0).
+# Env: PROTOVIEWER_CLEARTEXT (default 1; set 0 to omit the dev cleartext opt-in).
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=scripts/lib/spotlight-exclude.sh
+source "${repo_root}/scripts/lib/spotlight-exclude.sh"
 out_dir="${1:-${repo_root}/scratch/protoviewer}"
-mkdir -p "${out_dir}"
+mkdir_spotlight_excluded_within "${repo_root}" "${out_dir}"
 out_dir="$(cd "${out_dir}" && pwd)"
 app="${out_dir}/ProtoViewer.app"
 mkdir -p "${app}"
@@ -20,6 +23,11 @@ if [[ ${#archs[@]} -eq 0 ]]; then
   exit 1
 fi
 
+# Cleartext defaults on for this dev build; release-style builds set PROTOVIEWER_CLEARTEXT=0.
+cleartext_flags=()
+if [[ "${PROTOVIEWER_CLEARTEXT:-1}" == 1 ]]; then
+  cleartext_flags=(-D PROTOVIEWER_ALLOW_CLEARTEXT)
+fi
 # One executable module, including Core + Agent Swift, never Loader.c or an asset catalog.
 swift_sources=()
 while IFS= read -r -d '' file; do
@@ -36,6 +44,7 @@ for arch in "${archs[@]}"; do
   xcrun --sdk iphonesimulator swiftc \
     -target "${arch}-apple-ios${min_ios}-simulator" -sdk "${sdk}" \
     -swift-version 6 -warnings-as-errors -O -parse-as-library \
+    ${cleartext_flags[@]+"${cleartext_flags[@]}"} \
     -module-name AutoMobileProtoViewer \
     -o "${slice}" ${swift_sources[@]+"${swift_sources[@]}"}
   slices+=("${slice}")
@@ -68,6 +77,10 @@ func hasCompiledIconName(_ value: Any) -> Bool {
 guard let metadata = plist as? [String: Any],
       metadata["NSAppTransportSecurity"] == nil, metadata["UIFileSharingEnabled"] == nil
 else { fatalError("ProtoViewer must not enable ATS exceptions or file sharing") }
+guard let localNetworkUsage = metadata["NSLocalNetworkUsageDescription"] as? String,
+      !localNetworkUsage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+      metadata["NSBonjourServices"] == nil
+else { fatalError("ProtoViewer requires a local network usage description and no Bonjour services") }
 guard !hasCompiledIconName(plist) else { fatalError("Template must not contain CFBundleIconName") }
 for (scale, size) in [(2, 120), (3, 180)] {
     guard let context = CGContext(

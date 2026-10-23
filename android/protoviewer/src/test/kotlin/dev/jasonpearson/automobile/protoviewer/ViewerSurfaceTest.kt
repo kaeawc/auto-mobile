@@ -150,6 +150,17 @@ class ViewerSurfaceTest {
     compose.onNodeWithTag("network-provenance").assertDoesNotExist()
   }
 
+  @Test
+  fun revokedPermissionDetectedOnWindowFocusTurnsNetworkOffWithoutResume() {
+    install("""{"type":"text","testTag":"plain","text":"Plain"}""")
+    val activity = launch()
+    compose.onNodeWithTag("network-provenance").assertIsDisplayed()
+    grant.granted = false
+    compose.runOnIdle { activity.onWindowFocusChanged(true) }
+    assertFalse(settings.allowNetwork.value)
+    compose.onNodeWithTag("network-provenance").assertDoesNotExist()
+  }
+
   private fun install(root: String, placement: String = """{"type":"fullscreen"}""") {
     val spec =
       """{"id":"surface","motion":"none","window":{"placement":$placement},"state":{"open":true,"choice":"a"},"root":$root}"""

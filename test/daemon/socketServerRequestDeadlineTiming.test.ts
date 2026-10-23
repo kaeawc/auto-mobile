@@ -40,8 +40,8 @@ function harness(): Harness {
   const timer = new FakeTimer();
   const server = createTestUnixSocketServer("unused", undefined, timer);
   // Bracket access is TypeScript's sanctioned way to reach private members from a test.
-  server["acceptingRequests"] = true;
-  server["handleConnection"](socket);
+  server.testHooks.acceptingRequests = true;
+  server.testHooks.transport.handleConnection(socket);
   const gate = Promise.withResolvers<unknown>();
   const seen: Harness["seen"] = [];
   server["handleLocalSocketRequest"] = (_request, _sessionId, signal, receivedAtMs) => {

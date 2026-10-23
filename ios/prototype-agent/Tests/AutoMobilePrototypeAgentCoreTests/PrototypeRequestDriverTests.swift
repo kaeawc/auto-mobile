@@ -177,7 +177,10 @@ final class PrototypeRequestDriverTests: XCTestCase {
     )
         -> String
     {
-        #"[{"type":"request","url":"http://localhost:8080/feed","into":"\#(into)","statusKey":"status","via":"\#(via)"\#(extra)}]"#
+        #"""
+        [{"type":"request","url":"http://localhost:8080/feed","into":"\#(into)",
+          "statusKey":"status","via":"\#(via)"\#(extra)}]
+        """#
     }
 
     private func hostResponse(
@@ -470,16 +473,26 @@ final class PrototypeRequestDriverTests: XCTestCase {
         XCTAssertEqual(harness.requestEvents.map { $0["requestId"]?.stringValue ?? "" }, ["r-1", "r-2"])
     }
 
-    func testDismissCancelsRunningDeviceTasks() async throws {
-        let harness = RequestHarness()
-        try harness.show(request(via: "device"))
-        harness.tap()
-        await harness.waitForDeviceCalls(1)
-        harness.dismiss()
-        await harness.driver.settled()
-        XCTAssertEqual(harness.client.cancelled, [0])
-        XCTAssertEqual(harness.driver.runningCount, 0)
-        XCTAssertFalse(harness.session.isShown)
+    func testEmbeddedStopDismissalCancelsRunningTasksOnBothRoutes() async throws {
+        for via in ["device", "host"] {
+            let harness = RequestHarness()
+            PrototypeNetworkConfiguration(device: harness.client).apply(to: harness.driver)
+            try harness.show(request(via: via))
+            harness.tap()
+            await harness.waitForDeviceCalls(1)
+            XCTAssertEqual(harness.client.requests.count, 1)
+            XCTAssertEqual(harness.driver.runningCount, 1)
+
+            // PrototypeEmbeddedController.stop() dismisses the session before its final storage flush.
+            harness.dismiss()
+            XCTAssertEqual(harness.driver.runningCount, 0)
+            let events = harness.events
+            await harness.yield()
+            XCTAssertEqual(harness.client.cancelled, [0])
+            XCTAssertEqual(harness.events, events, "the cancelled task's answer must not reach the stopped session")
+            XCTAssertNil(harness.data("/feed"))
+            XCTAssertFalse(harness.session.isShown)
+        }
     }
 
     func testAnAgentWithoutAClientFailsDeviceRequestsWithAHint() async throws {
@@ -494,7 +507,10 @@ final class PrototypeRequestDriverTests: XCTestCase {
     func testHostAndDeviceRequestsShareTheInFlightLimit() async throws {
         let harness = RequestHarness()
         let list = (0 ..< 5).map {
-            #"{"type":"request","url":"http://h/\#($0)","into":"/data/o\#($0)","via":"\#($0 % 2 == 0 ? "host" : "device")"}"#
+            #"""
+            {"type":"request","url":"http://h/\#($0)","into":"/data/o\#($0)",
+             "via":"\#($0 % 2 == 0 ? "host" : "device")"}
+            """#
         }.joined(separator: ",")
         try harness.show("[\(list)]")
         harness.tap()

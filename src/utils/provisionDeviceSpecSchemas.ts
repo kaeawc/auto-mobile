@@ -8,7 +8,14 @@ const MODERN_PLAY_IMAGE_MIN_API_LEVEL = 30;
 const CORE_SIMULATOR_IDENTIFIER_PREFIX = "com.apple.CoreSimulator.";
 const ANDROID_SYSTEM_IMAGE_PREFIX = "system-images;";
 
-export const BINDING_DEVICE_FAMILIES = ["phone", "tablet", "foldable"] as const;
+export const BINDING_DEVICE_FAMILIES = [
+  "phone",
+  "tablet",
+  "foldable",
+  "tv",
+  "watch",
+  "automotive",
+] as const;
 export type BindingDeviceFamily = (typeof BINDING_DEVICE_FAMILIES)[number];
 
 const bindingDeviceFamilySchema = z

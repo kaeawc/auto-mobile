@@ -25,11 +25,9 @@ Inventory reads have separate response budgets: `BOOTED_DEVICES_RESOURCE_BUDGET_
 `CONFIGURED_IMAGE_FALLBACK_TIMEOUT_MS` (2,000 ms) for `listDevices` image enrichment.
 Android inventory device-list reads use `ANDROID_INVENTORY_DEVICE_LIST_BUDGET_MS`
 (2,000 ms); existing per-device name/model and display probes remain bounded at 2,000 ms.
-The five-emulator mixed-capture fixture verifies a sequential `listDevices` → booted resource
-→ images resource bound of 25,000 ms, with every individual response before a 15,000 ms
-client deadline. The review-fix run completes in 23,200 FakeTimer ms (6,200 ms for
-`listDevices`, 8,000 ms for the booted resource, 9,000 ms for images). This is a
-deterministic workload bound, not a host performance guarantee.
+A five-emulator mixed-capture fixture bounds a sequential `listDevices` -> booted
+resource -> images read at 25,000 ms, each response inside a 15,000 ms client
+deadline (a deterministic FakeTimer bound, not a host performance guarantee).
 
 On budget expiry, known devices/images remain in the response. The booted resource adds
 `enrichment: { complete: false, pending: string[], retryable: true, retryAfterMs: 1000, reason }`,
@@ -57,7 +55,9 @@ enablement, running and compatibility flags; nullable installed and expected che
 runner `version`; and nullable `supportedCommandsComplete` / `supportedFeaturesComplete` flags.
 The booted resource's top-level `serviceStatus` is a resource-specific diagnostic sibling, not a
 `DeviceDescription` alias. Canonical top-level `formFactor` always uses `phone`, `tablet`,
-`foldable`, or `unknown`.
+`foldable`, `tv`, `watch`, `automotive`, or `unknown`. Android derives `tv`, `watch` and
+`automotive` from the system-image tag (`android-tv`, `android-wear`, `android-automotive`, ...)
+first, then the avdmanager profile id, then geometry.
 
 `DeviceResource` describes observed resource state for one device. Its `resources`
 property is a JSON object keyed by logical resource name. `AndroidDeviceResource`
@@ -95,11 +95,10 @@ observed state.
 | `icloudSync`         | iOS      | OS-managed iCloud data synchronization, including photo sync; excludes app-owned networking.                  |
 | `photoAnalysis`      | iOS      | On-device analysis of the system photo library; excludes photo synchronization.                               |
 
-The groups describe separate functions even when they share infrastructure. For
-example, photo sync belongs to `icloudSync`, while local photo analysis belongs to
-`photoAnalysis`. Common background scheduling and platform-specific account
-services may share dependencies; changing one does not establish the other's state.
-Native service names and commands stay inside platform implementations.
+Groups describe separate functions even when they share infrastructure (photo sync
+is `icloudSync`, local analysis is `photoAnalysis`); changing one does not establish
+the other's state. Native service names and commands stay inside platform
+implementations.
 
 ## Observed state
 
@@ -146,10 +145,9 @@ start AutoMobile with `--enable-tool setDeviceResources`. Tool names are
 case-sensitive. The optional `provisionDevice.resources` field does not require
 enabling the standalone tool.
 
-Both tools accept the same partial map of resource names to `enabled` or
-`disabled`. Omitted entries remain untouched; an empty map, raw service names,
-unknown keys, and profile names are rejected. Ordinary provisioning without
-`resources` preserves existing behavior.
+Both tools accept the same partial map of resource names to `enabled`/`disabled`.
+Omitted entries are untouched; an empty map, raw service names, unknown keys and
+profile names are rejected.
 
 ```json
 {
@@ -163,11 +161,9 @@ unknown keys, and profile names are rejected. Ordinary provisioning without
 }
 ```
 
-Pass this map to `setDeviceResources` with the usual session/device targeting,
-or add it alongside `device` in `provisionDevice`. Provisioning requires
-`boot: true` when resources are supplied and applies settings before automation
-readiness. Every provision call runs its own lifecycle, so a retry re-reads and
-reconciles resource state.
+Pass the map to `setDeviceResources` (usual targeting) or alongside `device` in
+`provisionDevice`, which requires `boot: true` and applies settings before
+automation readiness; each provision call re-reads and reconciles state.
 
 `setDeviceResources.timeoutMs` defaults to 300,000 milliseconds for requests
 that configure many services. Provisioning uses its existing shared deadline
@@ -175,12 +171,10 @@ for creation, boot, resource configuration, and automation readiness.
 Within that deadline, resource configuration reserves time for readiness and
 session binding. It cannot consume the whole remaining provisioning budget.
 
-The iOS Simulator implementation controls narrow, disjoint service groups.
-Wallpaper, widgets, and Live Activities are three independent controls: disabling
-wallpaper never disables widget updates or Live Activities. No resource is disabled
-by default. Settings can affect optional system features; they are choices for the
-test workload, not a claim that every app remains fully functional with every
-resource disabled.
+The iOS Simulator implementation controls narrow, disjoint service groups
+(disabling wallpaper never disables widgets or Live Activities). Nothing is
+disabled by default; settings are workload choices and can degrade optional system
+features.
 
 | Controls                                                                   | Scope and tradeoff                                                                                                                                                                                                               |
 | -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -207,7 +201,7 @@ The shared schema is defined by `src/models/deviceResourceDescriptions.ts`; nati
 labels are scoped in `src/utils/iosDeviceResourceCatalog.ts`. Callers cannot supply
 raw launchd labels, shell commands, or arbitrary service paths. Every group is
 preflighted against the exact booted runtime before writing. Missing labels are
-reported individually and excluded from that runtime's group; a group with no
+reported individually and excluded from the group; a group with no
 installed services is unsupported. A mismatched, default-disabled, or conditional
 definition makes the whole group unsupported without mutations. Native read
 failures are unknown, not evidence that a service is absent.

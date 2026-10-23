@@ -241,7 +241,7 @@ describe("provider-owned identity recovery", () => {
       processFinder: { findDaemonProcesses: () => [], isProcessRunning: (pid) => pid === 123 },
       platform: "win32",
     });
-    const probe = spyOn(manager["identityRecoveryIO"], "probe").mockRejectedValue(
+    const probe = spyOn(manager.testHooks.identityRecoveryIO, "probe").mockRejectedValue(
       new Error("connect ECONNREFUSED"),
     );
     expect(await manager.status()).toEqual({ running: false });
@@ -257,7 +257,7 @@ describe("provider-owned identity recovery", () => {
   for (const outcome of ["repaired", "deferred", "failed", "unauthenticated"] as const) {
     test(`fix 1: status ${outcome} records only status and republish RPCs`, async () => {
       const h = harness({ accepted: outcome !== "deferred" });
-      const io = h.manager["identityRecoveryIO"];
+      const io = h.manager.testHooks.identityRecoveryIO;
       const original = io.probe;
       io.probe = async () => {
         await h.client.callDaemonMethod("ide/status", {});
@@ -302,16 +302,18 @@ describe("provider-owned identity recovery", () => {
       await timer.sleep(300);
       h.setOwner({ running: false });
     });
-    const launch = spyOn(h.manager["launcher"], "launchAndWait").mockImplementation(async () => {
-      h.setOwner({ ...successor, running: true });
-      // Listening is insufficient until the successor publishes its complete record.
-      launchStarted.resolve();
-      await publishSuccessor.promise;
-      h.setRecord(successor);
-    });
+    const launch = spyOn(h.manager.testHooks.launcher, "launchAndWait").mockImplementation(
+      async () => {
+        h.setOwner({ ...successor, running: true });
+        // Listening is insufficient until the successor publishes its complete record.
+        launchStarted.resolve();
+        await publishSuccessor.promise;
+        h.setRecord(successor);
+      },
+    );
     const peer = harness({ accepted: false }, join(dir, "lock"), timer);
     // Separate manager state, sharing only the filesystem lock and fake daemon endpoint.
-    const recoveryIO = h.manager["identityRecoveryIO"];
+    const recoveryIO = h.manager.testHooks.identityRecoveryIO;
     Object.assign(peer.manager, {
       identityRecoveryIO: {
         ...recoveryIO,
@@ -322,7 +324,7 @@ describe("provider-owned identity recovery", () => {
       } satisfies IdentityRecoveryIO,
     });
     spyOnPrivate<[number], boolean>(peer.manager, "isProcessRunning").mockImplementation((pid) =>
-      h.manager["isProcessRunning"](pid),
+      h.manager.testHooks.isProcessRunning(pid),
     );
     const reachable = spyOn(peer.manager, "waitForReady").mockResolvedValue(true);
     let joined: DaemonStatus | undefined;
@@ -365,10 +367,10 @@ describe("provider-owned identity recovery", () => {
     const timer = new FakeTimer();
     const h = harness({ accepted: false }, join(dir, "lock"), timer);
     const peer = harness({ accepted: false }, join(dir, "lock"), timer);
-    const io = h.manager["identityRecoveryIO"];
+    const io = h.manager.testHooks.identityRecoveryIO;
     Object.assign(peer.manager, { identityRecoveryIO: io });
     spyOnPrivate<[number], boolean>(peer.manager, "isProcessRunning").mockImplementation((pid) =>
-      h.manager["isProcessRunning"](pid),
+      h.manager.testHooks.isProcessRunning(pid),
     );
     const probe = io.probe;
     let unblock!: () => void;
@@ -405,7 +407,7 @@ describe("provider-owned identity recovery", () => {
     try {
       const start = h.manager.start();
       await authenticating;
-      expect(h.manager["readStartupLockHolder"]().recovering).toBe(true);
+      expect(h.manager.testHooks.readStartupLockHolder().recovering).toBe(true);
       const follower = peer.manager.start().then((result) => {
         joined = true;
         return result;
@@ -442,9 +444,9 @@ describe("provider-owned identity recovery", () => {
         writeFileSync(target, content, { mode: 0o600 });
         rmSync(path);
         symlinkSync(target, path);
-        expect(() => h.manager["markStartupLockRecovering"]()).not.toThrow();
+        expect(() => h.manager.testHooks.markStartupLockRecovering()).not.toThrow();
         expect(readFileSync(target, "utf8")).toBe(content);
-        const recovered = await h.manager["recoverSocketIdentity"]();
+        const recovered = await h.manager.testHooks.recoverSocketIdentity();
         expect(recovered.running).toBe(true);
         expect(h.record).toEqual(complete);
         expect(readFileSync(target, "utf8")).toBe(content);
@@ -465,9 +467,9 @@ describe("provider-owned identity recovery", () => {
         expect(h.manager.acquireLock()).toBe(true);
         const content = readFileSync(path, "utf8");
         chmodSync(path, 0o666);
-        expect(() => h.manager["markStartupLockRecovering"]()).not.toThrow();
+        expect(() => h.manager.testHooks.markStartupLockRecovering()).not.toThrow();
         expect(readFileSync(path, "utf8")).toBe(content);
-        const recovered = await h.manager["recoverSocketIdentity"]();
+        const recovered = await h.manager.testHooks.recoverSocketIdentity();
         expect(recovered.running).toBe(true);
         expect(h.record).toEqual(complete);
         expect(readFileSync(path, "utf8")).toBe(content);
@@ -492,10 +494,10 @@ describe("provider-owned identity recovery", () => {
         generation,
       );
       writeFileSync(path, oldBody);
-      const before = h.manager["readStartupLockHolder"]();
+      const before = h.manager.testHooks.readStartupLockHolder();
       expect(before.recovering).toBe(false);
-      h.manager["markStartupLockRecovering"]();
-      expect(h.manager["readStartupLockHolder"]()).toEqual({ ...before, recovering: true });
+      h.manager.testHooks.markStartupLockRecovering();
+      expect(h.manager.testHooks.readStartupLockHolder()).toEqual({ ...before, recovering: true });
       const body = readFileSync(path, "utf8");
       expect(body).toBe(
         formatLockContent(
@@ -521,11 +523,11 @@ describe("provider-owned identity recovery", () => {
     const h = harness({ accepted: false }, join(dir, "lock"));
     const next = harness({ accepted: false }, join(dir, "lock"), h.timer);
     h.timer.enableAutoAdvance();
-    Object.assign(next.manager, { identityRecoveryIO: h.manager["identityRecoveryIO"] });
+    Object.assign(next.manager, { identityRecoveryIO: h.manager.testHooks.identityRecoveryIO });
     const ready = spyOn(h.manager, "waitForReady").mockImplementation(async () => {
       h.manager.releaseLock();
       expect(next.manager.acquireLock()).toBe(true);
-      next.manager["markStartupLockRecovering"]();
+      next.manager.testHooks.markStartupLockRecovering();
       h.timer.setTimeout(() => h.setRecord(complete), 300);
       return true;
     });
@@ -548,11 +550,11 @@ describe("provider-owned identity recovery", () => {
     const ready = spyOn(h.manager, "waitForReady").mockResolvedValue(true);
     try {
       expect(h.manager.acquireLock()).toBe(true);
-      h.manager["markStartupLockRecovering"]();
+      h.manager.testHooks.markStartupLockRecovering();
       const content = readFileSync(path, "utf8");
       writeFileSync(path, content.slice(0, content.indexOf("{") + 1));
       h.timer.setTimeout(() => writeFileSync(path, content), 1);
-      const holder = await h.manager["readSettledStartupLockHolder"](30000);
+      const holder = await h.manager.testHooks.readSettledStartupLockHolder(30000);
       expect(holder.recovering).toBe(true);
       expect(holder.metadataPending).toBeUndefined();
       expect(h.timer.now()).toBe(1);
@@ -572,9 +574,9 @@ describe("provider-owned identity recovery", () => {
       expect(await h.manager.start()).toBe("joined");
       expect(existsSync(join(dir, "lock"))).toBe(false);
       expect(h.manager.acquireLock()).toBe(true);
-      expect(h.manager["readStartupLockHolder"]().recovering).toBeUndefined();
+      expect(h.manager.testHooks.readStartupLockHolder().recovering).toBeUndefined();
       const ready = spyOn(h.manager, "waitForReady").mockResolvedValue(true);
-      const probe = spyOn(h.manager["identityRecoveryIO"], "probe");
+      const probe = spyOn(h.manager.testHooks.identityRecoveryIO, "probe");
       expect(await h.manager.start()).toBe("joined");
       expect(ready).toHaveBeenCalled();
       expect(probe).not.toHaveBeenCalled();
@@ -586,7 +588,7 @@ describe("provider-owned identity recovery", () => {
   test("ordinary lock followers never inspect socket identity and retain the full budget", async () => {
     const dir = scratchDir("identity-ordinary-follower-");
     const h = harness({ accepted: false }, join(dir, "lock"));
-    const io = h.manager["identityRecoveryIO"];
+    const io = h.manager.testHooks.identityRecoveryIO;
     const socketExists = spyOn(io, "socketExists");
     const probe = spyOn(io, "probe");
     const ready = spyOn(h.manager, "waitForReady").mockResolvedValue(true);
@@ -606,7 +608,7 @@ describe("provider-owned identity recovery", () => {
     const h = harness({ accepted: false }, join(dir, "lock"));
     h.timer.enableAutoAdvance();
     const ready = spyOn(h.manager, "waitForReady").mockImplementation(async () => {
-      h.manager["markStartupLockRecovering"]();
+      h.manager.testHooks.markStartupLockRecovering();
       h.timer.setTimeout(() => h.setRecord(complete), 300);
       return true;
     });
@@ -629,12 +631,12 @@ describe("provider-owned identity recovery", () => {
       const reachable = spyOn(h.manager, "waitForReady").mockResolvedValue(true);
       try {
         expect(h.manager.acquireLock()).toBe(true);
-        h.manager["markStartupLockRecovering"]();
+        h.manager.testHooks.markStartupLockRecovering();
         if (outcome === "repair") {
           h.timer.setTimeout(() => h.setRecord(complete), 300);
         }
         if (outcome === "stalled probe") {
-          const io = h.manager["identityRecoveryIO"];
+          const io = h.manager.testHooks.identityRecoveryIO;
           const probe = io.probe;
           let calls = 0;
           spyOn(io, "probe").mockImplementation(() =>
@@ -668,7 +670,7 @@ describe("provider-owned identity recovery", () => {
       recovery: { state: "failed" },
     });
     h.setRecord(null);
-    await expect(h.manager["startUnlocked"]({})).rejects.toThrow("Republish accepted");
+    await expect(h.manager.testHooks.startUnlocked({})).rejects.toThrow("Republish accepted");
     expect(restart).not.toHaveBeenCalled();
     expect(h.client.callDaemonMethodCalls.every((c) => c.method === REPUBLISH)).toBe(true);
   });
@@ -681,7 +683,7 @@ describe("provider-owned identity recovery", () => {
         running: false,
         recovery: { state: "unauthenticated" },
       });
-      await expect(h.manager["startUnlocked"]({})).rejects.toThrow();
+      await expect(h.manager.testHooks.startUnlocked({})).rejects.toThrow();
       expect(h.client.callDaemonMethodCalls).toHaveLength(0);
     });
   }
@@ -710,7 +712,7 @@ describe("provider-owned identity recovery", () => {
         }
         return "restarted";
       });
-      const result = await h.manager["replaceRecoveryOwner"](replacementOwnerOf(evidence));
+      const result = await h.manager.testHooks.replaceRecoveryOwner(replacementOwnerOf(evidence));
       expect(result).toMatchObject({
         running: succeeds,
         recovery: { state: succeeds ? "replaced" : "failed" },
@@ -730,7 +732,8 @@ describe("provider-owned identity recovery", () => {
       return "joined";
     });
     expect(
-      (await h.manager["replaceRecoveryOwner"](replacementOwnerOf(evidence))).recovery?.state,
+      (await h.manager.testHooks.replaceRecoveryOwner(replacementOwnerOf(evidence))).recovery
+        ?.state,
     ).toBe("joined");
   });
 
@@ -791,7 +794,7 @@ describe("provider-owned identity recovery", () => {
       "startUnlocked",
     ).mockImplementation(async (options) => {
       expect(options).toEqual({ ...complete.options, strictPort: true });
-      expect(h.manager["daemonLaunchEnvironment"](options).AUTOMOBILE_DB_PATH).toBe(
+      expect(h.manager.testHooks.daemonLaunchEnvironment(options).AUTOMOBILE_DB_PATH).toBe(
         complete.dbPath,
       );
       const replacement = {
@@ -829,8 +832,11 @@ describe("provider-owned identity recovery", () => {
       h.results.set(PREPARE, { accepted: false, reason });
       const stop = spyOnPrivate(h.manager, "stopRunningDaemon");
       expect(
-        (await h.manager["replaceRecoveryOwner"](replacementOwnerOf(await h.manager.status())))
-          .recovery,
+        (
+          await h.manager.testHooks.replaceRecoveryOwner(
+            replacementOwnerOf(await h.manager.status()),
+          )
+        ).recovery,
       ).toMatchObject({
         state: "deferred",
         reason: expect.stringContaining(reason),

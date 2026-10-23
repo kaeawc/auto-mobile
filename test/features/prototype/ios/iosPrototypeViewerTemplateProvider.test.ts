@@ -55,6 +55,7 @@ describe("PrototypeViewerTemplateProvider", () => {
     checksumCalculator.checksum = pin;
     const timer = new FakeTimer();
     const deps = {
+      platform: "linux" as NodeJS.Platform,
       cacheDir,
       downloader,
       checksumCalculator,
@@ -96,6 +97,27 @@ describe("PrototypeViewerTemplateProvider", () => {
       provider: () => new PrototypeViewerTemplateProvider(deps),
     };
   }
+
+  test("Darwin marks only the cache root once, including after failed downloads", async () => {
+    const writes: string[] = [];
+    const h = harness({
+      platform: "darwin",
+      spotlightFileSystem: {
+        writeFile: async (file) => {
+          writes.push(file);
+        },
+      },
+    });
+    h.checksumCalculator.checksum = "bad";
+    const provider = h.provider();
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await expect(provider.resolve()).rejects.toBeInstanceOf(
+        errors.PrototypeViewerChecksumMismatchError,
+      );
+      expect(readdirSync(h.pinDir)).toEqual([]);
+    }
+    expect(writes).toEqual([path.join(h.cacheDir, ".metadata_never_index")]);
+  });
 
   test("explicit override wins over env, local builds and release", async () => {
     const h = harness();

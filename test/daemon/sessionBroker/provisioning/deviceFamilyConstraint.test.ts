@@ -31,7 +31,7 @@ const IPHONE_15 = "com.apple.CoreSimulator.SimDeviceType.iPhone-15";
 const IPHONE_16 = "com.apple.CoreSimulator.SimDeviceType.iPhone-16";
 const IPAD_OLD = "com.apple.CoreSimulator.SimDeviceType.iPad-Air";
 const IPAD_NEW = "com.apple.CoreSimulator.SimDeviceType.iPad-Pro";
-const FAMILIES = ["phone", "tablet", "foldable"] as const;
+const FAMILIES = ["phone", "tablet", "foldable", "tv", "watch", "automotive"] as const;
 
 function model(identifier: string, min = "17.0", max = "65535.255.255"): AppleDeviceType {
   return {
@@ -354,6 +354,75 @@ describe("binding Android family constraints", () => {
       );
     });
   }
+
+  test.each([
+    ["tv", "android-tv", "tv_1080p"],
+    ["watch", "android-wear", "wearos_small_round"],
+    ["automotive", "android-automotive", "automotive_1024p_landscape"],
+  ] as const)("a %s image is never a phone or tablet", async (family, tag, profile) => {
+    const runtime = `system-images;android-34;${tag};x86_64`;
+    const config = androidConfig(profile, {
+      systemImagePackage: runtime,
+      apiLevel: 34,
+      tag,
+      screenWidth: 1920,
+      screenHeight: 1080,
+      screenDensity: 160,
+    });
+    const matcher = new DefaultManagedSpecMatcher({ readConfig: async () => config });
+    for (const deviceFamily of FAMILIES) {
+      expect(await matcher.matches(ANDROID_DEVICE, { runtime, deviceFamily })).toBe(
+        deviceFamily === family ? "match" : "mismatch",
+      );
+    }
+  });
+
+  test("a family-only watch request creates the default watch profile", async () => {
+    expect(
+      await new DefaultManagedSpecResolver().resolve(
+        "android",
+        { runtime: "system-images;android-34;android-wear;x86_64", deviceFamily: "watch" },
+        {},
+      ),
+    ).toMatchObject({ kind: "resolved", resolvedSpec: { deviceType: "wearos_small_round" } });
+  });
+
+  test.each([
+    ["android-tv", "phone"],
+    ["android-wear", "tablet"],
+    ["android-automotive", "tv"],
+  ] as const)(
+    "a %s runtime conflicts with deviceFamily %s even when deviceType is defaulted",
+    async (tag, deviceFamily) => {
+      expect(
+        await new DefaultManagedSpecResolver().resolve(
+          "android",
+          { runtime: `system-images;android-34;${tag};x86_64`, deviceFamily },
+          {},
+        ),
+      ).toMatchObject({ kind: "unsupported", message: expect.stringContaining("image") });
+    },
+  );
+
+  test("a tv runtime with deviceFamily tv resolves to the tv default profile", async () => {
+    expect(
+      await new DefaultManagedSpecResolver().resolve(
+        "android",
+        { runtime: "system-images;android-34;android-tv;x86_64", deviceFamily: "tv" },
+        {},
+      ),
+    ).toMatchObject({ kind: "resolved", resolvedSpec: { deviceType: "tv_1080p" } });
+  });
+
+  test("an explicit tv profile conflicts with a phone family", async () => {
+    expect(
+      await new DefaultManagedSpecResolver().resolve(
+        "android",
+        { runtime: ANDROID, deviceType: "tv_1080p", deviceFamily: "phone" },
+        {},
+      ),
+    ).toMatchObject({ kind: "unsupported", message: expect.stringContaining("is a tv") });
+  });
 
   test("unreadable geometry is unknown and never deletes the assigned device", async () => {
     const config = androidConfig("pixel_8", { screenDensity: undefined });

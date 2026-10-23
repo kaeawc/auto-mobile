@@ -29,7 +29,8 @@ object AndroidLocalNetworkGrant : LocalNetworkGrant {
 
 /**
  * The user can revoke the permission in system settings while the stored switch stays on. Call on
- * start and resume: a lost grant turns the switch off exactly like a denial. True when it did.
+ * start, resume and window focus gain: a lost grant turns the switch off exactly like a denial.
+ * True when it did.
  */
 fun revokeNetworkIfLocalNetworkLost(
   settings: SettingsStore,
@@ -39,6 +40,16 @@ fun revokeNetworkIfLocalNetworkLost(
   if (!settings.allowNetwork.value || grant.isGranted(context)) return false
   settings.setAllowNetwork(false)
   return true
+}
+
+/** Recheck on foreground entry and focus gain, reporting a revocation to the owning surface. */
+fun recheckLocalNetworkPermission(
+  settings: SettingsStore,
+  grant: LocalNetworkGrant,
+  context: Context,
+  onRevoked: () -> Unit = {},
+) {
+  if (revokeNetworkIfLocalNetworkLost(settings, grant, context)) onRevoked()
 }
 
 /** Construct during onCreate, before the activity starts. Only an explicit enable calls request. */

@@ -1,6 +1,9 @@
 import { DUMPSYS_MAX_BUFFER } from "./dumpsysLimits";
 import type { AdbCommandRunner } from "./interfaces/AdbExecutor";
-import { parseWindowManagerRotation } from "./parseWindowManagerRotation";
+import {
+  parseAppliedDisplayRotation,
+  parseWindowManagerRotation,
+} from "./parseWindowManagerRotation";
 import { throwIfAborted } from "../toolUtils";
 import { logger } from "../logger";
 
@@ -10,6 +13,13 @@ export const WINDOW_MANAGER_ROTATION_FALLBACK_COMMAND =
 export const WINDOW_MANAGER_ROTATION_TIMEOUT_MS = 5_000;
 // Preserve the exported rotation limit as an alias of the shared dumpsys cap.
 export const WINDOW_MANAGER_ROTATION_MAX_BUFFER = DUMPSYS_MAX_BUFFER;
+
+/** Prefer the applied configuration; older dumps expose only the requested policy. */
+function parseLiveDisplayRotation(stdout: string, options: { displayId?: number }): number | null {
+  return (
+    parseAppliedDisplayRotation(stdout, options) ?? parseWindowManagerRotation(stdout, options)
+  );
+}
 
 export async function readWindowManagerRotation(
   adb: AdbCommandRunner,
@@ -25,7 +35,7 @@ export async function readWindowManagerRotation(
       maxBuffer: WINDOW_MANAGER_ROTATION_MAX_BUFFER,
       signal: options.signal,
     });
-    const rotation = parseWindowManagerRotation(stdout, { displayId: options.displayId });
+    const rotation = parseLiveDisplayRotation(stdout, options);
     if (rotation !== null || !defaultDisplay) {
       return rotation;
     }

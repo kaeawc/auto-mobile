@@ -273,7 +273,7 @@ final class PrototypeLibraryImportTests: XCTestCase {
         XCTAssertEqual(files.data, before)
     }
 
-    func testLibraryPolicyRejectsSecureAndPasswordBindingsInRequestsAndStorage() throws {
+    func testStrictValidatorRejectsSecureAndPasswordBindingsInRequestsAndStorage() throws {
         for secure in [true, false] {
             let field: [String: JSONValue] = [
                 "type": .string("textField"), "stateKey": .string("password"),
@@ -308,10 +308,17 @@ final class PrototypeLibraryImportTests: XCTestCase {
                 {
                     fields[slot] = .object(["version": .number(1), "keys": .array([.string("state:password")])])
                 }
-                XCTAssertThrowsError(try importer.importData(JSONEncoder().encode(fields), source: .file)) {
-                    let failure = $0 as? PrototypeLibraryImportFailure
-                    XCTAssertTrue(failure?.message.contains("Secure value") == true, "\(slot): \($0)")
-                    XCTAssertTrue(failure?.path.contains(slot) == true, "\(slot): \($0)")
+                let data = try JSONEncoder().encode(fields)
+                var expectedPath: String?
+                XCTAssertThrowsError(try PrototypeSpecStrictValidator.validate(data: data, library: true)) {
+                    guard case let PrototypeLoadError.invalidSpec(path, _) = $0 else {
+                        return XCTFail("Unexpected strict error: \($0)")
+                    }
+                    expectedPath = path
+                    XCTAssertTrue(path.contains(slot), "\(slot): \(path)")
+                }
+                XCTAssertThrowsError(try importer.importData(data, source: .file)) {
+                    XCTAssertEqual(($0 as? PrototypeLibraryImportFailure)?.path, expectedPath)
                 }
                 assertEmpty(files)
             }

@@ -111,13 +111,13 @@ describe("the implicit routing session of a call that names none", () => {
 
   const connect = (): Connection => {
     const socket = new FakeSocket();
-    server["handleConnection"](socket);
-    const id = [...server["sessions"].keys()].at(-1)!;
+    server.testHooks.transport.handleConnection(socket);
+    const id = [...server.testHooks.sessions.keys()].at(-1)!;
     let sequence = 0;
     return {
       id,
       call: async (name, args) =>
-        (await server["handleRequest"](id, socket, {
+        (await server.testHooks.transport.handleRequest(id, socket, {
           id: `${id}-${sequence++}`,
           type: "mcp_request",
           method: "tools/call",
@@ -145,9 +145,7 @@ describe("the implicit routing session of a call that names none", () => {
     expect(devices.killed).toEqual([]);
     expect(heldRuns()).toHaveLength(runsBefore);
     // The socket never bound the stranger's default route to the owner's session.
-    expect(server["boundMcpClientKeysBySocketSession"].get(stranger.id)?.sessionUuid).not.toBe(
-      HOLDER,
-    );
+    expect(server.testHooks.boundMcpClientFor(stranger.id)?.sessionUuid).not.toBe(HOLDER);
   };
 
   const build = async (): Promise<void> => {
@@ -193,7 +191,7 @@ describe("the implicit routing session of a call that names none", () => {
       DaemonState.getInstance(),
       timer,
     );
-    server["acceptingRequests"] = true;
+    server.testHooks.acceptingRequests = true;
     loopbacks = [];
     forwards = [];
     // One real MCP server per loopback client key, seeded as the daemon's HTTP endpoint seeds it.
@@ -397,7 +395,7 @@ describe("the implicit routing session of a call that names none", () => {
     expect(isToolError(tap)).toBe(false);
     expect(isToolError(boundTap)).toBe(false);
     expect(heldRuns().map((run) => run.sessionUuid)).toEqual([HOLDER, HOLDER]);
-    expect(server["boundMcpClientKeysBySocketSession"].get(owner.id)?.sessionUuid).toBe(HOLDER);
+    expect(server.testHooks.boundMcpClientFor(owner.id)?.sessionUuid).toBe(HOLDER);
     expect(devices.killed).toEqual([held.deviceId]);
   });
 
@@ -468,9 +466,7 @@ describe("the implicit routing session of a call that names none", () => {
           expect(heldRuns()).toEqual([]);
           expect(devices.killed).toEqual([]);
           expect(sessionManager.getSession(HOLDER)!.lastUsedAt).toBe(before);
-          expect(
-            server["boundMcpClientKeysBySocketSession"].get(stranger.id)?.sessionUuid,
-          ).not.toBe(HOLDER);
+          expect(server.testHooks.boundMcpClientFor(stranger.id)?.sessionUuid).not.toBe(HOLDER);
         },
       );
     }

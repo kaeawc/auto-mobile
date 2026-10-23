@@ -1,7 +1,6 @@
 # Android emulator optimization
 
-Status: implementation and local experiments, September 2026. Controls remain
-independent. No profiles or automatic package disabling.
+Controls remain independent. No profiles or automatic package disabling.
 
 ## Available controls
 
@@ -48,12 +47,10 @@ Reuse the existing surfaces for other costs:
 | Read-only shared snapshots                     | Distinct instance IDs/ports, shared/private accounting, isolation tests                     | Requires multi-instance lifecycle work before pool use                                                                          |
 | Linux CPU quotas / affinity / KSM / Cuttlefish | Linux/KVM worker and explicit limits with throughput tests                                  | Not available as cross-platform controls on a macOS emulator host                                                               |
 
-The supplied host has macOS/arm64 emulator tooling. This does not validate Linux
-KVM/Cuttlefish, Windows hypervisor behavior, custom system images, or realistic
-multi-host fleet density. Google account/Slack workflows need their own
-application fixtures and credentials; an unconfigured AVD cannot validate push,
-login, attachments, or huddles. These are evidence requirements, not claims of
-compatibility from a package list.
+Local evidence is macOS/arm64 only: it does not validate Linux KVM/Cuttlefish, Windows
+hypervisors, custom images, or multi-host fleet density, and an unconfigured AVD cannot
+validate push, login, attachments or huddles (those need their own app fixtures and
+credentials).
 
 ## Linux GPU renderer qualification
 
@@ -160,40 +157,21 @@ Preserve raw evidence. A one-device smoke measurement cannot prove fleet savings
 - [Init service lifecycle](https://android.googlesource.com/platform/system/core/+/refs/heads/main/init/README.md)
 - [Cuttlefish](https://source.android.com/docs/devices/cuttlefish/get-started)
 
-## Initial local measurements
+## Initial local measurements (preliminary, not a benchmark)
 
-A disposable Android 15 Google APIs arm64 emulator (emulator 36.4.5, 2 vCPU,
-2048 MB guest RAM, 1080×1920 at 420 dpi, headless/audio-off, GPU auto) was sampled
-on macOS. Auto selected SwiftShader. After excluding the overlap with initial
-smoke validation, 52 baseline samples covered 257 seconds; 60 treatment samples
-covered 297 seconds. The treatment disabled animations, screensavers, Gmail,
-YouTube, Photos, Wellbeing and printing. Exact prior overrides were then restored.
+On a disposable Android 15 Google APIs arm64 emulator (2 vCPU, 2048 MB, headless,
+GPU auto = SwiftShader, macOS), disabling animations, screensavers, Gmail, YouTube,
+Photos, Wellbeing and printing left median emulator RSS unchanged (4691.5 MiB before,
+4693.1 MiB after; 52 baseline vs 60 treatment samples). No repeated A/B/A, unrelated
+host work was running, and CPU percentages from the sampler are not used to claim a
+reduction.
 
-Median emulator-process RSS was 4691.5 MiB before and 4693.1 MiB after. This run
-showed no material host RSS saving. It is not a controlled causal benchmark:
-there was no repeated A/B/A sequence, unrelated host work was running, and no
-logged-in application workflow was exercised. Guest memory also changed while
-background services settled. CPU percentages from this preliminary sampler are
-not used to claim a reduction. Raw results remain in the task's scratch artifacts.
-
-Native follow-up checks on that disposable API-35 image exercised all 21 optional
-package groups: 18 disabled and restored, while Assistant, Dialer and Messages
-were correctly protected as active role holders. Google Play services and GSF
-were included in the reversible mechanism test; this does not validate app
-compatibility while disabled.
-
-More aggressive mechanism probes also succeeded: Maps' background app-op changed
-to `ignore` and back to `default`; its standby bucket changed from 10 to 45 and
-back to 10; forced deep Doze was entered and unforced. On the debuggable image,
-root access allowed `statsd` to remain stopped for three observations and then
-restart successfully. Maps speed-profile compilation returned success. These
-prove command availability and limited state transitions, not performance wins
-or suitability for ordinary interactive workflows. No native service control was
-added to the public catalog based on this short probe.
-
-The persisted hardware fields also booted successfully with 720×1280, 280 dpi,
-two online CPUs, no exposed cameras, audio input/output off and `gpuMode: host`.
-The emulator log identified Apple M3 Max rendering, whereas the earlier auto
-configuration used SwiftShader. A native screenshot rendered the launcher
-correctly. Because resolution, renderer and boot state changed together, this is
-hardware-control validation rather than an isolated GPU performance comparison.
+Mechanism checks on the API-35 image: 18 of 21 optional package groups disabled and
+restored (Assistant, Dialer, Messages protected as active role holders); Maps'
+background app-op (`ignore`/`default`), standby bucket (10/45/10), forced deep Doze,
+a root-only `statsd` stop/restart, and speed-profile compilation all worked. These
+prove command availability and limited reversible transitions, not performance wins,
+and nothing was added to the public catalog from them. Persisted hardware fields
+(720x1280, 280 dpi, two CPUs, no cameras, audio off, `gpuMode: host`) booted and
+rendered correctly; resolution, renderer and boot state changed together, so this is
+control validation, not a GPU comparison.

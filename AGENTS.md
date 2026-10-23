@@ -5,6 +5,7 @@ Bun TypeScript MCP server providing Android & iOS device automation capabilities
 ## Key Rules
 
 - TypeScript only (no JavaScript)
+- Docs have two audiences, and neither is a changelog. `docs/using/` is for end users only: what to call, parameters, results, errors and what to do — no source paths, class names, issue-number rationale, or AutoMobile's own CI/test harness. `docs/design-docs/` holds technical internals: architecture, contracts, invariants, failure modes and why a choice was made. Keep both concise and current-state: do not add progress logs, status checklists, dated history, per-PR/issue narration, or pasted run output to either; that belongs in the PR description, commit message, or issue. Update a doc only when the behavior it describes changes, by editing the existing statement in place.
 - Write GitHub issue and pull request references as clickable Markdown links only
   in AI-authored prose a human reads directly — issue and PR bodies, review
   comments, commit messages, and assistant chat responses — where a clickable

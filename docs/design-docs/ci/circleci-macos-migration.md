@@ -25,55 +25,24 @@ for the real number. For comparison, GitHub-hosted runners allow 5 concurrent ma
 jobs on GitHub Free ([Actions limits](https://docs.github.com/en/actions/reference/limits)),
 and standard runners are free for public repositories.
 
-I did not check which CircleCI plan the `kaeawc` organization is on, because that
-needs a login.
+The `kaeawc` organization's actual CircleCI plan was not checked (needs a login).
 
-### Xcode 26.5 / 26.6 images
-
-Both exist and are current (not deprecated) on the
-[Xcode image list](https://circleci.com/docs/guides/execution-managed/using-macos/):
-
-| `xcode:` tag | Xcode build   | Image macOS      | iOS runtime | Manifest                                                                                |
-| ------------ | ------------- | ---------------- | ----------- | --------------------------------------------------------------------------------------- |
-| `26.5`       | 26.5 (17F42)  | 26.3.1 (25D2128) | iOS 26.5    | [v18380](https://circle-macos-docs.s3.amazonaws.com/image-manifest/v18380/manifest.txt) |
-| `26.6`       | 26.6 (17F113) | 26.5.1 (25F80)   | iOS 26.5    | [v18807](https://circle-macos-docs.s3.amazonaws.com/image-manifest/v18807/manifest.txt) |
-
-The `26.6` image ships the iOS **26.5** simulator runtime, not a 26.6 runtime.
-Xcode 27.0, 27.1 and 27.2 images also exist. The existing `ios` executor already
-runs on `xcode: "26.5"` + `m4pro.medium`. For example, PR #10815 received green
-`ci/circleci: ios-swift-packages`, `ios-xcode-build`, `ios-playground-tests` and
-`Prototype Simulator iOS 26` statuses from `circleci-app[bot]`.
+The `xcode: "26.5"` and `"26.6"` images exist and are current; `26.6` ships the iOS **26.5**
+simulator runtime, not a 26.6 one. The `ios` executor runs on `xcode: "26.5"` + `m4pro.medium`.
 
 ### Does the allowance cover the load? No.
 
-I measured GitHub-hosted macOS time from recent runs. The PR sample is the last
-100 completed `pull_request.yml` runs, 2026-10-08 20:46Z to 2026-10-09 01:09Z
-(about 4.4 h). The nightly sample is the last 15 `nightly.yml` runs.
+Measured from 100 PR runs (2026-10-08/09, ~4.4 h) and 15 nightly runs:
 
-| Lane                                                 | Runs in sample   | Mean min/run |
-| ---------------------------------------------------- | ---------------- | ------------ |
-| XCTestRunner Simulator Tests (before #10895)         | 20 / 100 PR runs | 21.6         |
-| iOS Device Capture to WHEP                           | 5 / 100          | 10.0         |
-| Swift Packages (Xcode 26.5)                          | 3 / 100          | 5.0          |
-| Build Xcode Projects (Playground + CtrlProxy shards) | 3 / 100          | 2.3 + 1.0    |
-| Build Root SPM Package                               | 3 / 100          | 1.3          |
-| Nightly macOS total (10 jobs)                        | per night        | ≈ 34         |
-
-- **PR load:** XCTestRunner Simulator Tests ran on PRs when this sample was taken.
-  It now runs nightly and on PRs only with the `run-ios-sim` label (#10895), and it
-  is not mirrored on CircleCI. The sample total was ≈ 510 hosted macOS minutes per
-  100 PR runs (about 102,000 CircleCI credits, 3.4 months of the allowance). Without
-  XCTestRunner (20 × 21.6 = 432 min) the remaining PR lanes are ≈ 78 min per 100 PR
-  runs, which is about 15,600 credits, or about half a month of the open-source
-  allowance, for about 4.4 h of campaign-pace traffic.
-- **Nightly load:** ≈ 34 min/night, plus about 1.5 min of VM start per job, ≈ 49
-  min. That is ≈ 9,800 credits/night, or ≈ 294,000 credits/month, which is 10× the
-  allowance. At the overage price that is about $176/month for nightly alone.
-- **Concurrency:** before #10895 the 20 XCTestRunner runs alone were 432
-  job-minutes in 264 wall-clock minutes, which needs at least 2 macOS jobs running
-  at all times. With XCTestRunner off the PR path, the mirrored lanes are short
-  (about 78 job-minutes per 264 wall-clock minutes), so a concurrency of 1–2 is
-  workable for them. Today GitHub gives 5.
+- **PR load:** XCTestRunner Simulator Tests (21.6 min/run, 20 of 100 runs) dominated at ≈ 510
+  hosted macOS minutes per 100 PR runs (≈ 102,000 credits, 3.4 months of allowance). It now runs
+  nightly and on `run-ios-sim` PRs only (#10895) and is not mirrored on CircleCI. The remaining PR
+  lanes (device capture ~10, Swift Packages ~5, Xcode builds ~3.3, root SPM ~1.3 min/run) are
+  ≈ 78 min per 100 PR runs ≈ 15,600 credits.
+- **Nightly load:** ≈ 34 min/night plus ~1.5 min VM start per job ≈ 49 min ≈ 9,800 credits/night
+  ≈ 294,000 credits/month, 10× the allowance (≈ $176/month at overage price).
+- **Concurrency:** with XCTestRunner off the PR path, the mirrored lanes need 1–2 concurrent
+  macOS jobs; GitHub gives 5.
 
 **Conclusion:** the Free/open-source plan cannot carry the PR and nightly macOS
 load. Moving everything would replace free, 5-wide GitHub macOS capacity with
@@ -177,30 +146,22 @@ The shim rules:
 Option B needs no ruleset edit. If a required name ever changes, update the
 `green-main` ruleset in the same PR, as issue #10887 step 3 says.
 
-## 3. Migration table
+## 3. Migration table (summary)
 
-Estimates: CircleCI minutes = GitHub mean + ~1.5 min VM start, or a guess where
-there is no hosted sample. Credits = minutes × 200 (`m4pro.medium`).
+Estimates: CircleCI minutes = GitHub mean + ~1.5 min VM start; credits = minutes × 200
+(`m4pro.medium`). No PR lane needs secrets.
 
-| GitHub job (workflow)                                                                                      | Today                                       | CircleCI job                                           | Class        | Est. min/run                                | Est. credits/run  | Secrets                                                                                           | Move?                                                         |
-| ---------------------------------------------------------------------------------------------------------- | ------------------------------------------- | ------------------------------------------------------ | ------------ | ------------------------------------------- | ----------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| XCTestRunner Simulator Tests (nightly + `run-ios-sim` label, #10895)                                       | hosted `macos-26`                           | none (not mirrored on PRs)                             | —            | ~24                                         | 0 on CircleCI     | none                                                                                              | No; stays on GitHub, off the PR path                          |
-| iOS Device Capture to WHEP (PR, advisory)                                                                  | hosted `macos-26`                           | `ios-device-webrtc` (added)                            | m4pro.medium | ~12                                         | ~2,400            | none                                                                                              | Paid plan; ScreenCaptureKit on CircleCI VMs is not yet proven |
-| Build Root SPM Package (PR, **required**)                                                                  | hosted `macos-26`                           | `ios-spm-root-package-build` (added)                   | m4pro.medium | ~3                                          | ~600              | none                                                                                              | Yes, behind the §2 shim                                       |
-| Swift Packages (PR → **iOS Build**)                                                                        | hosted `macos-26`                           | `ios-swift-packages` (existing; API check added)       | m4pro.medium | ~7                                          | ~1,400            | none (signing pinned off)                                                                         | Yes, behind the shim                                          |
-| Build Xcode Projects ×2 shards (PR → **iOS Build**)                                                        | hosted `macos-26`                           | `ios-xcode-build` (existing, one job)                  | m4pro.medium | ~5                                          | ~1,000            | none                                                                                              | Yes, behind the shim                                          |
-| iOS Playground Tests (PR, advisory)                                                                        | CircleCI; GitHub only for label-forced runs | `ios-playground-tests` (existing)                      | m4pro.medium | ~6                                          | ~1,200            | none                                                                                              | Already moved                                                 |
-| SwiftLint (PR, **required**; hosted only for forks)                                                        | self-hosted / fork → `macos-26`             | not added (phase 2)                                    | m4pro.medium | ~3                                          | ~600              | none                                                                                              | Fork leg only; same-repo stays self-hosted                    |
-| Swift Code Coverage (PR, **required**; hosted only for forks)                                              | self-hosted / fork → `macos-26`             | `swift-code-coverage` (exists for main)                | m4pro.medium | ~4                                          | ~800              | none                                                                                              | Fork leg only                                                 |
-| Build Desktop App (macos leg; fork fallback)                                                               | self-hosted / fork → `macos-latest`         | not added                                              | m4pro.medium | ~6                                          | ~1,200            | none                                                                                              | Fork leg only, low priority                                   |
-| Installer Minimal (macos-latest) (PR, **required**; fork fallback)                                         | self-hosted / fork → `macos-latest`         | not added                                              | m4pro.medium | ~2                                          | ~400              | none                                                                                              | Fork leg only, behind a shim                                  |
-| Merge: Build Desktop App, Generate/Build Xcode Projects                                                    | dormant (`if: false`, #8583)                | none                                                   | —            | 0                                           | 0                 | —                                                                                                 | Nothing to move; coverage already runs on CircleCI post-merge |
-| Nightly: Swift Packages / Build Xcode Projects sweeps (26.5, 26.6)                                         | hosted `macos-26`                           | new nightly workflow, `xcode: 26.5` / `26.6` executors | m4pro.medium | ~6 + ~6 + ~4 + ~4                           | ~4,000            | none                                                                                              | Paid plan; scheduled pipeline on main                         |
-| Nightly: XCTestRunner Thread Sanitizer                                                                     | hosted `macos-26`                           | nightly                                                | m4pro.medium | ~3                                          | ~600              | none                                                                                              | Paid plan                                                     |
-| Nightly: macOS BATS / BATS integration / Node unit / Node host integration                                 | hosted `macos-latest`                       | nightly                                                | m4pro.medium | ~8 + ~2 + ~10 + ~4                          | ~4,800            | none                                                                                              | Paid plan; no Xcode needed                                    |
-| Nightly + release: Build CtrlProxy iOS IPA                                                                 | hosted `macos-26`                           | —                                                      | —            | ~3                                          | ~600              | none (unsigned)                                                                                   | Could move; no secrets                                        |
-| Release: build-prototype-agent (ad-hoc signed)                                                             | hosted `macos-26`                           | —                                                      | —            | ~3                                          | ~600              | none                                                                                              | Could move; no secrets                                        |
-| Release: build-screen-capture-helper, build-network-filter-probe, build-desktop-app-installers (macOS DMG) | hosted `macos-26` / `macos-latest`          | —                                                      | —            | ~10–25 each (notarization waits are billed) | ~2,000–5,000 each | Developer ID cert + password, keychain password, App Store Connect API key, provisioning profiles | **Do not move** (below)                                       |
+| Job                                                                                                        | CircleCI job                             | Est. min/run                | Disposition                                               |
+| ---------------------------------------------------------------------------------------------------------- | ---------------------------------------- | --------------------------- | --------------------------------------------------------- |
+| XCTestRunner Simulator Tests (nightly + `run-ios-sim`)                                                     | none                                     | ~24                         | Stays on GitHub, off the PR path                          |
+| iOS Device Capture to WHEP (advisory)                                                                      | `ios-device-webrtc`                      | ~12                         | Paid plan; ScreenCaptureKit on CircleCI VMs unproven      |
+| Build Root SPM Package (**required**)                                                                      | `ios-spm-root-package-build`             | ~3                          | Yes, behind the §2 shim                                   |
+| Swift Packages / Build Xcode Projects (→ **iOS Build**)                                                    | `ios-swift-packages` / `ios-xcode-build` | ~7 / ~5                     | Yes, behind the shim                                      |
+| iOS Playground Tests (advisory)                                                                            | `ios-playground-tests`                   | ~6                          | Already moved                                             |
+| SwiftLint, Swift Code Coverage, Build Desktop App, Installer Minimal (**required**; hosted only for forks) | none / `swift-code-coverage` (main)      | 2-6                         | Fork leg only, behind a shim; same-repo stays self-hosted |
+| Nightly sweeps (Swift Packages/Xcode 26.5+26.6, TSan, macOS BATS/Node)                                     | new nightly workflow                     | ~6-10 each                  | Paid plan; scheduled pipeline on main                     |
+| Release: CtrlProxy IPA, prototype-agent (unsigned/ad-hoc)                                                  | none                                     | ~3                          | Could move; no secrets                                    |
+| Release: screen-capture helper, network-filter probe, desktop DMG installers                               | none                                     | 10-25 (notarization billed) | **Do not move** (below)                                   |
 
 **Release/signing should stay on GitHub.** Releases are rare and are not limited
 by concurrency, so moving them gains nothing. Moving them would copy the Developer
@@ -245,14 +206,9 @@ from `circleci-app[bot]`. The remaining steps are all in the CircleCI web app.
    burn on the **Plan → Usage** page. Then land the §2 shims and remove the
    matching GitHub macOS jobs in the same PR (issue #10887 step 6).
 
-## Validation of this draft
+## Validation
 
-- The `circleci` CLI is not installed on the authoring machine, so
-  `circleci config validate` was not run. Policy tests and a YAML structure check
-  (every job, command, executor and pipeline parameter resolves) passed, and
-  every `run` body passes shellcheck.
-- `test/scripts/circleciMacosMigrationPolicy.test.ts` checks four things. The
-  `run-webrtc` mapping must equal the glob-for-glob translation of the GitHub
-  filter, and no `run-ios-integration` parameter or XCTestRunner job may exist
-  (#10895). The mirrors must keep their GitHub names.
-  No workflow may use a context. The executor must pin signing off.
+`test/scripts/circleciMacosMigrationPolicy.test.ts` checks that the `run-webrtc` mapping equals
+the glob-for-glob translation of the GitHub filter, that no `run-ios-integration` parameter or
+XCTestRunner job exists (#10895), that the mirrors keep their GitHub names, that no workflow uses
+a context, and that the executor pins signing off.

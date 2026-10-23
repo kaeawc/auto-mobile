@@ -3,15 +3,13 @@
 AutoMobile injects finger touches. It cannot yet drive stylus-only drawing modes,
 pressure-sensitive brushes, palm rejection, hover previews, Apple Pencil
 interactions or force-press menus. This note records what each platform's
-injection path can carry, states the direction that follows, and lists the follow-up
-work (#12539).
+injection path can carry and the direction that follows (#12539). Companion spike:
+[Stylus, pressure and hover injection](../mcp/stylus-pressure-hover-injection.md).
 
-**Status:** the first slice shipped in #13081: a stylus pointer on `tapAt` and a straight
-`swipeAt` for Android 12 and later, at pressure 1.0. This note is otherwise a research note,
-not a design for a shipped tool, and the rest of it is unchanged. Nothing here was run on an
-emulator, simulator or device: the capability claims are read from source or
-documentation, and every claim that needs a device is marked **unverified** and
-carried into the [verification plan](#verification-plan).
+**Status:** shipped so far (#13081): a stylus pointer on `tapAt` and a straight
+`swipeAt` for Android 12+, at pressure 1.0. Otherwise a research note. Nothing was
+run on an emulator, simulator or device; claims needing a device are marked
+**unverified** and carried into the [verification plan](#verification-plan).
 
 ## Evidence levels
 
@@ -80,16 +78,14 @@ for the whole stroke). It cannot produce a pressure curve, tilt, an eraser or ho
 | `UiAutomation.injectInputEvent` (instrumentation) | **Unverified**             | **Unverified**          | **Unverified**  | An instrumentation process; documented to work across app boundaries   |
 | `Instrumentation.sendPointerSync` and similar     | n/a                        | n/a                     | n/a             | Own process only                                                       |
 
-The `uinput` and emulator-console rows are expected to work because both inject at
-the evdev layer, where pressure, tilt and `BTN_TOOL_PEN` hover are ordinary axes and
-keys; that is a hypothesis, not a finding. The in-process `Instrumentation`
-injectors reach only the instrumented app's own windows, which does not fit
-AutoMobile's black-box model. `UiAutomation.injectInputEvent` is different: Android
-documents it as working across application boundaries with arbitrary `InputEvent`s, so
-a constructed `MotionEvent` could carry a stylus tool type, pressure, tilt and button
-state without root. Whether the shell can host that, and what it costs to run an
-instrumentation process beside CtrlProxy, is unverified and is part of #13082 before
-`uinput` is treated as the only richer route.
+`uinput` and emulator-console are expected to work because both inject at the evdev
+layer, where pressure, tilt and `BTN_TOOL_PEN` hover are ordinary axes (a
+hypothesis). In-process `Instrumentation` injectors reach only the instrumented
+app's own windows, which does not fit the black-box model. `UiAutomation.injectInputEvent`
+is documented to work across app boundaries with arbitrary `InputEvent`s, so a
+constructed `MotionEvent` could carry stylus tool type, pressure, tilt and buttons
+without root; whether the shell can host that, and its cost beside CtrlProxy, is
+unverified (#13082) and should be settled before `uinput` is the only richer route.
 
 Whether the emulator exposes a stylus-capable input device to apps (an
 `InputDevice` with `SOURCE_STYLUS`) depends on the AVD hardware profile and is
@@ -156,8 +152,8 @@ Two consequences, both **unverified** until run:
   pressure value sent through Appium's touch actions to WebDriverAgent returns
   success on an iPad simulator and device and has no visible effect
   ([Appium forum thread](https://discuss.appium.io/t/uitouch-with-force-pressure/30470)).
-  **Reported:** force touch in the Simulator is enabled through the Simulator's
-  _I/O → Touch Pressure_ menu with trackpad force, not through XCUITest
+  **Reported:** force touch in the Simulator is enabled via _I/O → Touch Pressure_
+  with trackpad force, not XCUITest
   ([Apple developer forums](https://developer.apple.com/forums/thread/705708)).
 - **Hover.** The public route to try first is XCTest's own `XCUIElement.hover()` and
   the coordinate-based `XCUICoordinate.hover()`, which would give a coordinate `hoverAt`
@@ -213,8 +209,7 @@ specified and reviewed when the work is picked up.
 
 ## Verification plan
 
-The note's open items are answered by running them, not by more reading. Each is a
-follow-up issue (see below) so it can be done where the hardware exists:
+Open items are answered by running them, each as a follow-up issue (below):
 
 1. **Android emulator and device:** run `adb shell input stylus swipe` and
    `motionevent` against a small app that logs `MotionEvent` tool type, pressure and
@@ -233,9 +228,6 @@ follow-up issue (see below) so it can be done where the hardware exists:
    record Pencil as out of scope.
 
 ## Follow-up issues
-
-The feasible parts, filed from this note, each carrying its own design and acceptance
-criteria:
 
 - #13081: stylus tool type at fixed pressure on `tapAt` and a straight `swipeAt`
   through `adb shell input`, with capability-gated errors.

@@ -98,6 +98,7 @@ export interface IosCtrlProxyClientDependencies extends IosCtrlProxyClientOption
   bootedDeviceLister?: BootedDeviceLister;
   deviceConnectionLostNotifier?: DeviceConnectionLostNotifier;
   sdkEventIngestor?: IosSdkEventIngestor;
+  logDemandProbe?: (deviceId: string) => boolean;
   retryExecutor?: RetryExecutor;
   /** Replaces the side effects `processMessage` runs for hierarchy messages; tests observe their order. */
   messageEffects?: IosHierarchyMessageEffects;
@@ -109,6 +110,7 @@ export interface IosCtrlProxyClientTestOptions {
   bootedDeviceLister?: BootedDeviceLister;
   deviceConnectionLostNotifier?: DeviceConnectionLostNotifier;
   sdkEventIngestor?: IosSdkEventIngestor;
+  logDemandProbe?: (deviceId: string) => boolean;
   retryExecutor?: RetryExecutor;
   options?: boolean | IosCtrlProxyClientOptions;
 }
@@ -448,6 +450,7 @@ export function iosCtrlProxyTestDependencies(
     bootedDeviceLister,
     deviceConnectionLostNotifier,
     sdkEventIngestor,
+    logDemandProbe,
     retryExecutor,
     options = false,
   } = dependencies;
@@ -466,6 +469,7 @@ export function iosCtrlProxyTestDependencies(
     bootedDeviceLister: lister,
     deviceConnectionLostNotifier,
     sdkEventIngestor,
+    logDemandProbe,
     retryExecutor,
   };
 }

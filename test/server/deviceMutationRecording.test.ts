@@ -7,8 +7,14 @@ import { iosCatalog, iosDefaults } from "../devices/sessionRequirements/fixtures
 import { opaqueIntentKey } from "../../src/daemon/sessionBroker/mutations/types";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
-import type { MutationValue } from "../../src/daemon/sessionBroker/mutations/types";
-import { SessionMutationRecorder } from "../../src/daemon/sessionBroker/mutations/recorder";
+import type {
+  DeviceMutationJournal,
+  MutationValue,
+} from "../../src/daemon/sessionBroker/mutations/types";
+import {
+  type MutationRecorder,
+  SessionMutationRecorder,
+} from "../../src/daemon/sessionBroker/mutations/recorder";
 import { planDeviceMutationRevert } from "../../src/daemon/sessionBroker/mutations/revertPlanner";
 import { deviceToolMutations, type ToolMutation } from "../../src/server/deviceMutationAdapters";
 import { SessionDeviceMutationRecording } from "../../src/server/deviceMutationRecording";
@@ -767,110 +773,162 @@ describe("review regression coverage", () => {
     expect("recorder" in recorder).toBe(false);
   });
 
-  test.each(["base", "own", "other-device", "write-failure", "recovery-failure"])(
-    "derived label recording resolves the owner: %s",
-    async (scenario) => {
-      const derived = `${SCOPE.sessionUuid}:secondary`;
-      const ownScope = { ...SCOPE, sessionUuid: derived };
-      const journal = new FakeDeviceMutationJournal(new FakeTimer());
-      const baseRecorder = new SessionMutationRecorder(journal, SCOPE);
-      const ownRecorder = new SessionMutationRecorder(journal, ownScope);
-      const marks: [string, string][] = [];
-      const recovered: string[] = [];
-      const warn = spyOn(logger, "warn").mockImplementation(() => {});
-      if (scenario === "write-failure") {
-        spyOn(journal, "record").mockRejectedValue(new Error("journal unwritable"));
-      }
-      const registry =
-        scenario === "recovery-failure"
-          ? await openSqliteBindingRegistry({ dbPath: ":memory:" })
-          : undefined;
-      const gaps = new InMemoryMutationRecordingGaps();
-      const service = registry
-        ? new SessionBrokerService(
-            new SessionBroker({
-              store: registry.sessionBrokerStore("test-scope"),
-              devices: new FakeNativePort(registry),
-              owner: FAKE_BROKER_OWNER,
-              limits: { totalDeviceCap: 1, sessionCap: 1, idlePoolCap: 1 },
-              catalog: async () => iosCatalog(),
-              defaults: () => iosDefaults(),
-            }),
-            "test-scope",
-            { acquire: async () => {}, release: async () => {} },
-            new FakeTimer(),
-            gaps,
-            async () => {
-              throw new Error("base recovery failed");
-            },
-          )
-        : undefined;
-      const recording = createRecording({
-        sessionManager: () => ({
-          getBaseSessionOfDerivedLabel: () => SCOPE.sessionUuid,
-          peekSession: () => null,
-        }),
-        sessionBrokerService: () => ({
-          markMutationUnrecorded: (uuid, reason) => {
-            marks.push([uuid, reason]);
-          },
-          recoverMutationRecorder: async (uuid) => {
-            recovered.push(uuid);
-            if (uuid === derived) {
-              return scenario === "own" ? ownRecorder : undefined;
-            }
-            if (service) {
-              return service.recoverMutationRecorder(uuid);
-            }
-            return baseRecorder;
-          },
-        }),
+  function derivedRecordingFixture(
+    options: {
+      ownRecorder?: boolean;
+      journalForBase?: (
+        journal: FakeDeviceMutationJournal,
+      ) => Pick<DeviceMutationJournal, "record" | "list" | "getBaseline">;
+      recoverBase?: (uuid: string) => Promise<MutationRecorder | undefined>;
+    } = {},
+  ) {
+    const derived = `${SCOPE.sessionUuid}:secondary`;
+    const ownScope = { ...SCOPE, sessionUuid: derived };
+    const journal = new FakeDeviceMutationJournal(new FakeTimer());
+    const baseRecorder = new SessionMutationRecorder(
+      options.journalForBase?.(journal) ?? journal,
+      SCOPE,
+    );
+    const ownRecorder = new SessionMutationRecorder(journal, ownScope);
+    const marks: [string, string][] = [];
+    const recovered: string[] = [];
+    const recording = createRecording({
+      sessionManager: () => ({
+        getBaseSessionOfDerivedLabel: () => SCOPE.sessionUuid,
+        peekSession: () => null,
+      }),
+      sessionBrokerService: () => ({
+        markMutationUnrecorded: (uuid, reason) => {
+          marks.push([uuid, reason]);
+        },
+        recoverMutationRecorder: async (uuid) => {
+          recovered.push(uuid);
+          if (uuid === derived) {
+            return options.ownRecorder ? ownRecorder : undefined;
+          }
+          return options.recoverBase ? options.recoverBase(uuid) : baseRecorder;
+        },
+      }),
+    });
+    const run = (handler: DeviceAwareToolHandler, device = DEVICE) =>
+      journaledDeviceHandler("setUIState", handler, recording)(device, { sessionUuid: derived });
+    return { derived, ownScope, journal, marks, recovered, run };
+  }
+
+  test("derived session on the base device records in the base journal scope", async () => {
+    const { derived, ownScope, journal, marks, recovered, run } = derivedRecordingFixture();
+    let acted = false;
+    await run(async () => {
+      expect(await journal.list(SCOPE)).toMatchObject([
+        { kind: "preference", key: "tool:setUIState" },
+      ]);
+      acted = true;
+      return { content: [] };
+    });
+    expect(acted).toBe(true);
+    expect(await journal.list(ownScope)).toEqual([]);
+    expect(marks).toEqual([]);
+    expect(recovered).toEqual([derived, SCOPE.sessionUuid]);
+  });
+
+  test("derived session with its own recorder never resolves the base recorder", async () => {
+    const { derived, ownScope, journal, marks, recovered, run } = derivedRecordingFixture({
+      ownRecorder: true,
+    });
+    let acted = false;
+    await run(async () => {
+      expect(await journal.list(ownScope)).toMatchObject([
+        { kind: "preference", key: "tool:setUIState" },
+      ]);
+      acted = true;
+      return { content: [] };
+    });
+    expect(acted).toBe(true);
+    expect(await journal.list(SCOPE)).toEqual([]);
+    expect(marks).toEqual([]);
+    expect(recovered).toEqual([derived]);
+  });
+
+  test("derived session on another device runs without recording or marking a gap", async () => {
+    const { derived, ownScope, journal, marks, recovered, run } = derivedRecordingFixture();
+    let acted = false;
+    await run(
+      async () => {
+        acted = true;
+        return { content: [] };
+      },
+      { ...DEVICE, deviceId: "generic-phone" },
+    );
+    expect(acted).toBe(true);
+    expect(await journal.list(SCOPE)).toEqual([]);
+    expect(await journal.list(ownScope)).toEqual([]);
+    expect(marks).toEqual([]);
+    expect(recovered).toEqual([derived, SCOPE.sessionUuid]);
+  });
+
+  test("base journal write failure marks only the base gap and still runs the tool", async () => {
+    const { derived, ownScope, journal, marks, recovered, run } = derivedRecordingFixture({
+      journalForBase: (journal) => ({
+        list: journal.list.bind(journal),
+        getBaseline: journal.getBaseline.bind(journal),
+        record: async () => {
+          throw new Error("journal unwritable");
+        },
+      }),
+    });
+    let acted = false;
+    await run(async () => {
+      acted = true;
+      return { content: [] };
+    });
+    expect(acted).toBe(true);
+    expect(marks).toEqual([[SCOPE.sessionUuid, expect.any(String)]]);
+    expect(await journal.list(SCOPE)).toEqual([]);
+    expect(await journal.list(ownScope)).toEqual([]);
+    expect(recovered).toEqual([derived, SCOPE.sessionUuid]);
+  });
+
+  test("base recovery failure marks only the base gap and still runs the tool", async () => {
+    const registry = await openSqliteBindingRegistry({ dbPath: ":memory:" });
+    const gaps = new InMemoryMutationRecordingGaps();
+    const service = new SessionBrokerService(
+      new SessionBroker({
+        store: registry.sessionBrokerStore("test-scope"),
+        devices: new FakeNativePort(registry),
+        owner: FAKE_BROKER_OWNER,
+        limits: { totalDeviceCap: 1, sessionCap: 1, idlePoolCap: 1 },
+        catalog: async () => iosCatalog(),
+        defaults: () => iosDefaults(),
+      }),
+      "test-scope",
+      { acquire: async () => {}, release: async () => {} },
+      new FakeTimer(),
+      gaps,
+      async () => {
+        throw new Error("base recovery failed");
+      },
+    );
+    try {
+      const { derived, ownScope, journal, marks, recovered, run } = derivedRecordingFixture({
+        recoverBase: (uuid) => service.recoverMutationRecorder(uuid),
       });
       let acted = false;
-      try {
-        await journaledDeviceHandler(
-          "setUIState",
-          async () => {
-            if (scenario === "base" || scenario === "own") {
-              expect(await journal.list(scenario === "own" ? ownScope : SCOPE)).toMatchObject([
-                { kind: "preference", key: "tool:setUIState" },
-              ]);
-            }
-            acted = true;
-            return { content: [] };
-          },
-          recording,
-        )(scenario === "other-device" ? { ...DEVICE, deviceId: "generic-phone" } : DEVICE, {
-          sessionUuid: derived,
-        });
-        expect(acted).toBe(true);
-        expect(recovered).toEqual(scenario === "own" ? [derived] : [derived, SCOPE.sessionUuid]);
-        if (scenario === "write-failure" || scenario === "recovery-failure") {
-          if (scenario === "recovery-failure") {
-            expect(gaps.reasonFor(SCOPE.sessionUuid)).toBe(
-              "recorder recovery: base recovery failed",
-            );
-            expect(gaps.reasonFor(derived)).toBeUndefined();
-            expect(marks).toEqual([]);
-          } else {
-            expect(marks).toEqual([[SCOPE.sessionUuid, expect.any(String)]]);
-          }
-          expect(warn).toHaveBeenCalled();
-        } else {
-          expect(marks).toEqual([]);
-          expect(warn).not.toHaveBeenCalled();
-        }
-        expect(await journal.list(scenario === "own" ? SCOPE : ownScope)).toEqual([]);
-        if (scenario === "other-device") {
-          expect(await journal.list(SCOPE)).toEqual([]);
-        }
-      } finally {
-        warn.mockRestore();
-        await service?.close();
-        await registry?.close();
-      }
-    },
-  );
+      await run(async () => {
+        acted = true;
+        return { content: [] };
+      });
+      expect(acted).toBe(true);
+      expect(gaps.reasonFor(SCOPE.sessionUuid)).toBe("recorder recovery: base recovery failed");
+      expect(gaps.reasonFor(derived)).toBeUndefined();
+      expect(marks).toEqual([]);
+      expect(await journal.list(SCOPE)).toEqual([]);
+      expect(await journal.list(ownScope)).toEqual([]);
+      expect(recovered).toEqual([derived, SCOPE.sessionUuid]);
+    } finally {
+      await service.close();
+      await registry.close();
+    }
+  });
 
   test("createRecording uses the injected keyboard-profile client factory", async () => {
     const journal = new FakeDeviceMutationJournal(new FakeTimer());

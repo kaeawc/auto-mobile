@@ -518,7 +518,15 @@ export class UnixSocketServer {
   }
   /** Typed access to the MCP forward-routing internals for daemon integration tests. */
   get testHooks(): UnixSocketServerTestHooks {
+    const server = this;
     return {
+      sessions: this.runtime.sessions,
+      get acceptingRequests() {
+        return server.runtime.acceptingRequests;
+      },
+      set acceptingRequests(value: boolean) {
+        server.runtime.acceptingRequests = value;
+      },
       input: this.callbacks,
       ide: this.callbacks,
       transport: this.callbacks,

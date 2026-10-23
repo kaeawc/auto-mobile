@@ -131,7 +131,7 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotationEntry>> = {
   captureTrace: entry("Capture Trace", destructiveDevice),
   displayProfile: entry("Set Display Profile", destructiveDevice),
   // Pauses the app while dumping; leaves only a host file, no app or device state is lost.
-  heapDump: entry("Heap Dump", controlDevice),
+  heapDump: entry("Dump Heap", controlDevice),
   killProfile: entry("Set Kill Policy", destructiveDevice),
   manufacturerProfile: entry("Set OEM Profile", destructiveDevice),
   measureStartup: entry("Measure Startup", destructiveDevice),

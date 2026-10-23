@@ -6677,7 +6677,7 @@
   },
   {
     "name": "heapDump",
-    "title": "Heap Dump",
+    "title": "Dump Heap",
     "annotations": {
       "destructiveHint": false
     },

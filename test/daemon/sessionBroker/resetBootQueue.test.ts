@@ -46,4 +46,25 @@ describe("reset boot cleanup queue", () => {
     await Promise.all([first, third]);
     expect(events).toEqual(["third"]);
   });
+
+  test("reports how long each run waited for a slot", async () => {
+    const timer = new FakeTimer();
+    const queue = new ResetBootQueue(1, timer, () => timer.now());
+    const finish = Promise.withResolvers<void>();
+    const waits: number[] = [];
+    const first = queue.run(
+      () => finish.promise,
+      undefined,
+      (ms) => waits.push(ms),
+    );
+    const second = queue.run(
+      async () => {},
+      undefined,
+      (ms) => waits.push(ms),
+    );
+    timer.advanceTime(750);
+    finish.resolve();
+    await Promise.all([first, second]);
+    expect(waits).toEqual([0, 750]);
+  });
 });

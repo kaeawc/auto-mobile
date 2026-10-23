@@ -26,6 +26,14 @@ import { shellQuote } from "../../utils/shellQuote";
  */
 export const ROTATION_READ_FLOOR_MS = 1000;
 
+/**
+ * Default time to wait for the window manager to report a requested rotation. A rotation on an
+ * emulator under load (several emulators on one host) routinely takes seconds from the
+ * `user_rotation` write to the display change, so this is a reliability ceiling rather than an
+ * expected duration: polling returns as soon as the display reports the target (#15021).
+ */
+export const ROTATION_WAIT_TIMEOUT_MS = 5000;
+
 /** Frame counters carried between stability checks; null when none were recorded yet. */
 export interface UiStabilityBaseline {
   missedVsync: number | null;

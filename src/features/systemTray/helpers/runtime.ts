@@ -263,6 +263,8 @@ export const ensureSystemTrayOpen = async (
   signal?: AbortSignal,
   // Recovery can reuse the closed observation it just read instead of reading twice.
   initialObservation?: ObserveResult,
+  // The caller just collapsed the shade, so probing for it is a wasted read; expand directly.
+  shadeKnownClosed = false,
 ): Promise<{
   observation?: ObserveResult;
   opened: boolean;
@@ -273,11 +275,15 @@ export const ensureSystemTrayOpen = async (
   const detector = getDetector(device, signal);
   const observeScreen = observeScreenFactory(device);
 
-  let minTimestamp = await awaitWhileRequestIsLive(detector.getObservationTimestamp(), signal);
-  const observation =
-    initialObservation ?? (await observeSystemTray(observeScreen, minTimestamp, signal));
-  if (detector.isTrayOpen(observation.viewHierarchy)) {
-    return { observation, opened: false, skipped: true, minTimestamp };
+  let minTimestamp = 0;
+  let observation: ObserveResult | undefined;
+  if (!shadeKnownClosed) {
+    minTimestamp = await awaitWhileRequestIsLive(detector.getObservationTimestamp(), signal);
+    observation =
+      initialObservation ?? (await observeSystemTray(observeScreen, minTimestamp, signal));
+    if (detector.isTrayOpen(observation.viewHierarchy)) {
+      return { observation, opened: false, skipped: true, minTimestamp };
+    }
   }
 
   await expandSystemTray(detector, observation, signal);
@@ -293,7 +299,7 @@ export const ensureSystemTrayOpen = async (
 
   return {
     observation: awaitedObservation ?? observation,
-    opened: detector.isTrayOpen((awaitedObservation ?? observation).viewHierarchy),
+    opened: detector.isTrayOpen((awaitedObservation ?? observation)?.viewHierarchy),
     skipped: false,
     minTimestamp,
   };

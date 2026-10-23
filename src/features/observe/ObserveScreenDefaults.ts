@@ -9,7 +9,8 @@ import { GetBackStack } from "./GetBackStack";
 import { PredictiveUIState } from "./PredictiveUIState";
 import { screenshotPathProtection } from "./ScreenshotPathProtection";
 import { RealHierarchyPlatformValidator } from "./HierarchyPlatformValidator";
-import { NotifyutilIosLockStateProbe } from "./ios/IosLockStateProbe";
+import { BudgetedIosLockStateProbe } from "./ios/BudgetedIosLockStateProbe";
+import { getIosLockStateCache } from "./ios/IosLockStateCacheRegistry";
 import { installObserveStores, type createObserveScreenWiring } from "./ObserveScreenWiring";
 import type { ObserveScreenDependencies } from "./ObserveScreenDependencies";
 import type { ViewHierarchy as ViewHierarchyInterface } from "./interfaces/ViewHierarchy";
@@ -157,7 +158,10 @@ export function resolveObserveCollectionServices(
     deviceStateCollector: orDefault(deps?.deviceStateCollector, () =>
       wiring.createDeviceStateCollector(sources.window, sources.backStack),
     ),
-    iosLockStateProbe: orDefault(deps?.iosLockStateProbe, () => new NotifyutilIosLockStateProbe()),
+    iosLockStateProbe: orDefault(
+      deps?.iosLockStateProbe,
+      () => new BudgetedIosLockStateProbe(getIosLockStateCache(), context.timer),
+    ),
     performanceAuditor: orDefault(deps?.performanceAuditor, () =>
       wiring.createPerformanceAuditor(),
     ),

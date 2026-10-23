@@ -1143,7 +1143,7 @@ describe("all-display captures", () => {
     const screen = new RealObserveScreen(
       { ...device, platform: "ios", deviceId: "00000000-0000-0000-0000-000000000001" },
       new FakeAdbClientFactory(h.adb),
-      { iosLockStateProbe: { read: async () => lock }, cacheStore: h.cache },
+      { iosLockStateProbe: { read: async () => ({ kind: "known", lock }) }, cacheStore: h.cache },
       h.timer,
       new FakeIdGenerator(),
     );

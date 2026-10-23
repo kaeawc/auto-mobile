@@ -27,7 +27,12 @@ public final class PrototypeLibraryNetworkSwitch {
     public let gate: PrototypeLibraryNetworkGate
     public private(set) var localNetworkDenied = false
 
-    public func denyLocalNetwork() {
+    public func denyLocalNetwork(epoch: PrototypeConsentEpoch) {
+        guard gate.permits(epoch) else { return }
+        denyLocalNetwork()
+    }
+
+    func denyLocalNetwork() {
         guard enabled else { return }
         enabled = false
         localNetworkDenied = true

@@ -21,7 +21,7 @@ export function commitDeliveredActionMetadata(
   }
 }
 
-/** Only these independently compared blocks are omitted; join keys and screen identity stay inline. */
+/** Unchanged blocks are omitted (the lock variants form one block); join keys and screen identity stay inline. */
 const ACTION_METADATA_FIELDS = [
   "insets",
   "systemInsets",
@@ -29,6 +29,7 @@ const ACTION_METADATA_FIELDS = [
   "gfxMetrics",
   "displayedTimeMetrics",
   "deviceLock",
+  "deviceLockUnknown",
   "accessibilityState",
   "freshness",
 ] as const;
@@ -164,9 +165,19 @@ function compactActionMetadata(
     return next;
   }
   const observation = payload.observation;
-  const omittedFields = ACTION_METADATA_FIELDS.filter((field) =>
-    isUnchangedActionBlock(field, observation[field], previous[field]),
-  );
+  const omittedFields = ACTION_METADATA_FIELDS.filter((field) => {
+    const sibling =
+      field === "deviceLock"
+        ? "deviceLockUnknown"
+        : field === "deviceLockUnknown"
+          ? "deviceLock"
+          : undefined;
+    // A delivered lock variant replaces its sibling in the client's baseline.
+    return (
+      !(sibling && previous[sibling] !== undefined) &&
+      isUnchangedActionBlock(field, observation[field], previous[field])
+    );
+  });
   const sourceHierarchy = isRecord(observation.viewHierarchy)
     ? observation.viewHierarchy
     : undefined;
@@ -211,7 +222,13 @@ function recordInlineActionMetadata(
   // claiming delivery of any artifacted/stripped block.
   // Detach values from the response and use the text serializer's wire representation.
   const snapshot: Record<string, unknown> = JSON.parse(stringifyToolResponse(blocks));
-  ctx.baselineStore!.setActionMetadata!(ctx.sessionUuid!, deviceId, { ...previous, ...snapshot });
+  const merged = { ...previous, ...snapshot };
+  if (snapshot.deviceLock !== undefined) {
+    delete merged.deviceLockUnknown;
+  } else if (snapshot.deviceLockUnknown !== undefined) {
+    delete merged.deviceLock;
+  }
+  ctx.baselineStore!.setActionMetadata!(ctx.sessionUuid!, deviceId, merged);
 }
 
 export function compactRenderedPayload(

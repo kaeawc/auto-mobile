@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, it, expect, spyOn } from "bun:test";
 import {
   DefaultDeviceProvisioner,
@@ -132,6 +133,111 @@ describe("pickAndroidSystemImage tag preference", () => {
     expect(pickAndroidSystemImage(images, {}, "arm64").packageName).toBe(
       "system-images;android-35;default;arm64-v8a",
     );
+  });
+});
+
+describe("pickAndroidSystemImage handheld-only default selection (#14900)", () => {
+  const sdkmanagerListing = readFileSync(
+    new URL("../fixtures/android-sdkmanager/list-system-images-available.txt", import.meta.url),
+    "utf8",
+  );
+  const NON_HANDHELD_TAGS = [
+    "android-wear",
+    "android-wear-signed",
+    "android-wear-cn",
+    "android-tv",
+    "google-tv",
+    "google-tv-ps16k",
+    "android-automotive",
+    "android-automotive-playstore",
+    "android-automotive-distant-display-playstore",
+    "android-desktop",
+    "android-xr-preview-playstore",
+    "ai-glasses",
+  ];
+
+  for (const tag of NON_HANDHELD_TAGS) {
+    it(`does not pick a newer '${tag}' image over an older phone image`, () => {
+      const images = [systemImage(35, "google_apis", "x86_64"), systemImage(36, tag, "x86_64")];
+
+      expect(pickAndroidSystemImage(images, {}, "x64").packageName).toBe(
+        "system-images;android-35;google_apis;x86_64",
+      );
+    });
+  }
+
+  it("keeps the phone image when a newer Wear image has the preferred ABI", () => {
+    const images = [
+      systemImage(35, "google_apis", "x86"),
+      systemImage(36, "android-wear", "x86_64"),
+    ];
+
+    expect(pickAndroidSystemImage(images, {}, "x64").packageName).toBe(
+      "system-images;android-35;google_apis;x86",
+    );
+  });
+
+  it("picks the newest phone image from a captured sdkmanager listing that includes every tag", () => {
+    const parsed = parseSystemImages(sdkmanagerListing, undefined, "available");
+    expect(parsed.length).toBeGreaterThan(40);
+    expect(new Set(parsed.map((image) => image.tag))).toContain("android-wear-signed");
+
+    const picked = pickAndroidSystemImage(parsed, {}, "x64");
+    expect(picked.packageName).toBe("system-images;android-36;google_apis;x86_64");
+  });
+
+  it("throws a typed error naming the non-handheld images when no phone image is installed", () => {
+    const parsed = parseSystemImages(sdkmanagerListing, undefined, "available").filter((image) =>
+      NON_HANDHELD_TAGS.includes(image.tag),
+    );
+    expect(parsed.length).toBeGreaterThan(10);
+
+    let thrown: unknown;
+    try {
+      pickAndroidSystemImage(parsed, {}, "x64");
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(ActionableError);
+    const message = (thrown as ActionableError).message;
+    expect(message).toContain("handheld");
+    expect(message).toContain("system-images;android-36;android-wear-signed;x86_64");
+    expect(message).toContain("system-images;android-34;android-tv;x86");
+    expect(message).toContain("sdkmanager");
+  });
+
+  it("reports only non-handheld images when the requested API range holds no phone image", () => {
+    const images = [
+      systemImage(34, "google_apis", "x86_64"),
+      systemImage(36, "android-wear", "x86_64"),
+    ];
+
+    expect(() => pickAndroidSystemImage(images, { minOsVersion: "36" }, "x64")).toThrow(
+      /non-handheld[\s\S]*system-images;android-36;android-wear;x86_64/,
+    );
+  });
+
+  it("still reports the range mismatch when nothing is installed in range at all", () => {
+    expect(() =>
+      pickAndroidSystemImage(
+        [systemImage(34, "google_apis", "x86_64")],
+        { minOsVersion: "36" },
+        "x64",
+      ),
+    ).toThrow(/No installed Android system image matches/);
+  });
+
+  it("still accepts the other phone and tablet image tags the SDK ships", () => {
+    for (const tag of [
+      "default",
+      "google_apis_playstore",
+      "google_apis_ps16k",
+      "google_apis_playstore_ps16k",
+      "google_apis_tablet",
+      "google_apis_playstore_tablet",
+    ]) {
+      expect(pickAndroidSystemImage([systemImage(35, tag, "x86_64")], {}, "x64").tag).toBe(tag);
+    }
   });
 });
 

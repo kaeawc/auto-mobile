@@ -115,6 +115,9 @@ class LibraryActivity : ComponentActivity() {
 
   override fun onResume() {
     super.onResume()
+    if (revokeNetworkIfLocalNetworkLost(services.settings, services.localNetworkGrant, this)) {
+      localNetworkDenied = true
+    }
     lifecycleScope.launch {
       entries =
         withContext(services.io) {

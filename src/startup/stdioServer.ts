@@ -93,6 +93,7 @@ export async function startDirectModeServices(
     | "startDeviceGestureRecordingSocketServer"
     | "startDeviceSnapshotSocketServer"
     | "startAppearanceSocketServer"
+    | "createDirectModeAppearanceDeviceSource"
     | "startWebRtcStreamSocketServer"
   >,
   deviceReadiness: DeviceReadiness,
@@ -100,7 +101,13 @@ export async function startDirectModeServices(
   await modules.startVideoRecordingSocketServer();
   await modules.startDeviceGestureRecordingSocketServer(deviceReadiness);
   await modules.startDeviceSnapshotSocketServer();
-  await modules.startAppearanceSocketServer();
+  // No pool or session on a sessionless request: it re-themes the devices this process readied.
+  await modules.startAppearanceSocketServer(
+    modules.createDirectModeAppearanceDeviceSource(() => {
+      const pin = deviceReadiness.getExplicitDevicePin();
+      return pin ? [pin] : [];
+    }),
+  );
   await modules.startWebRtcStreamSocketServer();
 }
 

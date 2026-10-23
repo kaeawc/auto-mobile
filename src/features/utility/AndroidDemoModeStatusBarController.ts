@@ -76,10 +76,7 @@ export class AndroidDemoModeStatusBarController implements StatusBarController {
     const unsupported: StatusBarField[] =
       overrides.operatorName === undefined ? [] : ["operatorName"];
     if (!this.receipts.has(this.deviceId)) {
-      const prior = (
-        await this.shell(["settings", "get", "global", DEMO_ALLOWED_SETTING], signal)
-      ).stdout.trim();
-      this.receipts.save(this.deviceId, prior === "" || prior === "null" ? null : prior);
+      this.receipts.save(this.deviceId, await this.readDemoAllowed(signal));
     }
     await this.shell(["settings", "put", "global", DEMO_ALLOWED_SETTING, "1"], signal);
     await this.demo([["command", "enter"]], signal);
@@ -182,6 +179,14 @@ export class AndroidDemoModeStatusBarController implements StatusBarController {
         : ["settings", "put", "global", DEMO_ALLOWED_SETTING, prior],
       signal,
     );
+  }
+
+  /** The `sysui_demo_allowed` value the device holds now, or null when the setting is unset. */
+  async readDemoAllowed(signal?: AbortSignal): Promise<string | null> {
+    const value = (
+      await this.shell(["settings", "get", "global", DEMO_ALLOWED_SETTING], signal)
+    ).stdout.trim();
+    return value === "" || value === "null" ? null : value;
   }
 
   async read(signal?: AbortSignal): Promise<string | null> {

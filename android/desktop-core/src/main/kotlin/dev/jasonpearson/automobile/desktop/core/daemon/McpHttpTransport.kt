@@ -207,7 +207,9 @@ internal class McpHttpTransport(val options: McpHttpClientOptions) {
     }
 
     if (
-      response.statusCode() == 401 && retryAuthentication && usesDaemonAuthentication(httpRequest)
+      response.statusCode() == 401 &&
+        retryAuthentication &&
+        usesDaemonAuthentication(httpRequest, options.tokenProvider)
     ) {
       return exchange(
         request,
@@ -231,7 +233,8 @@ internal class McpHttpTransport(val options: McpHttpClientOptions) {
     deadline: StatusRequestDeadline?,
     remainingRetries: Int,
   ): Boolean {
-    if (remainingRetries <= 0 || !usesDaemonAuthentication(request)) return false
+    if (remainingRetries <= 0 || !usesDaemonAuthentication(request, options.tokenProvider))
+      return false
     if (
       response.statusCode() != 503 || response.headers().firstValue("Retry-After").orElse("") != "1"
     )
@@ -276,7 +279,7 @@ internal class McpHttpTransport(val options: McpHttpClientOptions) {
 
   private fun sendAuthenticatedRequest(request: HttpRequest): HttpResponse<String> {
     val authenticated =
-      if (usesDaemonAuthentication(request)) {
+      if (usesDaemonAuthentication(request, options.tokenProvider)) {
         val builder = HttpRequest.newBuilder(request) { _, _ -> true }
         options.tokenProvider.read()?.let { builder.header("Authorization", "Bearer $it") }
         builder.build()
@@ -301,5 +304,11 @@ internal class McpHttpTransport(val options: McpHttpClientOptions) {
   }
 }
 
-private fun usesDaemonAuthentication(request: HttpRequest): Boolean =
-  isDaemonHttpEndpoint(request.uri()) && request.headers().firstValue("Authorization").isEmpty
+private fun usesDaemonAuthentication(
+  request: HttpRequest,
+  tokenProvider: DaemonHttpTokenProvider,
+): Boolean =
+  request.headers().firstValue("Authorization").isEmpty &&
+    daemonHttpPort(request.uri()) != null &&
+    // Resolved per request, and only for daemon-shaped URLs, so unrelated endpoints never probe it.
+    isDaemonHttpEndpoint(request.uri(), tokenProvider.discoveredPort())

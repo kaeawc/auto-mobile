@@ -279,6 +279,12 @@ export interface BindingJournalTarget {
   /** Durable removal intent for the created device; once true, it can never be adopted. */
   removalRequested?: true;
   /**
+   * When the entry's delete was quarantined: the teardown's soft kills and process escalation both
+   * failed (#14018). A quarantined entry never re-sends the delete; due probes only watch for the
+   * device to disappear. The entry stays open, so the device stays charged against capacity.
+   */
+  quarantinedAtMs?: number;
+  /**
    * The platform the entry creates on, when it differs from the entry's (the binding's platform when
    * the entry was opened, which the old device lives on): a cross-platform replacement (#11232).
    * Absent means the same platform.

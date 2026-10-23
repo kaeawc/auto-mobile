@@ -201,6 +201,7 @@ public final class OSLogReader: @unchecked Sendable {
         scheduledPoll = nil
         nextDelayMs = config.pollBaseMs
         source.reset()
+        completedEntries.withLock { $0.removeAll() }
     }
 
     private func endSessionIfIdle() -> Bool {

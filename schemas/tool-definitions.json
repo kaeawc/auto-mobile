@@ -9907,7 +9907,7 @@
               },
               "formFactor": {
                 "type": "string",
-                "enum": ["phone", "tablet", "foldable", "unknown"]
+                "enum": ["phone", "tablet", "foldable", "tv", "watch", "automotive", "unknown"]
               },
               "deviceType": {
                 "$ref": "#/$defs/__schema0"
@@ -10501,7 +10501,7 @@
               },
               "formFactor": {
                 "type": "string",
-                "enum": ["phone", "tablet", "foldable", "unknown"]
+                "enum": ["phone", "tablet", "foldable", "tv", "watch", "automotive", "unknown"]
               },
               "deviceType": {
                 "$ref": "#/$defs/__schema0"
@@ -25249,7 +25249,7 @@
             },
             "formFactor": {
               "type": "string",
-              "enum": ["phone", "tablet", "foldable", "unknown"]
+              "enum": ["phone", "tablet", "foldable", "tv", "watch", "automotive", "unknown"]
             },
             "deviceType": {
               "$ref": "#/$defs/__schema0"

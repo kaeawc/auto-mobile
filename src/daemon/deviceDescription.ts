@@ -358,7 +358,15 @@ export function withDeviceRuntimeObservation(
 
 const nullableString = z.string().nullable();
 const nullableNumber = z.number().nullable();
-const formFactorSchema = z.enum(["phone", "tablet", "foldable", "unknown"]);
+const formFactorSchema = z.enum([
+  "phone",
+  "tablet",
+  "foldable",
+  "tv",
+  "watch",
+  "automotive",
+  "unknown",
+]);
 const lifecycleSchema = z
   .object({
     state: z.enum(["configured", "booting", "booted", "shutting-down", "unavailable"]),

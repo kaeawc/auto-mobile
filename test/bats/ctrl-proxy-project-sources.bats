@@ -61,6 +61,8 @@ PBX
   repo_root="${BATS_TEST_DIRNAME}/../.."
   mkdir -p "${fixture}/scripts/swiftformat" "${fixture}/scripts/swiftlint" \
     "${fixture}/scripts/ios" "${fixture}/ios/XCTestRunner" "${mock_bin}"
+  mkdir -p "${fixture}/scripts/lib"
+  cp "${repo_root}/scripts/lib/spotlight-exclude.sh" "${fixture}/scripts/lib/"
   cp "${repo_root}/scripts/prepush-ios.sh" "${fixture}/scripts/prepush-ios.sh"
   cp "${repo_root}/scripts/swiftformat/swiftformat_version.sh" "${fixture}/scripts/swiftformat/"
   cp "${repo_root}/scripts/swiftlint/swiftlint_version.sh" "${fixture}/scripts/swiftlint/"

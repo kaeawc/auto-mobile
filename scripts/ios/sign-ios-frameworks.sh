@@ -7,6 +7,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+# shellcheck source=scripts/lib/spotlight-exclude.sh
+source "${PROJECT_ROOT}/scripts/lib/spotlight-exclude.sh"
 IOS_DIR="${PROJECT_ROOT}/ios"
 
 if [[ -z "${IOS_SIGNING_IDENTITY:-}" ]]; then
@@ -45,7 +47,7 @@ for entry in "${PACKAGES[@]}"; do
   fi
 
   DERIVED_DATA_PATH="${PROJECT_ROOT}/scratch/ios-signing/${package_dir}"
-  mkdir -p "${DERIVED_DATA_PATH}"
+  mkdir_spotlight_excluded "${DERIVED_DATA_PATH}"
 
   XCODEBUILD_ARGS=(
     -scheme "${scheme}"

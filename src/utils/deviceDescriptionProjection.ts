@@ -6,6 +6,7 @@ import type {
   ConfiguredImage,
 } from "../models/deviceDescription";
 import { formFactorFrom } from "../models/formFactor";
+import { parseAndroidSystemImageRuntime } from "./android-cmdline-tools/AndroidSystemImageRuntime";
 import { iosSimulatorCapabilityInventory } from "./virtualDeviceCapabilities";
 import type { StableConfiguredDeviceImage } from "./configuredDeviceInventory";
 
@@ -97,6 +98,12 @@ export function imageLinkFrom(image: ImageLike | undefined): DeviceDescription["
   };
 }
 
+function androidSystemImageTag(device: DeviceInfo): string | undefined {
+  return device.platform === "android" && device.runtimeId
+    ? parseAndroidSystemImageRuntime(device.runtimeId)?.tag
+    : undefined;
+}
+
 export function staticFactsFrom(
   device: DeviceInfo,
 ): Pick<
@@ -111,6 +118,7 @@ export function staticFactsFrom(
     architecture: device.architecture ?? null,
     model: device.model ?? null,
     formFactor: formFactorFrom({
+      systemImageTag: androidSystemImageTag(device),
       hint: device.formFactor,
       width: device.screenWidth,
       height: device.screenHeight,

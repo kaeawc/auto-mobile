@@ -22,6 +22,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+# shellcheck source=scripts/lib/spotlight-exclude.sh
+source "${ROOT}/scripts/lib/spotlight-exclude.sh"
 cd "$ROOT"
 
 tier_file="${AUTOMOBILE_INTEGRATION_SAFE_TIER_FILE:-$ROOT/test/integration-safe-tier.txt}"
@@ -179,7 +181,7 @@ if [[ -n "$failures" ]]; then
 else
   tail -20 "$log_file" >&2
 fi
-mkdir -p scratch
+mkdir_spotlight_excluded scratch
 cp "$log_file" scratch/prepush-integration-safe.log
 echo "Full log: scratch/prepush-integration-safe.log" >&2
 exit "$status"

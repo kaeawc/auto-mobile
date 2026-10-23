@@ -61,7 +61,7 @@ export interface ManagedDevicePortDependencies {
   bindMutationRecorder?: (scope: DeviceMutationScope) => void;
   /** Stable provider-owned identity. Consumer requests never choose this scope or a binding index. */
   scope: BindingScopeIdentity;
-  timer?: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
+  timer?: Pick<Timer, "now" | "sleep" | "setTimeout" | "clearTimeout">;
   /** Renews the acquired session while baseline preparation delays the client grant. */
   leaseKeepalive?: TaskLeaseKeepalive;
   brokerDeviceAcquisition: Pick<BrokerDeviceAcquisition, "acquire">;

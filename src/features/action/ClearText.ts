@@ -145,9 +145,13 @@ export function getFocusedTextValue(
 export interface FocusedTextField {
   value?: string;
   secure: boolean;
+  /** Non-secure native iOS values, used only when native focus is unavailable. */
+  nativeEditableValues?: Readonly<Record<string, string>>;
 }
 
 export interface FocusedTextFieldOptions {
+  /** Typing verification can compare native inputs when WebKit focus is unreliable. */
+  includeIosNativeEditableValues?: boolean;
   /**
    * iOS runners omit an empty field's value and XCUI can report the placeholder as the value, so a
    * focused editable with no value, or a value equal to its placeholder, reads as "" (#9078).
@@ -166,6 +170,8 @@ export function getFocusedTextField(
 ): FocusedTextField | undefined {
   for (const rootGroup of extractSearchRootGroups(viewHierarchy, parser)) {
     let firstField: FocusedTextField | undefined;
+    const nativeEditableValues: Record<string, string> | undefined =
+      options.includeIosNativeEditableValues ? {} : undefined;
     for (const root of rootGroup) {
       let nativeField: FocusedTextField | undefined;
       let webViewDepth: number | undefined;
@@ -177,6 +183,9 @@ export function getFocusedTextField(
         const nodeClass = properties.class ?? properties.className;
         if (webViewDepth === undefined && nodeClass === "WKWebView") {
           webViewDepth = depth;
+        }
+        if (webViewDepth === undefined) {
+          captureIosNativeEditableValue(properties, nativeEditableValues);
         }
         if (!isFocusedTextInputProperties(properties)) {
           return;
@@ -194,6 +203,9 @@ export function getFocusedTextField(
         return nativeField;
       }
     }
+    if (nativeEditableValues && Object.keys(nativeEditableValues).length > 0) {
+      return { ...(firstField ?? { secure: false }), nativeEditableValues };
+    }
     if (firstField !== undefined) {
       return firstField;
     }
@@ -201,15 +213,48 @@ export function getFocusedTextField(
   return undefined;
 }
 
+/** Snapshot stable native input identities without ever copying secure values. */
+function captureIosNativeEditableValue(
+  properties: Record<string, unknown>,
+  values: Record<string, string> | undefined,
+): void {
+  if (!values || isTruthyFlag(properties.focused) || !isNonSecureIosEditable(properties)) {
+    return;
+  }
+  const searchable = toSearchable(properties);
+  const id = properties["view-id"] ?? searchable.nativeId;
+  if (typeof id === "string" && id !== "") {
+    // Runner omissions represent empty native values; labels are never editable values.
+    values[id] = typeof properties.value === "string" ? properties.value : "";
+  }
+}
+
+function isSecureTextInput(properties: Record<string, unknown>): boolean {
+  const nodeClass = properties.class ?? properties.className;
+  return (
+    isTruthyFlag(properties.password) ||
+    (typeof nodeClass === "string" && nodeClass.includes("SecureTextField"))
+  );
+}
+
+function isNonSecureIosEditable(properties: Record<string, unknown>): boolean {
+  const nodeClass = properties.class ?? properties.className;
+  if (isSecureTextInput(properties)) {
+    return false;
+  }
+  return (
+    properties.role === "textfield" ||
+    (Array.isArray(properties.actions) && properties.actions.includes("set_text")) ||
+    (typeof nodeClass === "string" && /UITextField|UISearchBar|UITextView/.test(nodeClass))
+  );
+}
+
 function readFocusedTextField(
   properties: Record<string, unknown>,
   options: FocusedTextFieldOptions,
 ): FocusedTextField | undefined {
   const searchable = toSearchable(properties);
-  const nodeClass = properties.class ?? properties.className;
-  const secure =
-    isTruthyFlag(properties.password) ||
-    (typeof nodeClass === "string" && nodeClass.includes("SecureTextField"));
+  const secure = isSecureTextInput(properties);
   // Text sources preserve editable values; captured length distinguishes empty text from absence.
   const defaultValue =
     searchable.textSources.value ??
@@ -225,7 +270,11 @@ function readFocusedTextField(
         ? undefined
         : iosFieldValueOrBlank(searchable.textSources)
       : defaultValue;
-  return value !== undefined ? { value, secure } : undefined;
+  // A known native focused input remains the target even when its value is unreadable.
+  // Typing verification must not substitute unrelated native inputs in that case.
+  return value !== undefined || options.includeIosNativeEditableValues
+    ? { value, secure }
+    : undefined;
 }
 
 function iosFieldValueOrBlank(textSources: Readonly<Record<string, string>>): string {

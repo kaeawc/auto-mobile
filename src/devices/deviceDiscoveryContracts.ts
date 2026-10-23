@@ -108,7 +108,12 @@ export function iosSucceededSources(outcome: {
   ];
 }
 
+export interface ForeignAndroidSerialSource {
+  foreignSerials(serials: readonly string[], signal?: AbortSignal): Promise<ReadonlySet<string>>;
+}
+
 export interface BootedDeviceDiscoveryOptions {
+  skipForeignEnrichment?: boolean;
   coalesceInventoryEnrichment?: boolean;
   /** Read listings only: reuse Android AVD names on the same ADB connection briefly. */
   memoizeReadAvdNames?: boolean;
@@ -209,6 +214,7 @@ export interface DeviceStartResult {
 
 /** Platform-agnostic device management for Android emulators and iOS simulators. */
 export interface PlatformDeviceManager {
+  withForeignAndroidSerialSource?(source: ForeignAndroidSerialSource): this;
   /**
    * List all available device images for a specific platform
    * @param platform - Target platform ("android", "ios", or "either" for both)

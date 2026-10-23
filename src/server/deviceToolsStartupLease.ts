@@ -256,6 +256,7 @@ async function ownsAndroidStartupOfflineRecovery(
         operation: async (signal) => {
           const discovery = await deviceUtils.getBootedDevicesDetailed("android", {
             bypassAndroidDeviceListCache: true,
+            skipForeignEnrichment: true,
             signal,
           });
           if (!discovery.succeededPlatforms.has("android")) {
@@ -274,7 +275,10 @@ async function ownsAndroidStartupOfflineRecovery(
     );
     // An unresolved emulator name may be this AVD. Fail open rather than
     // suppressing the disconnect monitor's only recovery for a warm device.
-    return !booted.some((device) => device.name === avdName || isUnknownAndroidRuntimeName(device));
+    return !booted.some(
+      (device) =>
+        !device.foreignOwned && (device.name === avdName || isUnknownAndroidRuntimeName(device)),
+    );
   } catch (error) {
     // An uncertain running state must not suppress the monitor's recovery.
     logger.warn(

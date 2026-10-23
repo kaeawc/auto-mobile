@@ -10,7 +10,11 @@ import { DEFAULT_PROVISION_DEVICE_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { logger } from "../utils/logger";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import type { Timer } from "../utils/SystemTimer";
+import { DAEMON_RECONNECT_OUTAGE_BUDGET_MS } from "./constants";
+import { DaemonUnavailableError } from "./DaemonUnavailableError";
 import { McpTimeoutError } from "./McpTimeoutError";
+import { DaemonConnectAttemptStalledError } from "./proxy/DaemonConnectAttemptStalledError";
+import { DaemonPreflightConnectionError } from "./proxy/DaemonPreflightConnectionError";
 import { SESSION_BROKER_RETRY_AFTER_MS } from "./sessionBroker/timing";
 
 export const DAEMON_PREPARE_SESSION_METHOD = "daemon/prepareSession";
@@ -22,6 +26,8 @@ const DAEMON_CAPABILITIES_METHOD = "daemon/capabilities";
 const CAPABILITY_PROBE_TIMEOUT_MS = 5_000;
 const STATUS_POLL_INTERVAL_MS = 250;
 const STATUS_RECOVERY_RESERVE_MS = 15_000;
+/** Pause between reconnect attempts while the daemon is restarting (#15019). */
+const RECONNECT_RETRY_DELAY_MS = 1_000;
 
 export interface SessionBrokerProxyAcquisitionPorts {
   ensureConnected(): Promise<void>;
@@ -120,6 +126,49 @@ function timeoutFailure(config: SessionConfig, error: unknown): SessionBrokerRes
   );
 }
 
+/** A refused or stalled connect is what a restarting daemon looks like; policy failures are not. */
+function isTransientConnectFailure(error: unknown): boolean {
+  return (
+    error instanceof DaemonUnavailableError &&
+    (error.constructor === DaemonUnavailableError ||
+      error instanceof DaemonConnectAttemptStalledError ||
+      error instanceof DaemonPreflightConnectionError)
+  );
+}
+
+/**
+ * Connect, retrying transient failures, for at most one outage budget (#15019). A daemon restart
+ * must not leave `initialize` waiting out the whole preparation deadline: when the daemon stays
+ * unreachable past the budget the caller gets a typed retryable `daemon_unavailable`. Each attempt
+ * is itself bounded by the proxy's single-flight watchdog, so a stalled attempt is replaced.
+ */
+async function connectWithinOutageBudget(
+  ports: SessionBrokerProxyAcquisitionPorts,
+  deadlineMs: number,
+  signal: AbortSignal | undefined,
+  label: string,
+): Promise<void> {
+  const outageEndsMs = Math.min(deadlineMs, ports.timer.now() + DAEMON_RECONNECT_OUTAGE_BUDGET_MS);
+  for (;;) {
+    try {
+      await raceWithDeadline(() => ports.ensureConnected(), {
+        timer: ports.timer,
+        timeoutMs: Math.max(1, outageEndsMs - ports.timer.now()),
+        signal,
+        label,
+      });
+      return;
+    } catch (error) {
+      const delayMs = Math.min(RECONNECT_RETRY_DELAY_MS, outageEndsMs - ports.timer.now());
+      if (signal?.aborted || !isTransientConnectFailure(error) || delayMs <= 0) {
+        throw error;
+      }
+      logger.debug(`[SessionBroker] ${label} failed; retrying: ${errorMessage(error)}`, error);
+      await waitForStoppingRetry(ports.timer, delayMs, signal);
+    }
+  }
+}
+
 async function queryStatus(
   config: SessionConfig,
   ports: SessionBrokerProxyAcquisitionPorts,
@@ -148,12 +197,15 @@ async function queryStatus(
   }
 }
 
+/** The daemon could not be reached at all, as opposed to answering without a usable status. */
+const DAEMON_UNREACHABLE = Symbol("daemon-unreachable");
+
 async function queryStatusAfterReconnect(
   config: SessionConfig,
   ports: SessionBrokerProxyAcquisitionPorts,
   deadlineMs: number,
   signal: AbortSignal | undefined,
-): Promise<SessionBrokerResult | undefined> {
+): Promise<SessionBrokerResult | undefined | typeof DAEMON_UNREACHABLE> {
   const remainingMs = deadlineMs - ports.timer.now();
   try {
     await raceWithDeadline(() => ports.ensureConnected(), {
@@ -167,7 +219,7 @@ async function queryStatusAfterReconnect(
       // A daemon restart is expected to refuse connections briefly; polling retries.
       logger.debug(`[SessionBroker] Status reconnect failed: ${errorMessage(error)}`, error);
     }
-    return undefined;
+    return DAEMON_UNREACHABLE;
   }
   if (signal?.aborted || ports.timer.now() >= deadlineMs) {
     return undefined;
@@ -180,6 +232,43 @@ async function queryStatusAfterReconnect(
   );
 }
 
+interface StatusRecoveryState {
+  last: SessionBrokerResult | undefined;
+  unreachableSinceMs: number | undefined;
+}
+
+/**
+ * Folds one status poll into the recovery state; returns the result that ends the wait, if any.
+ * #15019: a daemon that stays unreachable past the outage budget ends it with the typed
+ * unresolved result (same requestId, owner token kept) instead of the full preparation deadline.
+ */
+function absorbStatusReply(
+  state: StatusRecoveryState,
+  reply: SessionBrokerResult | undefined | typeof DAEMON_UNREACHABLE,
+  config: SessionConfig,
+  ports: SessionBrokerProxyAcquisitionPorts,
+): SessionBrokerResult | undefined {
+  if (reply !== DAEMON_UNREACHABLE) {
+    state.unreachableSinceMs = undefined;
+    if (reply && reply.outcome !== "pending") {
+      return reply;
+    }
+    state.last = reply ?? state.last;
+    return undefined;
+  }
+  state.unreachableSinceMs ??= ports.timer.now();
+  if (ports.timer.now() - state.unreachableSinceMs < DAEMON_RECONNECT_OUTAGE_BUDGET_MS) {
+    return undefined;
+  }
+  return (
+    state.last ??
+    unresolvedResult(
+      config,
+      `The daemon stayed unreachable for ${DAEMON_RECONNECT_OUTAGE_BUDGET_MS}ms; status recovery must keep the same requestId and liveness owner token.`,
+    )
+  );
+}
+
 async function statusUntilSettled(
   config: SessionConfig,
   ports: SessionBrokerProxyAcquisitionPorts,
@@ -187,29 +276,27 @@ async function statusUntilSettled(
   signal: AbortSignal | undefined,
   initial: SessionBrokerResult | undefined,
 ): Promise<SessionBrokerResult> {
-  let last = initial;
+  const state: StatusRecoveryState = { last: initial, unreachableSinceMs: undefined };
   while (!signal?.aborted && ports.timer.now() < deadlineMs) {
     const reply = await queryStatusAfterReconnect(config, ports, deadlineMs, signal);
     if (signal?.aborted) {
       break;
     }
-    if (reply?.outcome !== "pending" && reply !== undefined) {
-      return reply;
-    }
-    if (reply) {
-      last = reply;
+    const settled = absorbStatusReply(state, reply, config, ports);
+    if (settled) {
+      return settled;
     }
     const delayMs = Math.min(STATUS_POLL_INTERVAL_MS, deadlineMs - ports.timer.now());
     if (delayMs > 0) {
       await ports.timer.sleep(delayMs);
     }
   }
-  if (last) {
-    return last;
-  }
-  return unresolvedResult(
-    config,
-    "The daemon may still be preparing this request; status recovery must keep the same requestId and liveness owner token.",
+  return (
+    state.last ??
+    unresolvedResult(
+      config,
+      "The daemon may still be preparing this request; status recovery must keep the same requestId and liveness owner token.",
+    )
   );
 }
 
@@ -462,22 +549,20 @@ async function prepareBudgetAfterRetry(
     if (prepareCallBudgetMs <= 0) {
       return exhaustedPrepareBudget(config, retryAfterMs);
     }
-    const timeoutError = new Error("Session broker retry reconnect exceeded preparation budget");
     try {
-      await raceWithDeadline(() => ports.ensureConnected(), {
-        timer: ports.timer,
-        timeoutMs: Math.max(1, prepareCallBudgetMs),
+      await connectWithinOutageBudget(
+        ports,
+        deadlineMs - statusReserveMs,
         signal,
-        label: "session broker retry daemon connection",
-        timeoutError: () => timeoutError,
-      });
+        "session broker retry daemon connection",
+      );
     } catch (error) {
       if (signal?.aborted) {
         // Cancellation must preserve the proxy's existing unresolved shutdown result.
         logger.debug("[SessionBroker] Retry reconnect cancelled during proxy shutdown.", error);
         return unresolvedResult(config, "Session preparation was cancelled during proxy shutdown.");
       }
-      if (error === timeoutError || ports.timer.now() >= deadlineMs - statusReserveMs) {
+      if (ports.timer.now() >= deadlineMs - statusReserveMs) {
         // Stopping admitted nothing, so exhausting the retry budget needs no status recovery.
         logger.debug("[SessionBroker] Retry reconnect exhausted the preparation budget.", error);
         return exhaustedPrepareBudget(config, retryAfterMs);
@@ -613,12 +698,7 @@ export async function acquireSessionThroughDaemon(
   const deadlineMs = ports.timer.now() + budgetMs;
   const remaining = () => deadlineMs - ports.timer.now();
   try {
-    await raceWithDeadline(() => ports.ensureConnected(), {
-      timer: ports.timer,
-      timeoutMs: Math.max(1, remaining()),
-      signal,
-      label: "session broker daemon connection",
-    });
+    await connectWithinOutageBudget(ports, deadlineMs, signal, "session broker daemon connection");
     if (
       !(await daemonSupportsRequestedContract(
         ports,

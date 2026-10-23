@@ -3,6 +3,7 @@ import type {
   BindingDeletionTarget,
   BindingDeviceDeleter,
 } from "./reconciler";
+import { EMULATOR_TEARDOWN_FAILED_CODE } from "../../../features/deviceLifecycle/teardown/stuckEmulatorEscalation";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import type { Timer } from "../../../utils/SystemTimer";
@@ -68,7 +69,10 @@ export class WorkflowBindingDeviceDeleter implements BindingDeviceDeleter {
 
 function teardownFailureDetails(
   response: TeardownToolResponse,
-): Pick<Extract<BindingDeletionResult, { kind: "failed" }>, "message" | "notAttempted"> {
+): Pick<
+  Extract<BindingDeletionResult, { kind: "failed" }>,
+  "message" | "notAttempted" | "escalationExhausted"
+> {
   const text = response.content[0]?.text;
   if (text === undefined) {
     return { message: "deleteDevice failed" };
@@ -81,6 +85,9 @@ function teardownFailureDetails(
       const reason = "failure" in payload ? preNativeRefusalReason(payload.failure) : undefined;
       if (reason) {
         return { message, notAttempted: { reason } };
+      }
+      if (isEscalationExhausted("failure" in payload ? payload.failure : undefined)) {
+        return { message, escalationExhausted: true };
       }
       return { message };
     }
@@ -104,4 +111,13 @@ function preNativeRefusalReason(
     return undefined;
   }
   return PRE_NATIVE_REFUSALS.find((code) => code === failure.code);
+}
+
+function isEscalationExhausted(failure: unknown): boolean {
+  return (
+    !!failure &&
+    typeof failure === "object" &&
+    "code" in failure &&
+    failure.code === EMULATOR_TEARDOWN_FAILED_CODE
+  );
 }

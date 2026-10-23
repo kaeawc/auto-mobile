@@ -1,3 +1,4 @@
+import { TransientPreSwipeError } from "./TransientPreSwipeError";
 import {
   NOTIFICATION_TITLE_FIELD_IDS,
   SYSTEM_TRAY_SCROLL_IDLE_POLL_MS,
@@ -470,6 +471,11 @@ export const listSystemTrayNotifications = async (
     appLabel: string | null;
     awaitTimeoutMs: number;
     signal?: AbortSignal;
+    /**
+     * Skip the read of the collapsed shade that only exists to report the final screen. A caller
+     * that goes on to open the shade itself (clearAll) has no use for it.
+     */
+    skipTerminalObservation?: boolean;
   },
   context: TrayNotificationListContext,
 ): Promise<{
@@ -479,7 +485,7 @@ export const listSystemTrayNotifications = async (
   swipes: number;
   order: "encounter";
 }> => {
-  const { device, appId, appLabel, awaitTimeoutMs, signal } = options;
+  const { device, appId, appLabel, awaitTimeoutMs, signal, skipTerminalObservation } = options;
   const { getSystemTrayDependencies, waitForSystemTrayOpen, observeSystemTray } = context;
 
   if (device.platform !== "android") {
@@ -517,16 +523,22 @@ export const listSystemTrayNotifications = async (
   signal?.throwIfAborted();
   await detector.collapseTray();
   signal?.throwIfAborted();
-  observation = await observeSystemTray(
-    observeScreenFactory(device),
-    await detector.getObservationTimestamp(),
-    signal,
-  );
+  if (!skipTerminalObservation) {
+    observation = await observeSystemTray(
+      observeScreenFactory(device),
+      await detector.getObservationTimestamp(),
+      signal,
+    );
+  }
   if (hasUnmatchedRequestedRecords) {
-    throw new ActionableError(
-      requestedRecords.every(isContentlessCustomLayout)
-        ? `Notification records for ${appId} have no title/text extras to correlate with shade rows (custom layout).`
-        : `Notification records for ${appId} could not be correlated with shade rows.`,
+    if (requestedRecords.every(isContentlessCustomLayout)) {
+      throw new ActionableError(
+        `Notification records for ${appId} have no title/text extras to correlate with shade rows (custom layout).`,
+      );
+    }
+    // Records exist for the app but no row explains any: a shade read mid-render looks like this.
+    throw new TransientPreSwipeError(
+      `Notification records for ${appId} could not be correlated with shade rows.`,
     );
   }
   return { notifications, unattributedRows, observation, swipes, order: "encounter" };

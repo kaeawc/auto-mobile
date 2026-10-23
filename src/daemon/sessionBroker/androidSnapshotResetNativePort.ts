@@ -1,3 +1,4 @@
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { createHash } from "node:crypto";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
@@ -33,7 +34,12 @@ import type {
   AndroidSnapshotStep,
 } from "./androidSnapshotReset";
 
-const ANDROID_RESET_POLL_TIMEOUT_MS = 5000;
+import {
+  adbAttemptTimeoutMs,
+  ctrlProxyDeadlineMs,
+  pollUntilWithinBudget,
+  retryAdbWithinBudget,
+} from "./androidResetBudget";
 
 export interface AndroidSnapshotReadiness {
   ready(device: BootedDevice, step: AndroidSnapshotStep): Promise<void>;
@@ -64,7 +70,10 @@ export interface AndroidSnapshotNativeDependencies {
     timeoutMs: number;
     targetDeviceId: string;
   }): Promise<BootedDevice[]>;
-  ctrlProxyReady(device: BootedDevice): Promise<boolean>;
+  ctrlProxyReady(
+    device: BootedDevice,
+    options?: { signal?: AbortSignal; timeoutMs?: number; noRetry?: boolean },
+  ): Promise<boolean>;
   imageMetadata(imagePath: string, signal: AbortSignal): Promise<string>;
   timer: Timer;
   invalidate(deviceId: string): void;
@@ -84,6 +93,7 @@ export class NativeAndroidSnapshotResetPort implements AndroidSnapshotResetPort 
     device: BootedDevice,
     step: AndroidSnapshotStep,
   ): Promise<AndroidSnapshotIdentity> {
+    step = this.remainingStep(step);
     await this.assertTarget(device, step);
     const config = await this.dependencies.config.readConfig(device.name);
     await step.assertOwned();
@@ -92,11 +102,10 @@ export class NativeAndroidSnapshotResetPort implements AndroidSnapshotResetPort 
     }
     const metadata = await this.dependencies.imageMetadata(config.systemImagePath, step.signal);
     await step.assertOwned();
-    const version = await this.dependencies.emulator.executeCommand(
-      ["-version"],
-      Math.min(2000, step.timeoutMs),
-      step.signal,
-    );
+    const version = await this.retryStep(step, async (timeoutMs) => {
+      await step.assertOwned();
+      return this.dependencies.emulator.executeCommand(["-version"], timeoutMs, step.signal);
+    });
     await step.assertOwned();
     if (version.error || !version.stdout.trim()) {
       throw new ActionableError("Android baseline lacks emulator version");
@@ -122,11 +131,12 @@ export class NativeAndroidSnapshotResetPort implements AndroidSnapshotResetPort 
     device: BootedDevice,
     step: AndroidSnapshotStep,
   ): Promise<void> {
+    step = this.remainingStep(step);
     await this.dependencies.console.runExclusive(device.deviceId, async () => {
       const result = await this.dependencies.adb
         .create(device)
         .execute(buildVmSnapshotCommand(action, ANDROID_BROKER_BASELINE_SNAPSHOT).split(" "), {
-          timeoutMs: Math.min(30_000, step.timeoutMs),
+          timeoutMs: step.timeoutMs,
           signal: step.signal,
           noRetry: true,
           waitForProcessSettlementAfterAbort: true,
@@ -144,6 +154,7 @@ export class NativeAndroidSnapshotResetPort implements AndroidSnapshotResetPort 
   }
 
   async health(device: BootedDevice, step: AndroidSnapshotStep): Promise<void> {
+    step = this.remainingStep(step);
     const deadlineMs = this.dependencies.timer.now() + step.timeoutMs;
     await this.assertTarget(device, step);
     const adb = this.fencedAdb(device, step);
@@ -184,13 +195,50 @@ export class NativeAndroidSnapshotResetPort implements AndroidSnapshotResetPort 
       throw new ActionableError("Android snapshot clock resync did not verify");
     }
     await step.assertOwned();
-    if (!(await this.dependencies.ctrlProxyReady(device))) {
+    if (!(await this.checkCtrlProxy(device, step, deadlineMs))) {
       throw new ActionableError("Android snapshot CtrlProxy health check failed");
     }
     await this.assertTarget(device, step);
   }
 
+  private checkCtrlProxy(
+    device: BootedDevice,
+    step: AndroidSnapshotStep,
+    resetDeadlineMs: number,
+  ): Promise<boolean> {
+    const timer = this.dependencies.timer;
+    const deadlineMs = ctrlProxyDeadlineMs(timer, resetDeadlineMs);
+    const controller = new AbortController();
+    const signal = AbortSignal.any([step.signal, controller.signal]);
+    const failure = () => new ActionableError("Android snapshot CtrlProxy health check failed");
+    return raceWithDeadline(
+      () =>
+        pollUntilWithinBudget(
+          async (timeoutMs) => {
+            await step.assertOwned();
+            const ready = await this.dependencies.ctrlProxyReady(device, {
+              signal,
+              timeoutMs,
+              noRetry: true,
+            });
+            await step.assertOwned();
+            return ready;
+          },
+          { timer, deadlineMs, signal, label: "Android snapshot CtrlProxy health check" },
+        ),
+      {
+        timer,
+        signal: step.signal,
+        timeoutMs: Math.max(0, deadlineMs - timer.now()),
+        label: "Android snapshot CtrlProxy health check",
+        timeoutError: failure,
+        onTimeout: () => controller.abort(failure()),
+      },
+    );
+  }
+
   async stop(device: BootedDevice, step: AndroidSnapshotStep): Promise<void> {
+    step = this.remainingStep(step);
     const deadlineMs = this.dependencies.timer.now() + step.timeoutMs;
     await this.assertTarget(device, step);
     const process = await this.dependencies.processStopper.identify(
@@ -204,15 +252,11 @@ export class NativeAndroidSnapshotResetPort implements AndroidSnapshotResetPort 
     await this.dependencies.emulator.killDevice(device, {
       beforeDispatch: () => this.assertTarget(device, step),
       signal: step.signal,
-      timeoutMs: Math.min(30_000, step.timeoutMs),
+      timeoutMs: step.timeoutMs,
       processStop: { stopper: this.dependencies.processStopper, expectedAvdName: device.name },
     });
     let lastPollError: unknown;
-    const pollTimeout = () =>
-      Math.max(
-        1,
-        Math.min(ANDROID_RESET_POLL_TIMEOUT_MS, deadlineMs - this.dependencies.timer.now()),
-      );
+    const pollTimeout = () => adbAttemptTimeoutMs(deadlineMs - this.dependencies.timer.now(), 2);
     const assertBeforeDeadline = () => {
       if (this.dependencies.timer.now() >= deadlineMs) {
         throw new ActionableError(
@@ -333,24 +377,62 @@ export class NativeAndroidSnapshotResetPort implements AndroidSnapshotResetPort 
 
   private fencedAdb(device: BootedDevice, step: AndroidSnapshotStep): AdbCommandRunner {
     const adb = this.dependencies.adb.create(device);
-    const deadlineMs = this.dependencies.timer.now() + step.timeoutMs;
+    step = this.remainingStep(step);
     return {
-      executeCommand: async (command, options) => {
-        await step.assertOwned();
-        step.signal.throwIfAborted();
-        const remainingMs = deadlineMs - this.dependencies.timer.now();
-        if (remainingMs <= 0) {
-          throw new ActionableError("Android health check exceeded its reset deadline");
-        }
-        return adb.executeCommand(command, {
-          ...options,
-          timeoutMs: Math.min(options?.timeoutMs ?? 2000, remainingMs),
-          signal: step.signal,
-          noRetry: true,
-          beforeDispatch: () => step.assertOwned(),
-        });
+      executeCommand: (command, options) => {
+        // The clock adapter captures this timestamp once; a retry would set stale time.
+        const timestampWrite = command.startsWith("shell date -u @");
+        return this.retryStep(
+          step,
+          async (timeoutMs) => {
+            await step.assertOwned();
+            step.signal.throwIfAborted();
+            const remaining = step.timeoutMs;
+            const result = await adb.executeCommand(command, {
+              ...options,
+              timeoutMs: timestampWrite
+                ? Math.min(
+                    remaining,
+                    Math.max(options?.timeoutMs ?? 0, adbAttemptTimeoutMs(remaining, 3)),
+                  )
+                : timeoutMs,
+              signal: step.signal,
+              noRetry: true,
+              beforeDispatch: () => step.assertOwned(),
+            });
+            await step.assertOwned();
+            return result;
+          },
+          { minAttemptMs: options?.timeoutMs, attempts: timestampWrite ? 1 : undefined },
+        );
       },
     };
+  }
+
+  private remainingStep(step: AndroidSnapshotStep): AndroidSnapshotStep {
+    const timer = this.dependencies.timer;
+    const deadlineMs = timer.now() + step.timeoutMs;
+    // The getter keeps nested target checks on the same absolute step deadline.
+    return {
+      ...step,
+      get timeoutMs() {
+        return deadlineMs - timer.now();
+      },
+    };
+  }
+
+  private retryStep<T>(
+    step: AndroidSnapshotStep,
+    operation: (timeoutMs: number) => Promise<T>,
+    options: { minAttemptMs?: number; attempts?: number } = {},
+  ): Promise<T> {
+    return retryAdbWithinBudget(operation, {
+      timer: this.dependencies.timer,
+      deadlineMs: this.dependencies.timer.now() + step.timeoutMs,
+      signal: step.signal,
+      label: "Android snapshot reset adb",
+      ...options,
+    });
   }
 
   private async assertTarget(
@@ -359,10 +441,14 @@ export class NativeAndroidSnapshotResetPort implements AndroidSnapshotResetPort 
     consoleExclusiveOwner = false,
   ): Promise<void> {
     await step.assertOwned();
-    const name = await this.dependencies.emulator.resolveAvdNameForSerial(device.deviceId, {
-      signal: step.signal,
-      timeoutMs: Math.min(2000, step.timeoutMs),
-      consoleExclusiveOwner,
+    const name = await this.retryStep(step, async (timeoutMs) => {
+      await step.assertOwned();
+      return this.dependencies.emulator.resolveAvdNameForSerial(device.deviceId, {
+        signal: step.signal,
+        timeoutMs,
+        consoleExclusiveOwner,
+        throwOnTimeout: true,
+      });
     });
     await step.assertOwned();
     if (name !== device.name) {

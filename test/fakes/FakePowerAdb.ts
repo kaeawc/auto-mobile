@@ -22,6 +22,9 @@ export class FakePowerAdb extends FakeAdbExecutor implements AdbExecutor {
   saverOffWhileCharging = false;
   /** `unforce` leaves a forced idle state in place until the screen wakes. */
   idleLingersWhileAsleep = false;
+  /** Complete deep/light observations that remain transient after leaving idle. */
+  idleSettleReads = 0;
+  private pendingIdleReads = 0;
   private awake = true;
   /** Commands (joined argv) containing any of these substrings fail with a device error. */
   failing = new Set<string>();
@@ -128,6 +131,12 @@ export class FakePowerAdb extends FakeAdbExecutor implements AdbExecutor {
       return `${(kind === "deep" ? this.deepEnabled : this.lightEnabled) ? 1 : 0}\n`;
     }
     if (rest[0] === "get") {
+      if (this.pendingIdleReads > 0) {
+        if (kind === "light") {
+          this.pendingIdleReads--;
+        }
+        return `${kind === "deep" ? "IDLE" : "OVERRIDE"}\n`;
+      }
       return `${kind === "deep" ? this.deep : this.light}\n`;
     }
     if (rest[0] === "force-idle") {
@@ -154,6 +163,9 @@ export class FakePowerAdb extends FakeAdbExecutor implements AdbExecutor {
   private leaveIdle(): void {
     if (this.idleLingersWhileAsleep && !this.awake) {
       return;
+    }
+    if (this.deep !== "ACTIVE" || this.light !== "ACTIVE") {
+      this.pendingIdleReads = this.idleSettleReads;
     }
     this.deep = "ACTIVE";
     this.light = "ACTIVE";

@@ -50,7 +50,11 @@ export class BrokerResetRelease {
     private readonly notifyReady: (resourceId: string) => void = () => {},
     private readonly setResetActive: (resourceId: string, active: boolean) => void = () => {},
   ) {
-    this.resetBoots = new ResetBootQueue(options.limits.maxConcurrentResetBoots, options.timer);
+    this.resetBoots = new ResetBootQueue(
+      options.limits.maxConcurrentResetBoots,
+      options.timer,
+      now,
+    );
   }
 
   async drainAndReset(
@@ -81,6 +85,10 @@ export class BrokerResetRelease {
         return "destroy";
       }
       const resetStarted = this.now();
+      // The wait for a reset-boot slot is its own phase, so phases account for the receipt total.
+      const recordBootQueueWait = (waitMs: number) => {
+        timing.phases.bootQueue = (timing.phases.bootQueue ?? 0) + waitMs;
+      };
       const resetDevice = async () => {
         this.setResetActive(resource.resourceId, true);
         try {
@@ -89,10 +97,14 @@ export class BrokerResetRelease {
             .managesResetBootSlots
             ? async <Result>(operation: () => Promise<Result>) => {
                 this.setResetActive(resource.resourceId, false);
-                return this.resetBoots.run(async () => {
-                  this.setResetActive(resource.resourceId, true);
-                  return operation();
-                }, signal);
+                return this.resetBoots.run(
+                  async () => {
+                    this.setResetActive(resource.resourceId, true);
+                    return operation();
+                  },
+                  signal,
+                  recordBootQueueWait,
+                );
               }
             : undefined;
           return await this.options.devices.reset!(resource, undefined, runResetBoot);
@@ -101,7 +113,7 @@ export class BrokerResetRelease {
         }
       };
       const reset = await (this.needsResetBootSlot(resource)
-        ? this.resetBoots.run(resetDevice, signal)
+        ? this.resetBoots.run(resetDevice, signal, recordBootQueueWait)
         : resetDevice());
       timing.phases.reset = this.now() - resetStarted;
       timing = this.timing.mergeResetTiming(timing, reset);

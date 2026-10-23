@@ -40,14 +40,14 @@ erase (the absent-key `defaults delete` wording is not recognized), so the measu
 | `keep-booted`               | Runs platform cleaning, then a health check, leaving the device booted | Not a claim all state was cleaned (see "What keep-booted does not clean") |
 | `minimal` (planned, #14682) | Not accepted by the schema                                             | No erase fallback; trusts its steps without a diff                        |
 
-In `keep-booted`, `maxUses` (default 20) forces every Nth release to erase instead;
+In `keep-booted`, `maxUses` (default 10; 20 in `erase` mode, where it has no effect) forces every Nth release to erase instead;
 on success the same device returns to idle and later releases can use keep-booted
-again. It bounds drift rather than capping sessions or retiring the device, and has
-no effect in `erase` mode. The only iOS fallback is `erase`.
+again. It bounds drift rather than capping sessions or retiring the device.
+The only iOS fallback is `erase`.
 
 ```json
 {
-  "reuse": { "ios": { "mode": "keep-booted", "maxUses": 20, "fallback": "erase" } },
+  "reuse": { "ios": { "mode": "keep-booted", "maxUses": 10, "fallback": "erase" } },
   "limits": {
     "idlePoolCap": 2,
     "totalDeviceCap": 10,
@@ -180,10 +180,12 @@ reversions may be skipped (no all-kinds gate).
 **Timings** (phase names are implementation details): iOS records journal,
 preflight inventory, individual revert, sanitize (incl. `trust-store:verify`),
 health and health-probe phases; native commands bound at 10 s, the health HTTP probe
-at 5 s, reset steps default 30 s. Android keep-booted records journal, clean, health
-(default 30 s cleaning budget); its snapshot fallback has a separate
-`androidResetTimeoutMs` budget bounding snapshot load and wipe-data. Android snapshot
-phases include identity, load, readiness, health, stop and wipe-data launch. A
+at 5 s, reset steps default 30 s. Android keep-booted records journal, clean and health
+phases. Cleaning uses the remaining `androidResetTimeoutMs` budget (default 600 s), or
+one third of it when snapshot fallback is configured; fallback uses the remaining budget
+minus a bounded 2 s command-settlement reserve. Android reset adb attempts derive their
+timeouts from the remaining budget and retry transient timeouts with backoff; readback
+mismatches still fail closed. Android snapshot phases include identity, load, readiness, health, stop and wipe-data launch. A
 keep-booted fallback reports `fallback:snapshot` even if snapshot itself fell back
 to wipe-data.
 

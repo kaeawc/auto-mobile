@@ -7,6 +7,15 @@ import type { DeviceMutationInput } from "../daemon/sessionBroker/mutations/type
 import { isRecord } from "./pipeline/isRecord";
 import { KEYBOARD_READ_ACTIONS } from "./interactionToolTypes";
 import { dataToolMutations } from "./deviceMutationDataAdapters";
+import { appearanceToolMutations } from "./deviceMutationAppearanceAdapters";
+import { interactionToolMutations } from "./deviceMutationInteractionAdapters";
+import { lifecycleToolMutations } from "./deviceMutationLifecycleAdapters";
+import { orchestrationToolMutations } from "./deviceMutationOrchestrationAdapters";
+import {
+  deviceStateToolMutations,
+  devicePowerMutations,
+  deviceStateFallbackMutations,
+} from "./deviceMutationDeviceStateAdapters";
 import { isReadOnlySqlQuery } from "../features/database/sqlQueryClassification";
 import {
   DEVICE_MUTATION_TOOL_COVERAGE,
@@ -76,7 +85,14 @@ function permissionMutations(args: Record<string, unknown>): ToolMutation[] {
   );
 }
 
-function deviceStateMutations(args: Record<string, unknown>): ToolMutation[] {
+/**
+ * Every `setDeviceState` field that changes device state (`deviceCondition` shares the power
+ * controls' keys). `power` records one intent per control (see `devicePowerMutations`); a
+ * `power` with nothing recognizable records one generic breadcrumb so the call still journals.
+ * Android effects nothing reverts (emulator GPS fix, lock credential, camera poster) add an
+ * opaque `fallback:` intent that forces keep-booted reset to escalate.
+ */
+function deviceStateMutations(args: Record<string, unknown>, platform?: Platform): ToolMutation[] {
   const entries = [
     ["location", "location"],
     ["clock", "clock"],
@@ -85,7 +101,6 @@ function deviceStateMutations(args: Record<string, unknown>): ToolMutation[] {
     ["doNotDisturb", "device-setting"],
     ["cameraPoster", "device-setting"],
     ["screenLock", "device-setting"],
-    ["power", "device-setting"],
   ];
   const mutations = entries
     .filter(([field]) => args[field] !== undefined)
@@ -102,6 +117,13 @@ function deviceStateMutations(args: Record<string, unknown>): ToolMutation[] {
   if (isRecord(args.connectivity)) {
     mutations.push(...Object.keys(args.connectivity).map((key) => mutation("device-setting", key)));
   }
+  const power = devicePowerMutations(args);
+  mutations.push(
+    ...(power.length === 0 && args.power !== undefined
+      ? [mutation("device-setting", "power")]
+      : power),
+    ...deviceStateFallbackMutations(args, platform),
+  );
   return mutations;
 }
 
@@ -162,14 +184,34 @@ function rotationMutations(args: Record<string, unknown>): ToolMutation[] {
     : [mutation("rotation")];
 }
 
-export function deviceToolMutations(
+/** The tool families that own their intents; the first that recognizes the tool answers. */
+const FAMILY_ADAPTERS = [
+  appearanceToolMutations,
+  lifecycleToolMutations,
+  interactionToolMutations,
+  orchestrationToolMutations,
+  deviceStateToolMutations,
+] as const;
+
+function familyToolMutations(
   name: string,
   args: Record<string, unknown>,
   platform?: Platform,
-): ToolMutation[] {
-  if (mutationCallIsRead(name, args, platform) || mutationCallNotJournaled(name, args)) {
-    return [];
+): ToolMutation[] | undefined {
+  for (const adapter of FAMILY_ADAPTERS) {
+    const mutations = adapter(name, args, platform);
+    if (mutations !== undefined) {
+      return mutations;
+    }
   }
+  return undefined;
+}
+
+/** Tools whose intent is fixed by their name (and, for two, an action). */
+function namedToolMutations(
+  name: string,
+  args: Record<string, unknown>,
+): ToolMutation[] | undefined {
   if (name === "rotate") {
     return rotationMutations(args);
   }
@@ -183,14 +225,35 @@ export function deviceToolMutations(
     resetKeychain: "keychain",
     windowMode: "device-setting",
     setNotificationPolicy: "notification",
-    setPosture: "device-setting",
     setUIState: "preference",
   };
-  if (Object.hasOwn(opaqueKinds, name)) {
-    return [mutation(opaqueKinds[name], name === "accessibility" ? "device" : `tool:${name}`)];
+  return Object.hasOwn(opaqueKinds, name)
+    ? [mutation(opaqueKinds[name], name === "accessibility" ? "device" : `tool:${name}`)]
+    : undefined;
+}
+
+export function deviceToolMutations(
+  name: string,
+  args: Record<string, unknown>,
+  platform?: Platform,
+): ToolMutation[] {
+  if (mutationCallIsRead(name, args, platform) || mutationCallNotJournaled(name, args)) {
+    return [];
   }
-  const mutations =
-    directToolMutations(name, args, platform) ?? stateToolMutations(name, args, platform);
+  const named = namedToolMutations(name, args);
+  if (named !== undefined) {
+    return named;
+  }
+  const family = familyToolMutations(name, args, platform);
+  if (family !== undefined) {
+    return family;
+  }
+  const direct = directToolMutations(name, args, platform);
+  if (direct !== undefined) {
+    // An adapter that answered [] decided this call changes nothing.
+    return direct;
+  }
+  const mutations = stateToolMutations(name, args, platform);
   return mutations.length > 0 || DEVICE_MUTATION_TOOL_COVERAGE[name]?.status !== "journaled"
     ? mutations
     : [mutation("opaque", `tool:${name}`)];
@@ -209,12 +272,6 @@ function directToolMutations(
   platform?: Platform,
 ): ToolMutation[] | undefined {
   switch (name) {
-    case "installApp":
-      return typeof args.appId === "string"
-        ? [mutation("installed-app", args.appId)]
-        : [mutation("opaque", "tool:installApp")];
-    case "uninstallApp":
-      return [mutation("installed-app", String(args.appId))];
     case "setAppPermissions":
       return permissionMutations(args);
     case "clipboard":
@@ -246,13 +303,16 @@ function stateToolMutations(
       return ["locale", "timeZone", "textDirection", "timeFormat", "calendarSystem"]
         .filter((key) => args[key] !== undefined)
         .map((key) =>
-          mutation(
-            "device-setting",
-            key === "locale" && args.appId ? JSON.stringify(["app-locale", args.appId]) : key,
-          ),
+          // The time zone is the clock family's `timezone`, which the reset ports restore.
+          key === "timeZone"
+            ? mutation("clock", "timezone")
+            : mutation(
+                "device-setting",
+                key === "locale" && args.appId ? JSON.stringify(["app-locale", args.appId]) : key,
+              ),
         );
     case "setDeviceState":
-      return deviceStateMutations(args);
+      return deviceStateMutations(args, platform);
     case "biometricAuth":
       return [
         mutation(

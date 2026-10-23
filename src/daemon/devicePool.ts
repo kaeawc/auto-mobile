@@ -123,6 +123,10 @@ export class DevicePool {
   constructor(deps: DevicePoolDependencies) {
     this.parts.initialization.initialize(deps);
   }
+  foreignSerials(serials: readonly string[], signal?: AbortSignal): Promise<ReadonlySet<string>> {
+    return this.state.foreignClaims.foreignSerials(serials, signal);
+  }
+
   protected get assignmentMutex() {
     return this.state.assignmentMutex;
   }

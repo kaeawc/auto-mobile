@@ -116,4 +116,7 @@ or `AutoMobilePrototypeCapabilities` (iOS) to check ahead of time.
 and compiles both against the libraries: the Android sample in a minified consumer app
 (`scripts/android/validate-prototype-compose-consumer.sh`) and the iOS one in the library build
 (`scripts/ios/prototype-library-build.sh`). The sample's request goes to `10.0.2.2`, the Android
-emulator's alias for the host machine; on an iOS simulator use `localhost` instead.
+emulator's alias for the host machine. The iOS renderer's default egress checks refuse that address,
+loopback and `localhost`, so on iOS point the request at the machine's LAN address (private
+addresses are allowed on ports other than the daemon's) or serve it from a
+`PrototypeNetworkConfiguration(hostHandler:)`.

@@ -264,3 +264,9 @@ Acquire, release and status replies expose `timing`; correlate with
 p50 is typical work; p90 is a conservative budget, not an upper bound. Use a recent
 window with enough same-mode, same-profile requests; sparse or mixed samples hide
 regressions.
+
+## Ownership release hold
+
+A managed session released while binding ownership is unconfirmed holds device teardown for up to 1.9 s on the daemon's timer. That is two shared turns at their worst case (700 ms attempt bound + the registry's 250 ms busy timeout each), covering the turn in flight when the hold is created and the hold's own expedited attempt. Creating the hold expedites one waiting re-own attempt, still in turn with other attempts; an in-flight attempt continues and recovery admission stays unchanged.
+
+Confirmation starts teardown early. Proven ownership loss skips device writes. At the cap, teardown skips device writes and one warning reports that saved device state was dropped because ownership could not be confirmed. A `device_cleanup_in_progress` hint includes the remaining hold plus the bounded teardown time, resetting when the hold settles.

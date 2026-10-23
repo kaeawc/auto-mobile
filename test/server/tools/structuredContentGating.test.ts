@@ -78,6 +78,9 @@ describe("structuredContent gating (issue #2759)", () => {
 
     fixture = new McpTestFixture();
     await fixture.setup();
+    // The first tools/list converts every registered tool's schema; pay that one-time cost here
+    // so the timed tools/list tests measure the advertisement, not the conversion.
+    await fixture.getContext().client.request({ method: "tools/list", params: {} }, listResult);
   });
 
   afterEach(() => {

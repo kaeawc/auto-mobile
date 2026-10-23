@@ -59,7 +59,8 @@ export interface DeviceTraits {
 
 export type AndroidEmulatorFlagRunner = (prop: string) => Promise<string>;
 
-const EMULATOR_FLAG_PROP = "ro.kernel.qemu";
+/** The emulator flag prop name, exported so other modules can look it up without re-spelling the read. */
+export const EMULATOR_FLAG_PROP = "ro.kernel.qemu";
 
 /** Interpret a raw `ro.kernel.qemu` value; see {@link AndroidDeviceTraits.isEmulator}. */
 export function parseAndroidEmulatorFlag(raw: string): boolean | null {

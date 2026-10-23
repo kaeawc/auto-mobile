@@ -57,10 +57,9 @@ export function compareIosTypedText(
   if (nativeComparison === "changed") {
     return { success: true };
   }
-  if (
-    (before.value === undefined || after.value === undefined) &&
-    nativeComparison !== "unchanged"
-  ) {
+  // Native inputs prove typing only by changing; unchanged native inputs cannot prove nothing was
+  // typed (the target may be web content whose value is unreadable).
+  if (before.value === undefined || after.value === undefined) {
     return {
       success: true,
       warning: "iOS typed text result was not verified: the focused field could not be read.",

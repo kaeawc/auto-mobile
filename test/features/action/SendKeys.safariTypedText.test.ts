@@ -119,7 +119,11 @@ test.each(["role", "action", "class"])(
   },
 );
 
-test("unchanged native inputs without advertised focus still fail verification", async () => {
+test("unchanged native inputs without a readable focused value stay unverified, not failed", async () => {
+  // Typing into web content whose value the runner does not expose must not read as "nothing typed".
   const field = await read(safariObservation("example.com", false, false, false));
-  expect(compareIosTypedText("example.com", field, field).success).toBe(false);
+  expect(compareIosTypedText("example.com", field, field)).toMatchObject({
+    success: true,
+    warning: expect.stringContaining("not verified"),
+  });
 });

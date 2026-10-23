@@ -1,6 +1,7 @@
 /**
- * Parse the authoritative WindowManagerService display rotation out of
+ * Parse the WindowManagerService requested/policy rotation out of
  * `dumpsys window` output (or a `grep -i "mRotation="`-filtered subset of it).
+ * Prefer parseAppliedDisplayRotation for display state when available (#15024).
  *
  * `mRotation=` appears in several unrelated places in a real dump, and a
  * naive "first match" scan can pick the wrong one:
@@ -71,4 +72,38 @@ export function parseWindowManagerRotation(
   }
   const requestedDisplay = currentDisplay === undefined ? undefined : (options.displayId ?? 0);
   return displayRotations.get(requestedDisplay) ?? null;
+}
+
+/**
+ * Read the display's applied configuration, rather than DisplayRotation's requested
+ * mRotation policy (#15024). The first mDisplayRotation in each Display section belongs
+ * to the display itself; later window configurations can be undefined or stale.
+ * Headerless/legacy dumps have no attributable applied value and return null.
+ */
+export function parseAppliedDisplayRotation(
+  dumpsysWindowOutput: string,
+  options: { displayId?: number } = {},
+): number | null {
+  let currentDisplay: number | undefined;
+  const rotations = new Map<number, number>();
+  const skipped = new Set<number>();
+  for (const line of dumpsysWindowOutput.split("\n")) {
+    const display = line.match(/^\s*Display:\s*mDisplayId=(\d+)/);
+    if (display) {
+      currentDisplay = Number(display[1]);
+      continue;
+    }
+    if (currentDisplay === undefined || skipped.has(currentDisplay)) {
+      continue;
+    }
+    const applied = line.match(/\bmDisplayRotation=(?:ROTATION_(0|90|180|270)\b|\S+)/);
+    if (applied) {
+      // The first token decides: an undefined display config must not fall through to a window's.
+      if (applied[1] !== undefined) {
+        rotations.set(currentDisplay, Number(applied[1]) / 90);
+      }
+      skipped.add(currentDisplay);
+    }
+  }
+  return rotations.get(options.displayId ?? 0) ?? null;
 }

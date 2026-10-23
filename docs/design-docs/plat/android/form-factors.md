@@ -202,7 +202,9 @@ decide after the first run.
 > [!NOTE]
 > Implemented for #14946: `tv`, `watch` and `automotive` are in `FormFactor` and
 > `BINDING_DEVICE_FAMILIES`, classified from the system-image tag, then the profile id, then
-> geometry (`src/models/formFactor.ts`). The tag and profile names are still unconfirmed
+> geometry (`src/models/formFactor.ts`). The new values are accepted by `startDevice`
+> `formFactor`, the broker binding `deviceFamily`, and the device description; `getAndroid`
+> has no `formFactor` input, and `startDevice` does not yet create these AVDs. The tag and profile names are still unconfirmed
 > (checklist row 10). The sections below describe the design as written.
 
 `provisionDevice` and `getAndroid` already accept the right inputs (a system-image id and

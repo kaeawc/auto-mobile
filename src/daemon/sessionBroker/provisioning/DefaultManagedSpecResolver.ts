@@ -135,8 +135,11 @@ function unsupportedModelFamily(
   platform: BindingPlatform,
   spec: BindingRequestedSpec,
 ): string | undefined {
-  if (spec.deviceType === undefined || spec.deviceFamily === undefined) {
+  if (spec.deviceFamily === undefined) {
     return undefined;
+  }
+  if (spec.deviceType === undefined) {
+    return platform === "android" ? unsupportedRuntimeFamily(spec) : undefined;
   }
   const actual =
     platform === "ios"
@@ -151,6 +154,18 @@ function unsupportedModelFamily(
   return actual === spec.deviceFamily
     ? undefined
     : `deviceType '${spec.deviceType}' is a ${actual}; it conflicts with deviceFamily '${spec.deviceFamily}'.`;
+}
+
+/** A defaulted hardware profile still sits on the runtime's image, whose tag fixes the family. */
+function unsupportedRuntimeFamily(spec: BindingRequestedSpec): string | undefined {
+  const tagFamily = androidProfileFormFactor({
+    systemImageTag: parseAndroidSystemImageRuntime(spec.runtime)?.tag,
+  });
+  return tagFamily === "tv" || tagFamily === "watch" || tagFamily === "automotive"
+    ? tagFamily === spec.deviceFamily
+      ? undefined
+      : `runtime '${spec.runtime}' is a ${tagFamily} image; it conflicts with deviceFamily '${spec.deviceFamily}'.`
+    : undefined;
 }
 
 function unsupportedFamilyScreenOverrides(

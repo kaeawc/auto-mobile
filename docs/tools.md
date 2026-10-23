@@ -3351,8 +3351,10 @@ booting the OS and `automationReadyTimeoutMs` for installing, updating, starting
 and verifying the automation runner. Each defaults to 180000 ms; their sum,
 including defaults for omitted fields, must not exceed 890000 ms.
 
-`getAndroid` accepts `formFactor` (`phone`, `tablet`, `foldable`, `tv`, `watch`,
-`automotive`), and a binding's `deviceFamily` takes the same values. Android classifies
+The `startDevice` compatibility API accepts `formFactor` (`phone`, `tablet`, `foldable`,
+`tv`, `watch`, `automotive`), and a binding's `deviceFamily` takes the same values;
+`getAndroid` has no form-factor input yet. `startDevice` with `createIfMissing` does not
+create `tv`, `watch` or `automotive` AVDs and fails with an actionable error. Android classifies
 `tv`, `watch` and `automotive` from the system-image tag first (`android-tv`,
 `android-wear`, `android-automotive`, ...), then the avdmanager profile id, then geometry,
 so a TV is never matched as a tablet. iOS accepts only `phone` and `tablet`.

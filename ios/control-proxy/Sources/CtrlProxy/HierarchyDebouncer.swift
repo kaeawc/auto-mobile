@@ -23,6 +23,9 @@ final class HierarchyDebouncer: HierarchyDebouncing {
     /// interval progresses base -> 2x -> 4x and then holds (e.g. 1s -> 2s -> 4s).
     static let maxIdleBackoffMultiplier: Int64 = 4
 
+    /// Leave three extraction durations idle between walks, bounding duty to 25% (#15030).
+    static let minGapToExtractionRatio: Int64 = 3
+
     // MARK: - Dependencies
 
     private let hierarchyExtractor: any HierarchyExtracting
@@ -36,6 +39,7 @@ final class HierarchyDebouncer: HierarchyDebouncing {
 
     // MARK: - State
 
+    private var lastExtractionMs: Int64 = 0
     private var lastStructuralHash = 0
     private var lastObservedStructuralHash = 0
     private var inAnimationMode = false
@@ -93,6 +97,7 @@ final class HierarchyDebouncer: HierarchyDebouncing {
 
     func stop() {
         isRunning = false
+        lastExtractionMs = 0
         pollScheduled = false
         // Clear idle backoff when polling stops.
         effectivePollIntervalMs = pollIntervalMs
@@ -137,11 +142,19 @@ final class HierarchyDebouncer: HierarchyDebouncing {
         lastHierarchy = hierarchy
     }
 
+    private static func clampedProduct(_ interval: Int64, _ multiplier: Int64) -> Int64 {
+        let product = interval.multipliedReportingOverflow(by: multiplier)
+        return product.overflow ? Int64.max : product.partialValue
+    }
+
     private func scheduleNextPoll() {
         guard isRunning, !pollScheduled else { return }
         pollScheduled = true
         let scheduledGeneration = pollGeneration
-        let intervalMs = effectivePollIntervalMs
+        let intervalMs = max(
+            effectivePollIntervalMs,
+            Self.clampedProduct(lastExtractionMs, Self.minGapToExtractionRatio)
+        )
 
         timer.schedule(after: intervalMs) { [weak self] in
             guard let self else { return }
@@ -158,13 +171,14 @@ final class HierarchyDebouncer: HierarchyDebouncing {
     }
 
     private func captureInitialState() {
+        let startTime = timer.now()
         do {
-            let startTime = timer.now()
             let captureSequence = beginCapture()
             let hierarchy = try perf.withScope {
                 try hierarchyExtractor.getViewHierarchy(disableAllFiltering: false)
             }
             let extractionTime = timer.now() - startTime
+            lastExtractionMs = max(0, extractionTime)
             let hash = StructuralHasher.computeHash(hierarchy)
 
             lastStructuralHash = hash
@@ -181,6 +195,7 @@ final class HierarchyDebouncer: HierarchyDebouncing {
             print("[HierarchyDebouncer] Initial hierarchy broadcast hash=\(hash) extractionMs=\(extractionTime)")
             onResult?(result)
         } catch {
+            lastExtractionMs = max(lastExtractionMs, max(0, timer.now() - startTime))
             print("[HierarchyDebouncer] Failed to capture initial state: \(error)")
         }
     }
@@ -216,6 +231,7 @@ final class HierarchyDebouncer: HierarchyDebouncing {
                 try hierarchyExtractor.getViewHierarchy(disableAllFiltering: false)
             }
             let extractionTime = timer.now() - startTime
+            lastExtractionMs = max(0, extractionTime)
             let newHash = StructuralHasher.computeHash(hierarchy)
 
             let oldHash = lastStructuralHash
@@ -234,8 +250,8 @@ final class HierarchyDebouncer: HierarchyDebouncing {
                 // Idle: nothing changed since the last broadcast, so back off the poll
                 // interval toward the cap to eliminate steady-state load.
                 effectivePollIntervalMs = min(
-                    effectivePollIntervalMs * Self.idleBackoffMultiplier,
-                    pollIntervalMs * Self.maxIdleBackoffMultiplier
+                    Self.clampedProduct(effectivePollIntervalMs, Self.idleBackoffMultiplier),
+                    Self.clampedProduct(pollIntervalMs, Self.maxIdleBackoffMultiplier)
                 )
                 // Don't broadcast unchanged results (animation mode); just reset the counter.
                 skippedPollCount = 0
@@ -274,6 +290,7 @@ final class HierarchyDebouncer: HierarchyDebouncing {
                 }
             }
         } catch {
+            lastExtractionMs = max(lastExtractionMs, max(0, timer.now() - startTime))
             // Log errors during polling for debuggability. This can happen if the app is
             // transitioning between states; the next poll retries.
             print("[HierarchyDebouncer] Extraction error: \(error)")

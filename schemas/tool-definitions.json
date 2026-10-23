@@ -31199,6 +31199,11 @@
                   "type": "string",
                   "enum": ["throttling", "critical", "unset"],
                   "description": "Override thermal status via `cmd thermalservice override-status`, or unset."
+                },
+                "storage": {
+                  "type": "string",
+                  "enum": ["low", "full", "unset"],
+                  "description": "Use up free space on /data with a ballast file (`fallocate`): 'low' leaves about 128 MiB, 'full' about 8 MiB. Reset deletes the ballast. Or unset."
                 }
               },
               "additionalProperties": false,

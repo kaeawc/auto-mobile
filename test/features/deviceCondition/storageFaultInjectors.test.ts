@@ -139,6 +139,13 @@ function storageDevice(options: StorageDeviceOptions): StorageDevice {
 
 const BASE = 4096 * MIB;
 
+/** Let every already-queued promise continuation run; the fake device answers through microtasks only. */
+async function settle(): Promise<void> {
+  for (let i = 0; i < 50; i += 1) {
+    await Promise.resolve();
+  }
+}
+
 describe("parseDfAvailableBytes (#14066)", () => {
   test("reads the Available column of the last row in bytes", () => {
     expect(parseDfAvailableBytes(dfOutput(300 * MIB))).toBe(300 * MIB);
@@ -323,7 +330,7 @@ describe("storage fault (#14066)", () => {
     const releaseVerification = device.holdNext("ls -d");
     const resetting = first.reset?.() ?? Promise.resolve();
     const applying = injector.apply("full");
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await settle();
     // The apply has not started allocating while the reset is still running.
     expect(device.ballastBytes()).toBeUndefined();
 

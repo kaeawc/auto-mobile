@@ -10,6 +10,7 @@ import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { didSourceSucceedForDevice } from "../../utils/discoverySource";
 import { getAbortSignal, throwIfRequestAborted } from "../../utils/AbortContext";
 import { type AutolockClient } from "../deviceAutolockManager";
+import type { BootedDevice } from "../../models";
 import type { PooledDevice } from "../devicePoolTypes";
 import {
   ALLOCATION_SNAPSHOT_STALE_RETRIES,
@@ -22,6 +23,7 @@ import type { DevicePoolOperations } from "./operations";
 import type { DevicePoolState } from "./state";
 
 export interface TargetDiscoveryOperations {
+  pickUpRunningDevice(device: BootedDevice, signal?: AbortSignal): Promise<void>;
   /**
    * Bind a known device to a session without running the pool's idle-device
    * selection. If the device is already bound to a live session, reuse that
@@ -110,6 +112,73 @@ export class DevicePoolTargetDiscovery {
     private readonly state: TargetDiscoveryState,
     private readonly callbacks: TargetDiscoveryCallbacks,
   ) {}
+  /** Share the insertion fence with exact-device discovery, including absent-slot shutdowns. */
+  private insertionWasFenced(
+    deviceId: string,
+    removalFence: { wasRemoved(): boolean },
+    shutdownMarker: number | undefined,
+    shutdownReserved: boolean,
+  ): boolean {
+    return (
+      removalFence.wasRemoved() ||
+      shutdownReserved ||
+      this.state.shutdownReservationCoordinator.isDeviceUnderShutdown(deviceId) ||
+      shutdownMarker !== this.state.intentionalShutdowns.get(deviceId) ||
+      shutdownMarker !== undefined
+    );
+  }
+
+  async pickUpRunningDevice(device: BootedDevice, signal?: AbortSignal): Promise<void> {
+    const deviceId = device.deviceId;
+    if (this.state.devices.has(deviceId)) {
+      return;
+    }
+    const removalFence = this.state.refreshCoordinator.captureDeviceRemovalFence(deviceId);
+    const shutdownMarker = this.state.intentionalShutdowns.get(deviceId);
+    const shutdownReserved =
+      this.state.shutdownReservationCoordinator.isDeviceUnderShutdown(deviceId);
+    const shutdownMessage = `Device ${deviceId} is being shut down; retry after shutdown completes.`;
+    const unavailableMessage = `Device ${deviceId} is no longer running; call startDevice for it.`;
+    const pickupSignal = signal ?? getAbortSignal();
+    try {
+      if (shutdownMarker !== undefined || shutdownReserved) {
+        throw new ActionableError(shutdownMessage);
+      }
+      const discovery = await raceWithDeadline(
+        () => this.callbacks.takeFreshPresenceDiscovery(device.platform),
+        { timer: this.state.timer, signal: pickupSignal, label: "Running device pickup" },
+      );
+      if (device.platform === "ios") {
+        this.callbacks.assertTargetDeviceLiveness({
+          device: { id: deviceId, platform: device.platform },
+          unavailableMessage,
+          snapshot: {
+            capturedEntry: undefined,
+            bootedDevices: discovery.devices,
+            iosLiveness: await this.state.idleDeviceReaper.getIosLivenessSnapshot({ discovery }),
+          },
+        });
+      }
+      const fresh = discovery.devices.find((candidate) => candidate.deviceId === deviceId);
+      if (!fresh) {
+        throw new ActionableError(unavailableMessage);
+      }
+      const evidence = this.state.runtimeIdentity.identityEvidenceForBootedDevice(fresh);
+      await this.state.assignmentMutex.runExclusive(async () => {
+        if (this.state.devices.has(deviceId)) {
+          return;
+        }
+        pickupSignal?.throwIfAborted();
+        if (this.insertionWasFenced(deviceId, removalFence, shutdownMarker, shutdownReserved)) {
+          throw new ActionableError(shutdownMessage);
+        }
+        await this.callbacks.addDevice(fresh, undefined, true, evidence);
+      });
+    } finally {
+      removalFence.release();
+    }
+  }
+
   /**
    * Bind a known device to a session without running the pool's idle-device
    * selection. If the device is already bound to a live session, reuse that
@@ -253,13 +322,7 @@ export class DevicePoolTargetDiscovery {
           }
           // Undefined -> added -> retired -> undefined is also a changed incarnation.
           // Refuse before addDevice can clear a recorded intentional shutdown.
-          if (
-            removalFence.wasRemoved() ||
-            shutdownReserved ||
-            this.state.shutdownReservationCoordinator.isDeviceUnderShutdown(deviceId) ||
-            shutdownMarker !== this.state.intentionalShutdowns.get(deviceId) ||
-            shutdownMarker !== undefined
-          ) {
+          if (this.insertionWasFenced(deviceId, removalFence, shutdownMarker, shutdownReserved)) {
             throw new ActionableError(unavailableMessage);
           }
           // A failed iOS source may return no target or a retained last-good
@@ -422,6 +485,7 @@ export function connectTargetDiscovery(
   >,
 ): TargetDiscoveryOperations {
   return {
+    pickUpRunningDevice: (...args) => part().pickUpRunningDevice(...args),
     bindOrReuseDeviceSession: (...args) => seams.bindOrReuseDeviceSession(...args),
     claimExplicitlyBoundDevice: (...args) => part().claimExplicitlyBoundDevice(...args),
     releaseUndeliveredAcquisition: (...args) => seams.releaseUndeliveredAcquisition(...args),

@@ -81,7 +81,7 @@ export type DevicePoolWrites = Pick<
   | "reserveRestartRecoveryReadiness"
   | "reserveDeviceForReadiness"
   | "reconcileDiscoveryObservation"
-  | "addDevice"
+  | "pickUpRunningDevice"
 >;
 
 /** The one session read a failed plan makes to explain a lost session base. */

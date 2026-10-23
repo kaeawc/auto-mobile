@@ -172,6 +172,12 @@ export class DevicePool {
     return this.parts.membership.notifyDeviceReady(...args);
   }
 
+  pickUpRunningDevice(
+    ...args: Parameters<PoolOps["pickUpRunningDevice"]>
+  ): ReturnType<PoolOps["pickUpRunningDevice"]> {
+    return this.parts.targetDiscovery.pickUpRunningDevice(...args);
+  }
+
   addDevice(...args: Parameters<PoolOps["addDevice"]>): ReturnType<PoolOps["addDevice"]> {
     return this.parts.membership.addDevice(...args);
   }

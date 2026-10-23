@@ -208,4 +208,30 @@ describe("AndroidTraceCapture (#14113)", () => {
       "/data/misc/perfetto-traces/automobile-trace-a1.perfetto-trace",
     ]);
   });
+
+  test("overlapping starts on one device: one wins, the other is refused, one recorder runs (#14113 review)", async () => {
+    const { device, registry, capture } = setup();
+
+    const results = await Promise.allSettled([
+      capture.start({ deviceId: DEVICE, sessionId: "s-1" }),
+      capture.start({ deviceId: DEVICE, sessionId: "s-2" }),
+    ]);
+
+    expect(results.map((r) => r.status).sort()).toEqual(["fulfilled", "rejected"]);
+    const refused = results.find((r) => r.status === "rejected") as PromiseRejectedResult;
+    expect(String(refused.reason)).toContain("already recording on emulator-5554");
+    expect(device.runningPids.size).toBe(1);
+    expect(registry.traceOnDevice(DEVICE)).toBeDefined();
+  });
+
+  test("a failed start releases its claim so the next start succeeds", async () => {
+    const { device, capture } = setup();
+    device.perfettoStartOutput = fixture("perfetto-background-missing.txt");
+    await expect(capture.start({ deviceId: DEVICE })).rejects.toThrow("perfetto did not start");
+
+    device.perfettoStartOutput = fixture("perfetto-background-start.txt");
+    await expect(capture.start({ deviceId: DEVICE })).resolves.toMatchObject({
+      traceId: "trace-fake-1",
+    });
+  });
 });

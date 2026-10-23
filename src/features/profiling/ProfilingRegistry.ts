@@ -47,6 +47,7 @@ export interface SessionProfilingState {
  */
 export class ProfilingRegistry {
   private readonly traces = new Map<string, ActiveTraceRecord>();
+  private readonly starting = new Set<string>();
   private readonly deviceFiles = new Map<string, DeviceFileRecord>();
 
   addTrace(record: ActiveTraceRecord): void {
@@ -55,6 +56,24 @@ export class ProfilingRegistry {
 
   getTrace(traceId: string): ActiveTraceRecord | undefined {
     return this.traces.get(traceId);
+  }
+
+  /**
+   * Claim the device for a trace start that has not registered its recorder yet, synchronously,
+   * so overlapping starts cannot both pass the one-recorder-per-device check. Returns false when
+   * a trace is recording or another start holds the claim. Always pair with
+   * {@link releaseStart}.
+   */
+  reserveStart(deviceId: string): boolean {
+    if (this.traceOnDevice(deviceId) || this.starting.has(deviceId)) {
+      return false;
+    }
+    this.starting.add(deviceId);
+    return true;
+  }
+
+  releaseStart(deviceId: string): void {
+    this.starting.delete(deviceId);
   }
 
   traceOnDevice(deviceId: string): ActiveTraceRecord | undefined {

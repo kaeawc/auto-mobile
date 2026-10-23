@@ -55,14 +55,27 @@ export class AndroidTraceCapture {
   constructor(private readonly deps: TraceCaptureDependencies) {}
 
   async start(request: TraceStartRequest): Promise<TraceStartResult> {
-    const { registry, timer, idGenerator, store } = this.deps;
+    const { registry } = this.deps;
     const config = resolveTraceConfig(request);
-    const existing = registry.traceOnDevice(request.deviceId);
-    if (existing) {
+    // Claimed before the first await: overlapping starts must not both reach the device.
+    if (!registry.reserveStart(request.deviceId)) {
+      const existing = registry.traceOnDevice(request.deviceId);
       throw new ActionableError(
-        `A captureTrace (${existing.traceId}) is already recording on ${request.deviceId}; stop it before starting another.`,
+        `A captureTrace (${existing?.traceId ?? "still starting"}) is already recording on ${request.deviceId}; stop it before starting another.`,
       );
     }
+    try {
+      return await this.startReserved(request, config);
+    } finally {
+      registry.releaseStart(request.deviceId);
+    }
+  }
+
+  private async startReserved(
+    request: TraceStartRequest,
+    config: ResolvedTraceConfig,
+  ): Promise<TraceStartResult> {
+    const { registry, timer, idGenerator, store } = this.deps;
     const traceId = `trace-${idGenerator.next()}`;
     const remotePath = `${DEVICE_TRACE_DIR}/automobile-${traceId}.perfetto-trace`;
     const hostPath = await store.allocatePath("captureTrace", traceId, "perfetto-trace");

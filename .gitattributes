@@ -213,3 +213,4 @@ test/fixtures/android-secure-settings/*.txt text eol=lf
 android/protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol/PrototypeSpecModels.generated.kt text eol=lf
 ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeSpecModels.generated.swift text eol=lf
 test/fixtures/android-sdkmanager/*.txt text eol=lf
+test/fixtures/ios-safari-url-field/*.json text eol=lf

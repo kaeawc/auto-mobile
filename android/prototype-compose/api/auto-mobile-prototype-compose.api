@@ -57,6 +57,8 @@ public final class dev.jasonpearson.automobile.prototype.EmbeddedPrototypeHost {
   public final void setCurrent(kotlin.jvm.functions.Function0<java.lang.Boolean>);
   public final kotlin.jvm.functions.Function1<dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRuntime, kotlin.Unit> getOnRuntime();
   public final void setOnRuntime(kotlin.jvm.functions.Function1<? super dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRuntime, kotlin.Unit>);
+  public final kotlin.jvm.functions.Function0<kotlin.Unit> getOnReady();
+  public final void setOnReady(kotlin.jvm.functions.Function0<kotlin.Unit>);
   public final kotlin.jvm.functions.Function3<dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeInteraction, dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRuntime, kotlin.coroutines.Continuation<? super kotlin.Unit>, java.lang.Object> getOnInteraction();
   public final void setOnInteraction(kotlin.jvm.functions.Function3<? super dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeInteraction, ? super dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRuntime, ? super kotlin.coroutines.Continuation<? super kotlin.Unit>, ? extends java.lang.Object>);
 }

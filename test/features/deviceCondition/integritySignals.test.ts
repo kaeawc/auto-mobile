@@ -94,9 +94,19 @@ describe("integrity signals (#14062)", () => {
     for (const id of ["debuggable-build", "insecure-build", "test-keys", "qemu-props"]) {
       expect(mutability[id]).toBe("image-fixed");
     }
-    for (const id of ["su-binary", "superuser-apk", "selinux-permissive"]) {
+    for (const id of ["su-binary", "superuser-apk", "selinux-permissive", "missing-otacerts"]) {
       expect(mutability[id]).toBe("needs-root");
     }
+  });
+
+  test("an su binary at a RootBeer location outside /system still reads as su-binary", async () => {
+    const adb = adbWith({
+      getprop: EMULATOR_PROPS,
+      getenforce: "Enforcing",
+      "ls -d": "/su/bin/su\n/etc/security/otacerts.zip",
+    });
+    expect(byId(await readIntegritySignals(adb))["su-binary"]).toBe(true);
+    expect(adb.getExecutedCommands().find((c) => c.includes("ls -d"))).toContain("/su/bin/su");
   });
 
   test("probes present and absent paths in one command that tolerates a nonzero ls exit", async () => {

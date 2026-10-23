@@ -73,7 +73,7 @@ export const INTEGRITY_SIGNALS: readonly IntegritySignal[] = [
     id: "missing-otacerts",
     family: "root",
     description: "/etc/security/otacerts.zip is absent",
-    mutability: "image-fixed",
+    mutability: "needs-root",
   },
   {
     id: "qemu-props",
@@ -113,10 +113,18 @@ export function parseGetprop(output: string): Map<string, string> {
   return props;
 }
 
-/** RootBeer-style suPaths and artifacts the probe lists; the rootState fixture plants the same set. */
+/**
+ * RootBeer-style suPaths and artifacts the probe lists. The rootState fixture plants only the
+ * /system ones; the rest are common locations a real root leaves behind, so detection stays honest.
+ */
 const SU_PATHS = [
   "/system/xbin/su",
   "/system/bin/su",
+  "/su/bin/su",
+  "/sbin/su",
+  "/data/local/su",
+  "/data/local/bin/su",
+  "/data/local/xbin/su",
   "/system/xbin/busybox",
   "/system/bin/busybox",
 ] as const;

@@ -13,9 +13,9 @@ Captured verbatim from real `xcrun simctl` runs. Nothing here is hand-written.
   `<data>/Media/DCIM`; `residue-documents-entries.txt` is `ls -A <data>/Documents`;
   `residue-safari-container.txt` is `simctl get_app_container <udid> com.apple.mobilesafari
   data` (host user path replaced by `/Users/runner`); `residue-get-app-container-missing.txt`
-  is the stderr of that command for an uninstalled bundle; `residue-preferences-clean.xml`
+  is the stderr of that command for an uninstalled bundle; `residue-preferences-clean.plist`
   is `simctl spawn <udid> defaults export com.apple.Preferences -` on an untouched
-  simulator; `residue-preferences-keyboard-planted.xml` is `defaults export` of a
+  simulator; `residue-preferences-keyboard-planted.plist` is `defaults export` of a
   domain after `defaults write KeyboardAutocorrection -bool NO` (the planted key from
   manual-test batch 20261022b).
 - `residue-accessibility-*.xml` (#15017): `simctl spawn <udid> defaults export

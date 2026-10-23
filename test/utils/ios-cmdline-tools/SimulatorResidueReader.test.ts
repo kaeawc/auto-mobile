@@ -36,8 +36,8 @@ function harness() {
     ]),
     removed: [] as string[],
     safari: SAFARI_DATA as string | Error,
-    preferences: fixture("residue-preferences-clean.xml"),
-    accessibility: fixture("residue-accessibility-clean.xml"),
+    preferences: fixture("residue-preferences-clean.plist"),
+    accessibility: fixture("residue-accessibility-clean.plist"),
   };
   const files: SimulatorResidueFileSystem = {
     listFiles: async (directory) => state.trees.get(directory) ?? null,
@@ -88,13 +88,13 @@ describe("SimulatorResidueReader", () => {
   // `disabled` (#15017): turning the setting back off leaves its defaults behind as 0.
   test("reads the increase-contrast defaults simctl leaves behind, enabled or disabled", async () => {
     const enabled = harness();
-    enabled.state.accessibility = fixture("residue-accessibility-increase-contrast-enabled.xml");
+    enabled.state.accessibility = fixture("residue-accessibility-increase-contrast-enabled.plist");
     expect((await enabled.reader.read(UDID, enabled.signal)).accessibility).toEqual({
       DarkenSystemColors: 1,
       PointerIncreasedContrastEnabled: 1,
     });
     const disabled = harness();
-    disabled.state.accessibility = fixture("residue-accessibility-increase-contrast-disabled.xml");
+    disabled.state.accessibility = fixture("residue-accessibility-increase-contrast-disabled.plist");
     expect((await disabled.reader.read(UDID, disabled.signal)).accessibility).toEqual({
       DarkenSystemColors: 0,
       PointerIncreasedContrastEnabled: 0,
@@ -103,7 +103,7 @@ describe("SimulatorResidueReader", () => {
 
   test("a planted autocorrect default and out-of-band files are reported", async () => {
     const { reader, state, signal } = harness();
-    state.preferences = fixture("residue-preferences-keyboard-planted.xml");
+    state.preferences = fixture("residue-preferences-keyboard-planted.plist");
     state.trees.set(`${DATA}/Documents`, [
       ...lines(fixture("residue-documents-entries.txt")),
       "dirty-oob-1.txt",

@@ -59,7 +59,7 @@ const daemonPoolPickup: ObservationPoolPickup = {
   available: () => defaultDaemonContext.devicePoolWrites() !== undefined,
   isPooled: (device) => Boolean(defaultDaemonContext.devicePool()?.getDevice(device.deviceId)),
   ensurePooled: async (device) => {
-    await defaultDaemonContext.devicePoolWrites()?.addDevice(device);
+    await defaultDaemonContext.devicePoolWrites()?.pickUpRunningDevice(device);
   },
 };
 

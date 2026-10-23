@@ -268,6 +268,35 @@ describe("storage fault (#14066)", () => {
     expect(device.freeBytes()).toBe(BASE);
   });
 
+  test("the resolver reuses one injector per device, so low then full registers a single reset", async () => {
+    const device = storageDevice({ baseFreeBytes: BASE });
+    const android: BootedDevice = { name: "emu", platform: "android", deviceId: "emulator-5554" };
+    const cache = new Map();
+    const factory = { create: () => device.adb };
+    // Like the registry: resolve again on every apply.
+    const controller = new DeviceConditionController((key) =>
+      resolveStorageFaultInjector(android, key, { adbFactory: factory, cache }),
+    );
+
+    await controller.apply({ faults: { storage: "low" } });
+    await controller.apply({ faults: { storage: "full" } });
+    expect(device.freeBytes()).toBe(STORAGE_FREE_BYTES_LEFT.full);
+
+    const cleared = await controller.apply({ faults: { storage: "unset" } });
+    expect(cleared.changes).toEqual([{ key: "faults.storage", status: "cleared" }]);
+    expect(cleared.active).toEqual([]);
+    expect(device.freeBytes()).toBe(BASE);
+  });
+
+  test("the resolver keeps separate injectors for separate devices", () => {
+    const first: BootedDevice = { name: "a", platform: "android", deviceId: "emulator-5554" };
+    const second: BootedDevice = { name: "b", platform: "android", deviceId: "emulator-5556" };
+    const deps = { adbFactory: { create: () => new FakeAdbExecutor() }, cache: new Map() };
+    const one = resolveStorageFaultInjector(first, "faults.storage", deps);
+    expect(resolveStorageFaultInjector(first, "faults.storage", deps)).toBe(one);
+    expect(resolveStorageFaultInjector(second, "faults.storage", deps)).not.toBe(one);
+  });
+
   test("the resolver serves only this key, only on Android", () => {
     const android: BootedDevice = { name: "emu", platform: "android", deviceId: "emulator-5554" };
     const ios: BootedDevice = { name: "sim", platform: "ios", deviceId: "UDID" };

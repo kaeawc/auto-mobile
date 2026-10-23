@@ -171,14 +171,20 @@ export function createStorageFaultInjector(adb: AdbExecutor): DeviceConditionInj
   };
 }
 
-/** The injectable seams a test overrides; production uses the default adb factory. */
+/** The injectable seams a test overrides; production uses the default adb factory and cache. */
 export interface StorageFaultInjectorDeps {
   adbFactory?: AdbClientFactory;
+  cache?: Map<string, DeviceConditionInjector>;
 }
 
+/** One injector per device, so every apply shares its ballast ownership and registers a single reset. */
+const injectorsByDevice = new Map<string, DeviceConditionInjector>();
+
 /**
- * Build the injector for one storage `faults.*` key on an Android device, or
- * undefined when the key is not one of them or the device is not Android.
+ * Build (once per device) the injector for a storage `faults.*` key on an Android
+ * device, or undefined when the key is not one of them or the device is not Android.
+ * The registry resolves on every apply, so without the cache a `low` then `full`
+ * request would create two injectors that each register a reset.
  */
 export function resolveStorageFaultInjector(
   device: BootedDevice,
@@ -188,5 +194,13 @@ export function resolveStorageFaultInjector(
   if (device.platform !== "android" || key !== "faults.storage") {
     return undefined;
   }
-  return createStorageFaultInjector((deps.adbFactory ?? defaultAdbClientFactory).create(device));
+  const cache = deps.cache ?? injectorsByDevice;
+  let injector = cache.get(device.deviceId);
+  if (!injector) {
+    injector = createStorageFaultInjector(
+      (deps.adbFactory ?? defaultAdbClientFactory).create(device),
+    );
+    cache.set(device.deviceId, injector);
+  }
+  return injector;
 }

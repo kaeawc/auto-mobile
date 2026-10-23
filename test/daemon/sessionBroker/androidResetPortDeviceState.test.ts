@@ -1,3 +1,5 @@
+import { ActionableError } from "../../../src/models/ActionableError";
+import { sequenceBackoff } from "../../../src/utils/Backoff";
 import { beforeEach, describe, expect, test } from "bun:test";
 import { AndroidDeviceMutationResetPort } from "../../../src/daemon/sessionBroker/androidDeviceMutationResetPort";
 import type { DeviceMutationResetContext } from "../../../src/daemon/sessionBroker/mutations/reset";
@@ -96,7 +98,12 @@ describe("AndroidDeviceMutationResetPort setDeviceState reverts", () => {
       power = new FakePowerAdb();
       client = new AdbPowerClient(power);
       reader = new DeviceStateMutationPriorReader(() => client);
-      port = new AndroidDeviceMutationResetPort(powerRunner(power), timer);
+      timer.enableAutoAdvance();
+      port = new AndroidDeviceMutationResetPort(
+        powerRunner(power),
+        timer,
+        sequenceBackoff([250, 500, 1000]),
+      );
     });
 
     /** Journals a control the way the recording does: the prior is read before the change. */
@@ -104,6 +111,92 @@ describe("AndroidDeviceMutationResetPort setDeviceState reverts", () => {
       const [prior] = await reader.read(device, [{ kind: "device-setting", key }]);
       return mutation("device-setting", key, prior!);
     }
+
+    test("ignored unforce rejects after the injected bounded Doze poll", async () => {
+      const entry = await journal("power:doze");
+      await client.forceDoze("deep");
+      power.ignoring.add("deviceidle unforce");
+      const result = port.revert(entry, context);
+      await expect(result).rejects.toBeInstanceOf(ActionableError);
+      await expect(result).rejects.toThrow("could not confirm power:doze");
+      expect(timer.getSleepHistory()).toEqual([250, 500, 1000, 1000, 250]);
+      expect(timer.now()).toBe(3000);
+    });
+
+    test("Doze settles after two transient readings", async () => {
+      const entry = await journal("power:doze");
+      await client.forceDoze("deep");
+      power.idleSettleReads = 2;
+      await port.revert(entry, context);
+      expect(timer.getSleepHistory()).toEqual([250, 500]);
+      expect((await client.readDoze()).mode).toBe("off");
+    });
+
+    test("refused light Doze re-force is caught by read-back", async () => {
+      await client.forceDoze("light");
+      const entry = await journal("power:doze");
+      power.lightEnabled = false;
+      await expect(port.revert(entry, context)).rejects.toThrow("could not confirm power:doze");
+    });
+
+    test("Doze poll clamps to the remaining reset deadline", async () => {
+      const entry = await journal("power:doze");
+      await client.forceDoze("deep");
+      power.ignoring.add("deviceidle unforce");
+      await expect(
+        port.revert(entry, { ...context, deadlineMs: timer.now() + 1000 }),
+      ).rejects.toBeInstanceOf(ActionableError);
+      expect(timer.getSleepHistory()).toEqual([250, 500, 250]);
+      expect(timer.now()).toBe(1000);
+    });
+
+    test("Doze read-back errors reject with ActionableError", async () => {
+      const entry = await journal("power:doze");
+      power.failing.add("deviceidle get");
+      await expect(port.revert(entry, context)).rejects.toBeInstanceOf(ActionableError);
+    });
+
+    test("a Doze polling read error propagates instead of becoming a mismatch", async () => {
+      const entry = await journal("power:doze");
+      await client.forceDoze("deep");
+      power.ignoring.add("deviceidle unforce");
+      const runner = powerRunner(power);
+      port = new AndroidDeviceMutationResetPort(
+        {
+          executeCommand: (command, options) => {
+            if (timer.now() > 0) {
+              power.failing.add("deviceidle get");
+            }
+            return runner.executeCommand(command, options);
+          },
+        },
+        timer,
+        sequenceBackoff([250]),
+      );
+      await expect(port.revert(entry, context)).rejects.toThrow("could not read back device state");
+      expect(timer.getSleepHistory()).toEqual([250]);
+    });
+
+    test.each([
+      ["battery", { level: 40, charging: "usb", faked: true }, "dumpsys battery set"],
+      ["thermal", { status: 2, override: true }, "thermalservice override-status"],
+      ["dataSaver", true, "netpolicy set"],
+      ["batterySaver", true, "settings put"],
+      ["standby:com.example.app", "rare", "am set-standby-bucket"],
+      ["inactive:com.example.app", true, "am set-inactive"],
+    ])("ignored %s restore rejects on mismatch", async (field, prior, command) => {
+      power.ignoring.add(command);
+      await expect(
+        port.revert(mutation("device-setting", `power:${field}`, present(prior)), context),
+      ).rejects.toThrow(`could not confirm power:${field}`);
+    });
+
+    test("an explicit battery saver false prior must read back as false", async () => {
+      power.ignoring.add("settings put");
+      await expect(
+        port.revert(mutation("device-setting", "power:batterySaver", present(false)), context),
+      ).rejects.toThrow("could not confirm power:batterySaver");
+    });
 
     test("a faked battery goes back to the real one", async () => {
       const entry = await journal("power:battery");
@@ -171,16 +264,15 @@ describe("AndroidDeviceMutationResetPort setDeviceState reverts", () => {
     test("an unset battery saver is deleted again, and a thermal prior with no override resets", async () => {
       const entry = await journal("power:batterySaver");
       expect(entry.priorValue).toEqual(ABSENT);
-      const plain = new AndroidDeviceMutationResetPort(adb, timer);
-      await plain.revert(entry, context);
-      await plain.revert(
+      power.lowPower = "1";
+      power.thermal = { status: 4, override: true };
+      await port.revert(entry, context);
+      await port.revert(
         mutation("device-setting", "power:thermal", present({ status: 0, override: false })),
         context,
       );
-      expect(adb.getExecutedCommands()).toEqual([
-        "shell settings delete global low_power",
-        "shell cmd thermalservice reset",
-      ]);
+      expect(await client.readBatterySaver()).toBeUndefined();
+      expect(await client.readThermal()).toEqual({ status: 0, override: false });
     });
 
     test("a prior the tool cannot write back is not restorable", () => {

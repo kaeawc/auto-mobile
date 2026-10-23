@@ -30,6 +30,8 @@ export async function createFakeBrokerDaemon(
   options: {
     capacity?: number;
     timer?: FakeTimer;
+    /** Also drive the broker's own bounded waits (release reply budget) from the fake timer. */
+    brokerOnFakeTimer?: boolean;
     ids?: FakeIdGenerator;
     /** A file path makes the registry durable so a second host can model a daemon restart. */
     dbPath?: string;
@@ -73,6 +75,7 @@ export async function createFakeBrokerDaemon(
   let unavailable = false;
   let disposition: SessionLiveness = "live";
   const broker = new SessionBroker({
+    ...(options.brokerOnFakeTimer ? { timer } : {}),
     store,
     devices,
     owner,

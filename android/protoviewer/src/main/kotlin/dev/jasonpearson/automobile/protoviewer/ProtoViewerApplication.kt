@@ -41,27 +41,30 @@ class ProtoViewerApplication : Application() {
       }
     val sharer =
       CanonicalLibrarySharer(repository, DirectoryLibraryExports(File(app.cacheDir, "export")), ids)
+    val importer =
+      ValidatedLibraryImporter(
+        setOf(app.packageName, "${app.packageName}.exports"),
+        ImportContent { uri ->
+          app.contentResolver.openInputStream(uri.toUri())
+            ?: throw IOException("Content unavailable")
+        },
+        AutoMobilePrototype.capabilities,
+        AndroidImportAssetCheck(),
+        staging.canonicalFile.toPath().let { stagingRoot ->
+          DirectoryLibraryImport(
+            repository,
+            stagingRoot,
+            PrototypeBundleDirectoryFileSystem(stagingRoot),
+            ids,
+          )
+        },
+      )
     ProtoViewerServices(
       repository,
       storage,
-      importer =
-        ValidatedLibraryImporter(
-          setOf(app.packageName, "${app.packageName}.exports"),
-          ImportContent { uri ->
-            app.contentResolver.openInputStream(uri.toUri())
-              ?: throw IOException("Content unavailable")
-          },
-          AutoMobilePrototype.capabilities,
-          AndroidImportAssetCheck(),
-          staging.canonicalFile.toPath().let { stagingRoot ->
-            DirectoryLibraryImport(
-              repository,
-              stagingRoot,
-              PrototypeBundleDirectoryFileSystem(stagingRoot),
-              ids,
-            )
-          },
-        ),
+      importer = importer,
+      mcpInbox =
+        app.getExternalFilesDir(null)?.let { McpInbox(File(it, "mcp"), importer, repository) },
       sharer = sharer,
       settings = SharedPreferencesSettingsStore(app.getSharedPreferences("settings", MODE_PRIVATE)),
     )
@@ -81,6 +84,8 @@ class ProtoViewerServices(
   val io: CoroutineDispatcher = Dispatchers.IO,
   val clock: LibraryClock = LibraryClock(System::currentTimeMillis),
   val importer: LibraryImporter? = null,
+  /** Null when shared storage is unavailable; the MCP host then times out and says so. */
+  val mcpInbox: McpInbox? = null,
   val sharer: LibrarySharer? = null,
   val settings: SettingsStore,
   allowedClient: () -> PrototypeHttpClient = {

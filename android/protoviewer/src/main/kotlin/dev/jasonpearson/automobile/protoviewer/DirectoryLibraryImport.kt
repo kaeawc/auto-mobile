@@ -14,6 +14,8 @@ import java.util.logging.Logger
 
 private val logger: Logger = Logger.getLogger("ProtoViewerImport")
 
+const val DEFAULT_IMPORT_LABEL = "Imported prototype"
+
 /** Bounds-only decoding, on the import I/O dispatcher; never allocate the full image. */
 class AndroidImportAssetCheck : ImportAssetCheck {
   override fun invalidPath(bundle: PrototypeBundle): String? =
@@ -40,7 +42,11 @@ class DirectoryLibraryImport(
     "TooGenericExceptionCaught",
   ) // Injected content/storage adapters may throw operational exceptions.
   @Synchronized
-  override fun commit(bundle: PrototypeBundle, source: LibrarySource): LibraryResult<LibraryEntry> {
+  override fun commit(
+    bundle: PrototypeBundle,
+    source: LibrarySource,
+    label: String?,
+  ): LibraryResult<LibraryEntry> {
     val id = ids.newId()
     require(validLibraryId(id))
     val destination = stagingRoot.resolve(id)
@@ -61,7 +67,7 @@ class DirectoryLibraryImport(
       repository.add(
         SavedPrototypeSaveRequest(
           "ignored",
-          "Imported prototype",
+          label ?: DEFAULT_IMPORT_LABEL,
           bundle.spec.toString(Charsets.UTF_8),
           assets,
         ),

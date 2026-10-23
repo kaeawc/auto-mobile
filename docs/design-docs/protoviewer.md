@@ -317,19 +317,33 @@ The shared request-policy and storage work is tracked in #13622.
 
 ## 7. MCP integration (first release: save routing and open)
 
-- Android uses adb, the existing device channel: the host pushes the bundle into ProtoViewer's
-  app-scoped inbox directory and starts a non-exported internal import action (a separate
-  component from the exported `ImportActivity`, see section 5 step 1) that names the inbox file. It
-  runs the full import flow and the source is set by the app, never by the caller or the bundle, so
-  the entry is "imported" and the section 6 policy applies. The exported `ImportActivity` keeps
-  rejecting `file://` and its own authority, so a third-party app cannot reach the inbox route.
+- Android uses adb, the existing device channel (#13621): the host pushes the bundle into
+  ProtoViewer's app-scoped inbox, `getExternalFilesDir(null)/mcp/inbox/<request>.automobile-proto`,
+  then runs `am start -n dev.jasonpearson.automobile.protoviewer/.McpActivity` with action
+  `….mcp.IMPORT` and the request id (plus an optional label). `McpActivity` is a separate component
+  from the exported `ImportActivity` (section 5 step 1). It is exported only to callers holding
+  `android.permission.DUMP` and has no intent filters: the adb shell holds DUMP and third-party apps
+  cannot, and a non-exported activity could not be started from adb at all. It reads the inbox
+  file under the same byte caps, deletes it, and runs the full import flow; the source is always
+  `mcp`, set by the app, never by the caller or the bundle, so the entry is "imported" and the
+  section 6 policy applies. It writes one result, `mcp/results/<request>.json`
+  (`imported`/`opened` with `libraryId` and `label`, `rejected` with `path` and `reason`, or
+  `not_found`), under a temporary name and renames it; the host polls for it and removes it. The
+  exported `ImportActivity` keeps rejecting `file://` and its own authority. Known risk to verify
+  on a device: scoped storage does not guarantee shell write access to another app's
+  `Android/data` on every API level; a refused push is reported to the caller.
   iOS (simulator and dev-signed devices) uses `simctl` or `devicectl` file copy into the app's
   inbox plus the internal launch scheme `automobile-proto://open`, which the iOS app registers in
   the first release (section 4). Opening the scheme with an unknown id or an inbox name that does
-  not pass the same import checks shows an error and changes nothing.
-- `prototype save`: when ProtoViewer is installed and reachable, build a canonical bundle and route
-  it as above; otherwise the CtrlProxy or template path is unchanged. The output gains `viewer`.
-- `prototype open` (new action) launches a library id.
+  not pass the same import checks shows an error and changes nothing. The iOS route is a separate
+  slice of #13621; until it lands, iOS `save` keeps the template path and `open` is refused.
+- `prototype save`: on Android, when ProtoViewer is installed for the current user, build a
+  canonical bundle (#13616) and route it as above; otherwise the CtrlProxy or template path is
+  unchanged. `pin` and `icon` describe CtrlProxy launcher shortcuts, which ProtoViewer has not, so
+  a save with either keeps the CtrlProxy path. The output gains `viewer` `{app, libraryId, label}`
+  and a warning that the entry is imported.
+- `prototype open` (new action) launches a library id (`viewer.libraryId`) through the same
+  activity with action `….mcp.OPEN`, and returns the same warning.
 - Not in the first release: MCP `export` and `import` actions, a `listSaved` merge, live attach.
 
 ## 8. Distribution

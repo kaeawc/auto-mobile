@@ -21,7 +21,11 @@ import { SessionReleaseBroadcaster } from "../sessionReleaseBroadcast";
 
 import { ActionableError } from "../../models/ActionableError";
 
-import { isOwnedSocketFile, readSocketFileIdentity } from "../socketFileIdentity";
+import {
+  classifySocketPath,
+  readSocketFileIdentity,
+  type SocketPathState,
+} from "../socketFileIdentity";
 
 import { type PendingSocketRequest } from "../socketServer/PendingRequestTracker";
 
@@ -254,7 +258,7 @@ export class SocketLifecycle {
     // connection that has not opted in cannot receive the shutdown reason, so
     // close it now and let its proxy reconnect to the successor daemon.
     void this.callbacks.closeListeningServer(
-      isOwnedSocketFile(this.state.socketFileIdentity, this.state.socketPath),
+      classifySocketPath(this.state.socketFileIdentity, this.state.socketPath),
     );
     for (const [sessionId, socket] of this.state.clientSockets) {
       if (!this.state.notificationSubscribers.has(sessionId) && !socket.destroyed) {
@@ -301,8 +305,11 @@ export class SocketLifecycle {
     // Keep sockets and session bookkeeping alive while handlers finish and write.
     // The listener stops new connections now; existing requests get the bounded drain.
     const clientSockets = Array.from(this.state.clientSockets.values());
-    const ownsSocketPath = isOwnedSocketFile(this.state.socketFileIdentity, this.state.socketPath);
-    const serverClosed = this.callbacks.closeListeningServer(ownsSocketPath);
+    const socketPathState = classifySocketPath(
+      this.state.socketFileIdentity,
+      this.state.socketPath,
+    );
+    const serverClosed = this.callbacks.closeListeningServer(socketPathState);
     // Queued requests have not started device work and must not begin during shutdown.
     for (const pending of this.state.pendingSocketRequests) {
       if (!pending.admitted) {
@@ -343,14 +350,14 @@ export class SocketLifecycle {
       ...daemonShuttingDownFrameFields(daemonShuttingDownFailure(pending.admitted)),
     });
   }
-  closeListeningServer(ownsSocketPath: boolean): Promise<void> {
+  closeListeningServer(socketPathState: SocketPathState): Promise<void> {
     if (this.state.serverClosePromise) {
       return this.state.serverClosePromise;
     }
     if (!this.state.server) {
       return Promise.resolve();
     }
-    if (!ownsSocketPath && existsSync(this.state.socketPath)) {
+    if (socketPathState === "replaced") {
       logger.warn(
         `Unix socket path ${this.state.socketPath} no longer belongs to this server; leaving listener for process teardown`,
       );

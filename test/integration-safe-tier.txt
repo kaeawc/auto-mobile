@@ -54,7 +54,6 @@ test/daemon/integration/parallelExecution.integration.test.ts | safe | all fakes
 test/daemon/integration/startupOptionReconciliation.integration.test.ts | safe | UnixSocketServer on tmpdir socket L45, fake manager
 test/daemon/integration/versionMismatchRestart.integration.test.ts | unsafe | real DaemonManager L56 with no fake spawner, process table or signaler
 test/daemon/mcpForwardByteParity.integration.test.ts | safe | tmpdir socket L185, loopback ephemeral port L181, hermetic fixture device boundary
-test/daemon/netServerCloseDiag.integration.test.ts | safe | tmpdir socket, bare net.Server
 test/daemon/sessionBroker/brokerRestartHandoff.integration.test.ts | safe | :memory: binding registry and createTestDatabase in-memory DB, FakeNativePort and FakeTimer, no processes or host tooling
 test/daemon/sessionBroker/brokerTiming.integration.test.ts | safe | private file-backed registry temp directory, FakeNativePort and FakeTimer, no processes or host tooling
 test/daemon/sessionBroker/exports.integration.test.ts | safe | file-backed registry in tracked harness temp directory with FakeNativePort and FakeTimer

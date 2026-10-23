@@ -21,6 +21,37 @@ export function sameFileIdentity(left: SocketFileIdentity, right: SocketFileIden
   return left.dev === right.dev && left.ino === right.ino;
 }
 
+export type SocketPathState = "owned" | "gone" | "replaced" | "unverifiable";
+
+export interface SocketPathFs {
+  exists(path: string): boolean;
+  stat(path: string): SocketFileIdentity;
+}
+
+/** Distinguish a successor's path from a bound socket whose identity cannot be read. */
+export function classifySocketPath(
+  recorded: SocketFileIdentity | null,
+  socketPath: string,
+  fs: SocketPathFs = { exists: existsSync, stat: statFileIdentity },
+): SocketPathState {
+  if (!fs.exists(socketPath)) {
+    return "gone";
+  }
+  try {
+    const current = fs.stat(socketPath);
+    return recorded !== null && sameFileIdentity(current, recorded) ? "owned" : "replaced";
+  } catch (error) {
+    // An unreadable bound socket is expected on Windows; preserve uncertainty when
+    // no bind identity exists, but never assume ownership after losing a known identity.
+    logger.debug(`Socket path identity unavailable at ${socketPath}: ${error}`, error);
+    if (recorded !== null) {
+      return "replaced";
+    }
+    const code = error !== null && typeof error === "object" && "code" in error ? error.code : null;
+    return code === "ENOENT" || code === "ENOTDIR" ? "gone" : "unverifiable";
+  }
+}
+
 export function readSocketFileIdentity(socketPath: string): SocketFileIdentity | null {
   try {
     return statFileIdentity(socketPath);

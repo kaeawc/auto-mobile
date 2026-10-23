@@ -13,6 +13,7 @@ import {
 import { isEmulatorStopDispatchedError } from "../../../../src/utils/android-cmdline-tools/EmulatorProcessStop";
 import type { BackoffPolicy } from "../../../../src/utils/Backoff";
 import type { BootedDevice } from "../../../../src/models";
+import { DeviceShutdownTimeoutError } from "../../../../src/models/DeviceShutdownTimeoutError";
 import { FakeDeviceUtils } from "../../../fakes/FakeDeviceUtils";
 import { FakeEmulatorProcessStopper } from "../../../fakes/FakeEmulatorProcessStopper";
 import { FakeTimer } from "../../../fakes/FakeTimer";
@@ -205,11 +206,13 @@ describe("waitForEmulatorShutdownWithEscalation", () => {
     expect(error.reason).toBe("unidentified");
   });
 
-  test("with no process left in the table the serial must still leave discovery to count as gone", async () => {
+  test("with no emulator process left in the table the retryable shutdown timeout stands", async () => {
     stopper.outcome = { kind: "unidentified", identity: { kind: "absent" } };
-    stopper.onStop = emulatorGone;
 
-    await expect(run()).resolves.toBeUndefined();
+    const error = await run().catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(DeviceShutdownTimeoutError);
+    expect(error).not.toBeInstanceOf(EmulatorTeardownEscalationError);
   });
 
   test("without an AVD name there is no identity to signal, so it fails typed without a stop call", async () => {

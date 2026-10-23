@@ -93,6 +93,7 @@ export async function waitForEmulatorShutdownWithEscalation(
   );
 
   let softAttempts = 1;
+  let lastTimeout: unknown;
   for (;;) {
     try {
       return await waitForDeviceShutdown(
@@ -109,6 +110,7 @@ export async function waitForEmulatorShutdownWithEscalation(
       if (!isShutdownTimeoutError(error) || context.requestAbortSignal?.aborted) {
         throw error;
       }
+      lastTimeout = error;
     }
     if (softAttempts >= STUCK_EMULATOR_MAX_SOFT_ATTEMPTS || timer.now() >= softDeadlineMs) {
       break;
@@ -119,7 +121,7 @@ export async function waitForEmulatorShutdownWithEscalation(
     softAttempts++;
     await redispatch(input, softDeadlineMs);
   }
-  return await escalateToProcessStop(input, softAttempts);
+  return await escalateToProcessStop(input, softAttempts, lastTimeout);
 }
 
 async function redispatch(input: StuckEmulatorEscalationInput, softDeadlineMs: number) {
@@ -142,6 +144,7 @@ async function redispatch(input: StuckEmulatorEscalationInput, softDeadlineMs: n
 async function escalateToProcessStop(
   input: StuckEmulatorEscalationInput,
   softAttempts: number,
+  softWindowTimeout: unknown,
 ): Promise<BootedDevice | undefined> {
   const { context, stopper, avdName } = input;
   const serial = context.device.deviceId;
@@ -162,8 +165,14 @@ async function escalateToProcessStop(
     { serial, avdName },
     { deadlineMs: context.deadlineMs, signal: context.requestAbortSignal },
   );
-  if (outcome.kind === "stopped" || isProcessGone(outcome)) {
-    return await verifyGoneAfterStop(input, softAttempts, pidOf(outcome));
+  if (outcome.kind === "stopped") {
+    return await verifyGoneAfterStop(input, softAttempts, outcome.pid);
+  }
+  if (isProcessGone(outcome)) {
+    // No emulator process remains to signal, yet the last poll still listed the serial: adb's
+    // registration is stale or the exit is racing the poll. That is the plain retryable
+    // shutdown timeout, not a failed stop.
+    throw softWindowTimeout;
   }
   throw failureForOutcome(outcome, serial, avdName, softAttempts);
 }
@@ -174,10 +183,6 @@ function consoleKills(count: number): string {
 
 function isProcessGone(outcome: EmulatorProcessStopOutcome): boolean {
   return outcome.kind === "unidentified" && outcome.identity.kind === "absent";
-}
-
-function pidOf(outcome: EmulatorProcessStopOutcome): number | undefined {
-  return "pid" in outcome ? outcome.pid : undefined;
 }
 
 async function verifyGoneAfterStop(

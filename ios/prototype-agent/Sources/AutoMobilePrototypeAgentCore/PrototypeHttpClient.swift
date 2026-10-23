@@ -64,6 +64,8 @@ struct PrototypeHttpResponse: Equatable, Sendable {
 struct PrototypeHttpFailure: Error, Equatable, Sendable {
     let error: PrototypeRequestError
     let durationMs: Int
+    /// Internal classification survives public error mapping without matching user-visible text.
+    var localNetworkDenied = false
 }
 
 protocol PrototypeHttpClient: Sendable {

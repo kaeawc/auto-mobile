@@ -1,3 +1,5 @@
+import { ENV } from "../../config/env";
+import { readEnvInt } from "../../utils/envNumbers";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import type { BootedDevice } from "../../models/DeviceInfo";
 import {
@@ -214,6 +216,8 @@ export async function openSessionBrokerService(
         health: nativeIosResetHealth(options.timer),
         erase: iosReset,
         maxUses: reuse.maxUses,
+        budgetMs: readEnvInt(ENV.IOS_RESET_STEP_BUDGET_MS),
+        budgetCeilingMs: readEnvInt(ENV.IOS_RESET_STEP_BUDGET_MAX_MS),
       });
       captureIosBaseline = (context) => captureFirstDeviceBaseline(journal, mutations, context);
       resetIosBaseline = async (device, profile, assertOwned, signal, context) => {

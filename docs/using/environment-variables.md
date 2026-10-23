@@ -281,10 +281,21 @@ excluded from that allowance. Capture is still admitted if nothing fits.
 
 ## Device behavior
 
+Android rebind command and iOS keep-booted reset budgets scale by the one-minute host
+load per CPU core when it exceeds 1, up to the configured maximum. Unknown load uses
+the base budget. Setting MAX equal to the base disables scaling. A budget timeout
+allows one retry with up to twice the first budget, bounded by MAX. iOS waits for
+the abandoned step to settle before retrying; exhausted budgets are reported as
+budget-driven fallback reasons.
+
 <div class="environment-variable-table" markdown>
 
 | Variable                                                                              | Use and accepted values                                                                                                                                 | Default                                                           |
 | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `AUTOMOBILE_CTRL_PROXY_REBIND_WRITE_TIMEOUT_MS`                                       | Base timeout for each Android accessibility rebind command. Positive integer milliseconds.                                                              | `5000` ms                                                         |
+| `AUTOMOBILE_CTRL_PROXY_REBIND_WRITE_TIMEOUT_MAX_MS`                                   | Ceiling for Android accessibility rebind command timeouts. Positive integer milliseconds.                                                               | `30000` ms                                                        |
+| `AUTOMOBILE_IOS_RESET_STEP_BUDGET_MS`                                                 | Base budget for each iOS keep-booted reset step and health probe. Positive integer milliseconds.                                                        | `30000` ms                                                        |
+| `AUTOMOBILE_IOS_RESET_STEP_BUDGET_MAX_MS`                                             | Ceiling for iOS keep-booted reset step and health probe budgets. Positive integer milliseconds.                                                         | `120000` ms                                                       |
 | `AUTOMOBILE_IOS_WARMUP_DEVICES`                                                       | Comma-separated simulator UDIDs that get startup warm-up and observation streams without a session.                                                     | empty list                                                        |
 | `AUTOMOBILE_ANDROID_APPEARANCE_SYNC_DEVICES`                                          | Comma-separated Android serials that get appearance sync without a session.                                                                             | empty list                                                        |
 | `AUTOMOBILE_ANDROID_OBSERVATION_STREAM_DEVICES`                                       | Comma-separated Android serials that get observation streams without a session.                                                                         | empty list                                                        |

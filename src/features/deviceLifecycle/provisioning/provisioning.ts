@@ -45,7 +45,7 @@ export function findExactProvisionedBootedDevice(
     return booted.find((device) => device.deviceId === provisioned.deviceId);
   }
   const byDeviceId = provisioned.deviceId
-    ? booted.find((device) => device.deviceId === provisioned.deviceId)
+    ? booted.find((device) => !device.foreignOwned && device.deviceId === provisioned.deviceId)
     : undefined;
   return byDeviceId ?? findUniqueBootedAndroidDeviceByName(booted, provisioned.name);
 }

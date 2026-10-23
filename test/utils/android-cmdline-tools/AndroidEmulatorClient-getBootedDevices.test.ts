@@ -381,12 +381,8 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
     });
 
     expect((await client.getBootedDevicesChecked())[0]?.name).toBe("Pixel_9");
-    expect(adb.getExecutedCommands()).toEqual([
-      "emu avd name",
-      "shell dumpsys SurfaceFlinger --display-id",
-      "shell dumpsys display",
-      "shell cmd device_state print-states",
-    ]);
+    // Display discovery is optional metadata too: do not start it after the scan deadline.
+    expect(adb.getExecutedCommands()).toEqual(["emu avd name"]);
   });
 
   test.each(["shell getprop ro.product.model", "shell getprop ro.product.cpu.abi"])(

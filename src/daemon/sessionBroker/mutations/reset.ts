@@ -15,6 +15,7 @@ import type {
 import { DEVICE_MUTATION_KINDS } from "./types";
 
 export interface DeviceMutationResetContext {
+  deadlineMs?: number;
   scope: DeviceMutationScope;
   signal: AbortSignal;
   assertOwned(): Promise<void>;

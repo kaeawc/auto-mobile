@@ -14,19 +14,25 @@ import { orientationFromRotation, readNaturalLandscape } from "./OrientationRead
 import type { RotationContext } from "./RotationSupport";
 import type { RotationSettingsStore } from "./RotationSettingsStore";
 
-// Bounded settle-wait for the post-restore confirmation read (#6211). When
-// the device is physically held opposite the requested orientation,
-// WindowManager takes a moment to settle after `accelerometer_rotation` is
-// restored, so an immediate read can catch a transient value and report a
-// spurious "unconfirmed"/reverted result. The converse is just as real: a
-// FIRST sample that already matches the requested orientation is not proof
-// it is held — the physical sensor can swing it away moments later — so a
-// match is only accepted once it reads the same way on a second,
-// subsequent sample. Retry a few times, on the injected Timer, before
-// accepting the read as final (#6211 review).
-const SETTLE_WAIT_MAX_ATTEMPTS = 3;
 export const SETTLE_WAIT_POLL_INTERVAL_MS = 150;
+export const SETTLE_HOLD_MS = 1000;
+export const SETTLE_WINDOW_MS = 3000;
 const SETTLE_WAIT_STABLE_READS = 2;
+export interface RotationSettleProfile {
+  maxAttempts: number;
+  holdMs: number;
+  windowMs: number;
+}
+export const ERROR_RECOVERY_SETTLE_PROFILE: RotationSettleProfile = {
+  maxAttempts: 3,
+  holdMs: 0,
+  windowMs: Infinity,
+};
+export const POST_RESTORE_SETTLE_PROFILE: RotationSettleProfile = {
+  maxAttempts: Math.ceil(SETTLE_WINDOW_MS / SETTLE_WAIT_POLL_INTERVAL_MS) + 2,
+  holdMs: SETTLE_HOLD_MS,
+  windowMs: SETTLE_WINDOW_MS,
+};
 
 export class RotationOrientationReader {
   // The active display's natural orientation, read once per Android call so every
@@ -108,97 +114,62 @@ export class RotationOrientationReader {
     }
   }
 
-  /**
-   * Read the live rotation after restoring auto-rotate, with a bounded
-   * settle-wait: WindowManager can take a moment to settle after
-   * `accelerometer_rotation` is restored, particularly when the device is
-   * physically held opposite the requested orientation, so an immediate read
-   * can catch a transient value. Retry (on the injected Timer) until the
-   * live read matches the requested orientation or the attempt budget is
-   * exhausted, returning the last read either way so the caller can report
-   * it honestly (#6211).
-   */
-  /**
-   * Update an in-progress consecutive-match streak with a newly read
-   * orientation. A `null` (unreadable) sample always breaks the streak
-   * rather than extending or restarting it — it is a read failure, not a
-   * confirming or contradicting orientation sample.
-   */
-  private updateOrientationStreak(
-    achieved: "portrait" | "landscape" | null,
-    streak: { achieved: "portrait" | "landscape" | null; count: number },
-  ): void {
-    if (achieved !== null && achieved === streak.achieved) {
+  private updateSettleStreak(
+    streak: { orientation: string | null; count: number; startedAt: number },
+    achieved: string | null,
+    now: number,
+    holdMs: number,
+  ): boolean {
+    if (achieved !== null && achieved === streak.orientation) {
       streak.count++;
     } else {
-      streak.achieved = achieved;
+      streak.orientation = achieved;
       streak.count = achieved === null ? 0 : 1;
+      streak.startedAt = now;
     }
+    return streak.count >= SETTLE_WAIT_STABLE_READS && now - streak.startedAt >= holdMs;
   }
 
-  /**
-   * Decide the settle-wait's return value once the attempt budget is
-   * exhausted without the requested orientation ever reaching the stability
-   * threshold (#6211 review).
-   */
-  private resolveExhaustedSettleWait(
-    lastAchieved: "portrait" | "landscape" | null,
-    lastStreakCount: number,
-    lastConfirmed: { value: number | null; achieved: "portrait" | "landscape" | null },
-  ): number | null {
-    // A lone final sample, whether it matches the requested orientation or
-    // contradicts it, has no opportunity for a confirming later sample. Do
-    // not turn that unsettled observation into either a definitive success or
-    // a definitive reversion. A later non-null sample supersedes an earlier
-    // confirmed streak unless that later sample completes its own confirmed
-    // streak. An unreadable final sample leaves the earlier confirmed streak
-    // as the newest trustworthy evidence.
-    if (lastAchieved !== null) {
-      return lastStreakCount >= SETTLE_WAIT_STABLE_READS ? lastConfirmed.value : null;
-    }
-    return lastConfirmed.achieved !== null ? lastConfirmed.value : null;
-  }
-
+  /** Requested orientation must hold continuously; opposite evidence is retained on read failure. */
   async readLiveRotationWithSettleWait(
     requestedOrientation: "portrait" | "landscape",
     signal?: AbortSignal,
+    profile: RotationSettleProfile = ERROR_RECOVERY_SETTLE_PROFILE,
   ): Promise<number | null> {
     throwIfAborted(signal);
-    let lastValue: number | null = null;
-    let lastAchieved: "portrait" | "landscape" | null = null;
-    // Tracks consecutive matching samples for whichever orientation was last
-    // read — not only the requested one — so a confirmed opposite-orientation
-    // reversion (e.g. two consecutive landscape samples when portrait was
-    // requested) is remembered in `lastConfirmed` even though it never
-    // triggers the early-return below (#6211 review).
-    const streak: { achieved: "portrait" | "landscape" | null; count: number } = {
-      achieved: null,
-      count: 0,
-    };
-    const lastConfirmed: { value: number | null; achieved: "portrait" | "landscape" | null } = {
-      value: null,
-      achieved: null,
-    };
-    for (let attempt = 1; attempt <= SETTLE_WAIT_MAX_ATTEMPTS; attempt++) {
-      lastValue = await this.readLiveRotation(signal);
-      lastAchieved =
-        lastValue === null ? null : await this.orientationOfRotation(lastValue, signal);
-      this.updateOrientationStreak(lastAchieved, streak);
-      if (lastAchieved !== null && streak.count >= SETTLE_WAIT_STABLE_READS) {
-        lastConfirmed.value = lastValue;
-        lastConfirmed.achieved = lastAchieved;
-        // A single matching sample is not proof the orientation is held —
-        // require it to hold across a second, later sample before accepting
-        // it, rather than returning on the very first read (#6211 review).
-        if (lastAchieved === requestedOrientation) {
-          return lastValue;
-        }
+    const timer = this.ctx().timer;
+    const startedAt = timer.now();
+    const streak = { orientation: null as string | null, count: 0, startedAt };
+    let confirmedOpposite: number | null = null;
+    for (let attempt = 0; attempt < profile.maxAttempts; attempt++) {
+      if (timer.now() - startedAt >= profile.windowMs) {
+        break;
       }
-      if (attempt < SETTLE_WAIT_MAX_ATTEMPTS) {
-        await awaitWhileRequestIsLive(this.ctx().timer.sleep(SETTLE_WAIT_POLL_INTERVAL_MS), signal);
+      const value = await this.readLiveRotation(signal);
+      const achieved = value === null ? null : await this.orientationOfRotation(value, signal);
+      const now = timer.now();
+      const held = this.updateSettleStreak(streak, achieved, now, profile.holdMs);
+      // A readable newer sample supersedes prior evidence, even if it is a lone sample.
+      // An unreadable tail keeps the last confirmed opposite streak trustworthy.
+      if (achieved !== null) {
+        confirmedOpposite =
+          achieved !== requestedOrientation && streak.count >= SETTLE_WAIT_STABLE_READS
+            ? value
+            : null;
       }
+      if (achieved === requestedOrientation && held) {
+        return value;
+      }
+      const remaining = profile.windowMs - (now - startedAt);
+      if (remaining <= 0 || attempt + 1 >= profile.maxAttempts) {
+        break;
+      }
+      await awaitWhileRequestIsLive(
+        timer.sleep(Math.min(SETTLE_WAIT_POLL_INTERVAL_MS, remaining)),
+        signal,
+      );
     }
-    return this.resolveExhaustedSettleWait(lastAchieved, streak.count, lastConfirmed);
+    return confirmedOpposite;
   }
 
   async getCurrentOrientation(signal?: AbortSignal): Promise<string> {

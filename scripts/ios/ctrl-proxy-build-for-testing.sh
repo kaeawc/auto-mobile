@@ -57,7 +57,13 @@ XCODEPROJ="${CTRL_PROXY_IOS_DIR}/CtrlProxy.xcodeproj"
 # Default derived data path (matches IosCtrlProxyBuilder.ts)
 DEFAULT_DERIVED_DATA="/tmp/automobile-ctrl-proxy"
 DERIVED_DATA="${AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA:-${DEFAULT_DERIVED_DATA}}"
-mkdir_spotlight_excluded "${DERIVED_DATA}"
+if [ "${DERIVED_DATA}" = "${DEFAULT_DERIVED_DATA}" ]; then
+    # Fixed /tmp default: always marked.
+    mkdir_spotlight_excluded "${DERIVED_DATA}"
+else
+    # Caller-selected override may point outside the checkout: mark only inside it.
+    mkdir_spotlight_excluded_within "${PROJECT_ROOT}" "${DERIVED_DATA}"
+fi
 
 echo -e "${CYAN}========================================${NC}"
 echo -e "${CYAN}  CtrlProxy iOS Build for Testing${NC}"

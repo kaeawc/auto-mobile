@@ -1,3 +1,7 @@
+import type {
+  KeychainDeleteOutcome,
+  KeychainItemSelector,
+} from "../features/observe/ios/CtrlProxyStorage";
 import { errorMessage } from "../utils/describeUnknownError";
 import { toActionableError } from "../models/ActionableError";
 import { z } from "zod/v4";
@@ -13,6 +17,7 @@ import {
   clearKeyValueFileResultSchema,
   getDataStoreResultSchema,
   listDataStoresResultSchema,
+  deleteKeychainItemResultSchema,
   removeKeyValueResultSchema,
   setKeyValueResultSchema,
 } from "./storageToolOutputSchemas";
@@ -55,6 +60,11 @@ export interface AndroidKeyValueClient {
 
 /** The subset of IOSCtrlProxyClient the key-value tool handlers depend on. */
 export interface IosKeyValueClient {
+  deleteKeychainItemForIos(
+    appId: string,
+    selector: KeychainItemSelector,
+    confirm: boolean,
+  ): Promise<KeychainDeleteOutcome>;
   setPreference(
     appId: string,
     fileName: string,
@@ -110,6 +120,54 @@ const KEY_VALUE_TYPES = [
 
 const STORAGE_NAME_DESCRIPTION =
   'Storage name. iOS: empty string, "standard" (any case) or the app bundle id select the app\'s standard UserDefaults; any other value is a UserDefaults suite name (e.g. an app group) and must be a valid suite with no leading or trailing whitespace. Android: SharedPreferences file name without the .xml extension (letters, digits, underscore, dash, dot).';
+
+export const deleteKeychainItemSchema = withAppIdAliases(
+  addDeviceTargetingToSchema(
+    z
+      .object({
+        appId: z.string().min(1),
+        selector: z
+          .object({
+            itemClass: z.string().min(1),
+            service: z.string().min(1),
+            account: z.string().min(1),
+            accessGroup: z.string().min(1),
+          })
+          .strict(),
+        confirm: z
+          .literal(true)
+          .describe("Explicit confirmation to delete this exact Keychain item"),
+      })
+      .strict(),
+  ),
+);
+
+async function deleteKeychainItemHandler(
+  device: BootedDevice,
+  args: z.output<typeof deleteKeychainItemSchema>,
+  deps: StorageToolsDependencies,
+) {
+  if (device.platform !== "ios") {
+    throw new ActionableError("deleteKeychainItem requires iOS with the in-app AutoMobile SDK");
+  }
+  if (args.confirm !== true) {
+    throw new ActionableError("deleteKeychainItem requires confirm:true");
+  }
+  try {
+    const result = await deps
+      .iosClientFactory(device)
+      .deleteKeychainItemForIos(args.appId, args.selector, args.confirm);
+    if (result.outcome !== "deleted") {
+      return {
+        ...createStructuredToolResponse({ success: false, appId: args.appId, ...result }),
+        isError: true as const,
+      };
+    }
+    return createStructuredToolResponse({ appId: args.appId, ...result });
+  } catch (error) {
+    throw toActionableError(error, "Failed to delete scoped iOS Keychain item");
+  }
+}
 
 const ADAPTER_NAME_DESCRIPTION =
   "Name the host app registered its DataStore adapter under (AutoMobile SDK)";
@@ -598,6 +656,13 @@ async function getDataStoreHandler(
  */
 export function registerStorageTools(overrides: Partial<StorageToolsDependencies> = {}): void {
   const deps = { ...defaultStorageToolsDependencies, ...overrides };
+  ToolRegistry.registerDeviceAware(
+    "deleteKeychainItem",
+    "Delete one exact, host-allowlisted, app-owned iOS generic-password Keychain item. Requires SDK opt-in, mutation authorization and explicit confirmation; never exports values.",
+    deleteKeychainItemSchema,
+    (device, args) => deleteKeychainItemHandler(device, args, deps),
+    { defaultEnabled: false, outputSchema: deleteKeychainItemResultSchema, embeddedSdkOnly: true },
+  );
   ToolRegistry.registerDeviceAware(
     "setKeyValue",
     "Set app key-value storage entry.",

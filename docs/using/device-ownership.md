@@ -5,6 +5,15 @@ Acquiring a device with `getAndroid`, `getApple` or `startDevice` creates the
 session and returns its `sessionUuid`; the session holds the device until it is
 released (idle timeout, lost heartbeat, or an explicit release).
 
+`daemon/releaseSession` returns `alreadyReleased:true` and `known:true` when
+this daemon remembers an earlier release. An unrecognized session returns
+`alreadyReleased:false` and `known:false`; it still succeeds so releases remain
+idempotent after a daemon restart. Set `requireKnown:true` to refuse unrecognized
+sessions with `daemon_session_not_found`. When restoration is incomplete,
+`cleanup` is `pending` or `failed` (failure takes precedence); inspect the restore
+reports before relying on the device being fully restored. Completed restoration
+omits `cleanup`.
+
 ## Passing the session
 
 - **MCP:** a connection that acquired a device is bound to it, so its calls route

@@ -257,6 +257,28 @@ Settled mode costs roughly 170 ms per Android observation and 20-70 ms per iOS
 observation over async. When only one call needs a matching screenshot, pass
 `observe({ screenshot: "settled" })` instead of setting the variable.
 
+## Screenshot retention
+
+<div class="environment-variable-table" markdown>
+
+| Variable                                    | Use and accepted values                                                                                  | Default    |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ---------- |
+| `AUTOMOBILE_SCREENSHOT_CACHE_MB`            | Base screenshot cache capacity; positive MiB.                                                            | `128` MiB  |
+| `AUTOMOBILE_SCREENSHOT_CACHE_PER_DEVICE_MB` | Capacity per active device; positive MiB.                                                                | `64` MiB   |
+| `AUTOMOBILE_SCREENSHOT_CACHE_CEILING_MB`    | Host cache ceiling; positive MiB, never lowers the base.                                                 | `1024` MiB |
+| `AUTOMOBILE_SCREENSHOT_KEEP_PER_DEVICE`     | Newest screenshots per device evicted only as a last resort; nonnegative integer, `0` disables fairness. | `3`        |
+
+</div>
+
+Capacity is the larger of the base and active devices × per-device capacity,
+limited by the ceiling (or the base if larger). A device is active while any of
+its screenshots has an unexpired retention guarantee; an incoming capture also
+counts. Files without a device identity do not increase capacity. Under pressure,
+the byte capacity stays fixed for the eviction pass and is recalculated on the
+next admission. Each device's newest screenshots are evicted last, with the incoming
+capture counting toward its device's allowance and files already being removed
+excluded from that allowance. Capture is still admitted if nothing fits.
+
 ## Device behavior
 
 <div class="environment-variable-table" markdown>
@@ -451,6 +473,7 @@ shutdown then stops it after active device sessions are released.
 | `AUTOMOBILE_SKIP_IOS_PROTOTYPE_VIEWER_DOWNLOAD`                                              | Do not download the viewer template when no verified cache exists; `1`/`true` enables.                                                                    | off                                                       |
 | `AUTOMOBILE_CTRLPROXY_VERBOSE`                                                               | Verbose iOS CtrlProxy output; `1`/`true` enables.                                                                                                         | off                                                       |
 | `AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS`, `AUTO_MOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS`    | iOS runner health poll attempts; positive integer.                                                                                                        | `60`                                                      |
+| `AUTOMOBILE_IOS_RUNNER_LAUNCH_CONCURRENCY`                                                   | Maximum concurrent iOS runner launches per daemon; positive integer. Invalid values use the default.                                                      | `2`                                                       |
 | `AUTOMOBILE_IPROXY_START_TIMEOUT_MS`, `AUTO_MOBILE_IPROXY_START_TIMEOUT_MS`                  | iOS USB iproxy tunnel startup timeout; positive integer milliseconds.                                                                                     | `5000` ms                                                 |
 | `AUTOMOBILE_CWEBP_PATH`                                                                      | Trusted `cwebp` executable; filesystem path. An invalid executable fails.                                                                                 | PATH, bundled or downloaded libwebp                       |
 | `AUTOMOBILE_DWEBP_PATH`                                                                      | Trusted `dwebp` executable; filesystem path. An invalid executable fails.                                                                                 | PATH, bundled or downloaded libwebp                       |

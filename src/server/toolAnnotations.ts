@@ -102,6 +102,7 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotationEntry>> = {
   postNotification: entry("Post Notification", controlDevice),
   pressButton: entry("Press Button", destructiveDevice),
   recentApps: entry("Open Recent Apps", controlDevice),
+  rotaryScroll: entry("Scroll Rotary Input", destructiveDevice),
   recordDeviceGestures: entry("Record Gestures", controlDevice),
   selectAllText: entry("Select All Text", controlDevice),
   sendSms: entry("Simulate SMS", controlDevice),
@@ -127,7 +128,11 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotationEntry>> = {
   // Recording an audit baseline can replace an existing host-side baseline.
   audit: entry("Audit Current Screen", destructiveDevice),
   backgroundWork: entry("Control Background Jobs", destructiveDevice),
+  // start/stop is a mixed-action tool: stop pulls the trace and deletes the device copy.
+  captureTrace: entry("Capture Trace", destructiveDevice),
   displayProfile: entry("Set Display Profile", destructiveDevice),
+  // Pauses the app while dumping; leaves only a host file, no app or device state is lost.
+  heapDump: entry("Dump Heap", controlDevice),
   killProfile: entry("Set Kill Policy", destructiveDevice),
   manufacturerProfile: entry("Set OEM Profile", destructiveDevice),
   measureStartup: entry("Measure Startup", destructiveDevice),
@@ -171,6 +176,7 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotationEntry>> = {
   clearKeyValueFile: entry("Clear Key Value File", clearDevice),
   clearMockNetwork: entry("Clear Mock Network Rules", clearDevice),
   deleteDevice: entry("Delete Device", clearDevice),
+  deleteKeychainItem: entry("Delete Keychain Item", clearDevice),
   killDevice: entry("Kill Device", clearDevice),
   removeKeyValue: entry("Remove Key Value", clearDevice),
   resetAppLogs: entry("Reset Logs", clearDevice),

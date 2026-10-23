@@ -312,7 +312,10 @@ test("token-bearing unknown and already released sessions remain idempotent", as
       },
       rig.state,
     );
-    expect(response).toMatchObject({ success: true, result: { alreadyReleased: true } });
+    expect(response).toMatchObject({
+      success: true,
+      result: { alreadyReleased: sessionId === "gone", known: sessionId === "gone" },
+    });
   }
 });
 

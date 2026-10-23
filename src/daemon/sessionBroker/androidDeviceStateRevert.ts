@@ -1,3 +1,8 @@
+import type { PowerDeviceClient } from "../../features/utility/power/AndroidPowerClient";
+import { settleDoze } from "../../features/utility/power/PowerSettle";
+import { toActionableError } from "../../models/ActionableError";
+import type { BackoffPolicy } from "../../utils/Backoff";
+import type { Timer } from "../../utils/SystemTimer";
 import { z } from "zod/v4";
 import { DEVICE_CLOCK_TOLERANCE_MS } from "../../features/utility/DeviceClock";
 import {
@@ -137,6 +142,100 @@ function powerCommands(intent: PowerIntent, mutation: DeviceMutationInput): Comm
     case "inactive":
       return appBucketCommands(intent, prior);
   }
+}
+
+type PowerVerification = (
+  client: PowerDeviceClient,
+  ctx: { timer: Pick<Timer, "sleep" | "now">; backoff: BackoffPolicy; budgetMs: number },
+) => Promise<string | null>;
+
+function batteryVerification(prior: unknown): PowerVerification {
+  const before = batterySchema.parse(prior);
+  return async (client) => {
+    const now = await client.readBattery();
+    const matches = before.faked
+      ? now.level === before.level && now.charging === before.charging
+      : !now.faked;
+    return matches ? null : "battery differs from its prior state";
+  };
+}
+
+function thermalVerification(prior: unknown): PowerVerification {
+  const before = thermalSchema.parse(prior);
+  return async (client) => {
+    const now = await client.readThermal();
+    const matches = before.override ? now.override && now.status === before.status : !now.override;
+    return matches ? null : "thermal override differs from its prior state";
+  };
+}
+
+function dozeVerification(prior: unknown): PowerVerification {
+  const mode = z.enum(DOZE_MODES).parse(prior);
+  return async (client, ctx) => {
+    // settleDoze retains the last reading on read failure; reset must also propagate that failure.
+    let readError: Error | undefined;
+    const settlement = await settleDoze(
+      {
+        readDoze: async () => {
+          try {
+            return await client.readDoze();
+          } catch (error) {
+            readError = toActionableError(error, "Android reset could not read back device state");
+            throw readError;
+          }
+        },
+      },
+      mode,
+      { ...ctx, reading: await client.readDoze() },
+    );
+    if (readError) {
+      throw readError;
+    }
+    return settlement.settled ? null : `Doze is ${settlement.reading.mode}, expected ${mode}`;
+  };
+}
+
+function powerVerification(intent: PowerIntent, prior: unknown): PowerVerification {
+  switch (intent.field) {
+    case "battery":
+      return batteryVerification(prior);
+    case "thermal":
+      return thermalVerification(prior);
+    case "doze":
+      return dozeVerification(prior);
+    case "dataSaver":
+      return async (client) =>
+        (await client.readDataSaver()) === prior ? null : "Data Saver differs from its prior state";
+    case "batterySaver":
+      return async (client) => {
+        const now = await client.readBatterySaver();
+        const matches = prior === undefined ? (now ?? false) === false : now === prior;
+        return matches ? null : "battery saver differs from its prior state";
+      };
+    case "standby":
+      return async (client) =>
+        (await client.readStandbyBucket(intent.appId)) === prior
+          ? null
+          : "standby bucket differs from its prior state";
+    case "inactive":
+      return async (client) =>
+        (await client.readInactive(intent.appId)) === prior
+          ? null
+          : "inactive state differs from its prior state";
+  }
+}
+
+/** Verify only power priors the command builders can restore. */
+export function deviceStatePowerVerification(
+  mutation: DeviceMutationInput,
+): PowerVerification | null {
+  if (mutation.kind !== "device-setting") {
+    return null;
+  }
+  const intent = parsePowerIntentKey(mutation.key);
+  return intent && powerCommands(intent, mutation) !== null
+    ? powerVerification(intent, priorOf(mutation))
+    : null;
 }
 
 /**

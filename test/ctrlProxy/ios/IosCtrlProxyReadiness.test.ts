@@ -1,7 +1,10 @@
-import { describe, expect, mock, test } from "bun:test";
+import { FakeRunnerLaunchProgressProbe } from "../../fakes/FakeRunnerLaunchProgressProbe";
+import { describe, expect, mock, test, spyOn } from "bun:test";
 import { IosCtrlProxyReadiness } from "../../../src/ctrlProxy/ios/IosCtrlProxyReadiness";
 import type { SharedCtrlProxyStart } from "../../../src/ctrlProxy/ios/IosCtrlProxyLifecycleSteps";
 import { NoOpPerformanceTracker } from "../../../src/utils/PerformanceTracker";
+import { sequenceBackoff } from "../../../src/utils/Backoff";
+import { logger } from "../../../src/utils/logger";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeIosTunnelClient } from "../../fakes/FakeIosTunnelClient";
 import { settleByFakeEvents } from "../../helpers/fakeTimerStepping";
@@ -14,6 +17,7 @@ function createHarness(isSimulator = true) {
   };
   const state: ConstructorParameters<typeof IosCtrlProxyReadiness>[0] = {
     timer,
+    runnerLaunchProgressProbe: new FakeRunnerLaunchProgressProbe(),
     tunnelClient,
     device: { deviceId: "test-ios-device", platform: "ios", name: "Test iPhone" },
     xcTestProcessId: null,
@@ -134,5 +138,108 @@ describe("IosCtrlProxyReadiness health startup", () => {
     expect(timer.getSleepHistory()).toEqual([100, 100]);
     expect(state.servicePort).toBe(8765);
     expect(host.startProcessSupervision).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("progress-aware runner windows", () => {
+  function progressHarness(samples: Array<number | null | Error>, callerDeadline?: number) {
+    const h = createHarness();
+    const sample = mock(async () => {
+      const value = samples.length > 1 ? samples.shift()! : samples[0]!;
+      if (value instanceof Error) {
+        throw value;
+      }
+      return value;
+    });
+    const readiness = new IosCtrlProxyReadiness(h.state, h.host, {
+      progressProbe: { sample },
+      extensionBackoff: sequenceBackoff([300, 60000]),
+      relaunchBackoff: sequenceBackoff([10]),
+    });
+    h.state.steps.waitForHealthEndpoint = (...args) => readiness.waitForHealthEndpoint(...args);
+    h.state.xcTestProcessId = 123;
+    h.start.defaultHealthPollDeadlineMs = 100;
+    h.start.healthPollDeadlineMs = callerDeadline ?? 100;
+    if (callerDeadline) {
+      h.start.callerHealthPollDeadlinesMs.set(Symbol(), callerDeadline);
+    }
+    const terminated = mock(async () => {});
+    h.state.steps.isOwnRunnerProcessAlive = async () => true;
+    h.state.steps.terminateHungRunnerProcess = terminated;
+    h.host.prepareSimulatorRunner = mock(async () => {
+      h.state.xcTestProcessId = 124;
+      return "spawned" as const;
+    });
+    return { ...h, readiness, sample, terminated };
+  }
+
+  test("growing CPU extends by injected Backoff and succeeds without retiring the launch", async () => {
+    const h = progressHarness([0, 200, 400]);
+    h.host.checkHealthEndpoint = mock(async () => h.timer.now() >= 450);
+    expect(
+      await settleByFakeEvents(
+        h.timer,
+        h.readiness.waitForHealthRestartingUnresponsiveRunner(h.start, h.perf, 100, 100, true),
+        { description: "progress extension" },
+      ),
+    ).toBe(true);
+    expect(h.terminated).not.toHaveBeenCalled();
+    expect(h.start.defaultHealthPollDeadlineMs).toBe(500);
+    expect(h.timer.now()).toBe(500);
+  });
+
+  test.each([0, null, new Error("probe failed")])(
+    "flat or unavailable CPU %s retires and relaunches",
+    async (value) => {
+      const h = progressHarness([0, value], 10000);
+      h.host.checkHealthEndpoint = mock(async () => h.state.xcTestProcessId === 124);
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        expect(
+          await settleByFakeEvents(
+            h.timer,
+            h.readiness.waitForHealthRestartingUnresponsiveRunner(h.start, h.perf, 100, 100, true),
+            { description: "no progress relaunch" },
+          ),
+        ).toBe(true);
+        expect(h.terminated).toHaveBeenCalledTimes(1);
+        if (value !== 0) {
+          expect(warn.mock.calls.some(([message]) => String(message).includes("progress"))).toBe(
+            true,
+          );
+        }
+        expect(h.timer.getSleepHistory()).toContain(10);
+      } finally {
+        warn.mockRestore();
+      }
+    },
+  );
+
+  test("continuing progress retires at the hard launch ceiling", async () => {
+    const h = progressHarness([0], 400000);
+    h.sample.mockImplementation(async () => h.timer.now());
+    h.host.checkHealthEndpoint = mock(async () => h.state.xcTestProcessId === 124);
+    expect(
+      await settleByFakeEvents(
+        h.timer,
+        h.readiness.waitForHealthRestartingUnresponsiveRunner(h.start, h.perf, 10000, 30000, true),
+        { description: "progress ceiling", maxEvents: 2000 },
+      ),
+    ).toBe(true);
+    expect(h.terminated).toHaveBeenCalledTimes(1);
+    expect(h.timer.now()).toBe(300010);
+  });
+
+  test("caller budget bounds progress extensions", async () => {
+    const h = progressHarness([0, 200, 400], 350);
+    expect(
+      await settleByFakeEvents(
+        h.timer,
+        h.readiness.waitForHealthRestartingUnresponsiveRunner(h.start, h.perf, 100, 100, true),
+        { description: "caller budget" },
+      ),
+    ).toBe(false);
+    expect(h.timer.now()).toBe(350);
+    expect(h.terminated).not.toHaveBeenCalled();
   });
 });

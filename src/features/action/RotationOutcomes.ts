@@ -9,7 +9,10 @@ import { throwIfAborted } from "../../utils/toolUtils";
 import { ActionableError } from "../../models/ActionableError";
 import { OrientationLockState, RotateResult } from "../../models";
 import { logger } from "../../utils/logger";
-import type { RotationOrientationReader } from "./RotationOrientationReader";
+import {
+  POST_RESTORE_SETTLE_PROFILE,
+  type RotationOrientationReader,
+} from "./RotationOrientationReader";
 import type { RotationSettingsStore } from "./RotationSettingsStore";
 import type {
   RotationCallSettings,
@@ -229,7 +232,7 @@ export class RotationOutcomes {
       cleanup,
     );
     const orientationLockState = await this.reader.getOrientationLockState(signal);
-    if (orientationLockState !== "unlocked") {
+    if (orientationLockState !== "unlocked" && achievedOrientation !== "unknown") {
       return {
         kind: "handled",
         result: {
@@ -245,10 +248,15 @@ export class RotationOutcomes {
         },
       };
     }
+    const error =
+      achievedOrientation === "unknown"
+        ? "The end orientation could not be confirmed after restoring automatic rotation."
+        : undefined;
     return {
       kind: "handled",
       result: {
-        success: true,
+        success: error === undefined,
+        error,
         orientation,
         value,
         currentOrientation: achievedOrientation,
@@ -257,7 +265,8 @@ export class RotationOutcomes {
         orientationLockHandled: true,
         orientationLockState,
         warning,
-        message: `Restored automatic rotation; device is currently ${achievedOrientation}.`,
+        message:
+          error ?? `Restored automatic rotation; device is currently ${achievedOrientation}.`,
       },
     };
   }
@@ -310,6 +319,34 @@ export class RotationOutcomes {
     }
   }
 
+  /** Direct failed locks restore prior automatic rotation; sessions own restoration on release. */
+  async restoreAutoRotateAfterFailedLock(
+    result: RotateResult,
+    plan: AutoRotatePlan,
+    settings: RotationCallSettings,
+    cleanup: RotationSettingCleanup,
+    sessionMode: boolean,
+  ): Promise<RotateResult> {
+    if (
+      result.success ||
+      sessionMode ||
+      !settings.started ||
+      !plan.preserveLock ||
+      !plan.wasAutoRotateEnabled
+    ) {
+      return result;
+    }
+    try {
+      await this.store.restoreAutoRotateSetting(cleanup);
+    } catch (error) {
+      logger.warn("Failed to restore auto-rotate after failed lock", error);
+      result.warning = [result.warning, `Failed to restore auto-rotate: ${error}`]
+        .filter(Boolean)
+        .join(" ");
+    }
+    return result;
+  }
+
   async finalizeAndroidRotation(options: AndroidRotationResultOptions): Promise<RotateResult> {
     const {
       orientation,
@@ -326,6 +363,22 @@ export class RotationOutcomes {
     throwIfAborted(signal);
     const orientationLockState = await this.reader.getOrientationLockState(signal);
     const rotationPerformed = currentOrientation !== orientation;
+    if (achievedOrientation === "unknown") {
+      const error = "The end orientation could not be confirmed after restoring auto-rotate.";
+      return {
+        success: false,
+        orientation,
+        value,
+        currentOrientation: "unknown",
+        previousOrientation: currentOrientation,
+        rotationPerformed,
+        orientationLockHandled: wasAutoRotateEnabled,
+        orientationLockState,
+        warning: warning ?? error,
+        error,
+        message: error,
+      };
+    }
     if (preserveLock && orientationLockState !== "locked") {
       // Auto-rotate may already have restored the sensor-held orientation.
       // Reuse the bounded live read; stale user_rotation cannot confirm it.
@@ -359,7 +412,7 @@ export class RotationOutcomes {
         error: `Rotated to ${orientation}, but automatic rotation could not be confirmed as restored (orientation lock is ${orientationLockState}).`,
       };
     }
-    if (achievedOrientation !== "unknown" && achievedOrientation !== orientation) {
+    if (achievedOrientation !== orientation) {
       const cause = restoreConfirmed
         ? "auto-rotate reverted it"
         : `after attempting to restore auto-rotate, it was confirmed ${achievedOrientation}; auto-rotate may have reverted it`;
@@ -449,6 +502,7 @@ export class RotationOutcomes {
     const liveRotationValue = await this.reader.readLiveRotationWithSettleWait(
       requestedOrientation,
       signal,
+      POST_RESTORE_SETTLE_PROFILE,
     );
     if (liveRotationValue === null) {
       return {

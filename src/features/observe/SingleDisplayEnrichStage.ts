@@ -17,6 +17,7 @@ import type { AccessibilityAuditor } from "./audits/AccessibilityAuditor";
 import type { AccessibilityStateDetector } from "./audits/AccessibilityStateDetector";
 import { ObserveElementsBuilder } from "./ObserveElementsBuilder";
 import { SafeAreaAuditor } from "./audits/SafeAreaAuditor";
+import type { ScreenRoundReader } from "../wear/screenRound";
 
 /** Stages 3 and 5 of one single-display observation: derive elements, start screenshots, run audits and predictions, then attach timings and protect the screenshot. */
 export interface SingleDisplayEnrichStageDependencies {
@@ -31,6 +32,7 @@ export interface SingleDisplayEnrichStageDependencies {
   predictiveUIState: () => PredictiveUIStateInterface;
   safeAreaAuditor: () => SafeAreaAuditor;
   elementsBuilder: () => ObserveElementsBuilder;
+  screenRound: () => ScreenRoundReader;
   deferredBackStackDisplays: () => WeakMap<ObserveResult, number>;
   stampScreenSizeUnits: (result: ObserveResult) => void;
   processRecomposition: (result: ObserveResult, perf?: PerformanceTracker) => Promise<void>;
@@ -65,8 +67,20 @@ export class SingleDisplayEnrichStage {
   /** Stage 3: derive elements, start screenshots, and run audits and predictions. */
   async enrichSingleDisplay(run: SingleDisplayRun): Promise<void> {
     this.enrichSingleDisplayElements({ result: run.result });
+    await this.attachScreenRound(run);
     await this.startSingleDisplayScreenshot(run);
     await this.runSingleDisplayAudits(run);
+  }
+
+  /** Wear OS only (#14948): a phone pays no extra read and reports no field. */
+  private async attachScreenRound(run: SingleDisplayRun): Promise<void> {
+    if (this.d.device().formFactor !== "watch") {
+      return;
+    }
+    const round = await this.d.screenRound().isScreenRound(run.signal);
+    if (round !== undefined) {
+      run.result.isScreenRound = round;
+    }
   }
 
   private async startSingleDisplayScreenshot(run: SingleDisplayRun): Promise<void> {

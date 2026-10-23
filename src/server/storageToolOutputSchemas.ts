@@ -25,6 +25,23 @@ export const removeKeyValueResultSchema = z
   })
   .passthrough();
 
+/** Non-`deleted` outcomes return `success: false` with isError; `deletedScope` is null then. */
+export const deleteKeychainItemResultSchema = z
+  .object({
+    success: z.boolean().optional(),
+    appId: z.string(),
+    outcome: z.string(),
+    deletedScope: z
+      .object({
+        itemClass: z.string(),
+        service: z.string(),
+        account: z.string(),
+        accessGroup: z.string(),
+      })
+      .nullable(),
+  })
+  .passthrough();
+
 export const clearKeyValueFileResultSchema = z.object(storageWriteResultBase).passthrough();
 
 /** `stores` is the SDK adapter's own listing; its shape is owned by the adapter. */

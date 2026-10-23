@@ -228,4 +228,51 @@ describe("AndroidHeapDump (#14113)", () => {
       REMOTE,
     ]);
   });
+
+  describe("when adb rejects the dump call (nonzero remote exit, #14113 review)", () => {
+    test("a rejected SecurityException is the typed refusal, and the device copy is removed", async () => {
+      const { device, store, registry, dump } = setup();
+      device.dumpheapOutput["am dumpheap"] = profiling("am-dumpheap-not-debuggable.txt");
+      device.rejectingDumpheap.add("am dumpheap");
+
+      const refusal = await dump.dump({ appId: APP, deviceId: DEVICE, sessionId: "s-1" }).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+
+      expect(refusal).toBeInstanceOf(HeapDumpRefusedError);
+      expect((refusal as HeapDumpRefusedError).code).toBe("heap_dump_not_debuggable");
+      expect(device.commands).toContain(`shell rm -f ${REMOTE}`);
+      expect(store.removed).toHaveLength(1);
+      expect(registry.takeOwnedBy(DEVICE, "s-1").deviceFiles).toEqual([]);
+    });
+
+    test("a rejected unknown-process output asks for a launch", async () => {
+      const { device, dump } = setup();
+      device.dumpheapOutput["am dumpheap"] = profiling("am-dumpheap-unknown-process.txt");
+      device.rejectingDumpheap.add("am dumpheap");
+      await expect(dump.dump({ appId: APP, deviceId: DEVICE })).rejects.toThrow(
+        "is not running on emulator-5554",
+      );
+    });
+
+    test("an unrelated rejection is rethrown unchanged and still cleans up", async () => {
+      const { device, registry, dump } = setup();
+      const failure = new Error("adb: device offline");
+      const original = device.execute.bind(device);
+      device.execute = async (args, options) => {
+        if (args.join(" ").includes("dumpheap")) {
+          throw failure;
+        }
+        return original(args, options);
+      };
+
+      await expect(dump.dump({ appId: APP, deviceId: DEVICE, sessionId: "s-1" })).rejects.toBe(
+        failure,
+      );
+
+      expect(device.commands).toContain(`shell rm -f ${REMOTE}`);
+      expect(registry.takeOwnedBy(DEVICE, "s-1").deviceFiles).toEqual([]);
+    });
+  });
 });

@@ -180,6 +180,9 @@ describe("Storage Tools Registration", () => {
       }> = [];
       useStorageToolsDependenciesForTesting({
         iosClientFactory: () => ({
+          deleteKeychainItemForIos: async () => {
+            throw new Error("unexpected keychain call");
+          },
           setPreference: async (appId, suite, key, value, type) => {
             calls.push({ appId, suite, key, value, type });
           },
@@ -209,6 +212,9 @@ describe("Storage Tools Registration", () => {
       let sdkCalls = 0;
       useStorageToolsDependenciesForTesting({
         iosClientFactory: () => ({
+          deleteKeychainItemForIos: async () => {
+            throw new Error("unexpected keychain call");
+          },
           setPreference: async () => {
             sdkCalls += 1;
             throw new Error(
@@ -239,6 +245,9 @@ describe("Storage Tools Registration", () => {
       registerStorageTools(deps);
       useStorageToolsDependenciesForTesting({
         iosClientFactory: () => ({
+          deleteKeychainItemForIos: async () => {
+            throw new Error("unexpected keychain call");
+          },
           setPreference: async () => {
             throw new Error("mutation_not_authorized");
           },
@@ -520,6 +529,9 @@ describe("Storage Tools Registration", () => {
       const result = resolvedStore ? { resolvedStore } : undefined;
       useStorageToolsDependenciesForTesting({
         iosClientFactory: () => ({
+          deleteKeychainItemForIos: async () => {
+            throw new Error("unexpected keychain call");
+          },
           setPreference: async () => result,
           removePreference: async () => result,
           clearPreferenceStore: async () => result,
@@ -566,6 +578,9 @@ describe("Storage Tools Registration", () => {
       const device: BootedDevice = { deviceId: "ios-test", name: "iPhone", platform: "ios" };
       useStorageToolsDependenciesForTesting({
         iosClientFactory: () => ({
+          deleteKeychainItemForIos: async () => {
+            throw new Error("unexpected keychain call");
+          },
           setPreference: async () => ({ resolvedStore: "standard", effectiveValueDiffers }),
           removePreference: async () => ({
             resolvedStore: "standard",

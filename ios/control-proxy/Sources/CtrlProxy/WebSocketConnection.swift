@@ -192,7 +192,7 @@ final class WebSocketConnection: WebSocketResponding, @unchecked Sendable {
         } else if request.contains("POST /sdk-events") {
             handleSdkEventsPost(request)
         } else if request.contains("GET /sdk-events") {
-            handleSdkEventsGet()
+            handleSdkEventsGet(request)
         } else {
             let response = Data("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".utf8)
             channel.send(response) { [weak self] _ in
@@ -250,10 +250,21 @@ final class WebSocketConnection: WebSocketResponding, @unchecked Sendable {
         }
     }
 
-    private func handleSdkEventsGet() {
+    /// Log collection is opt-in; headers and body cannot arm the OSLog reader.
+    static func requestsLogEvents(_ request: String) -> Bool {
+        guard let requestLine = request.components(separatedBy: "\r\n").first else { return false }
+        let parts = requestLine.split(separator: " ")
+        guard parts.count == 3, parts[0] == "GET",
+              let components = URLComponents(string: String(parts[1])),
+              components.path == "/sdk-events"
+        else { return false }
+        return components.queryItems?.contains { $0.name == "logs" && $0.value == "1" } ?? false
+    }
+
+    private func handleSdkEventsGet(_ request: String) {
         dispatchPrecondition(condition: .onQueue(queue))
         var allEvents = SdkEventBuffer.shared.drain()
-        if let logEvents = drainLogEvents?() {
+        if Self.requestsLogEvents(request), let logEvents = drainLogEvents?() {
             allEvents.append(contentsOf: logEvents)
         }
         let combined = "[" + allEvents.compactMap { String(data: $0, encoding: .utf8) }.joined(separator: ",") + "]"

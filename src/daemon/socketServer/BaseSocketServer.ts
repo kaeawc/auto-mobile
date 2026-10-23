@@ -10,10 +10,12 @@ import { AuxiliarySocketBindConflict } from "../auxiliarySocketAvailability";
 import { AuxiliarySocketOwner } from "../auxiliarySocketOwner";
 import {
   classifySocketPath,
-  isOwnedSocketFile,
   readSocketFileIdentity,
+  statFileIdentity,
   type SocketFileIdentity,
+  type SocketPathFs,
 } from "../socketFileIdentity";
+import { decideStaleAuxSocketReclaim } from "../staleAuxSocketReclaim";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { ActionableError } from "../../models/ActionableError";
 import { logger } from "../../utils/logger";
@@ -48,6 +50,8 @@ export const AUX_SOCKET_BIND_LIVENESS_PROBE_TIMEOUT_MS = 1_000;
  */
 export abstract class BaseSocketServer {
   protected server: NetServer | null = null;
+  protected readonly platform: NodeJS.Platform = process.platform;
+  protected readonly socketPathFs: SocketPathFs = { exists: existsSync, stat: statFileIdentity };
   // Identity of the socket inode this server created, so close() never unlinks a
   // socket a successor process has already rebound at the same path.
   private socketFileIdentity: SocketFileIdentity | null = null;
@@ -129,27 +133,24 @@ export abstract class BaseSocketServer {
    * the shared PID record or create a bind lock for every stream socket.
    */
   private async reclaimExistingSocketBeforeBind(): Promise<void> {
-    if (!existsSync(this.socketPath)) {
+    const decision = await decideStaleAuxSocketReclaim({
+      socketPath: this.socketPath,
+      platform: this.platform,
+      reachability: this.socketReachability,
+      probeTimeoutMs: AUX_SOCKET_BIND_LIVENESS_PROBE_TIMEOUT_MS,
+      fs: this.socketPathFs,
+    });
+    if (decision === "absent") {
       return;
     }
-
-    const originalIdentity = this.readSocketFileIdentity();
-    const reachable = await this.socketReachability.isReachable(
-      this.socketPath,
-      AUX_SOCKET_BIND_LIVENESS_PROBE_TIMEOUT_MS,
-    );
-    if (!reachable && !existsSync(this.socketPath)) {
-      return;
-    }
-    // Option 1: compare dev+ino across the async probe, then unlink synchronously
-    // without another event-loop yield. A successor's rebound path must survive;
-    // reuse the close-time identity check instead of adding a per-stream lock.
-    if (reachable) {
+    if (decision === "held") {
       throw this.socketOwner.conflict(this.socketPath, this.serverName);
     }
-    if (!this.isOwnedSocketFile(originalIdentity)) {
+    if (decision === "conflict") {
       throw new AuxiliarySocketBindConflict(this.socketPath, this.serverName);
     }
+    // Unlink synchronously without another event-loop yield after the decision, so the
+    // identity check (POSIX) or the second probe (Windows) is as fresh as possible.
 
     try {
       unlinkSync(this.socketPath);
@@ -210,10 +211,6 @@ export abstract class BaseSocketServer {
 
   private readSocketFileIdentity(): SocketFileIdentity | null {
     return readSocketFileIdentity(this.socketPath);
-  }
-
-  private isOwnedSocketFile(identity = this.socketFileIdentity): boolean {
-    return isOwnedSocketFile(identity, this.socketPath);
   }
 
   /**

@@ -206,7 +206,7 @@ export const appLifecycleResultSchema = z.object({
   action: z.enum(["background", "killBackgrounded", "trimMemory"]),
   platform: z.enum(["android", "ios"]),
   appId: z.string(),
-  mechanism: z.enum(["home", "am-kill", "am-send-trim-memory", "unsupported"]),
+  mechanism: z.enum(["home", "am-kill", "am-send-trim-memory", "ios-sigkill", "unsupported"]),
   trimLevel: z.enum(APP_TRIM_MEMORY_LEVELS).optional(),
   userId: z.number().int().nonnegative().optional(),
   pid: z.number().int().positive().optional(),

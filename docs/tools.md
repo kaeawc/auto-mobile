@@ -58,7 +58,7 @@ A read never writes settings on a device another session holds. A sessionless re
 | 🚀 <code>launchApp</code>             | Launch app by package name                                                                     |
 | 🛑 <code>terminateApp</code>          | Terminate app by package name                                                                  |
 | 💥 <code>crashApp</code>              | Intentionally crash a running app through the platform crash path                              |
-| 🔄 <code>appLifecycle</code>          | Background-kill an app to test state restoration                                               |
+| 🔄 <code>appLifecycle</code>          | Background-kill an app to test state restoration (Android; iOS background and SIGKILL)         |
 | ⬇️ <code>installApp</code>            | Install app on device (.apk, split APKs, .apks, .aab, .app, or .ipa)                           |
 | 🗑️ <code>uninstallApp</code>          | Uninstall app by package name or bundle identifier                                             |
 | 🔏 <code>inspectPackageSigning</code> | Fresh read of one app's presence (installed/absent/unknown) and signing                        |

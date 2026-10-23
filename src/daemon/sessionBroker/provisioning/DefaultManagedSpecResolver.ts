@@ -78,6 +78,10 @@ export const BINDING_DEFAULT_ANDROID_DEVICE_TYPES_BY_FAMILY = {
   phone: BINDING_DEFAULT_ANDROID_DEVICE_TYPE,
   tablet: "pixel_tablet",
   foldable: "pixel_fold",
+  // Names from avdmanager listings; confirm with `avdmanager list device` (form-factors.md row 10).
+  tv: "tv_1080p",
+  watch: "wearos_small_round",
+  automotive: "automotive_1024p_landscape",
 } as const satisfies Record<BindingDeviceFamily, string>;
 
 export type ManagedSpecResolution =
@@ -137,7 +141,10 @@ function unsupportedModelFamily(
   const actual =
     platform === "ios"
       ? inferIosFormFactor(spec.deviceType)
-      : androidProfileFormFactor({ profileId: spec.deviceType });
+      : androidProfileFormFactor({
+          profileId: spec.deviceType,
+          systemImageTag: parseAndroidSystemImageRuntime(spec.runtime)?.tag,
+        });
   if (actual === undefined || actual === "unknown") {
     return `The family of deviceType '${spec.deviceType}' cannot be verified before creation for deviceFamily '${spec.deviceFamily}'. Request either deviceType or deviceFamily, not both.`;
   }

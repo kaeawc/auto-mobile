@@ -91,7 +91,8 @@ interface Failure {
 const SESSIONLESS_WARNING =
   "No session owns this change, so nothing restores it automatically: undo it with " +
   "battery.reset, doze off, batterySaver/dataSaver false, thermalStatus reset and the " +
-  "restoreReceipt values when done.";
+  "restoreReceipt values when done. doze off does not replug a charger an earlier doze call " +
+  "unplugged: follow it with battery.reset or the receipt's battery.charging.";
 
 function refused(code: PowerErrorCode, message: string): PowerState {
   return { supported: true, verified: false, errorCode: code, error: message };

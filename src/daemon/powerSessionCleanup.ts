@@ -21,7 +21,7 @@ import { SESSION_RELEASE_TEARDOWN_CAP_MS } from "./sessionManager/sessionConstan
 export interface PowerSessionCleanupOptions {
   registry?: PowerRegistry;
   clientFactory?: PowerClientFactory;
-  timer?: Pick<Timer, "sleep" | "setTimeout" | "clearTimeout">;
+  timer?: Pick<Timer, "sleep" | "now" | "setTimeout" | "clearTimeout">;
 }
 
 type PendingCleanupHost = Pick<SessionManager, "registerPendingDeviceCleanup">;

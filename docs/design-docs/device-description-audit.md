@@ -105,7 +105,7 @@ rationale for the current shape.
   `OrientationReader` in the same bounded parallel probe fan-out as service and lock
   state (Android portrait/landscape, iOS `null`: no safe read-only signal).
 - `listDevices.formFactor` could be `null` while its output schema rejected null; the
-  alias is now nullable, and canonical `formFactor` stays the strict four-value enum.
+  alias is now nullable, and canonical `formFactor` stays the strict enum (`phone`, `tablet`, `foldable`, `tv`, `watch`, `automotive`, `unknown`).
 - Canonical `runtime.serviceStatus` lost diagnostics held by its deprecated sibling; it
   now keeps the nullable installed checksum, structured version, and the iOS
   supported-command/feature completeness flags.

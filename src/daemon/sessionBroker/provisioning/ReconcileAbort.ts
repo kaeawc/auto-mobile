@@ -10,6 +10,7 @@ export type BindingReconcileFailureCode =
   | "device_busy"
   | "reconcile_in_progress"
   | "cleanup_pending"
+  | "cleanup_quarantined"
   | "capacity_exhausted"
   | "binding_budget_exhausted"
   | "concurrent_modification"

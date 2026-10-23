@@ -28,6 +28,7 @@ const FAILURE_RETRYABILITY: Readonly<Record<BindingReconcileFailureCode, boolean
   device_busy: true,
   reconcile_in_progress: true,
   cleanup_pending: true,
+  cleanup_quarantined: false,
   capacity_exhausted: true,
   binding_budget_exhausted: true,
   concurrent_modification: true,
@@ -48,6 +49,8 @@ const FAILURE_NEXT_ACTION: Readonly<Record<BindingReconcileFailureCode, string>>
   device_busy: "Wait for the device's live session or foreign claim to end, then retry.",
   reconcile_in_progress: "Another reconciliation of this binding is in progress; retry later.",
   cleanup_pending: "The previous device could not be removed; retry after cleanup succeeds.",
+  cleanup_quarantined:
+    "The previous device would not stop even after the process-level kill; stop its emulator process by hand, then retry.",
   binding_budget_exhausted:
     "Free unused broker resources or raise limits.totalDeviceCap in the broker host configuration, then retry.",
   capacity_exhausted: "Shut down a device or raise the boot limit, then retry.",

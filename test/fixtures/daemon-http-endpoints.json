@@ -1,98 +1,217 @@
 [
   {
+    "url": "http://localhost:3161/auto-mobile/streamable",
+    "daemon": true,
+    "discoveredPort": 3161
+  },
+  {
+    "url": "http://LOCALHOST:3161/auto-mobile/streamable",
+    "daemon": true,
+    "discoveredPort": 3161
+  },
+  {
+    "url": "http://127.0.0.1:3161/auto-mobile/streamable",
+    "daemon": true,
+    "discoveredPort": 3161
+  },
+  {
+    "url": "http://[::1]:3161/auto-mobile/streamable",
+    "daemon": true,
+    "discoveredPort": 3161
+  },
+  {
+    "url": "https://localhost:3161/auto-mobile/streamable",
+    "daemon": true,
+    "discoveredPort": 3161
+  },
+  {
+    "url": "http://localhost:3161/auto-mobile/streamable?probe=1",
+    "daemon": true,
+    "discoveredPort": 3161
+  },
+  {
+    "url": "http://localhost:3161/heartbeat",
+    "daemon": true,
+    "discoveredPort": 3161
+  },
+  {
+    "url": "http://example.com@localhost:3161/auto-mobile/streamable",
+    "daemon": true,
+    "discoveredPort": 3161
+  },
+  {
+    "url": "http://localhost:4000/auto-mobile/streamable",
+    "daemon": true,
+    "discoveredPort": null
+  },
+  {
+    "url": "http://localhost:4000/heartbeat",
+    "daemon": true,
+    "discoveredPort": null
+  },
+  {
+    "url": "https://localhost/auto-mobile/streamable",
+    "daemon": false,
+    "discoveredPort": 3161
+  },
+  {
+    "url": "https://localhost/auto-mobile/streamable",
+    "daemon": false,
+    "discoveredPort": null
+  },
+  {
+    "url": "http://localhost/auto-mobile/streamable",
+    "daemon": false,
+    "discoveredPort": null
+  },
+  {
+    "url": "https://[::1]/auto-mobile/streamable",
+    "daemon": false,
+    "discoveredPort": 3161
+  },
+  {
+    "url": "http://localhost/heartbeat",
+    "daemon": false,
+    "discoveredPort": 3161
+  },
+  {
+    "url": "http://localhost:8080/auto-mobile/streamable",
+    "daemon": false,
+    "discoveredPort": 3161
+  },
+  {
+    "url": "http://localhost:8080/heartbeat",
+    "daemon": false,
+    "discoveredPort": 3161
+  },
+  {
+    "url": "http://127.0.0.1:3162/auto-mobile/streamable",
+    "daemon": false,
+    "discoveredPort": 3161
+  },
+  {
     "url": "http://localhost:3161/mcp",
-    "daemon": true
+    "daemon": false,
+    "discoveredPort": 3161
   },
   {
-    "url": "http://LOCALHOST:3161/mcp",
-    "daemon": true
+    "url": "http://localhost:3161/",
+    "daemon": false,
+    "discoveredPort": 3161
   },
   {
-    "url": "http://127.0.0.1:3161/mcp",
-    "daemon": true
+    "url": "http://localhost:3161/heartbeat/",
+    "daemon": false,
+    "discoveredPort": 3161
   },
   {
-    "url": "https://localhost/mcp",
-    "daemon": true
+    "url": "http://localhost:3161/Heartbeat",
+    "daemon": false,
+    "discoveredPort": 3161
   },
   {
-    "url": "http://[::1]:3161/mcp",
-    "daemon": true
+    "url": "http://localhost:3161/auto-mobile/streamable/",
+    "daemon": false,
+    "discoveredPort": 3161
   },
   {
-    "url": "https://[::1]/mcp",
-    "daemon": true
+    "url": "http://localhost:3161/auto-mobile/streamable/../admin",
+    "daemon": false,
+    "discoveredPort": 3161
   },
   {
-    "url": "http://127.0.0.2/mcp",
-    "daemon": false
+    "url": "http://localhost:3161//heartbeat",
+    "daemon": false,
+    "discoveredPort": 3161
   },
   {
-    "url": "http://example.com/mcp",
-    "daemon": false
+    "url": "http://localhost:0/auto-mobile/streamable",
+    "daemon": false,
+    "discoveredPort": null
   },
   {
-    "url": "http://127.0.0.1.evil.com/mcp",
-    "daemon": false
+    "url": "http://127.0.0.2:3161/auto-mobile/streamable",
+    "daemon": false,
+    "discoveredPort": 3161
   },
   {
-    "url": "http://localhost.evil.com/mcp",
-    "daemon": false
+    "url": "http://example.com:3161/auto-mobile/streamable",
+    "daemon": false,
+    "discoveredPort": 3161
   },
   {
-    "url": "http://localhost@evil.com/mcp",
-    "daemon": false
+    "url": "http://127.0.0.1.evil.com:3161/auto-mobile/streamable",
+    "daemon": false,
+    "discoveredPort": 3161
   },
   {
-    "url": "http://example.com@localhost/mcp",
-    "daemon": true
+    "url": "http://localhost.evil.com:3161/auto-mobile/streamable",
+    "daemon": false,
+    "discoveredPort": 3161
   },
   {
-    "url": "http://[::ffff:127.0.0.1]/mcp",
-    "daemon": false
+    "url": "http://[::ffff:127.0.0.1]:3161/auto-mobile/streamable",
+    "daemon": false,
+    "discoveredPort": 3161
   },
   {
-    "url": "ftp://localhost/mcp",
-    "daemon": false
+    "url": "http://localhost.:3161/auto-mobile/streamable",
+    "daemon": false,
+    "discoveredPort": 3161
   },
   {
-    "url": "http://localhost./mcp",
-    "daemon": false
+    "url": "http://127.1:3161/auto-mobile/streamable",
+    "daemon": false,
+    "discoveredPort": 3161
   },
   {
-    "url": "http://127.1/mcp",
-    "daemon": false
+    "url": "http://2130706433:3161/auto-mobile/streamable",
+    "daemon": false,
+    "discoveredPort": 3161
   },
   {
-    "url": "http://2130706433/mcp",
-    "daemon": false
+    "url": "http://0x7f000001:3161/auto-mobile/streamable",
+    "daemon": false,
+    "discoveredPort": 3161
   },
   {
-    "url": "http://0x7f000001/mcp",
-    "daemon": false
+    "url": "http://[0:0:0:0:0:0:0:1]:3161/auto-mobile/streamable",
+    "daemon": false,
+    "discoveredPort": 3161
   },
   {
-    "url": "http://[0:0:0:0:0:0:0:1]/mcp",
-    "daemon": false
+    "url": "http://%6Cocalhost:3161/auto-mobile/streamable",
+    "daemon": false,
+    "discoveredPort": 3161
   },
   {
-    "url": "http://%6Cocalhost/",
-    "daemon": false
+    "url": "http://127.000.000.001:3161/auto-mobile/streamable",
+    "daemon": false,
+    "discoveredPort": 3161
   },
   {
-    "url": "http://127.000.000.001/",
-    "daemon": false
+    "url": "http://0177.0.0.1:3161/auto-mobile/streamable",
+    "daemon": false,
+    "discoveredPort": 3161
   },
   {
-    "url": "http://0177.0.0.1/",
-    "daemon": false
+    "url": "http://0x7f.0.0.1:3161/auto-mobile/streamable",
+    "daemon": false,
+    "discoveredPort": 3161
   },
   {
-    "url": "http://0x7f.0.0.1/",
-    "daemon": false
+    "url": "http://127.0.1:3161/auto-mobile/streamable",
+    "daemon": false,
+    "discoveredPort": 3161
   },
   {
-    "url": "http://127.0.1/",
-    "daemon": false
+    "url": "http://localhost@evil.com:3161/auto-mobile/streamable",
+    "daemon": false,
+    "discoveredPort": 3161
+  },
+  {
+    "url": "ftp://localhost:3161/auto-mobile/streamable",
+    "daemon": false,
+    "discoveredPort": 3161
   }
 ]

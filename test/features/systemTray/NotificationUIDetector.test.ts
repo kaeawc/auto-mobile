@@ -17,6 +17,7 @@ import type {
 } from "../../../src/models";
 import type { NotificationUIDetector } from "../../../src/utils/interfaces/NotificationUIDetector";
 import type { SystemTrayDependencies } from "../../../src/features/systemTray/systemTrayHelpers";
+import { fixedBackoff } from "../../../src/utils/Backoff";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { readFileSync } from "node:fs";
 import { wireCapture } from "../../helpers/wireCapture";
@@ -640,6 +641,7 @@ describe("NotificationUIDetector", () => {
         requestTapCoordinates: async () => ({ success: true }),
       }),
       timer: new FakeTimer(),
+      backoff: fixedBackoff(0),
     });
 
     it("returns an AndroidNotificationUIDetector for Android devices", () => {

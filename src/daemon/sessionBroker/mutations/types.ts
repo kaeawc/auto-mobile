@@ -107,3 +107,19 @@ export async function applyJournaledMutation<Result>(
   await journal.record(scope, mutation);
   return apply();
 }
+
+/**
+ * Key prefix of an opaque intent whose effect neither a journal revert nor the keep-booted
+ * baseline clean can undo (app-owned data, a broadcast's side effects). Keep-booted reset must
+ * escalate to its baseline fallback once such a row is journaled, the way it does for
+ * `deviceSnapshot` (#14359). Other `opaque` rows stay best-effort breadcrumbs.
+ */
+export const FALLBACK_OPAQUE_KEY_PREFIX = "fallback:";
+
+export function opaqueIntentKey(...parts: readonly unknown[]): string {
+  return `${FALLBACK_OPAQUE_KEY_PREFIX}${JSON.stringify(parts)}`;
+}
+
+export function opaqueForcesFallback(entry: Pick<DeviceMutationInput, "kind" | "key">): boolean {
+  return entry.kind === "opaque" && entry.key.startsWith(FALLBACK_OPAQUE_KEY_PREFIX);
+}

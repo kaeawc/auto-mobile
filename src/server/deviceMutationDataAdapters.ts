@@ -14,6 +14,13 @@ export function dataToolMutations(
     case "removeKeyValue":
     case "clearKeyValueFile":
       return keyValueMutations(name, args, platform);
+    case "deleteKeychainItem":
+      return [
+        {
+          kind: "preference",
+          key: JSON.stringify({ store: "keychain", appId: args.appId, selector: args.selector }),
+        },
+      ];
     case "setPreference":
       return preferenceMutations(args);
     case "sendBroadcast":

@@ -16,6 +16,7 @@ public enum SdkRoute: String, CaseIterable, Sendable {
     case dbTables = "/db/tables"
     case dbTableData = "/db/table-data"
     case dbTableStructure = "/db/table-structure"
+    case keychainDelete = "/keychain/delete"
     case preferences = "/preferences"
     case trigger = "/trigger"
 

@@ -258,23 +258,8 @@ object RegexLiteralScanner {
     val afterParen = call?.let { i + it.length }
     val next = afterParen?.let { p -> s.indexOfFirst(p) { c -> !c.isWhitespace() } }
     val isLiteralArg = next != null && next >= 0 && s[next] == '"'
-    val validatedPortablePattern =
-      call == "Pattern.compile(" &&
-        path.endsWith(
-          "protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol/PrototypeCheckPattern.kt",
-        ) &&
-        next != null &&
-        s.startsWith("source(pattern))", next) &&
-        s.substring(0, i).trimEnd().endsWith("if (!parse(pattern).ok) return false\n    return")
-    // Contract JSON patterns are checked as strings by the contract test, not as source.
-    val contractPatterns =
-      call == "Regex(" &&
-        path.endsWith(
-          "protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol/PrototypeSpecContract.kt",
-        ) &&
-        next != null &&
-        s.startsWith("it.value.jsonPrimitive.content)", next)
-    if (call != null && !isLiteralArg && !validatedPortablePattern && !contractPatterns) {
+    val exempt = call != null && next != null && isExemptCall(s, i, call, next, path)
+    if (call != null && !isLiteralArg && !exempt) {
       sites +=
         RegexSite(
           "$path:${lineOf(s, i)}",
@@ -284,6 +269,22 @@ object RegexLiteralScanner {
         )
     }
     return afterParen
+  }
+
+  /** Calls whose pattern is validated elsewhere: the portable pattern checker and contract JSON. */
+  private fun isExemptCall(s: String, i: Int, call: String, next: Int, path: String): Boolean {
+    val protocol = "protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol/"
+    val validatedPortablePattern =
+      call == "Pattern.compile(" &&
+        path.endsWith(protocol + "PrototypeCheckPattern.kt") &&
+        s.startsWith("source(pattern))", next) &&
+        s.substring(0, i).trimEnd().endsWith("if (!parse(pattern).ok) return false\n    return")
+    // Contract JSON patterns are checked as strings by the contract test, not as source.
+    val contractPatterns =
+      call == "Regex(" &&
+        path.endsWith(protocol + "PrototypeSpecContract.kt") &&
+        s.startsWith("it.value.jsonPrimitive.content)", next)
+    return validatedPortablePattern || contractPatterns
   }
 
   private fun String.indexOfFirst(from: Int, predicate: (Char) -> Boolean): Int {

@@ -5,6 +5,8 @@ import Foundation
 /// Inside AutoMobile, a `via: "host"` request is sent as a `prototype_request` frame and ends with
 /// the daemon's `prototype_response`. Embedded apps route it to their handler or device client.
 /// Client requests run in cancellable tasks; late responses for cancelled calls are ignored.
+/// Imported-prototype denial callbacks are bound to their request's consent epoch. Consent is
+/// checked again at main-actor delivery so obsolete successes and failures cannot update state.
 /// Every completion, including those decided here (no host, no client, a silent host), is
 /// delivered asynchronously, never from
 /// inside the transition that started the request.
@@ -176,24 +178,31 @@ final class PrototypeRequestDriver {
 
     private func startClient(_ job: PrototypeRequestJob, client: any PrototypeHttpClient) {
         let request = PrototypeHttpRequest(job: job)
+        let check = PrototypeDeliveryCheck()
         deviceTasks[job.requestId] = Task { [weak self] in
             let response: PrototypeRequestResponse
             do {
-                response = try await client.perform(request).requestResponse(for: job.method)
+                response = try await client.perform(request, delivery: check).requestResponse(for: job.method)
             } catch let failure as PrototypeHttpFailure {
                 response = .failed(failure.error, durationMs: failure.durationMs)
             } catch {
                 // The protocol promises PrototypeHttpFailure only; anything else is a client bug.
                 response = .failed(PrototypeRequestError(.network, "The on-device HTTP client failed."), durationMs: 0)
             }
-            self?.finishDevice(job.requestId, response)
+            self?.finishDevice(job.requestId, response, check: check)
         }
     }
 
-    private func finishDevice(_ requestId: String, _ response: PrototypeRequestResponse) {
+    private func finishDevice(
+        _ requestId: String, _ response: PrototypeRequestResponse, check: PrototypeDeliveryCheck
+    ) {
         // A cancelled call was removed before its task ended: its answer is not wanted.
         guard deviceTasks.removeValue(forKey: requestId) != nil else { return }
-        deliver(requestId, response)
+        if let failure = check.obsoleteFailure() {
+            deliver(requestId, .failed(failure.error, durationMs: failure.durationMs))
+        } else {
+            deliver(requestId, response)
+        }
     }
 
     // MARK: Delivery

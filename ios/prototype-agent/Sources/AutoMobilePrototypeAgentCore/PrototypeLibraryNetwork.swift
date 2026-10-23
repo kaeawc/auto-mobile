@@ -11,11 +11,11 @@ public enum PrototypeLibraryNetwork {
         {
             configuration(
                 gate: networkSwitch.gate, allowsCleartext: allowsCleartext,
-                onLocalNetworkDenied: { networkSwitch.denyLocalNetwork() },
-                pinned: { cleartext in
+                onLocalNetworkDenied: { epoch in networkSwitch.denyLocalNetwork(epoch: epoch) },
+                pinned: { cleartext, epoch in
                     PrototypeNetworkConfiguration(device: PrototypePinnedHttpClient(
                         allowsCleartext: cleartext,
-                        onLocalNetworkDenied: { Task { @MainActor in networkSwitch.denyLocalNetwork() } }
+                        onLocalNetworkDenied: { Task { @MainActor in networkSwitch.denyLocalNetwork(epoch: epoch) } }
                     ))
                 }
             )
@@ -25,13 +25,13 @@ public enum PrototypeLibraryNetwork {
     @MainActor
     public static func configuration(
         gate: PrototypeLibraryNetworkGate, allowsCleartext: Bool,
-        onLocalNetworkDenied: @escaping @MainActor @Sendable () -> Void = {},
-        pinned: @escaping @MainActor @Sendable (Bool) -> PrototypeNetworkConfiguration
+        onLocalNetworkDenied: @escaping @MainActor @Sendable (PrototypeConsentEpoch) -> Void = { _ in },
+        pinned: @escaping @MainActor @Sendable (Bool, PrototypeConsentEpoch) -> PrototypeNetworkConfiguration
     )
         -> PrototypeNetworkConfiguration
     {
         PrototypeNetworkConfiguration(device: PrototypeLibraryGatedClient(
-            gate: gate, factory: { pinned(allowsCleartext) }, onLocalNetworkDenied: onLocalNetworkDenied
+            gate: gate, factory: { epoch in pinned(allowsCleartext, epoch) }, onLocalNetworkDenied: onLocalNetworkDenied
         ))
     }
 }

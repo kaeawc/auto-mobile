@@ -76,14 +76,45 @@ function isExpandedFocusFrame(target: Element, candidate: Element): boolean {
   );
 }
 
+/** A settled keyboard permits a wider relocated editor or the same stable native field. */
+function isKeyboardNativeEditor(
+  target: Element,
+  candidate: Element,
+  nodes: readonly SearchableEntry[],
+  screenHeight: number | undefined,
+): boolean {
+  const epsilon = ANDROID_PRE_TAP_BOUNDS_EPSILON_PX;
+  const keyboardBelowEditor =
+    screenHeight !== undefined &&
+    nodes.some(
+      (node) =>
+        node.className === "UIKeyboard" &&
+        node.bounds !== undefined &&
+        node.bounds.top < screenHeight &&
+        candidate.bounds.bottom <= node.bounds.top + epsilon,
+    );
+  const sameNativeId = (["resource-id", "view-id"] as const).some((key) => {
+    const id = target[key];
+    return id && !(key === "view-id" && id.startsWith("s2-")) && id === candidate[key];
+  });
+  return (
+    keyboardBelowEditor &&
+    (candidate.bounds.right - candidate.bounds.left >
+      target.bounds.right - target.bounds.left + epsilon ||
+      (sameNativeId && boundsNearlyEqual(target.bounds, candidate.bounds, epsilon)))
+  );
+}
+
 /**
  * Safari replaces its compact URL field with an expanded native editor without a focused flag.
- * A sole native field of that class, expansion and non-conflicting labels identify the editor;
+ * A sole native field of that class, expansion (or a keyboard-backed stable identity)
+ * and non-conflicting labels identify the editor;
  * another native field holding keyboard focus rules it out.
  */
 function findSoleExpandedNativeFocusField(
   target: Element,
   nodes: readonly SearchableEntry[],
+  screenHeight: number | undefined,
   labelText?: string,
 ): Element | undefined {
   const nativeFields = distinctFocusFields(
@@ -98,7 +129,8 @@ function findSoleExpandedNativeFocusField(
   }
   const candidate = candidates[0].element!;
   if (
-    !isExpandedFocusFrame(target, candidate) ||
+    (!isExpandedFocusFrame(target, candidate) &&
+      !isKeyboardNativeEditor(target, candidate, nodes, screenHeight)) ||
     nativeFields.some(
       (node) => node.element !== candidate && isElementKeyboardFocused(node.element!),
     )
@@ -458,7 +490,12 @@ export class FocusVerifier {
         target,
         observation.viewHierarchy,
         nodes,
-        { labelText, selectedIndex, preTapHierarchy },
+        {
+          labelText,
+          selectedIndex,
+          preTapHierarchy,
+          screenHeight: observation.screenSize?.height ?? observation.viewHierarchy.screenHeight,
+        },
       );
     } catch (error) {
       // The selector is re-resolved against a capture taken while the layout may still be
@@ -548,7 +585,13 @@ export class FocusVerifier {
       labelText,
       selectedIndex,
       preTapHierarchy,
-    }: { labelText?: string; selectedIndex?: number; preTapHierarchy?: ViewHierarchyResult },
+      screenHeight,
+    }: {
+      labelText?: string;
+      selectedIndex?: number;
+      preTapHierarchy?: ViewHierarchyResult;
+      screenHeight?: number;
+    },
   ): boolean {
     const identifier = findFocusIdentifier(target, nodes);
     if (identifier?.shared) {
@@ -560,14 +603,19 @@ export class FocusVerifier {
         selectedIndex,
       );
     }
+    const iosNativeEditorFallback = () =>
+      this.deps.device.platform === "ios" &&
+      Boolean(findSoleExpandedNativeFocusField(target, nodes, screenHeight, labelText));
     if (identifier) {
-      return nodes.some(
-        (node) =>
-          node.element &&
-          isFocusEditableElement(node.properties) &&
-          isElementKeyboardFocused(node.element) &&
-          node.element[identifier.key] === identifier.value &&
-          isSameFocusTarget(target, node.element, nodes),
+      return (
+        nodes.some(
+          (node) =>
+            node.element &&
+            isFocusEditableElement(node.properties) &&
+            isElementKeyboardFocused(node.element) &&
+            node.element[identifier.key] === identifier.value &&
+            isSameFocusTarget(target, node.element, nodes),
+        ) || iosNativeEditorFallback()
       );
     }
     const focused = nodes.find((node) => this.isFocusedMatchingNode(target, node, nodes));
@@ -580,10 +628,7 @@ export class FocusVerifier {
     if (this.findSoleFocusedFieldAtTargetBounds(target, nodes, labelText)) {
       return true;
     }
-    if (
-      this.deps.device.platform === "ios" &&
-      findSoleExpandedNativeFocusField(target, nodes, labelText)
-    ) {
+    if (iosNativeEditorFallback()) {
       return true;
     }
     if (!options.testTag && !(options.elementId && target["resource-id"])) {

@@ -294,3 +294,33 @@ describe("read-only connection-keyed AVD name memo", () => {
     },
   );
 });
+
+describe("reset AVD timeout propagation", () => {
+  test("reset callers can distinguish a timed-out name probe from a mismatched name", async () => {
+    const f = fixture();
+    const execute = f.adb.executeCommand.bind(f.adb);
+    f.adb.executeCommand = async (command, options) => {
+      if (command === "emu avd name") {
+        f.timer.advanceTime(options?.timeoutMs ?? 2000);
+        throw new Error("Command timed out after 2000ms");
+      }
+      return execute(command, options);
+    };
+    await expect(
+      f.clients[0].resolveAvdNameForSerial("emulator-5558", {
+        timeoutMs: 2000,
+        throwOnTimeout: true,
+      }),
+    ).rejects.toThrow("timed out after 2000ms");
+    expect(
+      await f.clients[0].resolveAvdNameForSerial("emulator-5558", { timeoutMs: 2000 }),
+    ).toBeUndefined();
+    f.adb.executeCommand = execute;
+    expect(
+      await f.clients[0].resolveAvdNameForSerial("emulator-5558", {
+        timeoutMs: 2000,
+        throwOnTimeout: true,
+      }),
+    ).toBe("Pixel_A");
+  });
+});

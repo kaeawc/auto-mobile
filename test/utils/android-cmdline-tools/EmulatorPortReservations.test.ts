@@ -41,6 +41,20 @@ describe("DefaultEmulatorPortReservations", () => {
     });
   });
 
+  test("automatic allocation skips occupied serial ports without probing those ports", async () => {
+    // Ownership does not matter to the port allocator: every listed serial is occupied.
+    for (let port = 5554; port < 5610; port += 2) {
+      excludedPorts.add(port);
+    }
+    const reservation = await reservations.addReservedEmulatorPort(
+      [],
+      "broker",
+      completeSnapshot("emulator-5610", "emulator-5612"),
+    );
+    expect(reservation?.deviceId).toBe("emulator-5614");
+    expect(hostPorts.checkedPorts).toEqual([5614, 5615]);
+  });
+
   test("skips excluded console ports without probing their port pair", async () => {
     excludedPorts.add(5554);
     const args: string[] = [];

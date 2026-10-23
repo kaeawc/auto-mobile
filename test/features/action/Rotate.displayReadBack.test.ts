@@ -74,7 +74,11 @@ describe("Rotate non-default display read-back (#10362)", () => {
     const { adb, rotate, timer } = setup();
     adb.setCommandResponseSequence(DUMPSYS, [
       createExecResult(mirrorLandscape, ""),
-      createExecResult(mirrorLandscape.replace("    mRotation=0 ", "    mRotation=1 "), ""),
+      createExecResult(
+        // Change display 3's applied config; its requested policy alone is insufficient (#15024).
+        mirrorLandscape.replace("mDisplayRotation=ROTATION_0", "mDisplayRotation=ROTATION_90"),
+        "",
+      ),
     ]);
     const result = await rotate.execute("landscape", { lockOrientation: true, display: 3 });
     expect(result.success).toBe(true);

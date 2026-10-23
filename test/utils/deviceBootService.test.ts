@@ -1178,6 +1178,45 @@ describe("DeviceBootService", () => {
     expect(devices.wasMethodCalled("startDevice")).toBe(false);
   });
 
+  it.each([false, true])(
+    "boots an exact AVD beside a foreign placeholder (freshProvision=%s)",
+    async (freshProvision) => {
+      const devices = new FakeDeviceUtils();
+      devices.setDeviceImages("android", [image]);
+      devices.setBootedDevices("android", [
+        {
+          name: "Unknown (emulator-5556)",
+          platform: "android",
+          deviceId: "emulator-5556",
+          foreignOwned: true,
+        },
+      ]);
+      const result = await service(devices, new DefaultDeviceMatcher()).boot({
+        platform: "android",
+        name: image.name,
+        matchExactName: true,
+        freshProvision,
+      });
+      expect(result.source).toBe("cold-boot");
+      expect(result.device.name).toBe(image.name);
+    },
+  );
+
+  it("exact-name selection ignores a foreign runtime with the same name", async () => {
+    const devices = new FakeDeviceUtils();
+    devices.setDeviceImages("android", [image]);
+    devices.setBootedDevices("android", [
+      { name: image.name, platform: "android", deviceId: "emulator-5556", foreignOwned: true },
+      { name: image.name, platform: "android", deviceId: "emulator-5554" },
+    ]);
+    const result = await service(devices, new DefaultDeviceMatcher()).boot({
+      platform: "android",
+      name: image.name,
+      matchExactName: true,
+    });
+    expect(result.device.deviceId).toBe("emulator-5554");
+  });
+
   it("refuses an exact AVD while a running emulator's name is unresolved", async () => {
     const devices = new FakeDeviceUtils();
     devices.setDeviceImages("android", [image]);

@@ -141,10 +141,14 @@ describe("target and candidate selection", () => {
     expect(nextReadinessNameCandidates(devices, probed, unresolved)).toHaveLength(4);
   });
 
-  test("retryUnresolvedReadinessNames queues only still-unknown names", () => {
+  test("retryUnresolvedReadinessNames queues only local still-unknown names", () => {
     const unresolved = new Set<string>();
     retryUnresolvedReadinessNames(
-      [booted("emulator-1"), booted("emulator-2", "Pixel_7")],
+      [
+        booted("emulator-1"),
+        booted("emulator-2", "Pixel_7"),
+        { ...booted("emulator-3"), foreignOwned: true },
+      ],
       unresolved,
     );
     expect([...unresolved]).toEqual(["emulator-1"]);

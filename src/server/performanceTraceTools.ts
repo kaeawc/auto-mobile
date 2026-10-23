@@ -12,6 +12,7 @@ import {
 import type { BootedDevice } from "../models";
 import { addDeviceTargetingToSchema } from "../utils/schemaHelpers";
 import { createStructuredToolResponse } from "../utils/toolUtils";
+import { registerPerformanceTraceResources } from "./performanceTraceResources";
 import { ToolRegistry } from "./toolRegistry";
 
 const APP_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
@@ -142,6 +143,7 @@ export function registerPerformanceTraceTools(
     createPerformanceTraceHandler(manager),
     { defaultEnabled: false, outputSchema: performanceTraceResultSchema },
   );
+  registerPerformanceTraceResources(manager);
   unsubscribeTraceCleanup?.();
   const unsubscribe = subscribeTraceCleanup(manager);
   unsubscribeTraceCleanup = unsubscribe;

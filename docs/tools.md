@@ -153,7 +153,7 @@ A read never writes settings on a device another session holds. A sessionless re
 | 🎬 <code>recordDeviceGestures</code> | Start recording on-device user input (not tool calls) for exportPlan                                                                                                              |
 | 📤 <code>exportPlan</code>           | Stop active recording and export a YAML plan                                                                                                                                      |
 | 🎥 <code>videoRecording</code>       | Start or stop device video recording                                                                                                                                              |
-| 📈 <code>performanceTrace</code>     | Record an xctrace / Perfetto trace                                                                                                                                                |
+| 📈 <code>performanceTrace</code>     | Record an xctrace / Perfetto trace; read it back at <code>automobile:device-session/{sessionUuid}/performance-traces/{traceId}{?offset,maxBytes}</code>                           |
 | 🔬 <code>captureTrace</code>         | Android: record a Perfetto trace from typed categories (`sched`, `gfx`, `view`, `am`, `wm`, `binder_driver`, `memory`, `app`); `stop` pulls the `.perfetto-trace`. Off by default |
 | 🧠 <code>heapDump</code>             | Android: dump a debuggable or profileable app's heap to a host `.hprof` (`heap_dump_not_debuggable` otherwise). Off by default                                                    |
 

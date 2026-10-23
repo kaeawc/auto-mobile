@@ -71,6 +71,8 @@ fi
 # --- unsigned / signed ----------------------------------------------------------
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 project_root="$(cd "${script_dir}/../.." && pwd)"
+# shellcheck source=scripts/lib/spotlight-exclude.sh
+source "${project_root}/scripts/lib/spotlight-exclude.sh"
 package_dir="${project_root}/ios/network-filter"
 # PLIST_BUDDY and PROBE_OUTPUT_ROOT are test seams; production keeps the defaults
 # (the release workflow finds probe-stapled.zip under scratch/).
@@ -94,7 +96,7 @@ if [[ "${mode}" == signed ]]; then
 fi
 
 output_root="${PROBE_OUTPUT_ROOT:-${project_root}/scratch}"
-mkdir -p "${output_root}"
+mkdir_spotlight_excluded "${output_root}"
 output="$(mktemp -d "${output_root}/network-filter-probe.XXXXXX")"
 slices="${output}/slices"
 

@@ -58,3 +58,9 @@ Sampling is single-flight and independent of sessions, device epochs and runner 
 - Daemon-internal: `IosSimCapacityGate` in
   `src/features/iosSimFleet/`. Every simulator boot passes through one process-wide gate and records its
   duration via `BootDurationHistory`. The shared admission logic lives in `src/features/bootAdmission/`.
+
+Doctor also reports advisory Spotlight indexing warnings for existing developer directories on macOS.
+Generated scratch, build, and bootstrapped worktree roots receive `.metadata_never_index` markers.
+Set `AUTOMOBILE_SPOTLIGHT_EXCLUDE=0` to opt out of shell marker creation.
+For other developer directories, add a marker or use System Settings > Spotlight > Search Privacy.
+Doctor only reads indexing status and never changes system settings.

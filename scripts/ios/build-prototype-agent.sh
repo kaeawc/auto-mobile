@@ -11,12 +11,14 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=scripts/lib/spotlight-exclude.sh
+source "${repo_root}/scripts/lib/spotlight-exclude.sh"
 min_ios="${PROTOTYPE_AGENT_MIN_IOS:-17.0}"
 output_path="${1:-${repo_root}/scratch/prototype-agent/AutoMobilePrototypeAgent.dylib}"
 slices=(arm64 x86_64)
 
 output_dir="$(dirname "${output_path}")"
-mkdir -p "${output_dir}"
+mkdir_spotlight_excluded "${output_dir}"
 output_path="$(cd "${output_dir}" && pwd -P)/$(basename "${output_path}")"
 
 build_script="${repo_root}/scripts/ios/prototype-agent-build.sh"

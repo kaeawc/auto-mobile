@@ -1,3 +1,4 @@
+import { markSpotlightExcluded } from "../../../utils/spotlightExclusion";
 import AdmZip from "adm-zip";
 import * as fs from "node:fs/promises";
 import path from "node:path";
@@ -230,6 +231,7 @@ export class PrototypeViewerTemplateProvider implements TemplateProvider {
         ensureSecureTempDirSync(CACHE_SUBDIR);
       }
       await fs.mkdir(paths.directory, { recursive: true, mode: 0o700 });
+      await markSpotlightExcluded(paths.directory, fs);
       await this.downloadBytes(url, partial);
       await fs.chmod(partial, 0o600);
       const { checksum: actual } = await this.checksumCalculator.computeFileSha256(partial);

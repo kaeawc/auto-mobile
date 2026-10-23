@@ -16,9 +16,11 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=scripts/lib/spotlight-exclude.sh
+source "${repo_root}/scripts/lib/spotlight-exclude.sh"
 sources_root="${PROTOTYPE_AGENT_SOURCES_ROOT:-${repo_root}/ios/prototype-agent/Sources}"
 out_dir="${1:-${repo_root}/scratch/prototype-agent}"
-mkdir -p "${out_dir}"
+mkdir_spotlight_excluded "${out_dir}"
 
 sdk="$(xcrun --sdk iphonesimulator --show-sdk-path)"
 arch="${PROTOTYPE_AGENT_ARCH:-$(uname -m)}"

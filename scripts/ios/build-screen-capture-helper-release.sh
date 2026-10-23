@@ -12,9 +12,11 @@ output_path="${1:?Usage: $0 <output-zip-path>}"
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 project_root="$(cd "${script_dir}/../.." && pwd)"
+# shellcheck source=scripts/lib/spotlight-exclude.sh
+source "${project_root}/scripts/lib/spotlight-exclude.sh"
 package_dir="${project_root}/ios/screen-capture"
 output_dir="$(dirname "${output_path}")"
-mkdir -p "${output_dir}"
+mkdir_spotlight_excluded "${output_dir}"
 output_path="$(cd "${output_dir}" && pwd -P)/$(basename "${output_path}")"
 archive_path="${output_path}.partial"
 

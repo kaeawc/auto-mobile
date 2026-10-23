@@ -25,6 +25,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+# shellcheck source=scripts/lib/spotlight-exclude.sh
+source "${ROOT}/scripts/lib/spotlight-exclude.sh"
 cd "$ROOT"
 
 mode="${1:-unit}"
@@ -272,7 +274,7 @@ run_test_command() {
       run_managed_command gtimeout -k 2 "$AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" "$@"
     else
       local pgid_prefix
-      mkdir -p "${AUTOMOBILE_TEST_TS_SCRATCH_DIR:-$ROOT/scratch}"
+      mkdir_spotlight_excluded "${AUTOMOBILE_TEST_TS_SCRATCH_DIR:-$ROOT/scratch}"
       pgid_prefix="$(mktemp "${AUTOMOBILE_TEST_TS_SCRATCH_DIR:-$ROOT/scratch}/test-ts-pgid.XXXXXX")"
       rm -f "$pgid_prefix"
       cleanup_pgid_prefixes+=("$pgid_prefix")
@@ -990,7 +992,7 @@ run_windows_unit_shards() {
   local pids=() labels=() log_names=() starts=()
   if [[ "${TEST_TS_PRINT_CMD:-}" != 1 ]]; then
     rm -rf "$shard_root"
-    mkdir -p "$shard_root"
+    mkdir_spotlight_excluded "$shard_root"
   fi
   for ((shard = 1; shard <= unit_workers; shard += 1)); do
     launch_windows_test_process "unit shard $shard/$unit_workers" "shard-$shard" \
@@ -1024,7 +1026,7 @@ run_windows_integration_shards() {
   done < <(integration_tier_paths "$tier_file" unsafe)
   if [[ "${TEST_TS_PRINT_CMD:-}" != 1 ]]; then
     rm -rf "$shard_root"
-    mkdir -p "$shard_root"
+    mkdir_spotlight_excluded "$shard_root"
   fi
   safe_workers="$workers"
   if [[ "${#unsafe_paths[@]}" -gt 0 ]]; then
@@ -1099,7 +1101,7 @@ run_unit_shards() {
 
   if [[ "${TEST_TS_PRINT_CMD:-}" != 1 ]]; then
     rm -rf "$shard_root"
-    mkdir -p "$shard_root"
+    mkdir_spotlight_excluded "$shard_root"
   fi
   if [[ -n "${AUTOMOBILE_UNIT_JUNIT_DIR:-}" ]]; then
     rm -rf "$AUTOMOBILE_UNIT_JUNIT_DIR"
@@ -1108,7 +1110,7 @@ run_unit_shards() {
   if [[ "$shard_mode" == changed ]]; then
     # Print-only runs skip the scratch reset above but still need somewhere to
     # hold the resolved list.
-    mkdir -p "$shard_root"
+    mkdir_spotlight_excluded "$shard_root"
     unit_selection_file="$shard_root/selected-unit.txt"
     # Resolve once before sharding. The selector unions a parse-only Bun graph
     # with affectedTests' reference/always-run extras; uncertain edges select
@@ -1378,7 +1380,7 @@ case "$mode" in
       fi
     done
     if [[ "$runner_os" != "Windows" ]]; then
-      mkdir -p scratch
+      mkdir_spotlight_excluded scratch
       # These assignments run in the parent shell, independent of unit shards.
       export AUTOMOBILE_TEST_TIMING_LOG="${AUTOMOBILE_TEST_TIMING_LOG:-scratch/integration-file-timings-$$.ndjson}"
       export AUTOMOBILE_WATCHDOG_TIMING_LOG="${AUTOMOBILE_WATCHDOG_TIMING_LOG:-$AUTOMOBILE_TEST_TIMING_LOG}"
@@ -1678,6 +1680,7 @@ case "$mode" in
     fi
     if [[ "${TEST_TS_PRINT_CMD:-}" != "1" ]]; then
       rm -rf "$coverage_root"
+      mkdir_spotlight_excluded "$coverage_root"
       mkdir -p "$coverage_root/shards"
     fi
     # Coverage uses the unit shard supervisor too: the same 720s attempts,

@@ -1461,9 +1461,9 @@
   },
   {
     "name": "captureTrace",
-    "title": "Capture Perfetto Trace",
+    "title": "Capture Trace",
     "annotations": {
-      "destructiveHint": false
+      "destructiveHint": true
     },
     "description": "Android: record a Perfetto trace from typed categories (sched, gfx, view, am, wm, binder_driver, memory, app). start returns a traceId; drive the flow; stop pulls the .perfetto-trace to the host. Released sessions stop their trace.",
     "inputSchema": {
@@ -6791,7 +6791,7 @@
   },
   {
     "name": "heapDump",
-    "title": "Capture Heap Dump",
+    "title": "Dump Heap",
     "annotations": {
       "destructiveHint": false
     },

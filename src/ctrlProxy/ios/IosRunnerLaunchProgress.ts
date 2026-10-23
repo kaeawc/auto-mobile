@@ -51,12 +51,14 @@ export function sumRunnerLaunchCpuMs(
   if (!processes.has(rootPid)) {
     return null;
   }
-  // Simulator-side runner processes are children of the device's launchd_sim,
-  // whose command line carries the udid; most of them do not carry it themselves.
+  // The runner app lives under the device's data container, so its command line
+  // carries both the udid and the CtrlProxy bundle name. The device's launchd_sim
+  // (udid only) is deliberately excluded: an idle booted simulator burns CPU all
+  // the time and would make a frozen runner look like it is progressing.
   const roots = [rootPid];
   if (deviceId.length > 0) {
     for (const [pid, row] of processes) {
-      if (row.command.includes(deviceId)) {
+      if (row.command.includes(deviceId) && row.command.includes("CtrlProxy")) {
         roots.push(pid);
       }
     }

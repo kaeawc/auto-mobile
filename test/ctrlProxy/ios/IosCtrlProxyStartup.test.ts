@@ -166,6 +166,20 @@ test("queue wait credits caller deadlines before health budget begins", async ()
   expect(h.gate.acquisitions).toBe(1);
 });
 
+test("queue wait credit skips a caller that joined while queued", async () => {
+  const h = harness();
+  const late = Symbol("late");
+  h.gate.beforeAcquire = async () => {
+    h.timer.advanceTime(5000);
+    h.start.callerHealthPollDeadlinesMs.set(late, 9000);
+  };
+  h.host.waitForHealthRestartingUnresponsiveRunner = async () => {
+    expect(h.start.callerHealthPollDeadlinesMs.get(late)).toBe(9000);
+    return true;
+  };
+  await h.startup.startInternal(h.start);
+});
+
 test("spawn failure releases the slot", async () => {
   const h = harness();
   h.state.steps.startOnSimulator = async () => {

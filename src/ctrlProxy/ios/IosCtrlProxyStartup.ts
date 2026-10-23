@@ -261,12 +261,17 @@ export class IosCtrlProxyStartup {
       throw new Error("Runner launch requires a shared startup");
     }
     const queuedAt = this.state.timer.now();
+    // Only callers already waiting when the queue began are owed the credit; a
+    // later joiner's budget starts at its own join time.
+    const queuedCallers = new Set(sharedStart.callerHealthPollDeadlinesMs.keys());
     this.launchSlot = await this.state.runnerLaunchGate.acquire(sharedStart.controller.signal);
     const waitedMs = this.state.timer.now() - queuedAt;
     if (waitedMs > 0) {
       logger.info(`[IOSCtrlProxy] Runner launch queued for ${waitedMs}ms`);
       for (const [caller, deadline] of sharedStart.callerHealthPollDeadlinesMs) {
-        sharedStart.callerHealthPollDeadlinesMs.set(caller, deadline + waitedMs);
+        if (queuedCallers.has(caller)) {
+          sharedStart.callerHealthPollDeadlinesMs.set(caller, deadline + waitedMs);
+        }
       }
       this.host.refreshHealthPollDeadline(sharedStart);
     }

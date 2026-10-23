@@ -7,6 +7,7 @@ import type {
 } from "../../../src/daemon/sessionBroker/mutations/types";
 import type { ExecResult } from "../../../src/models/ExecResult";
 import { createExecResult } from "../../../src/utils/execResult";
+import { FakeIosResidueInspector } from "../../fakes/FakeIosResidueInspector";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 const UDID = "11111111-2222-4333-8444-555555555555";
@@ -30,6 +31,7 @@ function rig(notifyutilStdout: (enrolled: string) => string) {
       pasteboard: { assertSettled: () => {}, write: unused },
       privacyGrants: { readServiceRows: unused },
       trustStore: { readUserTrustedCertificates: unused },
+      residue: new FakeIosResidueInspector(),
     },
     new FakeTimer(),
   );

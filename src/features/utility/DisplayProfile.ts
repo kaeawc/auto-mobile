@@ -34,8 +34,8 @@ export type CutoutEmulation = (typeof CUTOUT_EMULATIONS)[number];
 export const NAVIGATION_MODES = ["gestural", "threebutton", "twobutton"] as const;
 export type NavigationMode = (typeof NAVIGATION_MODES)[number];
 
-const CUTOUT_OVERLAY_PREFIX = "com.android.internal.display.cutout.emulation.";
-const NAVIGATION_OVERLAY_PREFIX = "com.android.internal.systemui.navbar.";
+export const CUTOUT_OVERLAY_PREFIX = "com.android.internal.display.cutout.emulation.";
+export const NAVIGATION_OVERLAY_PREFIX = "com.android.internal.systemui.navbar.";
 const FORCE_DARK_PROPERTY = "debug.hwui.force_dark";
 
 /** One display profile: every field is optional; omitted facets are left alone. */

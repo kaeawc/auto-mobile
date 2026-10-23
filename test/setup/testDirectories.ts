@@ -24,6 +24,37 @@ export function withoutInheritedDatabaseOverrides(
   return isolated;
 }
 
+// Session liveness timings (src/config/envDaemon.ts) and their legacy twins. Unit tests assert
+// the 4 s / 2 s defaults, so a developer's exported override must not reach them (#14750).
+export const SESSION_TIMING_OVERRIDE_ENV_KEYS = [
+  "AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS",
+  "AUTO_MOBILE_CLI_SESSION_IDLE_TIMEOUT_MS",
+  "AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
+  "AUTO_MOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
+  "AUTOMOBILE_SESSION_HEARTBEAT_INITIAL_GRACE_MS",
+  "AUTO_MOBILE_SESSION_HEARTBEAT_INITIAL_GRACE_MS",
+  "AUTOMOBILE_SESSION_HEARTBEAT_CHECK_INTERVAL_MS",
+  "AUTO_MOBILE_SESSION_HEARTBEAT_CHECK_INTERVAL_MS",
+  "AUTOMOBILE_SESSION_IDLE_TIMEOUT_MS",
+  "AUTO_MOBILE_SESSION_IDLE_TIMEOUT_MS",
+  "AUTOMOBILE_SESSION_PRE_FIRST_HEARTBEAT_GRACE_MS",
+  "AUTO_MOBILE_SESSION_PRE_FIRST_HEARTBEAT_GRACE_MS",
+] as const;
+
+/** Pure env transformation: only unit entrypoints discard inherited session timing overrides. */
+export function withoutInheritedSessionTimingOverrides(
+  env: NodeJS.ProcessEnv,
+  entrypoint: string,
+): NodeJS.ProcessEnv {
+  const isolated = { ...env };
+  if (isUnitTestPath(entrypoint)) {
+    for (const key of SESSION_TIMING_OVERRIDE_ENV_KEYS) {
+      delete isolated[key];
+    }
+  }
+  return isolated;
+}
+
 const DIRECTORY_OVERRIDES = [
   ["AUTOMOBILE_DATA_DIR", "AUTO_MOBILE_DATA_DIR", "data"],
   ["AUTOMOBILE_LOG_DIR", "AUTO_MOBILE_LOG_DIR", "logs"],
@@ -62,6 +93,12 @@ export function isolatedTestDirectoryEnv(env: NodeJS.ProcessEnv, root: string): 
 const databaseEnv = withoutInheritedDatabaseOverrides(process.env, Bun.main);
 for (const key of DB_PATH_OVERRIDE_ENV_KEYS) {
   if (!(key in databaseEnv)) {
+    delete process.env[key];
+  }
+}
+const timingEnv = withoutInheritedSessionTimingOverrides(process.env, Bun.main);
+for (const key of SESSION_TIMING_OVERRIDE_ENV_KEYS) {
+  if (!(key in timingEnv)) {
     delete process.env[key];
   }
 }

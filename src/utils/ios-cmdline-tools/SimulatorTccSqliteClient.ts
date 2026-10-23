@@ -139,6 +139,21 @@ export function defaultDeviceSetRoot(
   );
 }
 
+/**
+ * {@link defaultDeviceSetRoot}, anchored against the daemon launch directory when relative,
+ * unless `override` names the root explicitly.
+ */
+export function resolveDeviceSetRoot(
+  homeDirectory: string,
+  environment: SimulatorDeviceSetEnvironment = process.env,
+  override?: string,
+): string {
+  return resolvePathFromDaemonLaunchWorkingDirectory(
+    override ?? defaultDeviceSetRoot(homeDirectory, environment),
+    environment,
+  );
+}
+
 export function tccServiceForPermission(permission: string): string {
   return permission.startsWith("kTCCService")
     ? permission
@@ -272,9 +287,10 @@ export class SimulatorTccSqliteClient
     // The same environment supplies both the device-set path and the launch
     // cwd it is anchored at, so an injected environment is honoured end to end.
     const environment: SimulatorDeviceSetEnvironment = dependencies.environment ?? process.env;
-    this.deviceSetRoot = resolvePathFromDaemonLaunchWorkingDirectory(
-      dependencies.deviceSetRoot ?? defaultDeviceSetRoot(this.homeDirectory, environment),
+    this.deviceSetRoot = resolveDeviceSetRoot(
+      this.homeDirectory,
       environment,
+      dependencies.deviceSetRoot,
     );
     this.timer = dependencies.timer ?? defaultTimer;
     this.timeoutMs = dependencies.timeoutMs ?? DEFAULT_TCC_QUERY_TIMEOUT_MS;

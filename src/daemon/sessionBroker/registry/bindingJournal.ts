@@ -42,6 +42,11 @@ import {
   type BindingJournalPhase,
   type BindingKey,
 } from "./bindingRegistry";
+import {
+  BINDING_JOURNAL_QUARANTINE_PROBE_MS,
+  quarantineFailure,
+  quarantineProbe,
+} from "./bindingJournalQuarantine";
 import { defaultBindingExecOwnerLiveness } from "./ownerLiveness";
 import { RegistryRetryPacing } from "./registryRetryPacing";
 export {
@@ -57,6 +62,7 @@ export {
 } from "./bindingJournalTypes";
 
 export {
+  BINDING_JOURNAL_QUARANTINE_PROBE_MS,
   BINDING_JOURNAL_MAX_ABANDONED_DELETES,
   BINDING_JOURNAL_OVERDUE_DELETE_GRACE_MS,
   BINDING_JOURNAL_REMOVAL_FLAG_MAX_ATTEMPTS,
@@ -322,11 +328,12 @@ export class BindingJournal {
     if (pending) {
       return pending;
     }
-    const located = options.device
-      ? { kind: "present" as const, device: options.device }
-      : await this.locator.locateForDeletion(entry, oldId, signal);
+    const located = await this.locator.locateForDeletion(entry, oldId, signal, options.device);
     if (located.kind === "blocked") {
       return this.recordBlocked(entry, located.reason, located.message, undefined, signal);
+    }
+    if (located.kind === "present" && entry.target.quarantinedAtMs !== undefined) {
+      return this.probeQuarantine(entry, oldId, signal);
     }
     const deletion: BindingDeletionResult =
       located.kind === "present"
@@ -346,6 +353,26 @@ export class BindingJournal {
     return this.recordDeletion(entry, oldId, deletion, signal);
   }
 
+  /** The quarantined device is still there: re-arm the probe without sending the delete again. */
+  private async probeQuarantine(
+    entry: BindingJournalEntry,
+    oldId: string,
+    signal?: AbortSignal,
+  ): Promise<Extract<DeletionStepResult, { kind: "blocked" }>> {
+    const probe = quarantineProbe(this.deps.timer.now(), entry, oldId);
+    const probed = await this.advanceStep(
+      entry,
+      { expectedPhase: "deleting", phase: "deleting", ...probe.advance },
+      signal,
+    );
+    return {
+      kind: "blocked",
+      entry: probed.kind === "advanced" ? probed.entry : entry,
+      reason: "cleanup_quarantined",
+      message: probe.message,
+    };
+  }
+
   /** Record a deletion outcome: the empty binding with `deleted`, or `cleanup_pending` and a retry. */
   private async recordDeletion(
     entry: BindingJournalEntry,
@@ -354,20 +381,30 @@ export class BindingJournal {
     signal?: AbortSignal,
   ): Promise<DeletionStepResult> {
     if (deletion.kind === "failed") {
+      // An exhausted escalation (#14018) would only repeat itself: quarantine instead of backing off.
+      const quarantined = deletion.escalationExhausted === true;
       const pending = await this.advanceStep(
         entry,
         {
           expectedPhase: "deleting",
           phase: "deleting",
           assignment: { kind: "state", expected: entry.binding, state: "cleanup_pending" },
-          attempt: this.attemptAfter(entry, deletion.message, this.entryRemovalInFlight(entry)),
+          ...(quarantined
+            ? quarantineFailure(this.deps.timer.now(), deletion.message)
+            : {
+                attempt: this.attemptAfter(
+                  entry,
+                  deletion.message,
+                  this.entryRemovalInFlight(entry),
+                ),
+              }),
         },
         signal,
       );
       return {
         kind: "blocked",
         entry: pending.kind === "advanced" ? pending.entry : entry,
-        reason: "cleanup_pending",
+        reason: quarantined ? "cleanup_quarantined" : "cleanup_pending",
         message: `Deleting device '${oldId}' failed: ${deletion.message}`,
         evidence: deletion.evidence,
       };

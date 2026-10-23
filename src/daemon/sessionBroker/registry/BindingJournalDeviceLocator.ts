@@ -61,11 +61,16 @@ export class BindingJournalDeviceLocator {
     entry: BindingJournalEntry,
     oldId: string,
     signal?: AbortSignal,
+    /** Present when the caller already proved the device listed and unclaimed. */
+    known?: DeviceInfo,
   ): Promise<
     | { kind: "present"; device: DeviceInfo }
     | { kind: "absent" }
     | { kind: "blocked"; reason: BindingJournalBlockReason; message: string }
   > {
+    if (known) {
+      return { kind: "present", device: known };
+    }
     const inventory = await this.stages.listInventory(entry, entry.platform, signal);
     if (!inventory) {
       return {

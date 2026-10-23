@@ -3426,8 +3426,15 @@ locked no-op records nothing. If the initial auto-rotate setting is unreadable,
 omission leaves it unchanged rather than forcing a lock.
 
 In direct mode (no session or session manager), omission temporarily disables
-auto-rotate when necessary and restores it at the end of the call. To keep the
-orientation locked past a direct call, pass `lockOrientation: true`:
+auto-rotate when necessary and restores it at the end of the call. With
+auto-rotate on, the sensor then returns the display to its physical orientation,
+so a plain direct `rotate` to a different orientation reports `success: false`
+("returned to ... because automatic rotation is on") and rolls back the
+`user_rotation` it wrote. That is intentional: a direct call has no session to
+restore a lock on release, so it never leaves the device locked unasked. To keep
+the orientation locked past a direct call, pass `lockOrientation: true` (or
+rotate inside a device session, where omission holds the lock and the session
+journal restores it on release):
 
 ```json
 { "orientation": "landscape", "lockOrientation": true }

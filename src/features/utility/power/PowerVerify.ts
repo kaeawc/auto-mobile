@@ -87,8 +87,15 @@ const CHECKS: readonly Check[] = [
 ];
 
 /** Requested values a fresh read does not show. */
-export function verifyRequested(input: SetPowerInput, after: PowerState): string[] {
-  return CHECKS.map((check) => check(input, after)).filter(
-    (message): message is string => message !== undefined,
-  );
+export function verifyRequested(
+  input: SetPowerInput,
+  after: PowerState,
+  unsettled?: { polls: number; waitedMs: number },
+): string[] {
+  return CHECKS.map((check) => {
+    const message = check(input, after);
+    return message && check === doze && unsettled
+      ? `${message} (still not settled after ${unsettled.polls} reads over ${unsettled.waitedMs} ms)`
+      : message;
+  }).filter((message): message is string => message !== undefined);
 }

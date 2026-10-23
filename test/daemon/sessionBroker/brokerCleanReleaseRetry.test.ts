@@ -8,6 +8,7 @@ import {
 } from "../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import type { SessionConfig } from "../../../src/devices/sessionConfig";
 import { ActionableError, toActionableError } from "../../../src/models/ActionableError";
+import { BootedDeviceDiscoveryIncompleteError } from "../../../src/models/BootedDeviceDiscoveryIncompleteError";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { SimctlCommandTimeoutError } from "../../../src/utils/ios-cmdline-tools/SimctlCommandTimeoutError";
 import { iosCatalog, iosDefaults } from "../../devices/sessionRequirements/fixtures";
@@ -147,6 +148,17 @@ describe("clean release retains warm devices across retryable failures", () => {
       },
     );
   }
+
+  test("incomplete discovery during reset retains the resource until recovery", async () => {
+    const error = new BootedDeviceDiscoveryIncompleteError("ios", {
+      code: "timeout",
+      message: "timed out after 15000ms collecting iOS simulator capacity",
+      retryable: true,
+    });
+    const sessionUuid = await ready("first");
+    const failure = spyOn(devices, "reset").mockRejectedValue(error);
+    await expectPendingThenRedrive("reset", sessionUuid, () => failure.mockRestore());
+  });
 
   test("fresh inventory timeout wrapped by IosBaselineReset remains retryable", async () => {
     const error = toActionableError(

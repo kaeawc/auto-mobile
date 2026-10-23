@@ -437,7 +437,7 @@ test("production generation guard refuses an uncaptured terminal desire after sa
   const snapshot = terminalSnapshot();
   const writer = writerOf(run.manager);
   writer.noteRelease(snapshot);
-  run.manager["sessionSlots"].setTerminalSnapshot(UUID, snapshot);
+  run.manager.testHooks.wiring.host.sessionSlots.setTerminalSnapshot(UUID, snapshot);
   lift(run.manager);
   await run.create();
   const generation = run.lastGeneration;
@@ -465,7 +465,7 @@ test("create after lift synchronously cancels its parked terminal desire and jou
   const options = Promise.withResolvers<{}>();
   const journal = Reflect.get(run.manager, "terminalReleaseJournal") as FileTerminalReleaseJournal;
   journal.record({ sessionId: UUID, reason: snapshot.releaseReason, at: 0 });
-  run.manager["sessionSlots"].setTerminalSnapshot(UUID, snapshot);
+  run.manager.testHooks.wiring.host.sessionSlots.setTerminalSnapshot(UUID, snapshot);
   // bun:sqlite cannot interleave mid-statement. Park at the retry/precondition seam and
   // exercise the real manager lift + publish boundary; the matrix also parks issued statements.
   writer.desire(UUID, { snapshot, terminal: true, precondition: () => options.promise });
@@ -590,9 +590,9 @@ test("forced release survives rebind and a timed-out re-persist that fails late"
   expect(run.manager.forceStuckRelease(UUID)?.stage).toBe("awaiting-rebind");
   await flush();
   expect(await persistence.getSession(UUID)).toMatchObject({ status: "active" });
-  expect(run.manager["sessionSlots"].getTerminalSnapshot(UUID)?.releaseReason).toBe(
-    "heartbeat-timeout",
-  );
+  expect(
+    run.manager.testHooks.wiring.host.sessionSlots.getTerminalSnapshot(UUID)?.releaseReason,
+  ).toBe("heartbeat-timeout");
   run.manager.setTerminalReleaseRetryBackoff(fixedBackoff(11));
   const plan = new FaultPlan(run.timer, 2, "hang-until-released");
   // The in-flight rebind lands, then its compensating terminal re-persist is parked.
@@ -641,7 +641,7 @@ test("uncaptured manager terminal fallback cannot overwrite a recreated UUID whi
   const released = run.manager.releaseSession(UUID, "explicit-release");
   await flush();
   expect(plan.points).toEqual(["getSession"]);
-  const snapshot = run.manager["sessionSlots"].getTerminalSnapshot(UUID)!;
+  const snapshot = run.manager.testHooks.wiring.host.sessionSlots.getTerminalSnapshot(UUID)!;
   const captures = Reflect.get(run.manager, "releaseRowGenerations") as WeakMap<object, number>;
   expect(captures.has(snapshot)).toBe(false);
   await run.timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS + 1);

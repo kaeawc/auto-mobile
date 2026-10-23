@@ -203,7 +203,7 @@ test("startup replay retains its fence without lifting a successor writer desire
     releasedAtMs: 0,
     heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: false, timeoutMs: 1000, ageMs: 0 },
   };
-  manager["sessionSlots"].setTerminalSnapshot(snapshot.sessionId, snapshot);
+  manager.testHooks.wiring.host.sessionSlots.setTerminalSnapshot(snapshot.sessionId, snapshot);
   writer.noteRelease(snapshot);
   writer.desire(snapshot.sessionId, {
     snapshot,
@@ -220,7 +220,9 @@ test("startup replay retains its fence without lifting a successor writer desire
   manager.attachTerminalReleaseJournal(journal);
   await manager.applyRecoveredTerminalReleaseIntents();
   expect(journal.loadUnconfirmed()).toEqual([]);
-  expect(manager["sessionSlots"].getTerminalSnapshot(snapshot.sessionId)).toBe(snapshot);
+  expect(manager.testHooks.wiring.host.sessionSlots.getTerminalSnapshot(snapshot.sessionId)).toBe(
+    snapshot,
+  );
   expect(writer.pendingSnapshot(snapshot.sessionId)).toBe(snapshot);
   expect(writer.canIssueRelease(snapshot)).toBe(true);
   expect(lift).not.toHaveBeenCalled();

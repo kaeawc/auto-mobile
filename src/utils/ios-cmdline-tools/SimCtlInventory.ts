@@ -194,9 +194,10 @@ export class SimCtlInventory {
   private static recordedDeviceListRequestSequence = 0;
 
   private static inFlightDeviceListRequestSequence: number | null = null;
+  private static readonly DISPLAY_BYPASS_REFRESH_MIN_INTERVAL_MS = 60_000;
   private static readonly simulatorDisplays = new Map<
     string,
-    { lastUsedAt?: string; displays?: SimulatorDisplay[] }
+    { lastUsedAt?: string; displays?: SimulatorDisplay[]; enumeratedAt: number }
   >();
 
   static invalidateDeviceListCache(): void {
@@ -538,8 +539,9 @@ export class SimCtlInventory {
     signal: AbortSignal | undefined,
     cacheable: boolean,
   ): Promise<SimulatorDisplay[]> {
-    const entry: { lastUsedAt?: string; displays?: SimulatorDisplay[] } = {
+    const entry: { lastUsedAt?: string; displays?: SimulatorDisplay[]; enumeratedAt: number } = {
       lastUsedAt: device.lastUsedAt,
+      enumeratedAt: this.context.timer.now(),
     };
     SimCtlInventory.simulatorDisplays.set(device.udid, entry);
     try {
@@ -789,7 +791,12 @@ export class SimCtlInventory {
     refreshDisplays = false,
   ): Promise<DeviceInfo[]> {
     if (refreshDisplays) {
-      SimCtlInventory.simulatorDisplays.clear();
+      const now = this.context.timer.now();
+      for (const [udid, entry] of SimCtlInventory.simulatorDisplays) {
+        if (now - entry.enumeratedAt >= SimCtlInventory.DISPLAY_BYPASS_REFRESH_MIN_INTERVAL_MS) {
+          SimCtlInventory.simulatorDisplays.delete(udid);
+        }
+      }
     }
     const deadlineMs = timeoutMs === undefined ? undefined : this.context.timer.now() + timeoutMs;
     // Start optional static metadata alongside the raw list, without making it a readiness gate.

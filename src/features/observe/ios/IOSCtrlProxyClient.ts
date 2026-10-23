@@ -1,3 +1,4 @@
+import { getTelemetryPushServer } from "../../../daemon/telemetryPushSocketServer";
 import {
   sdkCapabilityQueryOptions,
   type SdkCapabilityQueryOptions,
@@ -456,6 +457,7 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
     timer: this.timer,
     screenIdentity: this.sdkScreenIdentity,
     getSdkEventIngestor: () => this.sdkEventIngestor,
+    hasLogDemand: () => this.logDemandProbe(this.device.deviceId),
     getPort: () => this.port,
     resolveWebSocketHost: () => this.resolveWebSocketHost(),
     pollSdkEvents: () => this.pollSdkEvents(),
@@ -532,6 +534,7 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
 
   // SDK-event ingestion (telemetry/failure fan-out + layout telemetry)
   private readonly sdkEventIngestor: IosSdkEventIngestor;
+  private readonly logDemandProbe: (deviceId: string) => boolean;
   private readonly messageEffects: IosHierarchyMessageEffects;
 
   private constructor(
@@ -564,6 +567,9 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
     this.bootedDeviceLister = options.bootedDeviceLister ?? defaultBootedDeviceLister;
     this.deviceConnectionLostNotifier =
       options.deviceConnectionLostNotifier ?? observationStreamDeviceConnectionLostNotifier;
+    this.logDemandProbe =
+      options.logDemandProbe ??
+      ((deviceId) => getTelemetryPushServer()?.hasSubscriberForLogTelemetry(deviceId) ?? false);
     // Constructed eagerly (unlike the lazy delegate getters): DefaultIosSdkEventIngestor's
     // constructor only stores these session-bound closures — it does no I/O and does not
     // resolve the telemetry/failure singletons (those resolve per-call), so eager

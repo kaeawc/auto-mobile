@@ -49,6 +49,7 @@ function inventory(foldable = false) {
   };
   return {
     client,
+    timer,
     listing,
     device,
     devices,
@@ -143,20 +144,50 @@ describe("SimCtlInventory per-boot display cache", () => {
     expect(rig.counts()).toEqual({ lists: 4, enumerations: 2 });
   });
 
-  test.each(["invalidate", "bypass"])(
-    "explicit %s refreshes displays then reuses them",
-    async (refresh) => {
-      const rig = inventory();
-      await rig.tick();
-      await rig.tick();
-      if (refresh === "invalidate") {
-        SimCtlClient.invalidateDeviceListCache();
-        await rig.tick();
-      } else {
-        await rig.client.listSimulatorImages(undefined, { bypassCache: true });
-      }
-      await rig.tick();
-      expect(rig.counts()).toEqual({ lists: 4, enumerations: 2 });
-    },
-  );
+  test("explicit invalidate refreshes displays then reuses them", async () => {
+    const rig = inventory();
+    await rig.tick();
+    await rig.tick();
+    SimCtlClient.invalidateDeviceListCache();
+    await rig.tick();
+    await rig.tick();
+    expect(rig.counts()).toEqual({ lists: 4, enumerations: 2 });
+  });
+
+  test("bypass within 60 seconds reuses displays while refreshing the device list", async () => {
+    const rig = inventory();
+    await rig.tick();
+    await rig.tick();
+    await rig.client.listSimulatorImages(undefined, { bypassCache: true });
+    expect(rig.counts()).toEqual({ lists: 3, enumerations: 1 });
+    await rig.tick();
+    expect(rig.counts()).toEqual({ lists: 4, enumerations: 1 });
+  });
+
+  test("bypass after 60 seconds refreshes displays then reuses the new entry", async () => {
+    const rig = inventory();
+    await rig.client.listSimulatorImages();
+    rig.timer.advanceTime(60_001);
+    rig.changeDisplay();
+    const refreshed = await rig.client.listSimulatorImages(undefined, { bypassCache: true });
+    expect(refreshed[0].displays?.panels[0]?.sizePx.width).toBe(1400);
+    expect(rig.counts()).toEqual({ lists: 2, enumerations: 2 });
+    rig.timer.advanceTime(10_000);
+    await rig.client.listSimulatorImages(undefined, { bypassCache: true });
+    expect(rig.counts()).toEqual({ lists: 3, enumerations: 2 });
+  });
+
+  test("ten bypass listings 10 seconds apart enumerate only at 0 and 60 seconds", async () => {
+    const rig = inventory();
+    await rig.client.listSimulatorImages();
+    expect(rig.counts()).toEqual({ lists: 1, enumerations: 1 });
+    for (let listing = 1; listing <= 10; listing++) {
+      rig.timer.advanceTime(10_000);
+      await rig.client.listSimulatorImages(undefined, { bypassCache: true });
+      expect(rig.counts()).toEqual({
+        lists: listing + 1,
+        enumerations: listing < 6 ? 1 : 2,
+      });
+    }
+  });
 });

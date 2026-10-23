@@ -1,3 +1,6 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
+import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
+import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { createExecResult } from "../../../src/utils/execResult";
 import {
   beforeEach as beforeOutputSchema,
@@ -9,7 +12,10 @@ import { finalizeToolResponse } from "../../../src/server/finalizeToolResponse";
 import { createStructuredToolResponse } from "../../../src/utils/toolUtils";
 import { FakeArtifactWriter } from "../../fakes/FakeArtifactWriter";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { PressButton } from "../../../src/features/action/PressButton";
+import {
+  PressButton,
+  acceptAndroidHomeAlreadyOnLauncher,
+} from "../../../src/features/action/PressButton";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeWindow } from "../../fakes/FakeWindow";
@@ -77,6 +83,42 @@ describe("PressButton Android keycode dispatch", () => {
     frameContextClient = undefined;
     setDeviceIncarnationResolver(undefined);
     clearResolvedHomePackageCache();
+  });
+
+  test.each([
+    ["home", "com.android.launcher3", true],
+    ["home", "com.android.settings", false],
+    ["back", "com.android.launcher3", false],
+  ] as const)("identical hierarchy for %s on %s (#15028)", async (button, appId, success) => {
+    const window = new FakeWindow();
+    window.configureCachedActiveWindow(null);
+    window.configureActiveWindow({ appId, activityName: "Main", layoutSeqSum: 1 });
+    const observe = new FakeObserveScreen();
+    observe.setObserveResult(
+      buildObserveResult({
+        updatedAt: 1,
+        screenSize: { width: 1080, height: 1920 },
+        systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+        viewHierarchy: { packageName: appId, hierarchy: { node: {} } },
+      }),
+    );
+    const action = new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
+      window,
+      observeScreen: observe,
+      awaitIdle: new FakeAwaitIdle(),
+      globalActionClient: {
+        requestGlobalAction: async () => ({ success: true, action: button, totalTimeMs: 0 }),
+      },
+    });
+    const result = await action.execute(button);
+    expect(result.success).toBe(success);
+    if (success) {
+      expect(result.error).toBeUndefined();
+    } else {
+      expect(result.error).toContain(
+        button === "home" ? "did not background the foreground app" : "No visual change observed",
+      );
+    }
   });
 
   test.each(["plain", "refused", "cancelled", "deadline"] as const)(
@@ -747,3 +789,28 @@ async function dispatch(
   expect(pressButtonResultSchema.parse({ message: "Result", ...result })).toBeDefined();
   return result;
 }
+
+describe("acceptAndroidHomeAlreadyOnLauncher (#15028)", () => {
+  test.each([
+    ["android", "home", false],
+    ["android", "back", true],
+    ["ios", "home", true],
+  ] as const)(
+    "preserves no-change failure for %s %s, press ok=%s",
+    (platform, button, pressSucceeded) => {
+      const result = { success: false, error: "No visual change observed" };
+      acceptAndroidHomeAlreadyOnLauncher(result, { platform, button, pressSucceeded });
+      expect(result).toEqual({ success: false, error: "No visual change observed" });
+    },
+  );
+
+  test("preserves other errors and successful screen changes", () => {
+    const context = { platform: "android", button: "home", pressSucceeded: true };
+    const failed = { success: false, error: "Observation failed" };
+    acceptAndroidHomeAlreadyOnLauncher(failed, context);
+    expect(failed).toEqual({ success: false, error: "Observation failed" });
+    const changed = { success: true };
+    acceptAndroidHomeAlreadyOnLauncher(changed, context);
+    expect(changed).toEqual({ success: true });
+  });
+});

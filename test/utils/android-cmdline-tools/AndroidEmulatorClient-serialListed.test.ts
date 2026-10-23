@@ -36,7 +36,11 @@ describe("AndroidEmulatorClient.isEmulatorSerialListed", () => {
       const signal = new AbortController().signal;
 
       expect(await client["isEmulatorSerialListed"](SERIAL, signal)).toBe(true);
-      expect(online).toHaveBeenCalledWith(true, { bypassDeviceListCache: true }, signal);
+      expect(online).toHaveBeenCalledWith(
+        true,
+        { bypassDeviceListCache: true, skipNameEnrichment: true, skipProfileEnrichment: true },
+        signal,
+      );
       expect(stateProbe).toHaveBeenCalledWith({ signal, throwOnMissingAdb: true });
     },
   );

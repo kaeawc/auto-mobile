@@ -4,6 +4,18 @@ Every tool works from the **CLI** (`bunx @kaeawc/auto-mobile --cli <tool>`), **M
 
 📖 Full arguments: the registered schema ([`schemas/tool-definitions.json`](https://github.com/kaeawc/auto-mobile/blob/main/schemas/tool-definitions.json)) or `automobile:tools`. Availability varies by platform and feature gates.
 
+## 🏷️ Tool discovery metadata
+
+- 📋 `tools/list` entries carry a human-readable `title` and SDK `ToolAnnotations`.
+- 🛡️ Hints are untrusted client guidance, never authorization.
+- 🗂️ Classification lives in `src/server/toolAnnotations.ts`.
+- 🔀 Mixed-action tools take the conservative union of all supported actions.
+- 📦 The wire omits default `readOnlyHint: false`, `idempotentHint: false`, and `openWorldHint: true`.
+- 📖 Read-only tools omit the meaningless destructive and idempotent hints.
+- 🎛️ Controls always declare `destructiveHint` explicitly.
+- 🔑 Metadata is independent of `deviceReadOnly` dispatch and ownership enforcement.
+- 🧪 `readOnlyHint` follows `deviceReadOnly`, except tools that also write host state (`compareScreenshot` record mode).
+
 ## 🔁 Shared options
 
 - 🔑 `sessionUuid` — run on a held device session (device tools)

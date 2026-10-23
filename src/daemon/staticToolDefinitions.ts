@@ -1,5 +1,6 @@
 import toolDefinitionsJson from "../../schemas/tool-definitions.json";
 import type { ProxiedToolDefinition } from "./daemonMcpProxy";
+import type { ToolAnnotations } from "@modelcontextprotocol/server";
 import type { DaemonOptions } from "./types";
 import { isAlwaysLoadToolsEnabled } from "../config/alwaysLoadTools";
 
@@ -28,12 +29,14 @@ import { isAlwaysLoadToolsEnabled } from "../config/alwaysLoadTools";
  * before connecting. Advertising an output schema the
  * daemon may then strip from results would violate the MCP contract before the
  * client can call anything. The cold list therefore carries only the
- * flag-independent shape (name, description, inputSchema, `_meta`); the
+ * flag-independent shape (name, title, annotations, description, inputSchema, `_meta`); the
  * post-connect reconciliation delivers the accurate list, `outputSchema`
  * included when the daemon advertises it (issue #5879 review).
  */
 interface RawToolDefinition {
   name: string;
+  title?: string;
+  annotations?: ToolAnnotations;
   description?: string;
   inputSchema: Record<string, unknown>;
   _meta?: Record<string, unknown>;
@@ -76,6 +79,8 @@ function toolDefinitions(
     delete meta[PLAN_ONLY_META_KEY];
     const definition: ProxiedToolDefinition = {
       name: tool.name,
+      title: tool.title,
+      annotations: tool.annotations,
       inputSchema: tool.inputSchema,
     };
     if (tool.description !== undefined) {

@@ -1,5 +1,6 @@
 import type { SocketServerInputTestHooks } from "./socketServerInputTestHooks";
 import type { SocketServerOperations } from "../socketServerParts/socketServerOperations";
+import type { SocketServerRuntime } from "../socketServerParts/SocketServerRuntime";
 import type { DaemonRequest } from "../types";
 import type { ListChangedKind, McpForwardRoute } from "../socketServer";
 import type { InterceptableMethod } from "../interceptableMethod";
@@ -19,11 +20,19 @@ export interface UnixSocketServerTestHooks {
     | "resolveIdeActionDevices"
     | "assertSocketToolEnabled"
     | "handleIdeSocketRequest"
+    | "handleIdeRequest"
   >;
   readonly transport: Pick<
     SocketServerOperations,
-    "processSocketRequestLine" | "writeTerminalSocketResponse"
+    | "processSocketRequestLine"
+    | "writeTerminalSocketResponse"
+    | "handleConnection"
+    | "handleRequest"
   >;
+  /** Live per-connection state; tests read the connection ids of sockets they open. */
+  readonly sessions: SocketServerRuntime["sessions"];
+  /** Whether the server admits requests; tests open it without starting a listener. */
+  acceptingRequests: boolean;
   readonly routing: Pick<SocketServerOperations, "getToolsCallForwardRoute">;
   readonly input: SocketServerInputTestHooks;
   readonly release: Pick<
@@ -44,7 +53,9 @@ export interface UnixSocketServerTestHooks {
     response: unknown,
   ): void;
   /** The MCP client key a socket session is currently bound to, if any. */
-  boundMcpClientFor(socketSessionId: string): { sessionUuid?: string } | undefined;
+  boundMcpClientFor(
+    socketSessionId: string,
+  ): ReturnType<SocketServerRuntime["boundMcpClientKeysBySocketSession"]["get"]>;
   requireCurrentFrameContext(deviceId: string, frameContext: string, action: string): void;
   broadcastListChanged: InterceptableMethod<(kind: ListChangedKind) => void>;
   /** The startup gate every forwarded request waits on; tests intercept it to hold a request mid-gate. */

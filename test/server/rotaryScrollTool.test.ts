@@ -6,6 +6,10 @@ import {
 } from "../../src/server/rotaryScrollTool";
 import { ActionableError, type BootedDevice } from "../../src/models";
 import type { RotaryScroller, RotaryScrollResult } from "../../src/features/wear/RotaryScroll";
+import { screenFingerprint } from "../../src/server/rotaryScrollTool";
+import { AdbRotaryScroller } from "../../src/features/wear/RotaryScroll";
+import type { ObserveResult } from "../../src/models";
+import { FakeTimer } from "../fakes/FakeTimer";
 import { toolJson } from "../helpers/toolResponse";
 
 const android: BootedDevice = { name: "Wear", deviceId: "emulator-5554", platform: "android" };
@@ -70,5 +74,44 @@ describe("rotaryScroll tool", () => {
     expect(rotaryScrollSchema.safeParse({ delta: 0 }).success).toBe(false);
     expect(rotaryScrollSchema.safeParse({ delta: 51 }).success).toBe(false);
     expect(rotaryScrollSchema.safeParse({ delta: 1.5 }).success).toBe(false);
+  });
+});
+
+describe("screenFingerprint", () => {
+  const unavailable = (detail: string): Pick<ObserveResult, "viewHierarchy"> => ({
+    viewHierarchy: { hierarchy: { error: "CtrlProxy disconnected", unavailableDetail: detail } },
+  });
+
+  test("an error-shaped hierarchy is unavailable, whatever its detail", () => {
+    expect(screenFingerprint(unavailable("a"))).toBeUndefined();
+    expect(screenFingerprint(unavailable("b"))).toBeUndefined();
+    expect(screenFingerprint({ viewHierarchy: undefined })).toBeUndefined();
+  });
+
+  test("a changing diagnostic never reports a scroll and no input is sent", async () => {
+    const commands: string[] = [];
+    let n = 0;
+    const result = await new AdbRotaryScroller({
+      adb: {
+        executeCommand: async (command) => {
+          commands.push(command);
+          return {
+            stdout: "",
+            stderr: "",
+            toString: () => "",
+            trim: () => "",
+            includes: () => false,
+          };
+        },
+      },
+      timer: new FakeTimer(),
+      deviceId: "emulator-5554",
+      fingerprint: async () => screenFingerprint(unavailable(`detail ${(n += 1)}`)),
+    }).scroll({ delta: 1 });
+
+    expect(result.success).toBe(false);
+    expect(result.attempts).toEqual([]);
+    expect(result.reason).toContain("could not be read");
+    expect(commands).toEqual([]);
   });
 });

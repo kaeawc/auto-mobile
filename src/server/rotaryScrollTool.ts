@@ -7,6 +7,8 @@ import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClien
 import { defaultTimer } from "../utils/SystemTimer";
 import { hierarchyFingerprint } from "../utils/hierarchyFingerprint";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
+import { hasUsableHierarchy } from "../features/observe/ActiveWindowAttribution";
+import type { ObserveResult } from "../models";
 import {
   AdbRotaryScroller,
   ROTARY_MAX_DELTA,
@@ -49,6 +51,18 @@ export const rotaryScrollResultSchema = z
 
 type RotaryScrollArgs = z.output<typeof rotaryScrollInput>;
 
+/**
+ * An error-shaped hierarchy (CtrlProxy disconnected) is not a screen: hashing it would let a
+ * changed diagnostic count as a scroll, so it reads as unavailable.
+ */
+export function screenFingerprint(
+  observation: Pick<ObserveResult, "viewHierarchy">,
+): string | undefined {
+  return hasUsableHierarchy(observation.viewHierarchy)
+    ? (hierarchyFingerprint(observation.viewHierarchy) ?? undefined)
+    : undefined;
+}
+
 /** Builds the scroller a call drives; injectable so tests substitute a fake. */
 export type RotaryScrollerFactory = (device: BootedDevice) => RotaryScroller;
 
@@ -68,7 +82,7 @@ const defaultRotaryScrollerFactory: RotaryScrollerFactory = (device) =>
         requireFreshExtraction: true,
         signal,
       });
-      return hierarchyFingerprint(observation.viewHierarchy) ?? undefined;
+      return screenFingerprint(observation);
     },
   });
 

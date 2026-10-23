@@ -535,10 +535,17 @@ export class IosCtrlProxyLaunch {
    * Capture process output for debugging
    */
   private captureProcessOutput(child: ChildProcess): void {
+    // Stream boundaries are arbitrary; retain only a bounded overlap per child/stream.
+    let stdoutTail = "";
+    let stderrTail = "";
+    const tailLength = 256;
     if (child.stdout) {
       child.stdout.on("data", (data: Buffer | string) => {
-        const output = data.toString().trim();
-        this.recordLaunchOutputFailure(child, output);
+        const chunk = data.toString();
+        const combined = stdoutTail + chunk;
+        this.recordLaunchOutputFailure(child, combined);
+        stdoutTail = combined.slice(-tailLength);
+        const output = chunk.trim();
         if (output && this.shouldPromoteCtrlProxyOutput(output)) {
           logger.info(`[CtrlProxy stdout] ${output.slice(0, 500)}`);
         }
@@ -547,8 +554,11 @@ export class IosCtrlProxyLaunch {
 
     if (child.stderr) {
       child.stderr.on("data", (data: Buffer | string) => {
-        const output = data.toString().trim();
-        this.recordLaunchOutputFailure(child, output);
+        const chunk = data.toString();
+        const combined = stderrTail + chunk;
+        this.recordLaunchOutputFailure(child, combined);
+        stderrTail = combined.slice(-tailLength);
+        const output = chunk.trim();
         if (output && !output.includes("Build Succeeded")) {
           if (this.shouldPromoteCtrlProxyOutput(output)) {
             logger.warn(`[CtrlProxy stderr] ${output.slice(0, 500)}`);
@@ -562,7 +572,12 @@ export class IosCtrlProxyLaunch {
 
   private recordLaunchOutputFailure(child: ChildProcess, output: string): void {
     const failure = classifyRunnerLaunchOutput(output);
-    if (failure && child.pid !== undefined && this.state.xcTestProcess === child) {
+    if (
+      failure &&
+      child.pid !== undefined &&
+      this.state.xcTestProcess === child &&
+      !this.state.runnerLaunchFailures.get(child.pid)
+    ) {
       this.state.runnerLaunchFailures.record(child.pid, failure);
       logger.warn(
         `[IOSCtrlProxy] Runner launch failure ${failure.reason} (PID ${child.pid}): ${failure.detail}`,

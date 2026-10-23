@@ -225,6 +225,101 @@ describe("IOSCtrlProxyManager unresponsive runner relaunch (#10649)", () => {
     },
   );
 
+  test.each([
+    ["listener failed", "listener-bind-failed"],
+    ["Restarting after unexpected exit", "runner-lost"],
+  ] as const)("records split captured %s and promptly relaunches", async (marker, reason) => {
+    delete process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS;
+    const output = captured.find((chunk) => chunk.includes(marker))!;
+    const split = output.indexOf(marker) + Math.floor(marker.length / 2);
+    let emitted = false;
+    const h = createHarness((index) => index === 1, {
+      progressProbe: { sample: async () => 1000 },
+      onPoll: (child, elapsed) => {
+        if (!emitted && elapsed >= 2000) {
+          emitted = true;
+          child.stdout.emit("data", output.slice(0, split));
+          child.stdout.emit("data", output.slice(split));
+        }
+      },
+    });
+    const record = spyOn(IosRunnerLaunchFailures.prototype, "record");
+    try {
+      await settleByFakeEvents(
+        h.timer,
+        h.manager.start({ minimumHealthPollDurationMs: ACQUISITION_BUDGET_MS }),
+        { description: "split fatal output relaunch", maxEvents: 2000 },
+      );
+      const pid = h.executor.getSpawnedProcesses()[0].process.pid!;
+      expect(record).toHaveBeenCalledWith(pid, expect.objectContaining({ reason }));
+      expect(h.launches).toHaveLength(2);
+      expect(h.launches[1] - h.launches[0]).toBeLessThan(5000);
+      expect(h.terminated).toEqual([pid]);
+    } finally {
+      record.mockRestore();
+    }
+  });
+
+  test.each(["stdout", "stderr"] as const)(
+    "%s tail expires old text, stays separate, and preserves split whitespace",
+    (stream) => {
+      const h = createHarness(() => false);
+      const child = new FakeChildProcess(h.timer);
+      child.pid = 12345;
+      h.manager.trackStartedXcodebuild(child);
+      const otherStream = stream === "stdout" ? "stderr" : "stdout";
+      const marker = "Restarting after unexpected exit, crash, or test timeout";
+      const split = marker.indexOf(" unexpected") + 1;
+      const record = spyOn(IosRunnerLaunchFailures.prototype, "record");
+      try {
+        child[stream].emit("data", marker.slice(0, split));
+        child[otherStream].emit("data", marker.slice(split));
+        expect(record).not.toHaveBeenCalled();
+        child[stream].emit("data", "CtrlProxy listener failed: ");
+        for (let i = 0; i < 20; i++) {
+          child[stream].emit("data", "benign output\n".repeat(100));
+        }
+        child[stream].emit("data", "Address already in use");
+        child[stream].emit("data", marker.slice(split));
+        expect(record).not.toHaveBeenCalled();
+        child[stream].emit("data", marker.slice(0, split));
+        child[stream].emit("data", marker.slice(split));
+        expect(record).toHaveBeenCalledWith(
+          12345,
+          expect.objectContaining({ reason: "runner-lost" }),
+        );
+        child[stream].emit("data", "more benign output");
+        expect(record).toHaveBeenCalledTimes(1);
+      } finally {
+        record.mockRestore();
+      }
+    },
+  );
+
+  test("a replacement child with a reused PID starts with an empty output tail", () => {
+    const h = createHarness(() => false);
+    const first = new FakeChildProcess(h.timer);
+    const replacement = new FakeChildProcess(h.timer);
+    first.pid = replacement.pid = 12345;
+    const record = spyOn(IosRunnerLaunchFailures.prototype, "record");
+    try {
+      h.manager.trackStartedXcodebuild(first);
+      first.stdout.emit("data", "Restarting after unexpected");
+      h.manager.trackStartedXcodebuild(replacement);
+      replacement.stdout.emit("data", " exit, crash, or test timeout");
+      first.stdout.emit("data", " exit, crash, or test timeout");
+      expect(record).not.toHaveBeenCalled();
+      replacement.stdout.emit("data", "Restarting after unexpected");
+      replacement.stdout.emit("data", " exit, crash, or test timeout");
+      expect(record).toHaveBeenCalledWith(
+        12345,
+        expect.objectContaining({ reason: "runner-lost" }),
+      );
+    } finally {
+      record.mockRestore();
+    }
+  });
+
   test("bind failure relaunch uses a different service port", async () => {
     const ports: number[] = [];
     const h = createHarness((index) => index === 1, {

@@ -24,6 +24,7 @@ import { registerSnapshotOfTools } from "./snapshotOfTools";
 import { registerBiometricTools } from "./biometricTools";
 import { registerTelephonyTools } from "./telephonyTools";
 import { registerMeasureStartupTools } from "./measureStartupTools";
+import { registerProfilingTools } from "./profilingTools";
 import { registerMediaSessionTools } from "./mediaSessionTools";
 import { registerWindowModeTools } from "./windowModeTools";
 import { registerPrototypeTools } from "./prototypeTools";
@@ -108,6 +109,7 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerBiometricTools();
   registerTelephonyTools();
   registerMeasureStartupTools();
+  registerProfilingTools();
   registerMediaSessionTools();
   registerWindowModeTools();
   registerHighlightTools();

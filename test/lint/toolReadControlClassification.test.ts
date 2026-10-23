@@ -148,6 +148,9 @@ const CLASSIFICATION: Classification = {
     "openLink",
     // Starts and stops an on-device tracer (perfetto) or a device-attached xctrace.
     "performanceTrace",
+    // Starts and stops an on-device Perfetto recorder from typed categories; heapDump makes the app write a dump.
+    "captureTrace",
+    "heapDump",
     "phoneCall",
     "pinchOn",
     "multiTouch",

@@ -92,6 +92,8 @@ object ValidTools {
         "uninstallApp",
         "videoRecording",
         "performanceTrace",
+        "captureTrace",
+        "heapDump",
         "appLifecycle",
         "displayConfig",
         "displayProfile",

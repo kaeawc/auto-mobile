@@ -14,13 +14,13 @@ the exact arguments supported by your connection.
 The following tools expose `sessionUuid` and `keepScreenAwake`:
 
 `accessibility`, `accessibilityAction`, `accessibilityAudit`, `accessibilityFocus`, `appLifecycle`, `audit`, `backgroundWork`, `barrier`, `biometricAuth`,
-`changeLocalization`, `clearKeyValueFile`, `clearMockNetwork`, `clipboard`, `crashApp`,
+`captureTrace`, `changeLocalization`, `clearKeyValueFile`, `clearMockNetwork`, `clipboard`, `crashApp`,
 `changeLocalization`, `clearKeyValueFile`, `clearMockNetwork`, `clipboard`,
 `compareScreenshot`, `crashApp`,
 `criticalSection`, `deleteDevice`, `deviceSnapshot`, `displayConfig`, `dragAndDrop`, `dragPath`,
 `executePlan`, `explore`, `exportPlan`, `getAppPermissions`, `getDataStore`, `getDeepLinks`, `getLogs`,
 `getDeviceState`, `getIosSimulatorCapabilities`, `getNavigationGraph`, `getNetworkGraph`,
-`getNotificationPolicy`, `getPreference`, `highlight`, `hitTest`, `homeScreen`,
+`getNotificationPolicy`, `getPreference`, `heapDump`, `highlight`, `hitTest`, `homeScreen`,
 `identifyInteractions`, `inspectPackageSigning`, `installApp`, `keyboard`, `launchApp`, `listApps`, `listDataStores`,
 `measureStartup`, `mediaSession`, `mockNetwork`, `multiTouch`, `navigateTo`, `network`, `observe`, `openLink`,
 `performanceTrace`, `phoneCall`, `pinchOn`,
@@ -3559,6 +3559,8 @@ while the shared 10,000 ms read continues; coalesced AVD reads use a 30,000 ms s
 | 📤 <code>exportPlan</code>                                     | Stops the active recording and exports a YAML plan.                                       |
 | 🎥 <code>videoRecording</code>                                 | Starts or stops device video recording.                                                   |
 | ⏱️ <code>performanceTrace</code>                               | Records a native trace (xctrace on iOS, Perfetto on Android) and returns a summary.       |
+| 🔬 <code>captureTrace</code>                                   | Android: records a Perfetto trace from typed categories and pulls the `.perfetto-trace`.  |
+| 🧠 <code>heapDump</code>                                       | Android: dumps a debuggable or profileable app's heap and pulls the `.hprof`.             |
 
 ### Network options
 
@@ -3665,6 +3667,36 @@ call's `sessionUuid`), or losing the device (its `deviceId`, or the device chose
 by `platform`), stops the recorder, so no `xctrace` or `perfetto` process
 outlives the session. Artifacts are stored under the AutoMobile data directory
 in `performance-traces/`, next to `video-archive/`.
+
+### Android Perfetto captures and heap dumps
+
+`captureTrace` and `heapDump` are Android-only and disabled by default; enable them
+with `setToolEnabled`. Unlike `performanceTrace`, which maps a template to an
+Instruments or Perfetto config and summarizes the result, `captureTrace` records
+exactly the categories you name and returns the raw trace for ui.perfetto.dev.
+
+`captureTrace({ action: "start" })` takes optional `categories` (`sched`, `gfx`,
+`view`, `am`, `wm`, `binder_driver`, `memory`, `app`; default `sched`, `gfx`,
+`view`), `appId`, `bufferMb` (1–256, default 32) and `maxDurationMs` (1000–300000,
+default 30000). The Perfetto text config is built from those values only; there is
+no raw-config argument. An `appId` turns on that app's atrace tags (`app` needs
+one). `action: "stop"` takes the `traceId` start returned, signals the recorder,
+waits for the file to fill, pulls it and deletes the device copy. Its result is
+`{ traceId, path, sizeBytes, durationMs }`. One capture records per device at a
+time, and the recorder stops itself at `maxDurationMs`.
+
+`heapDump({ appId, native? })` checks `dumpsys package` for a debuggable or
+profileable app, runs `am dumpheap [-n] <pkg> <device path>` (`cmd activity dumpheap`
+if that wrote nothing), waits for the file to stop growing, pulls it and deletes the
+device copy. It returns `{ path, sizeBytes }` plus the commands tried in `attempts`.
+Any other app is refused with `heap_dump_not_debuggable`. The `.hprof` is an ART heap
+dump; convert it with `hprof-conv` for tools that expect the standard format.
+
+Both tools write their files under the tool-outputs directory (`--tool-outputs-dir`,
+else the default one) and return the host `path`; the bytes are never in the tool
+response. Releasing the session that started a trace, or moving it off the device,
+stops the recorder and deletes its device file without pulling it; a heap dump file
+left by an interrupted dump is deleted the same way.
 
 ### Video recording quality and limits
 

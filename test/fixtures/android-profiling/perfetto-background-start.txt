@@ -1,0 +1,2 @@
+Connected to the Perfetto traced service, TTL: 30s
+31337

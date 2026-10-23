@@ -17,6 +17,7 @@ test/fixtures/android-app-links/*.txt text eol=lf
 test/fixtures/ios-simctl/*.txt text eol=lf
 test/fixtures/android-emulator/*.txt text eol=lf
 test/fixtures/android-startup/*.txt text eol=lf
+test/fixtures/android-profiling/*.txt text eol=lf
 test/fixtures/duo-enumerate.txt text eol=lf
 test/fixtures/ios-duo/*.json text eol=lf
 test/fixtures/ios-simctl/*.json text eol=lf

@@ -292,6 +292,8 @@ const EXEMPT_CODED_ERROR_MODULES: Readonly<Record<string, string>> = {
     "Request owner mismatch is mapped to a {success:false, code, retryable, retryAfterMs} daemon reply (retryAfterMs only when retryable) by the release/abandon handlers (test/daemon/sessionBroker/handlers.test.ts), not a tool refusal serializer.",
   "daemon/sessionBroker/SessionBrokerInvariantError":
     "Store precondition failure raised inside the broker; it is classified as a permanent clean-release failure by cleanReleaseFailure.ts and never serialized as a coded tool or daemon refusal (session_broker_invariant_failed appears nowhere on the wire). It reaches daemon RPCs only as an untyped rethrow (brokerRejection rethrows unknown errors; store requireValue/ownedResource can throw it out of releaseOnce).",
+  "features/profiling/HeapDumpRefusedError":
+    "heapDump refusal (heap_dump_not_debuggable) thrown by AndroidHeapDump and carried to the client as the tool error text (test/features/profiling/AndroidHeapDump.test.ts); it is not a daemon or session-broker refusal and has no wire fields beyond the message.",
   "server/SessionLogSourceError":
     "Session-log source failure caught by DefaultSessionLogService.runSource and reported as that source's {status, reason, code} outcome inside a successful collection (test/server/physicalIosSessionLog.test.ts); it never escapes as a tool or daemon refusal.",
   "daemon/sessionBroker/SessionBrokerStoppingError":

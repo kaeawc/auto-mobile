@@ -1,6 +1,8 @@
 #!/usr/bin/env bats
 # Isolated build fixture: Apple compiler/signing tools are mocked, plist parsing is structural.
 setup() {
+  export AUTOMOBILE_SPOTLIGHT_EXCLUDE_FORCE=1
+  unset AUTOMOBILE_SPOTLIGHT_EXCLUDE
   REPO_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)"
   FIXTURE="${BATS_TEST_TMPDIR}/repo"
   MOCK_BIN="${BATS_TEST_TMPDIR}/bin"
@@ -58,6 +60,8 @@ printf '%s\n' "$*" >> "$BUILD_LOG"
 SCRIPT
   chmod +x "${MOCK_BIN}/"{xcrun,lipo,plutil,codesign}
   export PATH="${MOCK_BIN}:${PATH}"
+  mkdir -p "${FIXTURE}/scripts/lib"
+  cp "${REPO_ROOT}/scripts/lib/spotlight-exclude.sh" "${FIXTURE}/scripts/lib/"
   unset PROTOVIEWER_CLEARTEXT
   SCRIPT="${FIXTURE}/scripts/ios/protoviewer-build.sh"
   OUT="${BATS_TEST_TMPDIR}/out space"
@@ -66,6 +70,8 @@ SCRIPT
 @test "builds both simulator slices and signs the separate ProtoViewer app" {
   run bash "$SCRIPT" "$OUT"
   [ "$status" -eq 0 ]
+  # Caller-owned output outside the fixture repo must remain searchable.
+  [ ! -e "$OUT/.metadata_never_index" ]
   [ -s "$OUT/ProtoViewer.app/ProtoViewer" ]
   [[ "$output" == *'/ProtoViewer.app'* ]]
   run cat "$BUILD_LOG"

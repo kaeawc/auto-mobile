@@ -9,8 +9,11 @@ setup() {
   cp "${REPO_ROOT}/scripts/ios/prototype-library-build.sh" \
     "${REPO_ROOT}/scripts/ios/local-sim-build-args.sh" "${FIXTURE}/scripts/ios/"
   cp "${REPO_ROOT}/scripts/lib/shell-core.sh" "${FIXTURE}/scripts/lib/"
+  cp "${REPO_ROOT}/scripts/lib/spotlight-exclude.sh" "${FIXTURE}/scripts/lib/"
   SCRIPT="${FIXTURE}/scripts/ios/prototype-library-build.sh"
   export BUILD_LOG="${BATS_TEST_TMPDIR}/build.log"
+  export AUTOMOBILE_SPOTLIGHT_EXCLUDE_FORCE=1
+  unset AUTOMOBILE_SPOTLIGHT_EXCLUDE
   unset CI
   cat > "${MOCK_BIN}/uname" <<'SCRIPT'
 #!/usr/bin/env bash
@@ -35,6 +38,7 @@ SCRIPT
 @test "builds library then external consumer from their package roots with separate scratch output" {
   run bash "$SCRIPT"
   [ "$status" -eq 0 ]
+  [ -f "${FIXTURE}/scratch/prototype-library/.metadata_never_index" ]
   [ "$(grep '^cwd=' "$BUILD_LOG")" = "$(printf 'cwd=%s\ncwd=%s' "$FIXTURE" "$FIXTURE/ios/prototype-agent/Fixtures/EmbedConsumer")" ]
   [ "$(grep -E '^<(AutoMobilePrototype|EmbedConsumer)>$' "$BUILD_LOG")" = $'<AutoMobilePrototype>\n<EmbedConsumer>' ]
   grep -Fx "<${FIXTURE}/scratch/prototype-library/library>" "$BUILD_LOG"

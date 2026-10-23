@@ -1911,7 +1911,7 @@ subtree, or the whole active-window tree when owner-less.
 | 🚀 <code>launchApp</code>                                                                        | Launches an app by package name. On iOS, optional `launchArguments` start a fresh process and pass argv after the bundle ID. DEBUG storage writes require a launch-scoped mutation token; the daemon supplies it when `--allow-storage-mutations` is present. Android rejects launch arguments and takes an `intent` instead; an app already in the foreground is a success flagged `alreadyForeground` unless an `intent` was given. On iOS simulators, `prototype: true` relaunches the app with the prototype agent injected (state is lost); physical iOS, Android and `com.apple.*` apps reject it. |
 | ❌ <code>terminateApp</code>                                                                     | Terminates an app by package name.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | 💥 <code>crashApp</code>                                                                         | Intentionally crashes a running app through the platform crash path.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| ♻️ <code>appLifecycle</code>                                                                     | State-preserving background-process kill for saved-state restoration tests, and `onTrimMemory` delivery with `trimMemory` (Android only).                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ♻️ <code>appLifecycle</code>                                                                     | State-preserving background-process kill for saved-state restoration tests, and `onTrimMemory` delivery with `trimMemory` (Android only). On iOS, `background` and `killBackgrounded` (SIGKILL after Home) work on the Simulator and physical devices.                                                                                                                                                                                                                                                                                                                                                   |
 | 📦 <code>installApp</code>                                                                       | Installs an APK, app bundle, or IPA.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | 🗑️ <code>uninstallApp</code>                                                                     | Uninstalls an app by package name or bundle identifier.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | 🔏 <code>inspectPackageSigning</code>                                                            | Fresh read of an app's presence (`installed`, `absent`, `unknown`) and signing. Android: one user's SHA-256 signer set and rotation history. iOS Simulator and physical: team, signing identity, CDHash, entitlements and the embedded provisioning profile. Never cached.                                                                                                                                                                                                                                                                                                                               |
@@ -1991,9 +1991,25 @@ kills processes it considers safe to kill. Failed process-table reads cannot
 prove reclaim and return an unverified advisory message if no poll succeeds.
 
 <code>terminateApp</code> is the force-stop (discards saved state);
-<code>crashApp</code> is the hard crash. This tool supports Android only; iOS
-returns <code>supported: false</code> for both actions because no state-preserving
-termination/PID contract is verified. Use <code>homeScreen</code> for iOS Home.
+<code>crashApp</code> is the hard crash.
+
+On iOS (#14098) <code>background</code> and <code>killBackgrounded</code> work on the Simulator
+and on physical devices; <code>trimMemory</code> returns <code>supported: false</code> (iOS has no
+equivalent). iOS keeps UIKit state restoration and SwiftUI <code>@SceneStorage</code> when the
+system terminates a backgrounded app, and discards it on an app-switcher force-quit, so the kill
+is a SIGKILL after backgrounding, as Xcode does. <code>background</code> presses Home (verified:
+SpringBoard must become the foreground app) and reports the app's <code>pid</code>.
+<code>killBackgrounded</code> presses Home the same way (a no-op when already on Home, because iOS
+has no cheap foreground read to refuse on), waits one second for the scene to save its state,
+then sends SIGKILL (<code>mechanism: "ios-sigkill"</code>): on the Simulator with
+<code>simctl spawn launchctl kill SIGKILL</code> on the app's launchd service, on a physical device
+with <code>devicectl device process signal</code> (macOS host, device on iOS 17+). It then reads
+the process table again: <code>processReclaimed: true</code> means the old PID is gone (a different
+<code>pidAfter</code> counts), and a process still present after five seconds is
+<code>kill_failed</code>, since SIGKILL cannot be caught. A bundle that is not running is
+<code>app_not_running</code>. Relaunch with <code>launchApp</code> to see whether state was
+restored. Not yet verified on hardware or a Simulator run of the Playground
+<code>@SceneStorage</code> screen (<code>needs-device-verify</code>).
 
 </details>
 
@@ -3334,6 +3350,12 @@ identifier from `automobile:devices/images`.
 booting the OS and `automationReadyTimeoutMs` for installing, updating, starting,
 and verifying the automation runner. Each defaults to 180000 ms; their sum,
 including defaults for omitted fields, must not exceed 890000 ms.
+
+`getAndroid` accepts `formFactor` (`phone`, `tablet`, `foldable`, `tv`, `watch`,
+`automotive`), and a binding's `deviceFamily` takes the same values. Android classifies
+`tv`, `watch` and `automotive` from the system-image tag first (`android-tv`,
+`android-wear`, `android-automotive`, ...), then the avdmanager profile id, then geometry,
+so a TV is never matched as a tablet. iOS accepts only `phone` and `tablet`.
 
 `setDeviceResources` and `provisionDevice.resources` results include `requested`
 and an independent `observed` full-platform resource snapshot after configuration,

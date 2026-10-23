@@ -48,6 +48,7 @@ import {
   DeviceOwnershipView,
   createDefaultDeviceOwnershipSources,
 } from "../../daemon/deviceOwnershipView";
+import { checkSpotlightIndexing } from "./spotlightIndexing";
 import { checkOrphanedDaemons } from "./orphanedDaemons";
 import { listForwardLeaseHolders } from "../../daemon/forwardLeaseHolders";
 
@@ -76,6 +77,7 @@ export interface AutoMobileCheckDependencies {
   checkDaemonStatus?: (probe?: DoctorProbeOptions) => Promise<CheckResult>;
   checkDaemonConnectivity?: (probe?: DoctorProbeOptions) => Promise<CheckResult>;
   checkDaemonBuildIdentity?: (probe?: DoctorProbeOptions) => Promise<CheckResult>;
+  checkSpotlightIndexing?: (probe?: DoctorProbeOptions) => Promise<CheckResult>;
   checkOrphanedDaemons?: (probe?: DoctorProbeOptions) => Promise<CheckResult>;
   checkForeignLeaseHolders?: () => Promise<CheckResult>;
   checkDeviceOwnership?: () => Promise<CheckResult>;
@@ -725,6 +727,11 @@ export async function runAutoMobileChecks(
   );
   await run(() =>
     (dependencies.checkDaemonBuildIdentity ?? ((probe) => checkDaemonBuildIdentity({}, probe)))(
+      options,
+    ),
+  );
+  await run(() =>
+    (dependencies.checkSpotlightIndexing ?? ((probe) => checkSpotlightIndexing({}, probe)))(
       options,
     ),
   );

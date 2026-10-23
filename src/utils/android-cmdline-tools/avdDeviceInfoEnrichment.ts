@@ -2,6 +2,7 @@ import type { DeviceInfo } from "../../models";
 import { androidProfileFormFactor } from "../../models/formFactor";
 import { logger } from "../logger";
 import type { AvdConfig, AvdConfigReader } from "./AvdConfigReader";
+import { parseAndroidSystemImageRuntime } from "./AndroidSystemImageRuntime";
 import { configuredAvdArchitecture } from "./AndroidDeviceInventoryScanner";
 
 /**
@@ -19,6 +20,9 @@ export async function enrichDeviceInfoList(
           return device;
         }
         const formFactor = androidProfileFormFactor({
+          systemImageTag: config.systemImagePackage
+            ? parseAndroidSystemImageRuntime(config.systemImagePackage)?.tag
+            : undefined,
           profileId: config.deviceName,
           width: config.screenWidth,
           height: config.screenHeight,

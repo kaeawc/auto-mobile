@@ -29,12 +29,14 @@ case "$1" in
 esac
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
+# shellcheck source=scripts/lib/spotlight-exclude.sh
+source "${repo_root}/scripts/lib/spotlight-exclude.sh"
 if [[ ! -f "$repo_root/android/gradlew" || ! -x "$repo_root/android/gradlew" ]]; then
   echo "error: $repo_root/android/gradlew is missing or not executable" >&2
   exit 2
 fi
 
-mkdir -p "$repo_root/scratch"
+mkdir_spotlight_excluded "$repo_root/scratch"
 
 use_build_brief=0
 if [[ -z "${CI:-}" && -z "${AUTOMOBILE_GRADLEW_NO_BUILD_BRIEF:-}" ]] \

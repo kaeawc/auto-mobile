@@ -92,7 +92,10 @@ export const startDeviceParametersSchema = z.object({
     .describe(
       "Generate a QR code PNG and use it as the Android emulator back camera wall poster; cold boot only. Mutually exclusive with cameraPosterPath.",
     ),
-  formFactor: z.enum(["phone", "tablet", "foldable"]).optional().describe("Device form factor"),
+  formFactor: z
+    .enum(["phone", "tablet", "foldable", "tv", "watch", "automotive"])
+    .optional()
+    .describe("Device form factor"),
   requires: z
     .object({
       panels: z.number().int().positive().optional().describe("Minimum number of display panels"),

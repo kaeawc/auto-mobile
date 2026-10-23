@@ -11,6 +11,7 @@ import type { FormFactor } from "../../../models/DeviceMatchCriteria";
 import { androidProfileFormFactor } from "../../../models/formFactor";
 import type { BindingDeviceFamily } from "../../../utils/provisionDeviceSpecSchemas";
 import { inferIosFormFactor } from "../../../utils/ios-cmdline-tools/iosDeviceType";
+import { parseAndroidSystemImageRuntime } from "../../../utils/android-cmdline-tools/AndroidSystemImageRuntime";
 import type { AvdConfigReader } from "../../../utils/android-cmdline-tools/AvdConfigReader";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
@@ -67,6 +68,9 @@ export class DefaultManagedSpecMatcher implements ManagedSpecMatcher {
       }
       return matchDeviceFamily(spec.deviceFamily, () =>
         androidProfileFormFactor({
+          systemImageTag: config.systemImagePackage
+            ? parseAndroidSystemImageRuntime(config.systemImagePackage)?.tag
+            : undefined,
           profileId: config.deviceName,
           width: config.screenWidth,
           height: config.screenHeight,

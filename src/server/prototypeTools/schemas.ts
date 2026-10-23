@@ -238,12 +238,13 @@ export const prototypeSchema = addDeviceTargetingToSchema(
           "save",
           "listSaved",
           "deleteSaved",
+          "open",
           "clearStorage",
         ],
         {
           error: (issue) =>
             getRemovedToolActionHint(PROTOTYPE_TOOL_NAME, issue.input) ??
-            "action must be one of show, patch, dismiss, status, inspect or awaitEvent; saved actions: save, listSaved or deleteSaved; storage action: clearStorage",
+            "action must be one of show, patch, dismiss, status, inspect or awaitEvent; saved actions: save, listSaved, deleteSaved or open; storage action: clearStorage",
         },
       ),
       spec: specInput
@@ -319,7 +320,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .min(1)
         .optional()
         .describe(
-          "Prototype id required for dismiss (unless all: true), awaitEvent, deleteSaved and clearStorage",
+          "Prototype id required for dismiss (unless all: true), awaitEvent, deleteSaved and clearStorage; for open, the ProtoViewer library id (viewer.libraryId) a save returned",
         ),
       assets: assetsInput
         .optional()
@@ -412,6 +413,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     save: ["spec", "assets", "label", "icon", "pin", "autoConfirm"],
     listSaved: [],
     deleteSaved: ["id", "removeIcon"],
+    open: ["id"],
     clearStorage: ["id"],
     dismiss: ["id", "all"],
     status: [],
@@ -589,6 +591,16 @@ const prototypeEventOutputSchema = z.object({
 });
 export const prototypeOutputSchema = z.object({
   saved: z.object({ id: z.string(), slug: z.string(), replaced: z.boolean() }).optional(),
+  viewer: z
+    .object({
+      app: z.literal("protoviewer"),
+      libraryId: z.string().describe("Pass as id to open to launch this entry."),
+      label: z.string(),
+    })
+    .optional()
+    .describe(
+      "save and open on Android with ProtoViewer installed: the ProtoViewer library entry. The entry is imported: ProtoViewer sets its source, keeps its network off until the user allows it, and it is not attached to this host.",
+    ),
   savedPrototypes: z
     .array(
       z.object({

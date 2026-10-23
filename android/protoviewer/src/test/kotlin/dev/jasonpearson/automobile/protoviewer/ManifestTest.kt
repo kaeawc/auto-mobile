@@ -48,6 +48,15 @@ class ManifestTest {
     }
     paths.close()
     assertEquals(1, cachePaths)
+    val mcp =
+      context.packageManager.getActivityInfo(ComponentName(context, McpActivity::class.java), 0)
+    // Only the adb shell holds DUMP; no app can start the MCP entry, and no intent resolves to it.
+    assertTrue(mcp.exported)
+    assertEquals("android.permission.DUMP", mcp.permission)
+    for (action in listOf(MCP_IMPORT_ACTION, MCP_OPEN_ACTION)) {
+      val implicit = android.content.Intent(action).setPackage(context.packageName)
+      assertTrue(context.packageManager.queryIntentActivities(implicit, 0).isEmpty())
+    }
     assertFalse(viewer.exported)
     assertEquals(android.content.pm.ActivityInfo.DOCUMENT_LAUNCH_ALWAYS, viewer.documentLaunchMode)
     assertEquals(0, context.applicationInfo.flags and ApplicationInfo.FLAG_ALLOW_BACKUP)

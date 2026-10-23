@@ -70,8 +70,8 @@ ${condition}
     for (const rejected of [
       "        rootState: god-mode",
       "        faults:\n          battery: explode",
-      "        faults:\n          storage: overflowing",
       "        faults:\n          dontKeepActivities: off",
+      "        faults:\n          storage: overflowing",
       "        faults:\n          gravity: low",
     ]) {
       expect(validator.validateYaml(plan(rejected)).valid).toBe(false);

@@ -41,10 +41,10 @@ export interface DeviceConditionInput {
     lowPower?: "on" | typeof DEVICE_CONDITION_UNSET;
     doze?: "on" | typeof DEVICE_CONDITION_UNSET;
     thermal?: "throttling" | "critical" | typeof DEVICE_CONDITION_UNSET;
-    /** Storage fault (#14066). */
-    storage?: "low" | "full" | typeof DEVICE_CONDITION_UNSET;
     /** Process-lifecycle fault (#14068). */
     dontKeepActivities?: "on" | typeof DEVICE_CONDITION_UNSET;
+    /** Storage fault (#14066). */
+    storage?: "low" | "full" | typeof DEVICE_CONDITION_UNSET;
   };
   expiresInSeconds?: number;
   reset?: true;
@@ -86,17 +86,17 @@ export const deviceConditionInputSchema: z.ZodType<DeviceConditionInput> = z
           .enum(["throttling", "critical", DEVICE_CONDITION_UNSET])
           .optional()
           .describe("Override thermal status via `cmd thermalservice override-status`, or unset."),
-        storage: z
-          .enum(["low", "full", DEVICE_CONDITION_UNSET])
-          .optional()
-          .describe(
-            "Use up free space on /data with a ballast file (`fallocate`): 'low' leaves about 128 MiB, 'full' about 8 MiB. Reset deletes the ballast. Or unset.",
-          ),
         dontKeepActivities: z
           .enum(["on", DEVICE_CONDITION_UNSET])
           .optional()
           .describe(
             "Developer options 'Don't keep activities' via `settings global always_finish_activities`, restored to its prior value, or unset. Applies to activities left after the change.",
+          ),
+        storage: z
+          .enum(["low", "full", DEVICE_CONDITION_UNSET])
+          .optional()
+          .describe(
+            "Use up free space on /data with a ballast file (`fallocate`): 'low' leaves about 128 MiB, 'full' about 8 MiB. Reset deletes the ballast. Or unset.",
           ),
       })
       .strict()

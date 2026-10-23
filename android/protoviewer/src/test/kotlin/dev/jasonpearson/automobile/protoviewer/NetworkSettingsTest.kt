@@ -123,6 +123,26 @@ class NetworkSettingsTest {
     assertEquals(0, denied.checks) // Nothing to revoke: no platform query while the switch is off.
   }
 
+  @Test
+  fun recheckReportsOnlyANewRevocationAfterDisablingNetwork() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val grant = FakeLocalNetworkGrant(true)
+    var revocations = 0
+    val onRevoked = {
+      assertFalse(settings.allowNetwork.value)
+      revocations++
+      Unit
+    }
+    settings.setAllowNetwork(true)
+    recheckLocalNetworkPermission(settings, grant, context, onRevoked)
+    assertEquals(0, revocations)
+    grant.granted = false
+    recheckLocalNetworkPermission(settings, grant, context, onRevoked)
+    recheckLocalNetworkPermission(settings, grant, context, onRevoked)
+    assertEquals(1, revocations)
+    assertEquals(2, grant.checks)
+  }
+
   private companion object {
     val REQUEST =
       PrototypeHttpRequest(

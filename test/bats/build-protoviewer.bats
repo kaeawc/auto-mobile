@@ -62,6 +62,7 @@ SCRIPT
   export PATH="${MOCK_BIN}:${PATH}"
   mkdir -p "${FIXTURE}/scripts/lib"
   cp "${REPO_ROOT}/scripts/lib/spotlight-exclude.sh" "${FIXTURE}/scripts/lib/"
+  unset PROTOVIEWER_CLEARTEXT
   SCRIPT="${FIXTURE}/scripts/ios/protoviewer-build.sh"
   OUT="${BATS_TEST_TMPDIR}/out space"
 }
@@ -89,6 +90,9 @@ with open(sys.argv[1], 'rb') as source:
 assert value['CFBundleIdentifier'] == 'dev.jasonpearson.automobile.protoviewer'
 assert value['CFBundleDisplayName'] == value['CFBundleName'] == value['CFBundleExecutable'] == 'ProtoViewer'
 assert value['LSSupportsOpeningDocumentsInPlace'] is False
+assert value['NSLocalNetworkUsageDescription'] == ('Used only when you allow network for imported prototypes, '
+    'to reach devices on your local network.')
+assert 'NSBonjourServices' not in value
 uti = 'dev.jasonpearson.automobile.prototype'
 declaration, = value['UTExportedTypeDeclarations']
 assert declaration['UTTypeIdentifier'] == uti
@@ -133,4 +137,31 @@ PY
   run cat "$BUILD_LOG"
   [[ "$output" != *'x86_64-apple'* ]]
   [[ "$output" == *'-verify_arch arm64'* ]]
+}
+
+@test "only the dev ProtoViewer compile path enables cleartext by default" {
+  run bash "$SCRIPT" "$OUT"
+  [ "$status" -eq 0 ]
+  run python3 - "$BUILD_LOG" "$REPO_ROOT/scripts/ios" <<'PY'
+from pathlib import Path
+import sys
+lines = Path(sys.argv[1]).read_text().splitlines()
+compiles = [line for line in lines if ' swiftc ' in line]
+assert len(compiles) == 2
+assert all('-D PROTOVIEWER_ALLOW_CLEARTEXT' in line for line in compiles)
+assert all('PROTOVIEWER_ALLOW_CLEARTEXT' not in line for line in lines if line not in compiles)
+# Agent, MCP-direct viewer and release entry points must not gain the dev opt-in.
+for path in Path(sys.argv[2]).glob('*.sh'):
+    if path.name != 'protoviewer-build.sh':
+        assert 'PROTOVIEWER_ALLOW_CLEARTEXT' not in path.read_text(), path
+PY
+  [ "$status" -eq 0 ]
+}
+
+@test "omits the cleartext define when PROTOVIEWER_CLEARTEXT is 0" {
+  PROTOVIEWER_CLEARTEXT=0 run bash "$SCRIPT" "$OUT"
+  [ "$status" -eq 0 ]
+  run cat "$BUILD_LOG"
+  [[ "$output" == *' swiftc '* ]]
+  [[ "$output" != *'PROTOVIEWER_ALLOW_CLEARTEXT'* ]]
 }

@@ -24,6 +24,7 @@ struct PrototypePinnedHttpClient: PrototypeHttpClient {
     private let connector: any PrototypePinnedConnecting
     private let deadlines: any PrototypeDNSDeadlineScheduling
     private let allowsCleartext: Bool
+    private let onLocalNetworkDenied: @Sendable () -> Void
     private let nowMs: @Sendable () -> Double
 
     init(
@@ -32,7 +33,8 @@ struct PrototypePinnedHttpClient: PrototypeHttpClient {
         connector: any PrototypePinnedConnecting,
         deadlines: any PrototypeDNSDeadlineScheduling = PrototypeDNSDeadline(),
         allowsCleartext: Bool = false,
-        nowMs: @escaping @Sendable () -> Double = { ProcessInfo.processInfo.systemUptime * 1000 }
+        nowMs: @escaping @Sendable () -> Double = { ProcessInfo.processInfo.systemUptime * 1000 },
+        onLocalNetworkDenied: @escaping @Sendable () -> Void = {}
     ) {
         self.policy = policy
         self.resolver = resolver
@@ -40,6 +42,7 @@ struct PrototypePinnedHttpClient: PrototypeHttpClient {
         self.deadlines = deadlines
         self.allowsCleartext = allowsCleartext
         self.nowMs = nowMs
+        self.onLocalNetworkDenied = onLocalNetworkDenied
     }
 
     #if canImport(Network)
@@ -48,15 +51,17 @@ struct PrototypePinnedHttpClient: PrototypeHttpClient {
             resolver: any HostResolving = PrototypeSystemHostResolver(),
             deadlines: any PrototypeDNSDeadlineScheduling = PrototypeDNSDeadline(),
             allowsCleartext: Bool = false,
-            nowMs: @escaping @Sendable () -> Double = { ProcessInfo.processInfo.systemUptime * 1000 }
+            nowMs: @escaping @Sendable () -> Double = { ProcessInfo.processInfo.systemUptime * 1000 },
+            onLocalNetworkDenied: @escaping @Sendable () -> Void = {}
         ) {
             self.init(
                 policy: policy,
                 resolver: resolver,
-                connector: PrototypeNWConnector(),
+                connector: PrototypeNWConnector(onLocalNetworkDenied: onLocalNetworkDenied),
                 deadlines: deadlines,
                 allowsCleartext: allowsCleartext,
-                nowMs: nowMs
+                nowMs: nowMs,
+                onLocalNetworkDenied: onLocalNetworkDenied
             )
         }
     #endif
@@ -86,7 +91,10 @@ struct PrototypePinnedHttpClient: PrototypeHttpClient {
             }
         } catch {
             let mapped = error as? PrototypeRequestError ?? Self.map(error, url: request.url)
-            throw PrototypeHttpFailure(error: mapped, durationMs: elapsed(since: started))
+            throw PrototypeHttpFailure(
+                error: mapped, durationMs: elapsed(since: started),
+                localNetworkDenied: error is PrototypeLocalNetworkDenied
+            )
         }
     }
 
@@ -169,6 +177,10 @@ struct PrototypePinnedHttpClient: PrototypeHttpClient {
                         .host(url) : nil
                 )
             } catch {
+                if error is PrototypeLocalNetworkDenied {
+                    onLocalNetworkDenied()
+                    throw error
+                }
                 guard Self.canRetryConnection(error) else { throw Self.map(error, url: url.absoluteString) }
                 lastError = error
                 continue
@@ -266,6 +278,7 @@ struct PrototypePinnedHttpClient: PrototypeHttpClient {
     }
 
     private static func map(_ error: Error, url: String) -> PrototypeRequestError {
+        if error is PrototypeLocalNetworkDenied { return .init(.network, PrototypeLocalNetworkDenied.message) }
         if let error = error as? PrototypeRequestError { return error }
         if (error as? URLError)?.code == .cannotConnectToHost || (error as? POSIXError)?.code == .ECONNREFUSED {
             return .init(.connectionRefused, "Connection refused: \(url)")

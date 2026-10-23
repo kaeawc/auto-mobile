@@ -93,6 +93,8 @@ func pinnedRequest(
 final class FakePinnedSignal: @unchecked Sendable {
     private let lock = NSLock()
     private var released = false
+    private var releases = 0
+    var releaseCount: Int { lock.withLock { releases } }
     private var continuations: [CheckedContinuation<Void, Never>] = []
     func wait() async {
         await withCheckedContinuation { continuation in
@@ -107,6 +109,7 @@ final class FakePinnedSignal: @unchecked Sendable {
 
     func release() {
         let pending = lock.withLock {
+            releases += 1
             released = true
             defer { continuations = [] }
             return continuations

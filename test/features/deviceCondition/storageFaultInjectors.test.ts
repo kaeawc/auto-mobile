@@ -78,7 +78,9 @@ function storageDevice(options: StorageDeviceOptions): StorageDevice {
       return Promise.resolve(execResult(dfOutput(free())));
     }
     if (command.startsWith("shell command -v fallocate")) {
-      return Promise.resolve(execResult(options.hasFallocate === false ? "" : "/system/bin/fallocate"));
+      return Promise.resolve(
+        execResult(options.hasFallocate === false ? "" : "/system/bin/fallocate"),
+      );
     }
     if (command.startsWith("shell ls -d ")) {
       return Promise.resolve(execResult(ballast === undefined ? "" : STORAGE_BALLAST_PATH));
@@ -121,12 +123,15 @@ describe("parseDfAvailableBytes (#14066)", () => {
   });
 
   test("reads columns from the right, so a filesystem name with spaces does not shift them", () => {
-    const output = "Filesystem 1K-blocks Used Available Use% Mounted on\n/dev/some name 1000 400 600 40% /data";
+    const output =
+      "Filesystem 1K-blocks Used Available Use% Mounted on\n/dev/some name 1000 400 600 40% /data";
     expect(parseDfAvailableBytes(output)).toBe(600 * 1024);
   });
 
   test("throws, naming the output, when no row parses", () => {
-    expect(() => parseDfAvailableBytes("df: /data: No such file")).toThrow(/Could not read free space/);
+    expect(() => parseDfAvailableBytes("df: /data: No such file")).toThrow(
+      /Could not read free space/,
+    );
   });
 });
 
@@ -267,10 +272,14 @@ describe("storage fault (#14066)", () => {
     const android: BootedDevice = { name: "emu", platform: "android", deviceId: "emulator-5554" };
     const ios: BootedDevice = { name: "sim", platform: "ios", deviceId: "UDID" };
     const factory = { create: () => new FakeAdbExecutor() };
-    expect(resolveStorageFaultInjector(android, "faults.storage", { adbFactory: factory })?.key).toBe(
-      "faults.storage",
-    );
-    expect(resolveStorageFaultInjector(android, "faults.battery", { adbFactory: factory })).toBeUndefined();
-    expect(resolveStorageFaultInjector(ios, "faults.storage", { adbFactory: factory })).toBeUndefined();
+    expect(
+      resolveStorageFaultInjector(android, "faults.storage", { adbFactory: factory })?.key,
+    ).toBe("faults.storage");
+    expect(
+      resolveStorageFaultInjector(android, "faults.battery", { adbFactory: factory }),
+    ).toBeUndefined();
+    expect(
+      resolveStorageFaultInjector(ios, "faults.storage", { adbFactory: factory }),
+    ).toBeUndefined();
   });
 });

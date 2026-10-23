@@ -150,7 +150,10 @@ export function createStorageFaultInjector(adb: AdbExecutor): DeviceConditionInj
       if (allocated === 0 && !alreadyOwned) {
         // Nothing was allocated, so there is nothing to undo and no reset to owe.
         owned = false;
-        return { status: "unchanged", detail: `free space already at or below the ${value} target` };
+        return {
+          status: "unchanged",
+          detail: `free space already at or below the ${value} target`,
+        };
       }
       return {
         status: "applied",

@@ -37,6 +37,15 @@ platform at its limit fails at once with the retryable `capacity_exhausted` erro
 [Boot capacity](environment-variables.md#boot-capacity) for the opt-out and the
 shared Android gate.
 
+A broker reset that re-boots a simulator it already holds booted keeps that
+simulator's own slot and is never refused because other simulators fill the cap.
+
+A broker reset re-booting its erased simulator waits at most 60 seconds with
+backoff for capacity. It then fails with `reset_capacity_wait_exceeded`, naming
+simulators with no AutoMobile owner that hold the cap. The broker destroys the
+unrecoverable device instead of retrying forever. Shut down the named simulators
+with `xcrun simctl shutdown <udid>` or raise `AUTOMOBILE_IOS_SIM_MAX_BOOTED`.
+
 Before a boot, the capacity check answers with one of:
 
 - `reuse-warm`: a booted simulator matches the requested device type, runtime and/or profile

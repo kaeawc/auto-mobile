@@ -3,7 +3,7 @@ export const UNPOOLED_SHUTDOWN_FENCE_HELD_MAX_MS = 600_000;
 export const UNPOOLED_SHUTDOWN_FENCE_LIFETIME_MS = 30_000;
 
 export class UnpooledShutdownFences {
-  private readonly entries = new Map<string, { token: symbol; expiresAt: number }>();
+  private readonly entries = new Map<string, { token: symbol; fenceEndsAt: number }>();
 
   constructor(private readonly now: () => number) {}
 
@@ -11,7 +11,7 @@ export class UnpooledShutdownFences {
     const token = Symbol("unpooled-shutdown");
     this.entries.set(deviceId, {
       token,
-      expiresAt: this.now() + UNPOOLED_SHUTDOWN_FENCE_HELD_MAX_MS,
+      fenceEndsAt: this.now() + UNPOOLED_SHUTDOWN_FENCE_HELD_MAX_MS,
     });
     return token;
   }
@@ -24,7 +24,7 @@ export class UnpooledShutdownFences {
   settle(deviceId: string): void {
     const entry = this.isActive(deviceId) ? this.entries.get(deviceId) : undefined;
     if (entry) {
-      entry.expiresAt = this.now() + UNPOOLED_SHUTDOWN_FENCE_LIFETIME_MS;
+      entry.fenceEndsAt = this.now() + UNPOOLED_SHUTDOWN_FENCE_LIFETIME_MS;
     }
   }
 
@@ -33,7 +33,7 @@ export class UnpooledShutdownFences {
     if (!entry) {
       return false;
     }
-    if (entry.expiresAt <= this.now()) {
+    if (entry.fenceEndsAt <= this.now()) {
       this.entries.delete(deviceId);
       return false;
     }

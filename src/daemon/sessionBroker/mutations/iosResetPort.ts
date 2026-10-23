@@ -19,6 +19,8 @@ import { looksLikeMissingIosDefault } from "../../../features/preferences/prefer
 import type { DeviceMutationResetContext, DeviceMutationResetPort } from "./reset";
 import { DEVICE_MUTATION_KINDS, type DeviceBaseline, type DeviceMutationInput } from "./types";
 import type { BaselineChange } from "./baseline";
+import { parseNotifyutilState } from "../../../utils/ios-cmdline-tools/notifyutil";
+import { iosBiometricEnrollmentTarget, iosBiometricRevertArgs } from "./iosBiometricRevert";
 
 const IOS_SETTING_VALUE_SCHEMAS = {
   appearance: z.enum(["light", "dark"]),
@@ -210,6 +212,8 @@ export class IosDeviceMutationResetPort implements DeviceMutationResetPort {
         return prior.state === "absent" || typeof prior.value === "string";
       case "device-setting":
         return canRestoreIosSetting(mutation);
+      case "biometric-enrollment":
+        return iosBiometricEnrollmentTarget(mutation) !== undefined;
       case "preference":
         return (
           mutation.key.split(":").length === 2 &&
@@ -364,20 +368,46 @@ export class IosDeviceMutationResetPort implements DeviceMutationResetPort {
         await context.assertOwned();
         break;
       }
-      default: {
-        const args = this.revertCommand(mutation, udid);
-        try {
-          await this.command(context, args);
-        } catch (error) {
-          if (args[0] !== "spawn" || args[3] !== "delete" || !looksLikeMissingIosDefault(error)) {
-            throw toActionableError(error, "iOS reset command failed");
-          }
-          // An absent preference already satisfies the requested deletion.
-          logger.debug(`iOS reset preference already absent: ${errorMessage(error)}`);
-          context.signal.throwIfAborted();
-          await context.assertOwned();
-        }
+      case "biometric-enrollment":
+        await this.revertBiometricEnrollment(mutation, context);
+        break;
+      default:
+        await this.revertByCommand(mutation, context);
+    }
+  }
+
+  private async revertByCommand(
+    mutation: DeviceMutationInput,
+    context: DeviceMutationResetContext,
+  ): Promise<void> {
+    const args = this.revertCommand(mutation, context.scope.deviceId);
+    try {
+      await this.command(context, args);
+    } catch (error) {
+      if (args[0] !== "spawn" || args[3] !== "delete" || !looksLikeMissingIosDefault(error)) {
+        throw toActionableError(error, "iOS reset command failed");
       }
+      // An absent preference already satisfies the requested deletion.
+      logger.debug(`iOS reset preference already absent: ${errorMessage(error)}`);
+      context.signal.throwIfAborted();
+      await context.assertOwned();
+    }
+  }
+
+  private async revertBiometricEnrollment(
+    mutation: DeviceMutationInput,
+    context: DeviceMutationResetContext,
+  ): Promise<void> {
+    const enrolled = iosBiometricEnrollmentTarget(mutation);
+    if (enrolled === undefined) {
+      throw new ActionableError("iOS cannot restore an unreadable biometric enrollment");
+    }
+    const result = await this.command(
+      context,
+      iosBiometricRevertArgs(context.scope.deviceId, enrolled),
+    );
+    if (parseNotifyutilState(result.stdout) !== enrolled) {
+      throw new ActionableError("iOS biometric enrollment did not read back as restored");
     }
   }
 

@@ -6,7 +6,13 @@ import {
 } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
 import { shellQuote } from "../../utils/shellQuote";
 import { logger } from "../../utils/logger";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { cleanAndroidBaseline } from "./androidKeepBootedCleanup";
+import {
+  clockCommands,
+  deviceStateSettingCommands,
+  networkConditionCommands,
+} from "./androidDeviceStateRevert";
 import type { AndroidKeepBootedResetPort } from "./androidKeepBootedReset";
 import {
   ANDROID_CERTIFIABLE_KINDS,
@@ -16,6 +22,10 @@ import {
 import { genericBaselineRevert, type BaselineChange } from "./mutations/baseline";
 import type { DeviceMutationResetContext } from "./mutations/reset";
 import type { DeviceBaseline, DeviceMutationInput } from "./mutations/types";
+import {
+  SCREEN_STATE_MUTATION_KEY,
+  isRestorableScreenState,
+} from "./mutations/screenStateMutation";
 
 interface AndroidRevertCommand {
   command: string;
@@ -35,8 +45,14 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
     "device-setting": (mutation) =>
       this.settingCommands(mutation) ??
       this.displayOverrideCommands(mutation) ??
-      this.nightModeCommands(mutation),
-    clock: (mutation) => this.timezoneCommands(mutation) ?? this.settingCommands(mutation),
+      this.nightModeCommands(mutation) ??
+      this.screenStateCommands(mutation) ??
+      deviceStateSettingCommands(mutation),
+    clock: (mutation) =>
+      this.timezoneCommands(mutation) ??
+      this.settingCommands(mutation) ??
+      clockCommands(mutation, this.timer.now()),
+    "network-condition": (mutation) => networkConditionCommands(mutation),
     rotation: (mutation) => this.settingCommands(mutation),
     "keep-awake": (mutation) => this.settingCommands(mutation),
     "screen-reader": (mutation) => this.settingCommands(mutation),
@@ -47,7 +63,10 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
     "shared-file": (mutation) => this.fileCommands(mutation),
   };
 
-  constructor(private readonly adb: AdbCommandRunner) {}
+  constructor(
+    private readonly adb: AdbCommandRunner,
+    private readonly timer: Pick<Timer, "now"> = defaultTimer,
+  ) {}
 
   canRevert(mutation: DeviceMutationInput): boolean {
     return this.commands(mutation) !== null;
@@ -335,6 +354,23 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
     const pattern = type === "density" ? /^\d+$/ : /^\d+x\d+$/;
     return absent || (typeof prior === "string" && pattern.test(prior))
       ? [{ command: `shell wm ${type} ${absent ? "reset" : prior}` }]
+      : null;
+  }
+
+  /**
+   * Puts the screen back after a power-key press or the lock action: wake it and dismiss the
+   * keyguard. Only a prior that was awake, unlocked and credential-free is restorable; a reset
+   * cannot enter a PIN, so a secure or unreadable prior is left to the next wakeAndUnlock.
+   */
+  private screenStateCommands({
+    key,
+    priorValue,
+  }: DeviceMutationInput): AndroidRevertCommand[] | null {
+    return key === SCREEN_STATE_MUTATION_KEY && isRestorableScreenState(priorValue)
+      ? [
+          { command: "shell input keyevent KEYCODE_WAKEUP" },
+          { command: "shell wm dismiss-keyguard" },
+        ]
       : null;
   }
 

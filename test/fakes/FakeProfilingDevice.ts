@@ -1,3 +1,4 @@
+import { getAbortSignal } from "../../src/utils/AbortContext";
 import { createExecResult } from "../../src/utils/execResult";
 import type { ExecResult } from "../../src/models";
 import type { ProfilingArtifactStore } from "../../src/features/profiling/ProfilingArtifactStore";
@@ -35,8 +36,13 @@ export class FakeProfilingDevice implements ProfilingAdbPort {
   /** Commands (substring) that fail with this message. */
   readonly failing = new Map<string, string>();
 
-  async execute(args: string[]): Promise<ExecResult> {
+  async execute(args: string[], options?: { signal?: AbortSignal }): Promise<ExecResult> {
     const command = args.join(" ");
+    // Like AdbClient: an explicit signal, else the ambient request signal, aborts the command.
+    if ((options?.signal ?? getAbortSignal())?.aborted) {
+      this.commands.push(`${command} [aborted]`);
+      throw new Error("operation cancelled");
+    }
     this.commands.push(command);
     for (const [pattern, message] of this.failing) {
       if (command.includes(pattern)) {

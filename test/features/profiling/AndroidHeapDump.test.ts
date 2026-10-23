@@ -7,6 +7,7 @@ import {
   HeapDumpRefusedError,
 } from "../../../src/features/profiling/AndroidHeapDump";
 import { ProfilingRegistry } from "../../../src/features/profiling/ProfilingRegistry";
+import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
 import { FakeProfilingDevice, FakeProfilingStore } from "../../fakes/FakeProfilingDevice";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -192,5 +193,39 @@ describe("AndroidHeapDump (#14113)", () => {
     expect(device.commands.some((c) => c.startsWith("shell cmd activity"))).toBe(false);
     expect(store.removed).toHaveLength(1);
     expect(registry.takeOwnedBy(DEVICE, "s-1").deviceFiles).toEqual([]);
+  });
+
+  test("a request cancelled after the dump was written still removes the device file (#14113 review)", async () => {
+    const { device, registry, dump } = setup();
+    const controller = new AbortController();
+    const original = device.execute.bind(device);
+    device.execute = async (args, options) => {
+      const result = await original(args, options);
+      if (args.join(" ").includes("dumpheap")) {
+        controller.abort();
+      }
+      return result;
+    };
+
+    await expect(
+      runWithAbortSignal(controller.signal, () =>
+        dump.dump({ appId: APP, deviceId: DEVICE, sessionId: "s-1" }),
+      ),
+    ).rejects.toThrow("cancelled");
+
+    expect(device.commands).toContain(`shell rm -f ${REMOTE}`);
+    expect(device.deviceFiles.size).toBe(0);
+    expect(registry.takeOwnedBy(DEVICE, "s-1").deviceFiles).toEqual([]);
+  });
+
+  test("a device file that cannot be removed stays registered for session-release cleanup", async () => {
+    const { device, registry, dump } = setup();
+    device.failing.set("rm -f", "device offline");
+
+    await dump.dump({ appId: APP, deviceId: DEVICE, sessionId: "s-1" });
+
+    expect(registry.takeOwnedBy(DEVICE, "s-1").deviceFiles.map((f) => f.remotePath)).toEqual([
+      REMOTE,
+    ]);
   });
 });

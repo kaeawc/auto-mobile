@@ -120,8 +120,10 @@ export class AndroidHeapDump {
       await store.remove(hostPath);
       throw error;
     } finally {
-      await removeDeviceFile(adb, remotePath, "heapDump");
-      registry.removeDeviceFile(request.deviceId, remotePath);
+      // A file that could not be removed stays registered so session release retries it.
+      if (await removeDeviceFile(adb, remotePath, "heapDump")) {
+        registry.removeDeviceFile(request.deviceId, remotePath);
+      }
     }
   }
 

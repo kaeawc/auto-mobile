@@ -130,7 +130,14 @@ export class AndroidTraceCapture {
     } finally {
       // A failed stop still frees the device: the recorder was signalled and is not retried.
       registry.removeTrace(traceId);
-      await removeDeviceFile(adb, record.remotePath, LOG_TAG);
+      if (!(await removeDeviceFile(adb, record.remotePath, LOG_TAG))) {
+        // The recorder is stopped but its file is not gone: keep it registered for release cleanup.
+        registry.addDeviceFile({
+          deviceId: record.deviceId,
+          sessionId: record.sessionId,
+          remotePath: record.remotePath,
+        });
+      }
     }
     const sizeBytes = await store.sizeOf(record.hostPath);
     if (sizeBytes === 0) {

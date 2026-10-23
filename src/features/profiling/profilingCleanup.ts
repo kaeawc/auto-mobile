@@ -1,3 +1,4 @@
+import { runOutsideRequestContext } from "../../utils/AbortContext";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import type { Timer } from "../../utils/SystemTimer";
@@ -18,13 +19,36 @@ export interface ProfilingCleanupReport {
   errors: string[];
 }
 
+async function removeFile(
+  adb: PerfettoAdb,
+  remotePath: string,
+  report: ProfilingCleanupReport,
+): Promise<void> {
+  if (await removeDeviceFile(adb, remotePath, "profiling")) {
+    report.removedFiles.push(remotePath);
+  } else {
+    report.errors.push(`remove ${remotePath}: failed`);
+  }
+}
+
 /**
  * Stop the trace recorders a released session left running and delete the device files it left
  * behind (#14113). Nobody is waiting for an orphaned trace, so its data is discarded, not pulled.
  * Every step is attempted even if an earlier one failed, and nothing here throws: the device
  * must not stay quarantined on account of a cleanup that cannot finish.
  */
-export async function cleanupSessionProfiling(
+export function cleanupSessionProfiling(
+  deviceId: string,
+  state: SessionProfilingState,
+  adb: PerfettoAdb,
+  timer: Pick<Timer, "sleep">,
+  poll?: PerfettoPollOptions,
+): Promise<ProfilingCleanupReport> {
+  // Called from inside a request when a start finishes late: a cancelled request must not abort it.
+  return runOutsideRequestContext(() => cleanupAll(deviceId, state, adb, timer, poll));
+}
+
+async function cleanupAll(
   deviceId: string,
   state: SessionProfilingState,
   adb: PerfettoAdb,
@@ -45,13 +69,10 @@ export async function cleanupSessionProfiling(
       report.errors.push(`stop ${trace.traceId}: ${errorMessage(error)}`);
       logger.warn(`[profiling] failed to stop trace ${trace.traceId} on ${deviceId}`, error);
     }
-    // removeDeviceFile logs and swallows its own failure, so the file is always attempted.
-    await removeDeviceFile(adb, trace.remotePath, "profiling");
-    report.removedFiles.push(trace.remotePath);
+    await removeFile(adb, trace.remotePath, report);
   }
   for (const file of state.deviceFiles) {
-    await removeDeviceFile(adb, file.remotePath, "profiling");
-    report.removedFiles.push(file.remotePath);
+    await removeFile(adb, file.remotePath, report);
   }
   return report;
 }

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { AndroidTraceCapture } from "../../../src/features/profiling/AndroidTraceCapture";
 import { ProfilingRegistry } from "../../../src/features/profiling/ProfilingRegistry";
+import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
 import { FakeProfilingDevice, FakeProfilingStore } from "../../fakes/FakeProfilingDevice";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -173,5 +174,38 @@ describe("AndroidTraceCapture (#14113)", () => {
     device.failing.set("kill -TERM", "adb dispatch aborted");
     await expect(capture.stop(DEVICE, "trace-a1")).rejects.toThrow();
     expect(registry.takeOwnedBy(DEVICE, "s-1").traces.map((t) => t.traceId)).toEqual(["trace-a1"]);
+  });
+
+  test("a stop cancelled once the recorder is confirmed stopped still removes the device file (#14113 review)", async () => {
+    const { device, registry, capture } = setup();
+    await capture.start({ deviceId: DEVICE, sessionId: "s-1" });
+    const controller = new AbortController();
+    const original = device.execute.bind(device);
+    device.execute = async (args, options) => {
+      const result = await original(args, options);
+      if (args.join(" ").includes("kill -0")) {
+        controller.abort();
+      }
+      return result;
+    };
+
+    await expect(
+      runWithAbortSignal(controller.signal, () => capture.stop(DEVICE, "trace-a1")),
+    ).rejects.toThrow("cancelled");
+
+    expect(device.deviceFiles.size).toBe(0);
+    expect(registry.getTrace("trace-a1")).toBeUndefined();
+  });
+
+  test("a stopped trace whose file cannot be removed stays registered as a device file", async () => {
+    const { device, registry, capture } = setup();
+    await capture.start({ deviceId: DEVICE, sessionId: "s-1" });
+    device.failing.set("rm -f", "device offline");
+
+    await capture.stop(DEVICE, "trace-a1");
+
+    expect(registry.takeOwnedBy(DEVICE, "s-1").deviceFiles.map((f) => f.remotePath)).toEqual([
+      "/data/misc/perfetto-traces/automobile-trace-a1.perfetto-trace",
+    ]);
   });
 });

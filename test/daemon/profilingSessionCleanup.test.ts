@@ -1,5 +1,7 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { registerProfilingSessionCleanup } from "../../src/daemon/profilingSessionCleanup";
+import { cleanupSessionProfiling } from "../../src/features/profiling/profilingCleanup";
+import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { AndroidHeapDump } from "../../src/features/profiling/AndroidHeapDump";
 import { AndroidTraceCapture } from "../../src/features/profiling/AndroidTraceCapture";
 import { ProfilingRegistry } from "../../src/features/profiling/ProfilingRegistry";
@@ -147,5 +149,39 @@ describe("registerProfilingSessionCleanup (#14113)", () => {
       dump.dump({ appId: "com.example.app", deviceId: DEVICE, sessionId: "s-1" }),
     ).rejects.toThrow("is empty");
     expect(device.deviceFiles.size).toBe(0);
+  });
+
+  test("cleanup run from inside a cancelled request still stops the recorder and removes the file (#14113 review)", async () => {
+    const { device, registry, capture, timer } = setup();
+    await capture.start({ deviceId: DEVICE, sessionId: "s-1" });
+    const controller = new AbortController();
+    controller.abort();
+
+    const report = await runWithAbortSignal(controller.signal, () =>
+      cleanupSessionProfiling(DEVICE, registry.takeOwnedBy(DEVICE, "s-1"), device, timer),
+    );
+
+    expect(report).toMatchObject({ stoppedTraces: ["trace-t1"], errors: [] });
+    expect(device.runningPids.size).toBe(0);
+    expect(device.deviceFiles.size).toBe(0);
+  });
+
+  test("a file that cannot be removed is reported, not claimed removed", async () => {
+    const { device, registry, timer } = setup();
+    registry.addDeviceFile({ deviceId: DEVICE, sessionId: "s-1", remotePath: "/data/local/tmp/x" });
+    device.failing.set("rm -f", "device offline");
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const report = await cleanupSessionProfiling(
+        DEVICE,
+        registry.takeOwnedBy(DEVICE, "s-1"),
+        device,
+        timer,
+      );
+      expect(report.removedFiles).toEqual([]);
+      expect(report.errors).toEqual(["remove /data/local/tmp/x: failed"]);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

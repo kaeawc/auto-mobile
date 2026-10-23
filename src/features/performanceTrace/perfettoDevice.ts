@@ -1,5 +1,6 @@
 import { ActionableError } from "../../models";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { runOutsideRequestContext } from "../../utils/AbortContext";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { shellQuoteUnlessSafe } from "../../utils/shellQuote";
@@ -98,19 +99,28 @@ export async function deviceFileSize(
   return Number.parseInt(probe.stdout.trim(), 10) || 0;
 }
 
-/** Best-effort `rm -f` of a device file; a leftover only costs device storage, so it is logged. */
+/**
+ * Best-effort `rm -f` of a device file; returns whether it ran. It runs outside the request
+ * context: adb inherits the ambient abort signal, so a cancelled request would otherwise abort
+ * its own teardown and leave the file behind. A failure is logged, and callers that can still
+ * retry later (session release) keep the file registered.
+ */
 export async function removeDeviceFile(
   adb: PerfettoAdb,
   remotePath: string,
   logTag: string,
-): Promise<void> {
+): Promise<boolean> {
   try {
-    await adb.execute(["shell", `rm -f ${shellQuoteUnlessSafe(remotePath)}`], {
-      timeoutMs: ADB_TIMEOUT_MS,
-      noRetry: true,
-    });
+    await runOutsideRequestContext(() =>
+      adb.execute(["shell", `rm -f ${shellQuoteUnlessSafe(remotePath)}`], {
+        timeoutMs: ADB_TIMEOUT_MS,
+        noRetry: true,
+      }),
+    );
+    return true;
   } catch (error) {
     logger.warn(`[${logTag}] failed to remove ${remotePath}: ${errorMessage(error)}`, error);
+    return false;
   }
 }
 

@@ -285,7 +285,9 @@ describe("broker tool-surface mutation recording", () => {
       } finally {
         journalRead.mockRestore();
       }
-      expect(await journal.list(SCOPE)).toEqual([]);
+      expect(await journal.list(SCOPE)).toMatchObject([
+        { kind: "opaque", key: opaqueIntentKey("recording-failed", "installApp") },
+      ]);
     },
   );
 
@@ -378,7 +380,10 @@ describe("broker tool-surface mutation recording", () => {
         { dirty: [], changes: [] },
         { canRevert: () => true },
       ),
-    ).toEqual({ status: "non_revertible", reasons: ["Unobservable prior value clipboard:device"] });
+    ).toEqual({
+      status: "non_revertible",
+      reasons: ["Unobservable prior value clipboard:device"],
+    });
   });
 
   test("unobservable priors never reach platform revert-support predicates", async () => {
@@ -434,7 +439,7 @@ describe("broker tool-surface mutation recording", () => {
       "Device mutation recording failed; proceeding without recording",
       expect.objectContaining({ message: "journal unavailable" }),
     );
-    expect(await journal.list(SCOPE)).toHaveLength(1);
+    expect(await journal.list(SCOPE)).toHaveLength(2);
   });
 
   test("failed actions retain their before-act journal entry", async () => {
@@ -757,6 +762,7 @@ describe("review regression coverage", () => {
         },
       }),
       sessionBrokerService: () => ({
+        markMutationUnrecorded: () => {},
         recoverMutationRecorder: async () => {
           throw new Error("derived session must not query receipts");
         },
@@ -779,7 +785,10 @@ describe("review regression coverage", () => {
           getBaseSessionOfDerivedLabel: () => undefined,
           peekSession: () => null,
         }),
-        sessionBrokerService: () => ({ recoverMutationRecorder: async () => recorder }),
+        sessionBrokerService: () => ({
+          markMutationUnrecorded: () => {},
+          recoverMutationRecorder: async () => recorder,
+        }),
       },
       {
         keyboardProfilesFor: () => ({
@@ -1226,4 +1235,100 @@ describe("existing cheap mutation prior readers", () => {
       { state: "unobservable" },
     ]);
   });
+});
+
+test.each(["record", "marker", "gap", "mismatch", "recovery", "missing", "abort"] as const)(
+  "recording %s tracks gaps without preventing available tools",
+  async (stage) => {
+    const { dispatch, journal } = harness();
+    const marks: [string, string][] = [];
+    const recorder = new SessionMutationRecorder(
+      journal,
+      stage === "mismatch" ? { ...SCOPE, sessionUuid: "other" } : SCOPE,
+    );
+    if (stage === "record" || stage === "marker") {
+      const record = journal.record.bind(journal);
+      journal.record = async (scope, mutation) => {
+        if (stage === "marker" || mutation.kind !== "opaque") {
+          throw new Error("journal unavailable");
+        }
+        return record(scope, mutation);
+      };
+    }
+    const controller = new AbortController();
+    const priorReader = new FakePriorReader();
+    const recording = new SessionDeviceMutationRecording(
+      async () => {
+        if (stage === "abort") {
+          controller.abort(new Error("cancelled"));
+          throw new Error("recovery failed");
+        }
+        if (stage === "recovery" || stage === "gap") {
+          throw new Error("recovery failed");
+        }
+        return stage === "missing" ? undefined : recorder;
+      },
+      priorReader,
+      undefined,
+      undefined,
+      (uuid, reason) => {
+        marks.push([uuid, reason]);
+        if (stage === "gap") {
+          throw new Error("gap service unavailable");
+        }
+      },
+    );
+    let acted = false;
+    const action = dispatch(
+      "clipboard",
+      { action: "clear" },
+      async () => {
+        acted = true;
+        return { content: [] };
+      },
+      recording,
+      controller.signal,
+    );
+    if (stage === "abort") {
+      await expect(action).rejects.toThrow("cancelled");
+    } else {
+      await action;
+    }
+    expect(acted).toBe(stage !== "abort");
+    expect(marks.length).toBe(stage === "missing" || stage === "abort" ? 0 : 1);
+    if (marks.length) {
+      expect(marks[0]).toEqual([SCOPE.sessionUuid, expect.stringContaining("clipboard")]);
+    }
+    if (stage === "record") {
+      expect(await journal.list(SCOPE)).toMatchObject([
+        { kind: "opaque", key: opaqueIntentKey("recording-failed", "clipboard") },
+      ]);
+    }
+    if (stage === "mismatch") {
+      expect(await journal.list(recorder.scope)).toEqual([]);
+    }
+  },
+);
+
+test("createRecording forwards a gap for the call session, never the mismatched recorder", async () => {
+  const journal = new FakeDeviceMutationJournal(new FakeTimer());
+  const recorder = new SessionMutationRecorder(journal, { ...SCOPE, sessionUuid: "other" });
+  const marks: [string, string][] = [];
+  const recording = createRecording({
+    sessionManager: () => ({
+      getBaseSessionOfDerivedLabel: () => undefined,
+      peekSession: () => null,
+    }),
+    sessionBrokerService: () => ({
+      recoverMutationRecorder: async () => recorder,
+      markMutationUnrecorded: (uuid, reason) => {
+        marks.push([uuid, reason]);
+      },
+    }),
+  });
+  await recording.beforeToolCall("clipboard", { action: "clear" }, DEVICE, SCOPE.sessionUuid);
+  expect(marks).toEqual([
+    [SCOPE.sessionUuid, expect.stringContaining("clipboard: Device mutation recorder must match")],
+  ]);
+  expect(await journal.list(recorder.scope)).toEqual([]);
 });

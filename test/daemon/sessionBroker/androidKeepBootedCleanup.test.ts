@@ -400,22 +400,14 @@ describe("Android unconditional keep-booted cleaning", () => {
     expect(commands).toContain("shell settings --user 0 put secure location_mode '3'");
   });
 
-  test.each([false, true])(
-    "setting put failure is hard only for a critical key (%s)",
-    async (critical) => {
-      const { adb, reply, reset } = await rig();
-      const key = critical ? "adb_enabled" : "optional_key";
-      reply("shell settings --user 0 list global", `${key}=0`);
-      const failedCommand = `shell settings --user 0 delete global ${key}`;
-      adb.setCommandResponse(failedCommand, createExecResult("Error: refused", ""));
-      if (critical) {
-        await expect(reset()).rejects.toThrow("non-clean");
-      } else {
-        expect(await reset()).toMatchObject({ outcome: "clean", mode: "keep-booted" });
-        expect(adb.getExecutedCommands()).toContain("shell cmd clipboard clear");
-      }
-    },
-  );
+  test.each([false, true])("persistent setting put failure is non-clean (%s)", async (critical) => {
+    const { adb, reply, reset } = await rig();
+    const key = critical ? "adb_enabled" : "optional_key";
+    reply("shell settings --user 0 list global", `${key}=0`);
+    const failedCommand = `shell settings --user 0 delete global ${key}`;
+    adb.setCommandResponse(failedCommand, createExecResult("Error: refused", ""));
+    await expect(reset()).rejects.toThrow("non-clean");
+  });
 
   test("removes only added files under inventory roots, preserving baseline contents", async () => {
     const { adb, reply, port, journal, reset } = await rig();
@@ -565,4 +557,53 @@ describe("cleaning adb under load", () => {
     expect(reads).toBe(2);
     expect(timer.getSleepHistory()).toEqual([250]);
   });
+});
+
+test.each([false, true])(
+  "non-critical setting restore re-read matches baseline (absent: %s)",
+  async (absent) => {
+    const { adb, reset } = await rig();
+    const key = absent ? "optional_key" : "animator_duration_scale";
+    adb.setCommandResponseSequence("shell settings --user 0 list global", [
+      createExecResult(`${key}=0`, ""),
+      createExecResult(absent ? "" : `${key}=0.5`, ""),
+    ]);
+    adb.setCommandResponse(
+      absent
+        ? `shell settings --user 0 delete global ${key}`
+        : `shell settings --user 0 put global ${key} '0.5'`,
+      createExecResult("Error: refused", ""),
+    );
+    expect(await reset()).toMatchObject({ outcome: "clean", mode: "keep-booted" });
+    expect(
+      adb
+        .getExecutedCommands()
+        .filter((command) => command === "shell settings --user 0 list global"),
+    ).toHaveLength(2);
+  },
+);
+
+test("persistent non-critical restore failures escalate and name every still-dirty key", async () => {
+  let fallbacks = 0;
+  const { adb, reset } = await rig([0], {
+    reset: async () => {
+      fallbacks++;
+      return { outcome: "clean", mode: "snapshot", phases: {} };
+    },
+  });
+  adb.setCommandResponseSequence("shell settings --user 0 list global", [
+    createExecResult("dirty_a=1\ndirty_b=2\nnow_clean=3", ""),
+    createExecResult("dirty_a=1\ndirty_b=2", ""),
+  ]);
+  for (const key of ["dirty_a", "dirty_b", "now_clean"]) {
+    adb.setCommandResponse(
+      `shell settings --user 0 delete global ${key}`,
+      createExecResult("Error: refused", ""),
+    );
+  }
+  const result = await reset();
+  expect(result.outcome).toBe("fallback:snapshot");
+  expect(result.fallbackReason).toContain("global:dirty_a, global:dirty_b");
+  expect(result.fallbackReason).not.toContain("now_clean");
+  expect(fallbacks).toBe(1);
 });

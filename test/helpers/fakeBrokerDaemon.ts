@@ -1,3 +1,4 @@
+import { InMemoryMutationRecordingGaps } from "../../src/daemon/sessionBroker/mutations/recordingGaps";
 import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { exampleSessionBrokerDeviceName } from "../../src/daemon/sessionBroker/deviceNaming";
@@ -111,6 +112,7 @@ export async function createFakeBrokerDaemon(
     scope.scope.scopeKey,
     { acquire: () => {}, release: () => {} },
     timer,
+    new InMemoryMutationRecordingGaps(),
   );
   const state: DaemonStateAccess = {
     isInitialized: () => true,

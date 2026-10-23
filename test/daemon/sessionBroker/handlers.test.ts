@@ -1,3 +1,4 @@
+import { InMemoryMutationRecordingGaps } from "../../../src/daemon/sessionBroker/mutations/recordingGaps";
 import { afterEach, beforeEach, describe, expect, spyOn, test, mock } from "bun:test";
 import {
   openSqliteBindingRegistry,
@@ -221,6 +222,7 @@ describe("session broker daemon handlers", () => {
       SCOPE,
       { acquire: () => {}, release: () => {} },
       new FakeTimer(),
+      new InMemoryMutationRecordingGaps(),
     );
     state = {
       isInitialized: () => true,

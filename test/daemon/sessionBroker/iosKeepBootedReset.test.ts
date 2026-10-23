@@ -1,3 +1,5 @@
+import { deviceToolMutations } from "../../../src/server/deviceMutationAdapters";
+import { InMemoryMutationRecordingGaps } from "../../../src/daemon/sessionBroker/mutations/recordingGaps";
 import { describe, expect, test } from "bun:test";
 import {
   IosKeepBootedReset,
@@ -14,6 +16,7 @@ import {
   DEVICE_MUTATION_KINDS,
   opaqueIntentKey,
   type DeviceBaseline,
+  type DeviceMutationInput,
 } from "../../../src/daemon/sessionBroker/mutations/types";
 import type { DeviceMutationResetContext } from "../../../src/daemon/sessionBroker/mutations/reset";
 import type { IosResetProfile } from "../../../src/daemon/sessionBroker/iosResetTarget";
@@ -37,6 +40,12 @@ const DEVICE = { deviceId: "UDID", platform: "ios", name: "phone" } as const;
 const SCOPE = { deviceId: DEVICE.deviceId, incarnation: "generation-1", sessionUuid: "session-a" };
 
 class FakeFastMutations extends FakeDeviceMutationResetPort implements IosKeepBootedMutationPort {
+  sanitizeCovers(entry: DeviceMutationInput): boolean {
+    return (
+      ["clipboard", "keychain", "permission", "certificate", "media"].includes(entry.kind) ||
+      (entry.kind === "device-setting" && entry.key === "appearance")
+    );
+  }
   sanitizeCount = 0;
   sanitizeError?: Error;
   sanitizedBaseline?: DeviceBaseline;
@@ -56,7 +65,10 @@ class FakeFastMutations extends FakeDeviceMutationResetPort implements IosKeepBo
 async function harness(
   observations: DeviceBaseline["observations"] = [],
   missingBaseline = false,
-  budgets: Pick<IosKeepBootedResetDependencies, "hostLoad" | "budgetCeilingMs"> = {},
+  budgets: Pick<
+    IosKeepBootedResetDependencies,
+    "hostLoad" | "budgetCeilingMs" | "recordingGaps"
+  > = {},
 ) {
   const timer = new FakeTimer();
   const baseline: DeviceBaseline = {
@@ -222,13 +234,14 @@ describe("iOS keep-booted best-effort cleaning", () => {
     },
   );
 
-  test("unplannable reverts are skipped while supported entries replay newest first", async () => {
+  test("covered unplannable reverts are skipped while supported entries replay newest first", async () => {
     const rig = await harness();
     rig.mutations.unsupportedKinds.add("media");
+    rig.mutations.unsupportedKinds.add("keychain");
     for (const [kind, key] of [
       ["clipboard", "device"],
       ["media", "photo"],
-      ["future-kind", "device"],
+      ["keychain", "device"],
       ["preference", "app:key"],
     ]) {
       await rig.journal.record(SCOPE, {
@@ -648,4 +661,124 @@ test("an abandoned step that never settles is not retried and blocks the erase",
   expect(await result).toBeInstanceOf(ResetFailureError);
   expect(calls).toBe(1);
   expect(rig.state.eraseCalls).toBe(0);
+});
+
+test.each(["rotation", "opened-url", "contact", "future-kind", "device-setting"])(
+  "uncovered non-revertible %s erases before sanitize",
+  async (kind) => {
+    const rig = await harness();
+    rig.mutations.unsupportedKinds.add(kind);
+    await rig.journal.record(SCOPE, {
+      kind,
+      key: "unknown",
+      toolName: "test",
+      priorValue: { state: "unobservable" },
+    });
+    expect(await rig.run()).toMatchObject({
+      outcome: "fallback:erase",
+      fallbackReason: expect.stringContaining(`${kind}:unknown (test)`),
+    });
+    expect(rig.state.eraseCalls).toBe(1);
+    expect(rig.mutations.sanitizeCount).toBe(0);
+  },
+);
+
+test.each([false, true])(
+  "iOS recording gap forces erase and clears only after success: %s",
+  async (fail) => {
+    const gaps = new InMemoryMutationRecordingGaps();
+    gaps.mark(SCOPE.sessionUuid, "clipboard: unavailable");
+    const rig = await harness([], false, { recordingGaps: gaps });
+    if (fail) {
+      rig.state.eraseError = new Error("erase failed");
+    }
+    if (fail) {
+      await expect(rig.run()).rejects.toThrow("erase failed");
+    } else {
+      expect(await rig.run()).toMatchObject({
+        outcome: "fallback:erase",
+        fallbackReason: expect.stringContaining("clipboard: unavailable"),
+      });
+    }
+    expect(rig.state.eraseCalls).toBe(1);
+    expect(rig.mutations.sanitizeCount).toBe(0);
+    expect(gaps.reasonFor(SCOPE.sessionUuid)).toBe(fail ? "clipboard: unavailable" : undefined);
+  },
+);
+
+test.each([
+  ["clipboard", "device"],
+  ["keychain", "device"],
+  ["permission", "app"],
+  ["certificate", "root"],
+  ["device-setting", "appearance"],
+  ["preference", "tool:setUIState"],
+  ["preference", "focused-field"],
+  ["preference", JSON.stringify({ appId: "session.app", key: "name" })],
+  ["opaque", "tool:sendSms"],
+  ["installed-app", "session.app"],
+  ["app-group", "session.app"],
+])("sanitize covers non-revertible %s:%s", async (kind, key) => {
+  const rig = await harness();
+  await rig.journal.record(SCOPE, {
+    kind,
+    key,
+    toolName: "test",
+    priorValue: { state: "unobservable" },
+  });
+  expect(await rig.run()).toMatchObject({ outcome: "clean", mode: "keep-booted" });
+  expect(rig.mutations.sanitizeCount).toBe(1);
+  expect(rig.state.eraseCalls).toBe(0);
+});
+
+test("non-revertible store preference of a baseline app requires erase", async () => {
+  const rig = await harness([
+    { kind: "installed-app", key: "baseline.app", value: { state: "present", value: true } },
+  ]);
+  const key = JSON.stringify({ appId: "baseline.app", key: "name" });
+  await rig.journal.record(SCOPE, {
+    kind: "preference",
+    key,
+    toolName: "test",
+    priorValue: { state: "unobservable" },
+  });
+  expect(await rig.run()).toMatchObject({
+    outcome: "fallback:erase",
+    fallbackReason: expect.stringContaining(key),
+  });
+  expect(rig.mutations.sanitizeCount).toBe(0);
+});
+
+test("snapshot restore adapter row requires erase on iOS", async () => {
+  const rig = await harness();
+  for (const row of deviceToolMutations(
+    "deviceSnapshot",
+    { action: "restore", snapshotName: "baseline" },
+    "ios",
+  )) {
+    await rig.journal.record(SCOPE, {
+      ...row,
+      toolName: "deviceSnapshot",
+      priorValue: { state: "unobservable" },
+    });
+  }
+  expect(await rig.run()).toMatchObject({ outcome: "fallback:erase" });
+});
+
+test("uncovered older row erases before reverting a newer clipboard row", async () => {
+  const rig = await harness();
+  await rig.journal.record(SCOPE, {
+    kind: "opened-url",
+    key: "unknown",
+    toolName: "openLink",
+    priorValue: { state: "unobservable" },
+  });
+  await rig.journal.record(SCOPE, {
+    kind: "clipboard",
+    key: "device",
+    toolName: "clipboard",
+    priorValue: { state: "present", value: "original" },
+  });
+  expect(await rig.run()).toMatchObject({ outcome: "fallback:erase" });
+  expect(rig.mutations.reverted).toEqual([]);
 });

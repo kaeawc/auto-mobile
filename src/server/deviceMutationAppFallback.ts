@@ -29,7 +29,9 @@ function fallbackTarget(
     return tool ? { tool, appId } : null;
   } catch (error) {
     // Another family's opaque intent need not parse as an app key; it is kept as recorded.
-    logger.debug(`Opaque intent ${mutation.key} is not an app fallback key: ${errorMessage(error)}`);
+    logger.debug(
+      `Opaque intent ${mutation.key} is not an app fallback key: ${errorMessage(error)}`,
+    );
     return null;
   }
 }

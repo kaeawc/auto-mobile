@@ -60,9 +60,7 @@ describe("device mutation tool coverage", () => {
         },
         { name: "pureRead", requiresDevice: true, deviceReadOnly: true },
       ]),
-    ).toEqual([
-      "newMixedTool: missing journaled adapter or explicit notJournaled justification",
-    ]);
+    ).toEqual(["newMixedTool: missing journaled adapter or explicit notJournaled justification"]);
   });
 
   test("journaled adapters and notJournaled justifications are distinct, and nothing is left pending", () => {
@@ -97,7 +95,10 @@ describe("device mutation tool coverage", () => {
     "setDeviceState",
     "deviceSnapshot",
   ])("%s can record an escalating fallback intent and says so", (name) => {
-    expect(DEVICE_MUTATION_TOOL_COVERAGE[name]).toMatchObject({ status: "journaled", fallback: true });
+    expect(DEVICE_MUTATION_TOOL_COVERAGE[name]).toMatchObject({
+      status: "journaled",
+      fallback: true,
+    });
   });
 
   test("only journaled tools may claim a fallback intent", () => {

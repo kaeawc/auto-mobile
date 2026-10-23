@@ -208,7 +208,6 @@ export function mutationToolCoverageViolations(
       );
     })
     .map(
-      (tool) =>
-        `${tool.name}: missing journaled adapter or explicit notJournaled justification`,
+      (tool) => `${tool.name}: missing journaled adapter or explicit notJournaled justification`,
     );
 }

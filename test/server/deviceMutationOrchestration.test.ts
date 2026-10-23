@@ -54,7 +54,11 @@ describe("Orchestration journal intents (#14359)", () => {
 
     test("a plain session show, patch, dismiss or read changes nothing", () => {
       expect(
-        deviceToolMutations("prototype", show({ id: "p", window: { persistence: "session" } }), "android"),
+        deviceToolMutations(
+          "prototype",
+          show({ id: "p", window: { persistence: "session" } }),
+          "android",
+        ),
       ).toEqual([]);
       for (const action of ["patch", "dismiss", "status", "inspect", "awaitEvent", "listSaved"]) {
         expect(deviceToolMutations("prototype", { action }, "android")).toEqual([]);
@@ -110,9 +114,9 @@ describe("recording a prototype show by path", () => {
   });
 
   test("a readable device-persistent spec records the device-state intent", async () => {
-    expect(
-      await recorded({ "/p.json": { window: { persistence: "device" } } }, "/p.json"),
-    ).toEqual([opaqueIntentKey("prototype", "show", "device-state")]);
+    expect(await recorded({ "/p.json": { window: { persistence: "device" } } }, "/p.json")).toEqual(
+      [opaqueIntentKey("prototype", "show", "device-state")],
+    );
   });
 
   test("an unreadable spec stays conservative", async () => {

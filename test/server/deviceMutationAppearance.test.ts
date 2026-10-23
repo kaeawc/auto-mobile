@@ -9,9 +9,9 @@ const STATUS_BAR = { kind: "status-bar", key: "device" };
 
 describe("Appearance journal intents (#14359)", () => {
   test("statusBar override journals the device override; clear and get change nothing", () => {
-    expect(deviceToolMutations("statusBar", { action: "override", time: "9:41" }, "android")).toEqual(
-      [STATUS_BAR],
-    );
+    expect(
+      deviceToolMutations("statusBar", { action: "override", time: "9:41" }, "android"),
+    ).toEqual([STATUS_BAR]);
     expect(deviceToolMutations("statusBar", { action: "override", time: "9:41" }, "ios")).toEqual([
       STATUS_BAR,
     ]);
@@ -20,9 +20,7 @@ describe("Appearance journal intents (#14359)", () => {
   });
 
   test("manufacturerProfile apply on Android journals the keyboard profile and a breadcrumb", () => {
-    expect(
-      deviceToolMutations("manufacturerProfile", { action: "apply" }, "android"),
-    ).toEqual([
+    expect(deviceToolMutations("manufacturerProfile", { action: "apply" }, "android")).toEqual([
       { kind: "keyboard", key: "profile" },
       { kind: "opaque", key: "tool:manufacturerProfile" },
     ]);

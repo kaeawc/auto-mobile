@@ -36,12 +36,12 @@ describe("Lifecycle journal intents (#14359)", () => {
   });
 
   test("measureStartup records only for a persistent compilation mode", () => {
-    expect(deviceToolMutations("measureStartup", { appId: "a.b", dropCaches: true }, "android")).toEqual(
-      [],
-    );
-    expect(deviceToolMutations("measureStartup", { appId: "a.b", compilation: "asIs" }, "android")).toEqual(
-      [],
-    );
+    expect(
+      deviceToolMutations("measureStartup", { appId: "a.b", dropCaches: true }, "android"),
+    ).toEqual([]);
+    expect(
+      deviceToolMutations("measureStartup", { appId: "a.b", compilation: "asIs" }, "android"),
+    ).toEqual([]);
     expect(
       deviceToolMutations("measureStartup", { appId: "a.b", compilation: "speed" }, "android"),
     ).toEqual([fallback("measureStartup", "a.b")]);
@@ -92,7 +92,10 @@ describe("withoutSessionCoveredFallbacks", () => {
 
   test("clearing data of an app the session installed and the baseline lacked is covered by the clean", async () => {
     expect(
-      await withoutSessionCoveredFallbacks([clear], evidence({ installed: ["a.b"], baselineApps: [] })),
+      await withoutSessionCoveredFallbacks(
+        [clear],
+        evidence({ installed: ["a.b"], baselineApps: [] }),
+      ),
     ).toEqual([]);
   });
 
@@ -115,7 +118,10 @@ describe("withoutSessionCoveredFallbacks", () => {
 
   test("an unreadable baseline keeps the fallback", async () => {
     expect(
-      await withoutSessionCoveredFallbacks([clear], evidence({ installed: ["a.b"], baselineApps: null })),
+      await withoutSessionCoveredFallbacks(
+        [clear],
+        evidence({ installed: ["a.b"], baselineApps: null }),
+      ),
     ).toEqual([clear]);
   });
 

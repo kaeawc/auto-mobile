@@ -149,7 +149,9 @@ describe("broker tool-surface mutation recording", () => {
   test("every journaled coverage classification has an exercised adapter", () => {
     expect(CASES.map((entry) => entry.name).sort()).toEqual(
       Object.entries(DEVICE_MUTATION_TOOL_COVERAGE)
-        .filter(([name, entry]) => entry.status === "journaled" && !SERVICE_RECORDED_TOOLS.includes(name))
+        .filter(
+          ([name, entry]) => entry.status === "journaled" && !SERVICE_RECORDED_TOOLS.includes(name),
+        )
         .map(([name]) => name)
         .sort(),
     );

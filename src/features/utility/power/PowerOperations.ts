@@ -1,6 +1,8 @@
 import type { BootedDevice } from "../../../models";
 import type { AdbClientFactory } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import type { DeviceTraits } from "../../../utils/android-cmdline-tools/deviceTraits";
+import { getRequestContext } from "../../../utils/AbortContext";
+import { exponentialBackoff, type BackoffPolicy } from "../../../utils/Backoff";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import type { Timer } from "../../../utils/SystemTimer";
@@ -11,6 +13,7 @@ import {
 } from "./AndroidPowerClient";
 import { POWER_MIN_API, powerRefusal, type PowerTarget } from "./PowerPlan";
 import { defaultPowerRegistry, type PowerRegistry, type SessionPower } from "./PowerRegistry";
+import { settleDoze, type DozeSettlement } from "./PowerSettle";
 import { buildPowerSteps, type PowerStep } from "./PowerSteps";
 import { verifyRequested } from "./PowerVerify";
 import {
@@ -30,17 +33,24 @@ export type PowerMutation = (
   mutation: (owner: string | undefined) => Promise<PowerState>,
 ) => Promise<PowerState>;
 
+interface DozeSettleOptions {
+  backoff?: BackoffPolicy;
+  defaultBudgetMs?: number;
+}
+
 export interface PowerOperationsDependencies {
+  settle?: DozeSettleOptions;
   device: () => BootedDevice;
   clientFactory: () => PowerClientFactory;
   registry: () => PowerRegistry;
   traits: () => Promise<PowerTarget>;
-  timer: () => Pick<Timer, "sleep">;
+  timer: () => Pick<Timer, "sleep" | "now">;
   mutation: () => PowerMutation;
 }
 
 /** The power seams `DeviceState` accepts; each defaults to the production one. */
 export interface PowerDeviceStateDependencies {
+  settle?: DozeSettleOptions;
   clientFactory?: PowerClientFactory;
   registry?: PowerRegistry;
   /** Emulator and API-level lookup; defaults to the shared build-prop reader. */
@@ -54,11 +64,12 @@ export function createPowerOperations(
   device: () => BootedDevice,
   adbFactory: () => AdbClientFactory,
   deviceTraits: () => DeviceTraits,
-  timer: () => Pick<Timer, "sleep">,
+  timer: () => Pick<Timer, "sleep" | "now">,
   seams: PowerDeviceStateDependencies = {},
 ): PowerOperations {
   return new PowerOperations({
     device,
+    settle: seams.settle,
     clientFactory: () => seams.clientFactory ?? defaultPowerClientFactory(adbFactory()),
     registry: () => seams.registry ?? defaultPowerRegistry,
     traits:
@@ -172,7 +183,50 @@ export class PowerOperations {
         ].filter((id): id is string => id !== undefined),
       ),
     ]);
-    return this.result(input, { after, applied, failures, preconditions, record, owner });
+    const unsettled = failures.length === 0 ? await this.settle(input, after, client) : undefined;
+    return this.result(input, {
+      after,
+      applied,
+      failures,
+      preconditions,
+      record,
+      owner,
+      unsettled,
+    });
+  }
+
+  private async settle(
+    input: SetPowerInput,
+    after: PowerState,
+    client: PowerDeviceClient,
+  ): Promise<DozeSettlement | undefined> {
+    if (!input.doze || !after.doze || after.doze.mode === input.doze) {
+      return undefined;
+    }
+    const timer = this.dependencies.timer();
+    const options = this.dependencies.settle ?? {};
+    const deadline = getRequestContext()?.getDeadlineMs?.();
+    // Half of what the request has left, never more than the default ceiling: a long
+    // deadline must not hold the power lock for minutes on a device that stays in Doze.
+    const ceilingMs = options.defaultBudgetMs ?? 15_000;
+    const budgetMs =
+      deadline === undefined
+        ? ceilingMs
+        : Math.min(ceilingMs, Math.max(0, Math.floor((deadline - timer.now()) / 2)));
+    const settlement = await settleDoze(client, input.doze, {
+      timer,
+      budgetMs,
+      backoff:
+        options.backoff ??
+        exponentialBackoff({
+          initialDelayMs: 250,
+          multiplier: 2,
+          maxDelayMs: 2000,
+        }),
+      reading: after.doze,
+    });
+    after.doze = settlement.reading;
+    return !settlement.settled && settlement.waitedMs >= budgetMs ? settlement : undefined;
   }
 
   /** Deep or light Doze can be turned off by the build; say so before touching anything. */
@@ -263,10 +317,11 @@ export class PowerOperations {
       preconditions: string[];
       record: SessionPower;
       owner: string | undefined;
+      unsettled?: DozeSettlement;
     },
   ): PowerState {
     const { after, failures, record, owner } = run;
-    const mismatches = failures.length > 0 ? [] : verifyRequested(input, after);
+    const mismatches = failures.length > 0 ? [] : verifyRequested(input, after, run.unsettled);
     return {
       ...after,
       applied: run.applied,

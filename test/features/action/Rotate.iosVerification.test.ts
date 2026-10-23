@@ -110,6 +110,24 @@ describe("iOS observed rotation verification (#8778)", () => {
     expect(result.warning).toBeUndefined();
   });
 
+  test("accepts the daemon restore request shape after a failed landscape rotate", async () => {
+    spyOn(runner, "requestRotate").mockResolvedValue(
+      runnerResult({
+        value: 0,
+        rotationPerformed: true,
+        previousOrientation: "portrait",
+        currentOrientation: "portrait",
+      }),
+    );
+    observe.setObserveSequence([createObserveResult(0), createObserveResult(0)]);
+    const result = await rotate.execute("portrait");
+    expect(result.success).toBe(true);
+    expect(result.rotationPerformed).toBe(true);
+    expect(result.previousOrientation).toBe("portrait");
+    expect(result.currentOrientation).toBe("portrait");
+    expect(result.error).toBeUndefined();
+  });
+
   test("warns when the orientation restore itself fails", async () => {
     spyOn(runner, "requestRotate")
       .mockResolvedValueOnce(

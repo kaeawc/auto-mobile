@@ -29,8 +29,10 @@ import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { logger } from "../utils/logger";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { createForeignAndroidSerialResolver } from "./foreignAndroidSerialResolver";
 import { bootAdmissionServices, type AndroidColdBootAdmitter } from "./bootAdmissionServices";
 import {
+  type ForeignAndroidSerialSource,
   type BootedDeviceDiscovery,
   type BootedDeviceDiscoveryOptions,
   type DeviceDestroyOptions,
@@ -79,6 +81,7 @@ export { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
 export type { DeviceDiscoveryError };
 
 export class MultiPlatformDeviceManager implements PlatformDeviceManager {
+  private foreignSource?: ForeignAndroidSerialSource;
   private adb: AdbExecutor;
   private emulator: AndroidEmulatorForDeviceManager;
   private simctl: DeviceManagerSimCtl;
@@ -113,6 +116,14 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     this.lifecycleCoordinator = lifecycleCoordinator;
     this.timer = timer;
   }
+
+  withForeignAndroidSerialSource(source: ForeignAndroidSerialSource): this {
+    this.foreignSource = source;
+    this.emulator.withForeignInventoryResolver?.(this.foreignResolver);
+    return this;
+  }
+
+  private readonly foreignResolver = createForeignAndroidSerialResolver(() => this.foreignSource);
 
   /** Overrides the devicectl sweep budget and its timer (tests, embedders). */
   withPhysicalIosScanBudget(
@@ -298,11 +309,15 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     try {
       const bootedDevices = await this.emulator.getBootedDevicesChecked(
         false,
-        { readinessOnly: true, coalesceInventoryEnrichment: options.coalesceInventoryEnrichment },
+        {
+          readinessOnly: true,
+          coalesceInventoryEnrichment: options.coalesceInventoryEnrichment,
+          resolveForeignSerials: this.foreignResolver,
+        },
         options.signal,
       );
-      const emulatorDevices = bootedDevices.filter((device) =>
-        isAndroidEmulatorSerial(device.deviceId),
+      const emulatorDevices = bootedDevices.filter(
+        (device) => isAndroidEmulatorSerial(device.deviceId) && !device.foreignOwned,
       );
       return {
         runningAvdNames: new Set(emulatorDevices.map((device) => device.name)),
@@ -603,6 +618,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
         devices: await this.emulator.getBootedDevicesChecked(
           false,
           {
+            resolveForeignSerials: options.skipForeignEnrichment ? this.foreignResolver : undefined,
             coalesceInventoryEnrichment: options.coalesceInventoryEnrichment,
             memoizeReadAvdNames: options.memoizeReadAvdNames,
             bypassDeviceListCache: options.bypassAndroidDeviceListCache,

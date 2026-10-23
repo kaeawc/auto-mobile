@@ -15,6 +15,7 @@ import {
 } from "../features/prototype/prototypeAssets";
 import { OBSERVATION_SCREENSHOT_CAPTURE_WAIT_TIMEOUT_MS } from "./observationResourceUris";
 import { WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS } from "../features/observe/waitForTimeout";
+import { PROTOVIEWER_DEFAULT_TIMEOUT_MS } from "../features/prototype/protoViewer/AndroidProtoViewer";
 import {
   APP_FILE_PUSH_TIMEOUT_MS,
   FILE_TRANSFER_MCP_TIMEOUT_HEADROOM_MS,
@@ -407,11 +408,22 @@ function resolvePrototypeAssetUploadBudgetMs(args: Record<string, unknown>): num
 }
 
 function resolvePrototypeAwaitBudgetMs(args: Record<string, unknown>): number {
-  // Only `awaitEvent` waits, and only `show` with `assets` uploads; every other prototype action
-  // keeps the default deadline. The tool's own maximum bounds the wait, so a larger value
+  // `awaitEvent` waits, `save` and `open` may wait on ProtoViewer, and only `show` with `assets`
+  // uploads; every other prototype action keeps the default deadline. The tool's own maximum bounds the wait, so a larger value
   // (rejected by its schema anyway) cannot inflate the deadline past that maximum plus headroom.
   if (args.action === "show") {
     return resolvePrototypeAssetUploadBudgetMs(args);
+  }
+  if (args.action === "save" || args.action === "open") {
+    // On Android with ProtoViewer installed these wait for the app's result file (#13621).
+    return resolveArgumentTimeoutBudgetMs(
+      Math.min(
+        positiveFiniteNumber(args.timeoutMs) ?? PROTOVIEWER_DEFAULT_TIMEOUT_MS,
+        MAX_PROTOTYPE_EVENT_TIMEOUT_MS,
+      ),
+      PROTOVIEWER_DEFAULT_TIMEOUT_MS,
+      WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
+    );
   }
   if (args.action !== "awaitEvent") {
     return 0;

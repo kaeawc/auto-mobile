@@ -1,4 +1,5 @@
 import type { z } from "zod/v4";
+import type { ProtoViewerDevice } from "../../features/prototype/protoViewer/AndroidProtoViewer";
 import type { DeviceWindowCacheInvalidator } from "../../features/observe/DeviceWindowCacheInvalidator";
 import type { HierarchyCapture } from "../../features/observe/HierarchyCapture";
 import type { PrototypeResult } from "../../features/observe/android/ctrlProxyProtocol";
@@ -45,6 +46,8 @@ export interface PrototypeTarget {
 export interface PrototypeToolDependencies {
   /** Saved iOS actions use the host installer without an agent connection; created lazily by default. */
   iosSavedPrototypeInstaller?: IosSavedPrototypeInstaller;
+  /** ProtoViewer on an Android device for saved `save`/`open` (#13621); adb-backed by default. */
+  protoViewerFactory?: (device: BootedDevice) => ProtoViewerDevice;
   /** Reads local files named by `assets`; tests inject an in-memory reader. */
   assetFileReader?: PrototypeAssetFileReader;
   /** Resolves `assets[].observation` URIs; defaults to the observation screenshot resource. */

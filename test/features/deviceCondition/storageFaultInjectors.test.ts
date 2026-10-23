@@ -288,6 +288,69 @@ describe("storage fault (#14066)", () => {
     expect(device.freeBytes()).toBe(BASE);
   });
 
+  describe("resizing through a registry-style resolver", () => {
+    const android: BootedDevice = { name: "emu", platform: "android", deviceId: "emulator-5554" };
+    const controllerFor = (device: StorageDevice): DeviceConditionController => {
+      const cache = new Map();
+      const factory = { create: () => device.adb };
+      return new DeviceConditionController((key) =>
+        resolveStorageFaultInjector(android, key, { adbFactory: factory, cache }),
+      );
+    };
+
+    test("a failed resize that rolls back, then a successful retry, still clears with one unset", async () => {
+      const device = storageDevice({ baseFreeBytes: BASE });
+      const controller = controllerFor(device);
+      await controller.apply({ faults: { storage: "low" } });
+
+      device.failOn("fallocate -l", 1);
+      const failed = await controller.apply({ faults: { storage: "full" } });
+      expect(failed.success).toBe(false);
+      expect(failed.active).toEqual(["faults.storage"]);
+
+      await controller.apply({ faults: { storage: "full" } });
+      expect(device.freeBytes()).toBe(STORAGE_FREE_BYTES_LEFT.full);
+
+      const cleared = await controller.apply({ faults: { storage: "unset" } });
+      expect(cleared.changes).toEqual([{ key: "faults.storage", status: "cleared" }]);
+      expect(cleared.active).toEqual([]);
+      expect(device.freeBytes()).toBe(BASE);
+    });
+
+    test("after an unset, a fresh apply registers its own reset again", async () => {
+      const device = storageDevice({ baseFreeBytes: BASE });
+      const controller = controllerFor(device);
+      await controller.apply({ faults: { storage: "low" } });
+      await controller.apply({ faults: { storage: "unset" } });
+      expect(device.freeBytes()).toBe(BASE);
+
+      await controller.apply({ faults: { storage: "full" } });
+      expect(device.freeBytes()).toBe(STORAGE_FREE_BYTES_LEFT.full);
+      // Without its own reset the second ballast would outlive the session.
+      const restored = await controller.restore();
+      expect(restored.verifiedClean).toBe(true);
+      expect(device.freeBytes()).toBe(BASE);
+    });
+
+    test("a failed resize whose rollback fails too does not add a second reset", async () => {
+      const device = storageDevice({ baseFreeBytes: BASE });
+      const controller = controllerFor(device);
+      await controller.apply({ faults: { storage: "low" } });
+
+      // The resize removes the old ballast (rm 1), fails to allocate, and its rollback's rm (2) fails.
+      device.failOn("fallocate -l", 1);
+      device.failOn("rm -f", 2);
+      const failed = await controller.apply({ faults: { storage: "full" } });
+      expect(failed.success).toBe(false);
+      expect(failed.active).toEqual(["faults.storage"]);
+
+      const cleared = await controller.apply({ faults: { storage: "unset" } });
+      expect(cleared.changes).toEqual([{ key: "faults.storage", status: "cleared" }]);
+      expect(cleared.active).toEqual([]);
+      expect(device.freeBytes()).toBe(BASE);
+    });
+  });
+
   test("the resolver keeps separate injectors for separate devices", () => {
     const first: BootedDevice = { name: "a", platform: "android", deviceId: "emulator-5554" };
     const second: BootedDevice = { name: "b", platform: "android", deviceId: "emulator-5556" };

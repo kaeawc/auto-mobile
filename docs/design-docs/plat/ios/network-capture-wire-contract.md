@@ -12,11 +12,13 @@ Absent versions and explicit v0 are accepted. v1 is current. Future versions (>1
 
 Rejection creates a typed diagnostic with `code: "sdk_network_schema_unsupported"`, `receivedVersion`, `supportedVersion`, and `bundleId`. It is logged with `logger.warn` and recorded as a warning telemetry log (`level: 5`, `tag: "SdkNetworkWire"`, `filterName: "sdk_network_schema_unsupported"`), with the diagnostic JSON in `message`. This uses existing persisted log telemetry and the log category of the telemetry push/backfill channel, so consumers can observe it even when network capture is disabled. Ingestion never throws on a version mismatch. No network row is inserted. Version and event type are routing controls, not network data columns; no new migration is needed.
 
-## Behavior changes
+## Rate-limited rejection diagnostics
 
-`AutoMobileNetwork.recordRequest` now redacts request and response headers with `NetworkCaptureRecorder.redactHeaders`, matching automatic capture: authorization, proxy-authorization, cookie, set-cookie, x-api-key, x-auth-token, and x-csrf-token (case-insensitive). Each matching value is replaced by `<redacted>`.
-
-Payloads from a newer SDK schema version are rejected with one rate-limited diagnostic per device/app/version in a 10-minute window. The first diagnostic has no suppression count; the next rejected event after the window re-emits with `suppressedCount` for events suppressed since the last emission. Received versions are bounded to 32 characters, including an ellipsis when truncated. Each ingestor tracks at most 64 keys, reserving the last slot for a shared overflow key that rate-limits additional keys together.
+Payloads from a newer SDK schema version are rejected with one diagnostic per device/app/version per
+10-minute window. The first has no suppression count; the next rejected event after the window
+re-emits with `suppressedCount` for events suppressed since. Received versions are bounded to 32
+characters (ellipsis when truncated). Each ingestor tracks at most 64 keys; the last slot is a shared
+overflow key that rate-limits additional keys together.
 
 ## Field mapping
 
@@ -50,9 +52,17 @@ Payloads from a newer SDK schema version are rejected with one rate-limited diag
 
 ## Redaction and bounds
 
-The existing `NetworkCaptureRecorder.redactHeaders` covers Authorization, Proxy-Authorization, Cookie, Set-Cookie, X-API-Key, X-Auth-Token, and X-CSRF-Token case-insensitively. Adapters apply it when recording headers; the shared `AutoMobileNetwork.recordRequest` emission boundary now applies it too, so manual, task-delegate, and URLProtocol callers receive the same policy. Headers still require opt-in capture.
+`NetworkCaptureRecorder.redactHeaders` replaces authorization, proxy-authorization, cookie, set-cookie,
+x-api-key, x-auth-token and x-csrf-token values (case-insensitive) with `<redacted>`. Adapters apply
+it, and so does the shared `AutoMobileNetwork.recordRequest` emission boundary, so manual,
+task-delegate and URLProtocol callers get the same policy. Headers still require opt-in capture.
 
-Recorder bodies are bounded by `maxBodyBytes` (default 32 KiB); the shared emitter applies `truncateBody` again with its configured byte bound before events enter the SDK buffer. Body capture is opt-in and disabled in release builds. TS repository reads apply the existing surrogate-safe `truncateBodyText` cap of 10,240 UTF-16 units to both traffic and request reads; original body sizes survive. TS does not introduce a new storage/body bound. SDK metadata has no size limit to mirror, so TS preserves it unchanged. These bounds do not imply body-value redaction or arbitrary metadata sanitization.
+Recorder bodies are bounded by `maxBodyBytes` (default 32 KiB); the shared emitter applies
+`truncateBody` again with its configured bound before events enter the SDK buffer. Body capture is
+opt-in and disabled in release builds. TS repository reads apply the surrogate-safe `truncateBodyText`
+cap of 10,240 UTF-16 units to traffic and request reads; original body sizes survive. TS adds no new
+storage bound and preserves SDK metadata unchanged. These bounds imply no body-value redaction or
+metadata sanitization.
 
 `NetworkState` notifications contain only resource URIs and trigger a fresh read; its internal debounce/filter record is not a separate payload read surface. The resource read and telemetry data paths retain the fields above.
 

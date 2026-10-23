@@ -227,7 +227,6 @@ test/server/configManagerDefaultRepositories.integration.test.ts | safe | getDat
 test/server/daemonShutdownOutcomeWire.integration.test.ts | safe | hermetic fixture and McpTestFixture in-memory L14
 test/server/deviceLabelSessionReleaseOrdering.integration.test.ts | safe | in-memory DB; new Daemon never started, pool release mocked L33
 test/server/deviceLossOutcomeWire.integration.test.ts | safe | FakeDeviceManager installed; in-memory McpTestFixture L29
-test/server/downloadsFixtureOwnership.integration.test.ts | safe | fake DownloadsFixtureService; FakeDeviceUtils pool L46/L56
 test/server/explicitSessionUuidBinding.daemon.integration.test.ts | safe | Registry device session manager replaced with FakeDeviceReadiness L67; UnixSocketServer never started, fake pool and :memory: DB
 test/server/finalizeToolResponse.outputSchema.integration.test.ts | safe | FakeDeviceManager and FakeArtifactWriter L19/L142
 test/server/internalToolPayloads.integration.test.ts | safe | read-only scan of src files L8

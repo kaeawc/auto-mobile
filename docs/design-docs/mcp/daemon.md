@@ -20,9 +20,8 @@ flowchart LR
   Results -->|return to the daemon| Daemon
 ```
 
-This enables parallel test runs and coordinated multi-device actions without
-each client needing to manage device processes itself. It can run as a
-standalone service, within the MCP server, or temporarily in CI.
+It can run as a standalone service, within the MCP server, or temporarily in CI,
+so clients need not manage device processes themselves.
 
 ## HTTP ingress
 
@@ -79,8 +78,7 @@ The PID file is re-read per request. The client-only
 Keep the token and Authorization header out of logs and error reports.
 
 For backwards compatibility, local HTTP clients obtain the token from the file;
-there is no unauthenticated fallback. Native HTTP-client adoption follows in a
-separate lane. The CLI, stdio proxy and daemon control commands use the Unix
+there is no unauthenticated fallback. The CLI, stdio proxy and daemon control commands use the Unix
 control socket and do not pass through HTTP ingress. Socket MCP forwarding uses
 the in-process transport rather than an HTTP request.
 
@@ -92,7 +90,5 @@ there is no transport session to expire, so a daemon restart needs no replay on 
 client side. The one session key is the `x-auto-mobile-mcp-session-id` header (or the
 in-band `__mcpSessionId` argument). The socket server forwards its socket session id
 in that header, and the desktop app sends one id per app session. Tool-to-session
-bindings live in a daemon-scoped store rather than on any one server. This landed
-in #4678 (slice L, device-control transport recovery in the socket server, #11820, is
-still in progress); the design and resolved questions are in
+bindings live in a daemon-scoped store rather than on any one server. The design (#4678, #11820) and resolved questions are in
 [SDK v2 and stateless daemon layer](sdk-v2-stateless-migration.md).

@@ -83,7 +83,12 @@ import { ScrollUntilVisible } from "./ScrollUntilVisible";
 import { isTruthyFlag } from "../../utility/elementProperties";
 import { getScreenBounds } from "../../../utils/screenBounds";
 import { edgeSwipeCoordinates, validateResolvedEdgeSwipe } from "./edgeSwipe";
-import { effectiveSwipeInsets, iosSwipeStartWarning, swipeScreenSize } from "./iosChromeInsets";
+import {
+  effectiveSwipeInsets,
+  iosSwipeStartWarning,
+  swipeScreenSize,
+  screenSwipeBounds,
+} from "./iosChromeInsets";
 import { resolveContainerSwipeCoordinates } from "./resolveContainerSwipeCoordinates";
 import { explicitDuration, withSwipeOnVelocity } from "./swipeDurationReport";
 import { type RenderedObservationReader } from "../TargetDisplayAction";
@@ -438,7 +443,9 @@ export class SwipeOn extends BaseVisualChange {
               signal,
               context.observeResult ? { observation: context.observeResult } : undefined,
             )
-          : await this.executeScreenSwipe(options, progress, perf, signal);
+          : await this.executeScreenSwipe(options, progress, perf, signal, {
+              within: decision.scrollFrame,
+            });
     return this.autoTargeting.withAutoTargetDecision({ result, decision });
   }
 
@@ -776,6 +783,7 @@ export class SwipeOn extends BaseVisualChange {
     progress?: ProgressCallback,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
+    { within }: { within?: Element["bounds"] } = {},
   ): Promise<SwipeOnResult> {
     logger.info(`[SwipeOn] Starting screen swipe: direction=${options.direction}`);
     let iosDispatchTimestamp: number | undefined;
@@ -788,12 +796,14 @@ export class SwipeOn extends BaseVisualChange {
           observation: observeResult,
           platform: this.device.platform,
           includeSystemInsets: options.includeSystemInsets,
+          includeFloatingBars: !options.fromEdge,
         };
         const screenSize = swipeScreenSize(insetOptions);
         if (!screenSize) {
           throw new ActionableError("Could not determine screen size");
         }
-        const bounds = getScreenBounds(screenSize, effectiveSwipeInsets(insetOptions));
+        const screenBounds = getScreenBounds(screenSize, effectiveSwipeInsets(insetOptions));
+        const bounds = screenSwipeBounds(screenBounds, within, options.fromEdge);
 
         const { startX, startY, endX, endY } = options.fromEdge
           ? screenEdgeSwipe(options, options.fromEdge, bounds)

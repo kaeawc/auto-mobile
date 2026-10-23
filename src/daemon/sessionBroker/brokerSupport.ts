@@ -1,3 +1,4 @@
+import { ResetCapacityWaitExceededError } from "../../models/ResetCapacityWaitExceededError";
 import { classifyCleanReleaseError } from "./cleanReleaseFailure";
 import { BootCapacityExhaustedError } from "../../models/BootCapacityExhaustedError";
 import type { RequirementResult } from "../../devices/sessionRequirements";
@@ -106,8 +107,12 @@ export function drainFailureOutcome(
   sessionUuid: string,
   resetClean: boolean,
 ): "destroy" | "pending" {
-  // Admission refusal leaves a healthy erased simulator shut down. Keep the durable reset
-  // pending and let recovery retry it; the consumer's release is already durable.
+  // Reset capacity exhaustion is terminal after its bounded wait. Other admission
+  // refusals stay pending for recovery; the consumer's release is already durable.
+  if (error instanceof ResetCapacityWaitExceededError) {
+    logger.warn(`Session ${sessionUuid} clean release exhausted capacity wait: ${error.message}`);
+    return "destroy";
+  }
   if (error instanceof BootCapacityExhaustedError) {
     logger.warn(
       `Session ${sessionUuid} clean release awaits boot capacity: ${errorMessage(error)}`,

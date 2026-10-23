@@ -197,7 +197,14 @@ class ViewerActivity : ComponentActivity() {
 
   override fun onResume() {
     super.onResume()
-    revokeNetworkIfLocalNetworkLost(services.settings, services.localNetworkGrant, this)
+    recheckLocalNetworkPermission(services.settings, services.localNetworkGrant, this)
+  }
+
+  override fun onWindowFocusChanged(hasFocus: Boolean) {
+    super.onWindowFocusChanged(hasFocus)
+    if (hasFocus) {
+      recheckLocalNetworkPermission(services.settings, services.localNetworkGrant, this)
+    }
   }
 
   override fun onStop() {

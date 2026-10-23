@@ -90,7 +90,7 @@ export function retryUnresolvedReadinessNames(
   unresolvedSerials: Set<string>,
 ): void {
   for (const device of devices) {
-    if (device.name === unknownEmulatorName(device.deviceId)) {
+    if (!device.foreignOwned && device.name === unknownEmulatorName(device.deviceId)) {
       unresolvedSerials.add(device.deviceId);
     }
   }

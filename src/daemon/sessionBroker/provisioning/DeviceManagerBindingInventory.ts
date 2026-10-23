@@ -37,6 +37,7 @@ export class DeviceManagerBindingInventory implements BindingInventory {
       const discovery = await this.deviceManager.getBootedDevicesDetailed?.(device.platform, {
         signal: options.signal,
         bypassAndroidDeviceListCache: true,
+        skipForeignEnrichment: true,
       });
       options.signal?.throwIfAborted();
       if (!discovery?.succeededPlatforms.has(device.platform)) {
@@ -44,6 +45,7 @@ export class DeviceManagerBindingInventory implements BindingInventory {
       }
       return discovery.devices.find(
         (runtime) =>
+          !runtime.foreignOwned &&
           runtime.platform === device.platform &&
           runtime.name === device.name &&
           isAndroidEmulatorSerial(runtime.deviceId),

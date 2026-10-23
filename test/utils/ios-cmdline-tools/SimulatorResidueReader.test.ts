@@ -1,6 +1,7 @@
-import { describe, expect, test } from "bun:test";
+import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { macOsOnlyDescribe } from "../../helpers/macOsHost";
 import type { ExecResult } from "../../../src/models/ExecResult";
 import {
   SimulatorResidueReader,
@@ -67,7 +68,7 @@ function harness() {
   return { state, reader, signal: new AbortController().signal };
 }
 
-describe("SimulatorResidueReader", () => {
+macOsOnlyDescribe("SimulatorResidueReader", () => {
   test("reads photos, system-filtered Documents, Safari Documents and keyboard defaults", async () => {
     const { reader, state, signal } = harness();
     const snapshot = await reader.read(UDID, signal);

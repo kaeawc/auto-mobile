@@ -118,10 +118,11 @@ describe("readWindowManagerRotation", () => {
       const adb = new FakeAdbExecutor();
       const capture = fixtureResult("dumpsys-window-displays-nomirror-landscape.txt");
       const lines = capture.stdout.split("\n");
-      // Remove only the captured standalone display 0 mRotation=1 mDeferredRotationPauseCount=0 line.
-      const withoutRotation = lines.filter(
-        (line) => line.trim() !== "mRotation=1 mDeferredRotationPauseCount=0",
-      );
+      // Missing rotation now requires both applied and requested fields to be absent (#15024).
+      const withoutRotation = capture.stdout
+        .replace("mDisplayRotation=ROTATION_90", "mDisplayRotation=undefined")
+        .split("\n")
+        .filter((line) => line.trim() !== "mRotation=1 mDeferredRotationPauseCount=0");
       expect(lines.length - withoutRotation.length).toBe(1);
       adb.setCommandResponse(
         WINDOW_MANAGER_ROTATION_COMMAND,
@@ -237,4 +238,23 @@ describe("readWindowManagerRotation", () => {
     );
     expect(adb.getExecutedCommands()).toEqual([WINDOW_MANAGER_ROTATION_COMMAND]);
   });
+});
+
+test("prefers applied portrait over requested landscape (#15024)", async () => {
+  const adb = new FakeAdbExecutor();
+  // Reproduce #15024 from the capture: requested 1, applied 0 (line 7 only).
+  const dump = fixtureResult("dumpsys-window-displays-nomirror-landscape.txt").stdout.replace(
+    "mDisplayRotation=ROTATION_90",
+    "mDisplayRotation=ROTATION_0",
+  );
+  adb.setCommandResponse(WINDOW_MANAGER_ROTATION_COMMAND, createExecResult(dump, ""));
+  expect(await readWindowManagerRotation(adb)).toBe(0);
+  expect(adb.getExecutedCommands()).toEqual([WINDOW_MANAGER_ROTATION_COMMAND]);
+});
+
+test("falls back to requested rotation when applied is absent (#15024)", async () => {
+  const adb = new FakeAdbExecutor();
+  adb.setCommandResponse(WINDOW_MANAGER_ROTATION_COMMAND, createExecResult("mRotation=1", ""));
+  expect(await readWindowManagerRotation(adb)).toBe(1);
+  expect(adb.getExecutedCommands()).toEqual([WINDOW_MANAGER_ROTATION_COMMAND]);
 });

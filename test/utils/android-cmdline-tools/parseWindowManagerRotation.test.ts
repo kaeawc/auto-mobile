@@ -1,7 +1,10 @@
 import { expect, describe, test } from "bun:test";
 import { readFileSync } from "fs";
 import { join } from "path";
-import { parseWindowManagerRotation } from "../../../src/utils/android-cmdline-tools/parseWindowManagerRotation";
+import {
+  parseAppliedDisplayRotation,
+  parseWindowManagerRotation,
+} from "../../../src/utils/android-cmdline-tools/parseWindowManagerRotation";
 
 const WINDOW_DUMPS_DIR = join(__dirname, "..", "..", "features", "observe", "windowDumps");
 
@@ -186,5 +189,54 @@ describe("parseWindowManagerRotation", () => {
 
   test("returns null for empty input", () => {
     expect(parseWindowManagerRotation("")).toBeNull();
+  });
+});
+
+describe("parseAppliedDisplayRotation (#15024)", () => {
+  test.each([
+    ["nomirror-landscape", 0, 1],
+    ["nomirror-portrait", 0, 0],
+    ["mirror-landscape", 0, 1],
+    ["mirror-portrait", 0, 0],
+    ["mirror-landscape", 3, 0],
+    ["mirror-portrait", 4, 0],
+  ] as const)("reads applied %s display %s", (capture, displayId, expected) => {
+    const dump = readFileSync(
+      join(WINDOW_DUMPS_DIR, `dumpsys-window-displays-${capture}.txt`),
+      "utf8",
+    );
+    expect(parseAppliedDisplayRotation(dump, { displayId })).toBe(expected);
+    expect(parseAppliedDisplayRotation(dump, { displayId: 99 })).toBeNull();
+  });
+
+  test.each(["api29-settings-window-dump.log", "api35-settings-window-dump.log"])(
+    "returns null for legacy/headerless %s",
+    (file) => {
+      expect(
+        parseAppliedDisplayRotation(readFileSync(join(WINDOW_DUMPS_DIR, file), "utf8")),
+      ).toBeNull();
+      expect(parseAppliedDisplayRotation(grepMRotationLines(file))).toBeNull();
+    },
+  );
+
+  test("distinguishes applied portrait from requested landscape (#15024)", () => {
+    // Reproduce #15024: mRotation=1 requested, but line 7's applied rotation stays 0.
+    const dump = readFileSync(
+      join(WINDOW_DUMPS_DIR, "dumpsys-window-displays-nomirror-landscape.txt"),
+      "utf8",
+    ).replace("mDisplayRotation=ROTATION_90", "mDisplayRotation=ROTATION_0");
+    expect(parseAppliedDisplayRotation(dump)).toBe(0);
+    expect(parseWindowManagerRotation(dump)).toBe(1);
+  });
+  test("does not fall through to a later window's rotation when the display's is undefined", () => {
+    const dump = readFileSync(
+      join(WINDOW_DUMPS_DIR, "dumpsys-window-displays-nomirror-landscape.txt"),
+      "utf8",
+    )
+      .replace("mDisplayRotation=ROTATION_90", "mDisplayRotation=undefined")
+      .replace(/mDisplayRotation=undefined/g, (m, off: number, all: string) =>
+        all.indexOf(m) === off ? m : "mDisplayRotation=ROTATION_270",
+      );
+    expect(parseAppliedDisplayRotation(dump)).toBeNull();
   });
 });

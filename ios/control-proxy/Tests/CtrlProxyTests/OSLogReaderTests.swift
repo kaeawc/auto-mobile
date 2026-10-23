@@ -110,7 +110,8 @@ final class OSLogReaderTests: XCTestCase {
             ),
             OSLogRecord(
                 date: Date(timeIntervalSince1970: 1002), level: 2, subsystem: "com.apple.network",
-                category: "connection", composedMessage: "nw_connection_report_state_with_handler_on_nw_queue [C4] reporting state ready"
+                category: "connection",
+                composedMessage: "nw_connection_report_state_with_handler_on_nw_queue [C4] reporting state ready"
             ),
         ]
         harness.advance(1000)

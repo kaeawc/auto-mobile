@@ -18,9 +18,7 @@ journaling.
   `removeKeyValue`, `clearKeyValueFile`, `setPreference`, `sqlQuery`,
   `mockNetwork`, `clearMockNetwork`, `sendSms`, `phoneCall`, `resetAppLogs`,
   `deviceSnapshot`.
-- Pending: `stageSessionDownloads` (its deprecated alias runs via
-  `nonDeviceHandler` and resolves the device inside the service, bypassing the
-  recorded dispatcher; needs service-side wiring), `manufacturerProfile`,
+- Pending: `manufacturerProfile`,
   `statusBar` (appearance intent/prior adapters not wired). This limits journal
   intent coverage, not baseline capture, tool execution or keep-booted reuse.
 - Recording uses the broker recorder scope, incarnation `resourceId +

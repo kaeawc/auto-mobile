@@ -8,7 +8,6 @@ import { PrototypeHiddenError } from "../../src/features/prototype/prototypeHidd
 import { PrototypeSuspendedError } from "../../src/features/prototype/prototypeSuspended";
 import { OrphanRecorderActiveError } from "../../src/daemon/orphanRecorderRefusal";
 import { HostBootAdmissionRegistryError } from "../../src/features/bootAdmission/HostBootAdmissionRegistry";
-import { StageSessionDownloadsRefusal } from "../../src/server/StageSessionDownloadsRefusal";
 import { AdbDeviceOfflineError } from "../../src/utils/android-cmdline-tools/AdbDeviceHealth";
 import { DeviceLostError } from "../../src/models/DeviceLostError";
 import { SessionConfigError } from "../../src/devices/sessionConfig";
@@ -1231,10 +1230,6 @@ export const EXEMPT_REFUSAL_ERROR_CLASSES: ReadonlyMap<Error["constructor"], str
   [
     HostBootAdmissionRegistryError,
     "internal host-lock failure; AndroidBootAdmissionGate maps it to discovery_incomplete before the wire",
-  ],
-  [
-    StageSessionDownloadsRefusal,
-    "uppercase code but no retryable field: shapeToolCallError returns plain 'Error: ...' text for this Downloads-staging refusal",
   ],
   [
     SharedDaemonNamespaceError,

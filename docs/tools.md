@@ -65,7 +65,6 @@ A read never writes settings on a device another session holds. A sessionless re
 | 🔗 <code>getDeepLinks</code>          | Query app deep links                                                                           |
 | 📥 <code>putAppFile</code>            | Write files into a bounded logical storage target                                              |
 | 🧹 <code>resetAppLogs</code>          | Reset named app log files                                                                      |
-| 📥 <code>stageSessionDownloads</code> | Deprecated alias of putAppFile for user files                                                  |
 | ⚙️ <code>getPreference</code>         | Read an Android system property, Android SharedPreferences key, or iOS UserDefaults key        |
 | ⚙️ <code>setPreference</code>         | Write a system property, SharedPreferences, or UserDefaults key                                |
 | 🔑 <code>setKeyValue</code>           | Set app key-value storage entry                                                                |

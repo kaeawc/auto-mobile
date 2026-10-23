@@ -585,5 +585,11 @@ normal use.
 | `AUTOMOBILE_IOS_CTRLPROXY_RECORD_DIR`      | Record iOS CtrlProxy requests and responses as JSON in this directory; filesystem path.                                                             | off            |
 | `AUTOMOBILE_IOS_TAP_STRATEGY`              | Diagnostic iOS tap strategy, at debug log level only: `legacy`, `appRelative`, `appRelativeObserved`, `displayTargeted`, `displayTargetedObserved`. | runner default |
 | `AUTOMOBILE_UNIT_TEST_ISOLATED_DATA_DIR`   | Data directory isolated by the unit-test preload.                                                                                                   | unset          |
+| `CI`, `GITHUB_ACTIONS`                     | Both exactly `true` on a GitHub Actions runner, where AutoMobile owns the iOS simulator lifecycle.                                                  | unset          |
+| `GITHUB_WORKSPACE`                         | GitHub Actions checkout directory, searched for `schemas/test-plan.schema.json`.                                                                    | unset          |
+| `NODE_ENV`                                 | Exact `test` arms the test-only guards and test defaults.                                                                                           | unset          |
 
 </div>
+
+Do not use `AUTOMOBILE_DB_PATH=:memory:` in production. Tests may allow it by also setting
+`AUTOMOBILE_ALLOW_IN_MEMORY_DB` to `1`, `true` or `yes`.

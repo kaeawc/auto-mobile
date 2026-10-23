@@ -216,33 +216,40 @@ refused with `discovery_incomplete`. See
 [environment variables](environment-variables.md#boot-capacity) for the opt-out
 and per-platform overrides.
 
-## Which read tools ready an unheld device
+### Which read tools ready an unheld device
 
-A sessionless read that names a running device nobody holds may set the device up
-in order to answer: on Android it may install the CtrlProxy APK and enable its
-accessibility service, and on an iOS simulator it may install and launch the
-runner. It writes no other settings and does not select or pin the device as the
-current one. Reads of a device held by a session, a broker binding, a device
-restart reservation or another daemon never run this setup; they use what is
-already installed. A physical iPhone is never set up by a sessionless read.
+A sessionless read that names a running device nobody holds can set up CtrlProxy
+(Android) or the runner (iOS simulator) so the read can answer. **Yes** means the
+read does that setup. A device held or reserved by another session or daemon is
+never readied: reads use what is already installed, and control is refused.
 
-Most read tools do this setup (`accessibility`, `clipboard`, `compareScreenshot`,
-`displayConfig`, `getAppPermissions`, `getDataStore`, `getDeepLinks`,
-`getDeviceState`, `getLogs`, `getNavigationGraph`, `getNetworkGraph`,
-`getNotificationPolicy`, `getPreference`, `hitTest`, `identifyInteractions`,
-`keyboard`, `listDataStores`, `prototype`, `snapshotOf`, `sqlQuery`,
-`statusBar`). The exceptions:
-
-- `listApps`, `inspectPackageSigning` and `mediaSession` only verify that the
-  device is booted and do no setup.
-- `observe {deviceId}` has its own path that may start the hierarchy service on
-  an unheld, idle device; see
-  [Reading a device you do not own](../tools.md#reading-a-device-you-do-not-own-deviceid).
-
-When another daemon holds the device, control calls are refused with the
-retryable `device_owned_by_other_daemon`. An unnamed control call never selects
-such a device automatically: pass the `deviceId` of a device you may drive, or
-acquire one with `getAndroid` or `getApple` and pass its `sessionUuid`.
+| Tool                    | Android                                     | iOS simulator                               |
+| ----------------------- | ------------------------------------------- | ------------------------------------------- |
+| `accessibility`         | Yes                                         | Yes                                         |
+| `clipboard`             | Yes                                         | Yes                                         |
+| `compareScreenshot`     | Yes                                         | Yes                                         |
+| `displayConfig`         | Yes                                         | Yes                                         |
+| `getAppPermissions`     | Yes                                         | Yes                                         |
+| `getDataStore`          | Yes                                         | Yes                                         |
+| `getDeepLinks`          | Yes                                         | Yes                                         |
+| `getDeviceState`        | Yes                                         | Yes                                         |
+| `getLogs`               | Yes                                         | Yes                                         |
+| `getNavigationGraph`    | Yes                                         | Yes                                         |
+| `getNetworkGraph`       | Yes                                         | Yes                                         |
+| `getNotificationPolicy` | Yes                                         | Yes                                         |
+| `getPreference`         | Yes                                         | Yes                                         |
+| `hitTest`               | Yes                                         | Yes                                         |
+| `identifyInteractions`  | Yes                                         | Yes                                         |
+| `inspectPackageSigning` | No: booted-only verification                | No: booted-only verification                |
+| `keyboard`              | Yes                                         | Yes                                         |
+| `listApps`              | No: booted-only verification                | No: booted-only verification                |
+| `listDataStores`        | Yes                                         | Yes                                         |
+| `mediaSession`          | No: booted-only verification                | No: booted-only verification                |
+| `observe`               | Own path: may start the service (see below) | Own path: may start the service (see below) |
+| `prototype`             | Yes                                         | Yes                                         |
+| `snapshotOf`            | Yes                                         | Yes                                         |
+| `sqlQuery`              | Yes                                         | Yes                                         |
+| `statusBar`             | Yes                                         | Yes                                         |
 
 ## Streams need an observer registration, not a session
 

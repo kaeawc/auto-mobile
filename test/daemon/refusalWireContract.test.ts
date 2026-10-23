@@ -15,8 +15,6 @@ import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { logger } from "../../src/utils/logger";
 import * as hostBootRegistry from "../../src/features/bootAdmission/HostBootAdmissionRegistry";
-import * as downloadsRefusals from "../../src/server/downloadsFixtureService";
-import * as downloadsStageRefusal from "../../src/server/StageSessionDownloadsRefusal";
 import * as adbHealth from "../../src/utils/android-cmdline-tools/AdbDeviceHealth";
 import * as deviceLost from "../../src/models/DeviceLostError";
 import * as bindingConfig from "../../src/daemon/sessionBroker/provisioning/provisionRequest";
@@ -157,8 +155,6 @@ import {
 const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unknown>>>> = {
   "models/DirectSessionNotActiveError": directSessionNotActive,
   "features/bootAdmission/HostBootAdmissionRegistry": hostBootRegistry,
-  "server/downloadsFixtureService": downloadsRefusals,
-  "server/StageSessionDownloadsRefusal": downloadsStageRefusal,
   "utils/android-cmdline-tools/AdbDeviceHealth": adbHealth,
   "models/DeviceLostError": deviceLost,
   "daemon/sessionBroker/provisioning/provisionRequest": bindingConfig,

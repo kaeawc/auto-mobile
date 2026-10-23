@@ -212,7 +212,6 @@ describe("data mutation identities", () => {
     expect(deviceToolMutations("deviceSnapshot", { action: "capture" })).not.toEqual(
       deviceToolMutations("deviceSnapshot", { action: "restore", snapshotName: "baseline" }),
     );
-    expect(deviceToolMutations("stageSessionDownloads", { directory: "fixtures" })).toEqual([]);
   });
 });
 

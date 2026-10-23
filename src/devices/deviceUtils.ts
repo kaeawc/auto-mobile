@@ -31,6 +31,7 @@ import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { bootAdmissionServices, type AndroidColdBootAdmitter } from "./bootAdmissionServices";
 import {
+  type ForeignAndroidSerialSource,
   type BootedDeviceDiscovery,
   type BootedDeviceDiscoveryOptions,
   type DeviceDestroyOptions,
@@ -79,6 +80,7 @@ export { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
 export type { DeviceDiscoveryError };
 
 export class MultiPlatformDeviceManager implements PlatformDeviceManager {
+  private foreignAndroidSerialSource?: ForeignAndroidSerialSource;
   private adb: AdbExecutor;
   private emulator: AndroidEmulatorForDeviceManager;
   private simctl: DeviceManagerSimCtl;
@@ -113,6 +115,32 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     this.lifecycleCoordinator = lifecycleCoordinator;
     this.timer = timer;
   }
+
+  withForeignAndroidSerialSource(source: ForeignAndroidSerialSource): this {
+    this.foreignAndroidSerialSource = source;
+    this.emulator.withForeignInventoryResolver?.(this.resolveForeignAndroidSerials);
+    return this;
+  }
+
+  private readonly resolveForeignAndroidSerials = async (
+    serials: readonly string[],
+    signal?: AbortSignal,
+  ): Promise<ReadonlySet<string>> => {
+    try {
+      return await raceWithDeadline(
+        this.foreignAndroidSerialSource?.foreignSerials(serials, signal) ??
+          Promise.resolve(new Set<string>()),
+        { timer: defaultTimer, signal, label: "Android inventory ownership refresh" },
+      );
+    } catch (error) {
+      signal?.throwIfAborted();
+      logger.warn(
+        `[DeviceManager] Android ownership refresh failed: ${errorMessage(error)}`,
+        error,
+      );
+      return new Set<string>();
+    }
+  };
 
   /** Overrides the devicectl sweep budget and its timer (tests, embedders). */
   withPhysicalIosScanBudget(
@@ -298,11 +326,15 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     try {
       const bootedDevices = await this.emulator.getBootedDevicesChecked(
         false,
-        { readinessOnly: true, coalesceInventoryEnrichment: options.coalesceInventoryEnrichment },
+        {
+          readinessOnly: true,
+          coalesceInventoryEnrichment: options.coalesceInventoryEnrichment,
+          resolveForeignSerials: this.resolveForeignAndroidSerials,
+        },
         options.signal,
       );
-      const emulatorDevices = bootedDevices.filter((device) =>
-        isAndroidEmulatorSerial(device.deviceId),
+      const emulatorDevices = bootedDevices.filter(
+        (device) => isAndroidEmulatorSerial(device.deviceId) && !device.foreignOwned,
       );
       return {
         runningAvdNames: new Set(emulatorDevices.map((device) => device.name)),
@@ -603,6 +635,9 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
         devices: await this.emulator.getBootedDevicesChecked(
           false,
           {
+            resolveForeignSerials: options.skipForeignEnrichment
+              ? this.resolveForeignAndroidSerials
+              : undefined,
             coalesceInventoryEnrichment: options.coalesceInventoryEnrichment,
             memoizeReadAvdNames: options.memoizeReadAvdNames,
             bypassDeviceListCache: options.bypassAndroidDeviceListCache,

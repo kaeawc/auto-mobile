@@ -5129,7 +5129,8 @@ describe("Android systemTray clearAll initial shade readiness", () => {
   for (const [readyAfterMs, awaitTimeout, expectedSwipes] of [
     [1000, undefined, 1],
     [1000, 2000, 1],
-    [1000, 500, 0],
+    // Three 500ms attempts with 250ms and 500ms backoffs end at 2250ms, before the shade is ready.
+    [3000, 500, 0],
     [0, 2000, 1],
   ] as const) {
     test(`shade ready at ${readyAfterMs}ms with timeout ${awaitTimeout ?? "default"}: ${expectedSwipes} swipe`, async () => {
@@ -5168,7 +5169,11 @@ describe("Android systemTray clearAll initial shade readiness", () => {
       expect(swipes()).toHaveLength(expectedSwipes);
       // Later no-match iterations retain the short drain budget rather than
       // paying the full caller timeout after the notification has gone.
-      expect(timer.now()).toBeLessThan(2000);
+      if (expectedSwipes === 0) {
+        expect(timer.now()).toBe(3 * 500 + 250 + 500);
+      } else {
+        expect(timer.now()).toBeLessThan(2000);
+      }
     });
   }
   test("clearAll forces a device capture because a floor-meeting cached tree is served unverified (#10296)", async () => {

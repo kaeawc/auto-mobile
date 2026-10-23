@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { DAEMON_RECONNECT_OUTAGE_BUDGET_MS } from "../../src/daemon/constants";
+import { DaemonUnavailableError } from "../../src/daemon/DaemonUnavailableError";
+import { DaemonVersionMismatchError } from "../../src/daemon/proxy/DaemonVersionMismatchError";
 import { SESSION_BROKER_RETRY_AFTER_MS } from "../../src/daemon/sessionBroker/timing";
 import {
   acquireSessionThroughDaemon,
@@ -807,6 +810,133 @@ describe("session broker proxy acquisition", () => {
 
     expect(acquisition.result).toMatchObject({ outcome: "failed", failure: { code: "cancelled" } });
     expect(releases).toContain("session-1");
+  });
+
+  describe("daemon outage while connecting (#15019)", () => {
+    const longConfig: SessionConfig = { ...config, preparationTimeoutMs: 8 * 60_000 };
+    const capabilitiesOr =
+      (otherwise: () => unknown) =>
+      (method: string): unknown =>
+        method === "daemon/capabilities" ? { capabilities: ["session-broker/v1"] } : otherwise();
+
+    test("a daemon that refuses connections while restarting is retried until it is back", async () => {
+      const connectedAt: number[] = [];
+      const { ports, calls, timer } = rig(capabilitiesOr(() => ready));
+      ports.ensureConnected = async () => {
+        connectedAt.push(timer.now());
+        if (connectedAt.length <= 3) {
+          throw new DaemonUnavailableError("Daemon socket not found");
+        }
+      };
+
+      expect(await acquireSessionThroughDaemon(longConfig, ports)).toEqual(ready);
+      expect(connectedAt).toEqual([0, 1_000, 2_000, 3_000]);
+      expect(calls.filter(({ method }) => method === DAEMON_PREPARE_SESSION_METHOD)).toHaveLength(
+        1,
+      );
+    });
+
+    test("a daemon that stays unreachable ends in a typed retryable failure at the outage budget", async () => {
+      let attempts = 0;
+      const { ports, calls, timer } = rig(capabilitiesOr(() => ready));
+      ports.ensureConnected = async () => {
+        attempts++;
+        throw new DaemonUnavailableError("Daemon socket not found");
+      };
+
+      expect(await acquireSessionThroughDaemon(longConfig, ports)).toMatchObject({
+        outcome: "failed",
+        failure: { code: "daemon_unavailable", retryable: true },
+      });
+      expect(timer.now()).toBe(DAEMON_RECONNECT_OUTAGE_BUDGET_MS);
+      expect(attempts).toBeGreaterThan(10);
+      expect(calls).toEqual([]);
+    });
+
+    test("a connect that never settles cannot hold initialize past the outage budget", async () => {
+      const { ports, calls, timer } = rig(capabilitiesOr(() => ready));
+      ports.ensureConnected = () => new Promise<void>(() => {});
+
+      expect(await acquireSessionThroughDaemon(longConfig, ports)).toMatchObject({
+        outcome: "failed",
+        failure: { code: "daemon_unavailable", retryable: true },
+      });
+      expect(timer.now()).toBe(DAEMON_RECONNECT_OUTAGE_BUDGET_MS);
+      expect(calls).toEqual([]);
+    });
+
+    test("a reconnect after a stopping refusal that never settles ends at the outage budget", async () => {
+      let connections = 0;
+      const { ports, calls, timer } = rig(
+        capabilitiesOr(() => {
+          throw Object.assign(new Error("broker stopping"), {
+            code: "session_broker_stopping",
+            retryAfterMs: 5_000,
+          });
+        }),
+      );
+      ports.ensureConnected = async () => {
+        if (++connections >= 2) {
+          await new Promise<void>(() => {});
+        }
+      };
+
+      expect(await acquireSessionThroughDaemon(longConfig, ports)).toMatchObject({
+        outcome: "failed",
+        cleanupPending: false,
+        failure: { code: "daemon_unavailable", retryable: true },
+      });
+      expect(timer.now()).toBe(5_000 + DAEMON_RECONNECT_OUTAGE_BUDGET_MS);
+      expect(calls.filter(({ method }) => method === DAEMON_PREPARE_SESSION_METHOD)).toHaveLength(
+        1,
+      );
+    });
+
+    test("status recovery gives up on an unreachable daemon with the same request identity", async () => {
+      let connections = 0;
+      const { ports, calls, timer } = rig(
+        capabilitiesOr(() => {
+          throw new Error("prepare reply lost");
+        }),
+      );
+      ports.ensureConnected = async () => {
+        if (++connections > 1) {
+          throw new DaemonUnavailableError("Daemon socket not found");
+        }
+      };
+
+      const result = await acquireSessionThroughDaemon(longConfig, ports);
+
+      expect(result).toMatchObject({
+        outcome: "pending",
+        requestId: longConfig.requestId,
+        cleanupPending: true,
+        failure: { code: "session_status_unresolved", retryable: true },
+      });
+      expect(timer.now()).toBeLessThan(DAEMON_RECONNECT_OUTAGE_BUDGET_MS + 2_000);
+      expect(calls.filter(({ method }) => method === DAEMON_PREPARE_SESSION_METHOD)).toHaveLength(
+        1,
+      );
+    });
+
+    test("a policy refusal while connecting is not retried", async () => {
+      let attempts = 0;
+      const { ports } = rig(capabilitiesOr(() => ready));
+      ports.ensureConnected = async () => {
+        attempts++;
+        throw new DaemonVersionMismatchError({
+          clientVersion: "0.0.2",
+          daemonVersion: "0.0.1",
+          reason: "staleClient",
+          detail: "restart refused",
+        });
+      };
+
+      expect(await acquireSessionThroughDaemon(longConfig, ports)).toMatchObject({
+        failure: { code: "daemon_unavailable", retryable: true },
+      });
+      expect(attempts).toBe(1);
+    });
   });
 
   test("missing capability fails before prepare", async () => {

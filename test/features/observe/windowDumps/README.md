@@ -19,3 +19,9 @@ portrait, with or without mirroring.
 
 These four files are verbatim captures and must not be edited, reformatted, or
 regenerated.
+
+Rotation parser/reader tests use these captures for both the display's applied
+`mDisplayRotation=ROTATION_*` configuration and its requested `mRotation` policy.
+Rotate's read-back tests also use them. The #15024 divergent case is derived in
+tests by changing only the first `mDisplayRotation=ROTATION_90` in the nomirror
+landscape capture (line 7) to `ROTATION_0`; the captured file stays unchanged.

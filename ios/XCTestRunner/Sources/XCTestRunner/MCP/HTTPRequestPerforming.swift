@@ -22,7 +22,7 @@ struct URLSessionRequestPerformer: HTTPRequestPerforming {
 
     static func redirectDelegate(for request: URLRequest) -> RefuseDaemonRedirects? {
         guard let url = request.url,
-              AuthenticatedDaemonHTTPRequestPerformer.isDaemonEndpoint(url)
+              AuthenticatedDaemonHTTPRequestPerformer.isDaemonEndpointShape(url)
         else { return nil }
         return RefuseDaemonRedirects()
     }
@@ -47,9 +47,11 @@ struct AuthenticatedDaemonHTTPRequestPerformer: HTTPRequestPerforming {
     let performer: any HTTPRequestPerforming
     let tokenProvider: any DaemonHTTPTokenProviding
     var scheduler: any DeadlineScheduler = SystemDeadlineScheduler()
+    var portDiscovery: any DaemonHTTPPortDiscovering = DaemonPidFilePortDiscovery()
 
     func perform(_ request: URLRequest) async throws -> (Data, URLResponse) {
-        guard let url = request.url, Self.isDaemonEndpoint(url),
+        guard let url = request.url, Self.isDaemonEndpointShape(url),
+              Self.isDaemonEndpoint(url, discoveredPort: portDiscovery.discoveredPort()),
               request.value(forHTTPHeaderField: "Authorization") == nil
         else { return try await performer.perform(request) }
         var refreshed = false
@@ -72,11 +74,26 @@ struct AuthenticatedDaemonHTTPRequestPerformer: HTTPRequestPerforming {
         }
     }
 
-    /// Exact loopback names only, matching the shared daemon HTTP endpoint vectors.
-    static func isDaemonEndpoint(_ url: URL) -> Bool {
+    private static let daemonPaths: Set<String> = ["/auto-mobile/streamable", "/heartbeat"]
+
+    /// The credential-scoping predicate, matching the shared daemon HTTP endpoint vectors: http(s) on
+    /// an exact loopback name, an explicit port, and one of the daemon's two routes. A discovered
+    /// PID-file port must equal the URL's port; without one the port is unverifiable and passes.
+    static func isDaemonEndpoint(_ url: URL, discoveredPort: Int?) -> Bool {
+        guard isDaemonEndpointShape(url) else { return false }
+        return discoveredPort == nil || discoveredPort == url.port
+    }
+
+    /// Everything about the endpoint that does not depend on the running daemon. Also scopes
+    /// redirect refusal, so the superset of possible daemon endpoints never follows a redirect.
+    static func isDaemonEndpointShape(_ url: URL) -> Bool {
         guard let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme),
-              let host = URLComponents(url: url, resolvingAgainstBaseURL: false)?.percentEncodedHost?.lowercased()
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let host = components.percentEncodedHost?.lowercased(),
+              ["localhost", "127.0.0.1", "::1", "[::1]"].contains(host),
+              let port = components.port, (1 ... 65535).contains(port),
+              daemonPaths.contains(components.percentEncodedPath)
         else { return false }
-        return ["localhost", "127.0.0.1", "::1", "[::1]"].contains(host)
+        return true
     }
 }

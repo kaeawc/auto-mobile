@@ -1,3 +1,5 @@
+import { FakeTimer } from "../../fakes/FakeTimer";
+
 import { beforeEach, describe, expect, test } from "bun:test";
 import { AndroidDeviceMutationResetPort } from "../../../src/daemon/sessionBroker/androidDeviceMutationResetPort";
 import type { DeviceMutationResetContext } from "../../../src/daemon/sessionBroker/mutations/reset";
@@ -344,5 +346,40 @@ describe("AndroidDeviceMutationResetPort", () => {
       "cancelled",
     );
     expect(adb.getExecutedCommands()).toEqual([]);
+  });
+});
+
+describe("non-idempotent reset commands", () => {
+  test.each(["uninstall", "clear"])("pm %s timeout has one derived attempt", async (verb) => {
+    const timer = new FakeTimer();
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse(
+      "shell pm list packages --user 10",
+      createExecResult("package:android\npackage:com.example.probe", ""),
+    );
+    adb.setCommandError(`shell pm ${verb}`, new Error("Command timed out after 2000ms: adb"));
+    const port = new AndroidDeviceMutationResetPort(adb, timer);
+    const context: DeviceMutationResetContext = {
+      scope: { deviceId: "emulator-5558", incarnation: "a", sessionUuid: "b" },
+      deadlineMs: 60_000,
+      signal: new AbortController().signal,
+      assertOwned: async () => {},
+    };
+    await expect(
+      port.revert(
+        mutation(
+          verb === "uninstall" ? "installed-app" : "preference",
+          verb === "uninstall" ? "user:10:com.example.probe" : "app-data:10:com.example.probe",
+          ABSENT,
+        ),
+        context,
+      ),
+    ).rejects.toThrow("timed out");
+    const calls = adb
+      .getCommandCalls()
+      .filter((call) => call.command.startsWith(`shell pm ${verb}`));
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.timeoutMs).toBe(verb === "uninstall" ? 10_000 : 7500);
+    expect(timer.getSleepHistory()).toEqual([]);
   });
 });

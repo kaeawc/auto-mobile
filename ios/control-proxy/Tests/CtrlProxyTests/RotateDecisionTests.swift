@@ -54,13 +54,50 @@ final class RotateDecisionTests: XCTestCase {
         XCTAssertEqual(result.value, 0)
     }
 
-    func testPortraitAppOverridesStaleLandscapeOnNoOp() throws {
-        let outcome = try decision("portrait", app: .portrait, device: "landscape_left").initial()
+    func testPortraitAppWithStaleLandscapeDevicePerformsSet() throws {
+        let decision = try decision("portrait", app: .portrait, device: "landscape_left")
+        XCTAssertEqual(decision.initial(), .pending)
+        let outcome = decision.poll(appAxis: .portrait, device: "portrait", deadlineReached: false)
         let result = try XCTUnwrap(outcome.result)
-        XCTAssertEqual(outcome, .noOp(result))
+        XCTAssertEqual(outcome, .success(result))
         XCTAssertEqual(result.previousOrientation, "portrait")
         XCTAssertEqual(result.currentOrientation, "portrait")
-        XCTAssertFalse(result.rotationPerformed)
+        XCTAssertEqual(result.value, 0)
+        XCTAssertTrue(result.rotationPerformed)
+        XCTAssertNil(result.error)
+    }
+
+    func testFailedSpringBoardLandscapeThenPortraitRestore() throws {
+        let landscape = try decision("landscape", app: .portrait, device: "portrait")
+        XCTAssertEqual(landscape.initial(), .pending)
+        let failed = landscape.poll(appAxis: .portrait, device: "landscape_left", deadlineReached: true)
+        let failure = try XCTUnwrap(failed.result)
+        XCTAssertEqual(failed, .failure(failure))
+        XCTAssertEqual(failure.error, RotateDecision.unchangedAxisError)
+        XCTAssertFalse(failure.rotationPerformed)
+        let restore = try decision("portrait", app: .portrait, device: "landscape_left")
+        XCTAssertEqual(restore.initial(), .pending)
+        let restored = restore.poll(appAxis: .portrait, device: "portrait", deadlineReached: false)
+        let result = try XCTUnwrap(restored.result)
+        XCTAssertEqual(restored, .success(result))
+        XCTAssertTrue(result.rotationPerformed)
+        XCTAssertEqual(result.previousOrientation, "portrait")
+        XCTAssertEqual(result.currentOrientation, "portrait")
+        XCTAssertEqual(result.value, 0)
+        XCTAssertNil(result.error)
+    }
+
+    func testMatchingOrUnknownDeviceAxisKeepsCoarseNoOp() throws {
+        for (request, app, device) in [
+            ("portrait", AppAxis.portrait, "portrait"),
+            ("portrait", AppAxis.portrait, "unknown"),
+            ("landscape", AppAxis.landscape, "landscape_right"),
+        ] {
+            let outcome = try decision(request, app: app, device: device).initial()
+            let result = try XCTUnwrap(outcome.result)
+            XCTAssertEqual(outcome, .noOp(result))
+            XCTAssertFalse(result.rotationPerformed)
+        }
     }
 
     func testLandscapeAppWithUnknownDeviceIsCoarseNoOp() throws {

@@ -154,6 +154,10 @@ export class DevicePoolInitialization {
     private readonly state: InitializationState,
     private readonly callbacks: InitializationCallbacks,
   ) {}
+  private wireForeignInventorySource(): void {
+    this.state.deviceManager.withForeignAndroidSerialSource?.(this.state.foreignClaims);
+  }
+
   initialize({
     env,
     sessionManager,
@@ -225,6 +229,7 @@ export class DevicePoolInitialization {
     this.state.consoleBusyRegistry = resolveConsoleBusyRegistry(consoleBusyRegistry);
     this.state.installedAppsRepository = installedAppsRepository ?? new InstalledAppsRepository();
     this.state.deviceManager = deviceManager;
+    this.wireForeignInventorySource();
     const shutdownReservationsPort: DeviceShutdownReservationsPoolPort =
       this.callbacks.createShutdownReservationsPort();
     this.state.shutdownReservationCoordinator = createDeviceShutdownReservations(

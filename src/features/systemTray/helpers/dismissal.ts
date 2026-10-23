@@ -28,6 +28,8 @@ import {
   findNotificationMatches,
   resolveNotificationSwipeElement,
 } from "./matching";
+import { TransientPreSwipeError } from "../TransientPreSwipeError";
+import { retryTransientPreSwipe } from "./transientRetry";
 import {
   SYSTEM_TRAY_CLEAR_MAX_ITERATIONS,
   SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS,
@@ -435,12 +437,13 @@ const waitForClearAllDismissal = async (
   }
 };
 
-const waitForReadableClearAllMatch = async (
+/** One readiness attempt: open the shade and read until a row matches, within one budget. */
+const readClearAllShadeOnce = async (
   device: BootedDevice,
   criteria: SystemTrayNotificationArgs,
   appMatchTexts: string[],
   awaitTimeoutMs: number,
-  options: { progress?: ProgressCallback; signal?: AbortSignal },
+  options: { progress?: ProgressCallback; signal?: AbortSignal; shadeKnownClosed: boolean },
 ): Promise<{ observation: ObserveResult; match: SystemTrayNotificationMatch | null }> => {
   const { timer, observeScreenFactory } = getSystemTrayDependencies();
   const controller = new AbortController();
@@ -456,12 +459,20 @@ const waitForReadableClearAllMatch = async (
     label: "Notification shade readiness",
     onTimeout: () => controller.abort(),
     timeoutError: () =>
-      new ActionableError(
+      new TransientPreSwipeError(
         "Could not clear notifications: shade not readable before dismissal (read timed out).",
       ),
   });
   const opened = await raceWithDeadline(
-    () => ensureSystemTrayOpen(device, awaitTimeoutMs, options.progress, signal),
+    () =>
+      ensureSystemTrayOpen(
+        device,
+        awaitTimeoutMs,
+        options.progress,
+        signal,
+        undefined,
+        options.shadeKnownClosed,
+      ),
     raceOptions(),
   );
   const read = () =>
@@ -483,7 +494,7 @@ const waitForReadableClearAllMatch = async (
     const remainingMs = deadlineMs - timer.now();
     if (remainingMs <= 0) {
       if (!readable) {
-        throw new ActionableError(
+        throw new TransientPreSwipeError(
           "Could not clear notifications: shade not readable before dismissal.",
         );
       }
@@ -492,6 +503,34 @@ const waitForReadableClearAllMatch = async (
     await sleep(Math.min(SYSTEM_TRAY_POLL_INTERVAL_MS, remainingMs), signal);
     observation = await read();
   }
+};
+
+/**
+ * Open the shade and wait for a readable row that matches. A load spike makes a read time out or
+ * come back unreadable, so each attempt gets its own `awaitTimeoutMs` and a transient failure is
+ * retried after a backoff; the shade is only assumed closed on the first attempt.
+ */
+const waitForReadableClearAllMatch = (
+  device: BootedDevice,
+  criteria: SystemTrayNotificationArgs,
+  appMatchTexts: string[],
+  awaitTimeoutMs: number,
+  options: { progress?: ProgressCallback; signal?: AbortSignal; shadeKnownClosed?: boolean },
+): Promise<{ observation: ObserveResult; match: SystemTrayNotificationMatch | null }> => {
+  let shadeKnownClosed = options.shadeKnownClosed ?? false;
+  return retryTransientPreSwipe(
+    "clearAll shade readiness",
+    () => {
+      const attemptKnowsShade = shadeKnownClosed;
+      shadeKnownClosed = false;
+      return readClearAllShadeOnce(device, criteria, appMatchTexts, awaitTimeoutMs, {
+        progress: options.progress,
+        signal: options.signal,
+        shadeKnownClosed: attemptKnowsShade,
+      });
+    },
+    options.signal,
+  );
 };
 
 /**
@@ -517,8 +556,8 @@ export interface ClearAllDrainResult {
 }
 
 /**
- * Android drain: readiness, each iteration's group expansion, and each post-swipe
- * verification get separate awaitTimeoutMs budgets. Confirmed dismissals renew
+ * Android drain: each readiness attempt (retried when transient), each iteration's group
+ * expansion, and each post-swipe verification get separate awaitTimeoutMs budgets. Confirmed dismissals renew
  * the next iteration's budget; inventory or the safety cap bounds the drain.
  */
 export const clearMatchingSystemTrayNotifications = async (
@@ -526,7 +565,13 @@ export const clearMatchingSystemTrayNotifications = async (
   criteria: SystemTrayNotificationArgs,
   appMatchTexts: string[],
   awaitTimeoutMs: number,
-  options: { maxSwipes?: number; progress?: ProgressCallback; signal?: AbortSignal } = {},
+  options: {
+    maxSwipes?: number;
+    progress?: ProgressCallback;
+    signal?: AbortSignal;
+    /** The caller just collapsed the shade, so the first readiness attempt can expand it directly. */
+    shadeKnownClosed?: boolean;
+  } = {},
 ): Promise<ClearAllDrainResult> => {
   const { signal, progress } = options;
   if (options.maxSwipes === 0) {
@@ -538,7 +583,7 @@ export const clearMatchingSystemTrayNotifications = async (
     criteria,
     appMatchTexts,
     awaitTimeoutMs,
-    { progress, signal },
+    { progress, signal, shadeKnownClosed: options.shadeKnownClosed },
   );
   let deadlineMs = timer.now() + awaitTimeoutMs;
   // The initial app inventory includes rows below the viewport that move into

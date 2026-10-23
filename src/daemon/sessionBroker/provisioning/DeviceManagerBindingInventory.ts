@@ -19,13 +19,25 @@ export class DeviceManagerBindingInventory implements BindingInventory {
     device: DeviceInfo,
     options: { signal?: AbortSignal },
   ): Promise<string | undefined> {
-    if (device.deviceId) {
-      return device.deviceId;
-    }
+    return device.deviceId ?? this.bootedRuntimeId(device, options, "replacement runtime");
+  }
+
+  async probeRunning(device: DeviceInfo, options: { signal?: AbortSignal }): Promise<boolean> {
+    // A listing's own deviceId is not live evidence; only a fresh booted listing proves running.
+    return (await this.bootedRuntimeId(device, options, "running state")) !== undefined;
+  }
+
+  /** The adb serial of the booted emulator running this image, from a fresh complete listing. */
+  private async bootedRuntimeId(
+    device: DeviceInfo,
+    options: { signal?: AbortSignal },
+    purpose: string,
+  ): Promise<string | undefined> {
     try {
       const discovery = await this.deviceManager.getBootedDevicesDetailed?.(device.platform, {
         signal: options.signal,
         bypassAndroidDeviceListCache: true,
+        skipForeignEnrichment: true,
       });
       options.signal?.throwIfAborted();
       if (!discovery?.succeededPlatforms.has(device.platform)) {
@@ -33,6 +45,7 @@ export class DeviceManagerBindingInventory implements BindingInventory {
       }
       return discovery.devices.find(
         (runtime) =>
+          !runtime.foreignOwned &&
           runtime.platform === device.platform &&
           runtime.name === device.name &&
           isAndroidEmulatorSerial(runtime.deviceId),
@@ -40,7 +53,7 @@ export class DeviceManagerBindingInventory implements BindingInventory {
     } catch (error) {
       options.signal?.throwIfAborted();
       // Unknown identity earns no freed-slot credit; reservation still requires proven capacity.
-      logger.warn(`[Bindings] cannot resolve replacement runtime: ${errorMessage(error)}`, error);
+      logger.warn(`[Bindings] cannot resolve ${purpose}: ${errorMessage(error)}`, error);
       return undefined;
     }
   }

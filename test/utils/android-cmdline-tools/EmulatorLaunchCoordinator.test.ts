@@ -109,6 +109,17 @@ describe("DefaultEmulatorLaunchCoordinator.launchEmulator", () => {
     controller.abort(new Error("later reset failure"));
     expect(spawned.killed).toBe(false);
   });
+  test("refuses launching an AVD already owned by another daemon", async () => {
+    const { coordinator, launcher, setBooted } = setup();
+    setBooted([
+      { name: "Pixel", platform: "android", deviceId: "emulator-5556", foreignOwned: true },
+    ]);
+    await expect(
+      coordinator.adoptsExistingAvdLaunch("Pixel", new NoOpPerformanceTracker()),
+    ).rejects.toThrow(/another daemon.*Pixel/);
+    expect(launcher.calls).toHaveLength(0);
+  });
+
   test("an already aborted request is cancelled before launching", async () => {
     const { coordinator, launcher } = setup();
     const controller = new AbortController();

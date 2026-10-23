@@ -27,7 +27,10 @@ import {
 } from "../../src/server/deviceMutationRecording";
 import { ToolRegistryClass } from "../../src/server/toolRegistry";
 import { logger } from "../../src/utils/logger";
-import { DEVICE_MUTATION_TOOL_CASES as CASES } from "../helpers/deviceMutationToolCases";
+import {
+  DEVICE_MUTATION_TOOL_CASES as CASES,
+  SERVICE_RECORDED_TOOLS,
+} from "../helpers/deviceMutationToolCases";
 
 const DEVICE: BootedDevice = { deviceId: "phone", platform: "android", name: "Phone" };
 const SCOPE = { sessionUuid: "broker-session", deviceId: DEVICE.deviceId, incarnation: "native-1" };
@@ -146,7 +149,9 @@ describe("broker tool-surface mutation recording", () => {
   test("every journaled coverage classification has an exercised adapter", () => {
     expect(CASES.map((entry) => entry.name).sort()).toEqual(
       Object.entries(DEVICE_MUTATION_TOOL_COVERAGE)
-        .filter(([, entry]) => entry.status === "journaled")
+        .filter(
+          ([name, entry]) => entry.status === "journaled" && !SERVICE_RECORDED_TOOLS.includes(name),
+        )
         .map(([name]) => name)
         .sort(),
     );

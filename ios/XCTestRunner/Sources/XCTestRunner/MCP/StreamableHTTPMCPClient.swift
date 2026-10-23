@@ -15,6 +15,7 @@ public final class StreamableHTTPMCPClient: AutoMobileMCPClient, Sendable {
         var logger: any AutoMobileLogger = StdoutLogger()
         var scheduler: any DeadlineScheduler = SystemDeadlineScheduler()
         var tokenProvider: any DaemonHTTPTokenProviding = DaemonHTTPTokenProvider()
+        var portDiscovery: any DaemonHTTPPortDiscovering = DaemonPidFilePortDiscovery()
     }
 
     private let state = OSAllocatedUnfairLock<State>(initialState: State())
@@ -33,7 +34,11 @@ public final class StreamableHTTPMCPClient: AutoMobileMCPClient, Sendable {
         try self.init(
             endpoint: endpoint,
             performer: URLSessionRequestPerformer(session: session),
-            options: Options(logger: logger, tokenProvider: DaemonHTTPTokenProvider(logger: logger))
+            options: Options(
+                logger: logger,
+                tokenProvider: DaemonHTTPTokenProvider(logger: logger),
+                portDiscovery: DaemonPidFilePortDiscovery(logger: logger)
+            )
         )
     }
 
@@ -41,11 +46,12 @@ public final class StreamableHTTPMCPClient: AutoMobileMCPClient, Sendable {
         guard endpoint.scheme != nil else { throw MCPClientError.invalidEndpoint(endpoint.absoluteString) }
         self.endpoint = endpoint
         logger = options.logger
-        self.performer = AuthenticatedDaemonHTTPRequestPerformer.isDaemonEndpoint(endpoint)
+        self.performer = AuthenticatedDaemonHTTPRequestPerformer.isDaemonEndpointShape(endpoint)
             ? AuthenticatedDaemonHTTPRequestPerformer(
                 performer: performer,
                 tokenProvider: options.tokenProvider,
-                scheduler: options.scheduler
+                scheduler: options.scheduler,
+                portDiscovery: options.portDiscovery
             )
             : performer
         scheduler = options.scheduler

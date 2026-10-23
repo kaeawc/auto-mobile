@@ -1,3 +1,4 @@
+import { adbAttemptTimeoutMs, retryAdbWithinBudget } from "./androidResetBudget";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import type { AdbCommandRunner } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import {
@@ -6,7 +7,13 @@ import {
 } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
 import { shellQuote } from "../../utils/shellQuote";
 import { logger } from "../../utils/logger";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { cleanAndroidBaseline } from "./androidKeepBootedCleanup";
+import {
+  clockCommands,
+  deviceStateSettingCommands,
+  networkConditionCommands,
+} from "./androidDeviceStateRevert";
 import type { AndroidKeepBootedResetPort } from "./androidKeepBootedReset";
 import {
   ANDROID_CERTIFIABLE_KINDS,
@@ -16,11 +23,16 @@ import {
 import { genericBaselineRevert, type BaselineChange } from "./mutations/baseline";
 import type { DeviceMutationResetContext } from "./mutations/reset";
 import type { DeviceBaseline, DeviceMutationInput } from "./mutations/types";
+import {
+  SCREEN_STATE_MUTATION_KEY,
+  isRestorableScreenState,
+} from "./mutations/screenStateMutation";
 
 interface AndroidRevertCommand {
   command: string;
   success?: string;
   timeoutMs?: number;
+  retryable?: boolean;
 }
 
 const PACKAGE_PATTERN = /^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*$/;
@@ -35,8 +47,14 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
     "device-setting": (mutation) =>
       this.settingCommands(mutation) ??
       this.displayOverrideCommands(mutation) ??
-      this.nightModeCommands(mutation),
-    clock: (mutation) => this.timezoneCommands(mutation) ?? this.settingCommands(mutation),
+      this.nightModeCommands(mutation) ??
+      this.screenStateCommands(mutation) ??
+      deviceStateSettingCommands(mutation),
+    clock: (mutation) =>
+      this.timezoneCommands(mutation) ??
+      this.settingCommands(mutation) ??
+      clockCommands(mutation, this.timer.now()),
+    "network-condition": (mutation) => networkConditionCommands(mutation),
     rotation: (mutation) => this.settingCommands(mutation),
     "keep-awake": (mutation) => this.settingCommands(mutation),
     "screen-reader": (mutation) => this.settingCommands(mutation),
@@ -45,9 +63,13 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
     location: (mutation) => this.locationCommands(mutation),
     preference: (mutation) => this.appDataCommands(mutation),
     "shared-file": (mutation) => this.fileCommands(mutation),
+    "status-bar": (mutation) => this.statusBarCommands(mutation),
   };
 
-  constructor(private readonly adb: AdbCommandRunner) {}
+  constructor(
+    private readonly adb: AdbCommandRunner,
+    private readonly timer: Pick<Timer, "now" | "sleep"> = defaultTimer,
+  ) {}
 
   canRevert(mutation: DeviceMutationInput): boolean {
     return this.commands(mutation) !== null;
@@ -109,7 +131,7 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
       (command, timeoutMs) => this.execute(command, context, timeoutMs),
       (mutation) => this.revert(mutation, context),
     );
-    const output = await this.execute("shell cmd clipboard clear", context, 2000, true);
+    const output = await this.execute("shell cmd clipboard clear", context, undefined, true);
     if (this.unsupportedClipboard(output)) {
       logger.warn("Android cleaning skipped unsupported clipboard clear");
     } else if (this.failedOutput(output)) {
@@ -144,8 +166,14 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
     ) {
       return;
     }
-    for (const { command, success, timeoutMs } of commands) {
-      const output = await this.execute(command, context, timeoutMs, mutation.kind === "clipboard");
+    for (const { command, success, timeoutMs, retryable } of commands) {
+      const output = await this.execute(
+        command,
+        context,
+        timeoutMs,
+        mutation.kind === "clipboard",
+        retryable,
+      );
       if (mutation.kind === "clipboard" && this.unsupportedClipboard(output)) {
         logger.warn("Android cleaning skipped unsupported journal clipboard clear");
         continue;
@@ -182,19 +210,48 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
   private async execute(
     command: string,
     context: DeviceMutationResetContext,
+    // Legacy callers without a deadline retain one attempt; reset deadlines turn this into a floor.
     timeoutMs = 2000,
     optionalClipboard = false,
+    retryable = true,
   ): Promise<string> {
-    await context.assertOwned();
-    context.signal.throwIfAborted();
     try {
-      const result = await this.adb.executeCommand(command, {
-        signal: context.signal,
-        timeoutMs,
-        maxBuffer: 4 * 1024 * 1024,
-        noRetry: true,
-        waitForProcessSettlementAfterAbort: true,
-      });
+      const dispatch = async (attemptTimeoutMs: number) => {
+        await context.assertOwned();
+        context.signal.throwIfAborted();
+        return this.adb.executeCommand(command, {
+          signal: context.signal,
+          timeoutMs: attemptTimeoutMs,
+          maxBuffer: 4 * 1024 * 1024,
+          noRetry: true,
+          waitForProcessSettlementAfterAbort: true,
+        });
+      };
+      const result =
+        context.deadlineMs === undefined
+          ? await dispatch(timeoutMs)
+          : await retryAdbWithinBudget(
+              (attemptTimeoutMs) =>
+                dispatch(
+                  retryable
+                    ? attemptTimeoutMs
+                    : Math.min(
+                        context.deadlineMs! - this.timer.now(),
+                        Math.max(
+                          timeoutMs,
+                          adbAttemptTimeoutMs(context.deadlineMs! - this.timer.now(), 3),
+                        ),
+                      ),
+                ),
+              {
+                timer: this.timer,
+                deadlineMs: context.deadlineMs,
+                signal: context.signal,
+                label: "Android reset command",
+                minAttemptMs: timeoutMs,
+                attempts: retryable ? undefined : 1,
+              },
+            );
       context.signal.throwIfAborted();
       await context.assertOwned();
       if (optionalClipboard && this.unsupportedClipboard(`${result.stdout}\n${result.stderr}`)) {
@@ -223,6 +280,7 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
           { command: `shell am force-stop --user ${target[1]} ${shellQuote(target[2]!)}` },
           {
             command: `shell pm uninstall --user ${target[1]} ${shellQuote(target[2]!)}`,
+            retryable: false,
             success: "Success",
             timeoutMs: 10_000,
           },
@@ -338,6 +396,23 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
       : null;
   }
 
+  /**
+   * Puts the screen back after a power-key press or the lock action: wake it and dismiss the
+   * keyguard. Only a prior that was awake, unlocked and credential-free is restorable; a reset
+   * cannot enter a PIN, so a secure or unreadable prior is left to the next wakeAndUnlock.
+   */
+  private screenStateCommands({
+    key,
+    priorValue,
+  }: DeviceMutationInput): AndroidRevertCommand[] | null {
+    return key === SCREEN_STATE_MUTATION_KEY && isRestorableScreenState(priorValue)
+      ? [
+          { command: "shell input keyevent KEYCODE_WAKEUP" },
+          { command: "shell wm dismiss-keyguard" },
+        ]
+      : null;
+  }
+
   private nightModeCommands({
     key,
     priorValue,
@@ -387,10 +462,31 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
           { command: `shell am force-stop --user ${appData[1]} ${shellQuote(appData[2]!)}` },
           {
             command: `shell pm clear --user ${appData[1]} ${shellQuote(appData[2]!)}`,
+            retryable: false,
             success: "Success",
           },
         ]
       : null;
+  }
+
+  /** Leaves SystemUI demo mode, then puts `sysui_demo_allowed` back to its journaled value. */
+  private statusBarCommands({
+    key,
+    priorValue,
+  }: DeviceMutationInput): AndroidRevertCommand[] | null {
+    const prior = priorValue.state === "present" ? priorValue.value : undefined;
+    if (key !== "device" || (priorValue.state !== "absent" && typeof prior !== "string")) {
+      return null;
+    }
+    return [
+      { command: "shell am broadcast -a com.android.systemui.demo -e command exit" },
+      {
+        command:
+          priorValue.state === "absent"
+            ? "shell settings delete global sysui_demo_allowed"
+            : `shell settings put global sysui_demo_allowed ${shellQuote(prior as string)}`,
+      },
+    ];
   }
 
   private fileCommands({ key, priorValue }: DeviceMutationInput): AndroidRevertCommand[] | null {

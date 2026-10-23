@@ -17,7 +17,10 @@ export function skippedReason(entry: BindingJournalEntry): BindingJournalBlockRe
   if (entry.kind === "release") {
     return "binding_settling";
   }
-  return entry.phase === "deleting" ? "cleanup_pending" : "reconcile_in_progress";
+  if (entry.phase !== "deleting") {
+    return "reconcile_in_progress";
+  }
+  return entry.target.quarantinedAtMs === undefined ? "cleanup_pending" : "cleanup_quarantined";
 }
 
 export function emptyBindingCommit(requestedSpec: unknown): BindingBindingCommit {

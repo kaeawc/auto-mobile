@@ -1,3 +1,4 @@
+import { BOOT_ID_TIMEOUT } from "./fixtures/androidResetLoadTimeouts";
 import { describe, expect, test } from "bun:test";
 import {
   AndroidBaselineReset,
@@ -441,6 +442,8 @@ describe("AndroidBaselineReset", () => {
   });
   async function rig() {
     const host = new FakeAndroidResetHost();
+    host.timer = new FakeTimer();
+    host.timer.enableAutoAdvance();
     host.strategy = { reset: async (_device, _packages, assertOwned) => assertOwned() };
     const reset = new AndroidBaselineReset(host);
     await reset.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-a");
@@ -615,4 +618,69 @@ describe("AndroidBaselineReset", () => {
     ).toBe("clean");
     expect(host.closed).toBe(2);
   });
+});
+
+describe("baseline reset under load", () => {
+  test("reset boot identity retries the captured timeout", async () => {
+    const host = new FakeAndroidResetHost();
+    const timer = new FakeTimer();
+    host.timer = timer;
+    host.strategy = { handlesSessionMutations: true, reset: async () => {} };
+    const baseline = new AndroidBaselineReset(host);
+    await baseline.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-a", {
+      timer,
+    });
+    timer.enableAutoAdvance();
+    const adb = host.adb.bind(host);
+    let reads = 0;
+    host.adb = () => ({
+      executeCommand: async (command, options) => {
+        if (command.includes("boot_id") && ++reads === 1) {
+          throw new Error(BOOT_ID_TIMEOUT);
+        }
+        return adb().executeCommand(command, options);
+      },
+    });
+    await expect(
+      baseline.reset("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, async () => {}),
+    ).resolves.toBe("clean");
+    expect(timer.getSleepHistory()).toEqual([250]);
+  });
+  test.each([true, false])(
+    "CtrlProxy readiness recovers=%s within derived window",
+    async (recovers) => {
+      const host = new FakeAndroidResetHost();
+      const timer = new FakeTimer();
+      host.timer = timer;
+      host.strategy = { reset: async () => {} };
+      const baseline = new AndroidBaselineReset(host);
+      await baseline.capture(
+        "resource-a",
+        ANDROID_RESET_DEVICE,
+        ANDROID_RESET_PROFILE,
+        "session-a",
+        { timer },
+      );
+      timer.enableAutoAdvance();
+      let calls = 0;
+      host.ctrlProxyReady = async () => {
+        calls++;
+        return recovers && calls >= 3;
+      };
+      const pending = baseline.reset(
+        "resource-a",
+        ANDROID_RESET_DEVICE,
+        ANDROID_RESET_PROFILE,
+        async () => {},
+      );
+      if (recovers) {
+        await expect(pending).resolves.toBe("clean");
+        expect(calls).toBe(3);
+      } else {
+        await expect(pending).rejects.toThrow("Android reset CtrlProxy health check failed");
+        expect(timer.now()).toBe(150_000);
+        expect(calls).toBeGreaterThan(2);
+      }
+    },
+  );
 });

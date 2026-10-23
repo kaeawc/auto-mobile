@@ -1,7 +1,11 @@
 import { StageSessionDownloadsRefusal } from "./StageSessionDownloadsRefusal";
 
 import { defaultDaemonContext, type DaemonContext } from "../daemon/daemonContext";
-import { resolveActiveSessionDevice, type ActiveSessionResolver } from "./activeSessionDevice";
+import {
+  resolveActiveSessionDevice,
+  type ActiveSessionDevice,
+  type ActiveSessionResolver,
+} from "./activeSessionDevice";
 import {
   getSharedStorageService,
   type SharedStorageService,
@@ -9,6 +13,8 @@ import {
 } from "./sharedStorageService";
 import type { SharedStorageFileInput } from "./sharedStorageContract";
 import type { StageSessionDownloadsResult } from "./downloadsFixtureContract";
+import { stageSessionDownloadsAsPutAppFile } from "./deviceMutationDataAdapters";
+import { createRecording, type DeviceMutationRecording } from "./deviceMutationRecording";
 
 export interface StageSessionDownloadsRequest {
   sessionUuid: string | undefined;
@@ -27,6 +33,8 @@ export interface DownloadsFixtureServiceDependencies {
   resolveActiveSession?: ActiveSessionResolver;
   sharedStorage?: () => SharedStorageService;
   registerPendingDeviceCleanup?: (deviceId: string, cleanup: Promise<unknown>) => void;
+  /** Journals the staged files before the first device write, as the device dispatcher does. */
+  mutationRecording?: () => Pick<DeviceMutationRecording, "beforeToolCall">;
 }
 
 let downloadsFixtureService: DownloadsFixtureService | null = null;
@@ -41,10 +49,12 @@ export function getDownloadsFixtureService(): DownloadsFixtureService {
 export function createDownloadsFixtureService(
   deps: DownloadsFixtureServiceDependencies = {},
 ): DownloadsFixtureService {
+  let recording: DeviceMutationRecording | undefined;
   return new DefaultDownloadsFixtureService(
     deps.resolveActiveSession ?? resolveActiveSessionDevice,
     deps.sharedStorage ?? getSharedStorageService,
     deps.registerPendingDeviceCleanup ?? registerPendingDeviceCleanup,
+    deps.mutationRecording ?? (() => (recording ??= createRecording(defaultDaemonContext))),
   );
 }
 
@@ -64,6 +74,7 @@ class DefaultDownloadsFixtureService implements DownloadsFixtureService {
       deviceId: string,
       cleanup: Promise<unknown>,
     ) => void,
+    private readonly mutationRecording: () => Pick<DeviceMutationRecording, "beforeToolCall">,
   ) {}
 
   async stage(request: StageSessionDownloadsRequest): Promise<StageSessionDownloadsResult> {
@@ -108,8 +119,9 @@ class DefaultDownloadsFixtureService implements DownloadsFixtureService {
     };
     // Register before awaiting: if session release races cancellation, DevicePool
     // observes this promise and keeps the device assigned until all staging work
-    // has settled.
-    const stagedPromise = this.sharedStorage().stage(stageRequest);
+    // has settled. The journal row is part of that work: this tool resolves its device here,
+    // so the device dispatcher never records it.
+    const stagedPromise = this.recordThenStage(request, sessionUuid, active, stageRequest);
     this.registerPendingDeviceCleanup(active.device.deviceId, stagedPromise);
     const staged = await stagedPromise;
     return {
@@ -124,5 +136,21 @@ class DefaultDownloadsFixtureService implements DownloadsFixtureService {
       reset: staged.reset,
       files: staged.files,
     };
+  }
+
+  private async recordThenStage(
+    request: StageSessionDownloadsRequest,
+    sessionUuid: string,
+    active: ActiveSessionDevice,
+    stageRequest: StageSharedStorageRequest,
+  ) {
+    await this.mutationRecording().beforeToolCall(
+      "putAppFile",
+      stageSessionDownloadsAsPutAppFile(request),
+      active.device,
+      sessionUuid,
+      request.signal,
+    );
+    return this.sharedStorage().stage(stageRequest);
   }
 }

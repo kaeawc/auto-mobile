@@ -295,8 +295,9 @@ export class FakeDeviceReadiness implements Pick<
         const hasAndroid = this.connectedDevices.some((device) => device.platform === "android");
         const hasIos = this.connectedDevices.some((device) => device.platform === "ios");
         if (hasAndroid && hasIos && !pin) {
-          throw new ActionableError(
+          throw new AmbiguousDeviceTargetError(
             "Both Android and iOS devices are connected. For a device tool call, pass sessionUuid (from getAndroid/getApple), platform, or a bound device label on this call to select the target. Alternatively, call setActiveDevice to select an active device.",
+            this.connectedDevices,
           );
         }
         const resolvedPlatform =

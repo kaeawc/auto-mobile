@@ -309,6 +309,25 @@ export async function resolveIosProvisioningSelection(
  */
 const ANDROID_TAG_PREFERENCE = ["google_apis", "default", "google_apis_playstore"];
 
+/**
+ * Tags of handheld (phone/tablet) system images, the only ones a default Android
+ * provision may create an AVD from. The SDK also ships Wear OS (`android-wear*`),
+ * TV (`android-tv`, `google-tv*`), Automotive (`android-automotive*`), desktop, XR and
+ * glasses images; an AVD created from one of those boots a different product, so a newer
+ * non-handheld image must never beat an older phone image (#14900). Tablet, 16 KB-page
+ * (`_ps16k`) and ATD (automated test device) variants are handheld and rank behind the
+ * preferred tags via {@link tagRank}.
+ */
+const HANDHELD_ANDROID_TAGS: ReadonlySet<string> = new Set([
+  ...ANDROID_TAG_PREFERENCE,
+  "google_apis_ps16k",
+  "google_apis_playstore_ps16k",
+  "google_apis_tablet",
+  "google_apis_playstore_tablet",
+  "google_atd",
+  "aosp_atd",
+]);
+
 function tagRank(tag: string): number {
   const index = ANDROID_TAG_PREFERENCE.indexOf(tag);
   return index === -1 ? ANDROID_TAG_PREFERENCE.length : index;
@@ -400,6 +419,8 @@ function describeBound(bound: string | undefined, apiLevel: number | undefined):
 /**
  * Choose an installed system image: newest exact API identifier within the
  * requested major-API range, preferring a host-runnable ABI and a Google APIs tag.
+ * Only handheld (phone/tablet) images are candidates; Wear OS, TV and Automotive
+ * images are never selected (#14900).
  */
 export function pickAndroidSystemImage(
   images: SystemImage[],
@@ -452,9 +473,21 @@ export function pickAndroidSystemImage(
     );
   }
 
+  const handheld = inRange.filter((image) => HANDHELD_ANDROID_TAGS.has(image.tag));
+  if (handheld.length === 0) {
+    throw new ActionableError(
+      "No installed handheld (phone) Android system image matches the requested API range " +
+        `(min=${describeBound(criteria.minOsVersion, min)}, max=${describeBound(criteria.maxOsVersion, max)}). ` +
+        "Only non-handheld images (Wear OS, TV, Automotive or similar) are installed in that range: " +
+        `${inRange.map((image) => image.packageName).join(", ")}. ` +
+        "Default provisioning never creates an AVD from them. " +
+        "Install a phone image with 'sdkmanager \"system-images;android-<api>;google_apis;<abi>\"'.",
+    );
+  }
+
   const preferences = preferredAbis(architecture);
-  const runnable = inRange.filter((image) => preferences.includes(image.abi));
-  const candidates = runnable.length > 0 ? runnable : inRange;
+  const runnable = handheld.filter((image) => preferences.includes(image.abi));
+  const candidates = runnable.length > 0 ? runnable : handheld;
 
   // Precedence is major API > ABI > tag > minor > packageName; keep capability
   // and rootability preferences ahead of point-release freshness.

@@ -12,6 +12,7 @@ import {
   MultiPlatformDeviceManager,
   type PlatformDeviceManager,
 } from "../../../devices/deviceUtils";
+import type { ForeignAndroidSerialSource } from "../../../devices/deviceDiscoveryContracts";
 import type { ExactIosRuntimeCatalog } from "../../../devices/exactDeviceProvisioning";
 import {
   FileAvdConfigReader,
@@ -59,7 +60,7 @@ import { daemonToolRegistry } from "../../toolRegistryPort";
 export interface DaemonBrokerDeviceAcquisitionOptions {
   registry: () => Promise<BindingRegistry>;
   sessions: BrokerDeviceAcquisitionSessions;
-  pool: BindingClaimPool & FreeDeviceBusyPool;
+  pool: BindingClaimPool & FreeDeviceBusyPool & Partial<ForeignAndroidSerialSource>;
   resourceBudgetPolicy?: BindingResourceBudgetPolicy;
   /** Which sessions this daemon holds as live managed executions (#11275). */
   executions?: LiveExecutionSessions;
@@ -102,9 +103,13 @@ const sdkAndroidProfileCatalog: ManagedAndroidProfileCatalog = {
 };
 
 /** The injected tooling with the host's real tooling filled in. */
-function hostTooling(tooling: DaemonBindingTooling = {}) {
+function hostTooling(tooling: DaemonBindingTooling = {}, source?: ForeignAndroidSerialSource) {
   return {
-    deviceManager: tooling.deviceManager ?? new MultiPlatformDeviceManager(),
+    deviceManager:
+      tooling.deviceManager ??
+      (source
+        ? new MultiPlatformDeviceManager().withForeignAndroidSerialSource(source)
+        : new MultiPlatformDeviceManager()),
     androidConfigReader: tooling.androidConfigReader ?? new FileAvdConfigReader(),
     androidImageCatalog: tooling.androidImageCatalog ?? sdkAndroidImageCatalog,
     androidProfileCatalog: tooling.androidProfileCatalog ?? sdkAndroidProfileCatalog,
@@ -149,7 +154,12 @@ export function createDaemonBrokerDeviceAcquisition(
     let reconciler = reconcilers.get(registry);
     if (!reconciler) {
       // Built on the first acquisition: daemons that never serve a binding never touch them.
-      const tooling = hostTooling(options.tooling);
+      const tooling = hostTooling(
+        options.tooling,
+        options.pool.foreignSerials
+          ? { foreignSerials: (serials, signal) => options.pool.foreignSerials!(serials, signal) }
+          : undefined,
+      );
       const { deviceManager, androidConfigReader } = tooling;
       const inventory = new DeviceManagerBindingInventory(deviceManager);
       const claims = new PoolBindingDeviceClaims(options.pool, options.executions);

@@ -18,3 +18,8 @@ Captured verbatim from real `xcrun simctl` runs. Nothing here is hand-written.
   simulator; `residue-preferences-keyboard-planted.xml` is `defaults export` of a
   domain after `defaults write KeyboardAutocorrection -bool NO` (the planted key from
   manual-test batch 20261022b).
+- `residue-accessibility-*.xml` (#15017): `simctl spawn <udid> defaults export
+  com.apple.Accessibility -` captured 2026-10-22 on a freshly created iOS 27.0 (iPhone 18
+  Pro) simulator: `-clean` before any contrast change, `-increase-contrast-enabled` after
+  `simctl ui <udid> increase_contrast enabled`, and `-increase-contrast-disabled` after
+  turning it back off (`DarkenSystemColors` and `PointerIncreasedContrastEnabled` stay at 0).

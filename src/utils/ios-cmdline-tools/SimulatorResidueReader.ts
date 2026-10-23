@@ -26,6 +26,18 @@ export const IOS_KEYBOARD_DEFAULT_KEYS = [
 
 export const IOS_KEYBOARD_DEFAULTS_DOMAIN = "com.apple.Preferences";
 
+/**
+ * `simctl ui <udid> increase_contrast` writes these `com.apple.Accessibility` defaults and,
+ * when turned back off, leaves them behind at 0 instead of removing them (#15017). A pool
+ * simulator has neither, so a leftover is session residue even though contrast reads as disabled.
+ */
+export const IOS_INCREASE_CONTRAST_DEFAULT_KEYS = [
+  "DarkenSystemColors",
+  "PointerIncreasedContrastEnabled",
+] as const;
+
+export const IOS_ACCESSIBILITY_RESIDUE_DOMAIN = "com.apple.Accessibility";
+
 const SAFARI_BUNDLE_ID = "com.apple.mobilesafari";
 
 export type IosResidueFileArea = "documents" | "safari-documents";
@@ -39,6 +51,8 @@ export interface IosResidueSnapshot {
   /** Top-level entries of Safari's data-container `Documents` directory, sorted. */
   safariDocuments: string[];
   keyboard: Record<string, KeyboardDefaultValue>;
+  /** The `com.apple.Accessibility` increase-contrast defaults, by key. */
+  accessibility: Record<string, KeyboardDefaultValue>;
 }
 
 export interface IosResidueInspector {
@@ -147,7 +161,18 @@ export class SimulatorResidueReader implements IosResidueInspector {
       photos: [...photos].sort(),
       documents: documents.filter((name) => !isSystemOwnedDocument(name)).sort(),
       safariDocuments: [...safariDocuments].sort(),
-      keyboard: await this.readKeyboardDefaults(deviceId, signal),
+      keyboard: await this.readDefaults(
+        deviceId,
+        IOS_KEYBOARD_DEFAULTS_DOMAIN,
+        IOS_KEYBOARD_DEFAULT_KEYS,
+        signal,
+      ),
+      accessibility: await this.readDefaults(
+        deviceId,
+        IOS_ACCESSIBILITY_RESIDUE_DOMAIN,
+        IOS_INCREASE_CONTRAST_DEFAULT_KEYS,
+        signal,
+      ),
     };
   }
 
@@ -211,26 +236,28 @@ export class SimulatorResidueReader implements IosResidueInspector {
     return join(stdout, "Documents");
   }
 
-  private async readKeyboardDefaults(
+  private async readDefaults(
     deviceId: string,
+    domain: string,
+    trackedKeys: readonly string[],
     signal: AbortSignal,
   ): Promise<Record<string, KeyboardDefaultValue>> {
     const exported = await this.dependencies.simctl.executeCommandArgs(
-      ["spawn", deviceId, "defaults", "export", IOS_KEYBOARD_DEFAULTS_DOMAIN, "-"],
+      ["spawn", deviceId, "defaults", "export", domain, "-"],
       this.dependencies.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       signal,
     );
     const plist = await parsePlist(exported.stdout);
     if (!(plist instanceof Map)) {
-      throw new ActionableError("iOS keyboard defaults export is not a dictionary");
+      throw new ActionableError(`iOS ${domain} defaults export is not a dictionary`);
     }
-    const keyboard: Record<string, KeyboardDefaultValue> = {};
-    for (const key of IOS_KEYBOARD_DEFAULT_KEYS) {
+    const defaults: Record<string, KeyboardDefaultValue> = {};
+    for (const key of trackedKeys) {
       const value = plist.get(key);
       if (isKeyboardDefaultValue(value)) {
-        keyboard[key] = value;
+        defaults[key] = value;
       }
     }
-    return keyboard;
+    return defaults;
   }
 }

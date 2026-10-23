@@ -37,6 +37,7 @@ function harness() {
     removed: [] as string[],
     safari: SAFARI_DATA as string | Error,
     preferences: fixture("residue-preferences-clean.xml"),
+    accessibility: fixture("residue-accessibility-clean.xml"),
   };
   const files: SimulatorResidueFileSystem = {
     listFiles: async (directory) => state.trees.get(directory) ?? null,
@@ -57,7 +58,9 @@ function harness() {
           }
           return exec(`${state.safari}\n`);
         }
-        return exec(state.preferences);
+        return exec(
+          args[4] === "com.apple.Accessibility" ? state.accessibility : state.preferences,
+        );
       },
     },
   });
@@ -73,10 +76,29 @@ describe("SimulatorResidueReader", () => {
     expect(snapshot.documents).toEqual(["snapshot-gallery.jpeg"]);
     expect(snapshot.safariDocuments).toEqual([]);
     expect(snapshot.keyboard).toEqual({});
+    expect(snapshot.accessibility).toEqual({});
     expect(state.commands).toEqual([
       ["get_app_container", UDID, "com.apple.mobilesafari", "data"],
       ["spawn", UDID, "defaults", "export", "com.apple.Preferences", "-"],
+      ["spawn", UDID, "defaults", "export", "com.apple.Accessibility", "-"],
     ]);
+  });
+
+  // Captured from a fresh iOS 27.0 simulator after `simctl ui increase_contrast enabled`, then
+  // `disabled` (#15017): turning the setting back off leaves its defaults behind as 0.
+  test("reads the increase-contrast defaults simctl leaves behind, enabled or disabled", async () => {
+    const enabled = harness();
+    enabled.state.accessibility = fixture("residue-accessibility-increase-contrast-enabled.xml");
+    expect((await enabled.reader.read(UDID, enabled.signal)).accessibility).toEqual({
+      DarkenSystemColors: 1,
+      PointerIncreasedContrastEnabled: 1,
+    });
+    const disabled = harness();
+    disabled.state.accessibility = fixture("residue-accessibility-increase-contrast-disabled.xml");
+    expect((await disabled.reader.read(UDID, disabled.signal)).accessibility).toEqual({
+      DarkenSystemColors: 0,
+      PointerIncreasedContrastEnabled: 0,
+    });
   });
 
   test("a planted autocorrect default and out-of-band files are reported", async () => {

@@ -27,6 +27,7 @@ import { warmedTests } from "./warmedTests";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeEmulatorProcessStopper } from "../fakes/FakeEmulatorProcessStopper";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FileTerminalReleaseJournal } from "../../src/daemon/terminalReleaseJournal";
 import { FakeTerminalReleaseJournalFileSystem } from "../fakes/FakeTerminalReleaseJournalFileSystem";
@@ -156,6 +157,8 @@ export function restartStopHarness() {
       ensureCtrlProxyReady: async () => {},
       stopPerformanceMonitoring: () => {},
       stopAndroidObservers: async () => {},
+      // An unconfirmed stop escalates to the process table; never read the real host's.
+      androidEmulatorProcessStopper: new FakeEmulatorProcessStopper(),
       resolveRunningAndroidAvdName: async (target) =>
         (await manager.getBootedDevices("android")).find(
           (device) => device.deviceId === target.deviceId,

@@ -12,14 +12,15 @@ final class DaemonHTTPAuthenticationTests: XCTestCase {
         throws -> StreamableHTTPMCPClient
     {
         try StreamableHTTPMCPClient(
-            endpoint: XCTUnwrap(URL(string: "http://localhost/auto-mobile/streamable")), performer: performer,
-            options: .init(scheduler: scheduler, tokenProvider: tokens)
+            endpoint: XCTUnwrap(URL(string: "http://localhost:3161/auto-mobile/streamable")), performer: performer,
+            options: .init(scheduler: scheduler, tokenProvider: tokens, portDiscovery: FakeDaemonHTTPPortDiscovery())
         )
     }
 
     private struct EndpointVector: Decodable {
         let url: String
         let daemon: Bool
+        let discoveredPort: Int?
     }
 
     func testSharedEndpointVectorsPreserveCallerAuthorizationAndLimitRefresh() async throws {
@@ -35,7 +36,10 @@ final class DaemonHTTPAuthenticationTests: XCTestCase {
             for caller in [false, true] {
                 let performer = AsyncFakeHTTPPerformer()
                 let tokens = FakeDaemonHTTPTokenProvider(["local", "refreshed"])
-                let authenticated = AuthenticatedDaemonHTTPRequestPerformer(performer: performer, tokenProvider: tokens)
+                let authenticated = AuthenticatedDaemonHTTPRequestPerformer(
+                    performer: performer, tokenProvider: tokens,
+                    portDiscovery: FakeDaemonHTTPPortDiscovery(vector.discoveredPort)
+                )
                 var request = try URLRequest(url: XCTUnwrap(URL(string: vector.url)))
                 if caller { request.setValue("caller", forHTTPHeaderField: "aUtHoRiZaTiOn") }
                 let original = request
@@ -81,9 +85,10 @@ final class DaemonHTTPAuthenticationTests: XCTestCase {
             let tokens = FakeDaemonHTTPTokenProvider([nil, "published"])
             let scheduler = StartupScheduler()
             let authenticated = AuthenticatedDaemonHTTPRequestPerformer(
-                performer: performer, tokenProvider: tokens, scheduler: scheduler
+                performer: performer, tokenProvider: tokens, scheduler: scheduler,
+                portDiscovery: FakeDaemonHTTPPortDiscovery()
             )
-            let request = try URLRequest(url: XCTUnwrap(URL(string: "http://localhost/heartbeat")))
+            let request = try URLRequest(url: XCTUnwrap(URL(string: "http://localhost:3161/heartbeat")))
             let response = try await authenticated.perform(request)
             let captured = await performer.captured
             let delays = await scheduler.delays
@@ -111,7 +116,7 @@ final class DaemonHTTPAuthenticationTests: XCTestCase {
     func testDaemonSessionPerformerRefusesRedirectIncludingCallerAuthorization() async throws {
         let session = URLSession(configuration: .ephemeral)
         defer { session.invalidateAndCancel() }
-        let original = try XCTUnwrap(URL(string: "http://localhost/heartbeat"))
+        let original = try XCTUnwrap(URL(string: "http://localhost:3161/heartbeat"))
         let remote = try XCTUnwrap(URL(string: "https://example.com/heartbeat"))
         var request = URLRequest(url: original)
         request.setValue("Bearer local", forHTTPHeaderField: "Authorization")
@@ -161,13 +166,14 @@ final class DaemonHTTPAuthenticationTests: XCTestCase {
     }
 
     func testRemote401AndCallerAuthorizationDoNotRefreshDaemonCredentials() async throws {
-        for endpoint in ["https://example.com/mcp", "http://localhost/mcp"] {
+        for endpoint in ["https://example.com/mcp", "http://localhost:3161/auto-mobile/streamable"] {
             var request = try URLRequest(url: XCTUnwrap(URL(string: endpoint)))
             if endpoint.contains("localhost") { request.setValue("caller", forHTTPHeaderField: "Authorization") }
             let tokens = FakeDaemonHTTPTokenProvider(["local", "refreshed"])
             let performer = AuthenticatedDaemonHTTPRequestPerformer(
                 performer: RejectedPerformer(),
-                tokenProvider: tokens
+                tokenProvider: tokens,
+                portDiscovery: FakeDaemonHTTPPortDiscovery()
             )
             _ = try await performer.perform(request)
             XCTAssertEqual(tokens.reads, 0)
@@ -187,6 +193,51 @@ final class DaemonHTTPAuthenticationTests: XCTestCase {
         performer.reply(0)
         try await task.value
         XCTAssertEqual(tokens.reads, 0)
+    }
+
+    func testCredentialsOnlyReachDiscoveredDaemonPortAndRoutes() async throws {
+        let cases: [(url: String, discovered: Int?, attached: Bool)] = [
+            ("http://localhost:3162/heartbeat", 3161, false), // port mismatch
+            ("http://localhost/heartbeat", 3161, false), // missing port
+            ("https://localhost/heartbeat", nil, false), // missing port, no pid file port
+            ("http://localhost:3161/mcp", 3161, false), // non-daemon route
+            ("http://localhost:3161/heartbeat", nil, true), // unverifiable port passes
+            ("http://localhost:3161/heartbeat", 3161, true),
+        ]
+        for testCase in cases {
+            let performer = AsyncFakeHTTPPerformer()
+            let tokens = FakeDaemonHTTPTokenProvider(["local"])
+            let authenticated = AuthenticatedDaemonHTTPRequestPerformer(
+                performer: performer, tokenProvider: tokens,
+                portDiscovery: FakeDaemonHTTPPortDiscovery(testCase.discovered)
+            )
+            let request = try URLRequest(url: XCTUnwrap(URL(string: testCase.url)))
+            let task = Task { try await authenticated.perform(request) }
+            try await performer.requests.wait(for: 1)
+            XCTAssertEqual(authorization(performer, 0), testCase.attached ? "Bearer local" : nil, testCase.url)
+            XCTAssertEqual(tokens.reads, testCase.attached ? 1 : 0, testCase.url)
+            performer.reply(0, data: Data(), headers: [:])
+            _ = try await task.value
+        }
+    }
+
+    func testClientForNonDaemonLoopbackRouteNeverWrapsOrReadsCredentials() async throws {
+        let tokens = FakeDaemonHTTPTokenProvider(["local"])
+        let discovery = FakeDaemonHTTPPortDiscovery()
+        for endpoint in ["https://localhost/mcp", "http://localhost:8080/x"] {
+            let performer = AsyncFakeHTTPPerformer()
+            let client = try StreamableHTTPMCPClient(
+                endpoint: XCTUnwrap(URL(string: endpoint)), performer: performer,
+                options: .init(scheduler: VirtualDeadlineScheduler(), tokenProvider: tokens, portDiscovery: discovery)
+            )
+            let task = Task { try await client.initialize(timeout: 5) }
+            try await performer.requests.wait(for: 1)
+            XCTAssertNil(authorization(performer, 0), endpoint)
+            performer.reply(0)
+            try await task.value
+        }
+        XCTAssertEqual(tokens.reads, 0)
+        XCTAssertEqual(discovery.reads, 0)
     }
 
     private func authorization(_ performer: AsyncFakeHTTPPerformer, _ index: Int) -> String? {
@@ -293,8 +344,10 @@ final class DaemonHTTPAuthenticationTests: XCTestCase {
     func testHTTPHeartbeatHeaderAndRefreshPolicy() async throws {
         let performer = AsyncFakeHTTPPerformer()
         let tokens = FakeDaemonHTTPTokenProvider(["heartbeat-old", "heartbeat-new"])
-        let authenticated = AuthenticatedDaemonHTTPRequestPerformer(performer: performer, tokenProvider: tokens)
-        var request = try URLRequest(url: XCTUnwrap(URL(string: "http://localhost/heartbeat")))
+        let authenticated = AuthenticatedDaemonHTTPRequestPerformer(
+            performer: performer, tokenProvider: tokens, portDiscovery: FakeDaemonHTTPPortDiscovery()
+        )
+        var request = try URLRequest(url: XCTUnwrap(URL(string: "http://localhost:3161/heartbeat")))
         request.httpMethod = "POST"
         let heartbeatRequest = request
         let task = Task { try await authenticated.perform(heartbeatRequest) }
@@ -311,9 +364,10 @@ final class DaemonHTTPAuthenticationTests: XCTestCase {
     func testHTTPHeartbeatOmitsAuthorizationWithoutToken() async throws {
         let performer = AsyncFakeHTTPPerformer()
         let authenticated = AuthenticatedDaemonHTTPRequestPerformer(
-            performer: performer, tokenProvider: FakeDaemonHTTPTokenProvider()
+            performer: performer, tokenProvider: FakeDaemonHTTPTokenProvider(),
+            portDiscovery: FakeDaemonHTTPPortDiscovery()
         )
-        let request = try URLRequest(url: XCTUnwrap(URL(string: "http://localhost/heartbeat")))
+        let request = try URLRequest(url: XCTUnwrap(URL(string: "http://localhost:3161/heartbeat")))
         let task = Task { try await authenticated.perform(request) }
         try await performer.requests.wait(for: 1)
         XCTAssertNil(authorization(performer, 0))

@@ -1,10 +1,10 @@
 package dev.jasonpearson.automobile.protoviewer
 
+import android.content.Context
+import androidx.test.core.app.ApplicationProvider
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpRequest
 import dev.jasonpearson.automobile.protocol.PrototypeRequestErrorCode
 import dev.jasonpearson.automobile.protocol.PrototypeRequestResponse
-import android.content.Context
-import androidx.test.core.app.ApplicationProvider
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test

@@ -15,7 +15,10 @@ import {
   clearIosSystemTrayNotifications,
   readClearAllTerminalObservation,
   listSystemTrayNotifications,
+  listSystemTrayNotificationsForClear,
+  TransientPreSwipeError,
   NotificationShadeNotOpenError,
+  retryTransientPreSwipe,
   readActiveNotificationKeysForApp,
   resolveUniqueTrayAppLabel,
   resolveSystemTrayAwaitTimeout,
@@ -135,7 +138,7 @@ const readRequiredActiveNotificationKeys = async (
 ): Promise<string[]> => {
   const keys = await readActiveNotificationKeysForApp(device, appId, signal);
   if (keys === undefined) {
-    throw new ActionableError(
+    throw new TransientPreSwipeError(
       phase === "before"
         ? `Could not verify how many notifications exist for ${appId}.`
         : `Could not verify how many notifications remain for ${appId}.`,
@@ -153,10 +156,11 @@ const resolveClearAllAttributionLabel = async (
   device: BootedDevice,
   appId: string,
   installedApps: string[],
+  resolvedLabel: string | null,
   signal?: AbortSignal,
 ): Promise<string | null> => {
   try {
-    return await resolveUniqueTrayAppLabel(device, appId, installedApps, signal);
+    return await resolveUniqueTrayAppLabel(device, appId, installedApps, signal, resolvedLabel);
   } catch (error) {
     if (!(error instanceof ActionableError)) {
       throw error;
@@ -273,12 +277,8 @@ function resolveDismissSwipeTarget(
 
 interface NotificationScope {
   notification: SystemTrayNotificationArgs;
-  appMatchTexts: string[];
-  installedApps: string[];
-}
-
-interface NotificationScope {
-  notification: SystemTrayNotificationArgs;
+  /** The app's label as resolved for scoping; null without an appId or when it has none. */
+  appLabel: string | null;
   appMatchTexts: string[];
   installedApps: string[];
 }
@@ -438,7 +438,7 @@ export class SystemTray {
       );
       appMatchTexts = [appLabel, notification.appId].filter(Boolean) as string[];
     }
-    return { notification, appMatchTexts, installedApps };
+    return { notification, appLabel, appMatchTexts, installedApps };
   }
 
   private async find(scope: NotificationScope, awaitTimeoutMs: number): Promise<SystemTrayOutcome> {
@@ -656,34 +656,50 @@ export class SystemTray {
     }
   }
 
-  /** Android only: snapshot the app's active notification keys and row texts before swiping. */
+  /**
+   * Android only: snapshot the app's active notification keys and row texts before swiping.
+   * Each step is retried when it fails transiently, since a loaded host makes the shade read,
+   * the row correlation and the dumpsys time out or come back half-rendered. A listing leaves
+   * the shade collapsed, which the drain then need not probe for.
+   */
   private async inventoryBeforeClearAll(
     scope: NotificationScope,
     awaitTimeoutMs: number,
-  ): Promise<{ expectedKeys: string[] | undefined; clearMatchTexts: string[] }> {
-    const { device, progress, signal } = this;
-    const { notification, appMatchTexts, installedApps } = scope;
+  ): Promise<{
+    expectedKeys: string[] | undefined;
+    clearMatchTexts: string[];
+    shadeCollapsed: boolean;
+  }> {
+    const { device, signal } = this;
+    const { notification, appLabel, appMatchTexts, installedApps } = scope;
     let expectedKeys: string[] | undefined;
     let clearMatchTexts = appMatchTexts;
+    let shadeCollapsed = false;
     if (device.platform === "android" && notification.appId) {
+      const appId = notification.appId;
       const attributionLabel = await resolveClearAllAttributionLabel(
         device,
-        notification.appId,
+        appId,
         installedApps,
+        appLabel,
         signal,
       );
-      const listed = await listSystemTrayNotifications(
-        device,
-        notification.appId,
-        attributionLabel,
-        awaitTimeoutMs,
-        progress,
+      const listed = await retryTransientPreSwipe(
+        "clearAll notification listing",
+        () =>
+          listSystemTrayNotificationsForClear(
+            device,
+            appId,
+            attributionLabel,
+            awaitTimeoutMs,
+            signal,
+          ),
         signal,
       );
-      expectedKeys = await readRequiredActiveNotificationKeys(
-        device,
-        notification.appId,
-        "before",
+      shadeCollapsed = true;
+      expectedKeys = await retryTransientPreSwipe(
+        "clearAll notification count",
+        () => readRequiredActiveNotificationKeys(device, appId, "before", signal),
         signal,
       );
       // All correlated rows' content text lets the existing row matcher
@@ -695,7 +711,7 @@ export class SystemTray {
         ]),
       ];
     }
-    return { expectedKeys, clearMatchTexts };
+    return { expectedKeys, clearMatchTexts, shadeCollapsed };
   }
 
   private async clearAll(
@@ -706,7 +722,7 @@ export class SystemTray {
     const { notification } = scope;
     await this.armShadeRestore(awaitTimeoutMs);
 
-    const { expectedKeys, clearMatchTexts } = await this.inventoryBeforeClearAll(
+    const { expectedKeys, clearMatchTexts, shadeCollapsed } = await this.inventoryBeforeClearAll(
       scope,
       awaitTimeoutMs,
     );
@@ -721,6 +737,7 @@ export class SystemTray {
               maxSwipes: expectedKeys?.length,
               progress,
               signal,
+              shadeKnownClosed: shadeCollapsed,
             },
           )
         : await clearIosSystemTrayNotifications(device, notification, clearMatchTexts, {
@@ -728,10 +745,15 @@ export class SystemTray {
             signal,
           });
 
+    const { appId } = notification;
     const remainingKeys =
-      expectedKeys === undefined || !notification.appId
+      expectedKeys === undefined || !appId
         ? undefined
-        : await readRequiredActiveNotificationKeys(device, notification.appId, "after", signal);
+        : await retryTransientPreSwipe(
+            "clearAll remaining notification count",
+            () => readRequiredActiveNotificationKeys(device, appId, "after", signal),
+            signal,
+          );
 
     const result = formatClearAllResult(
       notification.appId,

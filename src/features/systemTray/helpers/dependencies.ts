@@ -5,6 +5,7 @@ import { defaultAdbClientFactory } from "../../../utils/android-cmdline-tools/Ad
 import { DUMPSYS_MAX_BUFFER } from "../../../utils/android-cmdline-tools/dumpsysLimits";
 import type { AdbExecuteOptions } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { NotificationUIDetector } from "../../../utils/interfaces/NotificationUIDetector";
+import { exponentialBackoff, type BackoffPolicy } from "../../../utils/Backoff";
 import { logger } from "../../../utils/logger";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { shellQuote } from "../../../utils/shellQuote";
@@ -23,6 +24,9 @@ import type { SwipeRequest } from "../../observe/shared/types";
 import { SearchableHierarchy } from "../../utility/SearchableNode";
 import { createNotificationUIDetector } from "../createNotificationUIDetector";
 import type { IosGestureResult } from "../IosNotificationUIDetector";
+
+const SYSTEM_TRAY_RETRY_INITIAL_DELAY_MS = 250;
+const SYSTEM_TRAY_RETRY_MAX_DELAY_MS = 1000;
 
 export interface SystemTrayObserver {
   execute(options?: ObserveScreenExecuteOptions): Promise<ObserveResult>;
@@ -63,7 +67,16 @@ export interface SystemTrayDependencies {
   pressHomeFactory?: (device: BootedDevice, signal?: AbortSignal) => Promise<IosGestureResult>;
   pressButtonFactory?: (device: BootedDevice) => Pick<PressButton, "execute">;
   timer: Timer;
+  /** Delay between retries of a transiently failing pre-swipe clearAll step. */
+  backoff: BackoffPolicy;
 }
+
+// Pre-swipe retries wait briefly: the failures they absorb are load spikes that
+// pass in a second or two, and each retry already pays its own read budget.
+const defaultSystemTrayBackoff = exponentialBackoff({
+  initialDelayMs: SYSTEM_TRAY_RETRY_INITIAL_DELAY_MS,
+  maxDelayMs: SYSTEM_TRAY_RETRY_MAX_DELAY_MS,
+});
 
 let systemTrayDependencies: SystemTrayDependencies | null = null;
 
@@ -116,6 +129,7 @@ export const getSystemTrayDependencies = (): SystemTrayDependencies => {
         return pressHomeResultToIosGestureResult(result);
       },
       timer: defaultTimer,
+      backoff: defaultSystemTrayBackoff,
       appInventoryFactory: (device) =>
         new ListInstalledApps(device, undefined, null, { cacheEnabled: false }),
       appLabelResolver: resolveAppLabel,
@@ -133,6 +147,7 @@ export const setSystemTrayDependencies = (overrides: Partial<SystemTrayDependenc
     pressHomeFactory: overrides.pressHomeFactory ?? current.pressHomeFactory,
     pressButtonFactory: overrides.pressButtonFactory ?? current.pressButtonFactory,
     timer: overrides.timer ?? current.timer,
+    backoff: overrides.backoff ?? current.backoff,
     appInventoryFactory: overrides.appInventoryFactory ?? current.appInventoryFactory,
     appLabelResolver: overrides.appLabelResolver ?? current.appLabelResolver,
   };
@@ -241,10 +256,12 @@ export const resolveUniqueTrayAppLabel = async (
   appId: string,
   appIds: string[],
   signal?: AbortSignal,
+  // The label the caller already resolved for `appId` through the same resolver.
+  resolvedLabel?: string | null,
 ): Promise<string> => {
   signal?.throwIfAborted();
   const { appLabelResolver } = getSystemTrayDependencies();
-  const label = await appLabelResolver(device, appId, signal);
+  const label = resolvedLabel || (await appLabelResolver(device, appId, signal));
   signal?.throwIfAborted();
   if (!label) {
     throw new ActionableError(`Cannot verify the notification label for ${appId}.`);

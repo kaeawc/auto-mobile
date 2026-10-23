@@ -21,6 +21,18 @@ import { DEVICE_MUTATION_KINDS, type DeviceBaseline, type DeviceMutationInput } 
 import type { BaselineChange } from "./baseline";
 import { parseNotifyutilState } from "../../../utils/ios-cmdline-tools/notifyutil";
 import { iosBiometricEnrollmentTarget, iosBiometricRevertArgs } from "./iosBiometricRevert";
+import {
+  IOS_KEYBOARD_DEFAULTS_DOMAIN,
+  type IosResidueInspector,
+} from "../../../utils/ios-cmdline-tools/SimulatorResidueReader";
+import {
+  hasResidueBaseline,
+  IOS_RESIDUE_KINDS,
+  planResidueRevert,
+  residueFromBaseline,
+  residueIsClean,
+  residueObservations,
+} from "./iosResidue";
 
 const IOS_SETTING_VALUE_SCHEMAS = {
   appearance: z.enum(["light", "dark"]),
@@ -72,10 +84,8 @@ export const IOS_UNOBSERVABLE_BASELINE_REASONS = {
   rotation: "simctl has no complete orientation readback and restoration API.",
   "screen-reader": "simctl cannot read back effective VoiceOver state.",
   notification: "simctl cannot inventory or remove all delivered and pending notifications.",
-  media: "simctl cannot inventory and restore the entire Photos library.",
   contact: "simctl cannot inventory and restore the complete Contacts store.",
   calendar: "simctl cannot inventory and restore the complete Calendar store.",
-  keyboard: "simctl cannot inventory keyboard configuration and learned dictionaries.",
   clock: "simctl cannot observe all effective clock and automatic time-zone state.",
   "network-condition": "simctl cannot inventory effective simulator and host network shaping.",
   "biometric-enrollment": "simctl cannot read back complete biometric enrollment state.",
@@ -83,7 +93,6 @@ export const IOS_UNOBSERVABLE_BASELINE_REASONS = {
   certificate: "simctl cannot inventory and restore complete certificate trust settings.",
   "opened-url": "simctl cannot inventory persistent effects of arbitrary URL handlers.",
   preference: "simctl cannot inventory every app's arbitrary preferences and live caches.",
-  "shared-file": "simctl cannot inventory and restore all shared filesystem contents.",
   account: "simctl cannot inventory and restore all provider and system accounts.",
 } as const;
 
@@ -181,6 +190,7 @@ export interface IosMutationResetDependencies {
   pasteboard: IosResetPasteboard;
   privacyGrants: Pick<TccServiceRowReader, "readServiceRows">;
   trustStore: UserTrustStoreReader;
+  residue: IosResidueInspector;
 }
 
 interface IosAppGroupCleanup {
@@ -280,6 +290,16 @@ export class IosDeviceMutationResetPort implements DeviceMutationResetPort {
       completeKinds.push("device-setting");
     } catch (error) {
       await this.inventoryFailure(error, context, "device-setting");
+    }
+    try {
+      observations.push(
+        ...residueObservations(
+          await this.dependencies.residue.read(context.scope.deviceId, context.signal),
+        ),
+      );
+      completeKinds.push(...IOS_RESIDUE_KINDS);
+    } catch (error) {
+      await this.inventoryFailure(error, context, "out-of-band residue");
     }
     return {
       observations,
@@ -544,6 +564,65 @@ export class IosDeviceMutationResetPort implements DeviceMutationResetPort {
     await this.resetSurvivingPrivacyGrants(context);
     await this.assertNoUserTrustedCertificates(context);
     await this.restoreSettings(context);
+    await this.sanitizeResidue(context);
+  }
+
+  /**
+   * Photos, Documents and Safari files and keyboard defaults are changed outside the tools the
+   * journal records, and `simctl` cannot undo a photo. Compare them against the baseline: revert
+   * what can be reverted, and refuse the keep-booted reset (so erase runs) for the rest, so a
+   * `clean` receipt never hides leftover state.
+   */
+  private async sanitizeResidue(context: DeviceMutationResetContext): Promise<void> {
+    await context.assertOwned();
+    if (!hasResidueBaseline(context.baseline) || !context.baseline) {
+      throw new ActionableError("iOS reset requires a residue baseline; erase required");
+    }
+    const baseline = residueFromBaseline(context.baseline);
+    const read = async (phase: string) => {
+      const started = this.timer.now();
+      try {
+        const snapshot = await this.dependencies.residue.read(
+          context.scope.deviceId,
+          context.signal,
+        );
+        await context.assertOwned();
+        return snapshot;
+      } finally {
+        context.recordPhase?.(phase, this.timer.now() - started);
+      }
+    };
+    const plan = planResidueRevert(baseline, await read("residue:inspect"));
+    if (plan.unrevertible.length > 0) {
+      throw new ActionableError(`${plan.unrevertible.join("; ")}; erase required`);
+    }
+    if (residueIsClean(plan)) {
+      return;
+    }
+    for (const { area, names } of plan.removals) {
+      await context.assertOwned();
+      await this.dependencies.residue.removeEntries(
+        context.scope.deviceId,
+        area,
+        names,
+        context.signal,
+      );
+    }
+    for (const { key, prior } of plan.keyboard) {
+      await this.revert(
+        {
+          kind: "preference",
+          key: `${IOS_KEYBOARD_DEFAULTS_DOMAIN}:${key}`,
+          priorValue:
+            prior === undefined ? { state: "absent" } : { state: "present", value: prior },
+          toolName: "baseline-reset",
+        },
+        context,
+      );
+    }
+    if (!residueIsClean(planResidueRevert(baseline, await read("residue:verify")))) {
+      throw new ActionableError("iOS out-of-band residue survived reset; erase required");
+    }
   }
 
   /**

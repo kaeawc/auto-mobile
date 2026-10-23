@@ -1,0 +1,8 @@
+    1     0  15:53.85 /sbin/launchd
+  341     1   6:12.46 /usr/libexec/logd
+  377     1   0:36.67 /usr/sbin/syslogd
+  577     1   0:13.50 /System/Library/PrivateFrameworks/ModelCatalogRuntime.framework/Versions/A/modelcatalogd
+51665     1   0:27.98 launchd_sim /Users/user/Library/Developer/CoreSimulator/Devices/18A2D9B1-CDFA-445A-93AA-A532EA4B5498/data/var/run/launchd_bootstrap.plist
+51672 51665   0:14.94 /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/usr/libexec/logd
+51688 51665   0:00.18 /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/usr/sbin/syslogd
+51784 51665   0:01.34 /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/ModelCatalogR

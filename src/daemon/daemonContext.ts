@@ -90,7 +90,7 @@ export interface PlanEndDaemonContext {
   sessionManager(): Pick<SessionManager, "peekTerminalAnswerForEndedSession"> | undefined;
 }
 
-/** The state the daemon itself initializes and updates over its lifecycle. */
+/** The state the daemon initializes, updates and reads back over its lifecycle. */
 export type DaemonStateWrites = Pick<
   DaemonState,
   | "initialize"
@@ -98,6 +98,7 @@ export type DaemonStateWrites = Pick<
   | "setSessionBrokerMode"
   | "setBrokerExecutionReowner"
   | "setSessionBrokerService"
+  | "getSessionBrokerService"
 >;
 
 /**
@@ -183,6 +184,7 @@ export const defaultDaemonStateWrites: DaemonStateWrites = {
   setSessionBrokerMode: (enabled) => currentDaemon().setSessionBrokerMode(enabled),
   setBrokerExecutionReowner: (reowner) => currentDaemon().setBrokerExecutionReowner(reowner),
   setSessionBrokerService: (service) => currentDaemon().setSessionBrokerService(service),
+  getSessionBrokerService: () => currentDaemon().getSessionBrokerService(),
 };
 
 export type { DaemonStateLike };

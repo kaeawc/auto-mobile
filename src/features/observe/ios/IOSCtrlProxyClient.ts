@@ -889,22 +889,13 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
     }
   }
 
-  /**
-   * Push THIS device's mock rules and error simulation from the host store.
-   * Used after a session release clears the store (issue #10061); the
-   * reconnect path runs the same two syncs.
-   */
+  /** Push this device's host network state, rejecting failed delivery. */
   public async syncNetworkStateFromHost(
     options: SdkCapabilityQueryOptions = sdkCapabilityQueryOptions(this.timer),
   ): Promise<void> {
-    try {
-      await this.syncNetworkMockRulesIfAvailable(options);
-    } catch (error) {
-      // Release cleanup is best effort; a failed mock sync must not retain error simulation.
-      logger.warn("[IOSCtrlProxyClient] Failed to sync network mock rules during cleanup", error);
-    } finally {
-      this.networkSync.syncNetworkErrorSimulationToDevice();
-    }
+    return this.networkSync.syncNetworkStateFromHost(options, (opts) =>
+      this.syncNetworkMockRulesIfAvailable(opts),
+    );
   }
 
   private syncHierarchyCadenceToDevice(): void {

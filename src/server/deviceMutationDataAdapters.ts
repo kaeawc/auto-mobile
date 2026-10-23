@@ -91,11 +91,12 @@ function opaqueDataToolMutations(
       return [{ kind: "opaque", key: opaqueIntentKey("sql", args.appId, args.databasePath) }];
     case "mockNetwork":
     case "clearMockNetwork":
-      // NetworkState owns the host rules; networkStateSessionCleanup clears and pushes them on
-      // release. SDK rule stores use process memory only, so reset's reboot/app termination drops
-      // them. Accepted residual, not a journal concern: if that best-effort release push fails,
-      // times out or is skipped while an SDK app keeps running, stale rules last until the next
-      // sync or app restart, like other session-release cleanup. Keep this breadcrumb non-fallback.
+      // Release pushes rejected, aborted/timed-out or hung, missing CtrlProxy clients, and
+      // iOS noCapability/superseded outcomes mark the session gap before cleanup settles,
+      // escalating keep-booted reset. Unconfirmed iOS replies count as delivered; Android
+      // delivery means socket write success, with no device ack. Residuals: a failed
+      // in-session clearMockNetwork push leaves nothing owned to push/mark at release;
+      // the gap map is in memory and keyed by session only. Keep this non-fallback.
       return [{ kind: "opaque", key: "network-mocks" }];
     case "phoneCall":
     case "sendSms":

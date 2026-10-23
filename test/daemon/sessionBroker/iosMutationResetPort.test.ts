@@ -1532,3 +1532,75 @@ test.each([
     }),
   ).toBe(false);
 });
+
+test.each([
+  ['["session.app","documents","a"]', true],
+  ['["app_containers","session.app","documents",null,"default","a"]', true],
+  ['["baseline.app","documents","a"]', false],
+  ['["user_files",null,null,"ns","default","a"]', false],
+  ["broken", false],
+])(
+  "shared-file coverage requires complete inventory and a non-baseline app: %s",
+  (key, covered) => {
+    const { port } = harness();
+    const entry: DeviceMutationInput = {
+      kind: "shared-file",
+      key,
+      toolName: "putAppFile",
+      priorValue: { state: "unobservable" },
+    };
+    const baseline: DeviceBaseline = {
+      completeKinds: ["installed-app"],
+      observations: [
+        { kind: "installed-app", key: "baseline.app", value: { state: "present", value: true } },
+      ],
+      unobservable: [],
+    };
+    expect(port.sanitizeCovers(entry, { baseline })).toBe(covered);
+    expect(port.sanitizeCovers(entry)).toBe(false);
+    expect(port.sanitizeCovers(entry, { baseline: { ...baseline, completeKinds: [] } })).toBe(
+      false,
+    );
+  },
+);
+
+test.each(["present", "absent", "unobservable"] as const)(
+  "shared-file inventory matching folds case for %s baseline rows",
+  (state) => {
+    const { port } = harness();
+    const baseline: DeviceBaseline = {
+      completeKinds: ["installed-app"],
+      unobservable: [],
+      observations: [
+        {
+          kind: "installed-app",
+          key: "com.Example.App",
+          value: state === "present" ? { state, value: { ApplicationType: "User" } } : { state },
+        },
+        {
+          kind: "installed-app",
+          key: "com.apple.MobileSMS",
+          value: state === "present" ? { state, value: { ApplicationType: "System" } } : { state },
+        },
+      ],
+    };
+    for (const appId of [
+      "com.example.app",
+      "com.EXAMPLE.app",
+      "com.apple.mobilesms",
+      "absent.app",
+    ]) {
+      expect(
+        port.sanitizeCovers(
+          {
+            kind: "shared-file",
+            key: JSON.stringify([appId, "documents", "a"]),
+            toolName: "putAppFile",
+            priorValue: { state: "unobservable" },
+          },
+          { baseline },
+        ),
+      ).toBe(appId === "absent.app");
+    }
+  },
+);

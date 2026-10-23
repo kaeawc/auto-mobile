@@ -1,8 +1,12 @@
+import { projectIosChromeFrames, type IosChromeFrame } from "./iosChromeFrames";
+export { projectIosChromeFrames, type IosChromeFrame } from "./iosChromeFrames";
+import { deriveIosFloatingBarInsets } from "./iosFloatingBarInsets";
 import {
   ActionableError,
   type Element,
   type ElementBounds,
   type ObserveResult,
+  type SwipeOnOptions,
   type ViewHierarchyResult,
 } from "../../../models";
 import type { ObservationEdgeInsets } from "../../../models/ObservationInsets";
@@ -11,7 +15,7 @@ import { getHierarchySnapshot } from "../../observe/HierarchyCapture";
 import { screenSizeForOffscreenCheck } from "../../utility/ElementGeometry";
 import { SearchableHierarchy, type SearchableEntry } from "../../utility/SearchableNode";
 import { getScreenBounds } from "../../../utils/screenBounds";
-import { boundsEqual } from "../../../utils/bounds";
+import { boundsEqual, intersectBounds } from "../../../utils/bounds";
 import { getHierarchyNodeSource } from "../../observe/output/elementProvenance";
 
 /**
@@ -40,95 +44,12 @@ export function hasDispatchableExposedTapPoint(
 }
 
 const zeroInsets = (): ObservationEdgeInsets => ({ top: 0, right: 0, bottom: 0, left: 0 });
-const navigationBars = new Set(["UINavigationBar", "XCUIElementTypeNavigationBar"]);
-const bottomBars = new Set([
-  "UITabBar",
-  "UIToolbar",
-  "XCUIElementTypeTabBar",
-  "XCUIElementTypeToolbar",
-]);
-
-export interface IosChromeFrame {
-  bounds: ElementBounds;
-  region: "navigation bar" | "status bar" | "bottom toolbar or tab bar";
-  node: SearchableEntry;
-}
-
-function visibleChromeNode(node: SearchableEntry): boolean {
-  return (
-    node.properties.visible !== false &&
-    node.properties.visible !== "false" &&
-    node.properties.hidden !== true &&
-    node.properties.hidden !== "true"
-  );
-}
-
-function chromeBoundsOnScreen(
-  bounds: ElementBounds | undefined,
-  screen: ScreenSize,
-): bounds is ElementBounds {
-  return (
-    !!bounds &&
-    Object.values(bounds).every(Number.isFinite) &&
-    bounds.right > bounds.left &&
-    bounds.bottom > bounds.top &&
-    bounds.right > 0 &&
-    bounds.left < screen.width &&
-    bounds.bottom > 0 &&
-    bounds.top < screen.height
-  );
-}
-
-function chromeRegion(
-  className: string,
-  bounds: ElementBounds,
-  screen: ScreenSize,
-): IosChromeFrame["region"] | undefined {
-  const isStatusBar =
-    className.startsWith("UIStatusBar") || className === "XCUIElementTypeStatusBar";
-  // Allow status-safe-area/home-indicator gaps, but reject bars in mid-screen content.
-  if (
-    (navigationBars.has(className) || isStatusBar) &&
-    bounds.top <= screen.height * 0.25 &&
-    bounds.bottom <= screen.height * 0.5
-  ) {
-    return isStatusBar ? "status bar" : "navigation bar";
-  }
-  if (
-    bottomBars.has(className) &&
-    bounds.top >= screen.height * 0.75 &&
-    bounds.bottom >= screen.height * 0.9
-  ) {
-    return "bottom toolbar or tab bar";
-  }
-  return undefined;
-}
-
 function iosChromeFrames(
   hierarchy: ViewHierarchyResult | undefined,
   screen?: ScreenSize,
   nodes = hierarchy ? new SearchableHierarchy().project(hierarchy) : [],
 ): IosChromeFrame[] {
   return hierarchy && screen ? projectIosChromeFrames(nodes, screen) : [];
-}
-
-/** Collect chrome once from the same projection used for tap target ancestry. */
-export function projectIosChromeFrames(
-  nodes: readonly SearchableEntry[],
-  screen: ScreenSize,
-): IosChromeFrame[] {
-  const frames: IosChromeFrame[] = [];
-  for (const node of nodes) {
-    const bounds = node.bounds;
-    if (!visibleChromeNode(node) || !chromeBoundsOnScreen(bounds, screen)) {
-      continue;
-    }
-    const region = chromeRegion(node.className ?? "", bounds, screen);
-    if (region) {
-      frames.push({ bounds, region, node });
-    }
-  }
-  return frames;
 }
 
 function chromeTargetNode(
@@ -342,6 +263,7 @@ export interface SwipeInsetsOptions {
   observation: ObserveResult;
   platform?: "android" | "ios";
   includeSystemInsets?: boolean;
+  includeFloatingBars?: boolean;
 }
 
 function swipePlatform({
@@ -376,10 +298,16 @@ export function effectiveSwipeInsets(
   const chrome = deriveIosChromeInsets(observation.viewHierarchy, {
     observationScreenSize: observation.screenSize,
   });
+  const floating =
+    options.includeFloatingBars === false
+      ? zeroInsets()
+      : deriveIosFloatingBarInsets(observation.viewHierarchy, {
+          observationScreenSize: observation.screenSize,
+        });
   return {
     top: Math.max(observed.top, chrome.top),
     right: Math.max(observed.right, chrome.right),
-    bottom: Math.max(observed.bottom, chrome.bottom),
+    bottom: Math.max(observed.bottom, chrome.bottom, floating.bottom),
     left: Math.max(observed.left, chrome.left),
   };
 }
@@ -407,6 +335,9 @@ export function insetSwipeBounds(
     swipePlatform(options) === "ios" &&
     (bounds.right <= bounds.left || bounds.bottom <= bounds.top)
   ) {
+    if (options.includeFloatingBars !== false) {
+      return insetSwipeBounds({ ...options, includeFloatingBars: false });
+    }
     throw new ActionableError(
       "Swipe container has no area outside iOS system chrome or the navigation bar.",
     );
@@ -431,4 +362,15 @@ export function iosSwipeStartWarning(
   return frame
     ? `iOS swipe started in the ${frame.region}; app content may not scroll.`
     : undefined;
+}
+
+/** Keep anonymous auto-target swipes inside their frame, except explicit edge gestures. */
+export function screenSwipeBounds(
+  screenBounds: ElementBounds,
+  within?: ElementBounds,
+  fromEdge?: SwipeOnOptions["fromEdge"],
+): ElementBounds {
+  return within && !fromEdge
+    ? (intersectBounds(screenBounds, within) ?? screenBounds)
+    : screenBounds;
 }

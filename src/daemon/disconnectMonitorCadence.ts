@@ -1,4 +1,16 @@
+import { holderOf, isIdle, type BindingFields } from "./deviceBinding";
 import { exponentialBackoff } from "../utils/Backoff";
+
+/** Pool bindings and startup leases both represent work the monitor must watch. */
+export function isHeldDisconnectDevice(
+  device: BindingFields | null | undefined,
+  leasedForAndroidStartup: boolean,
+): boolean {
+  return (
+    (device !== null && device !== undefined && (!isIdle(device) || !!holderOf(device))) ||
+    leasedForAndroidStartup
+  );
+}
 
 export const DEVICE_DISCONNECT_MAX_IDLE_INTERVAL_MS = 120_000;
 

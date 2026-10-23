@@ -214,3 +214,5 @@ android/protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol/PrototypeS
 ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeSpecModels.generated.swift text eol=lf
 test/fixtures/android-sdkmanager/*.txt text eol=lf
 test/fixtures/ios-safari-url-field/*.json text eol=lf
+||||||| 530b2bc346
+test/fixtures/android-sdkmanager/*.txt text eol=lf

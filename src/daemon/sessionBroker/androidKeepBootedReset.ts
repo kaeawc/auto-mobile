@@ -1,3 +1,4 @@
+import { ANDROID_RESET_MIN_ATTEMPT_MS, ANDROID_RESET_SETTLEMENT_MS } from "./androidResetBudget";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import type { BootedDevice } from "../../models/DeviceInfo";
 import { MAX_SETTIMEOUT_DELAY_MS, type Timer } from "../../utils/SystemTimer";
@@ -19,6 +20,7 @@ import type { ResetOutcome } from "./devicePort";
 import { ResetFailureError } from "./ResetFailureError";
 import { isAndroidCriticalSetting } from "./androidKeepBootedCleanup";
 import {
+  opaqueForcesFallback,
   type DeviceBaseline,
   type DeviceMutationJournal,
   type DeviceMutationScope,
@@ -51,22 +53,21 @@ export class AndroidKeepBootedReset implements AndroidResetStrategy {
   readonly handlesSessionMutations = true;
   private readonly sessions = new Map<string, AndroidKeepBootedSession>();
   private readonly maxUses: number;
-  private readonly budgetMs: number;
-  private readonly fallbackBudgetMs: number;
+  private readonly budgetMs: number | undefined;
+  private readonly fallbackBudgetMs: number | undefined;
 
   constructor(private readonly dependencies: AndroidKeepBootedResetDependencies) {
     this.maxUses = dependencies.maxUses ?? 20;
-    this.budgetMs = dependencies.budgetMs ?? 30_000;
-    this.fallbackBudgetMs = dependencies.fallbackBudgetMs ?? 30_000;
+    this.budgetMs = dependencies.budgetMs;
+    this.fallbackBudgetMs = dependencies.fallbackBudgetMs;
     if (
       !Number.isSafeInteger(this.maxUses) ||
       this.maxUses <= 0 ||
-      !Number.isFinite(this.budgetMs) ||
-      this.budgetMs <= 0 ||
-      this.budgetMs > MAX_SETTIMEOUT_DELAY_MS ||
-      !Number.isFinite(this.fallbackBudgetMs) ||
-      this.fallbackBudgetMs <= 0 ||
-      this.fallbackBudgetMs > MAX_SETTIMEOUT_DELAY_MS
+      [this.budgetMs, this.fallbackBudgetMs].some(
+        (limit) =>
+          limit !== undefined &&
+          (!Number.isFinite(limit) || limit <= 0 || limit > MAX_SETTIMEOUT_DELAY_MS),
+      )
     ) {
       throw new ActionableError("Android keep-booted requires positive, bounded reset limits");
     }
@@ -140,7 +141,7 @@ export class AndroidKeepBootedReset implements AndroidResetStrategy {
     if (!baseline) {
       const controller = new AbortController();
       const signal = AbortSignal.any([context.signal, controller.signal]);
-      const timeoutMs = Math.min(context.timeoutMs, this.budgetMs);
+      const timeoutMs = Math.min(context.timeoutMs, this.budgetMs ?? context.timeoutMs);
       await raceWithDeadline(
         () =>
           this.captureBaseline(port, scope, {
@@ -260,6 +261,7 @@ export class AndroidKeepBootedReset implements AndroidResetStrategy {
     let fallbackReason: string | undefined;
     const mutationContext: DeviceMutationResetContext = {
       scope: session.scope,
+      deadlineMs,
       signal,
       assertOwned: fence,
     };
@@ -277,8 +279,9 @@ export class AndroidKeepBootedReset implements AndroidResetStrategy {
         }
         logger.warn(`Android keep-booted escalating to baseline (${reason})`);
         const fallbackTimeoutMs = Math.min(
-          this.fallbackBudgetMs,
-          deadlineMs - this.dependencies.timer.now() - 2001,
+          this.fallbackBudgetMs ?? MAX_SETTIMEOUT_DELAY_MS,
+          // Leave one tick so settlement expires strictly before the parent deadline.
+          deadlineMs - this.dependencies.timer.now() - ANDROID_RESET_SETTLEMENT_MS - 1,
         );
         if (fallbackTimeoutMs <= 0) {
           throw new ActionableError(
@@ -388,6 +391,12 @@ export class AndroidKeepBootedReset implements AndroidResetStrategy {
     if (context.opaquePersistentChanges) {
       return "opaque persistent changes (deviceSnapshot) cannot be journal-reverted";
     }
+    const opaque = (await this.dependencies.journal.list(mutationContext.scope)).find(
+      opaqueForcesFallback,
+    );
+    if (opaque) {
+      return `opaque journaled mutation (${opaque.toolName}) cannot be journal-reverted`;
+    }
     return this.cleanWithDeadline(port, mutationContext, context, phases);
   }
 
@@ -436,10 +445,24 @@ export class AndroidKeepBootedReset implements AndroidResetStrategy {
     sessionContext: AndroidResetSessionContext,
     phases: Record<string, number>,
   ): Promise<string | undefined> {
+    const remaining =
+      (sessionContext.deadlineMs ??
+        this.dependencies.timer.now() + (sessionContext.timeoutMs ?? MAX_SETTIMEOUT_DELAY_MS)) -
+      this.dependencies.timer.now();
+    const derived = this.dependencies.fallback ? Math.floor(remaining / 3) : remaining;
+    const cleaningBudget = Math.min(
+      remaining,
+      MAX_SETTIMEOUT_DELAY_MS,
+      this.budgetMs ?? Math.max(ANDROID_RESET_MIN_ATTEMPT_MS, derived),
+    );
+    if (cleaningBudget <= 0) {
+      return "Android keep-booted cleaning budget exceeded";
+    }
     const controller = new AbortController();
     const signal = AbortSignal.any([context.signal, controller.signal]);
     const cleaningContext: DeviceMutationResetContext = {
       ...context,
+      deadlineMs: this.dependencies.timer.now() + cleaningBudget,
       signal,
       assertOwned: async () => {
         signal.throwIfAborted();
@@ -457,7 +480,7 @@ export class AndroidKeepBootedReset implements AndroidResetStrategy {
         {
           timer: this.dependencies.timer,
           signal,
-          timeoutMs: Math.min(this.budgetMs, sessionContext.timeoutMs ?? this.budgetMs),
+          timeoutMs: cleaningBudget,
           label: "Android keep-booted cleaning",
           onTimeout: () =>
             controller.abort(new ActionableError("Android keep-booted cleaning budget exceeded")),
@@ -476,7 +499,7 @@ export class AndroidKeepBootedReset implements AndroidResetStrategy {
   private async drainOperation(operation: Promise<void> | undefined): Promise<void> {
     await raceWithDeadline(Promise.allSettled(operation ? [operation] : []), {
       timer: this.dependencies.timer,
-      timeoutMs: 2000,
+      timeoutMs: ANDROID_RESET_SETTLEMENT_MS,
       label: "Android keep-booted command settlement",
     });
   }

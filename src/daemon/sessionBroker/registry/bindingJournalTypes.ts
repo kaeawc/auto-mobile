@@ -52,6 +52,7 @@ export type BindingJournalBlockReason =
   | "discovery_incomplete"
   | "device_busy"
   | "cleanup_pending"
+  | "cleanup_quarantined"
   | "binding_settling"
   | "binding_in_use"
   | "reconcile_in_progress"

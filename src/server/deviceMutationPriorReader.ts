@@ -20,7 +20,8 @@ import { TalkBackToggle } from "../features/accessibility/TalkBackToggle";
 import { VoiceOverToggle } from "../features/accessibility/VoiceOverToggle";
 import { awaitWhileRequestIsLive } from "../utils/toolUtils";
 import { type AndroidCtrlProxy } from "../features/observe/android/AndroidCtrlProxyClient";
-import { DataMutationPriorReader } from "./deviceMutationDataPriorReader";
+import { FamilyMutationPriorReader } from "./deviceMutationFamilyPriorReader";
+import { DeviceStateMutationPriorReader } from "./deviceMutationDeviceStatePriorReader";
 
 function stateField(entry: ToolMutation): DeviceStateField | undefined {
   const settingFields: Readonly<Record<string, DeviceStateField>> = {
@@ -36,6 +37,10 @@ function stateField(entry: ToolMutation): DeviceStateField | undefined {
     "network-condition": "networkCondition",
   };
   if (entry.key.startsWith("sdk:")) {
+    return undefined;
+  }
+  // The device clock state is the `device` row; the time zone is read by the device-state reader.
+  if (entry.kind === "clock" && entry.key !== "device") {
     return undefined;
   }
   return entry.kind === "device-setting" ? settingFields[entry.key] : kindFields[entry.kind];
@@ -91,6 +96,16 @@ function biometricPrior(biometrics: BiometricEnrollmentState | undefined): Mutat
     : { state: "unobservable" };
 }
 
+/** Per entry, the first reader's prior that observed something. */
+function mergePriors(
+  first: readonly MutationValue[],
+  second: readonly MutationValue[],
+): readonly MutationValue[] {
+  return first.map((prior, index) =>
+    prior.state === "unobservable" ? (second[index] ?? prior) : prior,
+  );
+}
+
 export interface MutationPriorReader {
   read(
     device: BootedDevice,
@@ -103,11 +118,14 @@ export interface MutationObservationReaders {
   screenReaderFor(device: BootedDevice): { getEnabled(): Promise<boolean | null> };
   keyboardProfilesFor?: (device: BootedDevice) => Pick<AndroidCtrlProxy, "listKeyboardProfiles">;
   dataReader?: MutationPriorReader;
+  /** Priors for the `power:*` intents of setDeviceState (#14359). */
+  deviceStateReader?: MutationPriorReader;
 }
 
 export class DefaultMutationPriorReader implements MutationPriorReader {
   private readonly observationReaders: MutationObservationReaders;
   private readonly dataReader: MutationPriorReader;
+  private readonly deviceStateReader: MutationPriorReader;
 
   constructor(
     private readonly settingsAccess: Pick<
@@ -127,7 +145,9 @@ export class DefaultMutationPriorReader implements MutationPriorReader {
     ) => new Rotate(device),
     observationReaders: Partial<MutationObservationReaders> = {},
   ) {
-    this.dataReader = observationReaders.dataReader ?? new DataMutationPriorReader();
+    this.dataReader = observationReaders.dataReader ?? new FamilyMutationPriorReader();
+    this.deviceStateReader =
+      observationReaders.deviceStateReader ?? new DeviceStateMutationPriorReader();
     this.observationReaders = {
       screenReaderFor:
         observationReaders.screenReaderFor ??
@@ -176,6 +196,10 @@ export class DefaultMutationPriorReader implements MutationPriorReader {
       : undefined;
     const keyboardProfile = await this.readKeyboardProfile(device, mutations, signal);
     const dataPriors = await this.dataReader.read(device, mutations, signal);
+    const familyPriors = mergePriors(
+      dataPriors,
+      await this.deviceStateReader.read(device, mutations, signal),
+    );
     signal?.throwIfAborted();
     const priorsByKey: Readonly<Record<string, Readonly<Record<string, MutationValue>>>> = {
       device: {
@@ -202,7 +226,9 @@ export class DefaultMutationPriorReader implements MutationPriorReader {
       if (stateField(entry)) {
         return statePrior(entry, state);
       }
-      return priorsByKey[entry.key]?.[entry.kind] ?? dataPriors[index] ?? { state: "unobservable" };
+      return (
+        priorsByKey[entry.key]?.[entry.kind] ?? familyPriors[index] ?? { state: "unobservable" }
+      );
     });
   }
 

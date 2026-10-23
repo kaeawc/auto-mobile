@@ -1,9 +1,10 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice } from "../../../../src/models";
 import { AdbPowerClient } from "../../../../src/features/utility/power/AndroidPowerClient";
 import {
   createPowerOperations,
   type PowerMutation,
+  type PowerDeviceStateDependencies,
 } from "../../../../src/features/utility/power/PowerOperations";
 import type { PowerTarget } from "../../../../src/features/utility/power/PowerPlan";
 import { PowerRegistry } from "../../../../src/features/utility/power/PowerRegistry";
@@ -12,11 +13,20 @@ import { FakeAdbClientFactory } from "../../../fakes/FakeAdbClientFactory";
 import { FakePowerAdb } from "../../../fakes/FakePowerAdb";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 
+import { runWithAbortSignal } from "../../../../src/utils/AbortContext";
+import { sequenceBackoff } from "../../../../src/utils/Backoff";
+import { logger } from "../../../../src/utils/logger";
+
 const DEVICE: BootedDevice = { name: "emu", platform: "android", deviceId: "emulator-5554" };
 const APP = "com.example.app";
 
 function setup(
-  options: { target?: PowerTarget; owner?: string; platform?: "android" | "ios" } = {},
+  options: {
+    target?: PowerTarget;
+    owner?: string;
+    platform?: "android" | "ios";
+    settle?: PowerDeviceStateDependencies["settle"];
+  } = {},
 ) {
   const adb = new FakePowerAdb();
   const registry = new PowerRegistry();
@@ -34,6 +44,7 @@ function setup(
       registry,
       target: async () => options.target ?? { isEmulator: true, sdk: 34 },
       mutation,
+      settle: options.settle,
     },
   );
   const mutating = (): string[] =>
@@ -264,5 +275,117 @@ describe("PowerOperations.write", () => {
     await ops.write({ batterySaver: false });
     expect(registry.get(DEVICE.deviceId)?.baseline.batterySaver).toBeNull();
     expect(registry.get(DEVICE.deviceId)?.changed).toEqual(["batterySaver"]);
+  });
+});
+
+const idleReads = (adb: FakePowerAdb): number =>
+  adb.getExecutedArgv().filter((argv) => argv.join(" ").includes("deviceidle get")).length;
+
+function transientSetup(settle?: PowerDeviceStateDependencies["settle"]) {
+  const fixture = setup({ settle });
+  fixture.adb.deep = "IDLE";
+  fixture.adb.light = "OVERRIDE";
+  return fixture;
+}
+
+describe("PowerOperations Doze settlement", () => {
+  test("doze off waits for transient IDLE/OVERRIDE using default backoff", async () => {
+    const { ops, adb, timer } = transientSetup();
+    adb.idleSettleReads = 2;
+    const state = await ops.write({ doze: "off" });
+    expect(state.verified).toBe(true);
+    expect(state.doze?.mode).toBe("off");
+    expect(state.mismatches).toBeUndefined();
+    expect(timer.getSleepHistory()).toEqual([250, 500]);
+    expect(idleReads(adb)).toBe(10); // three existing read pairs plus two polls
+  });
+
+  test("budget exhaustion reports the observed state and poll count", async () => {
+    const { ops, adb, timer } = transientSetup({
+      defaultBudgetMs: 1000,
+      backoff: sequenceBackoff([250, 500, 2000]),
+    });
+    adb.idleSettleReads = 1000;
+    const state = await ops.write({ doze: "off" });
+    expect(state.verified).toBe(false);
+    expect(state.doze).toEqual({ mode: "deep", deep: "IDLE", light: "OVERRIDE" });
+    expect(state.mismatches?.[0]).toContain("deep IDLE, light OVERRIDE");
+    expect(state.mismatches?.[0]).toContain("still not settled after 3 reads over 1000 ms");
+    expect(timer.getSleepHistory()).toEqual([250, 500, 250]);
+    expect(idleReads(adb)).toBe(12);
+  });
+
+  test("ambient deadline reserves half the remaining time", async () => {
+    const { ops, adb, timer } = transientSetup();
+    adb.idleSettleReads = 1000;
+    const deadline = timer.now() + 2000;
+    const state = await runWithAbortSignal(undefined, () => ops.write({ doze: "off" }), {
+      getDeadlineMs: () => deadline,
+      textState: { dispatched: () => () => {} },
+    });
+    expect(state.verified).toBe(false);
+    expect(timer.getSleepHistory()).toEqual([250, 500, 250]);
+    expect(state.mismatches?.[0]).toContain("3 reads over 1000 ms");
+  });
+
+  test("a long ambient deadline is capped at the default budget", async () => {
+    const { ops, adb, timer } = transientSetup({
+      defaultBudgetMs: 1000,
+      backoff: sequenceBackoff([250, 500, 2000]),
+    });
+    adb.idleSettleReads = 1000;
+    const deadline = timer.now() + 10 * 60_000;
+    const state = await runWithAbortSignal(undefined, () => ops.write({ doze: "off" }), {
+      getDeadlineMs: () => deadline,
+      textState: { dispatched: () => () => {} },
+    });
+    expect(state.verified).toBe(false);
+    expect(timer.getSleepHistory()).toEqual([250, 500, 250]);
+  });
+
+  test("already settled snapshot has no extra reads or sleeps", async () => {
+    const { ops, adb, timer } = setup();
+    const state = await ops.write({ doze: "off" });
+    expect(state.verified).toBe(true);
+    expect(idleReads(adb)).toBe(6);
+    expect(timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("aborted signal returns the previous observation without polling", async () => {
+    const { ops, adb, timer } = transientSetup();
+    adb.idleSettleReads = 1000;
+    const controller = new AbortController();
+    controller.abort();
+    const state = await runWithAbortSignal(controller.signal, () => ops.write({ doze: "off" }));
+    expect(state.verified).toBe(false);
+    expect(state.doze?.deep).toBe("IDLE");
+    expect(idleReads(adb)).toBe(6);
+    expect(timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("poll read failure logs and keeps the last observation", async () => {
+    const { ops, adb, timer } = transientSetup();
+    adb.idleSettleReads = 1000;
+    const sleep = timer.sleep.bind(timer);
+    const sleepSpy = spyOn(timer, "sleep").mockImplementation(async (ms) => {
+      await sleep(ms);
+      adb.failing.add("dumpsys deviceidle get");
+      adb.failTimes.set("dumpsys deviceidle get", 1);
+    });
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const state = await ops.write({ doze: "off" });
+      expect(state.verified).toBe(false);
+      expect(state.doze).toEqual({ mode: "deep", deep: "IDLE", light: "OVERRIDE" });
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("simulated failure"),
+        expect.any(Error),
+      );
+      expect(timer.getSleepHistory()).toEqual([250]);
+      expect(idleReads(adb)).toBe(7);
+    } finally {
+      warn.mockRestore();
+      sleepSpy.mockRestore();
+    }
   });
 });

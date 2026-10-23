@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { ActionableError } from "../../../../src/models/ActionableError";
+import type { DeviceInfo } from "../../../../src/models/index";
 import {
   computeBindingResourceUsage,
   describeBudgetExhaustion,
@@ -232,11 +233,11 @@ describe("binding total-resource budget", () => {
 
   test.each([
     ["Booted", true, "running"],
-    ["Booting", false, "power_unknown"],
-    ["Shutting Down", false, "power_unknown"],
-  ])(
+    ["Booting", false, "transitioning"],
+    ["Shutting Down", false, "transitioning"],
+  ] as const)(
     "unbound iOS simulator in state %s still consumes the cap (#13060)",
-    async (state, running) => {
+    async (state, running, orphanState) => {
       inventory.devices = [
         {
           platform: "ios",
@@ -248,10 +249,16 @@ describe("binding total-resource budget", () => {
         },
       ];
       const entry = await creation("ambroker-new");
-      expect(await budget(1).admitCreation({ journalEntryId: entry.id })).toMatchObject({
+      const result = await budget(1).admitCreation({ journalEntryId: entry.id });
+      expect(result).toMatchObject({
         kind: "exhausted",
         usage: { orphaned: 1 },
       });
+      expect(result.kind === "exhausted" && result.charged.map((c) => c.orphanState)).toEqual([
+        undefined,
+        orphanState,
+      ]);
+      expect(inventory.probedRunning).toEqual([]);
     },
   );
 
@@ -273,19 +280,102 @@ describe("binding total-resource budget", () => {
     });
   });
 
-  test("a leftover with unknown power state still counts as an orphan", async () => {
-    inventory.devices = [
-      {
-        platform: "android",
-        name: "ambroker-unsure",
-        isRunning: false,
-        isRunningStateKnown: false,
-      },
-    ];
-    const entry = await creation("ambroker-new");
-    expect(await budget(1).admitCreation({ journalEntryId: entry.id })).toMatchObject({
-      kind: "exhausted",
-      usage: { orphaned: 1 },
+  describe("unknown power state is probed once, never charged on suspicion (#15016)", () => {
+    const unsure = (name: string): DeviceInfo => ({
+      platform: "android",
+      name,
+      isRunning: false,
+      isRunningStateKnown: false,
+    });
+
+    test("a leftover the probe proves running counts as a running orphan", async () => {
+      inventory.devices = [unsure("ambroker-unsure")];
+      inventory.provablyRunning.add("ambroker-unsure");
+      const entry = await creation("ambroker-new");
+      const result = await budget(1).admitCreation({ journalEntryId: entry.id });
+      expect(result).toMatchObject({ kind: "exhausted", usage: { orphaned: 1 } });
+      expect(result.kind === "exhausted" && result.charged.map((c) => c.orphanState)).toEqual([
+        undefined,
+        "running",
+      ]);
+      expect(inventory.probedRunning).toEqual(["ambroker-unsure"]);
+    });
+
+    test("shut-down AVDs whose power could not be read do not consume the cap", async () => {
+      inventory.devices = ["api30", "api31", "api32", "api35"].map((api) =>
+        unsure(`ambroker-verify-${api}`),
+      );
+      const entry = await creation("ambroker-new");
+      expect(await budget(1).admitCreation({ journalEntryId: entry.id })).toMatchObject({
+        kind: "admitted",
+        usage: { total: 1, orphaned: 0, preparing: 1 },
+      });
+    });
+
+    test("each unknown device is probed once per admission even when the ledger is re-read", async () => {
+      inventory.devices = [
+        unsure("ambroker-a"),
+        unsure("ambroker-b"),
+        { platform: "android", name: "ambroker-live", isRunning: true },
+      ];
+      const entry = await creation("ambroker-new");
+      expect(await budget(1).admitCreation({ journalEntryId: entry.id })).toMatchObject({
+        kind: "exhausted",
+        usage: { orphaned: 1 },
+      });
+      expect([...inventory.probedRunning].sort()).toEqual(["ambroker-a", "ambroker-b"]);
+    });
+
+    test("known running or known powered-off devices are never probed", async () => {
+      inventory.devices = [
+        { platform: "android", name: "ambroker-live", isRunning: true },
+        { platform: "android", name: "ambroker-off", isRunning: false, isRunningStateKnown: true },
+      ];
+      const entry = await creation("ambroker-new");
+      await budget(5).admitCreation({ journalEntryId: entry.id });
+      expect(inventory.probedRunning).toEqual([]);
+    });
+
+    test("no probe port means unknown power is not charged", async () => {
+      inventory.probeRunning = undefined;
+      inventory.devices = [unsure("ambroker-unsure")];
+      const entry = await creation("ambroker-new");
+      expect(await budget(1).admitCreation({ journalEntryId: entry.id })).toMatchObject({
+        kind: "admitted",
+        usage: { orphaned: 0 },
+      });
+    });
+
+    test("a failing probe leaves the device uncharged without failing admission", async () => {
+      inventory.probeRunning = async () => {
+        throw new Error("adb offline");
+      };
+      inventory.devices = [unsure("ambroker-unsure")];
+      const entry = await creation("ambroker-new");
+      expect(await budget(1).admitCreation({ journalEntryId: entry.id })).toMatchObject({
+        kind: "admitted",
+        usage: { orphaned: 0 },
+      });
+    });
+
+    test("an aborted probe aborts admission instead of reading as capacity", async () => {
+      const controller = new AbortController();
+      inventory.probeRunning = async () => {
+        controller.abort();
+        throw new Error("aborted");
+      };
+      inventory.devices = [unsure("ambroker-unsure")];
+      const entry = await creation("ambroker-new");
+      await expect(
+        budget(1).admitCreation({ journalEntryId: entry.id, signal: controller.signal }),
+      ).rejects.toThrow();
+    });
+
+    test("pure accounting never charges an unprobed power-unknown device", async () => {
+      const snapshot = await registry.snapshotBindingResources();
+      expect(
+        computeBindingResourceUsage({ ...snapshot, inventory: [unsure("ambroker-unsure")] }),
+      ).toMatchObject({ total: 0, orphaned: 0 });
     });
   });
 
@@ -421,8 +511,7 @@ describe("binding total-resource budget", () => {
       platform: "android",
       name: "ambroker-orphan",
       deviceId: "orphan-id",
-      isRunning: false,
-      isRunningStateKnown: false,
+      isRunning: true,
     });
     const mine = await creation("amslot-new");
     const result = await budget(2).admitCreation({ journalEntryId: mine.id });
@@ -447,20 +536,21 @@ describe("binding total-resource budget", () => {
         stableDeviceId: "ambroker-orphan",
         kind: "orphaned",
         name: "ambroker-orphan",
-        orphanState: "power_unknown",
+        orphanState: "running",
       },
     ]);
   });
 
-  test("exhaustion distinguishes running from power-unknown orphans", async () => {
+  test("exhaustion distinguishes running from booting orphans", async () => {
     inventory.devices.push(
       { platform: "android", name: "ambroker-run", deviceId: "run-id", isRunning: true },
       {
-        platform: "android",
-        name: "ambroker-unk",
-        deviceId: "unk-id",
+        platform: "ios",
+        name: "ambroker-boot",
+        deviceId: "SIM-2",
         isRunning: false,
-        isRunningStateKnown: false,
+        isRunningStateKnown: true,
+        state: "Booting",
       },
     );
     const mine = await creation("amslot-new");
@@ -468,7 +558,7 @@ describe("binding total-resource budget", () => {
     expect(result.kind === "exhausted" && result.charged.map((c) => c.orphanState)).toEqual([
       undefined,
       "running",
-      "power_unknown",
+      "transitioning",
     ]);
     if (result.kind !== "exhausted") {
       throw new Error("expected exhausted");
@@ -476,7 +566,7 @@ describe("binding total-resource budget", () => {
     const message = describeBudgetExhaustion(result);
     expect(message).toContain("limit 1");
     expect(message).toContain("ambroker-run (android, orphaned: running)");
-    expect(message).toContain("ambroker-unk (android, orphaned: power state unknown)");
+    expect(message).toContain("ambroker-boot (ios, orphaned: booting or shutting down)");
     expect(message).toContain("amslot-new (android, committed: being prepared)");
   });
 
@@ -628,8 +718,7 @@ describe("binding total-resource budget", () => {
                   {
                     platform: "android",
                     name: "ambroker-orphan",
-                    isRunning: false,
-                    isRunningStateKnown: false,
+                    isRunning: true,
                   },
                 ],
               },

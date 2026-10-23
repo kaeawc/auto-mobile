@@ -24,32 +24,43 @@ import { join } from "node:path";
 import { useScratchRoot } from "../helpers/scratchRoot";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { logger } from "../../src/utils/logger";
+import type { PidFileData } from "../../src/daemon/types";
 import { ActionableError } from "../../src/models/ActionableError";
 import {
   daemonHttpAuthHeaders,
   FileDaemonHttpTokenStore,
+  isDaemonHttpEndpoint,
+  readDaemonPidFilePort,
   generateDaemonHttpToken,
   readDaemonHttpToken,
   verifyBearerToken,
 } from "../../src/daemon/daemonHttpToken";
 
-const endpointVectors: { url: string; daemon: boolean }[] = JSON.parse(
-  readFileSync(new URL("../fixtures/daemon-http-endpoints.json", import.meta.url), "utf8"),
-);
+const endpointVectors: { url: string; daemon: boolean; discoveredPort: number | null }[] =
+  JSON.parse(
+    readFileSync(new URL("../fixtures/daemon-http-endpoints.json", import.meta.url), "utf8"),
+  );
 import type { DaemonHttpTokenRemovalFiles } from "../../src/daemon/daemonHttpToken";
 
 const TOKEN = "private-test-token";
 
 describe("daemon HTTP token helpers", () => {
   test.each(endpointVectors)(
-    "scopes credentials to shared endpoint vector $url",
-    ({ url, daemon }) => {
+    "scopes credentials to shared endpoint vector $url (pid-file port $discoveredPort)",
+    ({ url, daemon, discoveredPort }) => {
       const env = { AUTOMOBILE_DAEMON_HTTP_TOKEN: TOKEN };
-      expect(daemonHttpAuthHeaders(url, env)).toEqual(
+      const discoverPort = () => discoveredPort;
+      expect(isDaemonHttpEndpoint(url, discoveredPort)).toBe(daemon);
+      expect(daemonHttpAuthHeaders(url, env, {}, discoverPort)).toEqual(
         daemon ? { Authorization: `Bearer ${TOKEN}` } : {},
       );
       expect(
-        daemonHttpAuthHeaders(url, env, { aUtHoRiZaTiOn: "caller", Accept: "application/json" }),
+        daemonHttpAuthHeaders(
+          url,
+          env,
+          { aUtHoRiZaTiOn: "caller", Accept: "application/json" },
+          discoverPort,
+        ),
       ).toEqual({
         aUtHoRiZaTiOn: "caller",
         Accept: "application/json",
@@ -59,12 +70,71 @@ describe("daemon HTTP token helpers", () => {
 
   test.each(endpointVectors)(
     "URL-object input requires original authority spelling: $url",
-    ({ url }) => {
-      expect(daemonHttpAuthHeaders(new URL(url), { AUTOMOBILE_DAEMON_HTTP_TOKEN: TOKEN })).toEqual(
-        {},
-      );
+    ({ url, discoveredPort }) => {
+      expect(
+        daemonHttpAuthHeaders(
+          new URL(url),
+          { AUTOMOBILE_DAEMON_HTTP_TOKEN: TOKEN },
+          {},
+          () => discoveredPort,
+        ),
+      ).toEqual({});
     },
   );
+
+  test("re-resolves the discovered port per request, so a restarted daemon is followed", () => {
+    const env = { AUTOMOBILE_DAEMON_HTTP_TOKEN: TOKEN };
+    let port: number | null = 3161;
+    const url = "http://localhost:3162/heartbeat";
+    expect(daemonHttpAuthHeaders(url, env, {}, () => port)).toEqual({});
+    port = 3162;
+    expect(daemonHttpAuthHeaders(url, env, {}, () => port)).toEqual({
+      Authorization: `Bearer ${TOKEN}`,
+    });
+  });
+
+  test("does not consult the pid file for endpoints that are not daemon routes", () => {
+    const discoverPort = () => {
+      throw new Error("must not be called");
+    };
+    expect(
+      daemonHttpAuthHeaders(
+        "http://localhost:8080/other",
+        { AUTOMOBILE_DAEMON_HTTP_TOKEN: TOKEN },
+        {},
+        discoverPort,
+      ),
+    ).toEqual({});
+  });
+
+  test.each([
+    ["a valid port", { port: 3161 }, 3161],
+    ["no pid file", null, null],
+    ["a missing port", { pid: 1 }, null],
+    ["a zero port", { port: 0 }, null],
+    ["an out-of-range port", { port: 70000 }, null],
+    ["a fractional port", { port: 3161.5 }, null],
+    ["a string port", { port: "3161" }, null],
+  ])("the default pid-file port reader returns the explicit port for %s", (_, data, expected) => {
+    const seen: string[] = [];
+    const port = readDaemonPidFilePort(
+      { AUTOMOBILE_DAEMON_PID_FILE_PATH: "/isolated/daemon.pid" },
+      (path) => {
+        seen.push(path);
+        return data as PidFileData | null;
+      },
+    );
+    expect(port).toBe(expected);
+    expect(seen).toEqual(["/isolated/daemon.pid"]);
+  });
+
+  test("the default pid-file port reader treats a throwing read as no port", () => {
+    expect(
+      readDaemonPidFilePort({}, () => {
+        throw new Error("EACCES");
+      }),
+    ).toBeNull();
+  });
 
   test("uses the injected identifier deterministically", () => {
     const ids = new CountingIdGenerator("uuid");
@@ -105,7 +175,9 @@ describe("daemon HTTP token helpers", () => {
       AUTOMOBILE_DAEMON_TOKEN_FILE_PATH: "/unused/token",
     };
     expect(readDaemonHttpToken(env)).toBe(TOKEN);
-    expect(daemonHttpAuthHeaders("http://localhost:3161", env)).toEqual({
+    expect(
+      daemonHttpAuthHeaders("http://localhost:3161/auto-mobile/streamable", env, {}, () => 3161),
+    ).toEqual({
       Authorization: `Bearer ${TOKEN}`,
     });
   });
@@ -267,6 +339,66 @@ describe("daemon HTTP token runtime file", () => {
     expect(readdirSync(directory)).toEqual(["daemon.token"]);
   });
 
+  test("does not overwrite a token another daemon published during the Windows backoff", () => {
+    const other = new FileDaemonHttpTokenStore(path, new CountingIdGenerator("other"));
+    other.write("other-daemon-token");
+    const sleeps: number[] = [];
+    let attempts = 0;
+    const retrying = new FileDaemonHttpTokenStore(path, new CountingIdGenerator("temporary"), {
+      platform: "win32",
+      renameFile: (source, destination) => {
+        attempts++;
+        if (attempts === 1) {
+          throw Object.assign(new Error("sharing violation"), { code: "EPERM" });
+        }
+        renameSync(source, destination);
+      },
+      sleep: (ms) => {
+        sleeps.push(ms);
+        // A concurrent daemon replaces the token while this one is backing off.
+        rmSync(path);
+        new FileDaemonHttpTokenStore(path, new CountingIdGenerator("racing")).write(
+          "racing-daemon-token",
+        );
+      },
+    });
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      expect(() => retrying.write(TOKEN)).toThrow(ActionableError);
+      expect(JSON.stringify(warn.mock.calls)).not.toContain(TOKEN);
+    } finally {
+      warn.mockRestore();
+    }
+    expect(attempts).toBe(1);
+    expect(sleeps).toEqual([10]);
+    expect(readFileSync(path, "utf8")).toBe("racing-daemon-token");
+    expect(readdirSync(directory)).toEqual(["daemon.token"]);
+    // The aborted store never claimed ownership, so remove() cannot delete the other token.
+    retrying.remove();
+    expect(readFileSync(path, "utf8")).toBe("racing-daemon-token");
+  });
+
+  test("does not claim a token published after the destination was observed absent", () => {
+    let attempts = 0;
+    const retrying = new FileDaemonHttpTokenStore(path, new CountingIdGenerator("temporary"), {
+      platform: "win32",
+      renameFile: () => {
+        attempts++;
+        throw Object.assign(new Error("sharing violation"), { code: "EBUSY" });
+      },
+      sleep: () => {
+        new FileDaemonHttpTokenStore(path, new CountingIdGenerator("racing")).write(
+          "racing-daemon-token",
+        );
+      },
+    });
+    expect(() => retrying.write(TOKEN)).toThrow(ActionableError);
+    expect(attempts).toBe(1);
+    expect(readFileSync(path, "utf8")).toBe("racing-daemon-token");
+    retrying.remove();
+    expect(readFileSync(path, "utf8")).toBe("racing-daemon-token");
+  });
+
   test.skipIf(process.platform === "win32")(
     "atomically replaces a stale file, preserving an already-open reader",
     () => {
@@ -391,10 +523,14 @@ describe("daemon HTTP token runtime file", () => {
   test("client helpers trim file content and treat missing or unsafe files as absent", () => {
     const env = { AUTOMOBILE_DAEMON_TOKEN_FILE_PATH: path };
     expect(readDaemonHttpToken(env)).toBeUndefined();
-    expect(daemonHttpAuthHeaders("http://localhost:3161", env)).toEqual({});
+    expect(
+      daemonHttpAuthHeaders("http://localhost:3161/auto-mobile/streamable", env, {}, () => 3161),
+    ).toEqual({});
     store.write(` ${TOKEN}\n`);
     expect(readDaemonHttpToken(env)).toBe(TOKEN);
-    expect(daemonHttpAuthHeaders("http://localhost:3161", env)).toEqual({
+    expect(
+      daemonHttpAuthHeaders("http://localhost:3161/auto-mobile/streamable", env, {}, () => 3161),
+    ).toEqual({
       Authorization: `Bearer ${TOKEN}`,
     });
     store.remove();

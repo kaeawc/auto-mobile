@@ -6,6 +6,7 @@ import {
 } from "../../../src/daemon/sessionBroker/androidBaselineReset";
 import {
   DEVICE_MUTATION_KINDS,
+  opaqueIntentKey,
   type DeviceMutationInput,
 } from "../../../src/daemon/sessionBroker/mutations/types";
 import { FakeDeviceMutationJournal } from "../../fakes/FakeDeviceMutationJournal";
@@ -37,7 +38,12 @@ const SETTING: DeviceMutationInput = {
 };
 
 async function rig(
-  options: { maxUses?: number; fallback?: AndroidResetStrategy; fallbackBudgetMs?: number } = {},
+  options: {
+    maxUses?: number;
+    fallback?: AndroidResetStrategy;
+    fallbackBudgetMs?: number;
+    budgetMs?: number;
+  } = {},
 ) {
   const timer = new FakeTimer();
   const journal = new FakeDeviceMutationJournal(timer);
@@ -154,7 +160,7 @@ describe("Android keep-booted strategy", () => {
     expect(await journal.list(SCOPE)).toEqual([]);
   });
 
-  test("journal capture uses the bounded cleaning budget within a larger preparation deadline", async () => {
+  test("journal capture respects an explicit cleaning cap within a larger preparation deadline", async () => {
     const timer = new FakeTimer();
     const journal = new FakeDeviceMutationJournal(timer);
     const port = new FakeAndroidKeepBootedResetPort({
@@ -170,7 +176,12 @@ describe("Android keep-booted strategy", () => {
       await release.promise;
       return capture(context);
     };
-    const strategy = new AndroidKeepBootedReset({ journal, port: () => port, timer });
+    const strategy = new AndroidKeepBootedReset({
+      journal,
+      port: () => port,
+      timer,
+      budgetMs: 30_000,
+    });
     const result = strategy
       .capture(ANDROID_RESET_DEVICE, {
         ...SESSION,
@@ -210,6 +221,46 @@ describe("Android keep-booted strategy", () => {
     expect(seenOpaque).toBe(true);
     expect(result).toMatchObject({ outcome: "fallback:wipe-data", mode: "wipe-data" });
     expect(result.fallbackReason).toContain("deviceSnapshot");
+  });
+
+  test("a fallback-forcing opaque journal row skips the clean and escalates without the wipe flag", async () => {
+    let seenOpaque: boolean | undefined = true;
+    const { port, strategy, journal } = await rig({
+      fallback: {
+        reset: async (_device, _packages, _assertOwned, context) => {
+          seenOpaque = context.opaquePersistentChanges;
+          return { outcome: "clean", mode: "snapshot", phases: {} };
+        },
+      },
+    });
+    await journal.record(SCOPE, {
+      kind: "opaque",
+      key: opaqueIntentKey("sendBroadcast", "com.example.app"),
+      priorValue: { state: "unobservable" },
+      toolName: "sendBroadcast",
+    });
+    const result = await strategy.reset(ANDROID_RESET_DEVICE, new Set(), async () => {}, {
+      ...SESSION,
+      rebindIncarnation: async () => SESSION.incarnation ?? SESSION.resourceId,
+      assertBindingOwned: async () => {},
+    });
+    expect(port.cleanCount).toBe(0);
+    expect(seenOpaque).toBeUndefined();
+    expect(result).toMatchObject({ outcome: "fallback:snapshot", mode: "snapshot" });
+    expect(result.fallbackReason).toContain("sendBroadcast");
+  });
+
+  test("a best-effort opaque journal row keeps the booted clean", async () => {
+    const { port, strategy, journal } = await rig();
+    await journal.record(SCOPE, {
+      kind: "opaque",
+      key: "tool:sendSms",
+      priorValue: { state: "unobservable" },
+      toolName: "sendSms",
+    });
+    const result = await strategy.reset(ANDROID_RESET_DEVICE, new Set(), async () => {}, SESSION);
+    expect(port.cleanCount).toBe(1);
+    expect(result).toMatchObject({ outcome: "clean", mode: "keep-booted" });
   });
 
   test("a deviceSnapshot session without a fallback fails closed", async () => {
@@ -337,7 +388,7 @@ describe("Android keep-booted strategy", () => {
     await reached.promise;
     timer.advanceTime(51);
     await drainMicrotasks(30);
-    timer.advanceTime(2001);
+    timer.advanceTime(150_001);
     expect(await result).toBeInstanceOf(Error);
     expect(fallbacks).toBe(0);
     release.resolve();
@@ -742,7 +793,9 @@ describe("Android keep-booted strategy", () => {
 
   test("composes with the seam health check without the legacy mutation veto", async () => {
     const host = new FakeAndroidResetHost();
-    const { strategy, journal } = await rig();
+    const { strategy, journal, timer } = await rig({ budgetMs: 30_000 });
+    host.timer = timer;
+    timer.enableAutoAdvance();
     host.strategy = strategy;
     const seam = new AndroidBaselineReset(host);
     await seam.capture(
@@ -767,7 +820,9 @@ describe("Android keep-booted strategy", () => {
 
   test("CtrlProxy health failure after replay cannot publish clean or drop the journal", async () => {
     const host = new FakeAndroidResetHost();
-    const { strategy, journal } = await rig();
+    const { strategy, journal, timer } = await rig({ budgetMs: 30_000 });
+    host.timer = timer;
+    timer.enableAutoAdvance();
     host.strategy = strategy;
     const seam = new AndroidBaselineReset(host);
     await seam.capture(
@@ -784,9 +839,11 @@ describe("Android keep-booted strategy", () => {
     expect(await journal.list(SCOPE)).toHaveLength(1);
   });
 
-  test("seam health ADB reads are non-retrying and CtrlProxy gets a bounded cancellable single attempt", async () => {
+  test("seam health owns adb retries and CtrlProxy gets a cancellable derived window", async () => {
     const host = new FakeAndroidResetHost();
-    const { strategy } = await rig();
+    const { strategy, timer } = await rig();
+    host.timer = timer;
+    timer.enableAutoAdvance();
     host.strategy = strategy;
     const seam = new AndroidBaselineReset(host);
     await seam.capture(
@@ -804,20 +861,21 @@ describe("Android keep-booted strategy", () => {
       async () => {},
     );
     for (const options of host.commandOptions) {
+      expect(options!.timeoutMs).toBeGreaterThan(0);
       expect(options).toMatchObject({
         noRetry: true,
-        timeoutMs: 2000,
         waitForProcessSettlementAfterAbort: true,
       });
     }
-    expect(host.healthOptions).toMatchObject({ noRetry: true, timeoutMs: 2000 });
+    expect(host.healthOptions).toMatchObject({ noRetry: true, timeoutMs: 4687 });
     expect(host.healthOptions?.signal).toBeInstanceOf(AbortSignal);
     expect(host.healthOptions?.signal?.aborted).toBe(false);
   });
 
-  test("CtrlProxy's own deadline aborts the health probe before the 30-second cleaning cap", async () => {
+  test("CtrlProxy's derived deadline aborts the health probe before the cleaning deadline", async () => {
     const host = new FakeAndroidResetHost();
     const timer = new FakeTimer();
+    host.timer = timer;
     const port = new FakeAndroidKeepBootedResetPort({
       completeKinds: [],
       // An empty capture is never persisted as a baseline, so keep one observation.
@@ -855,7 +913,7 @@ describe("Android keep-booted strategy", () => {
         (error: unknown) => error,
       );
     await reached.promise;
-    timer.advanceTime(2001);
+    timer.advanceTime(150_001);
     expect(await result).toBeInstanceOf(Error);
     expect(probeSignal?.aborted).toBe(true);
     expect(port.cleanCount).toBe(1);
@@ -864,13 +922,15 @@ describe("Android keep-booted strategy", () => {
   test("a reboot between capture and release prevents cleaning or fallback", async () => {
     const host = new FakeAndroidResetHost();
     let fallbacks = 0;
-    const { strategy, port } = await rig({
+    const { strategy, port, timer } = await rig({
       fallback: {
         reset: async () => {
           fallbacks++;
         },
       },
     });
+    host.timer = timer;
+    timer.enableAutoAdvance();
     host.strategy = strategy;
     const seam = new AndroidBaselineReset(host);
     await seam.capture(
@@ -892,7 +952,7 @@ describe("Android keep-booted strategy", () => {
     async (failure) => {
       const host = new FakeAndroidResetHost();
       let fallbacks = 0;
-      const { strategy, port } = await rig({
+      const { strategy, port, timer } = await rig({
         fallback: {
           reset: async (_device, _packages, fence) => {
             await fence();
@@ -903,6 +963,8 @@ describe("Android keep-booted strategy", () => {
           },
         },
       });
+      host.timer = timer;
+      timer.enableAutoAdvance();
       host.strategy = strategy;
       const seam = new AndroidBaselineReset(host);
       await seam.capture(
@@ -932,13 +994,15 @@ describe("Android keep-booted strategy", () => {
     const host = new FakeAndroidResetHost();
     let owned = true;
     let fallbacks = 0;
-    const { strategy } = await rig({
+    const { strategy, timer } = await rig({
       fallback: {
         reset: async () => {
           fallbacks++;
         },
       },
     });
+    host.timer = timer;
+    timer.enableAutoAdvance();
     host.strategy = strategy;
     const seam = new AndroidBaselineReset(host);
     await seam.capture(
@@ -962,7 +1026,9 @@ describe("Android keep-booted strategy", () => {
 
   test("mutation-aware seam permits package additions only when replay restores the original inventory", async () => {
     const host = new FakeAndroidResetHost();
-    const { strategy, port } = await rig();
+    const { strategy, port, timer } = await rig();
+    host.timer = timer;
+    timer.enableAutoAdvance();
     host.strategy = strategy;
     const seam = new AndroidBaselineReset(host);
     await seam.capture(
@@ -996,7 +1062,9 @@ describe("Android keep-booted strategy", () => {
 
   test("snapshot fallback reports its mode without a certification package equality gate", async () => {
     const host = new FakeAndroidResetHost();
-    const { strategy } = await rig({ maxUses: 1, fallback: { reset: async () => {} } });
+    const { strategy, timer } = await rig({ maxUses: 1, fallback: { reset: async () => {} } });
+    host.timer = timer;
+    timer.enableAutoAdvance();
     host.strategy = strategy;
     const seam = new AndroidBaselineReset(host);
     await seam.capture(
@@ -1081,5 +1149,76 @@ describe("Android keep-booted strategy", () => {
         incarnation: "replacement-generation",
       }),
     ).rejects.toThrow("fenced session baseline");
+  });
+});
+
+describe("keep-booted derived budgets", () => {
+  test.each([undefined, 30_000])(
+    "31 second cleaning respects explicit budget %s",
+    async (budgetMs) => {
+      const timer = new FakeTimer();
+      const journal = new FakeDeviceMutationJournal(timer);
+      const port = new FakeAndroidKeepBootedResetPort({
+        completeKinds: [...DEVICE_MUTATION_KINDS],
+        observations: [],
+        unobservable: [],
+      });
+      const strategy = new AndroidKeepBootedReset({ timer, journal, port: () => port, budgetMs });
+      await strategy.capture(ANDROID_RESET_DEVICE, {
+        ...SESSION,
+        signal: new AbortController().signal,
+        timeoutMs: 600_000,
+        assertOwned: async () => {},
+      });
+      port.beforeClean = () => timer.sleep(31_000);
+      timer.enableAutoAdvance();
+      const pending = strategy.reset(ANDROID_RESET_DEVICE, new Set(), async () => {}, {
+        ...SESSION,
+        timeoutMs: 600_000,
+        deadlineMs: 600_000,
+      });
+      if (budgetMs) {
+        await expect(pending).rejects.toThrow("cleaning");
+      } else {
+        expect((await pending).outcome).toBe("clean");
+      }
+    },
+  );
+  test("fallback cleaning gets one third and preserves the remaining fallback budget", async () => {
+    const timer = new FakeTimer();
+    const journal = new FakeDeviceMutationJournal(timer);
+    const port = new FakeAndroidKeepBootedResetPort({
+      completeKinds: [...DEVICE_MUTATION_KINDS],
+      observations: [],
+      unobservable: [],
+    });
+    let fallbackBudget: number | undefined;
+    const strategy = new AndroidKeepBootedReset({
+      timer,
+      journal,
+      port: () => port,
+      fallback: {
+        reset: async (_device, _packages, _owned, context) => {
+          fallbackBudget = context.timeoutMs;
+          return { outcome: "clean", mode: "snapshot", phases: {} };
+        },
+      },
+    });
+    await strategy.capture(ANDROID_RESET_DEVICE, {
+      ...SESSION,
+      signal: new AbortController().signal,
+      timeoutMs: 600_000,
+      assertOwned: async () => {},
+    });
+    port.beforeClean = () => timer.sleep(200_001);
+    timer.enableAutoAdvance();
+    const result = await strategy.reset(ANDROID_RESET_DEVICE, new Set(), async () => {}, {
+      ...SESSION,
+      timeoutMs: 600_000,
+      deadlineMs: 600_000,
+    });
+    expect(result.outcome).toBe("fallback:snapshot");
+    expect(result.phases.clean).toBe(200_001);
+    expect(fallbackBudget).toBe(397_998);
   });
 });

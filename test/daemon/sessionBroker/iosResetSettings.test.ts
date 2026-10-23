@@ -4,6 +4,7 @@ import { IosDeviceMutationResetPort } from "../../../src/daemon/sessionBroker/mu
 import type { DeviceMutationResetContext } from "../../../src/daemon/sessionBroker/mutations/reset";
 import type { MutationValue } from "../../../src/daemon/sessionBroker/mutations/types";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeIosResidueInspector } from "../../fakes/FakeIosResidueInspector";
 
 function harness(
   globals = '<plist version="1.0"><dict/></plist>',
@@ -37,6 +38,7 @@ function harness(
         },
       },
       privacyGrants: { readServiceRows: async () => [] },
+      residue: new FakeIosResidueInspector(),
       trustStore: { readUserTrustedCertificates: async () => [] },
       files: { realpath: async (path) => path, remove: async () => {} },
       pasteboard: { assertSettled: () => {}, write: async () => {} },
@@ -47,11 +49,16 @@ function harness(
     scope: { deviceId: "UDID", incarnation: "generation", sessionUuid: "session" },
     signal: new AbortController().signal,
     assertOwned: async () => {},
-    baseline: { completeKinds: ["installed-app"], observations: [], unobservable: [] },
+    baseline: {
+      completeKinds: ["installed-app", "media", "shared-file", "keyboard"],
+      observations: [],
+      unobservable: [],
+    },
   };
   const globalsSnapshot = async () =>
     (await port.capture(context)).observations.filter(
       (entry) =>
+        entry.kind === "device-setting" &&
         !["appearance", "nightMode", "content-size", "increase-contrast"].includes(entry.key),
     );
   return { port, context, commands, globalsSnapshot };
@@ -146,6 +153,7 @@ describe("iOS baseline setting contracts", () => {
           },
         },
         privacyGrants: { readServiceRows: async () => [] },
+        residue: new FakeIosResidueInspector(),
         trustStore: { readUserTrustedCertificates: async () => [] },
         files: { realpath: async (path) => path, remove: async () => {} },
         pasteboard: { assertSettled: () => {}, write: async () => {} },

@@ -292,29 +292,34 @@ describe("UnixSocketServer notification broadcast", () => {
     expect(subscriberB.frames.slice(1)).toEqual(expectedReleases);
   });
 
-  test("quiesce closes unsubscribed connections and stops accepting new clients (#6336)", async () => {
-    const subscriber = await connectedClient();
-    const unsubscribed = await connectedClient();
-    subscriber.send(DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD);
-    await subscriber.waitForFrames(1);
+  // Skipped on Windows: Bun 1.4.4 keeps a closed AF_UNIX listener connectable there, so the late
+  // connect resolves. Tracked in #15035.
+  test.skipIf(process.platform === "win32")(
+    "quiesce closes unsubscribed connections and stops accepting new clients (#6336)",
+    async () => {
+      const subscriber = await connectedClient();
+      const unsubscribed = await connectedClient();
+      subscriber.send(DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD);
+      await subscriber.waitForFrames(1);
 
-    await server.quiesce();
-    await unsubscribed.waitForClose();
+      await server.quiesce();
+      await unsubscribed.waitForClose();
 
-    const lateClient = new FrameCollectingClient();
-    clients.push(lateClient);
-    await expect(lateClient.connect(socketPath)).rejects.toBeDefined();
+      const lateClient = new FrameCollectingClient();
+      clients.push(lateClient);
+      await expect(lateClient.connect(socketPath)).rejects.toBeDefined();
 
-    SessionReleaseBroadcaster.emit("session-a", "daemon-shutdown");
-    await server.drainSessionReleaseNotifications();
-    await subscriber.waitForFrames(2);
-    expect(subscriber.frames[1]).toMatchObject({
-      type: "daemon_notification",
-      method: SESSION_RELEASED_NOTIFICATION_METHOD,
-      sessionId: "session-a",
-      reason: "daemon-shutdown",
-    });
-  });
+      SessionReleaseBroadcaster.emit("session-a", "daemon-shutdown");
+      await server.drainSessionReleaseNotifications();
+      await subscriber.waitForFrames(2);
+      expect(subscriber.frames[1]).toMatchObject({
+        type: "daemon_notification",
+        method: SESSION_RELEASED_NOTIFICATION_METHOD,
+        sessionId: "session-a",
+        reason: "daemon-shutdown",
+      });
+    },
+  );
 
   test("close() unsubscribes from the session-release broadcaster too (issue #4610)", async () => {
     const subscriber = await connectedClient();

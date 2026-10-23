@@ -833,8 +833,10 @@ export class ReadinessSelection {
         resolvedPlatform: selectedPlatform,
       };
     }
-    throw new ActionableError(
+    // #15020: typed, so a client branches on the code and reads the candidates it may choose from.
+    throw new AmbiguousDeviceTargetError(
       "Both Android and iOS devices are connected. For a device tool call, pass sessionUuid (from getAndroid/getApple), platform, or a bound device label on this call to select the target. Alternatively, call setActiveDevice to select an active device.",
+      [...androidDevices, ...iosDevices],
     );
   }
 

@@ -20,6 +20,7 @@ test/fixtures/android-startup/*.txt text eol=lf
 test/fixtures/duo-enumerate.txt text eol=lf
 test/fixtures/ios-duo/*.json text eol=lf
 test/fixtures/ios-simctl/*.json text eol=lf
+test/fixtures/ios-simctl/*.plist text eol=lf
 test/fixtures/ios-notification-center/*.json text eol=lf
 test/fixtures/ios-devicetype-order/*.json text eol=lf
 test/fixtures/ios-devicetype-order/*.md text eol=lf
@@ -211,3 +212,5 @@ test/fixtures/android-secure-settings/*.txt text eol=lf
 # Generated prototype spec models are compared byte-for-byte by a unit test on Windows.
 android/protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol/PrototypeSpecModels.generated.kt text eol=lf
 ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeSpecModels.generated.swift text eol=lf
+test/fixtures/android-sdkmanager/*.txt text eol=lf
+test/fixtures/ios-safari-url-field/*.json text eol=lf

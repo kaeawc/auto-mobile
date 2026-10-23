@@ -1,5 +1,7 @@
 import type { BrokerNativeProfile } from "./profile";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
+import { BootedDeviceDiscoveryIncompleteError } from "../../models/BootedDeviceDiscoveryIncompleteError";
+import { exponentialBackoff } from "../../utils/Backoff";
 import { BootCapacityExhaustedError } from "../../models/BootCapacityExhaustedError";
 import type { IosBootInstrumentation } from "../../models/IosBootInstrumentation";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../utils/deviceTimeouts";
@@ -26,7 +28,7 @@ export class IosBaselineReset {
       iosBootInstrumentation: IosBootInstrumentation;
       stopDevice: (device: BootedDevice) => Promise<void>;
     },
-    private readonly timer: Pick<Timer, "now"> = defaultTimer,
+    private readonly timer: Pick<Timer, "now" | "sleep"> = defaultTimer,
   ) {}
 
   async reset(
@@ -75,7 +77,7 @@ export class IosBaselineReset {
       signal?.throwIfAborted();
     };
     assertIosResetInput(device, profile);
-    // Only a capacity refusal from this resetter permits a shut-down retry. Re-erase below:
+    // Pre-boot capacity or discovery refusals permit a shut-down retry. Re-erase below:
     // ownership and inventory are checked again, so a retry never trusts an old clean result.
     const deferredBoot = this.deferredBoots.delete(device.deviceId);
     await this.readExpectedTarget(
@@ -88,14 +90,11 @@ export class IosBaselineReset {
     await owned();
     let reservation: BootSlotReservation | undefined;
     try {
-      reservation = await this.dependencies.iosBootInstrumentation.reserveBoot?.({
-        replacingDeviceId: device.deviceId,
-        timeoutMs: DEFAULT_DEVICE_READY_TIMEOUT_MS,
-        reason: "reset",
-        signal,
-      });
+      reservation = await this.reserveResetBoot(device.deviceId, owned, signal);
     } catch (error) {
-      if (deferredBoot && error instanceof BootCapacityExhaustedError) {
+      // Reservation and its ownership fences cannot mutate the simulator. Preserve the
+      // authoritative Shutdown retry marker even when backoff is interrupted.
+      if (deferredBoot) {
         this.deferredBoots.add(device.deviceId);
       }
       throw toActionableError(error, "Cannot reserve iOS reset boot slot");
@@ -105,6 +104,40 @@ export class IosBaselineReset {
       return await (reservation ? reservation.run(operation) : operation());
     } finally {
       reservation?.release();
+    }
+  }
+
+  private async reserveResetBoot(
+    deviceId: string,
+    owned: () => Promise<void>,
+    signal?: AbortSignal,
+  ): Promise<BootSlotReservation | undefined> {
+    const deadline = this.timer.now() + DEFAULT_DEVICE_READY_TIMEOUT_MS;
+    const backoff = exponentialBackoff({ initialDelayMs: 1_000, maxDelayMs: 8_000 });
+    let attempt = 0;
+    for (;;) {
+      signal?.throwIfAborted();
+      try {
+        return await this.dependencies.iosBootInstrumentation.reserveBoot?.({
+          replacingDeviceId: deviceId,
+          timeoutMs: deadline - this.timer.now(),
+          reason: "reset",
+          signal,
+        });
+      } catch (error) {
+        const delayMs = backoff.delayForAttempt(++attempt);
+        if (
+          !(error instanceof BootedDeviceDiscoveryIncompleteError) ||
+          deadline - this.timer.now() <= delayMs
+        ) {
+          throw toActionableError(error, "Cannot reserve iOS reset boot slot");
+        }
+        await this.timer.sleep(delayMs);
+        await owned();
+        if (this.timer.now() >= deadline) {
+          throw toActionableError(error, "Cannot reserve iOS reset boot slot");
+        }
+      }
     }
   }
 
@@ -151,6 +184,7 @@ export class IosBaselineReset {
     assertOwned: () => Promise<void>,
     signal?: AbortSignal,
   ): Promise<BootedDevice> {
+    let callbackStarted = false;
     try {
       return await this.dependencies.iosBootInstrumentation.run(
         // The callback ignores remainingMs; bootSimulator uses its own timeout.
@@ -162,13 +196,17 @@ export class IosBaselineReset {
           signal,
         },
         async () => {
+          callbackStarted = true;
           // Admission samples asynchronously; fence ownership immediately before the mutation.
           await assertOwned();
           return this.dependencies.simctl.bootSimulator(udid);
         },
       );
     } catch (error) {
-      if (error instanceof BootCapacityExhaustedError) {
+      if (
+        error instanceof BootCapacityExhaustedError ||
+        (!callbackStarted && error instanceof BootedDeviceDiscoveryIncompleteError)
+      ) {
         this.deferredBoots.add(udid);
       }
       throw toActionableError(error, "Cannot boot erased iOS simulator");

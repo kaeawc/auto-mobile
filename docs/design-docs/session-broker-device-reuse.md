@@ -50,7 +50,7 @@ The mode table describes only `reuse.ios.mode`; Android uses
 
 `reuse.ios.mode` replaces the coarse legacy switch. In `keep-booted` mode,
 `maxUses` forces every Nth release to use erase instead of keep-booted cleanup;
-its default is 20. This bounds keep-booted reuse rather than capping sessions or
+its default is 10 (20 in `erase` mode, where it has no effect). This bounds keep-booted reuse rather than capping sessions or
 retiring the device. When that erase succeeds, the same device returns to the
 idle pool, and later releases can use keep-booted again. `maxUses` has no effect
 in `erase` mode. The only iOS fallback is `erase`.
@@ -60,7 +60,7 @@ in `erase` mode. The only iOS fallback is `erase`.
   "reuse": {
     "ios": {
       "mode": "keep-booted",
-      "maxUses": 20,
+      "maxUses": 10,
       "fallback": "erase"
     }
   },
@@ -237,10 +237,12 @@ Reset timings identify the work performed. iOS records journal, preflight
 inventory, individual revert, sanitize (including `trust-store:verify`), health and health-probe phases; native
 commands are bounded at 10 seconds, the health HTTP probe at 5 seconds, and
 reset steps default to 30 seconds.
-Android keep-booted records journal, clean and health phases, with a default
-30-second cleaning budget. Its snapshot fallback gets a separate budget from
-`androidResetTimeoutMs` (default 600,000 ms) that bounds the snapshot load and
-its wipe-data step.
+Android keep-booted records journal, clean and health phases. Cleaning uses the
+remaining `androidResetTimeoutMs` budget (default 600,000 ms), or one third of it
+when snapshot fallback is configured. Fallback uses the remaining budget minus
+a bounded 2-second command-settlement reserve. Android reset adb attempts derive
+their timeouts from the remaining budget and retry transient timeouts with backoff;
+readback mismatches still fail closed.
 Android snapshot uses phases such as identity, load, readiness, health, stop
 and wipe-data launch; its overall timeout defaults to 600,000 ms. A keep-booted
 fallback is reported as `fallback:snapshot` even if that snapshot strategy

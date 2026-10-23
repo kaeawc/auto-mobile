@@ -7,6 +7,7 @@ import { DaemonRequestNotDeliveredError } from "../DaemonRequestNotDeliveredErro
 import { type BuildIdentity } from "../buildIdentity";
 import { DaemonUnavailableError, type DaemonClientLike } from "../client";
 import {
+  DAEMON_CONNECT_ATTEMPT_TIMEOUT_MS,
   DAEMON_RELEASE_SESSION_METHOD,
   DAEMON_STARTUP_TIMEOUT_MS,
   SOCKET_PATH,
@@ -15,6 +16,7 @@ import { DeviceControlTransportError } from "../deviceControlTransportFailure";
 import { type ListChangedKind } from "../listChangedBroadcast";
 import { type DaemonRestartResult } from "../manager";
 import { applyConnectionPresentationProfile } from "../proxy/ConnectionPresentationProfile";
+import { DaemonConnectAttemptStalledError } from "../proxy/DaemonConnectAttemptStalledError";
 import { runPreflightTransport } from "../proxy/DaemonLifecycleReconciler";
 import {
   DaemonBuildMismatchError,
@@ -120,6 +122,9 @@ type Runtime = Pick<
 
 /** Connection operations on a single proxy runtime. */
 export class ProxyConnection {
+  /** Identifies the live connection attempt; bumping it supersedes a stalled one (#15019). */
+  private connectionGeneration = 0;
+
   constructor(
     private readonly runtime: Runtime,
     private readonly port: ProxyConnectionPort,
@@ -135,7 +140,7 @@ export class ProxyConnection {
     }
     const daemonShutdownDisconnect = this.runtime.daemonShutdownBarrier.pending;
     if (daemonShutdownDisconnect) {
-      await daemonShutdownDisconnect;
+      await this.awaitShutdownBarrier(daemonShutdownDisconnect);
       if (this.runtime.closing) {
         throw new DaemonUnavailableError("MCP proxy is closing");
       }
@@ -153,6 +158,31 @@ export class ProxyConnection {
       }
     } catch (error) {
       await this.handleConnectionFailure(error);
+    }
+  }
+
+  /**
+   * #15019: the barrier bounds its own EOF wait and restart window, but a probe inside it that
+   * never settles would hold every caller. It only keeps the draining incarnation from being
+   * reused, and doConnect re-checks daemon readiness, so give up waiting once the connection
+   * attempt bound has passed and connect.
+   */
+  private async awaitShutdownBarrier(barrier: Promise<void>): Promise<void> {
+    const stalled = new DaemonConnectAttemptStalledError(DAEMON_CONNECT_ATTEMPT_TIMEOUT_MS);
+    try {
+      await raceWithDeadline(barrier, {
+        timer: this.runtime.timer,
+        timeoutMs: DAEMON_CONNECT_ATTEMPT_TIMEOUT_MS,
+        label: "daemon shutdown barrier",
+        timeoutError: () => stalled,
+      });
+    } catch (error) {
+      if (error !== stalled) {
+        throw error;
+      }
+      logger.warn(
+        `[DaemonMcpProxy] Daemon shutdown barrier did not settle within ${DAEMON_CONNECT_ATTEMPT_TIMEOUT_MS}ms; connecting anyway`,
+      );
     }
   }
 
@@ -224,7 +254,8 @@ export class ProxyConnection {
     if (this.runtime.connecting) {
       return this.runtime.connecting;
     }
-    const attempt = this.doConnect(allowsLifecycle);
+    const generation = ++this.connectionGeneration;
+    const attempt = this.doConnect(allowsLifecycle, generation);
     this.runtime.connectionAttemptWork = attempt;
     void attempt.then(
       () => this.clearConnectionAttemptWork(attempt),
@@ -232,11 +263,48 @@ export class ProxyConnection {
     );
     const connecting = new Promise<void>((resolve, reject) => {
       this.runtime.connectionCloseReject = reject;
-      void attempt.then(resolve, reject);
+      const watchdog = this.runtime.timer.setTimeout(
+        () => this.abandonStalledAttempt(generation, reject),
+        DAEMON_CONNECT_ATTEMPT_TIMEOUT_MS,
+      );
+      void attempt.then(
+        (value) => {
+          this.runtime.timer.clearTimeout(watchdog);
+          resolve(value);
+        },
+        (error: unknown) => {
+          this.runtime.timer.clearTimeout(watchdog);
+          reject(error);
+        },
+      );
     });
     this.runtime.connecting = connecting;
     this.runtime.connectingAllowsLifecycle = allowsLifecycle;
     return connecting;
+  }
+
+  /**
+   * #15019: a connection attempt that never settles would hold the single-flight slot, so every
+   * later caller joined it and waited on an unrelated outer deadline. Supersede it: its waiters get
+   * a typed unavailable error (callers reconnect from it), its half-built client is closed, and the
+   * next call starts a fresh attempt. The stale attempt fences itself on its generation.
+   */
+  private abandonStalledAttempt(generation: number, reject: (error: unknown) => void): void {
+    if (this.connectionGeneration !== generation) {
+      return;
+    }
+    this.connectionGeneration++;
+    logger.warn(
+      `[DaemonMcpProxy] Daemon connection attempt stalled for ${DAEMON_CONNECT_ATTEMPT_TIMEOUT_MS}ms; abandoning it`,
+    );
+    reject(new DaemonConnectAttemptStalledError(DAEMON_CONNECT_ATTEMPT_TIMEOUT_MS));
+    void this.resetConnection();
+  }
+
+  private assertAttemptCurrent(generation: number): void {
+    if (this.connectionGeneration !== generation) {
+      throw new DaemonConnectAttemptStalledError(DAEMON_CONNECT_ATTEMPT_TIMEOUT_MS);
+    }
   }
 
   clearConnectionAttemptWork(attempt: Promise<void>): void {
@@ -324,7 +392,7 @@ export class ProxyConnection {
     return "start";
   }
 
-  async doConnect(allowsLifecycle: boolean): Promise<void> {
+  async doConnect(allowsLifecycle: boolean, generation = this.connectionGeneration): Promise<void> {
     this.throwIfClosing();
     this.runtime.reconciliationSnapshot = undefined;
     this.runtime.structuredSessionNotFound = false;
@@ -359,6 +427,7 @@ export class ProxyConnection {
 
     // Create and connect client
     this.throwIfClosing();
+    this.assertAttemptCurrent(generation);
     // A previous attempt may have left a client behind; close it before it is
     // overwritten so the daemon socket is not leaked (#11117).
     const previousClient = this.runtime.client;
@@ -380,6 +449,7 @@ export class ProxyConnection {
       }
       this.subscribeToClientConnectionClosed(client);
       await runPreflightTransport(() => client.connect(undefined, this.runtime.closeAbort.signal));
+      this.assertAttemptCurrent(generation);
       if (this.runtime.closing) {
         await client.close();
         throw new DaemonUnavailableError("MCP proxy is closing");
@@ -404,7 +474,9 @@ export class ProxyConnection {
       const [firstConnectionStep, secondConnectionStep] =
         this.connectionOwnershipAndPresentationSteps(client);
       await firstConnectionStep();
+      this.assertAttemptCurrent(generation);
       await secondConnectionStep();
+      this.assertAttemptCurrent(generation);
       // Re-check closing before the deferred flip: the establishment heartbeat awaits a
       // real daemon round-trip, and a close() landing during it already set
       // connected=false and nulled the client. Without this guard doConnect would

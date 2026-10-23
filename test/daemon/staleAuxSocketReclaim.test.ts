@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import type { DaemonSocketReachabilityLike } from "../../src/daemon/daemonSocketReachability";
+import type {
+  DaemonSocketReachabilityLike,
+  SocketReachability,
+} from "../../src/daemon/daemonSocketReachability";
 import type { SocketFileIdentity, SocketPathFs } from "../../src/daemon/socketFileIdentity";
 import { decideStaleAuxSocketReclaim } from "../../src/daemon/staleAuxSocketReclaim";
 
@@ -22,9 +25,9 @@ class FakeSocketPathFs implements SocketPathFs {
 
 class FakeReachability implements DaemonSocketReachabilityLike {
   readonly calls: Array<{ socketPath: string; timeoutMs: number }> = [];
-  onProbe: (attempt: number) => boolean = () => false;
+  onProbe: (attempt: number) => SocketReachability = () => "absent";
 
-  async isReachable(socketPath: string, timeoutMs: number): Promise<boolean> {
+  async probe(socketPath: string, timeoutMs: number): Promise<SocketReachability> {
     this.calls.push({ socketPath, timeoutMs });
     return this.onProbe(this.calls.length);
   }
@@ -50,6 +53,21 @@ function fixture(platform: NodeJS.Platform = "linux") {
 }
 
 describe("decideStaleAuxSocketReclaim", () => {
+  test("an inconclusive first probe preserves the path", async () => {
+    const f = fixture();
+    f.reachability.onProbe = () => "unknown";
+    expect(await f.decide()).toBe("unknown");
+    expect(f.reachability.calls).toEqual([f.probe]);
+  });
+
+  test("win32 preserves a stat-denied path after an inconclusive second probe", async () => {
+    const f = fixture("win32");
+    f.fs.denied = true;
+    f.reachability.onProbe = (attempt) => (attempt === 2 ? "unknown" : "absent");
+    expect(await f.decide()).toBe("unknown");
+    expect(f.reachability.calls).toEqual([f.probe, f.probe]);
+  });
+
   test("absent paths need no probe", async () => {
     const f = fixture();
     f.fs.present = false;
@@ -59,7 +77,7 @@ describe("decideStaleAuxSocketReclaim", () => {
 
   test("a reachable first probe holds the path", async () => {
     const f = fixture();
-    f.reachability.onProbe = () => true;
+    f.reachability.onProbe = () => "answered";
     expect(await f.decide()).toBe("held");
     expect(f.reachability.calls).toEqual([f.probe]);
   });
@@ -68,7 +86,7 @@ describe("decideStaleAuxSocketReclaim", () => {
     const f = fixture();
     f.reachability.onProbe = () => {
       f.fs.present = false;
-      return false;
+      return "absent";
     };
     expect(await f.decide()).toBe("absent");
     expect(f.reachability.calls).toEqual([f.probe]);
@@ -93,7 +111,7 @@ describe("decideStaleAuxSocketReclaim", () => {
     const f = fixture();
     f.reachability.onProbe = () => {
       f.fs.identity = { dev: 1n, ino: 3n };
-      return false;
+      return "absent";
     };
     expect(await f.decide()).toBe("conflict");
     expect(f.reachability.calls).toEqual([f.probe]);
@@ -103,7 +121,7 @@ describe("decideStaleAuxSocketReclaim", () => {
     const f = fixture("win32");
     f.reachability.onProbe = () => {
       f.fs.identity = { dev: 1n, ino: 3n };
-      return false;
+      return "absent";
     };
     expect(await f.decide()).toBe("conflict");
     expect(f.reachability.calls).toEqual([f.probe]);
@@ -119,7 +137,7 @@ describe("decideStaleAuxSocketReclaim", () => {
   test("win32 preserves a successor answering the second probe", async () => {
     const f = fixture("win32");
     f.fs.denied = true;
-    f.reachability.onProbe = (attempt) => attempt === 2;
+    f.reachability.onProbe = (attempt) => (attempt === 2 ? "answered" : "absent");
     expect(await f.decide()).toBe("held");
     expect(f.reachability.calls).toEqual([f.probe, f.probe]);
   });
@@ -131,7 +149,7 @@ describe("decideStaleAuxSocketReclaim", () => {
       if (attempt === 2) {
         f.fs.present = false;
       }
-      return false;
+      return "absent";
     };
     expect(await f.decide()).toBe("absent");
     expect(f.reachability.calls).toEqual([f.probe, f.probe]);

@@ -6,10 +6,16 @@ import {
 } from "./socketFileIdentity";
 import { logger } from "../utils/logger";
 
+const preservedProbeDecision = {
+  answered: "held",
+  unknown: "unknown",
+} as const;
+
 /**
  * On Windows an unreadable socket identity requires a second liveness probe immediately
  * before unlinking: it narrows (it cannot close) the window in which a successor binds
- * during the first probe. "Nothing answered" is the same liveness signal POSIX uses.
+ * during the first probe. Only definite absence permits reclaim; inconclusive probes
+ * preserve the endpoint on every platform.
  */
 export async function decideStaleAuxSocketReclaim(deps: {
   socketPath: string;
@@ -17,7 +23,7 @@ export async function decideStaleAuxSocketReclaim(deps: {
   reachability: DaemonSocketReachabilityLike;
   probeTimeoutMs: number;
   fs: SocketPathFs;
-}): Promise<"absent" | "unlink" | "held" | "conflict"> {
+}): Promise<"absent" | "unlink" | "held" | "conflict" | "unknown"> {
   const { socketPath, platform, reachability, probeTimeoutMs, fs } = deps;
   if (!fs.exists(socketPath)) {
     return "absent";
@@ -31,9 +37,9 @@ export async function decideStaleAuxSocketReclaim(deps: {
     logger.debug(`Socket file identity unavailable at ${socketPath}: ${error}`, error);
   }
 
-  const reachable = await reachability.isReachable(socketPath, probeTimeoutMs);
-  if (reachable) {
-    return "held";
+  const result = await reachability.probe(socketPath, probeTimeoutMs);
+  if (result !== "absent") {
+    return preservedProbeDecision[result];
   }
   if (!fs.exists(socketPath)) {
     return "absent";
@@ -51,8 +57,9 @@ export async function decideStaleAuxSocketReclaim(deps: {
       if (platform !== "win32") {
         return "conflict";
       }
-      if (await reachability.isReachable(socketPath, probeTimeoutMs)) {
-        return "held";
+      const finalResult = await reachability.probe(socketPath, probeTimeoutMs);
+      if (finalResult !== "absent") {
+        return preservedProbeDecision[finalResult];
       }
       return fs.exists(socketPath) ? "unlink" : "absent";
   }

@@ -146,6 +146,9 @@ export abstract class BaseSocketServer {
     if (decision === "held") {
       throw this.socketOwner.conflict(this.socketPath, this.serverName);
     }
+    if (decision === "unknown") {
+      throw new AuxiliarySocketBindConflict(this.socketPath, this.serverName, "unverified");
+    }
     if (decision === "conflict") {
       throw new AuxiliarySocketBindConflict(this.socketPath, this.serverName);
     }

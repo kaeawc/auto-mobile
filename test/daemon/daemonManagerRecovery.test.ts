@@ -24,7 +24,7 @@ class DaemonManager extends SafeDaemonManager {
     super({
       ...options,
       idGenerator: options.idGenerator ?? { next: () => "recovery-unit-owner" },
-      peerSocketReachability: options.peerSocketReachability ?? { isReachable: async () => false },
+      peerSocketReachability: options.peerSocketReachability ?? { probe: async () => "absent" },
       identityRecoveryIO: options.identityRecoveryIO ?? {
         socketExists: () => false,
         readRecord: () => (options.pidFilePath ? readPidFileDataSync(options.pidFilePath) : null),

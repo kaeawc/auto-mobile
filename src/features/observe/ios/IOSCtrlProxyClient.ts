@@ -1,4 +1,3 @@
-import { toActionableError } from "../../../models/ActionableError";
 import { getTelemetryPushServer } from "../../../daemon/telemetryPushSocketServer";
 import {
   sdkCapabilityQueryOptions,
@@ -890,35 +889,13 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
     }
   }
 
-  /**
-   * Push THIS device's mock rules and error simulation from the host store.
-   * Used after a session release clears the store (issue #10061); the
-   * reconnect path runs the same two syncs. Rejects failed, noCapability or superseded
-   * rule delivery and failed simulation writes so cleanup can mark a recording gap.
-   * Sent rules (including unconfirmed replies) and disabled mocking succeed.
-   * Simulation sync is always attempted, even when rule delivery fails.
-   */
+  /** Push this device's host network state, rejecting failed delivery. */
   public async syncNetworkStateFromHost(
     options: SdkCapabilityQueryOptions = sdkCapabilityQueryOptions(this.timer),
   ): Promise<void> {
-    let simulationDelivered = true;
-    try {
-      const result = await this.syncNetworkMockRulesIfAvailable(options);
-      if (["failed", "noCapability", "superseded"].includes(result.outcome)) {
-        throw new Error(`Network mock rule sync ${result.outcome}`);
-      }
-    } catch (error) {
-      logger.warn("[IOSCtrlProxyClient] Failed to sync network mock rules during cleanup", error);
-      throw toActionableError(error, "iOS network mock rules were not delivered");
-    } finally {
-      // Always clear simulation; cleanup records a gap before containing delivery errors.
-      simulationDelivered = this.networkSync.syncNetworkErrorSimulationToDevice();
-    }
-    if (!simulationDelivered) {
-      const error = new Error("Network error simulation sync failed");
-      logger.warn("[IOSCtrlProxyClient] Failed to sync network simulation during cleanup", error);
-      throw toActionableError(error, "iOS network error simulation was not delivered");
-    }
+    return this.networkSync.syncNetworkStateFromHost(options, (opts) =>
+      this.syncNetworkMockRulesIfAvailable(opts),
+    );
   }
 
   private syncHierarchyCadenceToDevice(): void {

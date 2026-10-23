@@ -657,7 +657,7 @@ export class SimCtlClient implements SimCtl {
   getBootedSimulatorsChecked(
     timeoutMs?: number,
     signal?: AbortSignal,
-    options: { bypassCache?: boolean } = {},
+    options: { bypassCache?: boolean; maxCacheAgeMs?: number } = {},
   ): Promise<BootedDevice[]> {
     return this.simCtlInventory.getBootedSimulatorsChecked(timeoutMs, signal, options);
   }
@@ -665,7 +665,7 @@ export class SimCtlClient implements SimCtl {
   getSimulatorListingChecked(
     timeoutMs?: number,
     signal?: AbortSignal,
-    options: { bypassCache?: boolean } = {},
+    options: { bypassCache?: boolean; maxCacheAgeMs?: number } = {},
   ): Promise<{ booted: BootedDevice[]; transitional: TransitionalSimulator[] }> {
     return this.simCtlInventory.getSimulatorListingChecked(timeoutMs, signal, options);
   }

@@ -65,17 +65,15 @@ export class DisconnectMonitorSchedule {
   private lastEitherSweepAt: number | undefined;
   private idleState: IdleSweepState | undefined;
   private watching = false;
-  private planExecutionActive = false;
 
   constructor(
     private readonly cadence: DisconnectMonitorCadence,
     private lastSweepAt: number,
   ) {}
 
-  shouldRun(watching: boolean, now: number, planExecutionActive: boolean): boolean {
+  shouldRun(watching: boolean, now: number): boolean {
     const wasWatching = this.watching;
     this.watching = watching;
-    this.planExecutionActive = planExecutionActive;
     if (watching) {
       this.idleState = undefined;
       if (!wasWatching) {
@@ -100,9 +98,10 @@ export class DisconnectMonitorSchedule {
   selectPlatform(
     platforms: readonly ("android" | "ios")[],
     now: number,
+    planOnTracked: boolean,
   ): "android" | "ios" | "either" {
     const platform =
-      this.watching && !this.planExecutionActive
+      this.watching && !planOnTracked
         ? selectDisconnectScope(platforms, now, this.lastEitherSweepAt, this.cadence.idleIntervalMs)
         : "either";
     if (platform === "either") {

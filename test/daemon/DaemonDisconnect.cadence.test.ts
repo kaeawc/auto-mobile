@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { deviceHold, genericAvailabilityOf } from "../../src/daemon/deviceHold";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { DEFAULT_VIDEO_RECORDING_CONFIG } from "../../src/models/VideoRecordingConfigParsing";
@@ -426,13 +427,21 @@ describe("DaemonDisconnect adaptive discovery cadence", () => {
 
   test("plan activity on a tracked single-platform device still sweeps either every tick", async () => {
     const rig = monitor(undefined, "ios");
-    serverConfig.setPlanExecutionActive(true);
+    rig.pooled.status = "busy";
+    const execution = executionTracker.startExecution("executePlan", undefined, "plan-session");
+    executionTracker.bindDeviceExecution(execution.id, rig.pooled.id);
     try {
       await rig.tick();
       await rig.tick();
       await rig.tick();
       expect(rig.scopes).toEqual(["either", "either", "either"]);
+      executionTracker.endExecution(execution.id);
+      for (let tick = 0; tick < 7; tick++) {
+        await rig.tick();
+      }
+      expect(rig.scopes.slice(3)).toEqual(["ios", "ios", "ios", "ios", "ios", "either", "ios"]);
     } finally {
+      executionTracker.endExecution(execution.id);
       await rig.daemon.disconnectMonitor?.stop();
     }
   });

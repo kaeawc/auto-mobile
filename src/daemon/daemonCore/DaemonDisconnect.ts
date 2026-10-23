@@ -69,7 +69,10 @@ export type { DisconnectMonitorCadence } from "../disconnectMonitorCadence";
 
 interface DisconnectSweep {
   adbServerResetCohort: readonly PooledDevice[];
-  selectPlatform: (platforms: ("android" | "ios")[]) => "android" | "ios" | "either";
+  selectPlatform: (
+    platforms: ("android" | "ios")[],
+    planOnTracked: boolean,
+  ) => "android" | "ios" | "either";
   idleSignature?: string;
 }
 
@@ -270,8 +273,8 @@ export class DaemonDisconnect {
         async () => {
           const sweep: DisconnectSweep = {
             adbServerResetCohort: [],
-            selectPlatform: (platforms) =>
-              schedule.selectPlatform(platforms, this.host.services.timer().now()),
+            selectPlatform: (platforms, planOnTracked) =>
+              schedule.selectPlatform(platforms, this.host.services.timer().now(), planOnTracked),
           };
           try {
             await this.checkDisconnects(
@@ -296,7 +299,6 @@ export class DaemonDisconnect {
         {
           shouldRun: async () => {
             const pool: DisconnectMonitorPool = this.host.services.devicePool();
-            const planExecutionActive = serverConfig.isPlanExecutionActive();
             const watching =
               this.host.services.sessionManager().getAllSessions().length > 0 ||
               pool.getAllDevices().some(({ id }) => {
@@ -306,13 +308,9 @@ export class DaemonDisconnect {
                   pool.isDeviceLeasedForAndroidStartup(id)
                 );
               }) ||
-              planExecutionActive ||
+              serverConfig.isPlanExecutionActive() ||
               (await listRecordings()).length > 0;
-            return schedule.shouldRun(
-              watching,
-              this.host.services.timer().now(),
-              planExecutionActive,
-            );
+            return schedule.shouldRun(watching, this.host.services.timer().now());
           },
         },
       ),
@@ -865,17 +863,23 @@ export class DaemonDisconnect {
       assignedDevice: deviceId,
       platform,
     }));
-    const platform = sweep.selectPlatform([
-      ...this.host.services
-        .devicePool()
-        .getAllDevices()
-        .map((device) => device.platform),
-      ...this.host.services
-        .sessionManager()
-        .getAllSessions()
-        .map((session) => session.platform),
-      ...activeRecordings.map((recording) => recording.platform),
-    ]);
+    const pooled = this.host.services.devicePool().getAllDevices();
+    const sessions = this.host.services.sessionManager().getAllSessions();
+    const planOnTracked = [
+      ...pooled.map(({ id }) => id),
+      ...sessions.flatMap(({ assignedDevice }) =>
+        assignedDevice === undefined ? [] : [assignedDevice],
+      ),
+      ...activeRecordings.map(({ deviceId }) => deviceId),
+    ].some((id) => this.hasPlanExecution(id));
+    const platform = sweep.selectPlatform(
+      [
+        ...pooled.map((device) => device.platform),
+        ...sessions.map((session) => session.platform),
+        ...activeRecordings.map((recording) => recording.platform),
+      ],
+      planOnTracked,
+    );
     let discovery = await this.discoverAndReconcile(deviceManager, {
       platform,
       heldDevices,

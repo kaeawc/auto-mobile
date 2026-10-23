@@ -55,9 +55,9 @@ describe("disconnect monitor schedule", () => {
     const schedule = new DisconnectMonitorSchedule(cadence, 1_000);
     let now = 1_000;
     for (const interval of [30_000, 30_000, 60_000, 120_000, 120_000, 120_000]) {
-      expect(schedule.shouldRun(false, now + interval - 1, false)).toBe(false);
+      expect(schedule.shouldRun(false, now + interval - 1)).toBe(false);
       now += interval;
-      expect(schedule.shouldRun(false, now, false)).toBe(true);
+      expect(schedule.shouldRun(false, now)).toBe(true);
       schedule.recordSuccess("stable");
     }
   });
@@ -69,9 +69,9 @@ describe("disconnect monitor schedule", () => {
     );
     let now = 0;
     for (const interval of [40, 40, 80, 100, 100]) {
-      expect(schedule.shouldRun(false, now + interval - 1, false)).toBe(false);
+      expect(schedule.shouldRun(false, now + interval - 1)).toBe(false);
       now += interval;
-      expect(schedule.shouldRun(false, now, false)).toBe(true);
+      expect(schedule.shouldRun(false, now)).toBe(true);
       schedule.recordSuccess("stable");
     }
   });
@@ -79,107 +79,107 @@ describe("disconnect monitor schedule", () => {
   test("changed or missing signatures reset the idle baseline", () => {
     const schedule = new DisconnectMonitorSchedule(cadence, 0);
     for (const now of [30_000, 60_000, 120_000]) {
-      expect(schedule.shouldRun(false, now, false)).toBe(true);
+      expect(schedule.shouldRun(false, now)).toBe(true);
       schedule.recordSuccess("stable");
     }
-    expect(schedule.shouldRun(false, 240_000, false)).toBe(true);
+    expect(schedule.shouldRun(false, 240_000)).toBe(true);
     schedule.recordSuccess("changed");
-    expect(schedule.shouldRun(false, 269_999, false)).toBe(false);
-    expect(schedule.shouldRun(false, 270_000, false)).toBe(true);
+    expect(schedule.shouldRun(false, 269_999)).toBe(false);
+    expect(schedule.shouldRun(false, 270_000)).toBe(true);
     schedule.recordSuccess("changed");
-    expect(schedule.shouldRun(false, 330_000, false)).toBe(true);
+    expect(schedule.shouldRun(false, 330_000)).toBe(true);
     schedule.recordSuccess(undefined);
-    expect(schedule.shouldRun(false, 359_999, false)).toBe(false);
-    expect(schedule.shouldRun(false, 360_000, false)).toBe(true);
+    expect(schedule.shouldRun(false, 359_999)).toBe(false);
+    expect(schedule.shouldRun(false, 360_000)).toBe(true);
   });
 
   test("watching admits immediately, clears backoff, and ignores success evidence", () => {
     const schedule = new DisconnectMonitorSchedule(cadence, 0);
     for (const now of [30_000, 60_000, 120_000]) {
-      expect(schedule.shouldRun(false, now, false)).toBe(true);
+      expect(schedule.shouldRun(false, now)).toBe(true);
       schedule.recordSuccess("stable");
     }
-    expect(schedule.shouldRun(true, 125_000, false)).toBe(true);
+    expect(schedule.shouldRun(true, 125_000)).toBe(true);
     schedule.recordSuccess("stable");
-    expect(schedule.shouldRun(true, 130_000, false)).toBe(true);
+    expect(schedule.shouldRun(true, 130_000)).toBe(true);
     schedule.recordSuccess("stable");
-    expect(schedule.shouldRun(false, 159_999, false)).toBe(false);
-    expect(schedule.shouldRun(false, 160_000, false)).toBe(true);
+    expect(schedule.shouldRun(false, 159_999)).toBe(false);
+    expect(schedule.shouldRun(false, 160_000)).toBe(true);
     schedule.recordSuccess("stable");
-    expect(schedule.shouldRun(false, 189_999, false)).toBe(false);
-    expect(schedule.shouldRun(false, 190_000, false)).toBe(true);
+    expect(schedule.shouldRun(false, 189_999)).toBe(false);
+    expect(schedule.shouldRun(false, 190_000)).toBe(true);
   });
 
   test("watching scopes homogeneous platforms until a periodic full sweep", () => {
     const schedule = new DisconnectMonitorSchedule(cadence, 0);
-    expect(schedule.shouldRun(true, 5_000, false)).toBe(true);
-    expect(schedule.selectPlatform(["ios"], 5_000)).toBe("either");
-    expect(schedule.shouldRun(true, 10_000, false)).toBe(true);
-    expect(schedule.selectPlatform(["ios", "ios"], 10_000)).toBe("ios");
-    expect(schedule.selectPlatform(["android"], 15_000)).toBe("android");
-    expect(schedule.selectPlatform(["ios"], 34_999)).toBe("ios");
-    expect(schedule.selectPlatform(["ios"], 35_000)).toBe("either");
-    expect(schedule.selectPlatform(["ios"], 40_000)).toBe("ios");
+    expect(schedule.shouldRun(true, 5_000)).toBe(true);
+    expect(schedule.selectPlatform(["ios"], 5_000, false)).toBe("either");
+    expect(schedule.shouldRun(true, 10_000)).toBe(true);
+    expect(schedule.selectPlatform(["ios", "ios"], 10_000, false)).toBe("ios");
+    expect(schedule.selectPlatform(["android"], 15_000, false)).toBe("android");
+    expect(schedule.selectPlatform(["ios"], 34_999, false)).toBe("ios");
+    expect(schedule.selectPlatform(["ios"], 35_000, false)).toBe("either");
+    expect(schedule.selectPlatform(["ios"], 40_000, false)).toBe("ios");
   });
 
   test("idle, mixed and empty platforms force full sweeps and record their time", () => {
     const schedule = new DisconnectMonitorSchedule(cadence, 0);
-    expect(schedule.shouldRun(false, 30_000, false)).toBe(true);
-    expect(schedule.selectPlatform(["ios"], 30_000)).toBe("either");
-    expect(schedule.selectPlatform(["ios"], 35_000)).toBe("either");
-    expect(schedule.shouldRun(true, 40_000, false)).toBe(true);
-    expect(schedule.selectPlatform(["ios"], 40_000)).toBe("either");
-    expect(schedule.selectPlatform(["ios", "android"], 45_000)).toBe("either");
-    expect(schedule.selectPlatform([], 50_000)).toBe("either");
-    expect(schedule.selectPlatform(["ios"], 79_999)).toBe("ios");
-    expect(schedule.selectPlatform(["ios"], 80_000)).toBe("either");
+    expect(schedule.shouldRun(false, 30_000)).toBe(true);
+    expect(schedule.selectPlatform(["ios"], 30_000, false)).toBe("either");
+    expect(schedule.selectPlatform(["ios"], 35_000, false)).toBe("either");
+    expect(schedule.shouldRun(true, 40_000)).toBe(true);
+    expect(schedule.selectPlatform(["ios"], 40_000, false)).toBe("either");
+    expect(schedule.selectPlatform(["ios", "android"], 45_000, false)).toBe("either");
+    expect(schedule.selectPlatform([], 50_000, false)).toBe("either");
+    expect(schedule.selectPlatform(["ios"], 79_999, false)).toBe("ios");
+    expect(schedule.selectPlatform(["ios"], 80_000, false)).toBe("either");
   });
 
   test("entering watching resets full-sweep history even after an idle full sweep", () => {
     const schedule = new DisconnectMonitorSchedule(cadence, 0);
-    expect(schedule.shouldRun(false, 30_000, false)).toBe(true);
-    expect(schedule.selectPlatform(["ios"], 30_000)).toBe("either");
-    expect(schedule.shouldRun(true, 35_000, false)).toBe(true);
-    expect(schedule.selectPlatform(["ios"], 35_000)).toBe("either");
-    expect(schedule.shouldRun(true, 40_000, false)).toBe(true);
-    expect(schedule.selectPlatform(["ios"], 40_000)).toBe("ios");
+    expect(schedule.shouldRun(false, 30_000)).toBe(true);
+    expect(schedule.selectPlatform(["ios"], 30_000, false)).toBe("either");
+    expect(schedule.shouldRun(true, 35_000)).toBe(true);
+    expect(schedule.selectPlatform(["ios"], 35_000, false)).toBe("either");
+    expect(schedule.shouldRun(true, 40_000)).toBe(true);
+    expect(schedule.selectPlatform(["ios"], 40_000, false)).toBe("ios");
   });
 
-  test("admission stores plan activity for full sweeps and later clears it", () => {
+  test("tracked plan activity forces full sweeps and updates their refresh time", () => {
     const schedule = new DisconnectMonitorSchedule(cadence, 0);
-    expect(schedule.shouldRun(true, 5_000, false)).toBe(true);
-    expect(schedule.selectPlatform(["ios"], 5_000)).toBe("either");
-    expect(schedule.selectPlatform(["ios"], 10_000)).toBe("ios");
-    expect(schedule.shouldRun(true, 15_000, true)).toBe(true);
-    expect(schedule.selectPlatform(["ios"], 15_000)).toBe("either");
-    expect(schedule.selectPlatform(["ios"], 20_000)).toBe("either");
-    expect(schedule.shouldRun(true, 49_999, false)).toBe(true);
-    expect(schedule.selectPlatform(["ios"], 49_999)).toBe("ios");
-    expect(schedule.selectPlatform(["ios"], 50_000)).toBe("either");
+    expect(schedule.shouldRun(true, 5_000)).toBe(true);
+    expect(schedule.selectPlatform(["ios"], 5_000, false)).toBe("either");
+    expect(schedule.selectPlatform(["ios"], 10_000, false)).toBe("ios");
+    expect(schedule.shouldRun(true, 15_000)).toBe(true);
+    expect(schedule.selectPlatform(["ios"], 15_000, true)).toBe("either");
+    expect(schedule.selectPlatform(["ios"], 20_000, true)).toBe("either");
+    expect(schedule.shouldRun(true, 49_999)).toBe(true);
+    expect(schedule.selectPlatform(["ios"], 49_999, false)).toBe("ios");
+    expect(schedule.selectPlatform(["ios"], 50_000, false)).toBe("either");
   });
 
   test("failure resets idle backoff without moving the last admitted time", () => {
     const schedule = new DisconnectMonitorSchedule(cadence, 0);
     for (const now of [30_000, 60_000, 120_000]) {
-      expect(schedule.shouldRun(false, now, false)).toBe(true);
+      expect(schedule.shouldRun(false, now)).toBe(true);
       schedule.recordSuccess("stable");
     }
-    expect(schedule.shouldRun(false, 240_000, false)).toBe(true);
+    expect(schedule.shouldRun(false, 240_000)).toBe(true);
     schedule.recordFailure();
-    expect(schedule.shouldRun(false, 269_999, false)).toBe(false);
-    expect(schedule.shouldRun(false, 270_000, false)).toBe(true);
+    expect(schedule.shouldRun(false, 269_999)).toBe(false);
+    expect(schedule.shouldRun(false, 270_000)).toBe(true);
     schedule.recordSuccess("stable");
-    expect(schedule.shouldRun(false, 300_000, false)).toBe(true);
+    expect(schedule.shouldRun(false, 300_000)).toBe(true);
   });
 
   test("failure forces a full sweep on the next continuously watched admission", () => {
     const schedule = new DisconnectMonitorSchedule(cadence, 0);
-    expect(schedule.shouldRun(true, 5_000, false)).toBe(true);
-    expect(schedule.selectPlatform(["ios"], 5_000)).toBe("either");
-    expect(schedule.selectPlatform(["ios"], 10_000)).toBe("ios");
+    expect(schedule.shouldRun(true, 5_000)).toBe(true);
+    expect(schedule.selectPlatform(["ios"], 5_000, false)).toBe("either");
+    expect(schedule.selectPlatform(["ios"], 10_000, false)).toBe("ios");
     schedule.recordFailure();
-    expect(schedule.shouldRun(true, 15_000, false)).toBe(true);
-    expect(schedule.selectPlatform(["ios"], 15_000)).toBe("either");
+    expect(schedule.shouldRun(true, 15_000)).toBe(true);
+    expect(schedule.selectPlatform(["ios"], 15_000, false)).toBe("either");
   });
 });
 

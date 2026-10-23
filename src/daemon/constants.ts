@@ -437,6 +437,9 @@ export const READINESS_PROBE_BACKOFF_MS = 150;
  */
 export const MCP_STREAMABLE_PATH = "/auto-mobile/streamable";
 
+/** Daemon HTTP liveness route; with {@link MCP_STREAMABLE_PATH} the only daemon routes. */
+export const HEARTBEAT_PATH = "/heartbeat";
+
 /**
  * Internal loopback header used to restore a daemon socket's tool-selection
  * profile when its Streamable HTTP MCP transport is recreated.

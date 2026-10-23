@@ -1,4 +1,4 @@
-import { toActionableError } from "../models/ActionableError";
+import { ActionableError, toActionableError } from "../models/ActionableError";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import {
   closeSync,
@@ -24,7 +24,9 @@ import { ENV, readEnvTrimmed } from "../config/env";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { exponentialBackoff } from "../utils/Backoff";
 import { logger } from "../utils/logger";
-import { resolveDaemonStatePath } from "./constants";
+import { HEARTBEAT_PATH, MCP_STREAMABLE_PATH, resolveDaemonStatePath } from "./constants";
+import { readPidFileDataSync } from "./daemonFiles";
+import type { PidFileData } from "./types";
 
 const STALE_REMOVAL_CLAIM_MS = 60_000;
 
@@ -109,12 +111,29 @@ export class FileDaemonHttpTokenStore implements DaemonHttpTokenStore {
     }
   }
 
+  /** Identity and content of the public path; compared across the Windows retry backoff. */
+  private observeDestination(): string {
+    const stat = lstatSync(this.path, { throwIfNoEntry: false });
+    if (!stat) {
+      return "absent";
+    }
+    return JSON.stringify([stat.dev, stat.ino, stat.size, stat.mtimeMs, this.readAt(this.path)]);
+  }
+
   private publish(temporaryPath: string): void {
+    // Another daemon may publish during a backoff; a rename after that would overwrite
+    // its token. Pin what was observed up front and abort rather than replace anything else.
+    const observed = this.observeDestination();
     // Brief Windows sharing/antivirus locks can outlive a reader's close. Bound the
     // synchronous wait to five attempts (150 ms total); never write the token in place.
     const backoff = exponentialBackoff({ initialDelayMs: 10, maxDelayMs: 100 });
     for (let attempt = 1; ; attempt++) {
       this.assertTarget();
+      if (attempt > 1 && this.observeDestination() !== observed) {
+        throw new ActionableError(
+          "Daemon HTTP token file changed while publication was retrying; another daemon may own it",
+        );
+      }
       try {
         this.renameFile(temporaryPath, this.path);
         return;
@@ -305,23 +324,58 @@ export function readDaemonHttpToken(env: NodeJS.ProcessEnv = process.env): strin
   }
 }
 
-/** Exact loopback names only; other 127/8 and IPv4-mapped IPv6 addresses are excluded. */
-export function isDaemonHttpEndpoint(endpoint: string | URL): boolean {
+const DAEMON_ROUTES: readonly string[] = [MCP_STREAMABLE_PATH, HEARTBEAT_PATH];
+
+/**
+ * The daemon HTTP port recorded in its PID file, or null when the file is absent,
+ * unreadable, or carries no valid port. Best effort: never throws, never logs token data.
+ */
+export function readDaemonPidFilePort(
+  env: NodeJS.ProcessEnv = process.env,
+  readPid: (pidFilePath: string) => PidFileData | null = readPidFileDataSync,
+): number | null {
+  try {
+    const port = readPid(resolveDaemonStatePath("pid", env))?.port;
+    return typeof port === "number" && Number.isInteger(port) && port >= 1 && port <= 65535
+      ? port
+      : null;
+  } catch (error) {
+    // Client discovery is best effort; an unverifiable port is treated as undiscovered.
+    logger.debug(`Daemon PID file port unavailable: ${error}`);
+    return null;
+  }
+}
+
+/**
+ * The daemon credential scope: an exact loopback host, an explicit port, and one of the
+ * daemon's own routes. When the daemon's pid-file port is known (`discoveredPort`) the URL
+ * port must equal it; with no discoverable port any explicit port passes. Other 127/8 and
+ * IPv4-mapped IPv6 addresses are excluded.
+ */
+export function isDaemonHttpEndpoint(
+  endpoint: string | URL,
+  discoveredPort: number | null = null,
+): boolean {
   // WHATWG URL objects discard original host spelling (127.1 becomes 127.0.0.1,
-  // and %6Cocalhost becomes localhost). Require the original string for credential scope.
+  // %6Cocalhost becomes localhost) and drop default ports. Require the original string.
   if (typeof endpoint !== "string") {
     return false;
   }
-  const url = URL.parse(endpoint);
-  const literalHost =
-    /^[a-z][a-z0-9+.-]*:\/\/(?:[^@/?#]*@)?(?:localhost|127\.0\.0\.1|\[::1\])(?::[0-9]+)?(?:[/?#]|$)/i.test(
+  const match =
+    /^([a-z][a-z0-9+.-]*):\/\/(?:[^@/?#]*@)?(?:localhost|127\.0\.0\.1|\[::1\]):([0-9]{1,5})(\/[^?#]*)?(?:[?#]|$)/i.exec(
       endpoint,
     );
+  if (!match) {
+    return false;
+  }
+  const scheme = match[1]!.toLowerCase();
+  const port = Number(match[2]);
   return (
-    literalHost &&
-    !!url &&
-    (url.protocol === "http:" || url.protocol === "https:") &&
-    ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname.toLowerCase())
+    (scheme === "http" || scheme === "https") &&
+    port >= 1 &&
+    port <= 65535 &&
+    DAEMON_ROUTES.includes(match[3] ?? "") &&
+    (discoveredPort === null || port === discoveredPort)
   );
 }
 
@@ -329,10 +383,13 @@ export function daemonHttpAuthHeaders(
   endpoint: string | URL,
   env: NodeJS.ProcessEnv = process.env,
   headers: Record<string, string> = {},
+  discoverPort: (env: NodeJS.ProcessEnv) => number | null = readDaemonPidFilePort,
 ): Record<string, string> {
   if (
+    Object.keys(headers).some((key) => key.toLowerCase() === "authorization") ||
+    // Only read the pid file for URLs that already have daemon shape.
     !isDaemonHttpEndpoint(endpoint) ||
-    Object.keys(headers).some((key) => key.toLowerCase() === "authorization")
+    !isDaemonHttpEndpoint(endpoint, discoverPort(env))
   ) {
     return { ...headers };
   }

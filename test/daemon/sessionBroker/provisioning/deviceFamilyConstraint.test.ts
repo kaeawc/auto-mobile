@@ -387,6 +387,33 @@ describe("binding Android family constraints", () => {
     ).toMatchObject({ kind: "resolved", resolvedSpec: { deviceType: "wearos_small_round" } });
   });
 
+  test.each([
+    ["android-tv", "phone"],
+    ["android-wear", "tablet"],
+    ["android-automotive", "tv"],
+  ] as const)(
+    "a %s runtime conflicts with deviceFamily %s even when deviceType is defaulted",
+    async (tag, deviceFamily) => {
+      expect(
+        await new DefaultManagedSpecResolver().resolve(
+          "android",
+          { runtime: `system-images;android-34;${tag};x86_64`, deviceFamily },
+          {},
+        ),
+      ).toMatchObject({ kind: "unsupported", message: expect.stringContaining("image") });
+    },
+  );
+
+  test("a tv runtime with deviceFamily tv resolves to the tv default profile", async () => {
+    expect(
+      await new DefaultManagedSpecResolver().resolve(
+        "android",
+        { runtime: "system-images;android-34;android-tv;x86_64", deviceFamily: "tv" },
+        {},
+      ),
+    ).toMatchObject({ kind: "resolved", resolvedSpec: { deviceType: "tv_1080p" } });
+  });
+
   test("an explicit tv profile conflicts with a phone family", async () => {
     expect(
       await new DefaultManagedSpecResolver().resolve(

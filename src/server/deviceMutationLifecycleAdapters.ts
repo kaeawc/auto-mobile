@@ -33,38 +33,47 @@ function appFallback(tool: (typeof APP_FALLBACK_TOOLS)[number], appId: unknown):
  *   that intent when the session itself installed an app the baseline did not hold
  *   (`withoutSessionCoveredFallbacks`).
  */
+const PROCESS_ONLY_TOOLS: ReadonlySet<string> = new Set([
+  "terminateApp",
+  "crashApp",
+  "appLifecycle",
+  "performanceTrace",
+  "videoRecording",
+  "recordDeviceGestures",
+]);
+
+function installMutations(args: Record<string, unknown>): ToolMutation[] {
+  return [
+    ...(typeof args.appId === "string"
+      ? [{ kind: "installed-app", key: args.appId } satisfies ToolMutation]
+      : []),
+    appFallback("installApp", args.appId),
+  ];
+}
+
+const APP_TOOL_MUTATIONS: Readonly<
+  Record<string, (args: Record<string, unknown>) => ToolMutation[]>
+> = {
+  launchApp: (args) =>
+    args.clearAppData === true ? [appFallback("clearAppData", args.appId)] : [],
+  measureStartup: (args) =>
+    args.compilation !== undefined && args.compilation !== "asIs"
+      ? [appFallback("measureStartup", args.appId)]
+      : [],
+  installApp: installMutations,
+  uninstallApp: (args) => [
+    { kind: "installed-app", key: String(args.appId) },
+    appFallback("uninstallApp", args.appId),
+  ],
+};
+
 export function lifecycleToolMutations(
   name: string,
   args: Record<string, unknown>,
   _platform?: Platform,
 ): ToolMutation[] | undefined {
-  switch (name) {
-    case "terminateApp":
-    case "crashApp":
-    case "appLifecycle":
-    case "performanceTrace":
-    case "videoRecording":
-    case "recordDeviceGestures":
-      return [];
-    case "launchApp":
-      return args.clearAppData === true ? [appFallback("clearAppData", args.appId)] : [];
-    case "measureStartup":
-      return args.compilation !== undefined && args.compilation !== "asIs"
-        ? [appFallback("measureStartup", args.appId)]
-        : [];
-    case "installApp":
-      return [
-        ...(typeof args.appId === "string"
-          ? [{ kind: "installed-app", key: args.appId } satisfies ToolMutation]
-          : []),
-        appFallback("installApp", args.appId),
-      ];
-    case "uninstallApp":
-      return [
-        { kind: "installed-app", key: String(args.appId) },
-        appFallback("uninstallApp", args.appId),
-      ];
-    default:
-      return undefined;
+  if (PROCESS_ONLY_TOOLS.has(name)) {
+    return [];
   }
+  return Object.hasOwn(APP_TOOL_MUTATIONS, name) ? APP_TOOL_MUTATIONS[name](args) : undefined;
 }

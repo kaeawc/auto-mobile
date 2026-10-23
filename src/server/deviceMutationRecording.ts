@@ -179,23 +179,35 @@ export class SessionDeviceMutationRecording implements DeviceMutationRecording {
           "Device mutation recorder must match the admitted broker session and device",
         );
       }
-      if (name === "installApp") {
-        const appId = await runWithAbortSignal(signal, () =>
-          this.artifactReader.appId(device, args, signal),
-        );
-        mutations = deviceToolMutations(name, { ...args, appId }, device.platform);
-      }
-      if (name === "prototype" && args.spec === undefined && typeof args.specPath === "string") {
-        const spec = await this.specReader(args.specPath, signal);
-        if (spec !== undefined) {
-          mutations = deviceToolMutations(name, { ...args, spec }, device.platform);
-        }
-      }
+      mutations = await this.resolveMutations(name, args, device, mutations, signal);
       await this.recordMutations(name, device, recorder, mutations, signal);
     } catch (error) {
       signal?.throwIfAborted();
       logger.warn("Device mutation recording failed; proceeding without recording", error);
     }
+  }
+
+  /** Re-derives the intents once the host has read what the args only point at. */
+  private async resolveMutations(
+    name: string,
+    args: Record<string, unknown>,
+    device: BootedDevice,
+    mutations: ToolMutation[],
+    signal?: AbortSignal,
+  ): Promise<ToolMutation[]> {
+    if (name === "installApp") {
+      const appId = await runWithAbortSignal(signal, () =>
+        this.artifactReader.appId(device, args, signal),
+      );
+      return deviceToolMutations(name, { ...args, appId }, device.platform);
+    }
+    if (name === "prototype" && args.spec === undefined && typeof args.specPath === "string") {
+      const spec = await this.specReader(args.specPath, signal);
+      return spec === undefined
+        ? mutations
+        : deviceToolMutations(name, { ...args, spec }, device.platform);
+    }
+    return mutations;
   }
 
   private async recordMutations(

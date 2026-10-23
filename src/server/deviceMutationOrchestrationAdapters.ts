@@ -57,36 +57,44 @@ function prototypeMutations(args: Record<string, unknown>, platform?: Platform):
  * - `prototype` records according to {@link prototypeMutations}; shows, patches, dismissals and
  *   reads of a session prototype are dismissed when the CtrlProxy client disconnects.
  */
+const NO_DEVICE_STATE_TOOLS: ReadonlySet<string> = new Set([
+  "getAndroid",
+  "getApple",
+  "startDevice",
+  "provisionDevice",
+  "killDevice",
+  "deleteDevice",
+  "barrier",
+  "criticalSection",
+  "explore",
+  "navigateTo",
+]);
+
+const ORCHESTRATION_MUTATIONS: Readonly<
+  Record<string, (args: Record<string, unknown>, platform?: Platform) => ToolMutation[]>
+> = {
+  executePlan: (args) =>
+    args.cleanupClearAppData === true && typeof args.cleanupAppId === "string"
+      ? [fallback("clearAppData", args.cleanupAppId)]
+      : [],
+  setDeviceResources: (args) =>
+    isRecord(args.resources) && Object.keys(args.resources).length > 0
+      ? [fallback("setDeviceResources")]
+      : [],
+  reconcileDeviceResources: (args) =>
+    args.repair === true ? [fallback("reconcileDeviceResources")] : [],
+  prototype: prototypeMutations,
+};
+
 export function orchestrationToolMutations(
   name: string,
   args: Record<string, unknown>,
   platform?: Platform,
 ): ToolMutation[] | undefined {
-  switch (name) {
-    case "getAndroid":
-    case "getApple":
-    case "startDevice":
-    case "provisionDevice":
-    case "killDevice":
-    case "deleteDevice":
-    case "barrier":
-    case "criticalSection":
-    case "explore":
-    case "navigateTo":
-      return [];
-    case "executePlan":
-      return args.cleanupClearAppData === true && typeof args.cleanupAppId === "string"
-        ? [fallback("clearAppData", args.cleanupAppId)]
-        : [];
-    case "setDeviceResources":
-      return isRecord(args.resources) && Object.keys(args.resources).length > 0
-        ? [fallback("setDeviceResources")]
-        : [];
-    case "reconcileDeviceResources":
-      return args.repair === true ? [fallback("reconcileDeviceResources")] : [];
-    case "prototype":
-      return prototypeMutations(args, platform);
-    default:
-      return undefined;
+  if (NO_DEVICE_STATE_TOOLS.has(name)) {
+    return [];
   }
+  return Object.hasOwn(ORCHESTRATION_MUTATIONS, name)
+    ? ORCHESTRATION_MUTATIONS[name](args, platform)
+    : undefined;
 }

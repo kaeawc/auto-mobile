@@ -97,6 +97,27 @@ function thermalCommands(prior: unknown): Commands {
   ];
 }
 
+function batterySaverCommands(mutation: DeviceMutationInput, prior: unknown): Commands {
+  if (mutation.priorValue.state === "absent") {
+    return [{ command: "shell settings delete global low_power" }];
+  }
+  return typeof prior === "boolean"
+    ? [{ command: `shell settings put global low_power ${prior ? 1 : 0}` }]
+    : null;
+}
+
+function appBucketCommands(intent: PowerIntent & { appId: string }, prior: unknown): Commands {
+  if (intent.field === "inactive") {
+    return typeof prior === "boolean"
+      ? [{ command: `shell am set-inactive ${shellQuote(intent.appId)} ${prior}` }]
+      : null;
+  }
+  const bucket = z.enum(STANDBY_BUCKETS).safeParse(prior);
+  return bucket.success
+    ? [{ command: `shell am set-standby-bucket ${shellQuote(intent.appId)} ${bucket.data}` }]
+    : null;
+}
+
 function powerCommands(intent: PowerIntent, mutation: DeviceMutationInput): Commands {
   const prior = priorOf(mutation);
   switch (intent.field) {
@@ -111,22 +132,10 @@ function powerCommands(intent: PowerIntent, mutation: DeviceMutationInput): Comm
         ? [{ command: `shell cmd netpolicy set restrict-background ${prior}` }]
         : null;
     case "batterySaver":
-      if (mutation.priorValue.state === "absent") {
-        return [{ command: "shell settings delete global low_power" }];
-      }
-      return typeof prior === "boolean"
-        ? [{ command: `shell settings put global low_power ${prior ? 1 : 0}` }]
-        : null;
-    case "standby": {
-      const bucket = z.enum(STANDBY_BUCKETS).safeParse(prior);
-      return bucket.success
-        ? [{ command: `shell am set-standby-bucket ${shellQuote(intent.appId)} ${bucket.data}` }]
-        : null;
-    }
+      return batterySaverCommands(mutation, prior);
+    case "standby":
     case "inactive":
-      return typeof prior === "boolean"
-        ? [{ command: `shell am set-inactive ${shellQuote(intent.appId)} ${prior}` }]
-        : null;
+      return appBucketCommands(intent, prior);
   }
 }
 

@@ -207,14 +207,11 @@ function familyToolMutations(
   return undefined;
 }
 
-export function deviceToolMutations(
+/** Tools whose intent is fixed by their name (and, for two, an action). */
+function namedToolMutations(
   name: string,
   args: Record<string, unknown>,
-  platform?: Platform,
-): ToolMutation[] {
-  if (mutationCallIsRead(name, args, platform) || mutationCallNotJournaled(name, args)) {
-    return [];
-  }
+): ToolMutation[] | undefined {
   if (name === "rotate") {
     return rotationMutations(args);
   }
@@ -230,8 +227,22 @@ export function deviceToolMutations(
     setNotificationPolicy: "notification",
     setUIState: "preference",
   };
-  if (Object.hasOwn(opaqueKinds, name)) {
-    return [mutation(opaqueKinds[name], name === "accessibility" ? "device" : `tool:${name}`)];
+  return Object.hasOwn(opaqueKinds, name)
+    ? [mutation(opaqueKinds[name], name === "accessibility" ? "device" : `tool:${name}`)]
+    : undefined;
+}
+
+export function deviceToolMutations(
+  name: string,
+  args: Record<string, unknown>,
+  platform?: Platform,
+): ToolMutation[] {
+  if (mutationCallIsRead(name, args, platform) || mutationCallNotJournaled(name, args)) {
+    return [];
+  }
+  const named = namedToolMutations(name, args);
+  if (named !== undefined) {
+    return named;
   }
   const family = familyToolMutations(name, args, platform);
   if (family !== undefined) {

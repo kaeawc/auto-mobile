@@ -236,6 +236,7 @@ async function performMutation(
               scope.deviceId,
               target.id,
               args.replaceOthers,
+              device.platform === "android" ? "android" : "ios",
             );
           }
         },

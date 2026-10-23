@@ -50,6 +50,32 @@ steps:
     }
   });
 
+  it("accepts the deviceCondition fixtures the tool offers, and rejects values it does not", () => {
+    const plan = (condition: string) => `
+name: fixture-plan
+steps:
+  - tool: setDeviceState
+    params:
+      deviceCondition:
+${condition}
+`;
+    const accepted = validator.validateYaml(
+      plan(
+        "        rootState: rooted-detectable\n        faults:\n          battery: low\n          thermal: critical",
+      ),
+    );
+    expect(accepted.errors ?? []).toEqual([]);
+    expect(accepted.valid).toBe(true);
+
+    for (const rejected of [
+      "        rootState: god-mode",
+      "        faults:\n          battery: explode",
+      "        faults:\n          gravity: low",
+    ]) {
+      expect(validator.validateYaml(plan(rejected)).valid).toBe(false);
+    }
+  });
+
   it("reports the window error for an unquoted out-of-window clock instant", () => {
     const result = validator.validateYaml(`
 name: clock-plan

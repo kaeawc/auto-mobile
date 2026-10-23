@@ -31201,10 +31201,15 @@
                   "type": "string",
                   "enum": ["low", "full", "unset"],
                   "description": "Use up free space on /data with a ballast file (`fallocate`): 'low' leaves about 128 MiB, 'full' about 8 MiB. Reset deletes the ballast. Or unset."
+                },
+                "dontKeepActivities": {
+                  "type": "string",
+                  "enum": ["on", "unset"],
+                  "description": "Developer options 'Don't keep activities' via `settings global always_finish_activities`, restored to its prior value, or unset. Applies to activities left after the change."
                 }
               },
               "additionalProperties": false,
-              "description": "Power-domain fault injectors (Android only, behind the feature flag)."
+              "description": "Power and lifecycle fault injectors (Android only, behind the feature flag)."
             },
             "expiresInSeconds": {
               "type": "integer",

@@ -26,13 +26,14 @@ type Host = SessionPowerHost<TestSession>;
 /** A session host whose one session can be ended mid-start; trackSessionSetup just runs the setup. */
 function fakeHost(session: TestSession) {
   let live = true;
+  const pending: Array<{ deviceId: string; cleanup: Promise<unknown> }> = [];
   const host: Host = {
     getSession: () => (live ? session : null),
     isAdmittedForAutomation: () => live,
     trackSessionSetup: async (_session, setup) => setup(),
-    registerPendingDeviceCleanup: () => {},
+    registerPendingDeviceCleanup: (deviceId, cleanup) => void pending.push({ deviceId, cleanup }),
   };
-  return { host, end: () => void (live = false) };
+  return { host, pending, end: () => void (live = false) };
 }
 
 function setup(sessionHost: () => Host | undefined = () => undefined) {
@@ -128,6 +129,43 @@ describe("captureTrace start under a session (#14113 review)", () => {
     expect(registry.traceOnDevice(android.deviceId)).toBeUndefined();
     expect(device.runningPids.size).toBe(0);
     expect(device.deviceFiles.size).toBe(0);
+  });
+
+  test("a late start's teardown is registered as pending device cleanup while the recorder is still stopping (#14113 review)", async () => {
+    const { host, pending, end } = fakeHost(session);
+    const { trace, device, registry } = setup(() => host);
+    let openGate!: () => void;
+    const gate = new Promise<void>((resolve) => (openGate = resolve));
+    const original = device.execute.bind(device);
+    device.execute = async (args, options) => {
+      const command = args.join(" ");
+      if (command.includes("kill -TERM")) {
+        await gate;
+      }
+      const result = await original(args, options);
+      if (command.includes("perfetto --background")) {
+        end();
+      }
+      return result;
+    };
+
+    const started = trace(android, { action: "start", sessionUuid: "s-1" });
+    const outcome = started.then(
+      () => "resolved",
+      (error: Error) => error.message,
+    );
+    await Bun.sleep(0);
+    await Bun.sleep(0);
+
+    // The recorder is still alive, the registry is already empty, and device acquisition is held.
+    expect(device.runningPids.size).toBe(1);
+    expect(registry.traceOnDevice(android.deviceId)).toBeUndefined();
+    expect(pending.map((entry) => entry.deviceId)).toEqual([android.deviceId]);
+
+    openGate();
+    expect(await outcome).toContain("session ended while the trace was starting");
+    await pending[0].cleanup;
+    expect(device.runningPids.size).toBe(0);
   });
 
   test("a live session's start is registered to it", async () => {

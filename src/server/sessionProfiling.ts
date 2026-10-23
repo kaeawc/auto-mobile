@@ -51,7 +51,14 @@ export async function runTrackedTraceStart<T extends { traceId: string }>(
       `[profiling] Session ${session.sessionId} ended while starting trace ${result.traceId} on ${deviceId}; stopping it`,
     );
     const orphaned = deps.registry.takeOwnedBy(deviceId, session.sessionId);
-    await cleanupSessionProfiling(deviceId, orphaned, deps.adb, deps.timer);
+    const teardown = cleanupSessionProfiling(deviceId, orphaned, deps.adb, deps.timer);
+    // Release may already have finished: the next session must not acquire the device while the
+    // old recorder is still being stopped (the power restore wrapper's pattern).
+    host.registerPendingDeviceCleanup(deviceId, teardown, {
+      name: "stop released session's trace recorder and remove its file",
+      leftover: "a perfetto recorder the released session started",
+    });
+    await teardown;
     throw new ActionableError(
       "The session ended while the trace was starting; the recorder was stopped and its file removed.",
     );

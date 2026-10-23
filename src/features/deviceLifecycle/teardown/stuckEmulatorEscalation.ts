@@ -32,6 +32,9 @@ export const STUCK_EMULATOR_ESCALATION_RESERVE_MS =
   EMULATOR_STOP_RESULT_MARGIN_MS +
   FINAL_VERIFICATION_MS;
 
+/** Wire `code` of {@link EmulatorTeardownEscalationError}; the session broker keys quarantine on it. */
+export const EMULATOR_TEARDOWN_FAILED_CODE = "emulator_teardown_failed";
+
 export type EmulatorTeardownFailureReason =
   | "still-running"
   | "still-listed"
@@ -45,7 +48,7 @@ export type EmulatorTeardownFailureReason =
  * ({@link EmulatorStopDispatchedError}); the failure is terminal, not a retry of the same soft kill.
  */
 export class EmulatorTeardownEscalationError extends EmulatorStopDispatchedError {
-  readonly code = "emulator_teardown_failed";
+  readonly code = EMULATOR_TEARDOWN_FAILED_CODE;
   readonly retryable = false;
 
   constructor(

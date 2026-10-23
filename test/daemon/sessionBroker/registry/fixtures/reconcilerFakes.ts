@@ -158,6 +158,8 @@ export class FakeProvisioner implements BindingDeviceProvisioner {
 export class FakeDeleter implements BindingDeviceDeleter {
   readonly calls: BindingDeletionTarget[] = [];
   failWith: string | undefined;
+  /** Fail as the workflow does once its process-level escalation ran and the device stayed (#14018). */
+  failWithEscalationExhausted: string | undefined;
   /** Crash injection around the destructive step. */
   beforeDelete: ((target: BindingDeletionTarget) => Promise<void>) | undefined;
   afterDelete: ((target: BindingDeletionTarget) => Promise<void>) | undefined;
@@ -165,6 +167,13 @@ export class FakeDeleter implements BindingDeviceDeleter {
   async deleteAndVerifyAbsence(target: BindingDeletionTarget): Promise<BindingDeletionResult> {
     this.calls.push(target);
     await this.beforeDelete?.(target);
+    if (this.failWithEscalationExhausted) {
+      return {
+        kind: "failed",
+        message: this.failWithEscalationExhausted,
+        escalationExhausted: true,
+      };
+    }
     if (this.failWith) {
       return { kind: "failed", message: this.failWith };
     }

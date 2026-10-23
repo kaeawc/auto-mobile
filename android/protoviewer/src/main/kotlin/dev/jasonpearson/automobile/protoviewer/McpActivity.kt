@@ -32,16 +32,35 @@ class McpActivity : ComponentActivity() {
       return
     }
     lifecycleScope.launch {
-      val open =
-        try {
-          withContext(services.io) { inbox.handle(command) }
-        } catch (error: java.io.IOException) {
-          // No result could be written; the host reports its own timeout.
-          logger.log(Level.WARNING, "MCP command failed", error)
-          null
-        }
-      open?.let { ViewerLaunch.open(this@McpActivity, it) }
+      execute(services, inbox, command)
       finish()
+    }
+  }
+
+  // Any failure here must end in finish(), not a crash: open viewer documents share this process.
+  @Suppress("TooGenericExceptionCaught")
+  private suspend fun execute(services: ProtoViewerServices, inbox: McpInbox, command: McpCommand) {
+    val entry =
+      try {
+        withContext(services.io) { inbox.handle(command) }
+      } catch (error: Exception) {
+        // No result could be written; the host reports its own timeout.
+        logger.log(Level.WARNING, "MCP command failed", error)
+        return
+      }
+    if (entry == null || command !is McpCommand.Open) return
+    // "opened" is reported only once the viewer has actually been launched.
+    try {
+      ViewerLaunch.open(this, entry.libraryId)
+      withContext(services.io) { inbox.reportOpened(command, entry) }
+    } catch (error: Exception) {
+      logger.log(Level.WARNING, "MCP open failed", error)
+      try {
+        withContext(services.io) { inbox.reportOpenFailed(command) }
+      } catch (reportError: Exception) {
+        // Nothing more to tell the host; it reports its own timeout.
+        logger.log(Level.WARNING, "Cannot report the MCP open failure", reportError)
+      }
     }
   }
 

@@ -10,8 +10,18 @@ import { exportPrototypeBundle, type BundleExportAsset } from "../prototypeBundl
 import type { PrototypeSpec } from "../prototypeSpec";
 import { logger } from "../../../utils/logger";
 import { errorMessage } from "../../../utils/describeUnknownError";
-import { PROTOVIEWER_DEFAULT_TIMEOUT_MS, type ProtoViewerDevice } from "./AndroidProtoViewer";
-import { PROTOVIEWER_LIBRARY_ID, type ProtoViewerResult } from "./protoViewerContract";
+import {
+  PROTOVIEWER_DEFAULT_TIMEOUT_MS,
+  ProtoViewerEntryPointMissingError,
+  type ProtoViewerDevice,
+} from "./AndroidProtoViewer";
+import {
+  PROTOVIEWER_CAPABILITY_PATH,
+  PROTOVIEWER_LIBRARY_ID,
+  protoViewerDefaultLabel,
+  protoViewerLabelProblem,
+  type ProtoViewerResult,
+} from "./protoViewerContract";
 
 export const PROTOVIEWER_IMPORTED_WARNING =
   "ProtoViewer treats this prototype as imported: its requests stay off until someone turns on network for imported prototypes in ProtoViewer's settings, and it is not attached to this host (no awaitEvent, patch or inspect).";
@@ -76,29 +86,81 @@ export async function routeToProtoViewer(
   if (args.spec === undefined) {
     return undefined;
   }
-  if (hasElementAnchors(args.spec)) {
+  const userId = await probeInstalledUser(deps, signal);
+  return userId === undefined
+    ? undefined
+    : await saveInProtoViewer(args, args.spec, userId, deps, signal);
+}
+
+/** A probe that cannot answer keeps the CtrlProxy path: it must never fail a save by itself. */
+async function probeInstalledUser(
+  deps: ProtoViewerRouteDependencies,
+  signal?: AbortSignal,
+): Promise<number | undefined> {
+  try {
+    return await deps.device.installedUser(signal);
+  } catch (error) {
+    if (signal?.aborted) {
+      throw error;
+    }
+    logger.warn(
+      `[protoviewer] could not check for ProtoViewer, keeping the CtrlProxy path: ${errorMessage(error)}`,
+      error,
+    );
+    return undefined;
+  }
+}
+
+async function saveInProtoViewer(
+  args: ProtoViewerInput,
+  spec: PrototypeSpec,
+  userId: number,
+  deps: ProtoViewerRouteDependencies,
+  signal?: AbortSignal,
+): Promise<ProtoViewerOutput | undefined> {
+  if (hasElementAnchors(spec)) {
     return failure(
       "invalid_spec",
       'Element anchors are resolved against the live screen and are not supported in a saved prototype; use {type:"bounds",bounds:{x,y,width,height}} anchors (dp) instead. Nothing was saved.',
     );
   }
-  const userId = await deps.device.installedUser(signal);
-  if (userId === undefined) {
-    return undefined;
+  const label = libraryLabel(args.label, spec.id);
+  if ("failure" in label) {
+    return label.failure;
   }
-  const bundle = await canonicalBundle(args, args.spec, deps);
+  const bundle = await canonicalBundle(args, spec, deps);
   if ("failure" in bundle) {
     return bundle.failure;
   }
-  return await deviceCall(() =>
-    deps.device.importBundle(
-      userId,
-      bundle.bytes,
-      args.label,
-      args.timeoutMs ?? PROTOVIEWER_DEFAULT_TIMEOUT_MS,
-      signal,
-    ),
+  return await deviceCall(
+    () =>
+      deps.device.importBundle(
+        userId,
+        bundle.bytes,
+        label.label,
+        args.timeoutMs ?? PROTOVIEWER_DEFAULT_TIMEOUT_MS,
+        signal,
+      ),
+    (error) => {
+      // An older ProtoViewer without the MCP entry point: keep saving through CtrlProxy.
+      logger.warn(`[protoviewer] ${error.message} Keeping the CtrlProxy path.`);
+      return undefined;
+    },
   );
+}
+
+/** The caller's label, checked with the app's rule, or one derived from the spec id. */
+function libraryLabel(
+  label: string | undefined,
+  specId: string,
+): { label: string | undefined } | { failure: ProtoViewerOutput } {
+  if (label === undefined) {
+    return { label: protoViewerDefaultLabel(specId) };
+  }
+  const problem = protoViewerLabelProblem(label);
+  return problem === undefined
+    ? { label: label.trim() }
+    : { failure: failure("invalid_label", `${problem} Nothing was saved.`) };
 }
 
 async function openInProtoViewer(
@@ -112,7 +174,13 @@ async function openInProtoViewer(
       "open takes a ProtoViewer library id (the viewer.libraryId a save returned).",
     );
   }
-  const userId = await deps.device.installedUser(signal);
+  const userId = await deps.device.installedUser(signal).catch((error: unknown) => {
+    if (signal?.aborted) {
+      throw error;
+    }
+    logger.warn(`[protoviewer] could not check for ProtoViewer: ${errorMessage(error)}`, error);
+    return undefined;
+  });
   if (userId === undefined) {
     return failure(
       "unsupported_capability",
@@ -120,9 +188,12 @@ async function openInProtoViewer(
     );
   }
   const libraryId = args.id;
-  return await deviceCall(() =>
-    deps.device.open(userId, libraryId, args.timeoutMs ?? PROTOVIEWER_DEFAULT_TIMEOUT_MS, signal),
+  const opened = await deviceCall(
+    () =>
+      deps.device.open(userId, libraryId, args.timeoutMs ?? PROTOVIEWER_DEFAULT_TIMEOUT_MS, signal),
+    (error) => failure("unsupported_capability", error.message),
   );
+  return opened ?? failure("unsupported_capability", "ProtoViewer could not open the entry.");
 }
 
 async function canonicalBundle(
@@ -165,14 +236,24 @@ async function canonicalBundle(
   return { bytes: exported.bytes };
 }
 
-async function deviceCall(call: () => Promise<ProtoViewerResult>): Promise<ProtoViewerOutput> {
+async function deviceCall(
+  call: () => Promise<ProtoViewerResult>,
+  onMissingEntryPoint: (error: ProtoViewerEntryPointMissingError) => ProtoViewerOutput | undefined,
+): Promise<ProtoViewerOutput | undefined> {
   let result: ProtoViewerResult;
   try {
     result = await call();
   } catch (error) {
+    if (error instanceof ProtoViewerEntryPointMissingError) {
+      return onMissingEntryPoint(error);
+    }
     logger.warn(`[protoviewer] request failed: ${errorMessage(error)}`, error);
     return { success: false, error: `ProtoViewer request failed: ${errorMessage(error)}` };
   }
+  return outputFor(result);
+}
+
+function outputFor(result: ProtoViewerResult): ProtoViewerOutput {
   switch (result.status) {
     case "imported":
     case "opened":
@@ -182,16 +263,26 @@ async function deviceCall(call: () => Promise<ProtoViewerResult>): Promise<Proto
         warning: PROTOVIEWER_IMPORTED_WARNING,
       };
     case "rejected":
-      return failure(
-        "invalid_spec",
-        `ProtoViewer refused the prototype at ${result.path}: ${result.reason}`,
-      );
+      return rejectionOutput(result.path, result.reason);
     case "not_found":
       return failure(
         "not_found",
         "ProtoViewer has no library entry with that id; save the prototype again.",
       );
   }
+}
+
+function rejectionOutput(path: string, reason: string): ProtoViewerOutput {
+  if (path === PROTOVIEWER_CAPABILITY_PATH) {
+    return failure(
+      "unsupported_capability",
+      `The installed ProtoViewer cannot show this prototype (${reason}). Install a newer ProtoViewer.`,
+    );
+  }
+  return failure(
+    path === "label" ? "invalid_label" : "invalid_spec",
+    `ProtoViewer refused the prototype at ${path}: ${reason}`,
+  );
 }
 
 function failure(errorCode: ProtoViewerErrorCode, error: string): ProtoViewerOutput {

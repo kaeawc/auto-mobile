@@ -17,6 +17,7 @@ import java.util.logging.Level
 import java.util.logging.Logger
 
 const val PROTOTYPE_BUNDLE_MIME = "application/vnd.automobile.prototype+zip"
+const val UNSUPPORTED_PROTOTYPE_REASON = "This prototype needs a newer ProtoViewer"
 
 enum class ImportAction {
   View,
@@ -128,7 +129,7 @@ class ValidatedLibraryImporter(
       return LibraryImportResult.Rejected("spec.json:${policy.error.path}", policy.error.message)
     val supported = PrototypeSpecValidator.validate(bundle.spec, capabilities, library = true)
     if (supported is PrototypeSpecValidation.Failure || !capabilities.containsAll(bundle.requires))
-      return LibraryImportResult.Rejected("spec.json", "This prototype needs a newer ProtoViewer")
+      return LibraryImportResult.Rejected("spec.json", UNSUPPORTED_PROTOTYPE_REASON)
     return assets.invalidPath(bundle)?.let {
       LibraryImportResult.Rejected(it, "Invalid image dimensions")
     }

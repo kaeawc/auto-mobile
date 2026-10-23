@@ -1,4 +1,5 @@
 import { z as specZ, type ZodTypeAny } from "zod";
+import { PROTOVIEWER_DEFAULT_TIMEOUT_MS } from "../../features/prototype/protoViewer/AndroidProtoViewer";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { z } from "zod/v4";
 import { deleteInternalToolParams } from "../../daemon/constants";
@@ -332,7 +333,9 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .min(1)
         .max(120)
         .optional()
-        .describe("save only: label, defaults to spec.id"),
+        .describe(
+          "save only: label, defaults to spec.id; ProtoViewer takes one line without control or direction-override characters",
+        ),
       icon: z
         .string()
         .min(1)
@@ -381,7 +384,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .positive()
         .optional()
         .describe(
-          `Device request timeout; awaitEvent defaults to ${DEFAULT_PROTOTYPE_EVENT_TIMEOUT_MS} ms, maximum ${MAX_PROTOTYPE_EVENT_TIMEOUT_MS} ms; timeout is a successful empty result.`,
+          `Device request timeout; awaitEvent defaults to ${DEFAULT_PROTOTYPE_EVENT_TIMEOUT_MS} ms, maximum ${MAX_PROTOTYPE_EVENT_TIMEOUT_MS} ms; timeout is a successful empty result. save and open through ProtoViewer wait up to ${PROTOVIEWER_DEFAULT_TIMEOUT_MS} ms by default, maximum ${MAX_PROTOTYPE_EVENT_TIMEOUT_MS} ms.`,
         ),
     })
     .strict(),
@@ -440,6 +443,17 @@ export const prototypeSchema = addDeviceTargetingToSchema(
   validatePrototypeStorageInput(value, ctx);
   if (value.action === "awaitEvent") {
     validateAwaitEventInput(value, ctx);
+  }
+  if (
+    (value.action === "save" || value.action === "open") &&
+    value.timeoutMs !== undefined &&
+    value.timeoutMs > MAX_PROTOTYPE_EVENT_TIMEOUT_MS
+  ) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["timeoutMs"],
+      message: `${value.action} timeoutMs must not exceed ${MAX_PROTOTYPE_EVENT_TIMEOUT_MS}`,
+    });
   }
   if (value.action === "show" && (value.spec === undefined) === (value.specPath === undefined)) {
     ctx.addIssue({

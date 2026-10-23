@@ -145,4 +145,14 @@ describe("prototype save and open through ProtoViewer", () => {
     );
     expect(fake.calls).toEqual([]);
   });
+
+  test("save and open refuse a timeoutMs above the 60 s maximum", async () => {
+    expect((await call({ action: "open", id: LIBRARY_ID, timeoutMs: 60_001 })).error).toContain(
+      "open timeoutMs must not exceed 60000",
+    );
+    expect((await call({ action: "save", spec, timeoutMs: 60_001 })).error).toContain(
+      "save timeoutMs must not exceed 60000",
+    );
+    expect(fake.calls).toEqual([]);
+  });
 });

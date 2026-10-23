@@ -16,6 +16,7 @@ import {
   PROTOVIEWER_MCP_IMPORT_ACTION,
   PROTOVIEWER_MCP_OPEN_ACTION,
   PROTOVIEWER_PACKAGE,
+  PROTOVIEWER_REQUEST_ID,
   protoViewerInboxPath,
   protoViewerResultPath,
   protoViewerResultSchema,
@@ -52,8 +53,17 @@ export interface ProtoViewerDevice {
 
 export const PROTOVIEWER_RESULT_POLL_MS = 250;
 export const PROTOVIEWER_DEFAULT_TIMEOUT_MS = 15_000;
+/** Cleanup runs even after the caller's signal fired, but only this long. */
+const PROTOVIEWER_CLEANUP_TIMEOUT_MS = 5_000;
 
-export interface AndroidProtoViewerDependencies {
+/** The installed ProtoViewer predates the MCP entry point; a save then keeps the CtrlProxy path. */
+export class ProtoViewerEntryPointMissingError extends ActionableError {
+  constructor() {
+    super("This ProtoViewer build has no MCP entry point. Install a newer ProtoViewer and retry.");
+  }
+}
+
+interface AndroidProtoViewerDependencies {
   adb: AdbExecutor;
   timer: Timer;
   ids: IdGenerator;
@@ -94,10 +104,11 @@ export class AndroidProtoViewer implements ProtoViewerDevice {
     await this.shell(`mkdir -p ${shellQuote(dirname(inbox))}`, signal);
     const temp = await this.deps.tempFiles.write(bytes);
     try {
-      const pushed = await this.deps.adb.executeCommand(
-        `push ${shellQuote(temp.path)} ${shellQuote(inbox)}`,
-        { noRetry: true, signal },
-      );
+      // argv, not a command string: a host temp path must survive Windows argument parsing.
+      const pushed = await this.deps.adb.execute(["push", temp.path, inbox], {
+        noRetry: true,
+        signal,
+      });
       if (outputLooksLikeShellFailure(pushed.stdout, pushed.stderr ?? "")) {
         throw new ActionableError(
           `Could not copy the prototype into ProtoViewer's inbox (${inbox}): ${output(pushed)}. Open ProtoViewer once on the device and retry.`,
@@ -137,7 +148,11 @@ export class AndroidProtoViewer implements ProtoViewerDevice {
 
   private requestId(): string {
     // Request ids name files on the device, so keep only the characters the app accepts.
-    return `mcp-${this.deps.ids.next().replace(/[^A-Za-z0-9_-]/g, "")}`.slice(0, 64);
+    const request = `mcp-${this.deps.ids.next().replace(/[^A-Za-z0-9_-]/g, "")}`.slice(0, 64);
+    if (!PROTOVIEWER_REQUEST_ID.test(request)) {
+      throw new ActionableError(`Generated an unusable ProtoViewer request id: ${request}`);
+    }
+    return request;
   }
 
   private async exchange(
@@ -149,13 +164,13 @@ export class AndroidProtoViewer implements ProtoViewerDevice {
   ): Promise<ProtoViewerResult> {
     const resultPath = protoViewerResultPath(userId, request);
     try {
+      // A new task per call: without it a second launch while one runs only brings the first
+      // to the front (same component and intent filter), and that request is never handled.
       const started = await this.shell(
-        `am start -W --user ${userId} -n ${PROTOVIEWER_MCP_COMPONENT} -a ${action} ${extras.join(" ")}`,
+        `am start -W --activity-multiple-task --user ${userId} -n ${PROTOVIEWER_MCP_COMPONENT} -a ${action} ${extras.join(" ")}`,
         options.signal,
       );
-      if (startFailed(started)) {
-        throw new ActionableError(startFailureMessage(started));
-      }
+      throwIfStartFailed(started);
       const result = await this.awaitResult(resultPath, options.timeoutMs, options.signal);
       if (result.request !== request) {
         throw new ActionableError(
@@ -164,7 +179,7 @@ export class AndroidProtoViewer implements ProtoViewerDevice {
       }
       return result;
     } finally {
-      await this.removeQuietly([resultPath, ...options.cleanup], options.signal);
+      await this.removeQuietly([resultPath, ...options.cleanup]);
     }
   }
 
@@ -173,8 +188,9 @@ export class AndroidProtoViewer implements ProtoViewerDevice {
     timeoutMs: number,
     signal?: AbortSignal,
   ): Promise<ProtoViewerResult> {
-    const attempts = Math.max(1, Math.ceil(timeoutMs / PROTOVIEWER_RESULT_POLL_MS));
-    for (let attempt = 0; attempt < attempts; attempt++) {
+    // A deadline, not an attempt count: each read is an adb round trip of its own.
+    const deadline = this.deps.timer.now() + timeoutMs;
+    do {
       signal?.throwIfAborted();
       // The app renames a finished file into place, so a non-empty read is a whole result.
       const read = await this.shell(`cat ${shellQuote(path)} 2>/dev/null`, signal);
@@ -183,25 +199,33 @@ export class AndroidProtoViewer implements ProtoViewerDevice {
         return parseResult(text);
       }
       await this.deps.timer.sleep(PROTOVIEWER_RESULT_POLL_MS);
-    }
+    } while (this.deps.timer.now() < deadline);
     throw new ActionableError(
-      `ProtoViewer did not answer within ${timeoutMs} ms. Unlock the device, open ProtoViewer once, and retry.`,
+      `ProtoViewer did not answer within ${timeoutMs} ms. It may still have saved the prototype: check ProtoViewer before retrying, and unlock the device if it is locked.`,
     );
   }
 
-  private async removeQuietly(paths: readonly string[], signal?: AbortSignal): Promise<void> {
+  /** Runs without the caller's signal, so a cancelled call still removes its own files. */
+  private async removeQuietly(paths: readonly string[]): Promise<void> {
     try {
-      await this.shell(`rm -f ${paths.map(shellQuote).join(" ")}`, signal);
+      await this.shell(`rm -f ${paths.map(shellQuote).join(" ")}`, undefined, {
+        timeoutMs: PROTOVIEWER_CLEANUP_TIMEOUT_MS,
+      });
     } catch (error) {
-      // Leftover inbox or result files are app-scoped and replaced or ignored on the next call.
-      logger.debug(`[protoviewer] cleanup failed: ${errorMessage(error)}`);
+      // Best effort: a leftover file only takes app-scoped space, and uninstalling removes it.
+      logger.warn(`[protoviewer] cleanup of ${paths.join(", ")} failed: ${errorMessage(error)}`);
     }
   }
 
-  private async shell(command: string, signal?: AbortSignal): Promise<string> {
+  private async shell(
+    command: string,
+    signal?: AbortSignal,
+    options: { timeoutMs?: number } = {},
+  ): Promise<string> {
     const result = await this.deps.adb.executeCommand(`shell ${command}`, {
       noRetry: true,
       signal,
+      ...options,
     });
     return `${result.stdout}${result.stderr ? `\n${result.stderr}` : ""}`;
   }
@@ -215,15 +239,14 @@ function output(result: { stdout: string; stderr?: string }): string {
   return `${result.stdout}\n${result.stderr ?? ""}`.trim();
 }
 
-function startFailed(output: string): boolean {
-  return /(^|\n)\s*Error( type \d+)?:|Exception|Permission Denial/.test(output);
-}
-
-function startFailureMessage(output: string): string {
+function throwIfStartFailed(output: string): void {
   if (/does not exist|Unable to resolve Intent/.test(output)) {
-    return "This ProtoViewer build has no MCP entry point. Install a newer ProtoViewer and retry.";
+    throw new ProtoViewerEntryPointMissingError();
   }
-  return `Could not start ProtoViewer: ${output.trim()}`;
+  // "Activity not started" means the request was dropped: nothing would ever answer it.
+  if (/(^|\n)\s*Error( type \d+)?:|Exception|Permission Denial|Activity not started/.test(output)) {
+    throw new ActionableError(`Could not start ProtoViewer: ${output.trim()}`);
+  }
 }
 
 function parseResult(text: string): ProtoViewerResult {

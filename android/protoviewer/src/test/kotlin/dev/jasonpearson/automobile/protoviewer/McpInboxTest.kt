@@ -111,7 +111,13 @@ class McpInboxTest {
   @Test
   fun anUnusableLabelIsRejectedBeforeImporting() {
     for ((request, label) in
-      listOf("mcp-6" to "   ", "mcp-7" to "x".repeat(121), "mcp-8" to "two\nlines")) {
+      listOf(
+        "mcp-6" to "   ",
+        "mcp-7" to "x".repeat(121),
+        "mcp-8" to "two\nlines",
+        "mcp-16" to "evil\u202Eevil",
+        "mcp-17" to "a\u2028b",
+      )) {
       bundle(request)
       inbox.handle(McpCommand.Import(request, label))
       assertEquals("label", result(request).text("path"))
@@ -120,15 +126,25 @@ class McpInboxTest {
   }
 
   @Test
-  fun openReportsAKnownEntryAndReturnsItForTheViewer() {
+  fun openReturnsAKnownEntryAndReportsItOnlyAfterTheLaunch() {
     repository.prototypes[FIRST] = Fixtures.prototype(FIRST)
+    val command = McpCommand.Open("mcp-9", FIRST)
 
-    assertEquals(FIRST, inbox.handle(McpCommand.Open("mcp-9", FIRST)))
+    val entry = inbox.handle(command)
 
+    assertEquals(FIRST, entry?.libraryId)
+    assertFalse("nothing is reported before the launch", File(root, "results/mcp-9.json").exists())
+    inbox.reportOpened(command, entry!!)
     val written = result("mcp-9")
     assertEquals("opened", written.text("status"))
     assertEquals(FIRST, written.text("libraryId"))
     assertEquals("Example $FIRST", written.text("label"))
+  }
+
+  @Test
+  fun aFailedLaunchIsReportedAsRejected() {
+    inbox.reportOpenFailed(McpCommand.Open("mcp-12", FIRST))
+    assertEquals("viewer", result("mcp-12").text("path"))
   }
 
   @Test
@@ -140,7 +156,29 @@ class McpInboxTest {
   }
 
   @Test
-  fun parseAcceptsOnlyTheTwoActionsAndSafeRequestIds() {
+  fun anUnreadableLibraryIsNotReportedAsNotFound() {
+    repository.error = LibraryError.Storage
+    assertNull(inbox.handle(McpCommand.Open("mcp-13", FIRST)))
+    assertEquals("library", result("mcp-13").text("path"))
+  }
+
+  @Test
+  fun aSpecNeedingANewerProtoViewerIsReportedAsACapability() {
+    bundle("mcp-14")
+    importResult = LibraryImportResult.Rejected("spec.json", UNSUPPORTED_PROTOTYPE_REASON)
+    inbox.handle(McpCommand.Import("mcp-14", null))
+    assertEquals("capability", result("mcp-14").text("path"))
+  }
+
+  @Test
+  fun anActionThisBuildCannotRunIsAnsweredInsteadOfLeftWaiting() {
+    val command = McpCommand.parse("${MCP_IMPORT_ACTION}_V2", "mcp-15", null, null)
+    assertNull(inbox.handle(command!!))
+    assertEquals("action", result("mcp-15").text("path"))
+  }
+
+  @Test
+  fun parseNeedsASafeRequestIdAndAnswersEveryOtherLaunch() {
     assertEquals(
       McpCommand.Import("mcp-1", "L"),
       McpCommand.parse(MCP_IMPORT_ACTION, "mcp-1", "L", null),
@@ -149,9 +187,11 @@ class McpInboxTest {
       McpCommand.Open("mcp-1", FIRST),
       McpCommand.parse(MCP_OPEN_ACTION, "mcp-1", null, FIRST),
     )
-    assertNull(McpCommand.parse("android.intent.action.VIEW", "mcp-1", null, null))
+    assertTrue(
+      McpCommand.parse("android.intent.action.VIEW", "mcp-1", null, null) is McpCommand.Unsupported,
+    )
+    assertTrue(McpCommand.parse(MCP_OPEN_ACTION, "mcp-1", null, null) is McpCommand.Unsupported)
     assertNull(McpCommand.parse(MCP_IMPORT_ACTION, "../mcp-1", null, null))
     assertNull(McpCommand.parse(MCP_IMPORT_ACTION, null, null, null))
-    assertNull(McpCommand.parse(MCP_OPEN_ACTION, "mcp-1", null, null))
   }
 }

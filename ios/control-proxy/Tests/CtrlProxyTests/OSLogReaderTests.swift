@@ -97,6 +97,32 @@ final class OSLogReaderTests: XCTestCase {
         XCTAssertEqual(harness.scheduler.pendingCount, 1)
     }
 
+    /// Captured on iOS 27.0 (#15030): each poll and HTTP drain logs its own transport lines.
+    /// They must neither reset the backoff nor be published, yet the cursor must pass them.
+    func testSelfGeneratedNoiseDoesNotResetBackoffOrPublish() throws {
+        let harness = Harness()
+        harness.reader.start()
+        harness.wake()
+        harness.source.records = [
+            OSLogRecord(
+                date: Date(timeIntervalSince1970: 1001), level: 2, subsystem: "com.apple.xpc",
+                category: "connection", composedMessage: "[0x1] activating connection: name=com.apple.OSLogService"
+            ),
+            OSLogRecord(
+                date: Date(timeIntervalSince1970: 1002), level: 2, subsystem: "com.apple.network",
+                category: "connection",
+                composedMessage: "nw_connection_report_state_with_handler_on_nw_queue [C4] reporting state ready"
+            ),
+        ]
+        harness.advance(1000)
+        harness.source.records = []
+        harness.advance(2000)
+        XCTAssertEqual(harness.scheduler.delays, [1000, 2000, 4000])
+        XCTAssertTrue(harness.reader.drain().isEmpty)
+        harness.flush()
+        XCTAssertEqual(harness.source.queries.last, Date(timeIntervalSince1970: 1002))
+    }
+
     func testResumeFromLastSeen() throws {
         let harness = Harness()
         harness.source.records = [record(1001, "first"), record(1002, "second")]

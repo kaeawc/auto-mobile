@@ -76,10 +76,11 @@ object AutoMobileSocketPaths {
 
   /**
    * Effective daemon state-file path, ported from `resolveDaemonStatePath` in
-   * `src/daemon/wire/constants.ts`: an explicit `AUTOMOBILE_DAEMON_*_PATH` override (resolved against
-   * the daemon launch directory) first, then `/tmp/auto-mobile-daemon-<uid><suffix>.<ext>` where
-   * the suffix isolates an `AUTOMOBILE_AUX_SOCKET_DIR` daemon. [userId] is lazy so an override
-   * never pays for the uid lookup. Tested against `test/fixtures/daemon-isolation-paths.json`.
+   * `src/daemon/wire/constants.ts`: an explicit `AUTOMOBILE_DAEMON_*_PATH` override (resolved
+   * against the daemon launch directory) first, then `/tmp/auto-mobile-daemon-<uid><suffix>.<ext>`
+   * where the suffix isolates an `AUTOMOBILE_AUX_SOCKET_DIR` daemon. [userId] is lazy so an
+   * override never pays for the uid lookup. Tested against
+   * `test/fixtures/daemon-isolation-paths.json`.
    */
   internal fun daemonStatePath(
     file: DaemonStateFile,

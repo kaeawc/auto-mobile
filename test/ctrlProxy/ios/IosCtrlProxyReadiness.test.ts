@@ -1,3 +1,4 @@
+import { IosRunnerLaunchFailures } from "../../../src/ctrlProxy/ios/IosRunnerLaunchFailure";
 import { FakeRunnerLaunchProgressProbe } from "../../fakes/FakeRunnerLaunchProgressProbe";
 import { describe, expect, mock, test, spyOn } from "bun:test";
 import { IosCtrlProxyReadiness } from "../../../src/ctrlProxy/ios/IosCtrlProxyReadiness";
@@ -17,6 +18,7 @@ function createHarness(isSimulator = true) {
   };
   const state: ConstructorParameters<typeof IosCtrlProxyReadiness>[0] = {
     timer,
+    runnerLaunchFailures: new IosRunnerLaunchFailures(),
     runnerLaunchProgressProbe: new FakeRunnerLaunchProgressProbe(),
     tunnelClient,
     device: { deviceId: "test-ios-device", platform: "ios", name: "Test iPhone" },
@@ -43,6 +45,7 @@ function createHarness(isSimulator = true) {
   };
   const host: ConstructorParameters<typeof IosCtrlProxyReadiness>[1] = {
     isSimulator: () => isSimulator,
+    quarantineServicePort: mock((_port: number) => {}),
     checkHealthEndpointOnPortForDevice: mock(async () => false),
     adoptServicePort: mock((port: number) => {
       state.servicePort = port;
@@ -228,6 +231,32 @@ describe("progress-aware runner windows", () => {
     ).toBe(true);
     expect(h.terminated).toHaveBeenCalledTimes(1);
     expect(h.timer.now()).toBe(300010);
+  });
+
+  test("retirement reports the actual extended 90s launch window", async () => {
+    const h = progressHarness([0, 200, 200], 120000);
+    const readiness = new IosCtrlProxyReadiness(h.state, h.host, {
+      progressProbe: { sample: h.sample },
+      extensionBackoff: sequenceBackoff([30000]),
+    });
+    h.state.steps.waitForHealthEndpoint = (...args) => readiness.waitForHealthEndpoint(...args);
+    h.host.checkHealthEndpoint = mock(async () => h.state.xcTestProcessId === 124);
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      await settleByFakeEvents(
+        h.timer,
+        readiness.waitForHealthRestartingUnresponsiveRunner(h.start, h.perf, 500, 30000, true),
+        { description: "extended retirement" },
+      );
+      expect(
+        warn.mock.calls.some(([message]) => String(message).includes("within 90s of launch")),
+      ).toBe(true);
+      expect(warn.mock.calls.some(([message]) => String(message).includes("within 60s"))).toBe(
+        false,
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   test("caller budget bounds progress extensions", async () => {

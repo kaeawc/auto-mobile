@@ -14,6 +14,7 @@ import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { NetworkState } from "../utils/NetworkState";
+import { isIosUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
 
 /** Pushes a device's current host-side network state (rules + simulation) to it. */
 export interface NetworkDeviceStatePusher {
@@ -27,8 +28,13 @@ export interface NetworkDeviceStatePusher {
  */
 export const defaultNetworkDeviceStatePusher: NetworkDeviceStatePusher = {
   async push(deviceId: string, options?: SdkCapabilityQueryOptions): Promise<void> {
-    const android = AndroidCtrlProxyClient.getExistingInstance(deviceId);
+    // The platform that owns the id decides: a stray, never-connected Android client keyed by
+    // an iOS UDID must not veto (or stand in for) the iOS push (#15179). Any other id keeps
+    // the Android push first, so a stray iOS client can never hide it.
     const ios = IOSCtrlProxyClient.getExistingInstance(deviceId);
+    const android = isIosUdid(deviceId)
+      ? null
+      : AndroidCtrlProxyClient.getExistingInstance(deviceId);
     if (!android && !ios) {
       throw new ActionableError(`No live CtrlProxy client to clear network state on ${deviceId}`);
     }

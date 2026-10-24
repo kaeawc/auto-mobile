@@ -18,13 +18,18 @@ function nativeEditableWasCleared(before?: FocusedTextField, after?: FocusedText
   );
 }
 
+/** The keyboard-owning native editable reads blank, so the clear's postcondition holds. */
+function keyboardNativeEditableIsBlank(after?: FocusedTextField): boolean {
+  return after?.keyboardNativeEditableValue === "";
+}
+
 function classifyClearField(
   field: FocusedTextField | undefined,
   lastValue?: string,
   attempts = 1,
   before?: FocusedTextField,
 ): TextActionResult | string {
-  if (nativeEditableWasCleared(before, field)) {
+  if (nativeEditableWasCleared(before, field) || keyboardNativeEditableIsBlank(field)) {
     return { success: true };
   }
   if (field?.secure) {
@@ -65,6 +70,17 @@ function classifyUnchangedClearValue(
     success: true,
     warning: `The field still holds ${JSON.stringify(value)} after the clear was acknowledged and retried; it may be a mask or permanent prefix at its cleared content, or the app may have refused the clear.`,
   };
+}
+
+/** Lengths only: a failed clear must leave a trace without logging field contents. */
+function describeClearRead(field: FocusedTextField | undefined): string {
+  if (field === undefined) {
+    return "unreadable";
+  }
+  const lengths = Object.entries(field.nativeEditableValues ?? {}).map(
+    ([id, value]) => `${id}:${value.length}`,
+  );
+  return `focusedLength=${field.value?.length ?? "none"} native={${lengths.join(",")}} keyboardEditableLength=${field.keyboardNativeEditableValue?.length ?? "none"}`;
 }
 
 /** Preserve the backoff admission check and re-check the live deadline after sleeping. */
@@ -127,7 +143,8 @@ export async function clearIosFieldWithVerification({
   if (before?.secure) {
     return { success: true, warning: "iOS clear check skipped for a secure field." };
   }
-  let remaining = classifyClearField(await read(), undefined, 1, before);
+  let lastRead = await read();
+  let remaining = classifyClearField(lastRead, undefined, 1, before);
   let attempts = 1;
   while (typeof remaining === "string" && attempts < IOS_CLEAR_MAX_ATTEMPTS) {
     if (!(await waitForClearRetry(timer, attempts, requestSignal))) {
@@ -138,13 +155,21 @@ export async function clearIosFieldWithVerification({
     if (!result.success) {
       return { ...result, partialApplication: true };
     }
-    remaining = classifyClearField(await read(), remaining, attempts, before);
+    lastRead = await read();
+    remaining = classifyClearField(lastRead, remaining, attempts, before);
   }
-  return typeof remaining === "string"
-    ? {
-        success: false,
-        partialApplication: true,
-        error: `iOS clear left text in the focused field after ${attempts} attempt(s); remaining value: ${JSON.stringify(remaining)}.`,
-      }
-    : remaining;
+  const outcome: TextActionResult =
+    typeof remaining === "string"
+      ? {
+          success: false,
+          partialApplication: true,
+          error: `iOS clear left text in the focused field after ${attempts} attempt(s); remaining value: ${JSON.stringify(remaining)}.`,
+        }
+      : remaining;
+  if (!outcome.success) {
+    logger.warn(
+      `[iOS clear] Verification failed; before ${describeClearRead(before)}; after ${describeClearRead(lastRead)}`,
+    );
+  }
+  return outcome;
 }

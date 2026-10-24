@@ -39,7 +39,7 @@ import {
 export function registerDeviceResourceTools(dependencies: () => DeviceToolsDependencies): void {
   ToolRegistry.registerDeviceAware(
     "setDeviceResources",
-    "Set selected device resources and verify native state, including disabled iOS service impacts. All settings are opt-in; omitted resources stay unchanged. iOS Simulator services and Android optional apps/settings are runtime-dependent. Android changes return a restore receipt for exact restoration during the same boot. Disabling Google infrastructure changes push/auth behavior.",
+    "Set selected device resources and verify native state, including disabled iOS service impacts. All settings are opt-in; omitted resources stay unchanged. iOS Simulator services and Android optional apps/settings are runtime-dependent. Android changes return a restore receipt for exact restoration during the same boot. Disabling Google infrastructure changes push/auth behavior. Disabling calendarServices on a booted simulator is refused with code unsafe_device_resource_combination unless its service is not running. Request it when provisioning a new simulator so it applies before first boot, or leave it enabled. Preboot is unaffected; unsafeWith lists the applicable phases.",
     setDeviceResourcesSchema,
     async (device, args: z.infer<typeof setDeviceResourcesSchema>, _progress, signal) => {
       const callerSignal = signal ?? getAbortSignal();

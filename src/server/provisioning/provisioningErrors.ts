@@ -366,6 +366,9 @@ function provisionDeviceDiagnosticFields(error: ProvisionDeviceError) {
     ...(diagnostics.deviceId ? { deviceId: diagnostics.deviceId } : {}),
     ...(diagnostics.ownerPid !== undefined ? { ownerPid: diagnostics.ownerPid } : {}),
     ...(diagnostics.retryAfterMs !== undefined ? { retryAfterMs: diagnostics.retryAfterMs } : {}),
+    ...(diagnostics.hazards
+      ? { hazards: diagnostics.hazards, howToProceed: diagnostics.howToProceed }
+      : {}),
     ...(diagnostics.resourceDrift ? { resourceDrift: diagnostics.resourceDrift } : {}),
     ...(diagnostics.runtimeCompatibility
       ? { runtimeCompatibility: diagnostics.runtimeCompatibility }

@@ -1,3 +1,4 @@
+import { probeForeignUnnamedRuntimes } from "./foreignRuntimeProbe";
 import { BootedDevice } from "../../../models";
 import { logger } from "../../../utils/logger";
 import { type BootedDeviceDiscovery } from "../../../devices/deviceUtils";
@@ -169,6 +170,53 @@ export async function checkForSerialOnlyAndroidTeardownRestart(
   return undefined;
 }
 
+/**
+ * The resolution step cleared unnamed foreign emulators by reading their names; a serial can be
+ * reused after that read, so ask again right before the image is deleted. Only the pre-delete
+ * `stop` phase can still prevent anything, and `force` never probes consoles.
+ */
+async function checkForeignRuntimesBeforeDestroy(
+  context: TeardownContext,
+  target: TeardownResolvedTarget,
+  booted: BootedDeviceDiscovery,
+  phase: "stop" | "verification",
+): Promise<TeardownToolResponse | undefined> {
+  if (phase !== "stop" || context.mode !== "named") {
+    return undefined;
+  }
+  const foreignRuntimes = booted.devices.filter(
+    (device) =>
+      device.platform === "android" &&
+      (device.foreignOwned === true || context.clearedForeignSerials?.has(device.deviceId)) &&
+      isVirtualAndroidDevice(device) &&
+      isUnknownAndroidRuntimeName(device),
+  );
+  if (foreignRuntimes.length === 0) {
+    return undefined;
+  }
+  const probe = await probeForeignUnnamedRuntimes(context, foreignRuntimes);
+  if (probe.kind === "unresolved") {
+    return createTeardownFailureResponse(
+      context.args,
+      phase,
+      "target_identity_unresolved",
+      `Android emulator runtime '${probe.runtime.deviceId}' has no resolvable AVD name; refusing deletion.`,
+      target.device,
+    );
+  }
+  if (probe.kind === "runs-target") {
+    return createTeardownFailureResponse(
+      context.args,
+      phase,
+      "target_restarted",
+      `Android AVD '${probe.avdName}' is running on emulator '${probe.runtime.deviceId}', which ` +
+        "another AutoMobile daemon owns; refusing deletion.",
+      target.device,
+    );
+  }
+  return undefined;
+}
+
 export async function checkForRestartedTeardownTarget(
   context: TeardownContext,
   target: TeardownResolvedTarget,
@@ -211,6 +259,10 @@ export async function checkForRestartedTeardownTarget(
         "without a resolvable AVD name; refusing deletion.",
       target.device,
     );
+  }
+  const foreignRestart = await checkForeignRuntimesBeforeDestroy(context, target, booted, phase);
+  if (foreignRestart) {
+    return foreignRestart;
   }
   const serialOnlyRestart = await checkForSerialOnlyAndroidTeardownRestart(
     context,

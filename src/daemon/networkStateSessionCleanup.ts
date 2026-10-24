@@ -1,3 +1,5 @@
+import { raceWithDeadline } from "../utils/raceWithDeadline";
+import { ActionableError } from "../models/ActionableError";
 import { runOutsideRequestContext } from "../utils/AbortContext";
 import type { SdkCapabilityQueryOptions } from "../features/observe/ios/CtrlProxySdkCapabilities";
 import {
@@ -20,17 +22,26 @@ export interface NetworkDeviceStatePusher {
 
 /**
  * Re-sync through the connected CtrlProxy client of whichever platform owns the
- * device. A device with no live client has nothing to clear: the next connect
- * pushes its (now empty) state.
+ * device. A missing live client rejects: delivery cannot be established until
+ * a later connection pushes the current host state.
  */
 export const defaultNetworkDeviceStatePusher: NetworkDeviceStatePusher = {
   async push(deviceId: string, options?: SdkCapabilityQueryOptions): Promise<void> {
-    AndroidCtrlProxyClient.getExistingInstance(deviceId)?.syncNetworkStateToDevice();
-    await IOSCtrlProxyClient.getExistingInstance(deviceId)?.syncNetworkStateFromHost(options);
+    const android = AndroidCtrlProxyClient.getExistingInstance(deviceId);
+    const ios = IOSCtrlProxyClient.getExistingInstance(deviceId);
+    if (!android && !ios) {
+      throw new ActionableError(`No live CtrlProxy client to clear network state on ${deviceId}`);
+    }
+    if (android?.syncNetworkStateToDevice() === false) {
+      throw new ActionableError(`Android network state was not delivered to ${deviceId}`);
+    }
+    await ios?.syncNetworkStateFromHost(options);
   },
 };
 
 export interface NetworkStateSessionCleanupOptions {
+  /** Captured synchronously at release/unbind before the cleared-state push starts. */
+  gapMarkerFor?: (sessionId: string) => (reason: string) => void;
   /** Resolved lazily per call so a replaced singleton is always honoured. */
   state?: () => NetworkState;
   pusher?: NetworkDeviceStatePusher;
@@ -41,6 +52,7 @@ async function pushClearedState(
   pusher: NetworkDeviceStatePusher,
   deviceId: string,
   timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">,
+  onFailure?: (error: unknown) => void,
 ): Promise<void> {
   const controller = new AbortController();
   const deadlineMs = timer.now() + SESSION_RELEASE_TEARDOWN_CAP_MS;
@@ -50,14 +62,23 @@ async function pushClearedState(
   );
   handle.unref?.();
   try {
-    await runOutsideRequestContext(() =>
-      pusher.push(deviceId, { deadlineMs, abortSignal: controller.signal }),
+    await raceWithDeadline(
+      () =>
+        runOutsideRequestContext(() =>
+          pusher.push(deviceId, { deadlineMs, abortSignal: controller.signal }),
+        ),
+      { timer, signal: controller.signal, label: "push cleared network state" },
     );
   } catch (error) {
     logger.warn(
       `[networkState] Failed to push cleared network state to ${deviceId}: ${errorMessage(error)}`,
       error,
     );
+    try {
+      onFailure?.(error);
+    } catch (markError) {
+      logger.warn("[networkState] Failed to mark uncleared network state", markError);
+    }
   } finally {
     timer.clearTimeout(handle);
   }
@@ -97,12 +118,17 @@ export function registerNetworkStateSessionCleanup(
       );
       return;
     }
+    const markGap = options.gapMarkerFor?.(sessionId);
     // iOS probes capability before reading CURRENT rules; simulation is read after
     // that push settles. Android reads and sends synchronously. A late push therefore
     // delivers the current holder's host state, never a captured cleared snapshot.
     manager.registerPendingDeviceCleanup(
       deviceId,
-      pushClearedState(pusher, deviceId, options.timer ?? defaultTimer),
+      pushClearedState(pusher, deviceId, options.timer ?? defaultTimer, (error) => {
+        markGap?.(
+          `network mock rules and simulation may remain on ${deviceId}: ${errorMessage(error)}`,
+        );
+      }),
       {
         name: "push cleared network state",
         leftover: "the released session's network mock rules and error simulation",

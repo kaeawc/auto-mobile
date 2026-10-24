@@ -91,6 +91,16 @@ control.
 - Ownership is a guard between cooperating clients, not a security boundary
   against other local processes.
 
+### Cold iOS observe freshness
+
+With more simultaneous cold iOS observes than the configured launch concurrency,
+a queued launch can outlast the read budget. `observe` keeps that budget and
+reports the pending state with `ok: true`, `freshness.isFresh: false`, and
+`freshness.unavailableReason: "runner_launch_queued"`, without a hierarchy.
+The detail includes the queue position, and any captured screenshot is kept.
+The runner keeps launching; retry the observe after launch completes. A warm
+retry can complete in about 1.4 seconds; timing depends on the device and host.
+
 ## When a session is released
 
 A session is released by an explicit release, a lost owner heartbeat, the idle

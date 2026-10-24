@@ -1,3 +1,4 @@
+import { RunnerLaunchQueuedError } from "../../src/ctrlProxy/ios/RunnerLaunchQueuedError";
 import { attachSnapshotReference } from "../../src/server/observeResponse";
 import { observation as coordinateObservation } from "../helpers/tapAtCoordinate";
 import { readToolEnvelopePayload } from "../../src/utils/toolEnvelopePayload";
@@ -825,6 +826,11 @@ describe("session-free observe device read", () => {
       "unowned unreachable service",
       "Device emulator-5554 has no reachable hierarchy service",
       "connection_lost",
+    ],
+    [
+      "queued runner launch",
+      new RunnerLaunchQueuedError("ios-device", { position: 1, ahead: 2, limit: 2 }),
+      "runner_launch_queued",
     ],
     ["owner request deadline", new ObserverPendingRequestTimeoutError(), "request_timed_out"],
   ] as const)("observer keeps screenshot and reports %s", async (_label, failure, reason) => {

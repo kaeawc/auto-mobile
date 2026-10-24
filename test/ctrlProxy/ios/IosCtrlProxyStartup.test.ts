@@ -210,3 +210,13 @@ test("readiness relaunch retains its slot at concurrency one", async () => {
   expect(h.state.steps.startOnSimulator).toHaveBeenCalledTimes(2);
   (await h.state.runnerLaunchGate.acquire()).release();
 });
+
+test("startup passes the device owner to the launch gate", async () => {
+  const h = harness();
+  let owner: string | undefined;
+  h.gate.beforeAcquire = async (_signal, queuedOwner) => {
+    owner = queuedOwner;
+  };
+  await h.startup.startInternal(h.start);
+  expect(owner).toBe(h.state.device.deviceId);
+});

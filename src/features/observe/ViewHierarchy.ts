@@ -213,6 +213,9 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     result: ViewHierarchyResult,
     context: RecoveryReadContext,
   ): Promise<ViewHierarchyResult> {
+    if (result.hierarchy.unavailableReason === "runner_launch_queued") {
+      return result;
+    }
     const client = IOSCtrlProxyClient.getInstance(this.device);
     this.classifyDisconnectedIosHierarchy(result, client);
     if (

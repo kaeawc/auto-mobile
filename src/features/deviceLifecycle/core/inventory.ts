@@ -128,7 +128,9 @@ export function listDevicePayloads(
       configuredImages,
       sessionsById: sessions,
       deviceSessionUuid: pooled ? initializedDeviceSessionUuid(device.deviceId) : undefined,
-      hold: pooled ? poolHoldFor(devicePool, device.deviceId) : undefined,
+      // Not gated on `pooled`: a simulator an erase reset shut down leaves the pool while the broker
+      // still binds it, and the hold lookup answers for ids the pool does not list.
+      hold: poolHoldFor(devicePool, device.deviceId),
       poolStatus: pooled ? devicePool?.poolBucket(device.deviceId) : undefined,
       ...transitionalHoldInputs(transitionalHolds.get(device.deviceId)),
       transportAvdName: transportAvdNameForDevice(device.deviceId),

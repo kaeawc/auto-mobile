@@ -64,6 +64,25 @@ describe("listDevices reports ownership allocation enforces", () => {
     expect(free.runtime.heldBy).toBeUndefined();
   });
 
+  test("a broker-bound device the pool does not list is still reported held (#15233)", async () => {
+    const registry = new FakeBindingRegistry(timer);
+    await assignBindingDevice(registry, "ios", "SIM-SLOT");
+    // The erase reset shut SIM-SLOT down, so the pool dropped it; the platform lists it booted again.
+    const pool = await makePool([ios("SIM-FREE")], {
+      bindingExclusion: new RegistryBindingExclusion(async () => registry, timer),
+    });
+    await pool.bindingStableIds("ios");
+
+    const [unpooled, free] = listDevicePayloads(
+      [ios("SIM-SLOT"), ios("SIM-FREE")],
+      pool,
+      new Map(),
+    );
+
+    expect(unpooled.runtime.heldBy).toBe("session_broker");
+    expect(free.runtime.heldBy).toBeUndefined();
+  });
+
   test("a device another daemon drives is assigned/held", async () => {
     const ownership: ForeignDeviceOwnership = {
       async refresh() {},

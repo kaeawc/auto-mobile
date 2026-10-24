@@ -115,7 +115,10 @@ const deviceFor = (platform: Platform): BootedDevice => ({
 });
 
 class ReadSimctl extends FakeSimctl {
-  async presentSimulatorAfterStart(): Promise<void> {}
+  readonly presentations: string[] = [];
+  async presentSimulatorAfterStart(udid: string): Promise<void> {
+    this.presentations.push(udid);
+  }
 }
 
 function harness(
@@ -150,8 +153,10 @@ function harness(
     { platform, limit: 1, booted: 1, retryAfterMs: 100 },
     "capacity refused",
   );
+  let instrumentationRequests = 0;
   const instrumentation: IosBootInstrumentation = {
     async run(request, boot) {
+      instrumentationRequests++;
       if (capacity) {
         throw capacityError;
       }
@@ -265,12 +270,27 @@ function harness(
     verify,
     detect,
     capacityError,
+    get instrumentationRequests() {
+      return instrumentationRequests;
+    },
     iosManager,
     androidManager,
     handledDevices: [] as BootedDevice[],
     handlerSignals: [] as Array<AbortSignal | undefined>,
     runs: [] as Array<{ deviceId: string; sessionUuid: unknown; readPath: boolean }>,
   };
+}
+
+function stoppedIosMessage(device: BootedDevice): string {
+  return `iOS simulator '${device.name}' (${device.deviceId}) is not booted; a read never boots a simulator. Call startDevice (or acquire a session) to boot it.`;
+}
+
+function assertNoIosReadBoot(current: ReturnType<typeof harness>): void {
+  expect(current.boots).toEqual([]);
+  expect(current.simctl.getMethodCalls("bootSimulator")).toEqual([]);
+  expect(current.instrumentationRequests).toBe(0);
+  expect(current.simctl.presentations).toEqual([]);
+  expect(current.runs).toEqual([]);
 }
 
 type Harness = ReturnType<typeof harness>;
@@ -864,7 +884,7 @@ for (const platform of ["android", "ios"] as const) {
                 retryable: true,
               });
             }
-            if (column === "capacity") {
+            if (column === "capacity" && platform === "android") {
               expect(error).toBe(h.capacityError);
             }
           } finally {
@@ -875,8 +895,11 @@ for (const platform of ["android", "ios"] as const) {
           row.set(name, decision);
           decisions.set(key, row);
           const label = platform === "android" ? "Android" : "iOS";
-          const expected =
-            column === "reserved-stopped" || column === "failed-other-reserved"
+          const iosStopped =
+            platform === "ios" && ["stopped", "failed-other-stopped", "capacity"].includes(column);
+          const expected = iosStopped
+            ? stoppedIosMessage(h.device)
+            : column === "reserved-stopped" || column === "failed-other-reserved"
               ? "device_owned_by_other_session"
               : column === "unnamed"
                 ? `No ${label} device is running, so there is nothing to read. Start one with startDevice or provisionDevice, or pass a deviceId.`
@@ -895,6 +918,9 @@ for (const platform of ["android", "ios"] as const) {
                         ? `Device ${id} not found on ${requested ?? "either"} platform. Available ${requested ?? "either"} devices: none`
                         : `device:${h.device.deviceId};boots:${column === "stopped" || column === "failed-other-stopped" ? 1 : 0}`;
           expect(decision).toBe(expected);
+          if (iosStopped) {
+            assertNoIosReadBoot(h);
+          }
           if (failedOther) {
             const retried = column === "failed-other-unknown" || column === "failed-other-reserved";
             expect(retryTimer.now()).toBe(retried ? 1000 : 0);
@@ -1348,7 +1374,11 @@ for (const platform of ["android", "ios"] as const) {
               [INTERNAL_EXECUTION_START_TIME_PARAM]: execution.startTime,
             })
             .catch((error: unknown) => error);
-          if (kind === "reservation") {
+          if (platform === "ios" && phase === "images") {
+            expect(result).toBeInstanceOf(ActionableError);
+            expect(result).toHaveProperty("message", stoppedIosMessage(h.device));
+            assertNoIosReadBoot(h);
+          } else if (kind === "reservation") {
             expect(result).toMatchObject({ code: "device_owned_by_other_session" });
           } else if (platform === "android") {
             expect(h.runs).toEqual([
@@ -1625,6 +1655,11 @@ async function onePlatformDecision(
       expect(h.ensure).not.toHaveBeenCalled();
     }
     decision = "discovery_incomplete";
+  } else if (platform === "ios" && scenario === "stopped") {
+    expect(result).toBeInstanceOf(ActionableError);
+    expect(result).toHaveProperty("message", stoppedIosMessage(h.device));
+    assertNoIosReadBoot(h);
+    decision = stoppedIosMessage(h.device);
   } else {
     expect(result).not.toBeInstanceOf(Error);
     expect(h.runs).toHaveLength(1);
@@ -1832,7 +1867,7 @@ for (const platform of ["android", "ios"] as const) {
   });
 }
 
-for (const platform of ["android", "ios"] as const) {
+for (const platform of ["android"] as const) {
   for (const phase of platform === "android" ? ["lease wait", "cold boot"] : ["lease wait"]) {
     for (const acquisition of [
       "held",
@@ -2021,4 +2056,36 @@ function withoutInventoryOutcome(device: BootedDevice): BootedDevice {
   const stripped = { ...device };
   delete stripped[displayInventoryOutcome];
   return stripped;
+}
+
+for (const operation of ["start", "shutdown"] as const) {
+  test(`ios: stopped image read refuses before ${operation} lease wait`, async () => {
+    h = harness("ios", false);
+    const current = h;
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: current.manager });
+    DaemonState.getInstance().initialize(slotOwner.sessions, slotOwner.pool);
+    const blocker = await current.lifecycle.reserve(
+      { kind: "stable", platform: "ios", stableId: current.device.deviceId },
+      { operation, deadlineMs: 300_000 },
+    );
+    const execution = executionTracker.startExecution("listApps");
+    try {
+      const result = await ToolRegistry.getTool("listApps")!
+        .handler({
+          platform: "ios",
+          deviceId: current.device.deviceId,
+          [INTERNAL_EXECUTION_ID_PARAM]: execution.id,
+          [INTERNAL_EXECUTION_START_TIME_PARAM]: execution.startTime,
+        })
+        .catch((error: unknown) => error);
+      expect(result).toBeInstanceOf(ActionableError);
+      expect(result).toHaveProperty("message", stoppedIosMessage(current.device));
+      assertNoIosReadBoot(current);
+      expect(current.lifecycle.reservations).toHaveLength(1);
+      expect(execution.sessionlessDeviceUse?.size ?? 0).toBe(0);
+    } finally {
+      blocker.release();
+      executionTracker.endExecution(execution.id);
+    }
+  });
 }

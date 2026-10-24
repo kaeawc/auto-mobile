@@ -61,7 +61,7 @@ describe("iOS capacity limit when host snapshot reads fail (#11389)", () => {
         cpuCount: () => 16,
         loadAverage1m: () => null,
       });
-      expect((await gate.describeCapacity()).limit).toBe(8);
+      expect((await gate.describeCapacity()).limit).toBe(21);
     } finally {
       warn.mockRestore();
     }

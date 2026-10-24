@@ -42,6 +42,13 @@ export const DEVICES_ENV = {
     min: 1,
     doc: "Positive integer cap on concurrently booted Android emulators.",
   },
+  IOS_SIM_BOOT_CONCURRENCY: {
+    name: "AUTOMOBILE_IOS_SIM_BOOT_CONCURRENCY",
+    kind: "int",
+    default: "see docs",
+    min: 1,
+    doc: "Concurrent iOS simulator boot bursts; positive integer, otherwise derived from host cores.",
+  },
   IOS_SIM_MAX_BOOTED: {
     name: "AUTOMOBILE_IOS_SIM_MAX_BOOTED",
     kind: "int",

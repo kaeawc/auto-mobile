@@ -1,7 +1,7 @@
 const GIB = 1024 ** 3;
 
 /** Share of host RAM booted devices may use; the rest stays for the IDE, the app under test and the OS. */
-const MEMORY_BUDGET_FRACTION = 0.5;
+export const MEMORY_BUDGET_FRACTION = 0.5;
 /** One booted device is budgeted two cores. */
 const CORES_PER_DEVICE = 2;
 
@@ -151,7 +151,7 @@ export function resolveBootCapacityLimits(
       };
 }
 
-function parseOverride(raw: string | undefined): number | undefined {
+export function parseOverride(raw: string | undefined): number | undefined {
   if (raw === undefined || !/^\d+$/.test(raw.trim())) {
     return undefined;
   }

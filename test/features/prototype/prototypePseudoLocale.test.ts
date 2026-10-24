@@ -14,6 +14,13 @@ describe("pseudo-locale text (#14126)", () => {
     expect([...out].length - 2).toBeGreaterThanOrEqual(12 * (1 + PSEUDO_LOCALE_EXPANSION));
   });
 
+  test("keeps a data pointer that holds braces whole", () => {
+    expect(pseudoLocalizeText("Hi {data:/hello{world}")).toContain("{data:/hello{world}");
+    expect(pseudoLocalizeText("Go {platform:/os.version} {name}")).toContain(
+      "{platform:/os.version}",
+    );
+  });
+
   test("leaves bindings and blank text alone", () => {
     expect(pseudoLocalizeText("Hi {data:/user/name}!")).toContain("{data:/user/name}");
     expect(pseudoLocalizeText("{item.title}")).toContain("{item.title}");

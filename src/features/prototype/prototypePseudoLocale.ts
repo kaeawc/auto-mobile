@@ -5,6 +5,7 @@
  */
 
 import { prototypeLinkifyMatches, type PrototypeLinkifyKind } from "./prototypeLinkify";
+import { prototypeBindingSpans } from "./prototypeData";
 import { record } from "./prototypeTemplate";
 
 /** Spec fields that hold text a user reads. Identifiers, state keys and `contentDescription` stay. */
@@ -93,16 +94,33 @@ const ACCENTS: Record<string, string> = {
   Z: "Ž",
 };
 
-/** `{key}`, `{data:/pointer}` and `{item.field}` bindings are resolved by the device: left intact. */
+/** `{key}` and `{item.field}` bindings are resolved by the device: left intact. */
 const PLACEHOLDER = /\{[^{}]*\}/g;
 
-/** Accents the letters of text; `{...}` bindings stay as written. */
+/**
+ * Every binding range in the text, in order and non-overlapping: data and platform placeholders by
+ * the shared scan (a pointer may hold braces), then the plain `{key}` ones around them.
+ */
+function bindingRanges(text: string): { start: number; end: number }[] {
+  const pointers = prototypeBindingSpans(text);
+  const plain = [...text.matchAll(PLACEHOLDER)]
+    .map((found) => ({ start: found.index, end: found.index + found[0].length }))
+    .filter((range) =>
+      pointers.every((span) => range.end <= span.start || range.start >= span.end),
+    );
+  return [...pointers, ...plain].sort((a, b) => a.start - b.start);
+}
+
+/** Accents the letters of text; bindings stay as written. */
 function pseudoLocalizeSegment(text: string): string {
-  const accented = text
-    .split(PLACEHOLDER)
-    .map((part) => [...part].map((char) => ACCENTS[char] ?? char).join(""));
-  const placeholders = text.match(PLACEHOLDER) ?? [];
-  return accented.map((part, index) => part + (placeholders[index] ?? "")).join("");
+  const accent = (part: string): string => [...part].map((char) => ACCENTS[char] ?? char).join("");
+  const pieces: string[] = [];
+  let cursor = 0;
+  for (const { start, end } of bindingRanges(text)) {
+    pieces.push(accent(text.slice(cursor, start)), text.slice(start, end));
+    cursor = end;
+  }
+  return pieces.join("") + accent(text.slice(cursor));
 }
 
 /** Accented, bracketed and padded to ~140% of the original length; placeholders are untouched. */
@@ -127,12 +145,9 @@ function pseudoLocalizeLinkifiedText(text: string, kinds: readonly PrototypeLink
   if (text.trim() === "") {
     return text;
   }
-  const bindings = [...text.matchAll(PLACEHOLDER)].map((found) => ({
-    start: found.index,
-    end: found.index + found[0].length,
-  }));
-  // A token that cuts through a `{...}` binding (a pointer such as `/hello @sam`) is part of the
-  // binding, not a link: the device resolves the whole binding first.
+  // A token that cuts through a binding (a pointer such as `/hello @sam`) is part of the binding,
+  // not a link: the device resolves the whole binding first.
+  const bindings = bindingRanges(text);
   const matches = prototypeLinkifyMatches(text, kinds).filter((match) =>
     bindings.every(
       ({ start, end }) =>

@@ -144,11 +144,9 @@ async function main(): Promise<void> {
   const httpToken = generateDaemonHttpToken(defaultIdGenerator);
   const daemon = new Daemon({ port, host: "127.0.0.1" }, { timer: defaultTimer, httpToken });
   // The HTTP listener lifecycle is private; Daemon.start() would also boot devices and the DB.
-  const call = async (method: string): Promise<void> => {
-    await Reflect.get(daemon, method).call(daemon);
-  };
+  daemon.testHooks.publishHttpToken();
   await Reflect.get(daemon, "httpIngress").start();
-  await call("resolveStartupCompletion");
+  daemon.testHooks.resolveStartupCompletion();
 
   const url = `http://127.0.0.1:${port}${MCP_STREAMABLE_PATH}`;
   let nextId = 0;

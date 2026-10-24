@@ -34,6 +34,17 @@ describe("pseudo-locale structure (#14126)", () => {
     expect(out.text.startsWith("Ṽíšíť ")).toBe(true);
   });
 
+  test("a link-like token inside a binding is not split from it", () => {
+    const out = pseudoLocalizeSpec({
+      type: "text",
+      text: "Hi {data:/hello @sam} and {url} @ann",
+      linkify: { kinds: ["mention"], onTap: [] },
+    });
+    expect(out.text).toContain("{data:/hello @sam}");
+    expect(out.text).toContain("{url}");
+    expect(out.text).toContain(" @ann ");
+  });
+
   test("a screen or component named like an opaque field is still transformed", () => {
     const out = pseudoLocalizeSpec({
       screens: { theme: { type: "text", text: "Hello" }, data: { type: "text", text: "Bye" } },

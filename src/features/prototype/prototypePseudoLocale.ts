@@ -127,7 +127,18 @@ function pseudoLocalizeLinkifiedText(text: string, kinds: readonly PrototypeLink
   if (text.trim() === "") {
     return text;
   }
-  const matches = prototypeLinkifyMatches(text, kinds);
+  const bindings = [...text.matchAll(PLACEHOLDER)].map((found) => ({
+    start: found.index,
+    end: found.index + found[0].length,
+  }));
+  // A token that cuts through a `{...}` binding (a pointer such as `/hello @sam`) is part of the
+  // binding, not a link: the device resolves the whole binding first.
+  const matches = prototypeLinkifyMatches(text, kinds).filter((match) =>
+    bindings.every(
+      ({ start, end }) =>
+        match.end <= start || match.start >= end || (match.start <= start && match.end >= end),
+    ),
+  );
   const pieces = matches.flatMap((match, index) => [
     pseudoLocalizeSegment(text.slice(index === 0 ? 0 : matches[index - 1]!.end, match.start)),
     match.text,

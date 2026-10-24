@@ -1,3 +1,4 @@
+import { DeviceServiceDisabledError } from "../../src/models/DeviceServiceDisabledError";
 import { DaemonRestartOptionsUnknownError } from "../../src/daemon/proxy/DaemonRestartOptionsUnknownError";
 import { BindingConfigError } from "../../src/daemon/sessionBroker/provisioning/provisionRequest";
 import { DaemonHandshakeMismatchError } from "../../src/daemon/DaemonHandshakeMismatchError";
@@ -506,6 +507,24 @@ const BUILDERS: readonly FixtureEntry[] = [
     "device_owned_by_other_daemon",
     "DeviceOwnedByOtherDaemonError via shapeToolCallError",
     () => shaped(new DeviceOwnedByOtherDaemonError(DEVICE, 4242)),
+  ],
+  [
+    "device_service_disabled",
+    "DeviceServiceDisabledError via shapeToolCallError",
+    () =>
+      shaped(
+        new DeviceServiceDisabledError({
+          tool: "putAppFile",
+          resource: "mediaTranscoding",
+          labels: [
+            "com.apple.photos.ImageConversionService",
+            "com.apple.photos.VideoConversionService",
+          ],
+          disabledLabels: ["com.apple.photos.ImageConversionService"],
+          unavailable: "iOS Simulator photo/video media-library import and transcoding",
+          deviceId: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
+        }),
+      ),
   ],
   [
     "device_cleanup_in_progress",

@@ -1940,6 +1940,38 @@
                       "additionalProperties": false
                     }
                   ]
+                },
+                "disablePackage": {
+                  "oneOf": [
+                    { "type": "string", "const": "unset" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "package": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$"
+                        }
+                      },
+                      "required": ["package"],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "clearPackageData": {
+                  "oneOf": [
+                    { "type": "string", "const": "unset" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "package": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$"
+                        }
+                      },
+                      "required": ["package"],
+                      "additionalProperties": false
+                    }
+                  ]
                 }
               },
               "additionalProperties": false

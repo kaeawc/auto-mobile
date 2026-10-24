@@ -35,7 +35,6 @@ export const ANDROID_PACKAGE_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A
  */
 export const APP_FILE_PATH_PATTERN =
   /^(?!\.{1,2}(?:\/|$))[A-Za-z0-9_.-]+(?:\/(?!\.{1,2}(?:\/|$))[A-Za-z0-9_.-]+)*$/;
-/^(?!\.{1,2}(\/|$))[A-Za-z0-9_.-]+(\/(?!\.\.(\/|$))[A-Za-z0-9_.-]+)*$/;
 
 /** A full permission name, or a bare platform constant such as `CAMERA`. */
 export const ANDROID_PERMISSION_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_.]*$/;

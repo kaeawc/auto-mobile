@@ -2903,6 +2903,208 @@ describe("deleteDevice handler", () => {
     expect(manager.destroyRequests).toEqual([]);
   });
 
+  // #15213: another daemon's emulator is listed without a name on purpose (discovery skips the
+  // read), which used to veto deleting the broker's own dead AVD until that daemon let go of it.
+  describe("a foreign emulator discovery deliberately left unnamed", () => {
+    const foreign: BootedDevice = {
+      platform: "android",
+      name: "Unknown (emulator-5610)",
+      deviceId: "emulator-5610",
+      foreignOwned: true,
+    };
+    const target = "ambroker-dead-avd";
+
+    const arrange = () => {
+      manager.setBootedDevices("android", [foreign]);
+      manager.setDeviceImages("android", [{ platform: "android", name: target, isRunning: false }]);
+    };
+
+    test("does not veto deleting a stopped AVD once the runtime names a different one", async () => {
+      arrange();
+      runtimeAvdNames.set("emulator-5610", "Pixel_9_Foreign");
+
+      const body = responseBody(await teardownTool().handler(request("android", target, target)));
+
+      expect(body.state).toBe("destroyed");
+      // Resolution runs before and again under the teardown lease.
+      expect(new Set(runtimeAvdNameProbes)).toEqual(new Set(["emulator-5610"]));
+      expect(manager.destroyRequests).toEqual([
+        expect.objectContaining({ device: expect.objectContaining({ name: target }) }),
+      ]);
+    });
+
+    test("still refuses while the runtime cannot name itself", async () => {
+      arrange();
+
+      const body = responseBody(await teardownTool().handler(request("android", target, target)));
+
+      expect(body.state).toBe("failed");
+      expect(body.failure).toEqual(
+        expect.objectContaining({
+          code: "target_identity_unresolved",
+          message: expect.stringContaining("emulator-5610"),
+        }),
+      );
+      // Resolution runs before and again under the teardown lease.
+      expect(new Set(runtimeAvdNameProbes)).toEqual(new Set(["emulator-5610"]));
+      expect(manager.destroyRequests).toEqual([]);
+    });
+
+    test("refuses when the foreign emulator is running the AVD being deleted", async () => {
+      arrange();
+      runtimeAvdNames.set("emulator-5610", target);
+
+      const body = responseBody(await teardownTool().handler(request("android", target, target)));
+
+      expect(body.state).toBe("failed");
+      expect(body.failure).toEqual(
+        expect.objectContaining({
+          code: "target_identity_conflict",
+          message: expect.stringContaining("another AutoMobile daemon owns"),
+        }),
+      );
+      expect(manager.destroyRequests).toEqual([]);
+    });
+
+    test("refuses when the foreign emulator runs the AVD named by stableName", async () => {
+      arrange();
+      runtimeAvdNames.set("emulator-5610", target);
+
+      const body = responseBody(
+        await teardownTool().handler(request("android", "stable-id-other", target)),
+      );
+
+      expect(body.state).toBe("failed");
+      expect(body.failure).toEqual(expect.objectContaining({ code: "target_identity_conflict" }));
+      expect(manager.destroyRequests).toEqual([]);
+    });
+
+    test("re-asks right before deleting, because the serial can be reused after the first read", async () => {
+      arrange();
+      // Resolution (pre-lease and under the lease) sees another AVD; by the pre-delete check the
+      // foreign daemon has booted the target on the same serial.
+      const answers = ["Pixel_9_Foreign", "Pixel_9_Foreign", target];
+      setDeviceToolsDependencies({
+        resolveRunningAndroidAvdName: async (device) => {
+          runtimeAvdNameProbes.push(device.deviceId);
+          return answers[Math.min(runtimeAvdNameProbes.length, answers.length) - 1];
+        },
+      });
+
+      const body = responseBody(await teardownTool().handler(request("android", target, target)));
+
+      expect(body.state).toBe("failed");
+      expect(body.failure).toEqual(
+        expect.objectContaining({ code: "target_restarted", phase: "stop" }),
+      );
+      expect(runtimeAvdNameProbes).toHaveLength(3);
+      expect(manager.destroyRequests).toEqual([]);
+    });
+
+    test("re-asks a cleared serial before deleting even when it is no longer marked foreign", async () => {
+      arrange();
+      const answers: (string | undefined)[] = ["Pixel_9_Foreign", "Pixel_9_Foreign", undefined];
+      setDeviceToolsDependencies({
+        resolveRunningAndroidAvdName: async (device) => {
+          runtimeAvdNameProbes.push(device.deviceId);
+          // The other daemon let go of the serial once resolution had read it.
+          if (runtimeAvdNameProbes.length === 2) {
+            manager.setBootedDevices("android", [{ ...foreign, foreignOwned: undefined }]);
+          }
+          return answers[Math.min(runtimeAvdNameProbes.length, answers.length) - 1];
+        },
+      });
+
+      const body = responseBody(await teardownTool().handler(request("android", target, target)));
+
+      expect(body.failure).toEqual(
+        expect.objectContaining({ code: "target_identity_unresolved", phase: "stop" }),
+      );
+      expect(manager.destroyRequests).toEqual([]);
+    });
+
+    test("refuses at the pre-delete check when the console stops answering", async () => {
+      arrange();
+      const answers: (string | undefined)[] = ["Pixel_9_Foreign", "Pixel_9_Foreign", undefined];
+      setDeviceToolsDependencies({
+        resolveRunningAndroidAvdName: async (device) => {
+          runtimeAvdNameProbes.push(device.deviceId);
+          return answers[Math.min(runtimeAvdNameProbes.length, answers.length) - 1];
+        },
+      });
+
+      const body = responseBody(await teardownTool().handler(request("android", target, target)));
+
+      expect(body.state).toBe("failed");
+      expect(body.failure).toEqual(
+        expect.objectContaining({ code: "target_identity_unresolved", phase: "stop" }),
+      );
+      expect(manager.destroyRequests).toEqual([]);
+    });
+
+    test("refuses on the second of two foreign emulators when it runs the target", async () => {
+      manager.setBootedDevices("android", [
+        foreign,
+        { ...foreign, name: "Unknown (emulator-5612)", deviceId: "emulator-5612" },
+      ]);
+      manager.setDeviceImages("android", [{ platform: "android", name: target, isRunning: false }]);
+      runtimeAvdNames.set("emulator-5610", "Pixel_9_Foreign");
+      runtimeAvdNames.set("emulator-5612", target);
+
+      const body = responseBody(await teardownTool().handler(request("android", target, target)));
+
+      expect(body.failure).toEqual(expect.objectContaining({ code: "target_identity_conflict" }));
+      expect(runtimeAvdNameProbes).toContain("emulator-5612");
+      expect(manager.destroyRequests).toEqual([]);
+    });
+
+    test("a foreign and a local unnamed emulator together refuse without probing", async () => {
+      manager.setBootedDevices("android", [
+        foreign,
+        { platform: "android", name: "Unknown (emulator-5556)", deviceId: "emulator-5556" },
+      ]);
+      manager.setDeviceImages("android", [{ platform: "android", name: target, isRunning: false }]);
+      runtimeAvdNames.set("emulator-5610", "Pixel_9_Foreign");
+
+      const body = responseBody(await teardownTool().handler(request("android", target, target)));
+
+      expect(body.failure).toEqual(
+        expect.objectContaining({
+          code: "target_identity_unresolved",
+          message: expect.stringContaining("emulator-5556"),
+        }),
+      );
+      expect(runtimeAvdNameProbes).toEqual([]);
+      expect(manager.destroyRequests).toEqual([]);
+    });
+
+    test("force never probes the console and keeps the refusal", async () => {
+      arrange();
+      runtimeAvdNames.set("emulator-5610", "Pixel_9_Foreign");
+
+      const body = responseBody(
+        await teardownTool().handler({ ...request("android", target, target), force: true }),
+      );
+
+      expect(body.state).toBe("failed");
+      expect(body.failure).toEqual(expect.objectContaining({ code: "target_identity_unresolved" }));
+      expect(runtimeAvdNameProbes).toEqual([]);
+      expect(manager.destroyRequests).toEqual([]);
+    });
+
+    test("an unnamed emulator this daemon can reach is never probed away", async () => {
+      manager.setBootedDevices("android", [{ ...foreign, foreignOwned: undefined }]);
+      manager.setDeviceImages("android", [{ platform: "android", name: target, isRunning: false }]);
+      runtimeAvdNames.set("emulator-5610", "Pixel_9_Foreign");
+
+      const body = responseBody(await teardownTool().handler(request("android", target, target)));
+
+      expect(body.state).toBe("failed");
+      expect(runtimeAvdNameProbes).toEqual([]);
+      expect(manager.destroyRequests).toEqual([]);
+    });
+  });
+
   test("does not delete an AVD when stableId and stableName identify different targets", async () => {
     manager.setBootedDevices("android", [
       {

@@ -8,6 +8,7 @@ import {
   PrototypeAgentRequestTimeoutError,
   type PrototypeAgentClient,
 } from "../../../../src/features/prototype/ios/prototypeAgentClient";
+import { IosPrototypeTransport } from "../../../../src/features/prototype/ios/iosPrototypeTransport";
 import { MAX_PROTOTYPE_SPEC_BYTES } from "../../../../src/features/prototype/prototypeSpec";
 import { ActionableError } from "../../../../src/models/ActionableError";
 import { CountingIdGenerator } from "../../../../src/utils/IdGenerator";
@@ -358,6 +359,31 @@ describe("prototype request timeout overrides", () => {
     });
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
+  test("a transport show with timeoutMs fails at that deadline, not the client default", async () => {
+    const { client, timer } = await connected(undefined, 15_000);
+    const transport = new IosPrototypeTransport(client);
+    const shown = transport
+      .show(
+        {
+          id: "test",
+          window: { placement: { type: "fullscreen" }, opacity: 1 },
+          root: { type: "text", text: "Hello" },
+        },
+        { timeoutMs: 100 },
+      )
+      .catch((error: unknown) => error);
+
+    timer.advanceTime(100);
+
+    const error = await shown;
+    expect(error).toBeInstanceOf(PrototypeAgentRequestTimeoutError);
+    expect(error).toMatchObject({
+      requestType: "show_prototype",
+      timeoutMs: 100,
+      message: "Prototype agent did not answer show_prototype within 100 ms.",
+    });
+  });
+
   test("default request still waits the client-wide timeout", async () => {
     const { client, timer } = await connected(undefined, 6000);
     let rejected = false;

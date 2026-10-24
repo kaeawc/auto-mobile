@@ -29,12 +29,28 @@ export const DEVICE_CONDITION_APPLY = "apply";
 /** Android application ID: dot-separated segments, each starting with a letter. */
 export const ANDROID_PACKAGE_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$/;
 
+/**
+ * A path inside an app's data directory: relative, dot-separated names joined by `/`, no empty or
+ * `..` segment. The path is interpolated into a device shell command, so only these characters pass.
+ */
+export const APP_FILE_PATH_PATTERN =
+  /^(?!\.{1,2}(?:\/|$))[A-Za-z0-9_.-]+(?:\/(?!\.{1,2}(?:\/|$))[A-Za-z0-9_.-]+)*$/;
+/^(?!\.{1,2}(\/|$))[A-Za-z0-9_.-]+(\/(?!\.\.(\/|$))[A-Za-z0-9_.-]+)*$/;
+
 /** A full permission name, or a bare platform constant such as `CAMERA`. */
 export const ANDROID_PERMISSION_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_.]*$/;
 
 /** The app a package-state fault targets. */
 export interface DeviceConditionPackageTarget {
   package: string;
+}
+
+/** The app file a `corruptAppFile` fault damages, and how. */
+export interface DeviceConditionCorruptTarget {
+  package: string;
+  /** Relative to the app's data directory, e.g. `databases/app.db`. */
+  path: string;
+  mode: "overwrite" | "truncate";
 }
 
 /** The app a `killApp` fault ends, and how. */
@@ -87,6 +103,8 @@ export interface DeviceConditionInput {
     dontKeepActivities?: "on" | typeof DEVICE_CONDITION_UNSET;
     /** Storage fault (#14066). */
     storage?: "low" | "full" | typeof DEVICE_CONDITION_UNSET;
+    /** Corrupt one file in a debuggable app's data directory (#14066). */
+    corruptAppFile?: DeviceConditionCorruptTarget | typeof DEVICE_CONDITION_UNSET;
     /** Permission revocation (#14069); the one fault so far that takes an object. */
     revokePermission?: DeviceConditionPermissionTarget | typeof DEVICE_CONDITION_UNSET;
     /** Package state (#14069): disable an app until reset, or clear its data once. */
@@ -103,6 +121,15 @@ export interface DeviceConditionInput {
 /** A fresh schema per field: sharing one instance makes the JSON schema emit a dangling `$ref` for the second use. */
 const packageTargetSchema = () =>
   z.object({ package: z.string().regex(ANDROID_PACKAGE_NAME_PATTERN) }).strict();
+
+const corruptTargetSchema = () =>
+  z
+    .object({
+      package: z.string().regex(ANDROID_PACKAGE_NAME_PATTERN),
+      path: z.string().regex(APP_FILE_PATH_PATTERN),
+      mode: z.enum(["overwrite", "truncate"]),
+    })
+    .strict();
 
 const killTargetSchema = () =>
   z
@@ -175,6 +202,12 @@ export const deviceConditionInputSchema: z.ZodType<DeviceConditionInput> = z
           .optional()
           .describe(
             "Use up free space on /data with a ballast file (`fallocate`): 'low' leaves about 128 MiB, 'full' about 8 MiB. Reset deletes the ballast. Or unset.",
+          ),
+        corruptAppFile: z
+          .union([z.literal(DEVICE_CONDITION_UNSET), corruptTargetSchema()])
+          .optional()
+          .describe(
+            "Damage one file in a debuggable app's data directory ({ package, path, mode }), e.g. a SQLite database or SharedPreferences XML. 'overwrite' zeroes its first 256 bytes, 'truncate' cuts it in half. Needs a debuggable app (run-as), force-stops the app, and keeps a copy that reset restores and verifies by checksum. Or unset.",
           ),
         revokePermission: z
           .union([

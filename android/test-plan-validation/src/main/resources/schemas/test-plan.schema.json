@@ -1942,6 +1942,21 @@
                     }
                   ]
                 },
+                "corruptAppFile": {
+                  "oneOf": [
+                    { "type": "string", "const": "unset" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "package": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$" },
+                        "path": { "type": "string", "pattern": "^(?!\\.{1,2}(?:/|$))[A-Za-z0-9_.-]+(?:/(?!\\.{1,2}(?:/|$))[A-Za-z0-9_.-]+)*$" },
+                        "mode": { "type": "string", "enum": ["overwrite", "truncate"] }
+                      },
+                      "required": ["package", "path", "mode"],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
                 "killApp": {
                   "oneOf": [
                     { "type": "string", "const": "unset" },

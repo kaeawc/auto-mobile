@@ -32294,6 +32294,34 @@
                   "enum": ["low", "full", "unset"],
                   "description": "Use up free space on /data with a ballast file (`fallocate`): 'low' leaves about 128 MiB, 'full' about 8 MiB. Reset deletes the ballast. Or unset."
                 },
+                "corruptAppFile": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "unset"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "package": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$"
+                        },
+                        "path": {
+                          "type": "string",
+                          "pattern": "^(?!\\.{1,2}(?:\\/|$))[A-Za-z0-9_.-]+(?:\\/(?!\\.{1,2}(?:\\/|$))[A-Za-z0-9_.-]+)*$"
+                        },
+                        "mode": {
+                          "type": "string",
+                          "enum": ["overwrite", "truncate"]
+                        }
+                      },
+                      "required": ["package", "path", "mode"],
+                      "additionalProperties": false
+                    }
+                  ],
+                  "description": "Damage one file in a debuggable app's data directory ({ package, path, mode }), e.g. a SQLite database or SharedPreferences XML. 'overwrite' zeroes its first 256 bytes, 'truncate' cuts it in half. Needs a debuggable app (run-as), force-stops the app, and keeps a copy that reset restores and verifies by checksum. Or unset."
+                },
                 "revokePermission": {
                   "anyOf": [
                     {

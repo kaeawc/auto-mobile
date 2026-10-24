@@ -54,6 +54,7 @@ portable test/features/action/IosClearEntryPoints.test.ts                # asser
 portable test/features/action/IosSelectionScreenSize.test.ts             # tapAny geometry for iOS and Android
 portable test/features/action/TapOnElement.iosCachedResolution.test.ts   # Android failure text stays byte-identical
 portable test/features/action/TapOnElement.iosClippedTargetOwnership.test.ts # PIN cases for Android dispatch
+portable test/features/action/SetUIState.iosSafariEmptyValue.test.ts      # SetUIState fakes plus committed captures; no iOS host needed
 portable test/features/action/TapOnElement.iosKeyboardChromeCover.test.ts # PIN case for Android dispatch
 portable test/features/action/TapOnElementIosScreenSize.test.ts          # Android keeps legacy raw metadata
 portable test/features/action/swipeon/iosChromeInsets.test.ts            # Android auto-target inset comparison

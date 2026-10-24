@@ -50,6 +50,9 @@ export interface AndroidCtrlProxyClientTestHooks {
   webSocketMessageHandlers(): AndroidInboundMessageRouter["webSocketMessageHandlers"];
   createDelegateContext(): DelegateContext;
   injected(): AndroidCtrlProxyInjectedState;
+  isCommandSupported(messageType: string): boolean;
+  /** The memoised gestures delegate; assign a prebuilt one to drive it with a custom context. */
+  installedGestures: CtrlProxyGestures | null;
   cachedHierarchy(): CachedHierarchy | null;
   handleWebSocketMessage(data: string): Promise<void>;
   getWebSocketUrl(): string;

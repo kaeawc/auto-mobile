@@ -1,3 +1,9 @@
+import {
+  findUnsafeResourceCombinations,
+  iosDeviceResourceHazards,
+  type IosDeviceResourceHazard,
+} from "../iosDeviceResourceHazards";
+import { UnsafeDeviceResourceCombinationError } from "../../models/UnsafeDeviceResourceCombinationError";
 import { ENV, readEnvTrimmed } from "../../config/env";
 import type { DeviceResourceConfiguration } from "../../models/DeviceResourceConfiguration";
 import { iosDeviceResourceCatalog } from "../iosDeviceResourceCatalog";
@@ -30,13 +36,13 @@ export const PREBOOT_LEAN_PROFILES = {
   readonly (keyof typeof iosDeviceResourceCatalog)[]
 >;
 
-export function resolvePrebootLabels({
+function resolvePrebootResources({
   profile,
   resources = {},
 }: {
   profile: PrebootLeanProfileName;
   resources?: DeviceResourceConfiguration;
-}): string[] {
+}): (keyof typeof iosDeviceResourceCatalog)[] {
   const selected = new Set<keyof typeof iosDeviceResourceCatalog>(PREBOOT_LEAN_PROFILES[profile]);
   for (const key of Object.keys(
     iosDeviceResourceCatalog,
@@ -47,7 +53,18 @@ export function resolvePrebootLabels({
       selected.delete(key);
     }
   }
-  return [...new Set([...selected].flatMap((key) => [...iosDeviceResourceCatalog[key]]))].sort();
+  return [...selected];
+}
+
+export function resolvePrebootLabels(options: {
+  profile: PrebootLeanProfileName;
+  resources?: DeviceResourceConfiguration;
+}): string[] {
+  return [
+    ...new Set(
+      resolvePrebootResources(options).flatMap((key) => [...iosDeviceResourceCatalog[key]]),
+    ),
+  ].sort();
 }
 
 export function resolveDefaultPrebootProfile(env: NodeJS.ProcessEnv): PrebootLeanProfileName {
@@ -72,6 +89,7 @@ export interface PrebootApplyResult {
   labels: string[];
   path?: string;
   reason?: string;
+  unsafe?: readonly IosDeviceResourceHazard[];
 }
 
 export class SimulatorPrebootProfile {
@@ -79,6 +97,7 @@ export class SimulatorPrebootProfile {
     private readonly host: SimulatorHostState = new NodeSimulatorHostState(),
     private readonly defaultProfile: () => PrebootLeanProfileName = () =>
       resolveDefaultPrebootProfile(process.env),
+    private readonly hazards: readonly IosDeviceResourceHazard[] = iosDeviceResourceHazards,
   ) {}
   async apply(
     udid: string,
@@ -91,7 +110,18 @@ export class SimulatorPrebootProfile {
     let labels: string[] = [];
     try {
       signal?.throwIfAborted();
-      labels = resolvePrebootLabels({ profile: this.defaultProfile(), resources });
+      const options = { profile: this.defaultProfile(), resources };
+      const unsafe = findUnsafeResourceCombinations(
+        resolvePrebootResources(options),
+        this.hazards,
+        "preboot",
+      );
+      if (unsafe.length) {
+        const refusal = new UnsafeDeviceResourceCombinationError(unsafe);
+        logger.warn(refusal.message);
+        return { applied: false, labels: [], reason: refusal.message, unsafe };
+      }
+      labels = resolvePrebootLabels(options);
       if (!labels.length) {
         return { applied: false, labels: [] };
       }

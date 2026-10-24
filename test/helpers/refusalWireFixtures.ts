@@ -1,3 +1,5 @@
+import { UnsafeDeviceResourceCombinationError } from "../../src/models/UnsafeDeviceResourceCombinationError";
+import { fakeIosDeviceResourceHazards } from "./fakeIosDeviceResourceHazards";
 import { DeviceServiceDisabledError } from "../../src/models/DeviceServiceDisabledError";
 import { DaemonRestartOptionsUnknownError } from "../../src/daemon/proxy/DaemonRestartOptionsUnknownError";
 import { BindingConfigError } from "../../src/daemon/sessionBroker/provisioning/provisionRequest";
@@ -507,6 +509,11 @@ const BUILDERS: readonly FixtureEntry[] = [
     "device_owned_by_other_daemon",
     "DeviceOwnedByOtherDaemonError via shapeToolCallError",
     () => shaped(new DeviceOwnedByOtherDaemonError(DEVICE, 4242)),
+  ],
+  [
+    "unsafe_device_resource_combination",
+    "UnsafeDeviceResourceCombinationError via shapeToolCallError",
+    () => shaped(new UnsafeDeviceResourceCombinationError(fakeIosDeviceResourceHazards)),
   ],
   [
     "device_service_disabled",

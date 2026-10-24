@@ -1,3 +1,4 @@
+import type { IosDeviceResourceHazard } from "../utils/iosDeviceResourceHazards";
 import type { ProvisionDeviceLifecycleOutcome } from "./provisionDeviceLifecycle";
 import type { DeviceResourceDrift } from "../models/DeviceResourceReconciliation";
 import { ActionableError } from "../models";
@@ -21,6 +22,7 @@ export type ProvisionDeviceFailureCode =
   | "timeout"
   | "unsupported"
   | "platform_command_failed"
+  | "unsafe_device_resource_combination"
   | "resource_profile_unproven"
   | "runtime_incompatible"
   | "requires_real_device";
@@ -52,6 +54,7 @@ export const DEFAULT_PROVISION_DEVICE_RETRYABILITY: Readonly<
   unsupported: false,
   platform_command_failed: false,
   resource_profile_unproven: false,
+  unsafe_device_resource_combination: false,
   // A proven model/runtime mismatch is a property of the request; only a different pair can succeed.
   runtime_incompatible: false,
   // The request needs an OEM capability no emulator provides; only real hardware can serve it.
@@ -59,6 +62,8 @@ export const DEFAULT_PROVISION_DEVICE_RETRYABILITY: Readonly<
 };
 
 export interface ProvisionDeviceErrorDiagnostics {
+  hazards?: readonly IosDeviceResourceHazard[];
+  howToProceed?: string;
   /** Internal bridge of provisionDevice lifecycle evidence to the binding creation journal. */
   retainedDevice?: NonNullable<ProvisionDeviceLifecycleOutcome["device"]>;
   providerCode?: string;

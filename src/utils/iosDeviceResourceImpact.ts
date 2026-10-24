@@ -1,3 +1,4 @@
+import { iosDeviceResourceHazards, type IosDeviceResourceHazard } from "./iosDeviceResourceHazards";
 import type { ConfigurableDeviceResource } from "../models/deviceResourceDescriptions";
 import type {
   DisabledIosDeviceResource,
@@ -13,12 +14,13 @@ export type {
   IosDeviceResourceImpact,
 } from "../models/DeviceResourceImpact";
 
-/** #15097 checked the core driving surface with the full catalog plus extras disabled. */
+/** #15097 checked the driving surface; combination hazards are reported separately. */
 export const coreDrivingImpact: ImpactItem = {
   description:
     "Core driving (startDevice runner start, `observe`, screenshots, `launchApp`/`terminateApp`, `tapOn`, and `sendKeys`) is unaffected.",
   confidence: "verified",
-  evidence: "#15097: one run, iOS 27.0, every catalog group disabled together after boot",
+  evidence:
+    "#15097: driving surface passed on iOS 27.0; see unsafeWith / #15218 for combinations that spin the CPU",
 };
 
 export const iosDeviceResourceImpact = {
@@ -397,6 +399,13 @@ export const iosDeviceResourceImpact = {
     automobileImpact: [
       coreDrivingImpact,
       {
+        description:
+          "Disabling on a running simulator is refused with unsafe_device_resource_combination because it makes Calendar spin the CPU. Applying before first boot is allowed.",
+        confidence: "verified",
+        evidence:
+          "#15218: calaccessd bootout at 90 s caused MobileCal 100-130% CPU and diagnosticd 20-50%; preboot disable stayed quiet even after Calendar launched.",
+      },
+      {
         description: "Workflows that inspect or change the local Calendar database may fail.",
         confidence: "inferred",
       },
@@ -590,15 +599,28 @@ export const iosDeviceResourceImpact = {
 
 export function getIosDeviceResourceImpact(
   resource: ConfigurableDeviceResource,
+  hazards: readonly IosDeviceResourceHazard[] = iosDeviceResourceHazards,
 ): IosDeviceResourceImpact | undefined {
-  return Object.hasOwn(iosDeviceResourceImpact, resource)
-    ? iosDeviceResourceImpact[resource as keyof typeof iosDeviceResourceCatalog]
-    : undefined;
+  if (!Object.hasOwn(iosDeviceResourceImpact, resource)) {
+    return undefined;
+  }
+  const impact = iosDeviceResourceImpact[resource as keyof typeof iosDeviceResourceCatalog];
+  const unsafeWith = hazards
+    .filter((hazard) => hazard.resources.some((key) => key === resource))
+    .map((hazard) => ({
+      hazardId: hazard.id,
+      appliesTo: hazard.appliesTo,
+      withResources: hazard.resources.filter((key) => key !== resource),
+      reason: hazard.reason,
+      evidence: hazard.evidence,
+    }));
+  return unsafeWith.length ? { ...impact, unsafeWith } : impact;
 }
 
 /** Only proven disabled catalog resources are reported, in stable catalog order. */
 export function describeDisabledDeviceResources(
   states: Partial<Record<ConfigurableDeviceResource, { state: string }>>,
+  hazards: readonly IosDeviceResourceHazard[] = iosDeviceResourceHazards,
 ): DisabledIosDeviceResource[] {
   const disabled: DisabledIosDeviceResource[] = [];
   for (const resource of Object.keys(
@@ -608,7 +630,7 @@ export function describeDisabledDeviceResources(
       disabled.push({
         resource,
         labels: [...iosDeviceResourceCatalog[resource]],
-        ...iosDeviceResourceImpact[resource],
+        ...getIosDeviceResourceImpact(resource, hazards)!,
       });
     }
   }

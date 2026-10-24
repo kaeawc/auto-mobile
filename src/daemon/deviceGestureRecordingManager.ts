@@ -25,9 +25,12 @@ export const DEVICE_GESTURE_RECORDING_USER_INPUT_ONLY_NOTICE: string =
 export class NoUserInputCapturedError extends ActionableError {
   readonly reason = NO_USER_INPUT_CAPTURED_REASON;
 
-  constructor() {
+  /** `omitted` names input that was recorded but could not be exported, so it is not "nothing". */
+  constructor(omitted?: string) {
     super(
-      "No recorded interactions were captured. " + DEVICE_GESTURE_RECORDING_USER_INPUT_ONLY_NOTICE,
+      "No recorded interactions were captured. " +
+        DEVICE_GESTURE_RECORDING_USER_INPUT_ONLY_NOTICE +
+        (omitted ? ` ${omitted}` : ""),
     );
   }
 }
@@ -270,9 +273,10 @@ const buildPlanFromSteps = (
   session: RecordingSession,
   planName: string,
   stoppedAt: number,
+  omittedInput?: string,
 ): { plan: Plan; stepCount: number } => {
   if (steps.length === 0) {
-    throw new NoUserInputCapturedError();
+    throw new NoUserInputCapturedError(omittedInput);
   }
 
   const startedAt = new Date(session.startedAt);
@@ -572,7 +576,13 @@ async function stopAndBuildResult(
 
   const stoppedAt = timer.now();
   const resolvedPlanName = formatPlanName(planName);
-  const { plan, stepCount } = buildPlanFromSteps(steps, session, resolvedPlanName, stoppedAt);
+  const { plan, stepCount } = buildPlanFromSteps(
+    steps,
+    session,
+    resolvedPlanName,
+    stoppedAt,
+    exportMessage,
+  );
   const planContent = yaml.dump(plan, {
     indent: 2,
     lineWidth: -1,

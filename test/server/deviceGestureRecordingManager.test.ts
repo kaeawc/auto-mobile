@@ -863,6 +863,15 @@ describe("deviceGestureRecordingManager stylus export (#13084)", () => {
     expect(result.error).toBeUndefined();
   });
 
+  test("a recording where every pen gesture was skipped says why instead of reporting nothing", async () => {
+    const attempt = recordPenGestures("pen-eraser-only", [
+      { type: "tap", arrivedAt: 0, screenX: 90, screenY: 99, toolType: "eraser" },
+    ]);
+
+    await expect(attempt).rejects.toBeInstanceOf(NoUserInputCapturedError);
+    await expect(attempt).rejects.toThrow("eraser");
+  });
+
   test("an eraser gesture is left out and the result says so", async () => {
     const result = await recordPenGestures("pen-eraser", [
       { type: "tap", arrivedAt: 0, screenX: 40, screenY: 80, toolType: "stylus" },

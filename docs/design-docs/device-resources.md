@@ -530,3 +530,46 @@ and `retryAfterMs: 1000`; their timeout leaves the shared read running and able 
 into the 5,000 ms cache. Bypass readers run a fresh subprocess. Coalesced AVD listings use a
 30,000 ms shared cap and independent caller deadlines/signals, so a 2,000 ms waiter cannot
 cancel a longer reader's listing.
+
+## Tool preflight: device_service_disabled
+
+A scoped provider checks known disabled services before staging or invoking the
+simulator operation. The typed dependency map in
+`src/utils/deviceServiceDependencies.ts` registers only shipped tools that use a
+catalog resource. The provider enforces the scope; the preflight checks the
+registered tool's resources in stable catalog order.
+
+| Tool         | Scope                                        | Resource           | Labels                                                                               | Unavailable                                      |
+| ------------ | -------------------------------------------- | ------------------ | ------------------------------------------------------------------------------------ | ------------------------------------------------ |
+| `putAppFile` | iOS Simulator, `target.domain=media_library` | `mediaTranscoding` | `com.apple.photos.ImageConversionService`, `com.apple.photos.VideoConversionService` | Photo/video media-library import and transcoding |
+
+Any catalog label with the boolean override `true` disables its resource. The
+first disabled resource produces an `ActionableError` with this wire payload:
+
+```typescript
+{
+  code: "device_service_disabled",
+  tool: "putAppFile",
+  resource: "mediaTranscoding",
+  labels: ["com.apple.photos.ImageConversionService", "com.apple.photos.VideoConversionService"],
+  disabledLabels: ["com.apple.photos.ImageConversionService"],
+  unavailable: "iOS Simulator photo/video media-library import and transcoding",
+  howToEnable: "Call setDeviceResources with {resources:{mediaTranscoding:\"enabled\"}} (enable this default-disabled tool with setToolEnabled or --enable-tool setDeviceResources), or provision/start the simulator without {resources:{mediaTranscoding:\"disabled\"}}.",
+  retryable: false,
+  deviceId: "<simulator UDID>"
+}
+```
+
+The single source for this fast-path check is the host launchd disabled database,
+`/private/var/tmp/com.apple.CoreSimulator.SimDevice.<UDID>/disabled.plist`, read
+through `PlistReader.readJsonFile`. Both `launchctl disable` and pre-first-boot
+writes feed this per-UDID database, which survives reboot and erase. Application
+DB state is unsuitable here: it requires runtime/device-type identity and extra
+simctl calls, and may not reflect external changes. Each call reads once without
+caching. A missing file means no known disabled labels; other read failures log a
+warning and pass. Unknown state never blocks the tool. This check is not a
+service-health guarantee. Physical devices, Android devices and unmapped tools
+skip the read; cancellation remains cancellation.
+
+Tools for Siri (#14892), dictation, HealthKit, widgets and Spotlight lookups
+register a dependency and a scoped preflight call when they ship.

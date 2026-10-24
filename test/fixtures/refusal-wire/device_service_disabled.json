@@ -1,0 +1,13 @@
+{
+  "code": "device_service_disabled",
+  "builder": "DeviceServiceDisabledError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":\"putAppFile requires resource mediaTranscoding (com.apple.photos.ImageConversionService, com.apple.photos.VideoConversionService); disabled labels: com.apple.photos.ImageConversionService. Unavailable: iOS Simulator photo/video media-library import and transcoding. Call setDeviceResources with {resources:{mediaTranscoding:\\\"enabled\\\"}} (enable this default-disabled tool with setToolEnabled or --enable-tool setDeviceResources), or provision/start the simulator without {resources:{mediaTranscoding:\\\"disabled\\\"}}.\",\"code\":\"device_service_disabled\",\"tool\":\"putAppFile\",\"resource\":\"mediaTranscoding\",\"labels\":[\"com.apple.photos.ImageConversionService\",\"com.apple.photos.VideoConversionService\"],\"disabledLabels\":[\"com.apple.photos.ImageConversionService\"],\"unavailable\":\"iOS Simulator photo/video media-library import and transcoding\",\"howToEnable\":\"Call setDeviceResources with {resources:{mediaTranscoding:\\\"enabled\\\"}} (enable this default-disabled tool with setToolEnabled or --enable-tool setDeviceResources), or provision/start the simulator without {resources:{mediaTranscoding:\\\"disabled\\\"}}.\",\"retryable\":false,\"deviceId\":\"AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE\"}"
+      }
+    ],
+    "isError": true
+  }
+}

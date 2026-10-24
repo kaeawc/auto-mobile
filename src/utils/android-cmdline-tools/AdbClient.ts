@@ -943,6 +943,26 @@ export class AdbClient implements AdbExecutor {
     }).execWithSignal(file, args, maxBuffer, timeoutMs, signal, options);
   }
 
+  /** Typed test seam for the private execution members (#11865). */
+  get testHooks() {
+    const client = this;
+    type ExecWithSignal = AdbClient["execWithSignal"];
+    return {
+      get isTestMode(): boolean {
+        return client.isTestMode;
+      },
+      set isTestMode(value: boolean) {
+        client.isTestMode = value;
+      },
+      get execWithSignal(): ExecWithSignal {
+        return (...args) => client.execWithSignal(...args);
+      },
+      set execWithSignal(fn: ExecWithSignal) {
+        client.execWithSignal = fn;
+      },
+    };
+  }
+
   getBootedAndroidDevices(
     options: {
       bypassCache?: boolean;

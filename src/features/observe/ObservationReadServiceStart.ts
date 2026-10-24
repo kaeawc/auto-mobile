@@ -1,3 +1,5 @@
+import { ServiceStartTransitionDeclinedError } from "./ServiceStartTransitionDeclinedError";
+export { ServiceStartTransitionDeclinedError } from "./ServiceStartTransitionDeclinedError";
 import { RunnerReadinessError } from "../../ctrlProxy/RunnerReadinessError";
 import {
   getSharedIosRunnerLaunchQueueView,
@@ -18,7 +20,10 @@ import {
   isDeviceReadinessLocked,
 } from "../../utils/deviceReadinessLock";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
-import type { RunnerReadinessService } from "../../ctrlProxy/RunnerReadinessService";
+import type {
+  RunnerReadinessRequest,
+  RunnerReadinessService,
+} from "../../ctrlProxy/RunnerReadinessService";
 import { createDefaultRunnerReadinessService } from "../../daemon/defaultRunnerReadinessService";
 import { serverConfig } from "../../utils/ServerConfig";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
@@ -80,6 +85,8 @@ const daemonPoolPickup: ObservationPoolPickup = {
 
 // Foreign or non-assignable devices must not trigger pickup on every observe.
 const UNPOOLED_PICKUP_THROTTLE_MS = 10_000;
+const MAX_TRANSITION_WAITS = 8;
+export const IOS_SERVICE_START_FLIGHT_CEILING_MS = 60_000;
 
 export interface ObservationServiceStartRequest {
   device: BootedDevice;
@@ -104,6 +111,7 @@ export class ObservationReadServiceStart {
   constructor(
     private readonly options: {
       timer?: Timer;
+      iosFlightCeilingMs?: number;
       launchQueue?: IosRunnerLaunchQueueView;
       ownershipGuard?: ObservationServiceOwnershipGuard;
       poolPickup?: ObservationPoolPickup;
@@ -128,6 +136,7 @@ export class ObservationReadServiceStart {
     const key = deviceReadinessLockKey(request.device.platform, request.device.deviceId);
     // Each waiter retains the flight's snapshot even after setup removes the map entry.
     const snapshot = this.queueSnapshotFor(key);
+    let readerTimedOut = false;
     try {
       return await raceWithDeadline(
         () =>
@@ -144,12 +153,17 @@ export class ObservationReadServiceStart {
           timeoutMs: Math.max(0, request.deadlineMs - this.timer.now()),
           signal: request.signal,
           label: "Observer hierarchy service start",
+          onTimeout: () => {
+            readerTimedOut = true;
+          },
         },
       );
     } catch (error) {
       request.signal?.throwIfAborted();
       logger.warn(`[observe] Hierarchy service start failed: ${errorMessage(error)}`, error);
-      return this.rethrowStartupFailure(error, request, snapshot);
+      const backgroundStart =
+        readerTimedOut && request.device.platform === "ios" && this.flights.has(key);
+      return this.rethrowStartupFailure(error, request, snapshot, backgroundStart);
     } finally {
       // setup may still be running for other readers; their closures retain this snapshot.
       if (!this.flights.has(key)) {
@@ -159,21 +173,15 @@ export class ObservationReadServiceStart {
   }
 
   private async admit(request: ObservationServiceStartRequest): Promise<void> {
-    const awaitTransition = this.guard.awaitTransition?.bind(this.guard);
     let iterations = 0;
     while (!this.guard.canStart(request.device)) {
       const remaining = request.deadlineMs - this.timer.now();
       // An expired deadline intentionally falls through to the same decline.
-      if (!awaitTransition || remaining <= 0 || iterations >= 8) {
+      if (!this.guard.awaitTransition || remaining <= 0 || iterations >= MAX_TRANSITION_WAITS) {
         break;
       }
       iterations++;
-      const waited = await raceWithDeadline(() => awaitTransition(request.device, request.signal), {
-        timer: this.timer,
-        timeoutMs: remaining,
-        signal: request.signal,
-        label: "Observer pool assignment transition",
-      });
+      const waited = await this.awaitTransition(request.device, request.deadlineMs, request.signal);
       if (!waited) {
         break;
       }
@@ -183,6 +191,19 @@ export class ObservationReadServiceStart {
         "service start declined: ownership or pool transition cannot be excluded",
       );
     }
+  }
+
+  private async awaitTransition(
+    device: BootedDevice,
+    deadlineMs: number,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    return raceWithDeadline(() => this.guard.awaitTransition!(device, signal), {
+      timer: this.timer,
+      timeoutMs: Math.max(0, deadlineMs - this.timer.now()),
+      signal,
+      label: "Observer pool assignment transition",
+    });
   }
 
   private queueSnapshotFor(key: string): LaunchQueueSnapshot {
@@ -201,6 +222,7 @@ export class ObservationReadServiceStart {
     error: unknown,
     request: ObservationServiceStartRequest,
     snapshot: LaunchQueueSnapshot,
+    backgroundStart: boolean,
   ): never {
     const timedOut =
       (error instanceof RunnerReadinessError && error.deadlineExhausted) ||
@@ -209,7 +231,7 @@ export class ObservationReadServiceStart {
     const status = timedOut
       ? (snapshot.status ?? this.launchQueueStatus(request.device))
       : undefined;
-    if (status) {
+    if (status || (timedOut && backgroundStart)) {
       throw new RunnerLaunchQueuedError(request.device.deviceId, status, { cause: error });
     }
     throw error;
@@ -306,51 +328,106 @@ export class ObservationReadServiceStart {
     if (remaining <= 0) {
       throw new ActionableError("Observer hierarchy service start timed out before setup");
     }
-    // The first read supplies the shared setup's ceiling. Its cancellation only
-    // cancels setup when every waiter aborts; later readers retain their own bounds.
+    // Cold iOS starts outlive an individual read budget. Only explicit cancellation
+    // by all waiters cancels a flight; each reader retains its own deadline.
+    const flightMs =
+      request.device.platform === "ios"
+        ? Math.max(
+            remaining,
+            this.options.iosFlightCeilingMs ?? IOS_SERVICE_START_FLIGHT_CEILING_MS,
+          )
+        : remaining;
+    const flightDeadlineMs =
+      request.device.platform === "ios" ? this.timer.now() + flightMs : request.deadlineMs;
     const deadline = new AbortController();
     const timeout = this.timer.setTimeout(() => {
       snapshot.status = this.launchQueueStatus(request.device);
       deadline.abort(new ActionableError("Observer hierarchy service start timed out"));
-    }, remaining);
+    }, flightMs);
     const signal = flightSignal
       ? AbortSignal.any([flightSignal, deadline.signal])
       : deadline.signal;
     try {
       const readiness = this.options.readiness ?? createDefaultRunnerReadinessService(this.timer);
-      await raceWithDeadline(
-        () =>
-          readiness.ensureReady({
-            device: request.device,
-            requestedIdentity: request.device.deviceId,
-            operationName: "observe deviceId",
-            totalDeadlineMs: request.deadlineMs,
-            readinessTimeoutMs: remaining,
-            signal,
-            skipCtrlProxyDownload: (
-              this.options.skipCtrlProxyDownload ??
-              (() => serverConfig.isSkipCtrlProxyDownloadEnabled())
-            )(),
-            assertCanSetup: () => {
-              signal.throwIfAborted();
-              if (!this.guard.canStart(request.device)) {
-                throw new ActionableError(
-                  "service start declined: ownership or pool transition changed while waiting for readiness",
-                );
-              }
-            },
-          }),
-        {
-          timer: this.timer,
-          signal,
-          timeoutMs: remaining,
-          label: "Observer hierarchy service start",
+      await this.ensureReadyWithTransitions(readiness, {
+        device: request.device,
+        requestedIdentity: request.device.deviceId,
+        operationName: "observe deviceId",
+        totalDeadlineMs: flightDeadlineMs,
+        readinessTimeoutMs: flightMs,
+        signal,
+        skipCtrlProxyDownload: (
+          this.options.skipCtrlProxyDownload ??
+          (() => serverConfig.isSkipCtrlProxyDownloadEnabled())
+        )(),
+        assertCanSetup: () => {
+          signal.throwIfAborted();
+          if (!this.guard.canStart(request.device)) {
+            throw new ServiceStartTransitionDeclinedError(
+              "service start declined: ownership or pool transition changed while waiting for readiness",
+            );
+          }
         },
-      );
+      });
       return true;
     } finally {
       this.timer.clearTimeout(timeout);
       this.clearQueueSnapshot(key, snapshot);
+    }
+  }
+
+  private async ensureReadyWithTransitions(
+    readiness: Pick<RunnerReadinessService, "ensureReady">,
+    request: RunnerReadinessRequest,
+  ): Promise<void> {
+    let transitionWaits = 0;
+    while (true) {
+      const timeoutMs = Math.max(0, request.totalDeadlineMs - this.timer.now());
+      try {
+        await raceWithDeadline(
+          () => readiness.ensureReady({ ...request, readinessTimeoutMs: timeoutMs }),
+          {
+            timer: this.timer,
+            signal: request.signal,
+            timeoutMs,
+            label: "Observer hierarchy service start",
+          },
+        );
+        return;
+      } catch (error) {
+        // ensureReady has released the readiness lock before the pool mutex wait.
+        await this.awaitSetupTransition(error, request, transitionWaits);
+        transitionWaits++;
+      }
+    }
+  }
+
+  private async awaitSetupTransition(
+    error: unknown,
+    request: RunnerReadinessRequest,
+    transitionWaits: number,
+  ): Promise<void> {
+    if (
+      !(error instanceof ServiceStartTransitionDeclinedError) ||
+      !this.guard.awaitTransition ||
+      transitionWaits >= MAX_TRANSITION_WAITS ||
+      request.signal?.aborted ||
+      this.timer.now() >= request.totalDeadlineMs
+    ) {
+      throw error;
+    }
+    let waited: boolean;
+    try {
+      waited = await this.awaitTransition(request.device, request.totalDeadlineMs, request.signal);
+    } catch (transitionError) {
+      logger.debug(
+        "[observe] Assignment transition wait ended before setup retry",
+        transitionError,
+      );
+      throw error;
+    }
+    if (!waited || request.signal?.aborted || this.timer.now() >= request.totalDeadlineMs) {
+      throw error;
     }
   }
 }

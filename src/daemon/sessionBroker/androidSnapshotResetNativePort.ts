@@ -1,4 +1,5 @@
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import { watchEmulatorProcessDeath } from "./androidEmulatorLiveness";
 import { createHash } from "node:crypto";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
@@ -361,14 +362,33 @@ export class NativeAndroidSnapshotResetPort implements AndroidSnapshotResetPort 
 
   async waitForRestore(device: BootedDevice, step: AndroidSnapshotStep): Promise<void> {
     await step.assertOwned();
-    await this.dependencies.emulator.waitForEmulatorReady(
-      device.name,
-      step.timeoutMs,
-      null,
-      device.deviceId,
-      step.signal,
-      { skipWakeAndUnlock: true },
-    );
+    const { timer, processStopper } = this.dependencies;
+    const controller = new AbortController();
+    const signal = AbortSignal.any([step.signal, controller.signal]);
+    const deadlineMs = timer.now() + step.timeoutMs;
+    try {
+      // A snapshot load that kills the emulator would otherwise leave the readiness poll
+      // waiting out the whole step budget (#15177); the watch ends the wait on process death.
+      await raceWithDeadline(
+        [
+          this.dependencies.emulator.waitForEmulatorReady(
+            device.name,
+            step.timeoutMs,
+            null,
+            device.deviceId,
+            signal,
+            { skipWakeAndUnlock: true },
+          ),
+          watchEmulatorProcessDeath(
+            { serial: device.deviceId, avdName: device.name },
+            { stopper: processStopper, timer, signal, deadlineMs, assertOwned: step.assertOwned },
+          ),
+        ],
+        { timer, signal: step.signal, label: "Android snapshot restore readiness" },
+      );
+    } finally {
+      controller.abort();
+    }
   }
 
   ready(device: BootedDevice, step: AndroidSnapshotStep): Promise<void> {

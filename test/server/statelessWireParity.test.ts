@@ -254,12 +254,9 @@ describe("desktop handshake against the real daemon streamable endpoint", () => 
       },
     );
     // The HTTP listener lifecycle is private; Daemon.start() would also boot devices and the DB.
-    const call = async (method: string): Promise<void> => {
-      await Reflect.get(daemon, method).call(daemon);
-    };
     daemon.testHooks.publishHttpToken();
     await Reflect.get(daemon, "httpIngress").start();
-    await call("resolveStartupCompletion");
+    daemon.testHooks.resolveStartupCompletion();
     await Promise.resolve();
 
     const exchanges: FixtureExchange[] = [];

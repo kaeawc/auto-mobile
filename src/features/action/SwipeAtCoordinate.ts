@@ -1,3 +1,4 @@
+import { androidCtrlProxyClientForPlatform } from "../observe/android/androidCtrlProxyClientFor";
 import { ActionableError } from "../../models/ActionableError";
 import { DispatchedObservationError } from "../../models/DispatchedObservationError";
 import { logger } from "../../utils/logger";
@@ -32,7 +33,7 @@ import {
   dispatchStylusSwipe,
   stylusRefusal,
 } from "./stylusPointer";
-import { type AndroidCtrlProxy, AndroidCtrlProxyClient } from "../observe/android";
+import { type AndroidCtrlProxy } from "../observe/android";
 import {
   selectedDisplayPin,
   unsupportedDisplayOptionMessage,
@@ -142,7 +143,7 @@ export class SwipeAtCoordinate extends BaseVisualChange {
     this.geometry = dependencies.geometry ?? new DefaultElementGeometry();
     this.snapshotReferences = dependencies.snapshotReferences ?? snapshotReferences;
     this.androidClient =
-      dependencies.androidClient ?? AndroidCtrlProxyClient.getInstance(device, this.adbFactory);
+      dependencies.androidClient ?? androidCtrlProxyClientForPlatform(device, this.adbFactory);
     this.lastRenderedObservation = dependencies.lastRenderedObservation;
     this.invalidateIosCache =
       dependencies.invalidateIosCache ??

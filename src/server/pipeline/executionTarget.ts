@@ -1,3 +1,4 @@
+import { resolveSessionDevicePlatform } from "./resolveSessionDevicePlatform";
 import type { DeviceAwareToolOptions, SessionlessDeviceRead } from "../toolRegistry";
 import {
   DeviceReadiness,
@@ -556,13 +557,15 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     sessionPool: NonNullable<ReturnType<typeof defaultDaemonContext.devicePool>>,
     providedDeviceId: string,
   ): Promise<void> {
-    const resolvedPlatform =
-      state.platform === "android" || state.platform === "ios" ? state.platform : "android";
     const pooledDevice = sessionPool.getDevice(providedDeviceId);
     const device: BootedDevice = {
       deviceId: providedDeviceId,
       name: pooledDevice?.name ?? providedDeviceId,
-      platform: pooledDevice?.platform ?? resolvedPlatform,
+      platform: resolveSessionDevicePlatform(
+        pooledDevice?.platform,
+        state.platform,
+        providedDeviceId,
+      ),
       iosVersion: pooledDevice?.iosVersion,
     };
     state.device = await this.hydrateDisplays(

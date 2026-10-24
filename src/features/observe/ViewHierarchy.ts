@@ -1,3 +1,4 @@
+import { androidCtrlProxyClientForPlatform } from "./android/androidCtrlProxyClientFor";
 import {
   BootedDevice,
   Element,
@@ -87,7 +88,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     this.geometry = new DefaultElementGeometry();
 
     this.accessibilityServiceClient =
-      accessibilityServiceClient || AndroidCtrlProxyClient.getInstance(device, adbFactory);
+      accessibilityServiceClient || androidCtrlProxyClientForPlatform(device, adbFactory);
     this.adbFactory = adbFactory;
     this.timer = timer;
     this.observeAccessibilityManagerFactory = observeAccessibilityManagerFactory;

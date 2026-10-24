@@ -1,3 +1,4 @@
+import { androidCtrlProxyClientForPlatform } from "../../observe/android/androidCtrlProxyClientFor";
 import { SwipeOnAutoTargeting } from "./SwipeOnAutoTargeting";
 import { SwipeOnAndroidDisplay, containerFailureOf } from "./SwipeOnAndroidDisplay";
 import { freshSwipeHierarchy, withSwipeObservationReadScope } from "./freshSwipeHierarchy";
@@ -46,7 +47,6 @@ import {
   PerformanceTracker,
   NoOpPerformanceTracker,
 } from "../../../utils/PerformanceTracker";
-import { AndroidCtrlProxyClient } from "../../observe/android";
 import { buildElementSearchDebugContext } from "../../utility/ElementSearchDebugContext";
 import { resolveSwipeDirection } from "./swipeOnUtils";
 import { AccessibilityDetector } from "../../../ctrlProxy/accessibility/interfaces/AccessibilityDetector";
@@ -285,7 +285,7 @@ export class SwipeOn extends BaseVisualChange {
     this.geometry = dependencies.geometry ?? new DefaultElementGeometry();
     this.accessibilityService =
       dependencies.accessibilityService ??
-      AndroidCtrlProxyClient.getInstance(device, this.adbFactory);
+      androidCtrlProxyClientForPlatform(device, this.adbFactory);
     this.accessibilityDetector = dependencies.accessibilityDetector || defaultAccessibilityDetector;
     return parser;
   }

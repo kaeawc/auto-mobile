@@ -1,3 +1,4 @@
+import { assertAndroidCtrlProxyDevice } from "./androidCtrlProxyDeviceGuard";
 import { AndroidCtrlProxyClientDeps } from "./AndroidCtrlProxyClientDeps";
 import { AndroidCtrlProxyObservationClient } from "./AndroidCtrlProxyObservationClient";
 import { defaultAndroidServiceManagerFactory } from "./AndroidCtrlProxyServices";
@@ -197,6 +198,7 @@ export class AndroidCtrlProxyClient
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
   ): AndroidCtrlProxy {
     requireBootedDevice(device, "AndroidCtrlProxyClient.getInstance");
+    assertAndroidCtrlProxyDevice(device);
     daemonDeviceAdmissionGate.assertDeviceActionable(device.deviceId, CTRL_PROXY_CLIENT_PURPOSE);
     const deviceId = device.deviceId;
     const registry = AndroidCtrlProxyClient.registry;
@@ -250,6 +252,8 @@ export class AndroidCtrlProxyClient
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     existing?: AndroidCtrlProxyClient,
   ): AndroidCtrlProxyClient {
+    requireBootedDevice(device, "AndroidCtrlProxyClient.createForObservationRead");
+    assertAndroidCtrlProxyDevice(device);
     return new AndroidCtrlProxyClient(device, adbFactory.create(device), {
       ctrlProxyForwardLease:
         existing?.ctrlProxyForwardLease.fork?.() ?? existing?.ctrlProxyForwardLease,

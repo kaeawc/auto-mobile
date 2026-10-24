@@ -1,3 +1,4 @@
+import { androidCtrlProxyClientForPlatform } from "../observe/android/androidCtrlProxyClientFor";
 import { isStrictlyScoped } from "../utility/ScopedSelection";
 import { DispatchedObservationError } from "../../models/DispatchedObservationError";
 import { inputDurationArgument } from "./touchscreenInput";
@@ -28,7 +29,7 @@ import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 import { DRAG_INTENT } from "../utility/SelectionPolicy";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
 import { DefaultElementGeometry } from "../utility/ElementGeometry";
-import { type AndroidCtrlProxy, AndroidCtrlProxyClient } from "../observe/android";
+import { type AndroidCtrlProxy } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import {
   createGlobalPerformanceTracker,
@@ -180,7 +181,7 @@ export class DragAndDrop extends BaseVisualChange {
       deps.hierarchyCapture ??
       createDeviceHierarchyCapture(device, { timer, adbFactory: this.adbFactory });
     this.geometry = new DefaultElementGeometry();
-    this.accessibilityService = AndroidCtrlProxyClient.getInstance(device, this.adbFactory);
+    this.accessibilityService = androidCtrlProxyClientForPlatform(device, this.adbFactory);
     this.visionConfig = deps.visionConfig ?? DEFAULT_VISION_CONFIG;
     this.screenshotCapturer =
       deps.screenshotCapturer ?? new TakeScreenshotCapturer(device, this.adbFactory);

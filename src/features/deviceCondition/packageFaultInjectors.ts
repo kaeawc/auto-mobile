@@ -18,7 +18,14 @@ import {
   type DeviceConditionKey,
 } from "./DeviceConditionTypes";
 import { OwedResetError } from "./OwedResetError";
-import { createSerializer, rejectValue, shell, unsupported } from "./injectorSupport";
+import {
+  createSerializer,
+  rejectValue,
+  resolveAppUserWith,
+  shell,
+  unsupported,
+  type ResolveAppUser,
+} from "./injectorSupport";
 
 /**
  * Package-state faults for `deviceCondition.faults` (#14069), Android only and root-free:
@@ -42,55 +49,78 @@ function parsePackage(key: DeviceConditionKey, params: Record<string, unknown> |
   return parsed.data.package;
 }
 
-/** Whether `pm list packages <flags> <name>` lists exactly this package (the filter is a substring). */
+/** An app on one Android user: the `pm` subcommands default to user 0, or to every user when listing. */
+interface AppOnUser {
+  packageName: string;
+  userId: number;
+}
+
+const appKey = (app: AppOnUser): string => `${app.userId}|${app.packageName}`;
+
+/** Whether `pm list packages --user <id> <flags> <name>` lists exactly this package (the filter is a substring). */
 async function listsPackage(
   adb: AdbExecutor,
   flags: readonly string[],
-  packageName: string,
+  app: AppOnUser,
   signal?: AbortSignal,
 ): Promise<boolean> {
-  const out = await shell(adb, ["pm", "list", "packages", ...flags, packageName], signal);
-  return out.split("\n").some((line) => line.trim() === `package:${packageName}`);
+  const out = await shell(
+    adb,
+    ["pm", "list", "packages", "--user", String(app.userId), ...flags, app.packageName],
+    signal,
+  );
+  return out.split("\n").some((line) => line.trim() === `package:${app.packageName}`);
 }
 
-const isInstalled = (adb: AdbExecutor, packageName: string, signal?: AbortSignal) =>
-  listsPackage(adb, [], packageName, signal);
+const isInstalled = (adb: AdbExecutor, app: AppOnUser, signal?: AbortSignal) =>
+  listsPackage(adb, [], app, signal);
 
-const isDisabled = (adb: AdbExecutor, packageName: string, signal?: AbortSignal) =>
-  listsPackage(adb, ["-d"], packageName, signal);
+const isDisabled = (adb: AdbExecutor, app: AppOnUser, signal?: AbortSignal) =>
+  listsPackage(adb, ["-d"], app, signal);
+
+const pmArgs = (action: string, app: AppOnUser): string[] => [
+  "pm",
+  action,
+  "--user",
+  String(app.userId),
+  app.packageName,
+];
 
 /**
- * `faults.disablePackage`: disable the app for the current user and read back that it took. Reset
- * re-enables every package this injector disabled, newest first; an app that was already disabled
- * before AutoMobile touched it is left alone and not owned.
+ * `faults.disablePackage`: disable the app for the Android user it runs in and read back that it
+ * took. Reset re-enables every app this injector disabled, newest first; an app that was already
+ * disabled before AutoMobile touched it is left alone and not owned.
  */
-export function createDisablePackageInjector(adb: AdbExecutor): DeviceConditionInjector {
-  /** Packages this injector disabled and has not yet re-enabled, in disable order. */
-  const owned = new Set<string>();
+export function createDisablePackageInjector(
+  adb: AdbExecutor,
+  resolveUser: ResolveAppUser = resolveAppUserWith(adb),
+): DeviceConditionInjector {
+  /** Apps this injector disabled and has not yet re-enabled, in disable order. */
+  const owned = new Map<string, AppOnUser>();
   const serialize = createSerializer();
 
-  const enable = async (packageName: string, signal?: AbortSignal): Promise<void> => {
-    if (!(await isInstalled(adb, packageName, signal))) {
+  const enable = async (app: AppOnUser, signal?: AbortSignal): Promise<void> => {
+    if (!(await isInstalled(adb, app, signal))) {
       return;
     }
-    await shell(adb, ["pm", "enable", packageName], signal);
-    if (await isDisabled(adb, packageName, signal)) {
-      throw new ActionableError(`${packageName} is still disabled after pm enable.`);
+    await shell(adb, pmArgs("enable", app), signal);
+    if (await isDisabled(adb, app, signal)) {
+      throw new ActionableError(`${app.packageName} is still disabled after pm enable.`);
     }
   };
 
   const restoreNow = async (signal?: AbortSignal): Promise<void> => {
     const failures: string[] = [];
-    for (const packageName of [...owned].reverse()) {
+    for (const [key, app] of [...owned].reverse()) {
       try {
-        await enable(packageName, signal);
-        owned.delete(packageName);
+        await enable(app, signal);
+        owned.delete(key);
       } catch (error) {
         if (signal?.aborted) {
           throw error;
         }
-        logger.warn(`re-enabling ${packageName} failed: ${errorMessage(error)}`, error);
-        failures.push(`${packageName}: ${errorMessage(error)}`);
+        logger.warn(`re-enabling ${app.packageName} failed: ${errorMessage(error)}`, error);
+        failures.push(`${app.packageName}: ${errorMessage(error)}`);
       }
     }
     if (failures.length > 0) {
@@ -102,14 +132,14 @@ export function createDisablePackageInjector(adb: AdbExecutor): DeviceConditionI
   const reset = (signal?: AbortSignal): Promise<void> => serialize(() => restoreNow(signal));
 
   /** Undo a failed disable; if that fails too, hand the reset to the controller so release retries it. */
-  const rollBack = async (packageName: string, error: unknown): Promise<never> => {
+  const rollBack = async (app: AppOnUser, error: unknown): Promise<never> => {
     try {
-      await enable(packageName);
-      owned.delete(packageName);
+      await enable(app);
+      owned.delete(appKey(app));
     } catch (restoreError) {
       logger.warn(`package rollback failed: ${errorMessage(restoreError)}`, restoreError);
       throw new OwedResetError(
-        `${errorMessage(error)} Rollback also failed (${errorMessage(restoreError)}); ${packageName} may still be disabled, and release will retry.`,
+        `${errorMessage(error)} Rollback also failed (${errorMessage(restoreError)}); ${app.packageName} may still be disabled, and release will retry.`,
         reset,
         { cause: error },
       );
@@ -118,20 +148,20 @@ export function createDisablePackageInjector(adb: AdbExecutor): DeviceConditionI
   };
 
   const disable = async (
-    packageName: string,
+    app: AppOnUser,
     signal?: AbortSignal,
   ): Promise<DeviceConditionApplyOutcome> => {
-    // Own the package before the write, so a failure after it is still undone.
-    owned.add(packageName);
+    // Own the app before the write, so a failure after it is still undone.
+    owned.set(appKey(app), app);
     try {
-      await shell(adb, ["pm", "disable-user", packageName], signal);
-      if (!(await isDisabled(adb, packageName, signal))) {
-        unsupported(`pm disable-user did not disable ${packageName}`);
+      await shell(adb, pmArgs("disable-user", app), signal);
+      if (!(await isDisabled(adb, app, signal))) {
+        unsupported(`pm disable-user did not disable ${app.packageName}`);
       }
     } catch (error) {
-      return rollBack(packageName, error);
+      return rollBack(app, error);
     }
-    return { status: "applied", detail: `disabled ${packageName}`, reset };
+    return { status: "applied", detail: `disabled ${app.packageName}`, reset };
   };
 
   const applyNow = async (
@@ -139,17 +169,18 @@ export function createDisablePackageInjector(adb: AdbExecutor): DeviceConditionI
     signal?: AbortSignal,
   ): Promise<DeviceConditionApplyOutcome> => {
     const packageName = parsePackage("faults.disablePackage", params);
-    if (!(await isInstalled(adb, packageName, signal))) {
+    const app: AppOnUser = { packageName, userId: await resolveUser(packageName, signal) };
+    if (!(await isInstalled(adb, app, signal))) {
       unsupported(`${packageName} is not installed`);
     }
-    if (await isDisabled(adb, packageName, signal)) {
+    if (await isDisabled(adb, app, signal)) {
       return {
         status: "unchanged",
         detail: `${packageName} is already disabled`,
-        ...(owned.has(packageName) ? { reset } : {}),
+        ...(owned.has(appKey(app)) ? { reset } : {}),
       };
     }
-    return disable(packageName, signal);
+    return disable(app, signal);
   };
 
   return {
@@ -161,10 +192,10 @@ export function createDisablePackageInjector(adb: AdbExecutor): DeviceConditionI
         }
         return applyNow(params, signal);
       }),
-    // Clean means every package this injector disabled is enabled again.
+    // Clean means every app this injector disabled is enabled again.
     async isClean(signal): Promise<boolean> {
       const disabled = await Promise.all(
-        [...owned].map((packageName) => isDisabled(adb, packageName, signal)),
+        [...owned.values()].map((app) => isDisabled(adb, app, signal)),
       );
       return !disabled.includes(true);
     },
@@ -172,10 +203,15 @@ export function createDisablePackageInjector(adb: AdbExecutor): DeviceConditionI
 }
 
 /**
- * `faults.clearPackageData`: `pm clear` the app. One-shot: there is nothing to restore, so the
- * outcome carries no reset and `isClean` is always true.
+ * `faults.clearPackageData`: `pm clear` the app for the Android user it runs in. One-shot: there
+ * is nothing to restore, so the outcome carries no reset and `isClean` is always true. The
+ * session's mutation journal records the clear as a destructive-app intent instead (see
+ * `deviceStateFallbackMutations`), so a keep-booted device is not reused with the data gone.
  */
-export function createClearPackageDataInjector(adb: AdbExecutor): DeviceConditionInjector {
+export function createClearPackageDataInjector(
+  adb: AdbExecutor,
+  resolveUser: ResolveAppUser = resolveAppUserWith(adb),
+): DeviceConditionInjector {
   return {
     key: "faults.clearPackageData",
     async apply(value, signal, params): Promise<DeviceConditionApplyOutcome> {
@@ -183,10 +219,11 @@ export function createClearPackageDataInjector(adb: AdbExecutor): DeviceConditio
         rejectValue("faults.clearPackageData", value, ["{ package }"]);
       }
       const packageName = parsePackage("faults.clearPackageData", params);
-      if (!(await isInstalled(adb, packageName, signal))) {
+      const app: AppOnUser = { packageName, userId: await resolveUser(packageName, signal) };
+      if (!(await isInstalled(adb, app, signal))) {
         unsupported(`${packageName} is not installed`);
       }
-      const out = await shell(adb, ["pm", "clear", packageName], signal);
+      const out = await shell(adb, pmArgs("clear", app), signal);
       if (!/\bSuccess\b/.test(out)) {
         unsupported(`pm clear ${packageName} did not report Success: ${out || "(no output)"}`);
       }

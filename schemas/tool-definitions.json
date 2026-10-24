@@ -32345,7 +32345,15 @@
                       "const": "unset"
                     },
                     {
-                      "$ref": "#/properties/faults/properties/disablePackage/anyOf/1"
+                      "type": "object",
+                      "properties": {
+                        "package": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$"
+                        }
+                      },
+                      "required": ["package"],
+                      "additionalProperties": false
                     }
                   ],
                   "description": "Clear an installed app's data with `pm clear` ({ package }). One-shot: it kills the app's process and cannot be undone, so there is nothing to reset. 'unset' is a no-op."

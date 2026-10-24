@@ -121,6 +121,10 @@ export class DevicePoolDiscovery {
     device: BootedDevice,
     metadataSource: MutableMetadataSource,
   ): Promise<boolean> {
+    if (device.foreignOwned === true) {
+      logger.debug(`[DevicePool] Skipping foreign refresh observation for ${device.deviceId}`);
+      return false;
+    }
     let entry: PooledDevice | undefined = pooled;
     let runtimeReplaced = false;
     let replacementDeferred = false;

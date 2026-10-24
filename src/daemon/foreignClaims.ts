@@ -1,3 +1,4 @@
+import { exponentialBackoff, type BackoffPolicy } from "../utils/Backoff";
 import { SingleFlight } from "../utils/cache/SingleFlight";
 import { holderOf } from "./deviceBinding";
 import type { Platform } from "../models";
@@ -12,6 +13,7 @@ export interface ForeignClaimsPort {
   readonly foreignDeviceOwnership: ForeignDeviceOwnership | undefined;
   readonly iosForeignDeviceOwnership: ForeignDeviceOwnership | undefined;
   readonly timer: Pick<Timer, "now">;
+  readonly inventoryProbeBackoff?: BackoffPolicy;
   getDevice(deviceId: string): Pick<PooledDevice, "sessionId"> | undefined;
   getDevicesByPlatform(platform?: Platform): PooledDevice[];
 }
@@ -26,9 +28,17 @@ export class ForeignClaims {
   >();
 
   private readonly inventoryFlight = new SingleFlight<string, void>();
-  private readonly inventorySnapshots = new Map<string, { readAt: number; foreign: boolean }>();
+  private readonly inventorySnapshots = new Map<
+    string,
+    { staleAt: number; foreign: boolean; streak: number }
+  >();
+  private readonly inventoryProbeBackoff: BackoffPolicy;
 
-  constructor(private readonly port: ForeignClaimsPort) {}
+  constructor(private readonly port: ForeignClaimsPort) {
+    this.inventoryProbeBackoff =
+      port.inventoryProbeBackoff ??
+      exponentialBackoff({ initialDelayMs: 1_000, multiplier: 2, maxDelayMs: 8_000 });
+  }
 
   /** Inventory excludes only positively foreign Android serials, never our session holders. */
   async foreignSerials(
@@ -40,13 +50,16 @@ export class ForeignClaims {
     if (!ownership) {
       return new Set<string>();
     }
-    // Expire per serial: readiness scans rotate candidate subsets of the same inventory.
-    for (const [serial, snapshot] of this.inventorySnapshots) {
-      if (this.port.timer.now() - snapshot.readAt >= 1_000) {
+    const inventory = new Set(serials);
+    for (const serial of this.inventorySnapshots.keys()) {
+      if (!inventory.has(serial)) {
         this.inventorySnapshots.delete(serial);
       }
     }
-    const missing = [...new Set(serials)].filter((serial) => !this.inventorySnapshots.has(serial));
+    const missing = [...inventory].filter(
+      (serial) =>
+        (this.inventorySnapshots.get(serial)?.staleAt ?? -Infinity) <= this.port.timer.now(),
+    );
     try {
       // Inventory evidence may be reused briefly; explicit binds still refresh afresh.
       if (missing.length > 0) {
@@ -56,9 +69,13 @@ export class ForeignClaims {
             await ownership.refresh(missing, flightSignal);
             flightSignal?.throwIfAborted();
             for (const serial of missing) {
+              const foreign = ownership.foreignOwnerPid(serial) !== undefined;
+              const streak = foreign ? (this.inventorySnapshots.get(serial)?.streak ?? 0) + 1 : 0;
               this.inventorySnapshots.set(serial, {
-                readAt: this.port.timer.now(),
-                foreign: ownership.foreignOwnerPid(serial) !== undefined,
+                staleAt:
+                  this.port.timer.now() + this.inventoryProbeBackoff.delayForAttempt(streak || 1),
+                foreign,
+                streak,
               });
             }
           },
@@ -73,6 +90,9 @@ export class ForeignClaims {
         ),
       );
     } catch (error) {
+      for (const serial of missing) {
+        this.inventorySnapshots.delete(serial);
+      }
       signal?.throwIfAborted();
       logger.warn(
         `[DevicePool] Android inventory ownership refresh failed: ${errorMessage(error)}`,

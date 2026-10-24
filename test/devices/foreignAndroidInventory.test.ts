@@ -141,19 +141,44 @@ describe("foreign Android inventory", () => {
     }
   });
 
-  test("native readiness scans use the manager ownership source", async () => {
+  test.each([true, false])(
+    "native scans use the manager ownership source (readinessOnly=%s)",
+    async (readinessOnly) => {
+      const { scanner, adb, names, factory } = harness();
+      const client = new AndroidEmulatorClient({
+        inventory: scanner,
+        timer: new FakeTimer(),
+        adbFactory: new FakeAdbClientFactory(adb),
+      });
+      new MultiPlatformDeviceManager(adb, null, client).withForeignAndroidSerialSource({
+        foreignSerials: async () => new Set(["emulator-5610"]),
+      });
+      const result = await client.getBootedDevicesChecked(false, { readinessOnly });
+      expect(names).toEqual(["emulator-5554"]);
+      expect(result[1]?.foreignOwned).toBe(true);
+      expect(
+        factory.getCalls().filter(({ device }) => device?.deviceId === "emulator-5610"),
+      ).toEqual([]);
+      if (!readinessOnly) {
+        expect(adb.getInteractionLog().some(({ text }) => text === "shell dumpsys display")).toBe(
+          true,
+        );
+      }
+    },
+  );
+
+  test("caller resolver overrides the client source on full scans", async () => {
     const { scanner, adb, names } = harness();
     const client = new AndroidEmulatorClient({
       inventory: scanner,
       timer: new FakeTimer(),
       adbFactory: new FakeAdbClientFactory(adb),
     });
-    new MultiPlatformDeviceManager(adb, null, client).withForeignAndroidSerialSource({
-      foreignSerials: async () => new Set(["emulator-5610"]),
+    client.withForeignInventoryResolver(async () => new Set(["emulator-5610"]));
+    await client.getBootedDevicesChecked(false, {
+      resolveForeignSerials: async () => new Set(["emulator-5554"]),
     });
-    const result = await client.getBootedDevicesChecked(false, { readinessOnly: true });
-    expect(names).toEqual(["emulator-5554"]);
-    expect(result[1]?.foreignOwned).toBe(true);
+    expect(names).toEqual(["emulator-5610"]);
   });
 
   test("foreign physical serials also receive no device-scoped client", async () => {

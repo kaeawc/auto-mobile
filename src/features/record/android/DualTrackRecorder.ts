@@ -11,6 +11,7 @@ import type {
 } from "./types";
 import { GESTURE_THRESHOLDS } from "./types";
 import { formsDoubleTap, hasUnknownAxes } from "./gesturePairing";
+import { exportLossWarning } from "./penExportWarnings";
 import { AndroidCtrlProxyClient, type AndroidCtrlProxy } from "../../observe/android";
 import { defaultAdbClientFactory } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import { discoverInputNodes } from "./InputNodeDiscovery";
@@ -76,9 +77,6 @@ export const MERGE_WINDOW_MS = 750;
  */
 export const GEOMETRY_FINALIZE_BUDGET_MS = 3_000;
 
-export const ERASER_SKIPPED_WARNING =
-  "a pen gesture made with the eraser end was not exported: replay can inject a stylus but not an eraser, and replaying it as a finger or stylus would be wrong";
-
 export const GEOMETRY_UNCONFIRMED_WARNING =
   "rotation/size could not be confirmed at stop; tapAt and swipeOn steps recorded after a display change may be at the wrong coordinates or direction";
 
@@ -125,6 +123,11 @@ export class DualTrackRecorder {
   /** The steps captured so far; complete once `stop()` has been called, labels aside. */
   get capturedSteps(): readonly PlanStep[] {
     return this.steps;
+  }
+
+  /** Warnings for input left out of the plan so far, for a stop that failed or timed out. */
+  get capturedExportWarnings(): readonly string[] {
+    return [...this.exportWarnings];
   }
 
   constructor(
@@ -383,6 +386,7 @@ export class DualTrackRecorder {
     const step = priorTap?.step;
     if (step && ["tapOn", "tapAt"].includes(step.tool) && step.params.action === "tap") {
       step.params.action = "doubleTap";
+      this.noteExportLoss(gesture, step);
       return true;
     }
     if (priorTap && !priorTap.resolved) {
@@ -400,6 +404,14 @@ export class DualTrackRecorder {
       return true;
     }
     return false;
+  }
+
+  /** Record, for the stop result, a pen gesture the plan cannot reproduce. */
+  private noteExportLoss(gesture: GestureEvent, step: PlanStep | null | undefined): void {
+    const warning = exportLossWarning(gesture, step);
+    if (warning) {
+      this.exportWarnings.add(warning);
+    }
   }
 
   private enqueueStep(entry: OrderedStep): void {
@@ -470,9 +482,7 @@ export class DualTrackRecorder {
 
     const event = this.selectInteraction(pending, interaction);
     const step = buildMergedStep(pending.gesture, event);
-    if (pending.gesture.toolType === "eraser") {
-      this.exportWarnings.add(ERASER_SKIPPED_WARNING);
-    }
+    this.noteExportLoss(pending.gesture, step);
     pending.step = step ?? undefined;
     this.trackGeometrySpan(pending.gesture, step);
     this.flushResolvedSteps();

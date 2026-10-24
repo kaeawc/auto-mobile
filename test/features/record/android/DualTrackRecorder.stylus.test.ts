@@ -84,11 +84,12 @@ describe("recorded stylus gestures keep their pointer (#13084)", () => {
       ...STYLUS,
     });
 
-    const { steps } = await recorder.stop();
+    const { steps, exportWarnings } = await recorder.stop();
 
     expect(steps).toEqual([
       { tool: "tapAt", params: { x: 342, y: 891, action: "tap", pointer: STYLUS } },
     ]);
+    expect(exportWarnings).toBeUndefined();
     expect(tapAtSchema.safeParse(steps[0].params).success).toBe(true);
   });
 
@@ -154,7 +155,10 @@ describe("recorded stylus gestures keep their pointer (#13084)", () => {
       ...STYLUS,
     });
 
-    expect((await recorder.stop()).steps).toEqual([]);
+    const result = await recorder.stop();
+
+    expect(result.steps).toEqual([]);
+    expect(result.exportWarnings).toEqual([expect.stringContaining("not exported")]);
   });
 
   test("a stylus tap with unknown axes is not rescued into a finger swipe", async () => {
@@ -162,7 +166,29 @@ describe("recorded stylus gestures keep their pointer (#13084)", () => {
     a11y.emit({ type: "scroll", timestamp: timer.now(), element: BUTTON, scrollDeltaY: 100 });
     gestures.emit({ type: "tap", arrivedAt: timer.now(), unknownAxes: ["y"], ...STYLUS });
 
-    expect((await recorder.stop()).steps).toEqual([]);
+    const result = await recorder.stop();
+
+    expect(result.steps).toEqual([]);
+    expect(result.exportWarnings).toEqual([expect.stringContaining("not exported")]);
+  });
+
+  test("a stylus swipe that never moved is skipped with a warning", async () => {
+    await recorder.start();
+    gestures.emit({
+      type: "swipe",
+      arrivedAt: timer.now(),
+      startX: 5,
+      startY: 6,
+      endX: 5,
+      endY: 6,
+      direction: "up",
+      ...STYLUS,
+    });
+
+    const result = await recorder.stop();
+
+    expect(result.steps).toEqual([]);
+    expect(result.exportWarnings).toEqual([expect.stringContaining("not exported")]);
   });
 
   test("an eraser gesture cannot be replayed, so it is skipped with a warning", async () => {
@@ -193,9 +219,31 @@ describe("recorded stylus gestures keep their pointer (#13084)", () => {
       ...STYLUS,
     });
 
-    expect((await recorder.stop()).steps).toEqual([
+    const result = await recorder.stop();
+
+    expect(result.steps).toEqual([
       { tool: "tapAt", params: { x: 10, y: 20, action: "doubleTap", pointer: STYLUS } },
     ]);
+    // Replay refuses a stylus double tap, so recording says so instead of leaving it for replay.
+    expect(result.exportWarnings).toEqual([expect.stringContaining("double tap")]);
+  });
+
+  test("a standalone stylus double tap warns that replay will refuse it", async () => {
+    await recorder.start();
+    gestures.emit({
+      type: "doubleTap",
+      arrivedAt: timer.now(),
+      screenX: 10,
+      screenY: 20,
+      ...STYLUS,
+    });
+
+    const result = await recorder.stop();
+
+    expect(result.steps).toEqual([
+      { tool: "tapAt", params: { x: 10, y: 20, action: "doubleTap", pointer: STYLUS } },
+    ]);
+    expect(result.exportWarnings).toEqual([expect.stringContaining("double tap")]);
   });
 
   test("a finger double tap does not upgrade a stylus tap at the same spot", async () => {

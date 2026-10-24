@@ -41,6 +41,7 @@ class FakeRecorder {
   steps: PlanStep[] = [];
   /** What the recorder can still hand over after a failed stop. */
   capturedSteps: PlanStep[] | undefined;
+  capturedExportWarnings: string[] | undefined;
   lastStopOptions?: { hostOnly?: boolean };
 
   get stepCount(): number {
@@ -522,6 +523,23 @@ describe("deviceGestureRecordingManager stopping reservation", () => {
     expect(result.error).toContain("Stopping the recorder did not finish");
     expect(result.error).toContain("timed out after 10000 ms");
     expect(getDeviceGestureRecordingStatus(timer)).toBeNull();
+  });
+
+  test("a salvaged stop still reports input that was left out of the plan", async () => {
+    const timer = new FakeTimer();
+    const hung = new FakeRecorder();
+    hung.stopGate = new Deferred<{ steps: PlanStep[]; stepCount: number }>();
+    hung.capturedSteps = [capturedStep];
+    hung.capturedExportWarnings = ["an eraser gesture was not exported"];
+    const { result: started } = await start(timer, hung);
+
+    const stopping = stopDeviceGestureRecording(started.recordingId, undefined, timer);
+    await Promise.resolve();
+    timer.advanceTime(10_000);
+    const result = await stopping;
+
+    expect(result.error).toContain("Stopping the recorder did not finish");
+    expect(result.error).toContain("an eraser gesture was not exported");
   });
 
   test("a stop that fails with nothing captured still rejects", async () => {

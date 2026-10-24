@@ -82,7 +82,7 @@ const STOP_RECORDING_TIMEOUT_MS = 10_000;
 
 type TestRecorder = Pick<DualTrackRecorder, "start" | "stop" | "stepCount"> &
   /** Steps captured so far; lets a stop that failed or timed out still return them. */
-  Partial<Pick<DualTrackRecorder, "capturedSteps">>;
+  Partial<Pick<DualTrackRecorder, "capturedSteps" | "capturedExportWarnings">>;
 type RecorderFactory = (device: BootedDevice) => TestRecorder;
 
 let activeRecording: RecordingSession | null = null;
@@ -510,7 +510,11 @@ async function stopRecorder(
     if (captured.length === 0) {
       throw toActionableError(error, "Failed to stop device gesture recording");
     }
-    return { steps: [...captured], salvagedAfter: errorMessage(error) };
+    return {
+      steps: [...captured],
+      exportWarnings: [...(session.recorder.capturedExportWarnings ?? [])],
+      salvagedAfter: errorMessage(error),
+    };
   }
 }
 

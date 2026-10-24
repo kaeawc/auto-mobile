@@ -11,6 +11,15 @@ import {
 } from "../../src/daemon/sessionBroker/mutations/types";
 import type { Timer } from "../../src/utils/SystemTimer";
 
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    // Not valid JSON, so it identifies no resource.
+    return null;
+  }
+}
+
 export class FakeDeviceMutationJournal implements DeviceMutationJournal {
   private readonly entries = new Map<string, DeviceMutationEntry[]>();
   private readonly baselines = new Map<string, DeviceBaseline>();
@@ -71,11 +80,13 @@ export class FakeDeviceMutationJournal implements DeviceMutationJournal {
   }
 
   async deleteResource(resourceId: string): Promise<void> {
+    assertDeviceMutationScope({ deviceId: resourceId, incarnation: resourceId });
     const matches = (incarnation: string) => {
       if (incarnation === resourceId) {
         return true;
       }
-      const identity: unknown = JSON.parse(incarnation.startsWith("[") ? incarnation : "null");
+      // Like the SQLite journal, an incarnation that is not valid JSON never matches.
+      const identity: unknown = parseJson(incarnation.startsWith("[") ? incarnation : "null");
       return Array.isArray(identity) && identity[0] === resourceId;
     };
     for (const key of this.baselines.keys()) {

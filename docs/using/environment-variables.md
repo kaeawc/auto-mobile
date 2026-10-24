@@ -261,12 +261,12 @@ observation over async. When only one call needs a matching screenshot, pass
 
 <div class="environment-variable-table" markdown>
 
-| Variable                                    | Use and accepted values                                                                                  | Default    |
-| ------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ---------- |
-| `AUTOMOBILE_SCREENSHOT_CACHE_MB`            | Base screenshot cache capacity; positive MiB.                                                            | `128` MiB  |
-| `AUTOMOBILE_SCREENSHOT_CACHE_PER_DEVICE_MB` | Capacity per active device; positive MiB.                                                                | `64` MiB   |
-| `AUTOMOBILE_SCREENSHOT_CACHE_CEILING_MB`    | Host cache ceiling; positive MiB, never lowers the base.                                                 | `1024` MiB |
-| `AUTOMOBILE_SCREENSHOT_KEEP_PER_DEVICE`     | Newest screenshots per device evicted only as a last resort; nonnegative integer, `0` disables fairness. | `3`        |
+| Variable                                    | Use and accepted values                                                                                                   | Default    |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| `AUTOMOBILE_SCREENSHOT_CACHE_MB`            | Base screenshot cache capacity; positive MiB.                                                                             | `128` MiB  |
+| `AUTOMOBILE_SCREENSHOT_CACHE_PER_DEVICE_MB` | Capacity per active device; positive MiB.                                                                                 | `64` MiB   |
+| `AUTOMOBILE_SCREENSHOT_CACHE_CEILING_MB`    | Host cache ceiling; positive MiB, never lowers the base. Frames inside their 10-minute guarantee grow the cache up to it. | `2048` MiB |
+| `AUTOMOBILE_SCREENSHOT_KEEP_PER_DEVICE`     | Newest screenshots per device evicted only as a last resort; nonnegative integer, `0` disables fairness.                  | `3`        |
 
 </div>
 

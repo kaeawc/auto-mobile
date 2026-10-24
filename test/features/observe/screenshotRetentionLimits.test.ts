@@ -18,7 +18,7 @@ test("effective cap scales only above base and stops at ceiling", () => {
   expect(effectiveScreenshotCacheBytes(defaults, 0)).toBe(128 * MiB);
   expect(effectiveScreenshotCacheBytes(defaults, 2)).toBe(128 * MiB);
   expect(effectiveScreenshotCacheBytes(defaults, 6)).toBe(384 * MiB);
-  expect(effectiveScreenshotCacheBytes(defaults, 100)).toBe(1024 * MiB);
+  expect(effectiveScreenshotCacheBytes(defaults, 100)).toBe(2048 * MiB);
   expect(effectiveScreenshotCacheBytes({ ...defaults, ceilingBytes: 1 }, 100)).toBe(
     defaults.baseBytes,
   );

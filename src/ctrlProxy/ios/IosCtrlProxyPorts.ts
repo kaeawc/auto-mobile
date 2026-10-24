@@ -58,6 +58,9 @@ export class IosCtrlProxyPorts {
       PortManager.reserve(this.state.device.deviceId, retiredServicePort);
       replacementPort = retiredServicePort;
     }
+    if (replacementPort !== retiredServicePort) {
+      PortManager.quarantine(retiredServicePort);
+    }
     this.state.servicePort = replacementPort;
     this.host.clearCaches();
     logger.info(

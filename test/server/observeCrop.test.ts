@@ -1,4 +1,5 @@
 import { FakeFileSystem } from "../fakes/FakeFileSystem";
+import { BASE_CAP_SCREENSHOT_LIMITS } from "../helpers/screenshotRetentionLimits";
 import { BoundedScreenshotPathProtection } from "../../src/features/observe/ScreenshotRetention";
 import { SCREENSHOT_PATH_MIN_LIFETIME_MS } from "../../src/features/observe/ScreenshotRetention";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
@@ -798,7 +799,12 @@ test("crop writer at capacity evicts the least recently used path instead of ref
   files.setFile("/screenshots/screenshot_0_deviceA.png", "a");
   files.setFile("/screenshots/screenshot_0_deviceB.png", "b");
   files.stat = async () => ({ isFile: () => true, size: 64 * 1024 * 1024, mtimeMs: timer.now() });
-  const protection = new BoundedScreenshotPathProtection(timer, undefined);
+  const protection = new BoundedScreenshotPathProtection(
+    timer,
+    undefined,
+    undefined,
+    BASE_CAP_SCREENSHOT_LIMITS,
+  );
   register({
     crop: {
       pathProtection: protection,

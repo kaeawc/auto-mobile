@@ -61,7 +61,7 @@ describe("boot capacity gate parity", () => {
     );
     const gate = new IosSimCapacityGate(collector, timer, { env: {} });
 
-    // 128 GiB / 16 cores => derived limit 8; one simulator is booted, so a second boot fits.
+    // 128 GiB / 16 cores => memory-derived limit 21; one simulator is booted, so a second boot fits.
     const admission = await gate.admitBoot(undefined, {});
 
     expect(admission.decision.outcome).toBe("allow");

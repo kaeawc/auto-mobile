@@ -590,7 +590,7 @@ describe("IOSCtrlProxyClient", function () {
         try {
           expect(await client.ensureConnected()).toBe(false);
           expect(
-            client["createHierarchyDelegateContext"]().getLastConnectFailure?.(),
+            client.testHooks.createHierarchyDelegateContext().getLastConnectFailure?.(),
           ).toMatchObject({
             reason,
             detail: "iOS CtrlProxy runner exited during startup",
@@ -630,7 +630,7 @@ describe("IOSCtrlProxyClient", function () {
         try {
           expect(await client.ensureConnected()).toBe(false);
           expect(
-            client["createHierarchyDelegateContext"]().getLastConnectFailure?.(),
+            client.testHooks.createHierarchyDelegateContext().getLastConnectFailure?.(),
           ).toMatchObject({
             reason,
             detail: "iOS CtrlProxy startup was cancelled by stop()",
@@ -662,7 +662,7 @@ describe("IOSCtrlProxyClient", function () {
       client.connectionTestHooks.autoReconnectEnabled = false;
       try {
         expect(await client.ensureConnected()).toBe(false);
-        const failure = client["createHierarchyDelegateContext"]().getLastConnectFailure?.();
+        const failure = client.testHooks.createHierarchyDelegateContext().getLastConnectFailure?.();
         expect(failure?.reason).toBe(reason);
         if (booted) {
           expect(failure?.detail).toBe(message);
@@ -1718,14 +1718,9 @@ describe("IOSCtrlProxyClient", function () {
           const before = timer.now();
           let requestId = "no-pending-hierarchy";
           const pending = hasPendingRequest
-            ? client["hierarchy"].requestHierarchySync(
-                undefined,
-                false,
-                undefined,
-                1000,
-                false,
-                options,
-              )
+            ? client.testHooks
+                .hierarchy()
+                .requestHierarchySync(undefined, false, undefined, 1000, false, options)
             : undefined;
           if (hasPendingRequest) {
             const request = await waitForMessageType(socket, "request_hierarchy_if_stale");
@@ -3836,14 +3831,16 @@ describe("IOSCtrlProxyClient", function () {
           const before = h.state();
           expect(await h.client.getSupportedCommandsForDiagnostics()).toBeNull();
           expect(h.state()).toEqual(before);
-          const thrownRead = h.client["readForDiagnostics"](async () => {
-            throw new Error("probe read failed");
-          }, null).then(
-            () => {
-              throw new Error("diagnostic unexpectedly resolved");
-            },
-            (error: unknown) => error,
-          );
+          const thrownRead = h.client.testHooks
+            .readForDiagnostics(async () => {
+              throw new Error("probe read failed");
+            }, null)
+            .then(
+              () => {
+                throw new Error("diagnostic unexpectedly resolved");
+              },
+              (error: unknown) => error,
+            );
           expect(await thrownRead).toEqual(new Error("probe read failed"));
           expect(h.state()).toEqual(before);
           h.modes.push("timeout");

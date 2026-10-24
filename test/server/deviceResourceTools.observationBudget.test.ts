@@ -157,3 +157,25 @@ test("abort before mutation completion does not acquire an observation result ca
   expect(reason.deviceResourceResult).toBeUndefined();
   expect(observer.requests).toHaveLength(0);
 });
+
+test("iOS observation abort keeps the disabled-resource report on the carried result", async () => {
+  const iosDevice = { platform: "ios" as const, deviceId: "ios-sim-1", name: "ios-resource-test" };
+  const abort = new AbortController();
+  const reason = Object.assign(new DOMException("cancelled", "AbortError"), {
+    deviceResourceResult: undefined as typeof controller.result | undefined,
+  });
+  observer.onRequest = async () => {
+    abort.abort(reason);
+  };
+  await expect(
+    handler()(
+      iosDevice,
+      { resources: { wallpaperRendering: "disabled" } },
+      undefined,
+      abort.signal,
+    ),
+  ).rejects.toBe(reason);
+  expect(reason.deviceResourceResult?.disabledResources?.map((entry) => entry.resource)).toEqual([
+    "wallpaperRendering",
+  ]);
+});

@@ -1,3 +1,5 @@
+import { disabledDeviceResourceReport } from "./iosDeviceResourceImpact";
+import { mergeProvenResourceStates } from "./deviceResourceStates";
 import type { BootedDevice } from "../models/DeviceInfo";
 import type { AppleDeviceResource } from "../models/AppleDeviceResource";
 import { ActionableError } from "../models/ActionableError";
@@ -79,8 +81,15 @@ export class DefaultDeviceResourceReconciler implements DeviceResourceReconciler
       drift,
       verification: "current_boot" as const,
     };
+    const observedReport: DeviceResourceReconciliation = {
+      ...report,
+      success: drift.length === 0,
+      remainingDrift: drift,
+      observed: before,
+      ...disabledDeviceResourceReport(before.resources),
+    };
     if (!request.repair) {
-      return { ...report, success: drift.length === 0, remainingDrift: drift, observed: before };
+      return observedReport;
     }
 
     const delta: DeviceResourceConfiguration = {};
@@ -93,7 +102,7 @@ export class DefaultDeviceResourceReconciler implements DeviceResourceReconciler
     }
     if (!Object.keys(delta).length) {
       // Idempotent: nothing to apply, and no state to re-prove beyond the read just taken.
-      return { ...report, success: drift.length === 0, remainingDrift: drift, observed: before };
+      return observedReport;
     }
     const applied = await controller.setResources({
       device: request.device,
@@ -112,6 +121,9 @@ export class DefaultDeviceResourceReconciler implements DeviceResourceReconciler
       remainingDrift,
       applied,
       observed: after,
+      ...disabledDeviceResourceReport(
+        mergeProvenResourceStates(applied.resources, after.resources),
+      ),
     };
   }
 

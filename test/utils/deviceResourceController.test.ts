@@ -302,8 +302,6 @@ describe("device resource control", () => {
       "contactsd",
       "telephonyutilities.callservicesd",
       "identityservicesd",
-      "corespeechd",
-      "assistantd",
       "voiced",
       "voicebankingd",
       "naturallanguaged",

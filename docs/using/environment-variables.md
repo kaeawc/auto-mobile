@@ -500,10 +500,11 @@ To keep an installed CtrlProxy APK through device readiness, set
 
 When simultaneous cold iOS `observe` calls exceed
 `AUTOMOBILE_IOS_RUNNER_LAUNCH_CONCURRENCY`, a read can reach its bounded budget
-while its runner launch is queued. It returns `ok: true`, no hierarchy, and
+while its runner launch is queued or already running. It returns `ok: true`, no hierarchy, and
 `freshness` with `isFresh: false` and `unavailableReason: "runner_launch_queued"`.
-The detail names its queue position. The runner keeps launching; retry the
-observe shortly after launch completes.
+The detail names its queue position when queued, or says the runner is still
+starting in the background. Any captured screenshot is kept. The start continues
+for up to 60 seconds, and a retry joins that same start. Retry the observe shortly.
 
 ## iOS builds and signing
 

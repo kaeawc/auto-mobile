@@ -94,12 +94,15 @@ control.
 ### Cold iOS observe freshness
 
 With more simultaneous cold iOS observes than the configured launch concurrency,
-a queued launch can outlast the read budget. `observe` keeps that budget and
-reports the pending state with `ok: true`, `freshness.isFresh: false`, and
+a queued launch or one already running can outlast the read budget. `observe`
+keeps that budget and reports the pending state with `ok: true`, `freshness.isFresh: false`, and
 `freshness.unavailableReason: "runner_launch_queued"`, without a hierarchy.
-The detail includes the queue position, and any captured screenshot is kept.
-The runner keeps launching; retry the observe after launch completes. A warm
-retry can complete in about 1.4 seconds; timing depends on the device and host.
+The detail includes the queue position when queued, or says the runner is still
+starting in the background. Any captured screenshot is kept. The start continues
+for up to 60 seconds, and a retry joins that same start. While it runs it holds the
+device's readiness lock, so a concurrent `startDevice` or session upgrade for that
+simulator waits within its own deadline. Retry the observe shortly.
+A warm retry can complete in about 1.4 seconds; timing depends on the device and host.
 
 ## When a session is released
 

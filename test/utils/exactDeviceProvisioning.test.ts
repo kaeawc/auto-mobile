@@ -1,3 +1,4 @@
+import { FakeVirtualDeviceLifecycleCoordinator } from "../fakes/FakeVirtualDeviceLifecycleCoordinator";
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -1032,4 +1033,71 @@ describe("exact iOS provisioning runtime compatibility", () => {
     await expect(provision(IPHONE_17_PRO, RUNTIME("18.6"), controller.signal)).rejects.toThrow();
     expect(events).toEqual([]);
   });
+});
+
+test.each([false, true])(
+  "preboot resources run after exact iOS creation; failure=%s is best effort",
+  async (failure) => {
+    const calls: string[] = [];
+    const provisioner = new DefaultExactDeviceProvisioner({
+      timer: new FakeTimer(),
+      lifecycleCoordinator: new FakeVirtualDeviceLifecycleCoordinator(),
+      listDeviceImages: async () => [],
+      isCreationAllowed: () => true,
+      avdManager: { createAvd: async () => ({ success: true, message: "" }) },
+      androidConfigReader: { readConfig: async () => null },
+      androidConfigWriter: { setMemoryMb: async () => {} },
+      iosSimulator: {
+        createSimulator: async () => {
+          calls.push("create");
+          return "NEW-UDID";
+        },
+      },
+      prebootProfile: {
+        apply: async (udid, options) => {
+          expect(udid).toBe("NEW-UDID");
+          expect(options.resources).toEqual({ widgets: "disabled" });
+          expect(calls).toEqual(["create"]);
+          calls.push("apply");
+          return { applied: !failure, labels: [], ...(failure ? { reason: "denied" } : {}) };
+        },
+      },
+    });
+    const result = await provisioner.provision({
+      platform: "ios",
+      name: "new",
+      spec: { runtime: "iOS-26", deviceType: "iPhone-17" },
+      resources: { widgets: "disabled" },
+    });
+    expect(result.created).toBe(true);
+    expect(calls).toEqual(["create", "apply"]);
+  },
+);
+
+test("exact creation with default none and no resources has no host effects", async () => {
+  const { SimulatorPrebootProfile } =
+    await import("../../src/utils/ios-cmdline-tools/SimulatorPrebootProfile");
+  const { FakeSimulatorHostState } = await import("../fakes/FakeSimulatorHostState");
+  const host = new FakeSimulatorHostState();
+  const provisioner = new DefaultExactDeviceProvisioner({
+    timer: new FakeTimer(),
+    lifecycleCoordinator: new FakeVirtualDeviceLifecycleCoordinator(),
+    listDeviceImages: async () => [],
+    isCreationAllowed: () => true,
+    avdManager: { createAvd: async () => ({ success: true, message: "" }) },
+    androidConfigReader: { readConfig: async () => null },
+    androidConfigWriter: { setMemoryMb: async () => {} },
+    iosSimulator: { createSimulator: async () => "12345678-1234-ABCD-9876-123456789ABC" },
+    prebootProfile: new SimulatorPrebootProfile(host, () => "none"),
+  });
+  expect(
+    (
+      await provisioner.provision({
+        platform: "ios",
+        name: "new",
+        spec: { runtime: "iOS-26", deviceType: "iPhone-17" },
+      })
+    ).created,
+  ).toBe(true);
+  expect(host.calls).toEqual([]);
 });

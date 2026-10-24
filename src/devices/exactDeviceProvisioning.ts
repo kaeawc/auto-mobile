@@ -1,3 +1,5 @@
+import type { DeviceResourceConfiguration } from "../models/DeviceResourceConfiguration";
+import { SimulatorPrebootProfile } from "../utils/ios-cmdline-tools/SimulatorPrebootProfile";
 export {
   DEFAULT_PROVISION_DEVICE_RETRYABILITY,
   ProvisionDeviceError,
@@ -78,6 +80,7 @@ export type ResolvedExactDeviceSpecification =
     });
 
 export interface ExactDeviceProvisionRequest {
+  resources?: DeviceResourceConfiguration;
   platform: "android" | "ios";
   name: string;
   deviceId?: string;
@@ -131,6 +134,7 @@ export interface ExactDeviceProvisioner {
 }
 
 export interface DefaultExactDeviceProvisionerDependencies {
+  prebootProfile?: Pick<SimulatorPrebootProfile, "apply">;
   listDeviceImages: PlatformDeviceManager["listDeviceImages"];
   isCreationAllowed: DeviceCreationGate["isCreationAllowed"];
   avdManager: ExactAndroidAvdClient;
@@ -561,6 +565,11 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
       spec.runtime,
       request.signal,
     );
+    await this.dependencies.prebootProfile?.apply(
+      deviceId,
+      { resources: request.resources },
+      request.signal,
+    );
     return {
       created: true,
       device: {
@@ -620,6 +629,7 @@ export function createDefaultExactDeviceProvisioner(
     avdManager: new AvdManagerClient(),
     androidConfigReader: new FileAvdConfigReader(),
     androidConfigWriter,
+    prebootProfile: new SimulatorPrebootProfile(),
     iosSimulator: new SimCtlClient(null),
     iosRuntimeCatalog: new SimCtlClient(null),
   });

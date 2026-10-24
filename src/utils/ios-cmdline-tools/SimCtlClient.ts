@@ -80,9 +80,10 @@ export { SimulatorStillShuttingDownError } from "./SimulatorStillShuttingDownErr
 
 export class SimCtlClient implements SimCtl {
   private readonly simCtlShutdown: SimCtlShutdown;
-  private createSimCtlShutdown(): SimCtlShutdown {
+  private createSimCtlShutdown(p?: SimCtlClientDependencies["prebootProfile"]): SimCtlShutdown {
     const client = this;
     return new SimCtlShutdown({
+      prebootProfile: p,
       executeCommandArgs: (...args) => client.executeCommandArgs(...args),
       invalidateDeviceListCache: (...args) => SimCtlClient.invalidateDeviceListCache(...args),
       get timer() {
@@ -264,7 +265,7 @@ export class SimCtlClient implements SimCtl {
 
     this.simCtlScreenshot = this.createSimCtlScreenshot();
 
-    this.simCtlShutdown = this.createSimCtlShutdown();
+    this.simCtlShutdown = this.createSimCtlShutdown(dependencies.prebootProfile);
   }
 
   private resolveSimulatorAppPresenter(presenter?: SimulatorAppPresenter): SimulatorAppPresenter {

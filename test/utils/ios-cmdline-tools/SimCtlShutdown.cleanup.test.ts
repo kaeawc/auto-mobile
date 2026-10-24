@@ -1,3 +1,6 @@
+import { SimCtlClient } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
+import { SimulatorPrebootProfile } from "../../../src/utils/ios-cmdline-tools/SimulatorPrebootProfile";
+import { FakeSimulatorHostState } from "../../fakes/FakeSimulatorHostState";
 import { describe, expect, test } from "bun:test";
 import { Mutex } from "async-mutex";
 import {
@@ -28,8 +31,14 @@ function harness(states: string[], autoAdvance = true) {
     execAsync: async () => {
       throw new Error("No process probes allowed");
     },
+    prebootProfile: new SimulatorPrebootProfile(new FakeSimulatorHostState(), () => "none"),
   };
-  return { timer, lease, context, shutdown: new SimCtlShutdown(context) };
+  return {
+    timer,
+    lease,
+    context,
+    shutdown: new SimCtlShutdown(context),
+  };
 }
 
 describe("failed boot cleanup settlement", () => {
@@ -186,4 +195,59 @@ describe("failed boot cleanup settlement", () => {
       expect(budgets).toEqual(stall === "shutdown" ? [40_000] : [40_000, 20_000]);
     },
   );
+});
+
+test.each(["success", "delete failure", "cleanup failure"])(
+  "delete host cleanup: %s",
+  async (mode) => {
+    const h = harness([]);
+    const calls: string[] = [];
+    h.context.executeCommandArgv = async () => {
+      calls.push("delete");
+      if (mode === "delete failure") {
+        throw new Error("delete failed");
+      }
+      return createExecResult("", "");
+    };
+    h.context.prebootProfile = {
+      removeHostState: async (udid) => {
+        expect(udid).toBe("sim");
+        calls.push("cleanup");
+        if (mode === "cleanup failure") {
+          throw new Error("cleanup failed");
+        }
+      },
+    };
+    const shutdown = new SimCtlShutdown(h.context);
+    if (mode === "delete failure") {
+      await expect(shutdown.deleteSimulator("sim")).rejects.toThrow("delete failed");
+      expect(calls).toEqual(["delete"]);
+    } else {
+      await shutdown.deleteSimulator("sim");
+      expect(calls).toEqual(["delete", "cleanup"]);
+    }
+  },
+);
+
+test("SimCtlClient passes its injected host cleanup through to deletion", async () => {
+  const calls: string[] = [];
+  const timer = new FakeTimer();
+  const client = new SimCtlClient(
+    null,
+    async (_file, args) => {
+      expect(args).toEqual(["simctl", "delete", "injected-sim"]);
+      calls.push("delete");
+      return createExecResult("", "");
+    },
+    {
+      timer,
+      prebootProfile: {
+        removeHostState: async (udid) => {
+          calls.push(`cleanup:${udid}`);
+        },
+      },
+    },
+  );
+  await client.deleteSimulator("injected-sim");
+  expect(calls).toEqual(["delete", "cleanup:injected-sim"]);
 });

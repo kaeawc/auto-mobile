@@ -161,6 +161,12 @@ export const DEVICES_ENV = {
     default: "on",
     doc: "Boot admission gate for every platform; exact 0 disables.",
   },
+  IOS_PREBOOT_LEAN_PROFILE: {
+    name: "AUTOMOBILE_IOS_PREBOOT_LEAN_PROFILE",
+    kind: "string",
+    default: "none",
+    doc: "Pre-boot iOS simulator lean profile: none, minimal, or catalog-cpu; unknown values use none.",
+  },
   IOS_SIM_CAPACITY_GATE: {
     name: "AUTOMOBILE_IOS_SIM_CAPACITY_GATE",
     kind: "string",

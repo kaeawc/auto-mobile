@@ -10,6 +10,7 @@
  * {@link DeviceCreationGate}'s job, checked by the caller.
  */
 
+import { SimulatorPrebootProfile } from "../utils/ios-cmdline-tools/SimulatorPrebootProfile";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import type { DeviceMatchCriteria } from "../models/DeviceMatchCriteria";
 import type { FormFactor } from "../models/DeviceMatchCriteria";
@@ -520,6 +521,7 @@ export function pickAndroidSystemImage(
 // ---------------------------------------------------------------------------
 
 export interface DefaultDeviceProvisionerDependencies {
+  prebootProfile?: Pick<SimulatorPrebootProfile, "apply">;
   iosCreator: () => IosSimulatorCreator | undefined;
   androidCreator: () => AndroidAvdCreator;
   idGenerator?: IdGenerator;
@@ -621,6 +623,7 @@ export class DefaultDeviceProvisioner implements DeviceProvisioner {
         "' when no longer needed.",
     );
     await identityHooks?.bindAfterCreate(provisioned);
+    await this.dependencies.prebootProfile?.apply(deviceId, {}, creationSignal);
 
     return provisioned;
   }
@@ -712,6 +715,7 @@ export function createDefaultDeviceProvisioner(
 ): DeviceProvisioner {
   return new DefaultDeviceProvisioner({
     iosCreator,
+    prebootProfile: new SimulatorPrebootProfile(),
     androidCreator: createDefaultAndroidAvdCreator,
     identityHooks,
   });

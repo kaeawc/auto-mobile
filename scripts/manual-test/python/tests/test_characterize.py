@@ -44,7 +44,7 @@ class CharacterizeTests(unittest.TestCase):
 
     def test_documentation_uses_own_measurements_for_every_ordering(self) -> None:
         from tests.support import ROOT
-        section = (ROOT/'docs/using/manual-test-harness.md').read_text().split('## Python MCP SDK stdio clients')[1]
+        section = (ROOT/'docs/design-docs/manual-test-harness.md').read_text().split('## Python MCP SDK stdio clients')[1]
         self.assertNotIn("driver's fake-server probes", section)
         self.assertIn('pydantic 2.14.1', ' '.join(section.split()))
         self.assertIn('timing dependent', ' '.join(section.split()))

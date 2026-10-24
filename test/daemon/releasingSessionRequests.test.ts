@@ -37,7 +37,8 @@ const released = {
 const alreadyReleased = {
   success: true,
   result: {
-    message: `Session ${sessionId} already released or never existed`,
+    message: `Session ${sessionId} already released`,
+    known: true,
     alreadyReleased: true,
   },
 };

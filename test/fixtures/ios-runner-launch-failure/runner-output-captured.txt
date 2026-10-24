@@ -1,0 +1,7 @@
+stdout	Timeout: 86400.0s ========================================  WebSocket: ws://localhost:8765/ws Health:    http://localhost:8765/health  Protocol: Android AccessibilityService compatible ========================================
+stdout	[CtrlProxy] XCTest query timeout: applied(previous: Optional(30.0), current: 2.0)
+stdout	2026-10-23 13:29:39.412222-0500 CtrlProxyUITests-Runner[64616:14468102] [] nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID failed [2: No such file or directory]
+stdout	2026-10-23 13:29:39.421500-0500 CtrlProxyUITests-Runner[64616:14468102] [WebSocketServer] CtrlProxy listener failed: POSIXErrorCode(rawValue: 48): Address already in use
+stdout	Restarting after unexpected exit, crash, or test timeout; summary will include totals from previous launches.
+stdout	Restarting after unexpected exit, crash, or test timeout; summary will include totals from previous launches.
+stderr	2026-10-23 13:29:26.989 xcodebuild[64351:14466628] [MT] IDERunDestination: Supported platforms for the buildables in the current scheme is empty.

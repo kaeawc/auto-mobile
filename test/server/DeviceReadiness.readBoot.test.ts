@@ -232,6 +232,7 @@ function harness(platform: Platform, daemon: boolean, simctlAvailable = true) {
     expect(simctl.getMethodCalls("bootSimulator")).toEqual([]);
     expect(simctl.getMethodCalls("createSimulator")).toEqual([]);
     expect(instrumentation.requests).toEqual([]);
+    expect(simctl.presentations).toEqual([]);
   }
   function assertNoReadWrites() {
     expect("getCurrentDevice" in manager).toBe(false);
@@ -288,7 +289,23 @@ function noDeviceMessage(platform: SomePlatform): string {
   return `No ${label} device is running, so there is nothing to read. Start one with startDevice or provisionDevice, or pass a deviceId.`;
 }
 
-describe("read boots only an explicitly named stopped device", () => {
+async function expectStoppedIosRead(
+  h: ReturnType<typeof harness>,
+  requested: SomePlatform = "ios",
+) {
+  const error = await h.manager
+    .ensureDeviceReady(requested, h.id, h.options)
+    .catch((error: unknown) => error);
+  expect(error).toBeInstanceOf(ActionableError);
+  expect(error).toHaveProperty(
+    "message",
+    `iOS simulator '${h.device.name}' (${h.id}) is not booted; a read never boots a simulator. Call startDevice (or acquire a session) to boot it.`,
+  );
+  h.assertNoBoot();
+  h.assertNoReadWrites();
+}
+
+describe("reads boot only explicitly named stopped Android images", () => {
   for (const daemon of [false, true]) {
     for (const platform of ["android", "ios"] as const) {
       const lane = `${platform} ${daemon ? "daemon" : "direct"}`;
@@ -386,15 +403,18 @@ describe("read boots only an explicitly named stopped device", () => {
         h.assertNoReadWrites();
       });
       for (const requested of [platform, "either"] as const) {
-        test(`${lane}: ${requested} named stopped image boots exactly once`, async () => {
+        test(`${lane}: ${requested} named stopped image follows platform read policy`, async () => {
           const h = harness(platform, daemon);
+          if (platform === "ios") {
+            await expectStoppedIosRead(h, requested);
+            expect(h.lifecycle.reservations).toEqual([]);
+            return;
+          }
           const result = await h.manager.ensureDeviceReady(requested, h.id, h.options);
           expect(result.deviceId).toBe(h.device.deviceId);
           expect(result.platform).toBe(platform);
           expect(h.startCalls).toEqual(platform === "android" ? [h.image.name] : []);
-          expect(h.simctl.getMethodCalls("bootSimulator")).toEqual(
-            platform === "ios" ? [{ udid: h.id }] : [],
-          );
+          expect(h.simctl.getMethodCalls("bootSimulator")).toEqual([]);
           expect(h.simctl.getMethodCalls("createSimulator")).toEqual([]);
           expect(h.lifecycle.reservations).toEqual([
             { identity: { kind: "stable", platform, stableId: h.id }, operation: "start" },
@@ -409,9 +429,14 @@ describe("read boots only an explicitly named stopped device", () => {
           "No boot capacity",
         );
         h.refuseBoot(error);
-        const result = await h.manager
-          .ensureDeviceReady(platform, h.id, h.options)
-          .catch((e: unknown) => e);
+        if (platform === "ios") {
+          h.setImages([h.image]);
+        }
+        const result = await (
+          platform === "ios"
+            ? h.manager.findOrStartDevice(platform, { ...h.options, intent: "control" })
+            : h.manager.ensureDeviceReady(platform, h.id, h.options)
+        ).catch((e: unknown) => e);
         expect(result).toBe(error);
         expect(result).toMatchObject({ code: "capacity_exhausted", retryable: true });
         expect(h.startCalls).toEqual(platform === "android" ? [h.id] : []);
@@ -590,6 +615,10 @@ describe("read boots only an explicitly named stopped device", () => {
           { platform: "ios", name: "Other iPhone", deviceId: "other-ios" },
         ];
         h.setRunning(running);
+        if (platform === "ios") {
+          await expectStoppedIosRead(h, "either");
+          return;
+        }
         const result = await h.manager.ensureDeviceReady("either", h.id, h.options);
         expect(result.deviceId).toBe(h.device.deviceId);
         expect(result.platform).toBe(platform);
@@ -678,18 +707,13 @@ describe("read boots only an explicitly named stopped device", () => {
           expect(h.lifecycle.reservations).toEqual([]);
         });
       } else {
-        test(`${lane}: either named simulator boots when Android cannot be scanned`, async () => {
+        test(`${lane}: either named stopped simulator refuses when Android cannot be scanned`, async () => {
           const h = harness(platform, daemon);
           h.incomplete("android");
           h.devices.listDeviceImages = async () => {
             throw new Error("adb unavailable");
           };
-          expect((await h.manager.ensureDeviceReady("either", h.id, h.options)).deviceId).toBe(
-            h.device.deviceId,
-          );
-          expect(h.startCalls).toEqual([]);
-          expect(h.simctl.getMethodCalls("bootSimulator")).toEqual([{ udid: h.id }]);
-          expect(h.simctl.getMethodCalls("createSimulator")).toEqual([]);
+          await expectStoppedIosRead(h, "either");
           h.assertNoReadWrites();
         });
         test(`${lane}: either unnamed read with Android unscanned gives the no-device answer`, async () => {
@@ -752,7 +776,7 @@ describe("read boots only an explicitly named stopped device", () => {
   }
 });
 
-for (const platform of ["android", "ios"] as const) {
+for (const platform of ["android"] as const) {
   for (const refuses of [true, false]) {
     test(`${platform}: pre-read-boot callback ${refuses ? "refuses before lifecycle" : "admits the found image"}`, async () => {
       const h = harness(platform, true);
@@ -785,7 +809,7 @@ for (const platform of ["android", "ios"] as const) {
   }
 }
 
-for (const platform of ["android", "ios"] as const) {
+for (const platform of ["android"] as const) {
   test(`${platform}: rechecks read ownership inside lifecycle lease and releases on refusal`, async () => {
     const h = harness(platform, true);
     const identity = { kind: "stable" as const, platform, stableId: h.id };
@@ -840,7 +864,7 @@ test("Android running image without a resolved serial is retryable discovery, ne
   expect(h.lifecycle.reservations).toEqual([]);
 });
 
-for (const platform of ["android", "ios"] as const) {
+for (const platform of ["android"] as const) {
   for (const daemon of [false, true]) {
     test(`${platform} ${daemon ? "daemon" : "direct"}: concurrent stopped reads launch once after lifecycle wait`, async () => {
       const h = harness(platform, daemon);
@@ -886,7 +910,7 @@ for (const platform of ["android", "ios"] as const) {
         h.device.deviceId,
       ]);
       expect(h.startCalls.length + h.simctl.getMethodCalls("bootSimulator").length).toBe(1);
-      expect(h.instrumentation.requests.length).toBe(platform === "ios" ? 1 : 0);
+      expect(h.instrumentation.requests).toEqual([]);
       expect(beforeReadBoot).toHaveBeenCalledTimes(4);
       expect(verifyDevice).toHaveBeenCalledTimes(1);
       expect(verifyDevice.mock.calls[0]).toEqual([
@@ -907,8 +931,6 @@ for (const platform of ["android", "ios"] as const) {
             ),
         ).toBe(true);
         expect(h.devices.getListDeviceImagesCalls()).toHaveLength(4);
-      } else {
-        expect(h.simctl.imageCacheBypasses).toEqual([true, true, true, true]);
       }
       expect(h.lifecycle.isReserved(identity)).toBe(false);
       h.assertNoReadWrites();
@@ -1110,7 +1132,7 @@ for (const daemon of [false, true]) {
   }
 }
 
-for (const platform of ["android", "ios"] as const) {
+for (const platform of ["android"] as const) {
   for (const refused of [false, true]) {
     test(`${platform}: resolved running read checks ownership before resume and verify, refused=${refused}`, async () => {
       const h = harness(platform, true);
@@ -1193,3 +1215,208 @@ test("Android cold read readiness refusal leaves the booted emulator running and
   expect(h.lifecycle.isReserved(identity)).toBe(false);
   h.assertNoReadWrites();
 });
+
+for (const platform of ["android", "ios"] as const) {
+  for (const daemon of [false, true]) {
+    test(`${platform} ${daemon ? "daemon" : "direct"}: shutdown then start leaves a running device for the queued read`, async () => {
+      const h = harness(platform, daemon);
+      const identity = { kind: "stable" as const, platform, stableId: h.id };
+      const shutdown = await h.lifecycle.reserve(identity, {
+        operation: "shutdown",
+        deadlineMs: 300_000,
+      });
+      const startPending = h.lifecycle.reserve(identity, {
+        operation: "start",
+        deadlineMs: 300_000,
+      });
+      if (platform === "ios") {
+        h.setRunning([h.device]);
+        h.setImages([{ ...h.image, isRunning: true }]);
+      }
+      const outcome = h.manager.ensureDeviceReady(platform, h.id, h.options);
+      await drainUntil(() => h.lifecycle.reservations.length === 3, {
+        description: "start and read queued behind shutdown",
+      });
+      shutdown.release();
+      const start = await startPending;
+      h.setImages([{ ...h.image, isRunning: true }]);
+      h.setRunning([h.device]);
+      start.release();
+      expect(await outcome).toMatchObject(h.device);
+      h.assertNoBoot();
+      expect(h.lifecycle.isReserved(identity)).toBe(false);
+    });
+    for (const stop of ["shutdown", "teardown"] as const) {
+      test(`${platform} ${daemon ? "daemon" : "direct"}: read refuses boot ${platform === "ios" ? "before queueing behind" : "after waiting for"} ${stop}`, async () => {
+        const h = harness(platform, daemon);
+        const identity = { kind: "stable" as const, platform, stableId: h.id };
+        const blocker = await h.lifecycle.reserve(identity, {
+          operation: stop,
+          deadlineMs: 300_000,
+        });
+        if (platform === "ios") {
+          let settled = false;
+          const outcome = expectStoppedIosRead(h).finally(() => {
+            settled = true;
+          });
+          await drainUntil(() => settled || h.lifecycle.reservations.length === 2, {
+            description: "iOS read rejects or incorrectly queues behind stop",
+          });
+          blocker.release();
+          await outcome;
+          expect(h.lifecycle.reservations).toHaveLength(1);
+          expect(h.lifecycle.isReserved(identity)).toBe(false);
+          return;
+        }
+        let settled = false;
+        const outcome = h.manager.ensureDeviceReady(platform, h.id, h.options).then(
+          (device) => {
+            settled = true;
+            return device;
+          },
+          (error: unknown) => {
+            settled = true;
+            return error;
+          },
+        );
+        await drainUntil(
+          () =>
+            h.lifecycle.reservations.length === 2 &&
+            h.lifecycle.timer.getPendingTimeoutCount() === 1,
+          { description: "read queued behind stop" },
+        );
+        expect(settled).toBe(false);
+        h.assertNoBoot();
+        blocker.release();
+        const error = await outcome;
+        expect(error).toBeInstanceOf(ActionableError);
+        expect(error).toHaveProperty(
+          "message",
+          `${platform} device '${h.device.name}': a shutdown or teardown ran while this read waited for it; a read does not boot it again. Call startDevice to boot it.`,
+        );
+        h.assertNoBoot();
+        expect(h.lifecycle.isReserved(identity)).toBe(false);
+      });
+    }
+    for (const control of (platform === "android"
+      ? ["read-behind-start", "control-behind-shutdown"]
+      : ["control-behind-shutdown"]) as readonly string[]) {
+      test(`${platform} ${daemon ? "daemon" : "direct"}: ${control} still boots`, async () => {
+        const h = harness(platform, daemon);
+        const identity = { kind: "stable" as const, platform, stableId: h.id };
+        const blocker = await h.lifecycle.reserve(identity, {
+          operation: control === "read-behind-start" ? "start" : "shutdown",
+          deadlineMs: 300_000,
+        });
+        h.setImages([h.image]);
+        const outcome =
+          control === "read-behind-start"
+            ? h.manager.ensureDeviceReady(platform, h.id, h.options)
+            : h.manager.findOrStartDevice(platform, { ...h.options, intent: "control" });
+        await drainUntil(
+          () =>
+            h.lifecycle.reservations.length === 2 &&
+            h.lifecycle.timer.getPendingTimeoutCount() === 1,
+          { description: "control queued behind owner" },
+        );
+        h.assertNoBoot();
+        blocker.release();
+        expect(await outcome).toMatchObject({ deviceId: h.device.deviceId, platform });
+        expect(h.startCalls).toEqual(platform === "android" ? [h.image.name] : []);
+        expect(h.simctl.getMethodCalls("bootSimulator")).toEqual(
+          platform === "ios" ? [{ udid: h.id }] : [],
+        );
+        expect(h.lifecycle.isReserved(identity)).toBe(false);
+      });
+    }
+  }
+}
+
+for (const daemon of [false, true]) {
+  for (const intent of ["read", "control"] as const) {
+    test(`ios ${daemon ? "daemon" : "direct"}: ${intent} verifies boot state after waiting behind shutdown`, async () => {
+      const h = harness("ios", daemon);
+      h.setRunning([h.device]);
+      h.setImages([{ ...h.image, isRunning: true }]);
+      const identity = { kind: "stable" as const, platform: "ios" as const, stableId: h.id };
+      const shutdown = await h.lifecycle.reserve(identity, {
+        operation: "shutdown",
+        deadlineMs: 300_000,
+      });
+      const outcome = h.manager.ensureDeviceReady("ios", h.id, { ...h.options, intent });
+      await drainUntil(() => h.lifecycle.reservations.length === 2, {
+        description: "running selection queued behind shutdown",
+      });
+      h.setRunning([]);
+      h.setImages([h.image]);
+      h.simctl.setDeviceInfo(h.id, {
+        udid: h.id,
+        name: h.device.name,
+        state: "Shutdown",
+        isAvailable: true,
+      });
+      shutdown.release();
+      if (intent === "read") {
+        const error = await outcome.catch((error: unknown) => error);
+        expect(error).toBeInstanceOf(ActionableError);
+        expect(error).toHaveProperty(
+          "message",
+          `iOS simulator '${h.device.name}' (${h.id}) is not booted (state: Shutdown); a read never boots a simulator. Call startDevice (or acquire a session) to boot it.`,
+        );
+      } else {
+        expect(await outcome).toEqual(h.device);
+      }
+      h.assertNoBoot();
+      expect(h.lifecycle.isReserved(identity)).toBe(false);
+    });
+  }
+}
+
+for (const state of ["Shutdown", "Shutting Down"] as const) {
+  for (const daemon of [false, true]) {
+    test(`ios ${daemon ? "daemon" : "direct"}: plain ${state} read never boots`, async () => {
+      const h = harness("ios", daemon);
+      h.simctl.setDeviceInfo(h.id, {
+        udid: h.id,
+        name: h.device.name,
+        state,
+        isAvailable: true,
+      });
+      const beforeReadBoot = mock(async () => {});
+      const error = await h.manager
+        .ensureDeviceReady("ios", h.id, {
+          ...h.options,
+          beforeReadBoot,
+        })
+        .catch((error: unknown) => error);
+      h.assertNoBoot();
+      expect(error).toBeInstanceOf(ActionableError);
+      expect(error).toHaveProperty(
+        "message",
+        `iOS simulator '${h.device.name}' (${h.id}) is not booted; a read never boots a simulator. Call startDevice (or acquire a session) to boot it.`,
+      );
+      expect(beforeReadBoot).not.toHaveBeenCalled();
+      expect(h.lifecycle.reservations).toEqual([]);
+      h.assertNoBoot();
+      h.assertNoReadWrites();
+    });
+  }
+}
+
+for (const daemon of [false, true]) {
+  test(`ios ${daemon ? "daemon" : "direct"}: findOrStart read refuses before reserving a boot lease`, async () => {
+    const h = harness("ios", daemon);
+    h.setImages([h.image]);
+    const error = await h.manager
+      .findOrStartDevice("ios", h.options)
+      .catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(ActionableError);
+    expect(error).toHaveProperty(
+      "message",
+      `iOS simulator '${h.device.name}' (${h.id}) is not booted; a read never boots a simulator. Call startDevice (or acquire a session) to boot it.`,
+    );
+    expect(h.lifecycle.reservations).toEqual([]);
+    h.assertNoBoot();
+    h.assertNoReadWrites();
+  });
+}

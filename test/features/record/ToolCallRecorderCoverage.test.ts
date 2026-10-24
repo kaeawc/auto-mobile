@@ -66,6 +66,9 @@ const EXCLUDED_TOOLS: Record<string, string> = {
   barrier: "Multi-device coordination primitive, handled by the plan executor",
   videoRecording: "Starts or stops a host-side capture; not part of the replayed interaction",
   performanceTrace: "Starts or stops a diagnostic tracer; not part of the replayed interaction",
+  captureTrace:
+    "Starts or stops a diagnostic Perfetto capture; not part of the replayed interaction",
+  heapDump: "Pulls a diagnostic heap dump to the host; not part of the replayed interaction",
   explore: "Builds the navigation graph; an exploration run, not a scripted step",
   measureStartup: "Performance measurement run over repeated launches, not an interaction step",
   navigateTo: "Resolves through a host-local navigation graph, so the step is not portable",
@@ -93,6 +96,7 @@ const EXCLUDED_TOOLS: Record<string, string> = {
   setKeyValue: EMBEDDED_SDK_ONLY,
   removeKeyValue: EMBEDDED_SDK_ONLY,
   clearKeyValueFile: EMBEDDED_SDK_ONLY,
+  deleteKeychainItem: EMBEDDED_SDK_ONLY,
   network: EMBEDDED_SDK_ONLY,
   mockNetwork: EMBEDDED_SDK_ONLY,
   clearMockNetwork: EMBEDDED_SDK_ONLY,
@@ -117,6 +121,7 @@ const FORMER_PLAN_RELEVANT_TOOLS = [
   "displayProfile",
   "dragAndDrop",
   "dragPath",
+  "focusNavigate",
   "homeScreen",
   "getLogs",
   "keyboard",
@@ -133,6 +138,7 @@ const FORMER_PLAN_RELEVANT_TOOLS = [
   "pressButton",
   "putAppFile",
   "recentApps",
+  "rotaryScroll",
   "resetAppLogs",
   "resetKeychain",
   "rotate",
@@ -150,7 +156,6 @@ const FORMER_PLAN_RELEVANT_TOOLS = [
   "setUIState",
   "shake",
   "siri",
-  "stageSessionDownloads",
   "statusBar",
   "swipeAt",
   "swipeOn",
@@ -377,10 +382,6 @@ const RECORDED_STEP_CALLS: ReadonlyArray<readonly [string, Record<string, unknow
       contentText: "hi",
     },
   ],
-  [
-    "stageSessionDownloads",
-    { directory: "fixtures", files: [{ destinationPath: "a.txt", contentText: "a" }] },
-  ],
 ];
 
 const RECORDED_TOOLS_9966 = [
@@ -395,7 +396,6 @@ const RECORDED_TOOLS_9966 = [
   "resetKeychain",
   "resetAppLogs",
   "putAppFile",
-  "stageSessionDownloads",
 ];
 
 describe("tools recorded by #9966", () => {
@@ -418,7 +418,7 @@ describe("tools recorded by #9966", () => {
       throw new Error("Missing tool schema");
     }
     // PlanExecutor re-injects the session for device-aware tools before parsing;
-    // stageSessionDownloads declares it as required.
+    // putAppFile declares it as required.
     expect(() => schema.parse({ ...steps[0].params, sessionUuid: "session-2" })).not.toThrow();
   });
 
@@ -482,15 +482,6 @@ describe("tools recorded by #9966", () => {
           { destinationPath: "a.txt", contentText: "a" },
           { destinationPath: "b.txt", sourcePath: "/tmp/b.txt" },
         ],
-      },
-      STAGES_FILES,
-    );
-    recordPlanCall(
-      recorder,
-      "stageSessionDownloads",
-      {
-        directory: "fixtures",
-        files: [{ destinationPath: "a.txt", sourcePath: "/tmp/a.txt" }],
       },
       STAGES_FILES,
     );

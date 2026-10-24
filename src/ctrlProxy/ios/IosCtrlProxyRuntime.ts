@@ -1,3 +1,6 @@
+import { IosRunnerLaunchFailures } from "./IosRunnerLaunchFailure";
+import { getSharedIosRunnerLaunchGate, type IosRunnerLaunchGate } from "./IosRunnerLaunchGate";
+import type { RunnerLaunchProgressProbe } from "./IosRunnerLaunchProgress";
 import { CtrlProxyRunnerExitedDuringStartupError } from "./CtrlProxyRunnerExitedDuringStartupError";
 import { PortManager, IOS_CTRL_PROXY_RESERVED_PORTS } from "../../utils/PortManager";
 import { DefaultIosTunnelClient, type IosTunnelClient } from "./IosTunnelClient";
@@ -91,6 +94,9 @@ export class IosCtrlProxyRuntime {
   readonly processExecutor: HostProcessExecutor;
   readonly xcodebuild: Xcodebuild;
   readonly processClient: IosCtrlProxyProcessClient;
+  readonly runnerLaunchGate: IosRunnerLaunchGate;
+  readonly runnerLaunchFailures = new IosRunnerLaunchFailures();
+  readonly runnerLaunchProgressProbe: RunnerLaunchProgressProbe;
   readonly signingManager: XcodeSigningManager;
   readonly deviceAppManager: DeviceAppManager;
   readonly remoteRunner: RemoteCtrlProxyIOSRunner;
@@ -186,6 +192,8 @@ export class IosCtrlProxyRuntime {
     this.processExecutor = processExecutor;
     this.xcodebuild = xcodebuild;
     this.processClient = processClient ?? new IosCtrlProxyProcessClient();
+    this.runnerLaunchGate = this.resolveLaunchGate(options);
+    this.runnerLaunchProgressProbe = this.resolveLaunchProgressProbe(options);
     this.signingManager = signingManager;
     this.deviceAppManager = deviceAppManager;
     this.hostPortAvailabilityChecker = hostPortAvailabilityChecker;
@@ -218,6 +226,16 @@ export class IosCtrlProxyRuntime {
             allowReallocation: start.allowServicePortReallocation ?? true,
           }),
       });
+  }
+
+  private resolveLaunchGate(options: IosCtrlProxyManagerOptions): IosRunnerLaunchGate {
+    return options.runnerLaunchGate ?? getSharedIosRunnerLaunchGate();
+  }
+
+  private resolveLaunchProgressProbe(
+    options: IosCtrlProxyManagerOptions,
+  ): RunnerLaunchProgressProbe {
+    return options.runnerLaunchProgressProbe ?? this.processClient;
   }
 
   private resolveDeviceDetector(options: IosCtrlProxyManagerOptions): IosDeviceDetector {
@@ -317,6 +335,7 @@ export class IosCtrlProxyRuntime {
         if (!retainRunner) {
           if (this.xcTestProcessId !== null) {
             this.runnerGenerationTokens.delete(this.xcTestProcessId);
+            this.runnerLaunchFailures.clear(this.xcTestProcessId);
           }
           this.xcTestProcessId = null;
           this.xcTestProcess = null;

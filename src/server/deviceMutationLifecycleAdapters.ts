@@ -10,10 +10,18 @@ export const APP_FALLBACK_TOOLS = [
   "measureStartup",
 ] as const;
 
-function appFallback(tool: (typeof APP_FALLBACK_TOOLS)[number], appId: unknown): ToolMutation {
+function appFallback(
+  tool: (typeof APP_FALLBACK_TOOLS)[number],
+  appId: unknown,
+  keepData = false,
+): ToolMutation {
   return {
     kind: "opaque",
-    key: opaqueIntentKey(tool, typeof appId === "string" && appId.length > 0 ? appId : null),
+    key: opaqueIntentKey(
+      tool,
+      typeof appId === "string" && appId.length > 0 ? appId : null,
+      ...(keepData ? [true] : []),
+    ),
   };
 }
 
@@ -31,13 +39,16 @@ function appFallback(tool: (typeof APP_FALLBACK_TOOLS)[number], appId: unknown):
  *   session-installed app. They also record a `fallback:` intent: the clean cannot reinstall an app
  *   the baseline held, nor undo an APK replacement or restore its data. The recording layer drops
  *   that intent when the session itself installed an app the baseline did not hold
- *   (`withoutSessionCoveredFallbacks`).
+ *   (`withoutSessionCoveredFallbacks`). An uninstall that keeps data always retains its fallback:
+ *   the package inventory cannot see removed packages whose data remains.
  */
 const PROCESS_ONLY_TOOLS: ReadonlySet<string> = new Set([
   "terminateApp",
   "crashApp",
   "appLifecycle",
   "performanceTrace",
+  "captureTrace",
+  "heapDump",
   "videoRecording",
   "recordDeviceGestures",
 ]);
@@ -63,7 +74,7 @@ const APP_TOOL_MUTATIONS: Readonly<
   installApp: installMutations,
   uninstallApp: (args) => [
     { kind: "installed-app", key: String(args.appId) },
-    appFallback("uninstallApp", args.appId),
+    appFallback("uninstallApp", args.appId, args.keepData === true),
   ],
 };
 

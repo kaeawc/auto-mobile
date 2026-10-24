@@ -74,6 +74,8 @@ RUN_STATUS="${run_rc}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+# shellcheck source=scripts/lib/spotlight-exclude.sh
+source "${PROJECT_ROOT}/scripts/lib/spotlight-exclude.sh"
 export PROJECT_ROOT
 
 # Source library files
@@ -99,6 +101,7 @@ VIDEO_SERVER_JAR_PATH="${VIDEO_SERVER_DIR}/build/libs/automobile-video.jar"
 VIDEO_SERVER_REMOTE_JAR_PATH="/data/local/tmp/automobile-video.jar"
 CTRL_PROXY_IOS_DIR="${PROJECT_ROOT}/ios/control-proxy"
 DERIVED_DATA_PATH="/tmp/automobile-ctrl-proxy"
+spotlight_exclude_dir "${DERIVED_DATA_PATH}"
 PID_FILE="${PROJECT_ROOT}/.automobile-hot-reload.pid"
 
 # CLI options with defaults
@@ -1029,7 +1032,7 @@ done
 trap 'cleanup' EXIT INT TERM
 
 # Ensure scratch directory exists
-mkdir -p "${PROJECT_ROOT}/scratch"
+mkdir_spotlight_excluded "${PROJECT_ROOT}/scratch"
 
 # Check and install dependencies
 run_capture_status ensure_dependencies

@@ -42,6 +42,8 @@ source "${SCRIPT_DIR}/xcodegen_version.sh"
 # shellcheck source=scripts/ios/local-sim-build-args.sh
 source "${SCRIPT_DIR}/local-sim-build-args.sh"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+# shellcheck source=scripts/lib/spotlight-exclude.sh
+source "${PROJECT_ROOT}/scripts/lib/spotlight-exclude.sh"
 CTRL_PROXY_IOS_DIR="${PROJECT_ROOT}/ios/control-proxy"
 
 # On a local arm64 host, build only the arch the simulator runs and skip the
@@ -55,6 +57,13 @@ XCODEPROJ="${CTRL_PROXY_IOS_DIR}/CtrlProxy.xcodeproj"
 # Default derived data path (matches IosCtrlProxyBuilder.ts)
 DEFAULT_DERIVED_DATA="/tmp/automobile-ctrl-proxy"
 DERIVED_DATA="${AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA:-${DEFAULT_DERIVED_DATA}}"
+if [ "${DERIVED_DATA}" = "${DEFAULT_DERIVED_DATA}" ]; then
+    # Fixed /tmp default: always marked.
+    mkdir_spotlight_excluded "${DERIVED_DATA}"
+else
+    # Caller-selected override may point outside the checkout: mark only inside it.
+    mkdir_spotlight_excluded_within "${PROJECT_ROOT}" "${DERIVED_DATA}"
+fi
 
 echo -e "${CYAN}========================================${NC}"
 echo -e "${CYAN}  CtrlProxy iOS Build for Testing${NC}"
@@ -206,7 +215,7 @@ if [ "${INSTALL_AFTER_BUILD}" = true ] && [ "${DERIVED_DATA}" != "${DEFAULT_DERI
     echo ""
     echo -e "${BLUE}Installing to ${DEFAULT_DERIVED_DATA}...${NC}"
     rm -rf "${DEFAULT_DERIVED_DATA}"
-    mkdir -p "${DEFAULT_DERIVED_DATA}"
+    mkdir_spotlight_excluded "${DEFAULT_DERIVED_DATA}"
     cp -R "${DERIVED_DATA}/Build" "${DEFAULT_DERIVED_DATA}/"
     echo -e "${GREEN}Installed successfully${NC}"
 fi

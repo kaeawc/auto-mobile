@@ -1,3 +1,5 @@
+import { logger } from "../../../utils/logger";
+import { opaqueIntentKey } from "./types";
 import type {
   DeviceBaseline,
   DeviceMutationInput,
@@ -7,36 +9,7 @@ import type {
 } from "./types";
 import { assertDeviceMutationScope } from "./types";
 import { ActionableError } from "../../../models/ActionableError";
-
-export function brokerMutationIncarnation(
-  resourceId: string,
-  assignmentGeneration: number | null,
-): string {
-  if (
-    !resourceId.trim() ||
-    assignmentGeneration === null ||
-    !Number.isSafeInteger(assignmentGeneration) ||
-    assignmentGeneration < 0
-  ) {
-    throw new ActionableError(
-      "Broker mutation recording requires an exact resource and assignment generation",
-    );
-  }
-  return JSON.stringify([resourceId, assignmentGeneration]);
-}
-
-/**
- * The incarnation an iOS pool entry's mutation journal rows and baseline share. A session's
- * journal rows must carry the same incarnation as the keep-booted reset scope, or the reset reads
- * an empty journal and never reverts what the session changed (#14790).
- */
-export function iosMutationIncarnation(
-  scopeKey: string,
-  allocationIndex: number,
-  stableDeviceId: string,
-): string {
-  return JSON.stringify([scopeKey, allocationIndex, stableDeviceId]);
-}
+import { mutationIncarnation } from "./incarnation";
 
 /** The scope a broker session's mutation recorder binds, per platform. */
 export function brokerSessionMutationScope(input: {
@@ -46,28 +19,48 @@ export function brokerSessionMutationScope(input: {
   stableDeviceId: string;
   transportId?: string | null;
   assignmentGeneration: number | null;
+  bootId?: string | null;
 }): DeviceMutationScope {
   const { resource, stableDeviceId } = input;
+  if (
+    input.platform !== "ios" &&
+    (!resource.resourceId.trim() ||
+      input.assignmentGeneration === null ||
+      !Number.isSafeInteger(input.assignmentGeneration) ||
+      input.assignmentGeneration < 0)
+  ) {
+    throw new ActionableError(
+      "Broker mutation recording requires an exact resource and assignment generation",
+    );
+  }
   return input.platform === "ios"
     ? {
         sessionUuid: input.sessionUuid,
         deviceId: stableDeviceId,
-        incarnation: iosMutationIncarnation(
-          resource.scopeKey,
-          resource.allocationIndex,
+        incarnation: mutationIncarnation({
+          platform: "ios",
+          scopeKey: resource.scopeKey,
+          allocationIndex: resource.allocationIndex,
           stableDeviceId,
-        ),
+        }),
       }
     : {
         sessionUuid: input.sessionUuid,
         deviceId: input.transportId ?? stableDeviceId,
-        incarnation: brokerMutationIncarnation(resource.resourceId, input.assignmentGeneration),
+        incarnation: mutationIncarnation({
+          platform: "android",
+          resourceId: resource.resourceId,
+          stableDeviceId,
+          bootId: input.bootId ?? null,
+        }),
       };
 }
 
 export interface MutationRecorder {
   readonly scope: Readonly<DeviceMutationScope>;
   record(mutation: DeviceMutationInput): Promise<void>;
+  /** Never throws: best-effort persistence that logs its own failure. */
+  markUnrecorded(toolName: string): Promise<void>;
   missingMutations(
     mutations: readonly Pick<DeviceMutationInput, "kind" | "key">[],
   ): Promise<Pick<DeviceMutationInput, "kind" | "key">[]>;
@@ -89,6 +82,21 @@ export class SessionMutationRecorder implements MutationRecorder {
 
   record(mutation: DeviceMutationInput): Promise<void> {
     return this.journal.record(this.scope, mutation);
+  }
+
+  async markUnrecorded(toolName: string): Promise<void> {
+    try {
+      await this.record({
+        kind: "opaque",
+        key: opaqueIntentKey("recording-failed", toolName),
+        priorValue: { state: "unobservable" },
+        toolName,
+      });
+    } catch (error) {
+      // Best effort by contract: the in-memory recording gap already forces the session's
+      // fallback, and the tool call must not fail because its failure marker did.
+      logger.warn("Cannot persist device mutation recording failure marker", error);
+    }
   }
 
   async missingMutations(

@@ -11,8 +11,9 @@
 #   AC3  the POM names the artifact, depends on the published auto-mobile-protocol
 #        artifact and carries no unpublished or unversioned dependency, and
 #   AC4  an Android app resolving the artifact from that repository (with no
-#        Compose BOM of its own) compiles a call to AutoMobilePrototype into a
-#        minified (R8) release APK. Nothing runs the APK.
+#        Compose BOM of its own) compiles a call to AutoMobilePrototype and the
+#        committed automobile:prototype/native sample (samples/prototype-embedding)
+#        into a minified (R8) release APK. Nothing runs the APK.
 #
 # Usage:
 #   validate-prototype-compose-consumer.sh [--skip-publish] [--skip-consumer]
@@ -235,6 +236,7 @@ import dev.jasonpearson.automobile.prototype.AutoMobilePrototype
 import dev.jasonpearson.automobile.prototype.PrototypeAssets
 import dev.jasonpearson.automobile.prototype.PrototypeNetwork
 import dev.jasonpearson.automobile.prototype.PrototypeStorage
+import prototypes.EmbeddingSamplePrototype
 
 private const val SPEC =
   """{"id":"consumer","motion":"none","window":{"placement":{"type":"fullscreen"}},""" +
@@ -245,18 +247,31 @@ class MainActivity : ComponentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     check(AutoMobilePrototype.capabilities.isNotEmpty())
+    // The committed embedding sample is the native resource's own output (#13732).
+    val sample = intent.getBooleanExtra("sample", true)
     setContent {
-      AutoMobilePrototype(
-        spec = SPEC,
-        assets = PrototypeAssets.None,
-        storage = PrototypeStorage.fileBacked(this),
-        network = PrototypeNetwork(),
-        onDismiss = { finish() },
-      )
+      if (sample) {
+        EmbeddingSamplePrototype(onDismiss = { finish() })
+      } else {
+        AutoMobilePrototype(
+          spec = SPEC,
+          assets = PrototypeAssets.None,
+          storage = PrototypeStorage.fileBacked(this),
+          network = PrototypeNetwork(),
+          onDismiss = { finish() },
+        )
+      }
     }
   }
 }
 KOTLIN
+
+  # Compile the automobile:prototype/native sample (#13732) exactly as an app would add it.
+  local sample_root="${PROJECT_ROOT}/samples/prototype-embedding/android/app/src/main"
+  [ -d "$sample_root" ] || usage_error "embedding sample missing: ${sample_root}"
+  mkdir -p "${consumer_dir}/src/main/kotlin" "${consumer_dir}/src/main/assets"
+  cp -R "${sample_root}/java/." "${consumer_dir}/src/main/kotlin/"
+  cp -R "${sample_root}/assets/." "${consumer_dir}/src/main/assets/"
 
   if [ -n "${ANDROID_HOME:-}" ]; then
     printf 'sdk.dir=%s\n' "$ANDROID_HOME" >"${consumer_dir}/local.properties"

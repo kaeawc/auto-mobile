@@ -38,6 +38,7 @@ export function createDevicePoolSeams(
     waitForEmulatorLossIncident: (...args) => pool.waitForEmulatorLossIncident(...args),
     finishEmulatorLossIncident: (...args) => pool.finishEmulatorLossIncident(...args),
     isCurrentDisconnectedDevice: (...args) => pool.isCurrentDisconnectedDevice(...args),
+    fenceUnpooledShutdown: (...args) => pool.fenceUnpooledShutdown(...args),
     markIntentionalShutdown: (...args) => pool.markIntentionalShutdown(...args),
     releaseDeviceRestartReservationForStop: (...args) =>
       pool.releaseDeviceRestartReservationForStop(...args),
@@ -100,6 +101,7 @@ export function createDevicePoolSeams(
     isUnderShutdownReservation: (...args) => pool.isUnderShutdownReservation(...args),
     isReservedForReadiness: (...args) => pool.isReservedForReadiness(...args),
     assertNotPreparedForOtherRequest: (...args) => pool.assertNotPreparedForOtherRequest(...args),
+    waitForAssignmentTransition: (...args) => pool.waitForAssignmentTransition(...args),
     isSafeForObservationServiceStart: (...args) => pool.isSafeForObservationServiceStart(...args),
     reserveDevicesForRehydration: (...args) => pool.reserveDevicesForRehydration(...args),
     releaseRehydrationReservation: (...args) => pool.releaseRehydrationReservation(...args),

@@ -1,3 +1,4 @@
+import { applyIosLockStateReading } from "./ios/IosLockStateProbe";
 import { WindowIdentityFreshnessResolver } from "./WindowIdentityFreshness";
 import { HierarchyCaptureRequest } from "./HierarchyCapture";
 import { BootedDevice, ObserveResult } from "../../models";
@@ -94,7 +95,7 @@ export class SingleDisplaySettleStage {
     }
     this.d.identifyCapture(result, options?.freshness ?? "cached-ok");
     if (run.iosLockState) {
-      result.deviceLock = await run.iosLockState;
+      applyIosLockStateReading(result, await run.iosLockState);
     }
 
     // Polls defer their cache write until ObservePoll selects the returned result.
@@ -108,6 +109,7 @@ export class SingleDisplaySettleStage {
   private async resampleDeviceLock(result: ObserveResult, signal: AbortSignal | undefined) {
     // The ordinary lock sample may precede a fold discovered by the final hierarchy.
     delete result.deviceLock;
+    delete result.deviceLockUnknown;
     await this.d.deviceStateCollector().collectDeviceLock(result, signal);
   }
 

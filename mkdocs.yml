@@ -125,11 +125,11 @@ nav:
       - "Test prep tools": using/test-prep-tools.md
       - "Manufacturer profiles": using/oem-personas.md
       - "Session execution logs": using/session-logs.md
-      - "Session Downloads fixtures": using/session-downloads.md
       - "Storage capabilities": using/storage-capabilities.md
+      - "Keystore test state": using/keystore-test-state.md
+      - "Keystore metadata": using/keystore-metadata.md
       - "SDK capabilities": using/sdk-capabilities.md
-      - "Live device acceptance": using/live-device-acceptance.md
-      - "Manual-test harness": using/manual-test-harness.md
+      - "Embedding prototypes in an app": using/prototype-embedding.md
       - "Dynamic Tools": using/dynamic-tools.md
       - "Environment variables": using/environment-variables.md
       - "iOS Simulator fleet cost": using/ios-simulator-fleet-cost.md
@@ -139,8 +139,9 @@ nav:
       - "WebRTC Streaming": webrtc-streaming.md
   - "How it Works":
       - "System design": design-docs/index.md
-      - "atc build integration (research)": design-docs/atc-build-integration.md
       - "Device-description audit": design-docs/device-description-audit.md
+      - "Live device acceptance": design-docs/live-device-acceptance.md
+      - "Manual-test harness": design-docs/manual-test-harness.md
       - "Device resources": design-docs/device-resources.md
       - "Host toolchain resource": design-docs/host-toolchain-resource.md
       - "Session broker experiment": design-docs/session-broker-experiment.md
@@ -159,12 +160,15 @@ nav:
       - "Prototype Compose compiler report": design-docs/plat/android/prototype-compose-compiler-report.md
       - "iOS simulator prototype agent": design-docs/plat/ios/prototype-agent.md
       - "ProtoViewer": design-docs/protoviewer.md
+      - "ProtoViewer agent": design-docs/protoviewer-agent.md
+      - "Native prototype embedding": design-docs/prototype-embedding.md
       - "Runtime dependency pinning": design-docs/release/runtime-dependency-pinning.md
       - "Unit lane scaling": design-docs/ci/unit-lane-scaling.md
       - "CI attestation shadow promotion": design-docs/ci/attestation-shadow-promotion.md
       - "CI attestation GitHub App transport": design-docs/ci/attestation-github-app-transport.md
       - "CircleCI macOS migration": design-docs/ci/circleci-macos-migration.md
       - "macOS CI capacity plan": design-docs/ci/macos-capacity-plan.md
+      - "macOS-only iOS tests": design-docs/ci/macos-only-tests.md
       - "Interaction loop": design-docs/mcp/interaction-loop.md
       - "Stylus, pressure and hover injection": design-docs/mcp/stylus-pressure-hover-injection.md
       - "Daemon": design-docs/mcp/daemon.md

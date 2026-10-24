@@ -14,6 +14,7 @@ import {
 import { serverConfig } from "../utils/ServerConfig";
 import type { ToolRegistryHost, ToolRegistrySchema } from "./registryHost";
 import { ToolDefinitionListing } from "./ToolDefinitionListing";
+import { TOOL_ANNOTATIONS } from "./toolAnnotations";
 import { toolExecutionError } from "./toolExecutionError";
 import { erased, eraseDeviceAware, erasePlain } from "./toolRegistryErasure";
 
@@ -44,12 +45,8 @@ import {
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { StructuredToolResponse } from "../utils/toolUtils";
 import { AppCleanupService, DefaultAppCleanupService } from "./AppCleanupService";
-import { advertiseBoundsForCompact } from "./compactBoundsAdvertisement";
-import {
-  addSpillArtifactToAdvertisedOutputSchema,
-  applyInheritedPlanRequestParams,
-  toAdvertisedJsonSchema,
-} from "./pipeline/advertisedSchema";
+import { ToolDefinitionSchemaCache } from "./toolDefinitionSchemaCache";
+import { applyInheritedPlanRequestParams } from "./pipeline/advertisedSchema";
 import {
   AfterToolCallHandler,
   DefaultAfterToolCallHandler,
@@ -121,7 +118,6 @@ export { flattenTopLevelUnion } from "./TopLevelUnionFlattener";
 import { isAlwaysLoadToolsEnabled } from "../config/alwaysLoadTools";
 import { installDaemonToolRegistryPort } from "../daemon/toolRegistryPort";
 import {
-  CachedToolDefinitionSchemas,
   DeviceAwareToolHandler,
   DeviceAwareToolOptions,
   deviceReadOnlyMetadata,
@@ -134,7 +130,6 @@ import {
   RegisteredTool,
   shadowedSdkToolCallback,
   ToolHandler,
-  toolHasOutputSchema,
   ToolListingOptions,
   ToolRegistryCollaborators,
   ToolRegistryPipelineOverrides,
@@ -181,8 +176,7 @@ export class ToolRegistryClass {
   private planLifecycleManager: PlanLifecycleManager;
   private readonly isResponseFailure = (response: unknown): boolean =>
     isToolResponseFailure(response);
-  private toolDefinitionSchemaCache: Map<string, CachedToolDefinitionSchemas> = new Map();
-  private toolDefinitionSchemaBuilds = 0;
+  private readonly toolDefinitionSchemas = new ToolDefinitionSchemaCache();
   private removalEpoch = 0;
 
   constructor(
@@ -284,7 +278,7 @@ export class ToolRegistryClass {
     inOptions: PlainToolOptions<z.output<S>> = {},
   ): void {
     const { schema, handler, options } = erasePlain(inSchema, inHandler, inOptions);
-    this.invalidateToolDefinitionSchemaCache();
+    this.invalidateToolListing();
     if (this === ToolRegistry) {
       setToolTransportRecovery(name, options.transportRecovery);
     }
@@ -314,7 +308,7 @@ export class ToolRegistryClass {
 
   /** Remove one test-only or dynamically registered tool without disturbing the registry. */
   unregister(name: string): void {
-    this.invalidateToolDefinitionSchemaCache();
+    this.invalidateToolListing(name);
     this.removalEpoch++;
     if (this === ToolRegistry) {
       setToolTransportRecovery(name, undefined);
@@ -326,7 +320,7 @@ export class ToolRegistryClass {
     name: string,
     options: DeviceAwareToolOptions,
   ): ToolTransportRecovery {
-    this.invalidateToolDefinitionSchemaCache();
+    this.invalidateToolListing();
     const recovery = options.transportRecovery ?? "connect";
     if (this === ToolRegistry) {
       setToolTransportRecovery(name, recovery);
@@ -757,6 +751,7 @@ export class ToolRegistryClass {
       server.registerTool(
         tool.name,
         {
+          ...TOOL_ANNOTATIONS[tool.name],
           description: tool.description,
           inputSchema: erased<ToolRegistrySchema>(tool.schema),
           ...(isAlwaysLoadToolsEnabled() && { _meta: { "anthropic/alwaysLoad": true } }),
@@ -814,13 +809,13 @@ export class ToolRegistryClass {
 
   /** Test-only: put a previously captured tool back under its own name, replacing any current one. */
   setRegisteredToolForTesting(tool: RegisteredTool): void {
-    this.invalidateToolDefinitionSchemaCache();
+    this.invalidateToolListing();
     this.tools.set(tool.name, tool);
   }
 
   /** Test-only: unregister one tool by name; a no-op when it was never registered. */
   removeToolForTesting(name: string): void {
-    this.invalidateToolDefinitionSchemaCache();
+    this.invalidateToolListing(name);
     this.removalEpoch++;
     this.tools.delete(name);
   }
@@ -836,7 +831,7 @@ export class ToolRegistryClass {
 
   /** Test-only: how many per-tool schema builds `getToolDefinitions` has performed. */
   schemaBuildCountForTesting(): number {
-    return this.toolDefinitionSchemaBuilds;
+    return this.toolDefinitionSchemas.conversionCount;
   }
 
   // Register a per-transport server-side session-binding teardown handler (issue
@@ -893,6 +888,21 @@ export class ToolRegistryClass {
   // re-emit to their own external clients.
   notifyToolListChanged(): void {
     this.invalidateToolDefinitionSchemaCache();
+    this.fanOutToolListChanged();
+  }
+
+  /**
+   * A session binding or tool selection changed which tools a connection lists, not what any tool
+   * advertises, so every cached schema stays valid. Same fan-out as {@link notifyToolListChanged}
+   * without regenerating the whole catalog on the next listing (an acquisition lists it once to
+   * report the session's gated tools, and used to rebuild it once per bind).
+   */
+  notifyToolSelectionChanged(): void {
+    this.invalidateToolListing();
+    this.fanOutToolListChanged();
+  }
+
+  private fanOutToolListChanged(): void {
     for (const server of this.servers) {
       try {
         server.sendToolListChanged();
@@ -910,56 +920,21 @@ export class ToolRegistryClass {
     return new ToolDefinitionListing(
       (options) => this.getAllTools(options),
       (name) => this.isUserConfigurableTool(name),
-      (tool, suppress, compact) => this.getCachedToolDefinitionSchemas(tool, suppress, compact),
+      (tool, suppress, compact) => this.toolDefinitionSchemas.get(tool, suppress, compact),
     ).getToolDefinitions(options);
   }
 
-  private getCachedToolDefinitionSchemas(
-    tool: RegisteredTool,
-    suppressOutputSchema: boolean,
-    compactBounds: boolean,
-  ): { inputSchema: Record<string, unknown>; outputSchema: Record<string, unknown> | undefined } {
-    let cached = this.toolDefinitionSchemaCache.get(tool.name);
-    if (!cached) {
-      this.toolDefinitionSchemaBuilds++;
-      cached = {
-        inputSchema: toAdvertisedJsonSchema(tool.schema, {
-          constrainAppIds: true,
-          anthropicSubset: true,
-          exposeDeviceId: tool.name === "observe",
-        }),
-        outputSchemasByRuntimeFlags: new Map(),
-      };
-      this.toolDefinitionSchemaCache.set(tool.name, cached);
+  /** The tool list changed, not any tool's schema: see {@link ToolDefinitionSchemaCache}. */
+  private invalidateToolListing(removedTool?: string): void {
+    ListChangedBroadcaster.invalidate("tools");
+    if (removedTool !== undefined) {
+      this.toolDefinitionSchemas.forget(removedTool);
     }
-
-    const outputSchemaCacheKey = `${suppressOutputSchema}:${compactBounds}`;
-    if (!cached.outputSchemasByRuntimeFlags.has(outputSchemaCacheKey)) {
-      const outputSchema =
-        toolHasOutputSchema(tool) && !suppressOutputSchema
-          ? (advertiseBoundsForCompact(
-              addSpillArtifactToAdvertisedOutputSchema(
-                toAdvertisedJsonSchema(tool.outputSchema, {
-                  constrainAppIds: false,
-                  // Zod's per-conversion __schemaN definitions stay local to this tool.
-                  reused: "ref",
-                }),
-              ),
-              compactBounds,
-            ) as Record<string, unknown>)
-          : undefined;
-      cached.outputSchemasByRuntimeFlags.set(outputSchemaCacheKey, outputSchema);
-    }
-
-    return {
-      inputSchema: cached.inputSchema,
-      outputSchema: cached.outputSchemasByRuntimeFlags.get(outputSchemaCacheKey),
-    };
   }
 
   private invalidateToolDefinitionSchemaCache(): void {
     ListChangedBroadcaster.invalidate("tools");
-    this.toolDefinitionSchemaCache.clear();
+    this.toolDefinitionSchemas.clear();
   }
 
   /** Install the service owned by this process's composition root. */

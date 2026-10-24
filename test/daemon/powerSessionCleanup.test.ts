@@ -121,6 +121,87 @@ describe("registerPowerSessionCleanup", () => {
     expect(restore).toEqual(["dumpsys deviceidle unforce", "dumpsys battery reset"]);
   });
 
+  test("a Doze restore that deviceidle reports late is polled with backoff, not re-applied (#15042)", async () => {
+    const { adb, manager, ops, options, timer, mutating } = setup();
+    await ops.write({ doze: "deep" });
+    adb.idleSettleReads = 3;
+
+    manager.release("s-1", DEVICE);
+    await manager.settle();
+
+    expect(mutating().filter((c) => c.includes("deviceidle unforce"))).toEqual([
+      "dumpsys deviceidle unforce",
+    ]);
+    expect(timer.getSleepHistory()).toEqual(expect.arrayContaining([250, 500, 1000]));
+    const { powerRestore } = await powerRestoreResult("s-1", options);
+    expect(
+      powerRestore &&
+        "fields" in powerRestore &&
+        powerRestore.fields.find((f) => f.field === "doze"),
+    ).toEqual({ field: "doze", status: "restored", verified: true });
+  });
+
+  test("a deep Doze on an awake device releases restored and verified, with one wake (#15161)", async () => {
+    const { adb, manager, ops, options, timer, mutating } = setup();
+    // The emulator keeps forced idle after unforce until the screen it put to sleep wakes.
+    adb.idleLingersWhileAsleep = true;
+    adb.setScreenState(true);
+    await ops.write({ doze: "deep" });
+    expect(adb.deep).toBe("IDLE");
+    expect(await adb.isScreenOn()).toBe(false);
+    const applied = mutating().length;
+
+    manager.release("s-1", DEVICE);
+    await manager.settle();
+
+    expect(mutating().slice(applied)).toEqual([
+      "dumpsys deviceidle unforce",
+      "input keyevent KEYCODE_WAKEUP",
+      "dumpsys battery reset",
+    ]);
+    expect(adb.deep).toBe("ACTIVE");
+    // Settled on the first read-back: no backoff wait for an idle state that could never clear.
+    expect(timer.getSleepHistory()).toEqual([]);
+    const { powerRestore } = await powerRestoreResult("s-1", options);
+    expect(powerRestore).toMatchObject({
+      status: "restored",
+      fields: [
+        { field: "doze", status: "restored", verified: true },
+        { field: "screen", status: "restored", verified: true },
+        { field: "battery", status: "restored", verified: true },
+      ],
+    });
+    expect(powerRestore).not.toHaveProperty("leftover");
+  });
+
+  test("a failed wake before the Doze read-back does not fail the Doze restore (#15161)", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const { adb, manager, ops, options } = setup();
+      adb.idleLingersWhileAsleep = true;
+      adb.setScreenState(true);
+      await ops.write({ doze: "deep" });
+      adb.failing.add("KEYCODE_WAKEUP");
+      adb.failTimes.set("KEYCODE_WAKEUP", 1);
+
+      manager.release("s-1", DEVICE);
+      await manager.settle();
+
+      const { powerRestore } = await powerRestoreResult("s-1", options);
+      expect(powerRestore).toMatchObject({
+        status: "restored",
+        fields: [
+          { field: "doze", status: "restored", verified: true },
+          { field: "screen", status: "restored", verified: true },
+          { field: "battery", status: "restored", verified: true },
+        ],
+      });
+      expect(warn).toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   test("one failing field does not stop the others and the failure is reported loudly", async () => {
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {

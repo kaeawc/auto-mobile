@@ -86,9 +86,10 @@ afterEach(() => {
 });
 
 test("preserves registration order", () => {
-  expect(ToolRegistry.getAllTools({ includeUnavailable: true }).map((tool) => tool.name)).toEqual(
-    toolNames,
-  );
+  expect(ToolRegistry.getAllTools({ includeUnavailable: true }).map((tool) => tool.name)).toEqual([
+    "deleteKeychainItem",
+    ...toolNames,
+  ]);
 });
 
 test.each(["listDataStores", "getDataStore"])("%s preserves the read result", async (name) => {

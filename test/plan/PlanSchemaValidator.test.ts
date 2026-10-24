@@ -61,7 +61,7 @@ ${condition}
 `;
     const accepted = validator.validateYaml(
       plan(
-        "        rootState: rooted-detectable\n        faults:\n          battery: low\n          thermal: critical",
+        "        rootState: rooted-detectable\n        faults:\n          battery: low\n          thermal: critical\n          storage: full\n          dontKeepActivities: on",
       ),
     );
     expect(accepted.errors ?? []).toEqual([]);
@@ -70,6 +70,8 @@ ${condition}
     for (const rejected of [
       "        rootState: god-mode",
       "        faults:\n          battery: explode",
+      "        faults:\n          dontKeepActivities: off",
+      "        faults:\n          storage: overflowing",
       "        faults:\n          gravity: low",
     ]) {
       expect(validator.validateYaml(plan(rejected)).valid).toBe(false);

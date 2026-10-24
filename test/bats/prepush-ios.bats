@@ -8,10 +8,11 @@ setup() {
   mkdir -p "${mock_bin}"
   export PREPUSH_IOS_MOCK_REPO_ROOT="${repo_root}"
 
-  for tool in swiftformat swiftlint swift git; do
+  for tool in swiftformat swiftlint swift git bun; do
     cat > "${mock_bin}/${tool}" <<'MOCK'
 #!/usr/bin/env bash
 printf '%s %s\n' "$(basename "$0")" "$*" >> "${PREPUSH_IOS_COMMAND_LOG}"
+if [[ $(basename "$0") == bun ]]; then echo clean; exit 0; fi
 if [[ $(basename "$0") == swiftformat && ${1:-} == --version ]]; then
   echo "0.54.6"
 fi
@@ -31,7 +32,11 @@ if [[ $(basename "$0") == git ]]; then
   elif [[ $* == *"rev-parse --verify"* ]]; then
     :
   elif [[ $* == *"--name-only -z"* ]]; then
-    printf '%s\0' "ios/XCTestRunner/Sources/XCTestRunnerTests/AutoMobileVersionTests.swift"
+    if [[ -n ${PREPUSH_IOS_CHANGED_PATH:-} ]]; then
+      printf '%s\0' "${PREPUSH_IOS_CHANGED_PATH}"
+    else
+      printf '%s\0' "ios/XCTestRunner/Sources/XCTestRunnerTests/AutoMobileVersionTests.swift"
+    fi
   else
     echo "ios/XCTestRunner/Sources/XCTestRunnerTests/AutoMobileVersionTests.swift"
   fi
@@ -60,6 +65,14 @@ if [[ $(basename "$0") == swift && ${1:-} == test && ${2:-} == list ]]; then
     echo "XCTestRunnerTests.NewFeatureTests/testExample"
   fi
 elif [[ $(basename "$0") == swift && ${1:-} == test ]]; then
+  if [[ "$PWD" == */prototype-agent ]]; then
+    echo "prototype-agent swift $*" >> "${PREPUSH_IOS_COMMAND_LOG}"
+    if [[ -n ${PROTOVIEWER_TEST_FAILURE:-} ]]; then exit "$PROTOVIEWER_TEST_FAILURE"; fi
+    if [[ ${PROTOVIEWER_ZERO_TESTS:-0} == 1 ]]; then
+      echo "Executed 0 tests, with 0 failures"
+      exit 0
+    fi
+  fi
   if [[ ${PREPUSH_IOS_SWIFT_TEST_ZERO:-} == 1 ]]; then
     echo "Executed 0 tests, with 0 failures (0 unexpected)"
   else
@@ -76,13 +89,15 @@ create_real_git_fixture() {
   fixture_bin="${BATS_TEST_TMPDIR}/fixture-bin-${BATS_TEST_NUMBER}"
   mkdir -p "${fixture_root}/scripts/swiftformat" "${fixture_root}/scripts/swiftlint" "${fixture_root}/scripts/ios" "${fixture_root}/ios/XCTestRunner" "${fixture_root}/ios/Nested" "${fixture_bin}"
   fixture_root="$(cd "${fixture_root}" && pwd -P)"
+  mkdir -p "${fixture_root}/scripts/lib"
+  cp "${repo_root}/scripts/lib/spotlight-exclude.sh" "${fixture_root}/scripts/lib/"
   cp "${repo_root}/scripts/prepush-ios.sh" "${fixture_root}/scripts/prepush-ios.sh"
   cp "${repo_root}/scripts/swiftformat/swiftformat_version.sh" "${fixture_root}/scripts/swiftformat/swiftformat_version.sh"
   cp "${repo_root}/scripts/swiftlint/swiftlint_version.sh" "${fixture_root}/scripts/swiftlint/swiftlint_version.sh"
   cp "${repo_root}/scripts/ios/swift_test_counts.sh" "${fixture_root}/scripts/ios/swift_test_counts.sh"
   cp "${repo_root}/scripts/ios/xctestrunner_test_filter.sh" "${fixture_root}/scripts/ios/xctestrunner_test_filter.sh"
   printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "${fixture_root}/scripts/ios/api-dump.sh"
-  for tool in swiftformat swiftlint swift; do
+  for tool in swiftformat swiftlint swift bun; do
     cp "${mock_bin}/${tool}" "${fixture_bin}/${tool}"
   done
 
@@ -285,6 +300,8 @@ commit_changed_swift_file() {
   outside_bin="${BATS_TEST_TMPDIR}/outside-bin-${BATS_TEST_NUMBER}"
   mkdir -p "${outside_root}/scripts/swiftformat" "${outside_root}/scripts/ios" "${outside_root}/ios/XCTestRunner"
   mkdir -p "${outside_bin}"
+  mkdir -p "${outside_root}/scripts/lib"
+  cp "${repo_root}/scripts/lib/spotlight-exclude.sh" "${outside_root}/scripts/lib/"
   cp "${repo_root}/scripts/prepush-ios.sh" "${outside_root}/scripts/prepush-ios.sh"
   cp "${repo_root}/scripts/swiftformat/swiftformat_version.sh" "${outside_root}/scripts/swiftformat/swiftformat_version.sh"
   cp "${repo_root}/scripts/ios/swift_test_counts.sh" "${outside_root}/scripts/ios/swift_test_counts.sh"
@@ -332,7 +349,7 @@ SCRIPT
     PREPUSH_IOS_COMMAND_LOG="${command_log}" /bin/bash "${fixture_root}/scripts/prepush-ios.sh"
   [ "$status" -eq 0 ]
   grep -F -- '--scope partial' "${command_log}"
-  grep -F 'SwiftFormat=skip:0 SwiftLint=skip:0 CtrlProxy runner build=skip:0' "${command_log}"
+  grep -F 'SwiftFormat=skip:0 SwiftLint=skip:0 CtrlProxy runner build=skip:0 ProtoViewer build/tests=skip:0' "${command_log}"
 }
 
 @test "attests full scope after lint and simulator-free tests" {
@@ -356,4 +373,76 @@ SCRIPT
   [ "$status" -eq 0 ]
   grep -F -- '--scope partial --scope-note CtrlProxy runner build disabled' "${command_log}"
   grep -F 'CtrlProxy runner build=skip:0' "${command_log}"
+}
+
+setup_protoviewer_fixture() {
+  create_real_git_fixture
+  mkdir -p "${fixture_root}/ios/prototype-agent"
+  install_attestation_recorder
+  cat > "${fixture_root}/scripts/ios/protoviewer-build.sh" <<'SCRIPT'
+#!/bin/bash
+printf 'protoviewer-build %s\n' "$*" >> "${PREPUSH_IOS_COMMAND_LOG}"
+exit "${PROTOVIEWER_BUILD_FAILURE:-0}"
+SCRIPT
+  chmod +x "${fixture_root}/scripts/ios/protoviewer-build.sh"
+}
+
+@test "ProtoViewer package changes run warnings-as-errors tests and app build" {
+  setup_protoviewer_fixture
+  run env PATH="${mock_bin}:$PATH" PREPUSH_IOS_MOCK_REPO_ROOT="${fixture_root}" \
+    PREPUSH_IOS_CHANGED_PATH=ios/prototype-agent/Package.swift PREPUSH_IOS_COMMAND_LOG="${command_log}" \
+    bash "${fixture_root}/scripts/prepush-ios.sh"
+  [ "$status" -eq 0 ]
+  grep -Fx 'prototype-agent swift test -Xswiftc -warnings-as-errors' "${command_log}"
+  grep -Fx "protoviewer-build ${fixture_root}/scratch/protoviewer-prepush" "${command_log}"
+  grep -F 'ProtoViewer build/tests=pass:0' "${command_log}"
+}
+
+@test "ProtoViewer build script changes select tests and build" {
+  setup_protoviewer_fixture
+  run env PATH="${mock_bin}:$PATH" PREPUSH_IOS_MOCK_REPO_ROOT="${fixture_root}" \
+    PREPUSH_IOS_CHANGED_PATH=scripts/ios/protoviewer-build.sh PREPUSH_IOS_COMMAND_LOG="${command_log}" \
+    bash "${fixture_root}/scripts/prepush-ios.sh"
+  [ "$status" -eq 0 ]
+  grep -F 'prototype-agent swift test' "${command_log}"
+  grep -F 'ProtoViewer build/tests=pass:0' "${command_log}"
+}
+
+@test "ProtoViewer opt-out skips tests and build and attests partial scope" {
+  setup_protoviewer_fixture
+  run env PATH="${mock_bin}:$PATH" PREPUSH_IOS_MOCK_REPO_ROOT="${fixture_root}" \
+    PREPUSH_IOS_CHANGED_PATH=ios/prototype-agent/Package.swift PREPUSH_IOS_SKIP_PROTOVIEWER=1 \
+    PREPUSH_IOS_COMMAND_LOG="${command_log}" bash "${fixture_root}/scripts/prepush-ios.sh"
+  [ "$status" -eq 0 ]
+  run grep -F 'prototype-agent swift test' "${command_log}"
+  [ "$status" -ne 0 ]
+  run grep -F 'protoviewer-build ' "${command_log}"
+  [ "$status" -ne 0 ]
+  grep -F -- '--scope partial' "${command_log}"
+  grep -F 'ProtoViewer build/tests disabled' "${command_log}"
+  grep -F 'ProtoViewer build/tests=skip:0' "${command_log}"
+}
+
+@test "ProtoViewer zero executed tests fail before app build" {
+  setup_protoviewer_fixture
+  run env PATH="${mock_bin}:$PATH" PREPUSH_IOS_MOCK_REPO_ROOT="${fixture_root}" \
+    PREPUSH_IOS_CHANGED_PATH=ios/prototype-agent/Tests/Test.swift PROTOVIEWER_ZERO_TESTS=1 \
+    PREPUSH_IOS_COMMAND_LOG="${command_log}" bash "${fixture_root}/scripts/prepush-ios.sh"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'prototype-agent executed 0 tests'* ]]
+  run grep -F 'protoviewer-build ' "${command_log}"
+  [ "$status" -ne 0 ]
+}
+
+@test "ProtoViewer test and build failures propagate without attesting success" {
+  setup_protoviewer_fixture
+  for failure in PROTOVIEWER_TEST_FAILURE PROTOVIEWER_BUILD_FAILURE; do
+    : > "${command_log}"
+    run env PATH="${mock_bin}:$PATH" PREPUSH_IOS_MOCK_REPO_ROOT="${fixture_root}" \
+      PREPUSH_IOS_CHANGED_PATH=ios/prototype-agent/Package.swift "$failure=19" \
+      PREPUSH_IOS_COMMAND_LOG="${command_log}" bash "${fixture_root}/scripts/prepush-ios.sh"
+    [ "$status" -eq 19 ]
+    run grep -F 'attestation ' "${command_log}"
+    [ "$status" -ne 0 ]
+  done
 }

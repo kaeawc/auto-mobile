@@ -1,0 +1,8 @@
+# HAND-RECONSTRUCTED, NOT CAPTURED FROM A DEVICE (#14948): the same shape on a rectangular display.
+Display Manager State:
+Display Manager State:
+  mLogicalDisplays:
+    Display 0:
+      mBaseDisplayInfo=DisplayInfo{"Built-in Screen", displayId 0, displayGroupId 0, FLAG_SUPPORTS_PROTECTED_BUFFERS, FLAG_TRUSTED, real 1080 x 2400, largest app 384 x 384, smallest app 384 x 384, appVsyncOff 1000000, presDeadline 11111111, mode 1, defaultMode 1, rotation 0, state ON}
+  Display Devices: size=1
+    DisplayDeviceInfo{"Built-in Screen": uniqueId="local:4619827259835644672", 384 x 384, modeId 1, type INTERNAL, FLAG_DEFAULT_DISPLAY}

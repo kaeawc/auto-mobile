@@ -1,3 +1,4 @@
+import { InMemoryMutationRecordingGaps } from "../../../src/daemon/sessionBroker/mutations/recordingGaps";
 import { isSessionBrokerDeviceName } from "../../../src/daemon/sessionBroker/deviceNaming";
 import { FakeNativePort } from "../../helpers/fakeSessionBrokerDevicePort";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
@@ -1394,6 +1395,7 @@ describe("session-only broker lifecycle", () => {
         },
       },
       timer,
+      new InMemoryMutationRecordingGaps(),
     );
     const marked: string[] = [];
     const relinquish = options.store.relinquishForRestart.bind(options.store);
@@ -1527,6 +1529,7 @@ describe("session-only broker lifecycle", () => {
       "test-scope",
       { acquire: () => {}, release: () => {} },
       timer,
+      new InMemoryMutationRecordingGaps(),
     );
     service.start();
     await entered.promise;

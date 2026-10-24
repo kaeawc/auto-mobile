@@ -1,3 +1,4 @@
+import { androidCtrlProxyClientForPlatform } from "../observe/android/androidCtrlProxyClientFor";
 import { AndroidCoordinateTalkBack } from "./AndroidCoordinateTalkBack";
 import { AndroidCoordinateTapDispatcher } from "./AndroidCoordinateTapDispatcher";
 import type { TapAtPlanContext } from "../../models/TapAtGeometry";
@@ -29,7 +30,6 @@ import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import type { Timer } from "../../utils/SystemTimer";
 import { throwIfAborted } from "../../utils/toolUtils";
-import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { withStaleDisplay } from "../observe/StaleDisplayError";
 import { isAdoptableCapture } from "../observe/isAdoptableCapture";
@@ -127,7 +127,7 @@ export class TapAtCoordinate extends BaseVisualChange {
   ) {
     super(device, adb, dependencies.timer, dependencies.renderedDisplayRevision, dependencies);
     this.androidClient =
-      dependencies.androidClient ?? AndroidCtrlProxyClient.getInstance(device, this.adbFactory);
+      dependencies.androidClient ?? androidCtrlProxyClientForPlatform(device, this.adbFactory);
     this.iosClient = dependencies.iosClient ?? IOSCtrlProxyClient.getInstance(device);
     this.iosDoubleTap = dependencies.dispatchIosDoubleTap ?? dispatchIosDoubleTap;
     this.iosCoordinateTap = dependencies.dispatchIosCoordinateTap ?? dispatchIosCoordinateTap;

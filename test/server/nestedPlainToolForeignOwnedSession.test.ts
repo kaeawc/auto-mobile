@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, spyOn } from "bun:test";
 import { z } from "zod/v4";
 import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/constants";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -35,6 +35,7 @@ import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvi
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { warmedTests } from "../helpers/warmedTests";
 
 isolateToolRegistry();
 
@@ -99,7 +100,10 @@ describe("a nested plain control call naming a session another connection owns (
   const refusalCode = (result: StepExecutionResult): unknown =>
     (result.sourceError as InputDeviceOwnedError | undefined)?.code;
 
+  let harnessArranged = false;
+
   async function arrangeHarness(): Promise<void> {
+    harnessArranged = true;
     previousAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     spies = [
@@ -169,19 +173,11 @@ describe("a nested plain control call naming a session another connection owns (
     executor = new DefaultPlanStepExecutor<RegisteredTool>(ToolRegistry, () => true, timer);
   }
 
-  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
-  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
-    test(
-      name,
-      async () => {
-        await arrangeHarness();
-        await fn();
-      },
-      timeout,
-    );
-  }
-
-  afterEach(() => {
+  function teardownHarness(): void {
+    if (!harnessArranged) {
+      return;
+    }
+    harnessArranged = false;
     ToolRegistry.clearTools();
     restorePipeline();
     resetDeviceToolsDependencies();
@@ -197,7 +193,21 @@ describe("a nested plain control call naming a session another connection owns (
     } else {
       process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = previousAutolock;
     }
-  });
+  }
+
+  // First-use costs (the tool call path, the refusal) are paid in beforeAll. The harness is still
+  // built inside each test, so its cost is paid in the test body.
+  const test = warmedTests(teardownHarness);
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
 
   describe("while serving another connection", () => {
     arranged("killDevice naming the owner's session is refused before the kill", async () => {

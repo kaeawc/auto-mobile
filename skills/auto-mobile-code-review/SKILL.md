@@ -315,7 +315,10 @@ routinely ships nothing.
   interface + fake + `FakeTimer`, no real device or network, under 100ms, never resolving the
   real file-backed `getDatabase()`.
 - **Docs are part of the change.** Capability added or removed ⇒ the docs advertising it move
-  too. Stale claims in `docs/` were a recurring accepted finding.
+  too. Stale claims in `docs/` were a recurring accepted finding. Edit the existing statement in
+  place; flag docs added or grown with progress logs, status checklists, dated history, per-PR
+  narration, or internals leaking into `docs/using/` (end users only; internals go in
+  `docs/design-docs/`).
 
 ## Step 6 — The generated lens
 

@@ -6,7 +6,9 @@ import {
   DeviceConditionController,
   type DeviceConditionInjector,
 } from "./DeviceConditionController";
+import { resolveLifecycleFaultInjector } from "./lifecycleFaultInjectors";
 import { resolvePowerFaultInjector } from "./powerFaultInjectors";
+import { resolveStorageFaultInjector } from "./storageFaultInjectors";
 import { resolveRootStateInjector } from "./rootStateInjector";
 import {
   deviceConditionInputIsMeaningful,
@@ -204,15 +206,18 @@ export class DeviceConditionRegistry {
 }
 
 /**
- * Default resolver: the root fixture (#14060) and power-domain fault injectors
- * (#14063) on an Android device. The integrity injector (#14062) adds its key here
- * as it lands.
+ * Default resolver: the root fixture (#14060), power-domain fault injectors
+ * (#14063), process-lifecycle fault injectors (#14068) and storage fault injectors
+ * (#14066) on an Android device. The integrity injector (#14062) adds its key here as it lands.
  * Returns undefined for a key with no injector, which the controller reports as
  * `unsupported` rather than silently dropping.
  */
 const defaultInjectorResolver: DeviceConditionInjectorResolver = (owner, key) =>
   owner.device
-    ? (resolveRootStateInjector(owner.device, key) ?? resolvePowerFaultInjector(owner.device, key))
+    ? (resolveRootStateInjector(owner.device, key) ??
+      resolvePowerFaultInjector(owner.device, key) ??
+      resolveLifecycleFaultInjector(owner.device, key) ??
+      resolveStorageFaultInjector(owner.device, key))
     : undefined;
 
 /**

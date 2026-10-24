@@ -133,18 +133,18 @@ describe("CLI release-session daemon results", () => {
   test.each([
     {
       result: {
-        message: "Session fake-session already released or never existed",
+        message: "Session fake-session already released",
         alreadyReleased: true,
       },
-      output: ["Session fake-session already released or never existed"],
+      output: ["Session fake-session already released"],
     },
     {
       result: {
-        message: "Session fake-session already released or never existed",
+        message: "Session fake-session already released",
         alreadyReleased: true,
         device: "fake-device",
       },
-      output: ["Session fake-session already released or never existed"],
+      output: ["Session fake-session already released"],
     },
     {
       result: {
@@ -184,6 +184,39 @@ describe("CLI release-session daemon results", () => {
     }
   });
 
+  test.each(["pending", "failed"] as const)(
+    "surfaces %s cleanup in text and JSON",
+    async (cleanup) => {
+      const result = {
+        message: `Session fake-session already released; cleanup ${cleanup}`,
+        alreadyReleased: true,
+        known: true,
+        cleanup,
+      };
+      const Manager = managerForCliRelease(async () => result);
+      const log = logSpy.mockImplementation(() => {});
+      await runDaemonCommand("release-session", ["fake-session"], {}, Manager);
+      expect(log.mock.calls).toEqual([
+        [result.message],
+        [`Cleanup ${cleanup}: the device may not be fully restored`],
+      ]);
+      log.mockClear();
+      await runDaemonCommand("release-session", ["fake-session", "--json"], {}, Manager);
+      expect(log.mock.calls).toEqual([
+        [
+          JSON.stringify({
+            ok: true,
+            sessionId: "fake-session",
+            alreadyReleased: true,
+            message: result.message,
+            known: true,
+            cleanup,
+          }),
+        ],
+      ]);
+    },
+  );
+
   test.each([
     undefined,
     null,
@@ -191,6 +224,8 @@ describe("CLI release-session daemon results", () => {
     { message: "Released", alreadyReleased: "false" },
     { message: 5, alreadyReleased: true },
     { message: "Released", alreadyReleased: false, device: 5 },
+    { message: "Released", alreadyReleased: false, known: "true" },
+    { message: "Released", alreadyReleased: false, cleanup: "restored" },
     "Released",
   ])("rejects malformed release results: %j", async (result) => {
     const Manager = managerForCliRelease(async () => result);

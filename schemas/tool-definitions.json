@@ -1,6 +1,10 @@
 [
   {
     "name": "accessibility",
+    "title": "Control Accessibility",
+    "annotations": {
+      "destructiveHint": false
+    },
     "description": "Check or control accessibility services. On Android: omit talkback to check TalkBack state, or pass talkback: true/false to enable/disable it. On iOS: omit voiceover to check VoiceOver state, or pass voiceover: true/false to enable/disable it (Simulator via simctl, physical devices via the Settings app). After enabling TalkBack, reports a blocking system runtime permission prompt in warning and blockingPrompt when detected; AutoMobile does not dismiss it. Use observe, then tapOn to answer the prompt. Always returns fresh state from the device, regardless of feature flags: enabled is what the device reports. When force-accessibility-mode or accessibility-auto-detect: off changes what the action tools assume, detectionOverride names it ({ mode: forced-on | auto-detect-off, effectiveEnabled }); it is absent otherwise.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -91,6 +95,10 @@
   },
   {
     "name": "accessibilityAction",
+    "title": "Run Accessibility Action",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Perform an Android accessibility action on an element, the way TalkBack or Switch Access does: expand, collapse, dismiss, select, clear_selection, show_on_screen, scroll in a direction, page (API 29+), press_and_hold (API 30+), set_progress on a slider, or custom to run an app-defined action (e.g. a Compose customActions label) by its label. Target the element by resourceId, text or contentDesc; it needs a unique resource-id. An action the element does not offer is refused, and the error lists the actions it does offer (custom ones as custom:<label>).",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -184,6 +192,10 @@
   },
   {
     "name": "accessibilityAudit",
+    "title": "Audit Native Accessibility",
+    "annotations": {
+      "destructiveHint": false
+    },
     "description": "Run the platform's own accessibility audit engine on the current screen. iOS (iOS 17+, Simulator and physical) runs XCUITest performAccessibilityAudit and reports contrast, hitRegion, dynamicType, textClipped, sufficientDescription, trait and elementDetection issues, each with the element's accessibility identifier as elementId (usable with tapOn/highlight) and bounds. Unlike the host-side WCAG audit, the platform engine sees real hit regions, Dynamic Type support and clipped text. Android (Accessibility Test Framework) is not available yet and returns errorCode unsupported_platform; a runner that predates this command returns errorCode unsupported_capability.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -318,6 +330,11 @@
   },
   {
     "name": "accessibilityFocus",
+    "title": "Set Accessibility Focus",
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true
+    },
     "description": "Set or clear Android TalkBack focus by resourceId, text, or contentDesc.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -548,7 +565,11 @@
   },
   {
     "name": "appLifecycle",
-    "description": "State-preserving background-process kill for saved-state restoration tests (background, killBackgrounded); trimMemory sends onTrimMemory(level) to the running app without killing it.",
+    "title": "Control App Lifecycle",
+    "annotations": {
+      "destructiveHint": true
+    },
+    "description": "State-preserving background-process kill for saved-state restoration tests (background, killBackgrounded; iOS kills with SIGKILL after Home); trimMemory (Android only) sends onTrimMemory(level) to the running app without killing it.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -621,7 +642,7 @@
         },
         "mechanism": {
           "type": "string",
-          "enum": ["home", "am-kill", "am-send-trim-memory", "unsupported"]
+          "enum": ["home", "am-kill", "am-send-trim-memory", "ios-sigkill", "unsupported"]
         },
         "trimLevel": {
           "type": "string",
@@ -719,6 +740,10 @@
   },
   {
     "name": "audit",
+    "title": "Audit Current Screen",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Audit the current screen on demand, with every audit feature flag off and without changing flag state. kinds: accessibility (WCAG: contrast, touch targets, labels, headings; default), performance (UI jank and touch latency of the foreground app), memory (a memory snapshot of appId). Violations carry the element from this observation. scope.container limits the accessibility audit to one element's subtree. baseline record saves the accessibility violations under a name; compare reports baselineDiff (new, fixed, unchanged), and only new violations count toward failOn. failOn error|warning makes the call fail when findings reach that severity, for plan assertions; default never. Android only.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -927,6 +952,10 @@
   },
   {
     "name": "backgroundWork",
+    "title": "Control Background Jobs",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Android: read and trigger an app's background work without waiting hours. action \"list\" shows JobScheduler jobs (constraints, next run, WorkManager worker class); {runJob:{jobId|worker,force}} runs one now (cmd jobscheduler run); {workManagerDiagnostics:true} maps WorkManager jobs to worker classes; {listAlarms:true} shows pending alarms. Alarms cannot be fired without moving the clock: use setDeviceState clock.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -1245,6 +1274,11 @@
   },
   {
     "name": "barrier",
+    "title": "Synchronize Tracks",
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": false
+    },
     "description": "Synchronize multiple devices at a barrier, then let all proceed concurrently (no serialized section).",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -1316,6 +1350,10 @@
   },
   {
     "name": "biometricAuth",
+    "title": "Simulate Biometrics",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Simulate biometric auth: Android emulator/SDK hook, or iOS via the app's AutoMobile SDK or Simulator.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -1422,7 +1460,139 @@
     }
   },
   {
+    "name": "captureTrace",
+    "title": "Capture Trace",
+    "annotations": {
+      "destructiveHint": true
+    },
+    "description": "Android: record a Perfetto trace from typed categories (sched, gfx, view, am, wm, binder_driver, memory, app). start returns a traceId; drive the flow; stop pulls the .perfetto-trace to the host. Released sessions stop their trace.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "start a recorder, or stop one by traceId",
+          "type": "string",
+          "enum": ["start", "stop"]
+        },
+        "traceId": {
+          "description": "stop: the id start returned",
+          "type": "string",
+          "minLength": 1
+        },
+        "appId": {
+          "description": "start: enables the app's atrace tags (Choreographer, RenderThread, custom slices)",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "categories": {
+          "description": "start: what to record; default sched, gfx, view. app needs an appId",
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["sched", "gfx", "view", "am", "wm", "binder_driver", "memory", "app"]
+          }
+        },
+        "bufferMb": {
+          "description": "start: ring buffer size; default 32",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 256
+        },
+        "maxDurationMs": {
+          "description": "start: the recorder stops itself after this; default 30000",
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 300000
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["action"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "action": {
+          "type": "string",
+          "enum": ["start", "stop"]
+        },
+        "traceId": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "sizeBytes": {
+          "type": "number"
+        },
+        "durationMs": {
+          "type": "number"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "appId": {
+          "type": "string"
+        },
+        "categories": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["sched", "gfx", "view", "am", "wm", "binder_driver", "memory", "app"]
+          }
+        },
+        "bufferMb": {
+          "type": "number"
+        },
+        "maxDurationMs": {
+          "type": "number"
+        },
+        "startedAt": {
+          "type": "string"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": ["success", "action", "traceId", "deviceId", "warnings", "message"],
+      "additionalProperties": {}
+    }
+  },
+  {
     "name": "changeLocalization",
+    "title": "Change Locale",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Change locale, time zone, text direction, time format, and calendar system",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -1559,6 +1729,11 @@
   },
   {
     "name": "clearKeyValueFile",
+    "title": "Clear Key Value File",
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": true
+    },
     "description": "Clear app key-value storage file.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -1634,6 +1809,11 @@
   },
   {
     "name": "clearMockNetwork",
+    "title": "Clear Mock Network Rules",
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": true
+    },
     "description": "Clear mock network response rules.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -1717,6 +1897,10 @@
   },
   {
     "name": "clipboard",
+    "title": "Control Clipboard",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Clipboard operations (copy/paste/clear/get)",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -1762,6 +1946,10 @@
   },
   {
     "name": "compareScreenshot",
+    "title": "Compare Screenshot",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Visual regression: record a named screenshot baseline (per device profile) or compare the current screen, an element, or a rectangle against it, ignoring masked regions and system bars. Returns match, diffRatio and a diff image path on mismatch.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -2011,6 +2199,10 @@
   },
   {
     "name": "crashApp",
+    "title": "Crash App",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Intentionally crash a running app through the platform crash path",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -2229,6 +2421,10 @@
   },
   {
     "name": "criticalSection",
+    "title": "Run Critical Section",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Synchronize multiple devices at a barrier, then run steps serially.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -2337,6 +2533,11 @@
   },
   {
     "name": "deleteDevice",
+    "title": "Delete Device",
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": true
+    },
     "description": "Stop and permanently delete a device, with verified platform-inventory absence",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -2408,7 +2609,123 @@
     }
   },
   {
+    "name": "deleteKeychainItem",
+    "title": "Delete Keychain Item",
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": true
+    },
+    "description": "Delete one exact, host-allowlisted, app-owned iOS generic-password Keychain item. Requires SDK opt-in, mutation authorization and explicit confirmation; never exports values.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "selector": {
+          "type": "object",
+          "properties": {
+            "itemClass": {
+              "type": "string",
+              "minLength": 1
+            },
+            "service": {
+              "type": "string",
+              "minLength": 1
+            },
+            "account": {
+              "type": "string",
+              "minLength": 1
+            },
+            "accessGroup": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": ["itemClass", "service", "account", "accessGroup"],
+          "additionalProperties": false
+        },
+        "confirm": {
+          "description": "Explicit confirmation to delete this exact Keychain item",
+          "type": "boolean",
+          "const": true
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["appId", "selector", "confirm"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "appId": {
+          "type": "string"
+        },
+        "outcome": {
+          "type": "string"
+        },
+        "deletedScope": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "itemClass": {
+                  "type": "string"
+                },
+                "service": {
+                  "type": "string"
+                },
+                "account": {
+                  "type": "string"
+                },
+                "accessGroup": {
+                  "type": "string"
+                }
+              },
+              "required": ["itemClass", "service", "account", "accessGroup"],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": ["appId", "outcome", "deletedScope"],
+      "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/embeddedSdkOnly": true
+    }
+  },
+  {
     "name": "deviceSnapshot",
+    "title": "Manage Snapshot",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Capture or restore device snapshot. An Android VM restore in daemon mode returns the new deviceSessionUuid; the previous device-session UUID is superseded by the restore.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -2559,6 +2876,10 @@
   },
   {
     "name": "displayConfig",
+    "title": "Configure Display",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Read or set the visual display configuration — font/text scale, effective display density, light/dark (night mode) theme, and on Android the runtime screen size, navigation mode (gesture / 3-button / 2-button) and display-cutout emulation — for adaptive-layout, edge-to-edge and large-font accessibility testing. A call with no set field reads current values; providing fontScale, density, theme, size, navigationMode, displayCutout, or reset applies the change and returns applied + previous values so the client can restore. Android supports all three fields (density overrides are best-effort on physical devices); iOS supports theme (the Simulator via `simctl ui appearance`, physical devices through the CtrlProxy runner) and, on the Simulator only, font scale as a Dynamic Type category (via `simctl ui content_size`; fontScale maps to the nearest category and contentSize selects one exactly; reads report both). Android size, navigationMode and displayCutout use `wm size` and the system image's overlays; values the image does not ship are refused and `available` lists the ones it has; size, overlay and density changes invalidate cached observations and coordinates. On Android, reset restores font scale, density and screen size to device defaults, navigation mode and display cutout to the values recorded before they were first changed, and night mode only to the value displayConfig replaced earlier in this process; otherwise night mode is left unchanged. Releasing or rebinding the session that changed size, navigationMode or displayCutout restores them through the same record as displayProfile; sessionless changes persist until reset. Android reset never forces light mode. iOS Simulator reset restores light appearance and the content size category displayConfig replaced earlier in this process; physical iOS reset restores the appearance displayConfig first replaced there (light if none). The accessibility display preferences increaseContrast, reduceMotion and boldText are read and set on Android and the iOS Simulator, and colorInversion, colorCorrection, magnification, magnificationScale and extraDim (API 31+) on Android; `supported` reports each as true (proven by read-back), partial (stored setting reads back but running apps must relaunch; reason in supportNotes) or false, and reset restores the ones displayConfig changed.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -2979,6 +3300,10 @@
   },
   {
     "name": "displayProfile",
+    "title": "Set Display Profile",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Android: apply an OEM-style display profile in one call (screen size, density, font scale, display-cutout and navigation-mode overlays, force dark, fold posture), composing displayConfig and setPosture. Each step reports applied | partial | unsupported | failed. The state before each facet's first change is recorded once; reset restores every recorded facet, and in a daemon session release or rebind does too. Approximates OEM look and geometry; it cannot reproduce OEM SystemUI.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -3123,6 +3448,10 @@
   },
   {
     "name": "dragAndDrop",
+    "title": "Drag and Drop Element",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Drag and drop element",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -3334,6 +3663,10 @@
   },
   {
     "name": "dragPath",
+    "title": "Drag Along Path",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Drag a finger along a polyline with segment timing, an initial hold and a release hold (Android and iOS).",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -3433,6 +3766,10 @@
   },
   {
     "name": "executePlan",
+    "title": "Execute Automation Plan",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Execute YAML plan steps; stops on first failed step.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -3932,6 +4269,10 @@
   },
   {
     "name": "explore",
+    "title": "Explore Screens",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Automatically explore app to build navigation graph",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -4000,6 +4341,10 @@
   },
   {
     "name": "exportPlan",
+    "title": "Export Plan",
+    "annotations": {
+      "destructiveHint": false
+    },
     "description": "Stop active recording and export a YAML plan.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -4091,7 +4436,116 @@
     }
   },
   {
+    "name": "focusNavigate",
+    "title": "Navigate D-pad Focus",
+    "annotations": {
+      "destructiveHint": true
+    },
+    "description": "Move D-pad focus to an element on a focus-driven UI such as Android TV. Observes, and until the focused element matches `until` (text, contentDesc or resourceId) presses the D-pad arrow that moves toward the nearest match, or `direction` when given. Returns the path of focused elements and a status: focused, max_steps (default 30) or stuck (two presses left focus unchanged). Activate the result with sendKeys key enter.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "until": {
+          "description": "The element focus should land on; every field given must match",
+          "type": "object",
+          "properties": {
+            "text": {
+              "description": "Text of the element to focus (case-insensitive)",
+              "type": "string"
+            },
+            "contentDesc": {
+              "description": "Content-desc of the element to focus",
+              "type": "string"
+            },
+            "resourceId": {
+              "description": "Resource ID of the element to focus",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "direction": {
+          "description": "Press this D-pad direction every step instead of steering toward the target",
+          "type": "string",
+          "enum": ["up", "down", "left", "right"]
+        },
+        "maxSteps": {
+          "description": "Maximum D-pad presses (default 30)",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "settleMs": {
+          "description": "Wait after each press before observing (default 200)",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5000
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["until"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["focused", "max_steps", "stuck"]
+        },
+        "steps": {
+          "type": "number"
+        },
+        "path": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "focusedElement": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": ["success", "status", "steps", "path"],
+      "additionalProperties": {}
+    }
+  },
+  {
     "name": "getAndroid",
+    "title": "Acquire Android",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Find or recover an Android AVD and prepare it for automation. See the automobile:tools resource for every tool's default enabled/gated state before acquiring a device.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -4161,6 +4615,7 @@
               "audit",
               "backgroundWork",
               "biometricAuth",
+              "captureTrace",
               "changeLocalization",
               "clearKeyValueFile",
               "clearMockNetwork",
@@ -4168,6 +4623,7 @@
               "compareScreenshot",
               "crashApp",
               "deleteDevice",
+              "deleteKeychainItem",
               "deviceSnapshot",
               "displayConfig",
               "displayProfile",
@@ -4176,6 +4632,7 @@
               "executePlan",
               "explore",
               "exportPlan",
+              "focusNavigate",
               "getAppPermissions",
               "getDataStore",
               "getDeepLinks",
@@ -4186,6 +4643,7 @@
               "getNetworkGraph",
               "getNotificationPolicy",
               "getPreference",
+              "heapDump",
               "highlight",
               "hitTest",
               "homeScreen",
@@ -4224,6 +4682,7 @@
               "removeKeyValue",
               "resetAppLogs",
               "resetKeychain",
+              "rotaryScroll",
               "rotate",
               "selectAllText",
               "sendBroadcast",
@@ -4244,7 +4703,6 @@
               "siri",
               "snapshotOf",
               "sqlQuery",
-              "stageSessionDownloads",
               "statusBar",
               "swipeAt",
               "swipeOn",
@@ -4267,6 +4725,10 @@
   },
   {
     "name": "getApple",
+    "title": "Acquire Apple",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Find or recover an iOS Simulator and prepare it for automation. See the automobile:tools resource for every tool's default enabled/gated state before acquiring a device.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -4310,6 +4772,7 @@
               "audit",
               "backgroundWork",
               "biometricAuth",
+              "captureTrace",
               "changeLocalization",
               "clearKeyValueFile",
               "clearMockNetwork",
@@ -4317,6 +4780,7 @@
               "compareScreenshot",
               "crashApp",
               "deleteDevice",
+              "deleteKeychainItem",
               "deviceSnapshot",
               "displayConfig",
               "displayProfile",
@@ -4325,6 +4789,7 @@
               "executePlan",
               "explore",
               "exportPlan",
+              "focusNavigate",
               "getAppPermissions",
               "getDataStore",
               "getDeepLinks",
@@ -4335,6 +4800,7 @@
               "getNetworkGraph",
               "getNotificationPolicy",
               "getPreference",
+              "heapDump",
               "highlight",
               "hitTest",
               "homeScreen",
@@ -4373,6 +4839,7 @@
               "removeKeyValue",
               "resetAppLogs",
               "resetKeychain",
+              "rotaryScroll",
               "rotate",
               "selectAllText",
               "sendBroadcast",
@@ -4393,7 +4860,6 @@
               "siri",
               "snapshotOf",
               "sqlQuery",
-              "stageSessionDownloads",
               "statusBar",
               "swipeAt",
               "swipeOn",
@@ -4416,6 +4882,10 @@
   },
   {
     "name": "getAppPermissions",
+    "title": "Get Permissions",
+    "annotations": {
+      "readOnlyHint": true
+    },
     "description": "Read app permission state",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -4550,6 +5020,10 @@
   },
   {
     "name": "getDataStore",
+    "title": "Read Data Store",
+    "annotations": {
+      "readOnlyHint": true
+    },
     "description": "Read entries from an app Jetpack DataStore instance (Android, requires AutoMobile SDK adapter).",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -4617,6 +5091,10 @@
   },
   {
     "name": "getDeepLinks",
+    "title": "Get Deep Links",
+    "annotations": {
+      "readOnlyHint": true
+    },
     "description": "Query app deep links. On Android 12+ also reports appLinks: each web domain's App Links verification state, user selection, and whether the app may open it without a chooser.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -4790,6 +5268,10 @@
   },
   {
     "name": "getDeviceState",
+    "title": "Get Device State",
+    "annotations": {
+      "readOnlyHint": true
+    },
     "description": "Read device-level state including clock (Android epoch-second instant and automaticTime, readable without root; unsupported on iOS), Do Not Disturb, the connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), iOS Simulator biometric enrollment, network condition (device-wide on Android; on an iOS Simulator the per-app offline rules the network filter enforces, with revision and lease), and Android emulator virtual sensor values (sensors: acceleration, gyroscope, magnetic-field, orientation, temperature, proximity, light, pressure, humidity via `emu sensor get`, with unavailable listing sensors the AVD refuses; change them with setSensor). Use it as the idempotency oracle before flipping a toggle — a bare call returns doNotDisturb + connectivity, so you can check whether Airplane mode is already on instead of inferring it from the status bar. Each connectivity field is true/false, or omitted when the device could not answer (the key is absent on this API level, or the value did not parse) — omitted never means off. Android only: iOS reports connectivity unsupported, because Airplane mode / Wi-Fi / Bluetooth / Location have no simctl or devicectl read verb and a simulator shares the host's network stack. screenLock (Android) reports the lock credential type (none, pin, password, pattern, or unknown) and whether it is secure, never the credential. Clock control supports only rootable Android emulators; Play Store images, physical devices and iOS return unsupported. Set accepts ISO-8601 instants within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z (inclusive); cumulative advance must stay in that window. Commands have second-level precision; advance requires integer byMs >= 1000 (maximum 315360000000), uses device read-back time, and verifies movement with a 2000ms tolerance; set within tolerance reports outcome=unchanged. On session release/rebind/teardown/reset, AutoMobile explicitly restores HOST-derived real time plus the original auto_time, even if it was 1, and verifies both. Failed restore is retried and quarantines the device until success or removal. Clock control restarts adbd on the emulator; connections such as port forwards may be re-established. Restore unroots adbd if AutoMobile rooted it (bounded, best-effort). Hierarchy/observe caches and freshness baselines are invalidated on every clock change. The restore slot is in memory only: daemon restart loses it; reset is recovery to HOST time plus auto_time=1 on a rootable emulator. Without a slot, unsupported targets report unsupported/nothing to reset without clock mutations; with a slot, refused root reports failure and retains pending restoration. Sessionless callers must reset explicitly. Session-bound and sessionless clock writes share one device queue and original ownership baseline; session release restores the device while sessionless ownership persists until reset or removal. Removal cancels clock work for that device incarnation. Changing the clock affects TLS/certificate validation, token expiry, and freshness checks.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -5622,6 +6104,10 @@
   },
   {
     "name": "getIosSimulatorCapabilities",
+    "title": "Get iOS Simulator Capabilities",
+    "annotations": {
+      "readOnlyHint": true
+    },
     "description": "Discover biometric capabilities for a selected iOS Simulator device type and runtime.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -5729,6 +6215,10 @@
   },
   {
     "name": "getLogs",
+    "title": "Read Device Logs",
+    "annotations": {
+      "readOnlyHint": true
+    },
     "description": "Read device logs with filters: Android logcat by app (every process, so a crash survives process death), tags, priority, regex, buffers (main, system, crash, events) and since the last action or session start; iOS Simulator unified log by app subsystem. Bounded output.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -5908,6 +6398,11 @@
   },
   {
     "name": "getNavigationGraph",
+    "title": "Get Navigation Graph",
+    "annotations": {
+      "readOnlyHint": true,
+      "openWorldHint": false
+    },
     "description": "Get navigation graph for debugging",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -5945,6 +6440,11 @@
   },
   {
     "name": "getNetworkGraph",
+    "title": "Get Network Graph",
+    "annotations": {
+      "readOnlyHint": true,
+      "openWorldHint": false
+    },
     "description": "Get aggregate captured network graph.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -6028,6 +6528,10 @@
   },
   {
     "name": "getNotificationPolicy",
+    "title": "Get Notification Policy",
+    "annotations": {
+      "readOnlyHint": true
+    },
     "description": "Read app notification/DND policy state",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -6142,6 +6646,10 @@
   },
   {
     "name": "getPreference",
+    "title": "Get Preference",
+    "annotations": {
+      "readOnlyHint": true
+    },
     "description": "Read an Android system property, Android SharedPreferences key, or iOS UserDefaults key. On iOS, appId is required and the store selector is suite (not name or fileName as on setKeyValue); omit suite or use Standard for the default store. Uses an already connected embedded AutoMobile SDK with storage inspection enabled; storage access itself never starts a runner. Reads can fall back to the simulator data container's on-disk plist, which may lag the running app. Writes use the container only when no SDK connection is open before sending; SDK write failures never trigger a second write. App-group suites require the connected SDK.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -6286,7 +6794,100 @@
     }
   },
   {
+    "name": "heapDump",
+    "title": "Dump Heap",
+    "annotations": {
+      "destructiveHint": false
+    },
+    "description": "Android: dump a running debuggable or profileable app's heap (am dumpheap) to a host .hprof; refuses other apps with heap_dump_not_debuggable.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "description": "Running debuggable or profileable app to dump",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "native": {
+          "description": "Dump the native heap (am dumpheap -n); default Java",
+          "type": "boolean"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["appId"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "path": {
+          "type": "string"
+        },
+        "sizeBytes": {
+          "type": "number"
+        },
+        "appId": {
+          "type": "string"
+        },
+        "native": {
+          "type": "boolean"
+        },
+        "attempts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "command": {
+                "type": "string"
+              },
+              "outcome": {
+                "type": "string",
+                "enum": ["dumped", "empty"]
+              },
+              "output": {
+                "type": "string"
+              }
+            },
+            "required": ["command", "outcome"],
+            "additionalProperties": false
+          }
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": ["success", "path", "sizeBytes", "appId", "native", "attempts", "message"],
+      "additionalProperties": {}
+    }
+  },
+  {
     "name": "highlight",
+    "title": "Highlight Screen Element",
+    "annotations": {
+      "destructiveHint": false
+    },
     "description": "Draw a red hand-drawn circle around a UI element.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -6513,6 +7114,10 @@
   },
   {
     "name": "hitTest",
+    "title": "Inspect Point",
+    "annotations": {
+      "readOnlyHint": true
+    },
     "description": "Preview hierarchy-bounds candidates at a platform-native screen point; no input is dispatched and the actual event recipient is unknown.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -6566,6 +7171,10 @@
   },
   {
     "name": "homeScreen",
+    "title": "Open Home Screen",
+    "annotations": {
+      "destructiveHint": false
+    },
     "description": "Go to home screen",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -6605,6 +7214,10 @@
   },
   {
     "name": "identifyInteractions",
+    "title": "Identify Interactions",
+    "annotations": {
+      "readOnlyHint": true
+    },
     "description": "Suggest likely interactions",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -6686,6 +7299,10 @@
   },
   {
     "name": "inspectPackageSigning",
+    "title": "Inspect Package Signing",
+    "annotations": {
+      "readOnlyHint": true
+    },
     "description": "Fresh read of one app's presence (installed/absent/unknown) and signing. Android: a user's SHA-256 signer set and rotation history. iOS Simulator and physical: team, signing identity, CDHash, entitlements and embedded provisioning profile (expiry, UUID). Never cached.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -6923,6 +7540,10 @@
   },
   {
     "name": "installApp",
+    "title": "Install App",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Install app on device (.apk, split APKs, .apks, .aab, .app, or .ipa)",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -7033,6 +7654,10 @@
   },
   {
     "name": "keyboard",
+    "title": "Control Keyboard",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Open, close, detect, list/select installed Android IMEs, or switch the AutoMobile typing profile",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -7174,6 +7799,11 @@
   },
   {
     "name": "killDevice",
+    "title": "Kill Device",
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": true
+    },
     "description": "Kill device",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -7209,6 +7839,10 @@
   },
   {
     "name": "killProfile",
+    "title": "Set Kill Policy",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Android: simulate an OEM background-kill policy (Samsung sleeping apps, Xiaomi autostart off, OnePlus deep optimization, recents swipe, Motorola adaptive battery, user-restricted, exact alarms denied) on a stock device with standby buckets, appops, Doze and force-stop. Each profile reports its evidence status and each step applied | unsupported | failed. apply is idempotent and records the state before the first change; reset restores it, and in a daemon session release or rebind does too. list shows the catalog and the OEM behaviour that cannot be simulated. Simulates effects, not firmware.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -7424,6 +8058,10 @@
   },
   {
     "name": "launchApp",
+    "title": "Launch App",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Launch app by package name. On Android an app that is already in the foreground returns success with alreadyForeground:true plus the observation, not an error; iOS re-launches it and returns an ordinary success without that marker. prototype:true (iOS simulators only) relaunches the app with the prototype agent injected, so its current state is lost.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -9114,6 +9752,7 @@
                 "auto_setup_failed",
                 "unknown",
                 "service_recovering",
+                "runner_launch_queued",
                 "device_locked",
                 "incomplete_capture",
                 "runner_unavailable"
@@ -9571,6 +10210,10 @@
   },
   {
     "name": "listApps",
+    "title": "List Installed Apps",
+    "annotations": {
+      "readOnlyHint": true
+    },
     "description": "List installed apps on a device, with optional display label and launchable fields when reported by the platform or transport. The label is typically omitted on Android when the installed CtrlProxy APK lacks label support; launchable is typically omitted for physical iOS/devicectl records. Filters by type (default: launchable — every app with a launcher entry point, preinstalled ones included), search (package name or label), and profile.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -9766,6 +10409,10 @@
   },
   {
     "name": "listDataStores",
+    "title": "List Data Stores",
+    "annotations": {
+      "readOnlyHint": true
+    },
     "description": "List app Jetpack DataStore instances (Android, requires AutoMobile SDK adapter).",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -9826,6 +10473,10 @@
   },
   {
     "name": "listDeviceImages",
+    "title": "List Device Images",
+    "annotations": {
+      "readOnlyHint": true
+    },
     "description": "List device images",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -9909,7 +10560,7 @@
               },
               "formFactor": {
                 "type": "string",
-                "enum": ["phone", "tablet", "foldable", "unknown"]
+                "enum": ["phone", "tablet", "foldable", "tv", "watch", "automotive", "unknown"]
               },
               "deviceType": {
                 "$ref": "#/$defs/__schema0"
@@ -10401,6 +11052,10 @@
   },
   {
     "name": "listDevices",
+    "title": "List Devices",
+    "annotations": {
+      "readOnlyHint": true
+    },
     "description": "List booted devices; pending configured-image enrichment includes retry hints and failed provenance includes a non-retryable reason; resource pointers for images and detail in the note",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -10503,7 +11158,7 @@
               },
               "formFactor": {
                 "type": "string",
-                "enum": ["phone", "tablet", "foldable", "unknown"]
+                "enum": ["phone", "tablet", "foldable", "tv", "watch", "automotive", "unknown"]
               },
               "deviceType": {
                 "$ref": "#/$defs/__schema0"
@@ -11136,6 +11791,10 @@
   },
   {
     "name": "manufacturerProfile",
+    "title": "Set OEM Profile",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Android: apply an OEM manufacturer profile (pixel-baseline, samsung-oneui, xiaomi-hyperos, oneplus-oxygenos, oppo-coloros, motorola) on a stock device by composing the keyboard profile, killProfile and displayProfile executors. describe reports every facet's evidence status (focused_trace | vendor_documented | cdd_derived | inferred | experimental) and the OEM capabilities that cannot be emulated; apply with requires naming one of those returns route_to_real_device and changes nothing. applying a different manufacturer profile resets the recorded one first; reset restores the display, kill and keyboard changes (display, keyboard and device-wide kill state are shared with displayProfile, keyboard setProfile and killProfile, so reset also undoes their direct changes). In a daemon session, release or rebind restores all three. Simulates effects, not firmware.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -11394,6 +12053,10 @@
   },
   {
     "name": "measureStartup",
+    "title": "Measure Startup",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Android: measure cold/warm/hot app startup over N launches; TTID/TTFD percentiles, stored in performance results.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -11552,6 +12215,10 @@
   },
   {
     "name": "mediaSession",
+    "title": "Control Media",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Android media sessions: read playback state, position, speed, metadata and actions (dumpsys media_session); dispatch a transport key to the media button session like a headset, reporting which session handled it; or set a music/ring/alarm stream volume. Mutations return a restore receipt. waitFor polls get until a session reports a state.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -11959,6 +12626,10 @@
   },
   {
     "name": "mockNetwork",
+    "title": "Mock Network Response",
+    "annotations": {
+      "destructiveHint": false
+    },
     "description": "Add mock network response rule.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -12081,6 +12752,10 @@
   },
   {
     "name": "multiTouch",
+    "title": "Multi Touch Gesture",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Simultaneous 2-5 finger tap, long press, or swipe at a screen point.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -12262,6 +12937,10 @@
   },
   {
     "name": "navigateTo",
+    "title": "Navigate to Screen",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Navigate to screen using navigation graph",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -12296,6 +12975,10 @@
   },
   {
     "name": "network",
+    "title": "Control Network Capture",
+    "annotations": {
+      "destructiveHint": false
+    },
     "description": "Control network capture and error simulation.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -12440,6 +13123,10 @@
   },
   {
     "name": "observe",
+    "title": "Observe Screen",
+    "annotations": {
+      "readOnlyHint": true
+    },
     "description": "Android synthetic s2- element ids are valid only for the observation that returned them; re-observe before using an id after the screen changes. Get screen view hierarchy and screenshot, with optional PNG crop from a fresh settled capture of one display. Opt-in Android display:'all' adds per-panel displays to the unchanged active-panel result, without updating observation baselines or transition fences; rejects waitFor, raw:true and includeScreenshotImage:true. An explicit deviceId without sessionUuid creates no session, assigns no device and leaves an idle device idle. It may start an unowned device's hierarchy service using session setup within the read deadline, serialized with acquisition, guarded against ownership/pool transitions, and shared across concurrent reads. hierarchyServiceStarted: true reports this; the service and resident client remain running. Owned devices stay connect-only: this read never starts, restarts or reconfigures their service. With sessionUuid, observe uses the session and deviceId must match the session's device. DeviceId reads reject waitFor, raw: true and skipBackStack: true; use project: 'full' for the full filtered hierarchy. They omit snapshotReference and default to a settled screenshot; async also awaits capture. Each screenshot path is kept for at least 10 minutes after the response that returned it unless evicted early under capacity pressure, so a returned path is not guaranteed to survive until its expiresAt; expiresAt metadata uses the host clock. Returning cached paths extends their lifetime. At the shared 128 MiB / 4096-file cap, new captures are never refused: the least recently returned screenshots are evicted early, unreferenced ones first and then referenced ones, to admit them. Release and device removal leave files until their guarantees expire. Restart uses a ten-minute process-start grace; other processes can only honor the ten-minute mtime floor. Capacity uses a per-process in-memory inventory reconciled on sweeps and near either cap. Concurrent processes can exceed the aggregate cap before reconciliation; discovered files count against subsequent admission. Expired files are swept at initial inventory, near capacity and every minute while idle. Copy files needed beyond the guarantee.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -13797,6 +14484,7 @@
                 "auto_setup_failed",
                 "unknown",
                 "service_recovering",
+                "runner_launch_queued",
                 "device_locked",
                 "incomplete_capture",
                 "runner_unavailable"
@@ -14328,6 +15016,10 @@
         },
         "screenSize": {
           "$ref": "#/$defs/__schema1"
+        },
+        "isScreenRound": {
+          "description": "Wear OS (watch devices) only: true when the display is round, so the corners are cut off.",
+          "type": "boolean"
         },
         "systemInsets": {
           "$ref": "#/$defs/__schema11"
@@ -14895,6 +15587,20 @@
           "required": ["locked", "keyguardShowing"],
           "additionalProperties": false
         },
+        "deviceLockUnknown": {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "type": "string",
+              "enum": ["timeout", "pending", "error", "unparseable"]
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": ["reason"],
+          "additionalProperties": false
+        },
         "perfSnapshot": {
           "type": "object",
           "properties": {
@@ -15236,6 +15942,10 @@
   },
   {
     "name": "openLink",
+    "title": "Open Web Link",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Open URL in browser. A transient Android ADB failure returns device_transport_unavailable (retryable: true, retryAfterMs, deviceId). dispatched is false before dispatch or \"unknown\" after transport loss (true is reserved for confirmed dispatch). For \"unknown\", the link may already have opened: observe before reissuing a single-use link.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -15672,6 +16382,10 @@
   },
   {
     "name": "performanceTrace",
+    "title": "Record Trace",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Record a native performance trace (xctrace on iOS, Perfetto on Android): start with a template, drive the flow, then stop for the artifact path and a bounded summary.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -15923,6 +16637,10 @@
   },
   {
     "name": "phoneCall",
+    "title": "Simulate Phone Call",
+    "annotations": {
+      "destructiveHint": false
+    },
     "description": "Simulate a phone call: Android emulator gsm commands, or CallKit via the app's AutoMobile iOS SDK.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -15984,6 +16702,10 @@
   },
   {
     "name": "pinchOn",
+    "title": "Pinch Screen Element",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Pinch to zoom",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -16131,6 +16853,10 @@
   },
   {
     "name": "postNotification",
+    "title": "Post Notification",
+    "annotations": {
+      "destructiveHint": false
+    },
     "description": "Post notification via Android SDK hooks or iOS Simulator simctl push.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -16259,6 +16985,10 @@
   },
   {
     "name": "pressButton",
+    "title": "Press Button",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Press a device or navigation button. On iOS simulators, volume_up, volume_down, and power use hardware-button events; menu is unsupported on iOS. action and camera are iOS-only (Action button, Camera Control) and return unsupported_button where the device lacks that hardware. Android-only system actions: lock, power_dialog, quick_settings, screenshot, split_screen (raw system toggle; windowMode places a chosen app) and dismiss_notification_shade; each needs the API level and CtrlProxy APK that supports it and otherwise returns unsupported_system_action. lock leaves the device locked (wakeAndUnlock); power_dialog and quick_settings stay open until back/home.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -17737,6 +18467,7 @@
                 "auto_setup_failed",
                 "unknown",
                 "service_recovering",
+                "runner_launch_queued",
                 "device_locked",
                 "incomplete_capture",
                 "runner_unavailable"
@@ -18194,7 +18925,11 @@
   },
   {
     "name": "prototype",
-    "description": "Show (always a full spec, inline as spec or from a local JSON file as specPath), patch (id and ops), dismiss (id or all:true), status (host-local, no device request), inspect (asks the device which prototypes it is showing and adopts them into status and awaitEvent; use it after a session release or reconnect), or awaitEvent for a prototype id on Android, or on an iOS simulator through the prototype agent that launchApp with prototype:true injects (show, patch, dismiss, status, inspect, awaitEvent; sizes are points). save (spec/assets/label/icon), listSaved and deleteSaved (id) need prototype_saved_v1 on Android, or an iOS simulator (no agent needed) using the verified viewer template (or AUTOMOBILE_IOS_PROTOTYPE_VIEWER) for save; icon is an asset uploaded in the same call. On Android, save with pin:true then asks the launcher to pin a shortcut (pinned: pinned|pending|unsupported; pending until the launcher dialog is accepted (autoConfirm taps it), declining sends nothing); deleteSaved disables the shortcut, and removeIcon:true clears it with adb only when no saved prototype remains. iOS installs an app icon on the home screen and ignores pin. iOS listSaved ids are bundle ids accepted by deleteSaved and omit savedAt. A show with the id of the prototype already on screen replaces it in place: it keeps the display and each pager's page (clamped), while the new spec's state is authoritative (values the user changed by tapping are not carried over unless the spec includes them); reset:true starts fresh instead. patch changes the prototype already on screen without re-sending the spec: {action:\"patch\",id,ops:[...]} with ops add/replace/remove/test on /data (content, agent-owned) or /state/<key> (needs baseRevision; the device refuses with conflict if the user changed that key since), and replaceNode {id,node} for one node by id; use show for a new screen or a window, theme or root change. patch needs a device advertising prototype_patch_v1 and is refused otherwise: use show. To present alternatives, show one design, describe it and the others in chat (what each is, what changed, which you recommend), and show the next on request; or show one spec whose pager holds every design with a visible label per page. Ask the user in chat which they prefer; never wait on the device for a choice. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Input and state changes (text input, toggles, sliders etc.) arrive as kind emit with eventName change (there is no separate change kind), with payload {key,value} for one changed key or {keys,values} for severalBuffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column/flow/grid/carousel, text/image/icon/spacer/textField/searchBar, Material switch/checkbox/button/radioGroup/listItem/slider/chip/card/iconButton/fab/segmentedButton/topAppBar/divider/badge/progress/chart/dialog/snackbar/timePicker/datePicker bound to state keys, scroll/pager/stack/tabBar/bottomNav/bottomSheet; actions: emit/setPage/push/pop/popToRoot/replace/setState/toggle/increment/decrement/dismiss/setData/appendData/removeData/request. Stack {type:\"stack\",id,start,screens} needs prototype_stack_v1; only its top screen renders, and status/inspect report stacks {id:{path,depth}}. screen_changed has name = stack id and payload {screen,depth}. Reuse: a top-level components:{name:{root}} map placed with {type:\"use\",component,props} nodes, expanded on the host with {props.<field>} bound like repeat placeholders. Sizes and anchors use dp (points on iOS). A node's anchor {type:\"element\",selector:{elementId,text,testTag,container},alignment:cover|top|bottom|start|end,offset?} is resolved once at show against the app (the prototype excluded) and converted to dp with the display density (iOS bounds are already points); a missing, ambiguous or off-screen element fails the show, and the result reports anchors and hierarchyUpdatedAt (show again to re-anchor). {type:\"bounds\",bounds:{x,y,width,height}} is screen dp (screen points on iOS). Window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). window.chrome: none (default) or bar, fullscreen only: on a device advertising prototype_window_chrome_v1, none draws no host dismiss bar and fills the window including under the status bar (use safeAreaPadding on a top bar), and a two-finger long press (about 1 s) reveals a dismiss pill for 5 s; window.persistence: \"device\" defaults to bar. Without the capability the bar is kept, explicit none is refused, and lastResult.chrome says which was drawn. Example: {action:\"show\",spec:{id:\"demo\",window:{placement:{type:\"fullscreen\"},opacity:80},root:{type:\"text\",text:\"Hello\"}}}. show also accepts assets:[{id,path}] (absolute local PNG/JPEG/WebP file path, or a TTF/OTF font file referenced from style.fontFamily as {asset}) or [{id,observation}] (an observation screenshot URI) uploaded before the prototype is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the prototype re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. A successful show or patch also returns accessibilityFindings, an advisory host-side lint (unlabeled controls, images and text fields, low text contrast in light and dark, tap targets under 48dp) with spec paths; it never refuses a show. On Android a session prototype is tied to the app it was shown over: while another app is in front it is hidden (state kept, no dismissed event, not in observe, layer \"prototype\" calls fail saying so) and it returns with the app; a device-persistent prototype is not tied to an app. Status makes no device request, marks a prototype suspended:true once an inspect finds it hidden that way (an awaitEvent that then times out warns), and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed. window.layer: system (default, above system UI) or app (above apps only, so the shade, keyboard and screenshot preview draw over it; the daemon grants CtrlProxy SYSTEM_ALERT_WINDOW with appops first). window.persistence: session (default) or device: the prototype stays interactive after USB/adb disconnect and session end with no idle timeout, keeps its assets, and carries a visible Close control; remove it with that control, dismiss, or a new show. Both are Android only and need a CtrlProxy advertising prototype_window_options_v1. A device-persistent prototype keeps emitting taps, page changes and text input while no host is connected: the device buffers the last 200 events (oldest dropped, counted) and delivers them when a host connects or on inspect, with sequences continuing and no rewind; inspect returns deviceDroppedEvents. inspect needs a CtrlProxy advertising prototype_persistence_replay_v1 and is refused otherwise. On an iOS simulator inspect asks the agent (prototype_inspect_v1) for the one prototype it shows, with no suspended and no deviceDroppedEvents, and is refused with a relaunch hint on an older agent. Light and dark: show takes appearance device (default), light or dark, which pins what the system setting means for that show without changing the device; it replaces the system setting only (mode order: explicit theme.mode, then the flat theme.colors.background/surface luminance, then an opaque authored background, then appearance, else the device), and light or dark is refused unless the device advertises prototype_appearance_v1. Such a device reports appearance {mode, source, deviceDark} in the show result and per prototype in inspect; deviceDark (the device's own setting) appears only in those device answers. The host-local status reports mode and source only (kept current by appearance_changed events, which carry just mode and source), because the device can flip while a pinned mode stays put and then no event arrives; call inspect for the current deviceDark. It sends one appearance_changed event (match it with awaitEvent kind:\"appearance_changed\", not eventName: its name is null; payload {mode, source}) on any change of the resolved mode while shown (the device flipping, or prototype state changing an inferred mode), never for the show itself. If an appearance_changed event arrives while a show is in flight the host cannot order the two, so that status entry has no appearance until a later event or inspect states it. In a scrim slot only the scrim role gets alpha (0.4); other roles are drawn unchanged. row/listItem swipeActions {start?,end?,fullSwipe?} (1-3 {label,icon?,role?,color?,onTap} per side; not inside a horizontal pager or carousel) require prototype_swipe_actions_v1; revealed buttons are tagged <rowTag>.swipe.<index>. Flow/grid require prototype_flow_grid_v1; grid is non-lazy and never scrolls itself (wrap it in scroll). scroll.refresh {stateKey,onRefresh} (pull-to-refresh on a vertical scroll; stateKey is a boolean that shows the indicator) requires prototype_refresh_v1. carousel {itemWidth,variant?,itemSpacing?,children} (horizontal snapping row) and pager indicator \"dots\" require prototype_carousel_v1. Per-mode {light, dark} forms need prototype_theme_modes_v1. Stack {type:\"stack\",id,start,screens} requires prototype_stack_v1 and is refused otherwise. Data, repeat.items {path}, repeat.key, {data:/pointer} text and {data: pointer} conditions require prototype_data_model_v1. setData {path,value}, appendData {path,value} and removeData {path} (path is /data/<pointer>, with a whole {index} segment inside a repeat; value is {value: json}, {state: key}, {data: pointer}, or {item: field}/{index: true} in a repeat) change /data from a tap and require prototype_data_actions_v1. Each device write is a change event (awaitEvent kind:\"change\") with name = the written /data path and payload {op, value?, revision}; once the device has written a prototype's data, a patch with /data ops needs baseRevision (the latest revision seen) and is refused with conflict {revision, state, data} if a newer write touched an overlapping path. request {url, method?, headers?, query?, body?, into?, statusKey?, via?, timeoutMs?, onSuccess?, onError?} calls any absolute http(s) URL from a tap (no host allowlist; url takes {key} and {data:/pointer} placeholders; headers/query values and body are literals or {state}/{data}/{value}/{item} bindings) and needs prototype_network_v1, plus prototype_network_device_v1 for via \"device\" (default via \"host\": the host makes the call). A 2xx body (JSON, else a string) is written to into (a /data path naming an object member) like setData, and {status, headers, durationMs, error?} to into + \"__meta\" (/data/feed -> /data/feed__meta); a non-2xx status or failure leaves into alone and sets meta.error. statusKey names a declared string state key that moves loading -> success|error, for visibleWhen; onSuccess/onError are action lists (nest up to 4 deep). A newer request to the same into cancels the older. Limits: timeoutMs max 30000 (default 10000), response 262144 bytes, 4 in flight per device. Each finished request is an emit event named prototype_request (payload {requestId, method, url, via, into?, outcome, status?, durationMs, error?}; await it with kind emit, eventName prototype_request). Input checks, validateOn, enabledWhen, {valid: key|keys} conditions and emit.requireValid require prototype_checks_v1; see the guide for checks and formats. textField options (label, variant, supportingText, keyboardType, secure, multiline, minLines, maxLines, maxLength) require prototype_text_field_options_v1; a device without it refuses the show. textField trailingIcon {icon,label,onTap?}, imeAction (done|next|search|send|go) and onSubmit require prototype_text_field_actions_v1 (not allowed with multiline). textField leadingIcon (icon name) requires prototype_text_field_leading_icon_v1. onLongPress/onDoubleTap on box/row/column/text/image/icon/card require prototype_gestures_v1. On Android, show replaceOthers:false retains other windows up to a limit of 4 (prototype_multi_surface_v1); a fifth is refused listing the shown ids. Read the MCP resource automobile:prototype for the authoring guide (repeat grammar, limits, theme roles); look up icon names with automobile:prototype/icons?query=<word>. Read automobile:prototype/native?id=<id> for the spec, assets and a Compose or SwiftUI host file that embed it in an app. searchBar requires prototype_search_bar_v1 for show and patch. {data, empty} conditions and style shimmer require prototype_loading_states_v1. animate, style scale/rotation, transition slideStart|slideEnd|scale and image zoomable require prototype_motion_v2. chart (line/area/bar/ring over /data arrays) requires prototype_chart_v1; observe reports its summary. A root-level storage {version, keys:[\"state:<key>\",\"data:<pointer>\"]} block (up to 64 unique keys: each state key declared in state, each data pointer a member of /data, no overlapping pointers, at most 262144 stored bytes) makes the device save those values per prototype id after every write (user edit, device data action, request response) and requires prototype_storage_v1. Precedence on the next show of the same id: stored values replace the spec's for the listed keys; a changed storage.version discards them all; a stored key no longer listed (or a show without storage) is dropped; a stored value that no longer fits (state type changed, data of another JSON kind, unwritable pointer) is dropped and the spec's value stands. A host patch to a stored key wins under the usual baseRevision rules and the device then stores it. inspect reports storage {version, keys:[{key,bytes}], totalBytes, skippedKeys?} per prototype (absent if the device does not report it); {action:\"clearStorage\",id} wipes an id's stored values (result cleared = keys removed) and is refused without prototype_storage_v1; deleteSaved also clears them.",
+    "title": "Manage UI Prototype",
+    "annotations": {
+      "destructiveHint": true
+    },
+    "description": "Show (always a full spec, inline as spec or from a local JSON file as specPath), patch (id and ops), dismiss (id or all:true), status (host-local, no device request), inspect (asks the device which prototypes it is showing and adopts them into status and awaitEvent; use it after a session release or reconnect), or awaitEvent for a prototype id on Android, or on an iOS simulator through the prototype agent that launchApp with prototype:true injects (show, patch, dismiss, status, inspect, awaitEvent; sizes are points). save (spec/assets/label/icon), listSaved and deleteSaved (id) need prototype_saved_v1 on Android, or an iOS simulator (no agent needed) using the verified viewer template (or AUTOMOBILE_IOS_PROTOTYPE_VIEWER) for save; icon is an asset uploaded in the same call. On Android, save with pin:true then asks the launcher to pin a shortcut (pinned: pinned|pending|unsupported; pending until the launcher dialog is accepted (autoConfirm taps it), declining sends nothing); deleteSaved disables the shortcut, and removeIcon:true clears it with adb only when no saved prototype remains. iOS installs an app icon on the home screen and ignores pin. iOS listSaved ids are bundle ids accepted by deleteSaved and omit savedAt. On Android with the ProtoViewer app installed, save without pin or icon imports the spec and its assets into the ProtoViewer library instead of CtrlProxy, and returns viewer {app, libraryId, label} plus a warning: ProtoViewer marks the entry imported, keeps its requests off until the user allows network in ProtoViewer, and does not attach it to this host (no awaitEvent, patch or inspect). Each such save is a new library entry that listSaved and deleteSaved do not see. open with id set to that libraryId launches it (Android only). A show with the id of the prototype already on screen replaces it in place: it keeps the display and each pager's page (clamped), while the new spec's state is authoritative (values the user changed by tapping are not carried over unless the spec includes them); reset:true starts fresh instead. patch changes the prototype already on screen without re-sending the spec: {action:\"patch\",id,ops:[...]} with ops add/replace/remove/test on /data (content, agent-owned) or /state/<key> (needs baseRevision; the device refuses with conflict if the user changed that key since), and replaceNode {id,node} for one node by id; use show for a new screen or a window, theme or root change. patch needs a device advertising prototype_patch_v1 and is refused otherwise: use show. To present alternatives, show one design, describe it and the others in chat (what each is, what changed, which you recommend), and show the next on request; or show one spec whose pager holds every design with a visible label per page. Ask the user in chat which they prefer; never wait on the device for a choice. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Input and state changes (text input, toggles, sliders etc.) arrive as kind emit with eventName change (there is no separate change kind), with payload {key,value} for one changed key or {keys,values} for severalBuffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column/flow/grid/carousel, text/image/icon/spacer/textField/searchBar, Material switch/checkbox/button/radioGroup/listItem/slider/chip/card/iconButton/fab/segmentedButton/topAppBar/divider/badge/progress/chart/dialog/snackbar/timePicker/datePicker bound to state keys, scroll/pager/stack/tabBar/bottomNav/bottomSheet; actions: emit/setPage/push/pop/popToRoot/replace/setState/toggle/increment/decrement/dismiss/setData/appendData/removeData/request. Stack {type:\"stack\",id,start,screens} needs prototype_stack_v1; only its top screen renders, and status/inspect report stacks {id:{path,depth}}. screen_changed has name = stack id and payload {screen,depth}. Reuse: a top-level components:{name:{root}} map placed with {type:\"use\",component,props} nodes, expanded on the host with {props.<field>} bound like repeat placeholders. Sizes and anchors use dp (points on iOS). A node's anchor {type:\"element\",selector:{elementId,text,testTag,container},alignment:cover|top|bottom|start|end,offset?} is resolved once at show against the app (the prototype excluded) and converted to dp with the display density (iOS bounds are already points); a missing, ambiguous or off-screen element fails the show, and the result reports anchors and hierarchyUpdatedAt (show again to re-anchor). {type:\"bounds\",bounds:{x,y,width,height}} is screen dp (screen points on iOS). Window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). window.chrome: none (default) or bar, fullscreen only: on a device advertising prototype_window_chrome_v1, none draws no host dismiss bar and fills the window including under the status bar (use safeAreaPadding on a top bar), and a two-finger long press (about 1 s) reveals a dismiss pill for 5 s; window.persistence: \"device\" defaults to bar. Without the capability the bar is kept, explicit none is refused, and lastResult.chrome says which was drawn. Example: {action:\"show\",spec:{id:\"demo\",window:{placement:{type:\"fullscreen\"},opacity:80},root:{type:\"text\",text:\"Hello\"}}}. show also accepts assets:[{id,path}] (absolute local PNG/JPEG/WebP file path, or a TTF/OTF font file referenced from style.fontFamily as {asset}) or [{id,observation}] (an observation screenshot URI) uploaded before the prototype is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the prototype re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. A successful show or patch also returns accessibilityFindings, an advisory host-side lint (unlabeled controls, images and text fields, low text contrast in light and dark, tap targets under 48dp) with spec paths; it never refuses a show. On Android a session prototype is tied to the app it was shown over: while another app is in front it is hidden (state kept, no dismissed event, not in observe, layer \"prototype\" calls fail saying so) and it returns with the app; a device-persistent prototype is not tied to an app. Status makes no device request, marks a prototype suspended:true once an inspect finds it hidden that way (an awaitEvent that then times out warns), and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed. window.layer: system (default, above system UI) or app (above apps only, so the shade, keyboard and screenshot preview draw over it; the daemon grants CtrlProxy SYSTEM_ALERT_WINDOW with appops first). window.persistence: session (default) or device: the prototype stays interactive after USB/adb disconnect and session end with no idle timeout, keeps its assets, and carries a visible Close control; remove it with that control, dismiss, or a new show. Both are Android only and need a CtrlProxy advertising prototype_window_options_v1. A device-persistent prototype keeps emitting taps, page changes and text input while no host is connected: the device buffers the last 200 events (oldest dropped, counted) and delivers them when a host connects or on inspect, with sequences continuing and no rewind; inspect returns deviceDroppedEvents. inspect needs a CtrlProxy advertising prototype_persistence_replay_v1 and is refused otherwise. On an iOS simulator inspect asks the agent (prototype_inspect_v1) for the one prototype it shows, with no suspended and no deviceDroppedEvents, and is refused with a relaunch hint on an older agent. Light and dark: show takes appearance device (default), light or dark, which pins what the system setting means for that show without changing the device; it replaces the system setting only (mode order: explicit theme.mode, then the flat theme.colors.background/surface luminance, then an opaque authored background, then appearance, else the device), and light or dark is refused unless the device advertises prototype_appearance_v1. Such a device reports appearance {mode, source, deviceDark} in the show result and per prototype in inspect; deviceDark (the device's own setting) appears only in those device answers. The host-local status reports mode and source only (kept current by appearance_changed events, which carry just mode and source), because the device can flip while a pinned mode stays put and then no event arrives; call inspect for the current deviceDark. It sends one appearance_changed event (match it with awaitEvent kind:\"appearance_changed\", not eventName: its name is null; payload {mode, source}) on any change of the resolved mode while shown (the device flipping, or prototype state changing an inferred mode), never for the show itself. If an appearance_changed event arrives while a show is in flight the host cannot order the two, so that status entry has no appearance until a later event or inspect states it. In a scrim slot only the scrim role gets alpha (0.4); other roles are drawn unchanged. row/listItem swipeActions {start?,end?,fullSwipe?} (1-3 {label,icon?,role?,color?,onTap} per side; not inside a horizontal pager or carousel) require prototype_swipe_actions_v1; revealed buttons are tagged <rowTag>.swipe.<index>. Flow/grid require prototype_flow_grid_v1; grid is non-lazy and never scrolls itself (wrap it in scroll). scroll.refresh {stateKey,onRefresh} (pull-to-refresh on a vertical scroll; stateKey is a boolean that shows the indicator) requires prototype_refresh_v1. carousel {itemWidth,variant?,itemSpacing?,children} (horizontal snapping row) and pager indicator \"dots\" require prototype_carousel_v1. Per-mode {light, dark} forms need prototype_theme_modes_v1. Stack {type:\"stack\",id,start,screens} requires prototype_stack_v1 and is refused otherwise. Data, repeat.items {path}, repeat.key, {data:/pointer} text and {data: pointer} conditions require prototype_data_model_v1. setData {path,value}, appendData {path,value} and removeData {path} (path is /data/<pointer>, with a whole {index} segment inside a repeat; value is {value: json}, {state: key}, {data: pointer}, or {item: field}/{index: true} in a repeat) change /data from a tap and require prototype_data_actions_v1. Each device write is a change event (awaitEvent kind:\"change\") with name = the written /data path and payload {op, value?, revision}; once the device has written a prototype's data, a patch with /data ops needs baseRevision (the latest revision seen) and is refused with conflict {revision, state, data} if a newer write touched an overlapping path. request {url, method?, headers?, query?, body?, into?, statusKey?, via?, timeoutMs?, onSuccess?, onError?} calls any absolute http(s) URL from a tap (no host allowlist; url takes {key} and {data:/pointer} placeholders; headers/query values and body are literals or {state}/{data}/{value}/{item} bindings) and needs prototype_network_v1, plus prototype_network_device_v1 for via \"device\" (default via \"host\": the host makes the call). A 2xx body (JSON, else a string) is written to into (a /data path naming an object member) like setData, and {status, headers, durationMs, error?} to into + \"__meta\" (/data/feed -> /data/feed__meta); a non-2xx status or failure leaves into alone and sets meta.error. statusKey names a declared string state key that moves loading -> success|error, for visibleWhen; onSuccess/onError are action lists (nest up to 4 deep). A newer request to the same into cancels the older. Limits: timeoutMs max 30000 (default 10000), response 262144 bytes, 4 in flight per device. Each finished request is an emit event named prototype_request (payload {requestId, method, url, via, into?, outcome, status?, durationMs, error?}; await it with kind emit, eventName prototype_request). Input checks, validateOn, enabledWhen, {valid: key|keys} conditions and emit.requireValid require prototype_checks_v1; see the guide for checks and formats. textField options (label, variant, supportingText, keyboardType, secure, multiline, minLines, maxLines, maxLength) require prototype_text_field_options_v1; a device without it refuses the show. textField trailingIcon {icon,label,onTap?}, imeAction (done|next|search|send|go) and onSubmit require prototype_text_field_actions_v1 (not allowed with multiline). textField leadingIcon (icon name) requires prototype_text_field_leading_icon_v1. onLongPress/onDoubleTap on box/row/column/text/image/icon/card require prototype_gestures_v1. On Android, show replaceOthers:false retains other windows up to a limit of 4 (prototype_multi_surface_v1); a fifth is refused listing the shown ids. Read the MCP resource automobile:prototype for the authoring guide (repeat grammar, limits, theme roles); look up icon names with automobile:prototype/icons?query=<word>. Read automobile:prototype/native?id=<id> for the spec, assets and a Compose or SwiftUI host file that embed it in an app. searchBar requires prototype_search_bar_v1 for show and patch. {data, empty} conditions and style shimmer require prototype_loading_states_v1. animate, style scale/rotation, transition slideStart|slideEnd|scale and image zoomable require prototype_motion_v2. chart (line/area/bar/ring over /data arrays) requires prototype_chart_v1; observe reports its summary. A root-level storage {version, keys:[\"state:<key>\",\"data:<pointer>\"]} block (up to 64 unique keys: each state key declared in state, each data pointer a member of /data, no overlapping pointers, at most 262144 stored bytes) makes the device save those values per prototype id after every write (user edit, device data action, request response) and requires prototype_storage_v1. Precedence on the next show of the same id: stored values replace the spec's for the listed keys; a changed storage.version discards them all; a stored key no longer listed (or a show without storage) is dropped; a stored value that no longer fits (state type changed, data of another JSON kind, unwritable pointer) is dropped and the spec's value stands. A host patch to a stored key wins under the usual baseRevision rules and the device then stores it. inspect reports storage {version, keys:[{key,bytes}], totalBytes, skippedKeys?} per prototype (absent if the device does not report it); {action:\"clearStorage\",id} wipes an id's stored values (result cleared = keys removed) and is refused without prototype_storage_v1; deleteSaved also clears them.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -18211,6 +18946,7 @@
             "save",
             "listSaved",
             "deleteSaved",
+            "open",
             "clearStorage"
           ]
         },
@@ -23428,7 +24164,7 @@
           "enum": ["device", "light", "dark"]
         },
         "id": {
-          "description": "Prototype id required for dismiss (unless all: true), awaitEvent, deleteSaved and clearStorage",
+          "description": "Prototype id required for dismiss (unless all: true), awaitEvent, deleteSaved and clearStorage; for open, the ProtoViewer library id (viewer.libraryId) a save returned",
           "type": "string",
           "minLength": 1
         },
@@ -23462,7 +24198,7 @@
           }
         },
         "label": {
-          "description": "save only: label, defaults to spec.id",
+          "description": "save only: label, defaults to spec.id; ProtoViewer takes one line without control or direction-override characters",
           "type": "string",
           "minLength": 1,
           "maxLength": 120
@@ -23517,7 +24253,7 @@
           "maximum": 9007199254740991
         },
         "timeoutMs": {
-          "description": "Device request timeout; awaitEvent defaults to 30000 ms, maximum 60000 ms; timeout is a successful empty result.",
+          "description": "Device request timeout; awaitEvent defaults to 30000 ms, maximum 60000 ms; timeout is a successful empty result. save and open through ProtoViewer wait up to 15000 ms by default, maximum 60000 ms.",
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 9007199254740991
@@ -23559,6 +24295,25 @@
             }
           },
           "required": ["id", "slug", "replaced"],
+          "additionalProperties": false
+        },
+        "viewer": {
+          "description": "save and open on Android with ProtoViewer installed: the ProtoViewer library entry. The entry is imported: ProtoViewer sets its source, keeps its network off until the user allows it, and it is not attached to this host.",
+          "type": "object",
+          "properties": {
+            "app": {
+              "type": "string",
+              "const": "protoviewer"
+            },
+            "libraryId": {
+              "description": "Pass as id to open to launch this entry.",
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            }
+          },
+          "required": ["app", "libraryId", "label"],
           "additionalProperties": false
         },
         "savedPrototypes": {
@@ -24565,6 +25320,10 @@
   },
   {
     "name": "provisionDevice",
+    "title": "Provision Virtual Device",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Provision exact virtual device",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -25087,6 +25846,7 @@
               "audit",
               "backgroundWork",
               "biometricAuth",
+              "captureTrace",
               "changeLocalization",
               "clearKeyValueFile",
               "clearMockNetwork",
@@ -25094,6 +25854,7 @@
               "compareScreenshot",
               "crashApp",
               "deleteDevice",
+              "deleteKeychainItem",
               "deviceSnapshot",
               "displayConfig",
               "displayProfile",
@@ -25102,6 +25863,7 @@
               "executePlan",
               "explore",
               "exportPlan",
+              "focusNavigate",
               "getAppPermissions",
               "getDataStore",
               "getDeepLinks",
@@ -25112,6 +25874,7 @@
               "getNetworkGraph",
               "getNotificationPolicy",
               "getPreference",
+              "heapDump",
               "highlight",
               "hitTest",
               "homeScreen",
@@ -25150,6 +25913,7 @@
               "removeKeyValue",
               "resetAppLogs",
               "resetKeychain",
+              "rotaryScroll",
               "rotate",
               "selectAllText",
               "sendBroadcast",
@@ -25170,7 +25934,6 @@
               "siri",
               "snapshotOf",
               "sqlQuery",
-              "stageSessionDownloads",
               "statusBar",
               "swipeAt",
               "swipeOn",
@@ -25252,7 +26015,7 @@
             },
             "formFactor": {
               "type": "string",
-              "enum": ["phone", "tablet", "foldable", "unknown"]
+              "enum": ["phone", "tablet", "foldable", "tv", "watch", "automotive", "unknown"]
             },
             "deviceType": {
               "$ref": "#/$defs/__schema0"
@@ -25740,6 +26503,10 @@
   },
   {
     "name": "putAppFile",
+    "title": "Write App File",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Write files into a bounded logical storage target.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -25986,6 +26753,10 @@
   },
   {
     "name": "recentApps",
+    "title": "Open Recent Apps",
+    "annotations": {
+      "destructiveHint": false
+    },
     "description": "Open recent apps",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -26025,6 +26796,10 @@
   },
   {
     "name": "reconcileDeviceResources",
+    "title": "Reconcile Device Resources",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Compare an iOS Simulator with a requested resource map (workload profile) and report typed drift: missingRequested, ownedExtra (overrides AutoMobile applied earlier), unsupported, commandFailure. Report-only by default; repair applies only the drifted delta, re-reads, and succeeds only when every requested resource is proven.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -26521,6 +27296,10 @@
   },
   {
     "name": "recordDeviceGestures",
+    "title": "Record Gestures",
+    "annotations": {
+      "destructiveHint": false
+    },
     "description": "Start recording on-device user input (not tool calls) for exportPlan.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -26595,6 +27374,11 @@
   },
   {
     "name": "recordToolCalls",
+    "title": "Record Tool Calls",
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": false
+    },
     "description": "Record MCP tool calls to YAML. begin/end require tool-call-recording; status always works.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -26701,6 +27485,11 @@
   },
   {
     "name": "removeKeyValue",
+    "title": "Remove Key Value",
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": true
+    },
     "description": "Remove app key-value storage entry.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -26783,6 +27572,11 @@
   },
   {
     "name": "resetAppLogs",
+    "title": "Reset Logs",
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": true
+    },
     "description": "Reset explicitly named app-container log files (and their rotated `<path>.N` siblings) on the session's device, reporting a per-path outcome.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -26878,6 +27672,11 @@
   },
   {
     "name": "resetKeychain",
+    "title": "Reset Keychain",
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": true
+    },
     "description": "Reset an app's Keychain/Keystore state (scoped by appId). iOS Simulator resets the WHOLE device Keychain regardless of appId; physical iOS (#5188) and Android (#5190) not yet supported. Requires confirm:true.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -26915,7 +27714,98 @@
     }
   },
   {
+    "name": "rotaryScroll",
+    "title": "Scroll Rotary Input",
+    "annotations": {
+      "destructiveHint": true
+    },
+    "description": "Wear OS: scroll with the rotary crown. Tries `input rotaryencoder scroll`, the emulator console and finally a vertical swipe, in that order, and after each reads the screen back; success means the screen changed. Returns the method that worked and every attempt. The commands are unconfirmed on real images (see docs/design-docs/plat/android/form-factors.md), so check attempts. A screen that does not move when scrolled (already at the end) reports unchanged.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "delta": {
+          "description": "Crown detents: positive scrolls content down (clockwise), negative scrolls up",
+          "type": "integer",
+          "minimum": -50,
+          "maximum": 50
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["delta"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string"
+        },
+        "delta": {
+          "type": "number"
+        },
+        "method": {
+          "description": "The first candidate whose read-back showed the screen change",
+          "type": "string",
+          "enum": ["input_rotaryencoder", "emulator_rotary", "swipe"]
+        },
+        "attempts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "method": {
+                "type": "string",
+                "enum": ["input_rotaryencoder", "emulator_rotary", "swipe"]
+              },
+              "command": {
+                "type": "string"
+              },
+              "outcome": {
+                "type": "string",
+                "enum": ["scrolled", "unchanged", "failed"]
+              },
+              "error": {
+                "type": "string"
+              }
+            },
+            "required": ["method", "command", "outcome"],
+            "additionalProperties": false
+          }
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": ["success", "message", "delta", "attempts"],
+      "additionalProperties": {}
+    }
+  },
+  {
     "name": "rotate",
+    "title": "Rotate",
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true
+    },
     "description": "Rotate device orientation",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -28401,6 +29291,7 @@
                 "auto_setup_failed",
                 "unknown",
                 "service_recovering",
+                "runner_launch_queued",
                 "device_locked",
                 "incomplete_capture",
                 "runner_unavailable"
@@ -28858,6 +29749,10 @@
   },
   {
     "name": "selectAllText",
+    "title": "Select All Text",
+    "annotations": {
+      "destructiveHint": false
+    },
     "description": "Select all text in focused input",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -28902,6 +29797,10 @@
   },
   {
     "name": "sendBroadcast",
+    "title": "Send Broadcast",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Android: send an explicit broadcast to the app under test (its package, or one of its receivers) with a typed intent (action, data, categories, typed extras), e.g. to toggle a debug flag or seed data. Reports the ordered-broadcast result; protected system broadcasts are refused with a typed error.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -29178,6 +30077,10 @@
   },
   {
     "name": "sendKeys",
+    "title": "Send Keyboard Input",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Execute ordered typing, clear, raw-key, and semantic IME commands. Unicode: iOS any mode; Android a11y/ime/auto/eventAll/eventLast (event modes use a11y for unsupported runs). Android eventOnly/imeKeyEvents are ASCII-only. textLength counts code points.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -29667,6 +30570,10 @@
   },
   {
     "name": "sendSms",
+    "title": "Simulate SMS",
+    "annotations": {
+      "destructiveHint": false
+    },
     "description": "Send simulated incoming SMS: Android emulator, or a notification via the app's AutoMobile iOS SDK.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -29726,6 +30633,12 @@
   },
   {
     "name": "setActiveDevice",
+    "title": "Set Active Device",
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
     "description": "Set active device using existing session binding or a sessionless per-MCP-connection device pin that lasts for that connection (cleared when the connection disconnects or the device is released). With a daemon session, display pins a display key or role (inner/cover/rear/external); null clears, omission preserves. Explicit display arguments (including active) bypass the pin; otherwise pin beats focus/posture. On single-display devices, active resolves to the sole key; on multi-display devices active cannot be pinned. all cannot be pinned. Missing or inactive pinned panels fail without dispatch; clear with display: null. Pins clear on release/rebind and are unsupported in direct mode. Returns a text JSON result with message, deviceId, optional sessionUuid, and displayPin (string or null) when display was passed or a pin is present/cleared; never-pinned calls omit displayPin.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -29790,6 +30703,10 @@
   },
   {
     "name": "setAppLinks",
+    "title": "Set App Links",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Android 12+: change an app's App Links state so https links open the app directly (or not). approve force-verifies autoVerify domains, reset clears them to none, reverify re-runs verification, userSelection enables/disables domains for a user, restore writes back the state recorded before the first change. Returns what changed, the per-domain state after, and a restore receipt; in a daemon session, release or rebind restores it. Read state with getDeepLinks.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -29997,6 +30914,11 @@
   },
   {
     "name": "setAppPermissions",
+    "title": "Set Permissions",
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": true
+    },
     "description": "userId grant/revoke; device-wide reset ['all']; no POST_NOTIFICATIONS.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -30052,6 +30974,10 @@
   },
   {
     "name": "setDeviceResources",
+    "title": "Set Device Resources",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Set selected device resources and verify native state. All settings are opt-in; omitted resources stay unchanged. iOS Simulator services and Android optional apps/settings are runtime-dependent. Android changes return a restore receipt for exact restoration during the same boot. Disabling Google infrastructure changes push/auth behavior.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -30587,6 +31513,10 @@
   },
   {
     "name": "setDeviceState",
+    "title": "Set Device State",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Set device state such as Do Not Disturb, Android connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), static location or background route playback on an Android emulator, iOS Simulator, or physical iOS device (through the CtrlProxy runner), iOS Simulator biometric enrollment, and device-wide network condition. A static fix, replacement route, or stop cancels the active route. The location result may include previousRoute with endedReason and lastError; stop also reports whether a route was active. On release or rebind of a session that set a location, iOS clears it (`simctl location clear` on a Simulator, the runner on a physical device); failed clears are retried and quarantine the device until success or removal. Android emulator fixes persist after the session because the emulator console has no unset command; reset the fix explicitly if needed. Direct-mode (sessionless) calls are unchanged; an existing session marker on the device also clears later sessionless fixes on release. cameraPoster sets or clears a virtual-scene back-camera poster (image path or generated QR, wall or table surface) on a running Android emulator through the emulator console, without a restart; it persists until cleared or the AVD is cold-booted, iOS and physical Android return unsupported, a console refusal (for example an AVD whose back camera is not virtualscene) is returned as an error, and the default camera pose may not face the poster. Connectivity values are desired end states and are verified by a fresh Android read; iOS connectivity writes are unsupported. Degraded network profiles (offline/veryBad/2g/3g/4g) are best-effort cellular shaping on an Android emulator, reported `partial` (they may not affect Wi-Fi/app traffic); only reset to `none` is fully verified. A session always restores the network to a clean `none` state on release/rebind. On an iOS Simulator networkCondition is per-app only: profile offline or none with appId, within a session, refuses the app's new connections through the opt-in network-extension filter under a renewed 15s lease; release, rebind, expiry or a missed renewal removes it, and other sessions cannot clear it. screenLock (Android) sets a PIN, password, or pattern with locksettings, or clears one (type none plus currentCredential); a session's own credential is cleared on its release (a failed clear is reported in the release result as screenLockRestore), an existing credential the session did not set is refused with errorCode lock_credential_preexisting, and the result reports only the type and outcome (for example set: true). The credential is redacted from logs, telemetry, and recorded plans; it is in the device's process list while locksettings runs. power (Android) fakes battery level/charger, battery saver, light or deep Doze (the tool unplugs the battery and turns the screen off first and reports those preconditions), app standby buckets and inactive state, Data Saver and thermal status, and returns a restoreReceipt of the values it replaced; a session restores them on release in reverse order and reports failures as powerRestore in the release result. Battery, Doze and thermal faking is refused on physical devices (power_physical_device_refused). Clock control supports only rootable Android emulators; Play Store images, physical devices and iOS return unsupported. Set accepts ISO-8601 instants within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z (inclusive); cumulative advance must stay in that window. Commands have second-level precision; advance requires integer byMs >= 1000 (maximum 315360000000), uses device read-back time, and verifies movement with a 2000ms tolerance; set within tolerance reports outcome=unchanged. On session release/rebind/teardown/reset, AutoMobile explicitly restores HOST-derived real time plus the original auto_time, even if it was 1, and verifies both. Failed restore is retried and quarantines the device until success or removal. Clock control restarts adbd on the emulator; connections such as port forwards may be re-established. Restore unroots adbd if AutoMobile rooted it (bounded, best-effort). Hierarchy/observe caches and freshness baselines are invalidated on every clock change. The restore slot is in memory only: daemon restart loses it; reset is recovery to HOST time plus auto_time=1 on a rootable emulator. Without a slot, unsupported targets report unsupported/nothing to reset without clock mutations; with a slot, refused root reports failure and retains pending restoration. Sessionless callers must reset explicitly. Session-bound and sessionless clock writes share one device queue and original ownership baseline; session release restores the device while sessionless ownership persists until reset or removal. Removal cancels clock work for that device incarnation. Changing the clock affects TLS/certificate validation, token expiry, and freshness checks.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -31202,10 +32132,20 @@
                   "type": "string",
                   "enum": ["throttling", "critical", "unset"],
                   "description": "Override thermal status via `cmd thermalservice override-status`, or unset."
+                },
+                "dontKeepActivities": {
+                  "type": "string",
+                  "enum": ["on", "unset"],
+                  "description": "Developer options 'Don't keep activities' via `settings global always_finish_activities`, restored to its prior value, or unset. Applies to activities left after the change."
+                },
+                "storage": {
+                  "type": "string",
+                  "enum": ["low", "full", "unset"],
+                  "description": "Use up free space on /data with a ballast file (`fallocate`): 'low' leaves about 128 MiB, 'full' about 8 MiB. Reset deletes the ballast. Or unset."
                 }
               },
               "additionalProperties": false,
-              "description": "Power-domain fault injectors (Android only, behind the feature flag)."
+              "description": "Power and lifecycle fault injectors (Android only, behind the feature flag)."
             },
             "expiresInSeconds": {
               "type": "integer",
@@ -32027,6 +32967,11 @@
   },
   {
     "name": "setKeyValue",
+    "title": "Set Key Value",
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": true
+    },
     "description": "Set app key-value storage entry.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -32154,6 +33099,11 @@
   },
   {
     "name": "setNotificationPolicy",
+    "title": "Set Notification Policy",
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true
+    },
     "description": "Set app notification/DND policy state",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -32269,6 +33219,11 @@
   },
   {
     "name": "setPosture",
+    "title": "Set Posture",
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true
+    },
     "description": "Set Android device posture or iPhone Duo simulator posture, with an optional Resizable Android display preset. Specify exactly one of posture or hingeAngle (finite degrees, 0-180 inclusive). Hinge angle is BEST EFFORT, emulator/simulator only, without displayPreset; unsupported returns status: unsupported with a reason and no state change. Android console support is detected at call time; iOS requires a runner advertising set_hinge_angle (#8547). Angle results echo hingeAngle and device posture read-back, or unknown with postureReason. Android strictly parses emu sensor get hinge-angle0 output as hinge-angle0 = <n>; iOS uses the runner angle. Both report observedHingeAngle when available and warn without failing when the resulting angle is unavailable or differs by more than 1 degree.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -32383,6 +33338,11 @@
   },
   {
     "name": "setPreference",
+    "title": "Set Preference",
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": true
+    },
     "description": "Write an Android system property, Android SharedPreferences key, or iOS UserDefaults key and return read-back verification. On iOS, appId is required and the store selector is suite (not name or fileName as on setKeyValue); omit suite or use Standard for the default store. Uses an already connected embedded AutoMobile SDK with storage inspection enabled; storage access itself never starts a runner. Reads can fall back to the simulator data container's on-disk plist, which may lag the running app. Writes use the container only when no SDK connection is open before sending; SDK write failures never trigger a second write. App-group suites require the connected SDK.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -32544,6 +33504,11 @@
   },
   {
     "name": "setSensor",
+    "title": "Set Emulator Sensor",
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": true
+    },
     "description": "Set or reset one Android emulator virtual sensor (acceleration, gyroscope, magnetic-field, orientation, temperature, proximity, light, pressure, humidity) through the emulator console. Pass exactly one of value or reset: true. The result reports applied and previous values plus a restore receipt. The value read before the first change is kept; in a daemon session, release or rebind restores every sensor the session changed. Sessionless changes persist until reset. Physical devices and iOS are refused. Read current values with getDeviceState include: [\"sensors\"].",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -32674,6 +33639,12 @@
   },
   {
     "name": "setToolEnabled",
+    "title": "Set Tool Discovery",
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
     "description": "Control tools/list discovery for this MCP session: one exact name via toolName, or a batch via toolNames. Omitted tools remain callable directly by name through tools/call, including default-off tools such as pinchOn and prototype that tools/list never shows until enabled; read the automobile:tools resource for every tool's name and default discovery state. Returns enabledTools, or enabledToolsError if post-write readback fails (the change still applies).",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -32693,6 +33664,7 @@
             "audit",
             "backgroundWork",
             "biometricAuth",
+            "captureTrace",
             "changeLocalization",
             "clearKeyValueFile",
             "clearMockNetwork",
@@ -32700,6 +33672,7 @@
             "compareScreenshot",
             "crashApp",
             "deleteDevice",
+            "deleteKeychainItem",
             "deviceSnapshot",
             "displayConfig",
             "displayProfile",
@@ -32708,6 +33681,7 @@
             "executePlan",
             "explore",
             "exportPlan",
+            "focusNavigate",
             "getAppPermissions",
             "getDataStore",
             "getDeepLinks",
@@ -32718,6 +33692,7 @@
             "getNetworkGraph",
             "getNotificationPolicy",
             "getPreference",
+            "heapDump",
             "highlight",
             "hitTest",
             "homeScreen",
@@ -32756,6 +33731,7 @@
             "removeKeyValue",
             "resetAppLogs",
             "resetKeychain",
+            "rotaryScroll",
             "rotate",
             "selectAllText",
             "sendBroadcast",
@@ -32776,7 +33752,6 @@
             "siri",
             "snapshotOf",
             "sqlQuery",
-            "stageSessionDownloads",
             "statusBar",
             "swipeAt",
             "swipeOn",
@@ -32808,6 +33783,7 @@
               "audit",
               "backgroundWork",
               "biometricAuth",
+              "captureTrace",
               "changeLocalization",
               "clearKeyValueFile",
               "clearMockNetwork",
@@ -32815,6 +33791,7 @@
               "compareScreenshot",
               "crashApp",
               "deleteDevice",
+              "deleteKeychainItem",
               "deviceSnapshot",
               "displayConfig",
               "displayProfile",
@@ -32823,6 +33800,7 @@
               "executePlan",
               "explore",
               "exportPlan",
+              "focusNavigate",
               "getAppPermissions",
               "getDataStore",
               "getDeepLinks",
@@ -32833,6 +33811,7 @@
               "getNetworkGraph",
               "getNotificationPolicy",
               "getPreference",
+              "heapDump",
               "highlight",
               "hitTest",
               "homeScreen",
@@ -32871,6 +33850,7 @@
               "removeKeyValue",
               "resetAppLogs",
               "resetKeychain",
+              "rotaryScroll",
               "rotate",
               "selectAllText",
               "sendBroadcast",
@@ -32891,7 +33871,6 @@
               "siri",
               "snapshotOf",
               "sqlQuery",
-              "stageSessionDownloads",
               "statusBar",
               "swipeAt",
               "swipeOn",
@@ -32977,6 +33956,10 @@
   },
   {
     "name": "setUIState",
+    "title": "Set Form State",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Set multiple form fields by desired state.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -33152,6 +34135,10 @@
   },
   {
     "name": "shake",
+    "title": "Shake",
+    "annotations": {
+      "destructiveHint": false
+    },
     "description": "Shake device; iOS Simulator and Android emulator only (unsupported on physical iOS and Android devices).",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -33203,6 +34190,10 @@
   },
   {
     "name": "siri",
+    "title": "Activate Siri",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "iOS: activate Siri with a spoken phrase (XCUIDevice.siriService), e.g. to invoke an App Shortcut / App Intent, then return the observation. Android returns unsupported.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -34588,6 +35579,7 @@
                 "auto_setup_failed",
                 "unknown",
                 "service_recovering",
+                "runner_launch_queued",
                 "device_locked",
                 "incomplete_capture",
                 "runner_unavailable"
@@ -34975,6 +35967,10 @@
   },
   {
     "name": "snapshotOf",
+    "title": "Capture Snapshot",
+    "annotations": {
+      "readOnlyHint": true
+    },
     "description": "Save a PNG crop of one exposed element or a platform-native screen rectangle; return path and geometry metadata only.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -35184,6 +36180,10 @@
   },
   {
     "name": "sqlQuery",
+    "title": "Query Database",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Execute SQL on app SQLite database.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -35280,160 +36280,12 @@
     }
   },
   {
-    "name": "stageSessionDownloads",
-    "description": "Deprecated alias of putAppFile with target.domain \"user_files\"; retained until device verification. Stage host-file, UTF-8, or base64 fixtures into one bounded child directory of the shared Downloads tree on the device owned by the caller's session, optionally resetting that directory first and requesting Android media indexing (Android only).",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "properties": {
-        "sessionUuid": {
-          "description": "Live device session that owns the target Android device",
-          "type": "string",
-          "minLength": 1
-        },
-        "directory": {
-          "description": "One caller-named child directory beneath the device's shared Downloads tree",
-          "type": "string",
-          "pattern": "^(?!\\s*$)(?!\\s*\\.\\.?\\s*$)[^/\\\\\\u0000]+$"
-        },
-        "reset": {
-          "description": "Remove only this declared directory before writing",
-          "default": false,
-          "type": "boolean"
-        },
-        "indexMedia": {
-          "description": "Request Android media indexing for media files",
-          "default": true,
-          "type": "boolean"
-        },
-        "files": {
-          "description": "Files to stage into the declared Downloads directory",
-          "minItems": 1,
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "sourcePath": {
-                "description": "Host file path",
-                "type": "string",
-                "minLength": 1
-              },
-              "contentText": {
-                "description": "UTF-8 content",
-                "type": "string"
-              },
-              "contentBase64": {
-                "description": "Base64 content",
-                "type": "string",
-                "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/][AQgw](?:==)?|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=?)?$",
-                "minLength": 1
-              },
-              "destinationPath": {
-                "description": "Path relative to the declared Downloads namespace",
-                "type": "string",
-                "pattern": "^(?![/\\\\])(?!.*[/\\\\]{2})(?!.*[/\\\\]$)(?!.*(?:^|[/\\\\])\\.{1,2}(?:[/\\\\]|$)).+$"
-              }
-            },
-            "required": ["destinationPath"],
-            "additionalProperties": false,
-            "anyOf": [
-              {
-                "required": ["sourcePath"]
-              },
-              {
-                "required": ["contentText"]
-              },
-              {
-                "required": ["contentBase64"]
-              }
-            ]
-          }
-        }
-      },
-      "required": ["sessionUuid", "directory", "files"],
-      "additionalProperties": false
-    },
-    "outputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "properties": {
-        "success": {
-          "type": "boolean",
-          "enum": [true, false]
-        },
-        "sessionUuid": {
-          "type": "string"
-        },
-        "deviceId": {
-          "type": "string"
-        },
-        "platform": {
-          "type": "string",
-          "enum": ["android", "ios"]
-        },
-        "directory": {
-          "type": "string"
-        },
-        "userId": {
-          "type": "number"
-        },
-        "userSource": {
-          "type": "string",
-          "enum": ["explicit", "currentUser", "foregroundPackage", "managedProfile", "primary"]
-        },
-        "destinationDirectory": {
-          "type": "string"
-        },
-        "reset": {
-          "type": "boolean"
-        },
-        "files": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "propertyNames": {
-              "type": "string"
-            },
-            "additionalProperties": {}
-          }
-        },
-        "status": {
-          "type": "string",
-          "const": "unavailable"
-        },
-        "reason": {
-          "type": "string"
-        }
-      },
-      "required": ["success", "sessionUuid", "deviceId", "platform"],
-      "if": {
-        "properties": {
-          "success": {
-            "const": true
-          }
-        },
-        "required": ["success"]
-      },
-      "then": {
-        "required": ["directory", "userId", "userSource", "destinationDirectory", "reset", "files"]
-      },
-      "else": {
-        "if": {
-          "properties": {
-            "success": {
-              "const": false
-            }
-          },
-          "required": ["success"]
-        },
-        "then": {
-          "required": ["status", "reason"]
-        }
-      }
-    }
-  },
-  {
     "name": "statusBar",
+    "title": "Set Status Bar",
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": true
+    },
     "description": "Deterministic status bar for screenshots and video: override time, battery, signal, data network and carrier (iOS Simulator simctl status_bar, Android SystemUI demo mode), clear it, or read it. A session's override is cleared when the session releases the device.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -35630,6 +36482,10 @@
   },
   {
     "name": "swipeAt",
+    "title": "Swipe at Coordinates",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Swipe from one screen point to another, including diagonals, in native, normalized, or percent units.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -36107,6 +36963,10 @@
   },
   {
     "name": "swipeOn",
+    "title": "Swipe Screen Element",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Swipe/scroll on screen or elements",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -36321,6 +37181,10 @@
   },
   {
     "name": "systemAlerts",
+    "title": "Set Alert Policy",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Set how OS permission and system alerts are handled before and after each UI interaction (tapOn, tapAt, tapAny, swipeOn, swipeAt, sendKeys, pressButton, dragAndDrop, dragPath, pinchOn, multiTouch) on this device, including executePlan steps. iOS: SpringBoard permission prompts; Android: permission-controller grant dialogs. report (default) never taps and surfaces the alert in the action's warnings; allow, deny and allowOnce tap that button; match names a button by label for localized or app-specific alerts. Every alert seen or answered is reported in the action's warnings. A policy set in a daemon session clears when the session is released.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -36478,6 +37342,10 @@
   },
   {
     "name": "systemTray",
+    "title": "Control Notifications",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "System tray actions for notifications (open/close/list/find/tap/dismiss/clearAll)",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -36607,6 +37475,10 @@
   },
   {
     "name": "tapAny",
+    "title": "Tap Any Element",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Tap any clickable element; scope with container or scrollableContainer.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -36747,6 +37619,10 @@
   },
   {
     "name": "tapAt",
+    "title": "Tap at Coordinates",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Tap, long press, or double tap at screen coordinates in native, normalized, or percent units.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -37112,6 +37988,10 @@
   },
   {
     "name": "tapOn",
+    "title": "Tap Screen Element",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Tap an element by text/content-desc, resource-id, or Android test tag; use sibling for adjacent controls.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -38915,6 +39795,7 @@
                 "auto_setup_failed",
                 "unknown",
                 "service_recovering",
+                "runner_launch_queued",
                 "device_locked",
                 "incomplete_capture",
                 "runner_unavailable"
@@ -39296,6 +40177,11 @@
   },
   {
     "name": "terminateApp",
+    "title": "Terminate App",
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": true
+    },
     "description": "Terminate app by package name",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -40763,6 +41649,7 @@
                 "auto_setup_failed",
                 "unknown",
                 "service_recovering",
+                "runner_launch_queued",
                 "device_locked",
                 "incomplete_capture",
                 "runner_unavailable"
@@ -41220,6 +42107,11 @@
   },
   {
     "name": "uninstallApp",
+    "title": "Uninstall App",
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": true
+    },
     "description": "Uninstall app by package name or bundle identifier",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -41267,6 +42159,10 @@
   },
   {
     "name": "videoRecording",
+    "title": "Record Video",
+    "annotations": {
+      "destructiveHint": false
+    },
     "description": "Start or stop device video recording.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -41572,6 +42468,10 @@
   },
   {
     "name": "wakeAndUnlock",
+    "title": "Wake and Unlock",
+    "annotations": {
+      "destructiveHint": false
+    },
     "description": "Wake a device and unlock its keyguard. Android: swipe lock or secure PIN via `pin`; iOS: wake + swipe-dismiss (pin ignored).",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -41641,6 +42541,10 @@
   },
   {
     "name": "windowMode",
+    "title": "Set Window Mode",
+    "annotations": {
+      "destructiveHint": true
+    },
     "description": "Android: put an app's task into fullscreen, picture-in-picture (enter via HOME; the app must support PiP), freeform (optional bounds) or split screen with a second app, and read the mode and bounds back. Returns a restore receipt for the previous mode and any freeform settings it turned on. observe reports each task's windowingMode and bounds in backStack.tasks.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

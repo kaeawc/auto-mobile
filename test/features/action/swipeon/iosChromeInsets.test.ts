@@ -10,6 +10,7 @@ import {
   effectiveSwipeInsets,
   iosSwipeStartWarning,
   swipeScreenSize,
+  screenSwipeBounds,
 } from "../../../../src/features/action/swipeon/iosChromeInsets";
 import {
   loadAndroidHomeObserve,
@@ -272,4 +273,22 @@ test("existing fractional fixture preserves its control and checks the fractiona
       elements: [control.element!],
     }),
   ).toBe(false);
+});
+
+describe("screen swipe auto-target bounds", () => {
+  const screen = { left: 0, top: 104, right: 393, bottom: 772 };
+  const within = { left: 16, top: 80, right: 377, bottom: 700 };
+
+  test("intersects the frame with safe screen bounds", () => {
+    expect(screenSwipeBounds(screen, within)).toEqual({ ...within, top: 104 });
+  });
+  test("uses screen bounds without a frame", () => {
+    expect(screenSwipeBounds(screen)).toEqual(screen);
+  });
+  test("explicit edge gestures ignore the frame", () => {
+    expect(screenSwipeBounds(screen, within, "left")).toEqual(screen);
+  });
+  test("falls back to screen bounds for an empty intersection", () => {
+    expect(screenSwipeBounds(screen, { ...within, top: 800, bottom: 850 })).toEqual(screen);
+  });
 });

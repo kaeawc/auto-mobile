@@ -93,7 +93,9 @@ test("JSON schema retains strict endpoint alternatives and bounded recursive def
   const advertised = ToolRegistry.getToolDefinitions().find(
     (tool) => tool.name === "dragAndDrop",
   )?.inputSchema;
-  expect(advertised).toMatchObject({
+  // toMatchObject writes the expected asymmetric matchers (the `$ref` ones `output` now holds)
+  // into the value it matches, so match a copy: the registry's cached conversion is shared.
+  expect(structuredClone(advertised)).toMatchObject({
     properties: { source: output.properties?.source, target: output.properties?.target },
   });
   expect(JSON.stringify(advertised).length).toBeLessThan(15000);

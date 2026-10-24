@@ -1,3 +1,8 @@
+import {
+  ctrlProxyPidsFromArgsRows,
+  sumRunnerLaunchCpuMs,
+  type RunnerLaunchProgressProbe,
+} from "./IosRunnerLaunchProgress";
 import type { HostCommandExecutor } from "../../utils/HostCommandExecutor";
 import { trackAmbient } from "../../utils/PerfContext";
 import { DefaultHostCommandExecutor } from "../../utils/HostCommandExecutor";
@@ -46,7 +51,75 @@ type TerminationIdentities = {
  * Keeping PID discovery, ownership checks and signaling here prevents device IDs,
  * ports and PIDs from being interpolated into shell commands by lifecycle callers.
  */
-export class IosCtrlProxyProcessClient {
+export class IosCtrlProxyProcessClient implements RunnerLaunchProgressProbe {
+  async sample(pid: number, deviceId: string): Promise<number | null> {
+    try {
+      // The full table carries no command column: with args it exceeded exec's 1 MiB
+      // maxBuffer on a busy host (#15183). Device processes are looked up by udid.
+      const { stdout } = await this.executeCommand("ps", ["-axo", "pid=,ppid=,time="]);
+      const deviceRootPids =
+        deviceId.length === 0 ? [] : await this.findDeviceCtrlProxyPids(deviceId);
+      return sumRunnerLaunchCpuMs(stdout, pid, deviceRootPids);
+    } catch (error) {
+      logger.warn(`[IOSCtrlProxy] Launch progress sampling failed: ${errorMessage(error)}`);
+      return null;
+    }
+  }
+
+  private async findDeviceCtrlProxyPids(deviceId: string): Promise<number[]> {
+    const candidates = await this.pgrepOrNone(deviceId);
+    if (candidates.length === 0) {
+      return [];
+    }
+    try {
+      const { stdout } = await this.executeCommand("ps", [
+        "-p",
+        candidates.join(","),
+        "-o",
+        "pid=",
+        "-o",
+        "args=",
+        "-ww",
+      ]);
+      return ctrlProxyPidsFromArgsRows(stdout);
+    } catch (error) {
+      // ps exits 1 while still printing the rows of the candidates that survive
+      // (some exited between pgrep and ps); none surviving is a legitimate empty answer.
+      const partial = this.exitOneStdout(error);
+      if (partial !== undefined) {
+        return ctrlProxyPidsFromArgsRows(partial);
+      }
+      throw error;
+    }
+  }
+
+  private exitOneStdout(error: unknown): string | undefined {
+    const cause = error instanceof Error ? (error.cause ?? error) : error;
+    if (typeof cause !== "object" || cause === null) {
+      return undefined;
+    }
+    const failure = cause as { code?: unknown; signal?: unknown; stdout?: unknown };
+    return failure.code === 1 && !failure.signal && typeof failure.stdout === "string"
+      ? failure.stdout
+      : undefined;
+  }
+
+  /** pgrep -f, where "no match" (exit 1, no output) is empty rather than a failure. */
+  private async pgrepOrNone(pattern: string): Promise<number[]> {
+    try {
+      const { stdout } = await this.executeCommand("pgrep", ["-f", pattern]);
+      return stdout.split("\n").flatMap((line) => {
+        const found = Number.parseInt(line, 10);
+        return Number.isNaN(found) ? [] : [found];
+      });
+    } catch (error) {
+      if (this.isMissingProcessError(error)) {
+        return [];
+      }
+      throw error;
+    }
+  }
+
   private static readonly DEFAULT_PORT = 8765;
   private readonly releaseAttempts: number;
   private readonly releaseGraceMs: number;

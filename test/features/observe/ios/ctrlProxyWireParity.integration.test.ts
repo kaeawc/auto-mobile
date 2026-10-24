@@ -88,6 +88,7 @@ const SWIFT_REQUEST_TYPES = [
   "set_preference",
   "remove_preference",
   "clear_preferences",
+  "delete_keychain_item",
   "set_network_mock_rules",
   "set_network_fault_rules",
   "set_network_error_simulation",

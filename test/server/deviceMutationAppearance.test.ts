@@ -1,3 +1,4 @@
+import { opaqueIntentKey } from "../../src/daemon/sessionBroker/mutations/types";
 import { describe, expect, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
 import { deviceToolMutations } from "../../src/server/deviceMutationAdapters";
@@ -19,11 +20,30 @@ describe("Appearance journal intents (#14359)", () => {
     expect(deviceToolMutations("statusBar", { action: "get" }, "ios")).toEqual([]);
   });
 
-  test("manufacturerProfile apply on Android journals the keyboard profile and a breadcrumb", () => {
-    expect(deviceToolMutations("manufacturerProfile", { action: "apply" }, "android")).toEqual([
-      { kind: "keyboard", key: "profile" },
-      { kind: "opaque", key: "tool:manufacturerProfile" },
-    ]);
+  test.each(["samsung-oneui", undefined, "unknown", "toString"])(
+    "manufacturerProfile apply %s records a fallback for unproven kill/display restoration",
+    (manufacturerProfile) => {
+      expect(
+        deviceToolMutations(
+          "manufacturerProfile",
+          { action: "apply", manufacturerProfile },
+          "android",
+        ),
+      ).toEqual([
+        { kind: "keyboard", key: "profile" },
+        { kind: "opaque", key: opaqueIntentKey("manufacturerProfile", "apply") },
+      ]);
+    },
+  );
+
+  test("keyboard-only manufacturerProfile records only its keyboard row", () => {
+    expect(
+      deviceToolMutations(
+        "manufacturerProfile",
+        { action: "apply", manufacturerProfile: "pixel-baseline" },
+        "android",
+      ),
+    ).toEqual([{ kind: "keyboard", key: "profile" }]);
   });
 
   test.each(["list", "describe", "reset"])("manufacturerProfile %s changes nothing", (action) => {

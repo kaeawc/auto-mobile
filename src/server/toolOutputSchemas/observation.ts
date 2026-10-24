@@ -36,6 +36,7 @@ import {
   observeScopeMetadataSchema,
   predictionsSchema,
   deviceLockSchema,
+  deviceLockUnknownSchema,
   perfSnapshotSchema,
 } from "./observationMetadata";
 import { accessibilityStateSchema } from "./accessibility";
@@ -414,6 +415,12 @@ export const observeResultSchema = z
     ...observationScreenshotOutputFields,
     crop: observeCropResultSchema.optional(),
     screenSize: screenSizeSchema.optional(),
+    isScreenRound: z
+      .boolean()
+      .optional()
+      .describe(
+        "Wear OS (watch devices) only: true when the display is round, so the corners are cut off.",
+      ),
     systemInsets: systemInsetsSchema.optional(),
     insets: observationInsetsSchema.optional(),
     layoutWarnings: z
@@ -484,6 +491,7 @@ export const observeResultSchema = z
     predictions: predictionsSchema.optional(),
     accessibilityState: accessibilityStateSchema.optional(),
     deviceLock: deviceLockSchema.optional(),
+    deviceLockUnknown: deviceLockUnknownSchema.optional(),
     perfSnapshot: perfSnapshotSchema.optional(),
     observeScope: observeScopeMetadataSchema.optional(),
   })

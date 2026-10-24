@@ -101,7 +101,7 @@ export async function applyAcquisitionToolSelection(
   try {
     const selection = await applyToolSelection(service, sessionUuid, enableTools, true);
     if (selection.requested.length > 0) {
-      ToolRegistry.notifyToolListChanged();
+      ToolRegistry.notifyToolSelectionChanged();
     }
     return selection.skipped.length > 0 ? { skipped: selection.skipped } : {};
   } catch (error) {

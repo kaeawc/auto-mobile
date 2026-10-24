@@ -1,4 +1,5 @@
 import nodePath from "node:path";
+import { screenshotFileDeviceToken } from "../../utils/screenshot/screenshotFormats";
 
 export type ScreenshotPathModule = Pick<typeof nodePath, "normalize" | "sep">;
 
@@ -18,6 +19,80 @@ export interface ScreenshotCacheFile {
 }
 
 export const SCREENSHOT_CACHE_MAX_SIZE_BYTES = 128 * 1024 * 1024;
+
+/** Shared screenshot admission limits, in bytes except for the per-device file count. */
+export interface ScreenshotRetentionLimits {
+  baseBytes: number;
+  perDeviceBytes: number;
+  ceilingBytes: number;
+  keepPerDevice: number;
+}
+
+export const DEFAULT_SCREENSHOT_RETENTION_LIMITS: Readonly<ScreenshotRetentionLimits> = {
+  baseBytes: SCREENSHOT_CACHE_MAX_SIZE_BYTES,
+  perDeviceBytes: 64 * 1024 * 1024,
+  ceilingBytes: 2 * 1024 * 1024 * 1024,
+  keepPerDevice: 3,
+};
+
+/** Scale for active devices without lowering the base, even when the ceiling is smaller. */
+export function effectiveScreenshotCacheBytes(
+  limits: ScreenshotRetentionLimits,
+  activeDevices: number,
+): number {
+  return Math.min(
+    Math.max(limits.baseBytes, activeDevices * limits.perDeviceBytes),
+    Math.max(limits.ceilingBytes, limits.baseBytes),
+  );
+}
+
+/**
+ * Capacity that also honours the return guarantee: bytes still inside their guarantee lift
+ * the device-scaled capacity, up to the ceiling. Only past the ceiling does admission evict
+ * a frame before its guarantee expires (#15182: 3.2 MB frames every 10 s need about 192 MiB
+ * per device for the 10-minute guarantee, three times the per-device scale).
+ */
+export function guaranteedScreenshotCacheBytes(
+  limits: ScreenshotRetentionLimits,
+  activeDevices: number,
+  guaranteedBytes: number,
+): number {
+  return Math.min(
+    Math.max(effectiveScreenshotCacheBytes(limits, activeDevices), guaranteedBytes),
+    Math.max(limits.ceilingBytes, limits.baseBytes),
+  );
+}
+
+/**
+ * Path keys for each device's newest K files by last touch. Reserve one slot for an
+ * incoming device's new frame; legacy names have no device and receive no slots.
+ * Supply the same path-key function used by the caller's inventory.
+ */
+export function newestScreenshotPathKeys(
+  files: readonly ScreenshotCacheFile[],
+  keepPerDevice: number,
+  touched: (file: ScreenshotCacheFile) => number,
+  incomingDevice?: string,
+  key: (path: string) => string = screenshotPathKey,
+): Set<string> {
+  const counts = new Map<string, number>();
+  if (incomingDevice) {
+    counts.set(incomingDevice, 1);
+  }
+  const kept = new Set<string>();
+  for (const file of [...files].sort((a, b) => touched(b) - touched(a))) {
+    const device = screenshotFileDeviceToken(nodePath.basename(file.path));
+    if (!device) {
+      continue;
+    }
+    const count = counts.get(device) ?? 0;
+    if (count < keepPerDevice) {
+      kept.add(key(file.path));
+      counts.set(device, count + 1);
+    }
+  }
+  return kept;
+}
 
 export interface ScreenshotEvictionPlan {
   /** Oldest-first paths to delete. */

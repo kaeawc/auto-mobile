@@ -2,7 +2,7 @@ import type { Timer } from "../../utils/SystemTimer";
 import type { PlatformDeviceManager } from "../../devices/deviceUtils";
 import { terminateOwnedEmulatorProcess } from "../../devices/coldBootProcessTermination";
 import { type VirtualDeviceLifecycleLease } from "../../devices/virtualDeviceLifecycleCoordinator";
-import { DeviceInfo } from "../../models";
+import { ActionableError, DeviceInfo } from "../../models";
 import type { HostChildProcess as ChildProcess } from "../../utils/HostCommandExecutor";
 import { isEmulatorLaunchCancelledError } from "../../utils/android-cmdline-tools/EmulatorLaunchCancelledError";
 import { type DeviceReadyOptions } from "./DeviceReadinessContracts";
@@ -48,4 +48,27 @@ export async function runWithLifecycleLease<T>(
     (signal): signal is AbortSignal => signal !== undefined,
   );
   return await operation(signals.length === 1 ? signals[0] : AbortSignal.any(signals));
+}
+
+/** A queued read must respect a stop operation that ran before it acquired the device. */
+export function assertReadBootNotStoppedWhileWaiting(
+  device: DeviceInfo,
+  options: DeviceReadyOptions | undefined,
+  lease: VirtualDeviceLifecycleLease,
+): void {
+  if (
+    options?.intent === "read" &&
+    lease.precedingOperations?.some(
+      (operation) => operation === "shutdown" || operation === "teardown",
+    )
+  ) {
+    throw new ActionableError(
+      `${device.platform} device '${device.name}': a shutdown or teardown ran while this read waited for it; a read does not boot it again. Call startDevice to boot it.`,
+    );
+  }
+}
+
+/** Shared refusal for simulator reads at selection, boot, and verification boundaries. */
+export function iosReadNotBootedMessage(name: string, deviceId: string, state?: string): string {
+  return `iOS simulator '${name}' (${deviceId}) is not booted${state ? ` (state: ${state})` : ""}; a read never boots a simulator. Call startDevice (or acquire a session) to boot it.`;
 }

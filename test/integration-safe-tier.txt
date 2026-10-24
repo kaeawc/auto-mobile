@@ -44,6 +44,7 @@ test/daemon/daemonClientHandshake.integration.test.ts | safe | tmpdir socket L59
 test/daemon/daemonClientStaleSocketRecovery.integration.test.ts | safe | temp pid and socket paths, isProcessRunning stubbed L86-L161
 test/daemon/daemonManagerReadiness.integration.test.ts | unsafe | deletes AUTOMOBILE_DATA_DIR L158 in afterEach, unsetting isolation for later files
 test/daemon/daemonSessionReleaseSignal.integration.test.ts | safe | in-memory DB L52; Daemon never started; FakeDeviceManager L36
+test/daemon/daemonSocketReachability.integration.test.ts | safe | real net server and probes confined to a private mkdtemp directory removed after each test
 test/daemon/daemonStreamWiring.integration.test.ts | safe | Daemon built with fake repo/initializer L392; never started
 test/daemon/daemonTransportError.integration.test.ts | safe | mkdtemp sockets L43, local net servers, DaemonClient only connects
 test/daemon/directModeGuard.integration.test.ts | safe | guard deps injected as fakes L186; fake /home/tester paths are strings only
@@ -200,6 +201,7 @@ test/features/webrtc/WebRtcPublisher.loopback.integration.test.ts | unsafe | env
 test/fixtures/integrationRunnerProbe.integration.test.ts | safe | returns at once unless STALL_PID_FILE is set L8
 test/helpers/navigationTestHarness.integration.test.ts | safe | in-memory nav manager harness over createTestDatabase
 test/integration/androidH264SourceDevice.integration.test.ts | unsafe | real DefaultHostCommandExecutor driving adb L37
+test/integration/brokerMultiClientFixes.integration.test.ts | safe | real broker/handlers over :memory: SQLite, fake native port, FakeTimer, no processes or host tooling
 test/integration/foldablePostureRoundTrip.integration.test.ts | unsafe | execFile of dist/src CLI and ffprobe L23/L57
 test/integration/iosVideoRecordingStartStop.integration.test.ts | unsafe | execFile of dist CLI, xcrun simctl and ffprobe, real DaemonClient L130/L156/L372
 test/integration/logger-init-pidfile-crash.integration.test.ts | unsafe | Bun.spawn of a child bun process L42
@@ -213,6 +215,7 @@ test/integration/webrtcDeviceCaptureLoad.integration.test.ts | unsafe | execFile
 test/lint/avdManagerExecutionBoundary.integration.test.ts | safe | source scan via readFileSync; spawn text is string fixtures L52
 test/lint/devicectlExecutionBoundary.integration.test.ts | safe | source scan via readFileSync; devicectl calls are string literals L132
 test/lint/hostDefaultsExecutionBoundary.integration.test.ts | safe | source scan via readFileSync; spawn text is string literals L63
+test/lint/macOsOnlyTestClassification.integration.test.ts | safe | parses test and src files via readFileSync and the TypeScript API; spawns nothing L15
 test/lint/oxlintConfigScoping.integration.test.ts | unsafe | Bun.spawnSync runs oxlint L55
 test/lint/sdkManagerExecutionBoundary.integration.test.ts | safe | source scan via readFileSync; sdkmanager calls are string literals L174
 test/lint/turboTestInputsCoverNativeSources.integration.test.ts | safe | reads turbo.json and repo sources via readFileSync L90
@@ -226,7 +229,6 @@ test/server/configManagerDefaultRepositories.integration.test.ts | safe | getDat
 test/server/daemonShutdownOutcomeWire.integration.test.ts | safe | hermetic fixture and McpTestFixture in-memory L14
 test/server/deviceLabelSessionReleaseOrdering.integration.test.ts | safe | in-memory DB; new Daemon never started, pool release mocked L33
 test/server/deviceLossOutcomeWire.integration.test.ts | safe | FakeDeviceManager installed; in-memory McpTestFixture L29
-test/server/downloadsFixtureOwnership.integration.test.ts | safe | fake DownloadsFixtureService; FakeDeviceUtils pool L46/L56
 test/server/explicitSessionUuidBinding.daemon.integration.test.ts | safe | Registry device session manager replaced with FakeDeviceReadiness L67; UnixSocketServer never started, fake pool and :memory: DB
 test/server/finalizeToolResponse.outputSchema.integration.test.ts | safe | FakeDeviceManager and FakeArtifactWriter L19/L142
 test/server/internalToolPayloads.integration.test.ts | safe | read-only scan of src files L8

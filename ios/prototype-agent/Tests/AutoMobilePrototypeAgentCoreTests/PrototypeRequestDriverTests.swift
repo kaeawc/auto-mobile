@@ -172,6 +172,36 @@ final class RequestHarness {
 
 @MainActor
 final class PrototypeRequestDriverTests: XCTestCase {
+    func testDeliveryBoundaryChecksSuccessAndFailureAndKeepsCurrentResponse() async throws {
+        for revoked in [false, true] {
+            for fails in [false, true] {
+                let harness = RequestHarness()
+                let client = DeliveryCheckingClient(fails: fails)
+                PrototypeNetworkConfiguration(device: client).apply(to: harness.driver)
+                try harness.show(request(via: "device"))
+                harness.tap()
+                client.setCurrent(!revoked)
+                await harness.driver.settled()
+                if revoked {
+                    XCTAssertNil(harness.data("/feed"))
+                    XCTAssertEqual(harness.data("/feed__meta/error/code"), .string("blocked_destination"))
+                    XCTAssertEqual(
+                        harness.data("/feed__meta/error/message"),
+                        .string("Network is disabled for imported prototypes.")
+                    )
+                    XCTAssertEqual(harness.data("/feed__meta/durationMs"), .number(0))
+                } else if fails {
+                    XCTAssertEqual(
+                        harness.data("/feed__meta/error/message"), .string(PrototypeLocalNetworkDenied.message)
+                    )
+                } else {
+                    XCTAssertEqual(harness.data("/feed"), .string("ok"))
+                    XCTAssertEqual(harness.data("/feed__meta/status"), .number(200))
+                }
+            }
+        }
+    }
+
     private func request(
         via: String = "host", extra: String = "", into: String = "/data/feed"
     )
@@ -583,5 +613,33 @@ extension JSONValue {
     fileprivate var objectValue: [String: JSONValue]? {
         if case let .object(fields) = self { return fields }
         return nil
+    }
+}
+
+private final class DeliveryCheckingClient: PrototypeHttpClient, @unchecked Sendable {
+    private let lock = NSLock()
+    private var current = true
+    private let fails: Bool
+
+    init(fails: Bool) { self.fails = fails }
+    func setCurrent(_ value: Bool) { lock.withLock { current = value } }
+    private func isCurrent() -> Bool { lock.withLock { current } }
+
+    func perform(_: PrototypeHttpRequest) async throws -> PrototypeHttpResponse {
+        if fails {
+            throw PrototypeHttpFailure(
+                error: .init(.network, PrototypeLocalNetworkDenied.message), durationMs: 7, localNetworkDenied: true
+            )
+        }
+        return PrototypeHttpResponse(status: 200, headers: [:], body: Data("ok".utf8), durationMs: 7)
+    }
+
+    func perform(
+        _ request: PrototypeHttpRequest, delivery: PrototypeDeliveryCheck
+    )
+        async throws -> PrototypeHttpResponse
+    {
+        delivery.bind(isCurrent: { self.isCurrent() }, obsolete: PrototypeLibraryGatedClient.disabled)
+        return try await perform(request)
     }
 }

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
+import { BASE_CAP_SCREENSHOT_LIMITS } from "../../helpers/screenshotRetentionLimits";
 import {
   BoundedScreenshotPathProtection,
   SCREENSHOT_PATH_MIN_LIFETIME_MS,
@@ -59,7 +60,12 @@ beforeEach(() => {
   timer = new FakeTimer();
   files = new RecordingRetentionFiles();
   files.setDirectory("/screenshots");
-  protection = new BoundedScreenshotPathProtection(timer);
+  protection = new BoundedScreenshotPathProtection(
+    timer,
+    undefined,
+    undefined,
+    BASE_CAP_SCREENSHOT_LIMITS,
+  );
   setObserveCacheStore(new FakeObserveCacheStore(timer));
   setScreenshotStateStore(new InMemoryScreenshotStateStore(timer));
 });
@@ -96,9 +102,19 @@ test("50 captures inventory once; one explicit sweep reconciles and removes expi
 });
 
 test("independent authorities capture concurrently and preserve each other's mtime floor under cap pressure", async () => {
-  protection = new BoundedScreenshotPathProtection(timer);
+  protection = new BoundedScreenshotPathProtection(
+    timer,
+    undefined,
+    undefined,
+    BASE_CAP_SCREENSHOT_LIMITS,
+  );
   const otherTimer = new FakeTimer();
-  const other = new BoundedScreenshotPathProtection(otherTimer);
+  const other = new BoundedScreenshotPathProtection(
+    otherTimer,
+    undefined,
+    undefined,
+    BASE_CAP_SCREENSHOT_LIMITS,
+  );
   let finish!: () => void;
   let started!: () => void;
   const writing = new Promise<void>((resolve) => {

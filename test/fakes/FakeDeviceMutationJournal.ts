@@ -41,6 +41,19 @@ export class FakeDeviceMutationJournal implements DeviceMutationJournal {
     return structuredClone(this.entries.get(this.sessionKey(scope)) ?? []);
   }
 
+  async listStrayIncarnations(scope: DeviceMutationScope): Promise<readonly DeviceMutationEntry[]> {
+    assertDeviceMutationScope(scope, scope.sessionUuid);
+    const entries = [...this.entries].flatMap(([key, entries]) => {
+      const [sessionUuid, deviceId, incarnation]: string[] = JSON.parse(key);
+      return sessionUuid === scope.sessionUuid &&
+        deviceId === scope.deviceId &&
+        incarnation !== scope.incarnation
+        ? entries
+        : [];
+    });
+    return structuredClone(entries.sort((left, right) => left.sequence - right.sequence));
+  }
+
   async deleteSession(scope: DeviceMutationScope): Promise<void> {
     this.entries.delete(this.sessionKey(scope));
   }

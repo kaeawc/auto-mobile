@@ -1537,6 +1537,16 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     throw new Error("FakeCtrlProxy.removePreference is not scripted");
   }
 
+  deleteKeychainItemForIos(
+    ..._args: Parameters<
+      import("../../src/features/observe/ios/CtrlProxyStorage").CtrlProxyStorage["deleteKeychainItemForIos"]
+    >
+  ): ReturnType<
+    import("../../src/features/observe/ios/CtrlProxyStorage").CtrlProxyStorage["deleteKeychainItemForIos"]
+  > {
+    throw new Error("FakeCtrlProxy.deleteKeychainItemForIos is not scripted");
+  }
+
   clearPreferenceStore(
     ..._args: Parameters<AndroidCtrlProxy["clearPreferenceStore"]>
   ): ReturnType<AndroidCtrlProxy["clearPreferenceStore"]> {

@@ -14,6 +14,13 @@ export function dataToolMutations(
     case "removeKeyValue":
     case "clearKeyValueFile":
       return keyValueMutations(name, args, platform);
+    case "deleteKeychainItem":
+      return [
+        {
+          kind: "preference",
+          key: JSON.stringify({ store: "keychain", appId: args.appId, selector: args.selector }),
+        },
+      ];
     case "setPreference":
       return preferenceMutations(args);
     case "sendBroadcast":
@@ -81,28 +88,40 @@ function opaqueDataToolMutations(
 ): ToolMutation[] | undefined {
   switch (name) {
     case "sqlQuery":
-      return [{ kind: "opaque", key: JSON.stringify(["sql", args.appId, args.databasePath]) }];
+      return [{ kind: "opaque", key: opaqueIntentKey("sql", args.appId, args.databasePath) }];
     case "mockNetwork":
     case "clearMockNetwork":
+      // Release pushes rejected, aborted/timed-out or hung, missing CtrlProxy clients, and
+      // iOS noCapability/superseded outcomes mark the session gap before cleanup settles,
+      // escalating keep-booted reset. Unconfirmed iOS replies count as delivered; Android
+      // delivery means socket write success, with no device ack. Residuals: a failed
+      // in-session clearMockNetwork push leaves nothing owned to push/mark at release;
+      // the gap map is in memory and keyed by session only. Keep this non-fallback.
       return [{ kind: "opaque", key: "network-mocks" }];
     case "phoneCall":
     case "sendSms":
-      return [{ kind: "opaque", key: `tool:${name}` }];
+      return [{ kind: "opaque", key: opaqueIntentKey(name) }];
     case "resetAppLogs":
       return Array.isArray(args.paths)
         ? args.paths.map((path) => ({
             kind: "opaque",
-            key: JSON.stringify(["app-logs", args.appId, args.container ?? "documents", path]),
+            key: opaqueIntentKey(
+              "resetAppLogs",
+              "app-logs",
+              args.appId,
+              args.container ?? "documents",
+              path,
+            ),
           }))
         : [];
-    case "stageSessionDownloads":
-      // The service records its own putAppFile-shaped intents before its first device write.
-      return [];
     case "deviceSnapshot":
       return [
         {
           kind: "opaque",
-          key: JSON.stringify(["snapshot", args.action, args.snapshotName ?? null]),
+          key:
+            args.action === "restore"
+              ? opaqueIntentKey("deviceSnapshot", "restore", args.snapshotName)
+              : JSON.stringify(["snapshot", args.action, args.snapshotName ?? null]),
         },
       ];
     default:
@@ -179,29 +198,4 @@ function backgroundWorkMutations(
         },
       ]
     : [];
-}
-
-/**
- * `stageSessionDownloads` is the deprecated alias of `putAppFile` with `target.domain:
- * "user_files"`. It resolves its device inside the service, so the device dispatcher never
- * records it: the service records these `putAppFile` arguments itself, so the alias journals
- * exactly the shared-file and media intents `putAppFile` does for the same Downloads directory
- * and files (`deviceToolMutations("putAppFile", ...)`). The adapter map stays free of this
- * tool name on purpose: a second mapping there would duplicate `putAppFile`'s.
- */
-export function stageSessionDownloadsAsPutAppFile(request: {
-  directory: string;
-  reset?: boolean;
-  indexMedia?: boolean;
-  files: readonly unknown[];
-}): Record<string, unknown> {
-  return {
-    target: {
-      domain: "user_files",
-      namespace: request.directory,
-      reset: request.reset,
-      indexMedia: request.indexMedia,
-    },
-    files: request.files,
-  };
 }

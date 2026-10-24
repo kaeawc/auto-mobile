@@ -83,6 +83,50 @@ function harness() {
 }
 
 describe("DeviceRuntimeIdentity", () => {
+  test("twenty foreign placeholders never change quarantine or identity evidence", async () => {
+    const h = harness();
+    const device = { ...pooled(), id: "emulator-5610" };
+    h.devices.set(device.id, device);
+    let flips = 0;
+    Object.defineProperty(device, "identityUnresolved", {
+      get: () => undefined,
+      set: () => {
+        flips++;
+      },
+    });
+    for (let n = 0; n < 20; n++) {
+      await h.identity.reconcileDiscoveryObservation(
+        [
+          {
+            deviceId: device.id,
+            platform: "android",
+            name: `Unknown (${device.id})`,
+            foreignOwned: true,
+            observedAt: n + 1,
+          },
+        ],
+        "foreign listing",
+      );
+    }
+    expect(flips).toBe(0);
+    expect(device.identityObservedAt).toBeUndefined();
+    expect(device.avdName).toBe("Pixel");
+    expect(h.calls).toEqual([]);
+    expect(h.deviceCalls).toEqual([]);
+  });
+
+  test("foreign resolved observations cannot lift quarantine", async () => {
+    const h = harness();
+    const device = pooled();
+    device.identityUnresolved = true;
+    device.identityObservedAt = 1;
+    h.devices.set(id, device);
+    const foreign: BootedDevice = { ...observed("Pixel", 20), foreignOwned: true };
+    await h.identity.reconcileDiscoveryObservation([foreign], "foreign listing");
+    expect(device.identityUnresolved).toBe(true);
+    expect(device.identityObservedAt).toBe(1);
+  });
+
   test("admission refusal has a quarantine type and preserves the existing message", () => {
     const h = harness();
     const device = pooled();

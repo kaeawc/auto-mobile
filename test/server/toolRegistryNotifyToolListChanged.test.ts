@@ -132,6 +132,30 @@ describe("ToolRegistry.notifyToolListChanged", () => {
     expect(ToolRegistry.trackedServerCountsForTesting()).toEqual({ notified: 0, ephemeral: 0 });
   });
 
+  test("notifyToolSelectionChanged fans out and broadcasts exactly like notifyToolListChanged", () => {
+    const first = new FakeMcpServer();
+    const second = new FakeMcpServer();
+    second.shouldThrow = true;
+    const ephemeral = new FakeMcpServer();
+    ToolRegistry.registerWithServer(first);
+    ToolRegistry.registerWithServer(second);
+    ToolRegistry.registerWithServer(ephemeral, { ephemeral: true });
+    const kinds: string[] = [];
+    const unsubscribe = ListChangedBroadcaster.subscribe((kind) => {
+      kinds.push(kind);
+    });
+    try {
+      expect(() => ToolRegistry.notifyToolSelectionChanged()).not.toThrow();
+
+      expect(first.calls).toBe(1);
+      expect(second.calls).toBe(1);
+      expect(ephemeral.calls).toBe(0);
+      expect(kinds).toEqual(["tools"]);
+    } finally {
+      unsubscribe();
+    }
+  });
+
   test("emits on the ListChangedBroadcaster even with zero servers", () => {
     const kinds: string[] = [];
     const unsubscribe = ListChangedBroadcaster.subscribe((kind) => {

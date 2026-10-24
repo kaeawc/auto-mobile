@@ -25,6 +25,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+# shellcheck source=scripts/lib/spotlight-exclude.sh
+source "${ROOT}/scripts/lib/spotlight-exclude.sh"
 cd "$ROOT"
 
 mode="${1:-unit}"
@@ -84,6 +86,70 @@ validate_positive_integer() {
     echo "${label} must be a positive integer, got: ${value}" >&2
     exit 2
   fi
+}
+
+# macOS-only (iOS) tests (owner rule 2026-10-23: iOS tests never run on Linux or
+# Windows). test/macos-only-tests.txt classifies them; scripts/lib/macOsOnlyTests.ts
+# applies it. AUTOMOBILE_MACOS_ONLY_TESTS=auto (default) skips them on any host
+# that is not macOS, "include" runs them anywhere, "skip" drops them even on macOS.
+# Design: docs/design-docs/ci/macos-only-tests.md.
+macos_only_tool="$ROOT/scripts/lib/macOsOnlyTests.ts"
+case "${AUTOMOBILE_MACOS_ONLY_TESTS:-auto}" in
+  include) skip_macos_only=0 ;;
+  skip) skip_macos_only=1 ;;
+  auto)
+    if [[ "$runner_os" == macOS ]]; then skip_macos_only=0; else skip_macos_only=1; fi
+    ;;
+  *)
+    echo "AUTOMOBILE_MACOS_ONLY_TESTS must be auto, include or skip, got: ${AUTOMOBILE_MACOS_ONLY_TESTS}" >&2
+    exit 2
+    ;;
+esac
+
+# The skip list is read once, up front: a classification that cannot be read must
+# fail the lane, not quietly leave every file in or out.
+macos_only_skip_file=""
+case "$mode" in
+  unit | changed | integration | coverage)
+    if [[ "$skip_macos_only" -eq 1 ]]; then
+      macos_only_skip_file="${AUTOMOBILE_TEST_TS_SCRATCH_DIR:-$ROOT/scratch}/macos-only-tests.list"
+      mkdir -p "$(dirname "$macos_only_skip_file")"
+      if ! bun "$macos_only_tool" list > "$macos_only_skip_file"; then
+        echo "test-ts: cannot read the macOS-only test classification (test/macos-only-tests.txt)" >&2
+        exit 2
+      fi
+    fi
+    ;;
+  *) skip_macos_only=0 ;;
+esac
+
+# Drops macOS-only paths from a newline-delimited list on stdin when this host skips them.
+macos_only_filter() {
+  if [[ "$skip_macos_only" -eq 1 ]]; then
+    # grep -v exits 1 when every line is dropped; an empty list is a valid result.
+    grep -v -x -F -f "$macos_only_skip_file" || true
+  else
+    cat
+  fi
+}
+
+# Bun finds files itself on some paths (Windows shards, --changed, the integration
+# filter), so hand it a bunfig copy that ignores the macOS-only files. An ignore
+# pattern beats an explicit file argument, and a config file has no argv length cap.
+# The path is relative to the repo root (the lane's cwd) unless the scratch dir is
+# overridden, so Git Bash never rewrites it. $1 is the argument array to extend.
+add_macos_only_bun_config() {
+  [[ "$skip_macos_only" -eq 1 ]] || return 0
+  local config="scratch/bunfig.macos-only.toml"
+  if [[ -n "${AUTOMOBILE_TEST_TS_SCRATCH_DIR:-}" ]]; then
+    config="$AUTOMOBILE_TEST_TS_SCRATCH_DIR/bunfig.macos-only.toml"
+  fi
+  mkdir -p "$(dirname "$config")"
+  bun "$macos_only_tool" write-bunfig "$config"
+  case "$1" in
+    unit) unit_args+=("--config=$config") ;;
+    integration) integration_args+=("--config=$config") ;;
+  esac
 }
 
 # shellcheck source=scripts/lib/host-slots.sh
@@ -272,7 +338,7 @@ run_test_command() {
       run_managed_command gtimeout -k 2 "$AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" "$@"
     else
       local pgid_prefix
-      mkdir -p "${AUTOMOBILE_TEST_TS_SCRATCH_DIR:-$ROOT/scratch}"
+      mkdir_spotlight_excluded_within "$ROOT" "${AUTOMOBILE_TEST_TS_SCRATCH_DIR:-$ROOT/scratch}"
       pgid_prefix="$(mktemp "${AUTOMOBILE_TEST_TS_SCRATCH_DIR:-$ROOT/scratch}/test-ts-pgid.XXXXXX")"
       rm -f "$pgid_prefix"
       cleanup_pgid_prefixes+=("$pgid_prefix")
@@ -442,11 +508,54 @@ for ((arg_index = 0; arg_index < ${#args[@]}; arg_index += 1)); do
   fi
 done
 
+# Explicit file or directory targets: drop macOS-only files this host skips, and
+# stop cleanly when that leaves nothing, so `test-ts.sh unit test/utils` on Linux
+# still works.
+macos_only_skipped_targets=0
+if [[ "$skip_macos_only" -eq 1 ]]; then
+  macos_only_kept=()
+  if [[ "${#unit_test_paths[@]}" -gt 0 ]]; then
+    macos_only_kept=()
+    while IFS= read -r file; do
+      macos_only_kept+=("$file")
+    done < <(printf '%s\n' "${unit_test_paths[@]}" | macos_only_filter)
+    macos_only_skipped_targets=$((macos_only_skipped_targets + ${#unit_test_paths[@]} - ${#macos_only_kept[@]}))
+    unit_test_paths=(${macos_only_kept[@]+"${macos_only_kept[@]}"})
+  fi
+  if [[ "${#integration_test_paths[@]}" -gt 0 ]]; then
+    macos_only_kept=()
+    while IFS= read -r file; do
+      macos_only_kept+=("$file")
+    done < <(printf '%s\n' "${integration_test_paths[@]}" | macos_only_filter)
+    macos_only_skipped_targets=$((macos_only_skipped_targets + ${#integration_test_paths[@]} - ${#macos_only_kept[@]}))
+    integration_test_paths=(${macos_only_kept[@]+"${macos_only_kept[@]}"})
+  fi
+  if [[ "$macos_only_skipped_targets" -gt 0 &&
+    "${#unit_test_paths[@]}" -eq 0 && "${#integration_test_paths[@]}" -eq 0 && "${#stress_test_paths[@]}" -eq 0 ]]; then
+    printf 'test-ts: all %s requested test file(s) are macOS-only (iOS); skipped on this host (AUTOMOBILE_MACOS_ONLY_TESTS=include runs them)\n' \
+      "$macos_only_skipped_targets" >&2
+    exit 0
+  fi
+fi
+
+# Count line on stderr, plus a step-summary section in CI, so skipped iOS files stay visible.
+if [[ "$skip_macos_only" -eq 1 && "${TEST_TS_PRINT_CMD:-}" != 1 ]]; then
+  case "$mode" in
+    unit | changed | integration | coverage)
+      if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+        bun "$macos_only_tool" report --markdown >> "$GITHUB_STEP_SUMMARY" || true
+      else
+        bun "$macos_only_tool" report || true
+      fi
+      ;;
+  esac
+fi
+
 # Both the ordinary shards and the randomized diagnostic consume this list.
 discover_unit_test_files() {
   local file
   if [[ -n "${unit_selection_file:-}" ]]; then
-    cat "$unit_selection_file"
+    macos_only_filter < "$unit_selection_file"
     return
   fi
   while IFS= read -r file; do
@@ -454,7 +563,7 @@ discover_unit_test_files() {
       *.integration.test.ts | test/stress/*) ;;
       *) printf '%s\n' "$file" ;;
     esac
-  done < <(find test -type f -name '*.test.ts' -print | sort)
+  done < <(find test -type f -name '*.test.ts' -print | sort | macos_only_filter)
 }
 
 # Markdown backticks are literal formatting, not shell substitutions.
@@ -987,10 +1096,11 @@ reap_windows_test_processes() {
 
 run_windows_unit_shards() {
   local shard shard_root="${AUTOMOBILE_TEST_TS_SCRATCH_DIR:-$ROOT/scratch}/test-ts-unit-shards"
+  add_macos_only_bun_config unit
   local pids=() labels=() log_names=() starts=()
   if [[ "${TEST_TS_PRINT_CMD:-}" != 1 ]]; then
     rm -rf "$shard_root"
-    mkdir -p "$shard_root"
+    mkdir_spotlight_excluded_within "$ROOT" "$shard_root"
   fi
   for ((shard = 1; shard <= unit_workers; shard += 1)); do
     launch_windows_test_process "unit shard $shard/$unit_workers" "shard-$shard" \
@@ -1021,10 +1131,10 @@ run_windows_integration_shards() {
       unsafe_paths+=("$path")
       ignore_args+=(--path-ignore-patterns "$path")
     fi
-  done < <(integration_tier_paths "$tier_file" unsafe)
+  done < <(integration_tier_paths "$tier_file" unsafe | macos_only_filter)
   if [[ "${TEST_TS_PRINT_CMD:-}" != 1 ]]; then
     rm -rf "$shard_root"
-    mkdir -p "$shard_root"
+    mkdir_spotlight_excluded_within "$ROOT" "$shard_root"
   fi
   safe_workers="$workers"
   if [[ "${#unsafe_paths[@]}" -gt 0 ]]; then
@@ -1099,7 +1209,7 @@ run_unit_shards() {
 
   if [[ "${TEST_TS_PRINT_CMD:-}" != 1 ]]; then
     rm -rf "$shard_root"
-    mkdir -p "$shard_root"
+    mkdir_spotlight_excluded_within "$ROOT" "$shard_root"
   fi
   if [[ -n "${AUTOMOBILE_UNIT_JUNIT_DIR:-}" ]]; then
     rm -rf "$AUTOMOBILE_UNIT_JUNIT_DIR"
@@ -1108,7 +1218,7 @@ run_unit_shards() {
   if [[ "$shard_mode" == changed ]]; then
     # Print-only runs skip the scratch reset above but still need somewhere to
     # hold the resolved list.
-    mkdir -p "$shard_root"
+    mkdir_spotlight_excluded_within "$ROOT" "$shard_root"
     unit_selection_file="$shard_root/selected-unit.txt"
     # Resolve once before sharding. The selector unions a parse-only Bun graph
     # with affectedTests' reference/always-run extras; uncertain edges select
@@ -1332,6 +1442,7 @@ case "$mode" in
     elif [[ "${#unit_test_paths[@]}" -eq 0 && "${#passthrough_args[@]}" -eq 0 && "$runner_os" != "Windows" ]]; then
       run_unit_shards unit
     else
+      add_macos_only_bun_config unit
       run_test_command \
         "${unit_args[@]}" \
         "${unit_test_paths[@]+"${unit_test_paths[@]}"}" \
@@ -1351,6 +1462,7 @@ case "$mode" in
       run_unit_shards changed "$changed_ref"
       exit $?
     fi
+    add_macos_only_bun_config unit
     changed_args=("${unit_args[@]}")
     if [[ -n "${AUTOMOBILE_UNIT_JUNIT_DIR:-}" ]]; then
       rm -rf "$AUTOMOBILE_UNIT_JUNIT_DIR"
@@ -1368,6 +1480,7 @@ case "$mode" in
     ;;
   integration)
     integration_args=(bun test --isolate --timeout "$per_test_timeout_ms")
+    add_macos_only_bun_config integration
     transport_selected=false
     integration_main_paths=()
     for integration_path in "${integration_test_paths[@]+"${integration_test_paths[@]}"}"; do
@@ -1378,7 +1491,7 @@ case "$mode" in
       fi
     done
     if [[ "$runner_os" != "Windows" ]]; then
-      mkdir -p scratch
+      mkdir_spotlight_excluded scratch
       # These assignments run in the parent shell, independent of unit shards.
       export AUTOMOBILE_TEST_TIMING_LOG="${AUTOMOBILE_TEST_TIMING_LOG:-scratch/integration-file-timings-$$.ndjson}"
       export AUTOMOBILE_WATCHDOG_TIMING_LOG="${AUTOMOBILE_WATCHDOG_TIMING_LOG:-$AUTOMOBILE_TEST_TIMING_LOG}"
@@ -1529,7 +1642,7 @@ case "$mode" in
               if [[ "$integration_file" != test/server/proxyServerTransportFailure.integration.test.ts ]]; then
                 main_targets+=("$integration_file")
               fi
-            done < <(find test -type f -name '*.integration.test.ts' | LC_ALL=C sort)
+            done < <(find test -type f -name '*.integration.test.ts' | LC_ALL=C sort | macos_only_filter)
             if (( ${#main_targets[@]} == 0 )); then
               echo "No integration test files were found." >&2
               exit 2
@@ -1678,6 +1791,7 @@ case "$mode" in
     fi
     if [[ "${TEST_TS_PRINT_CMD:-}" != "1" ]]; then
       rm -rf "$coverage_root"
+      mkdir_spotlight_excluded_within "$ROOT" "$coverage_root"
       mkdir -p "$coverage_root/shards"
     fi
     # Coverage uses the unit shard supervisor too: the same 720s attempts,

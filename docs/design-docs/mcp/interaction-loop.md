@@ -39,6 +39,19 @@ value. The marker describes state and does not change `tapOn` selection or
 execution. An enabled-state transition appears in hierarchy diffs and prevents
 the settle comparator from treating the two captures as equal.
 
+iOS simulator lock readings are shared per device: unlocked known readings use
+`knownTtlMs` (30 seconds), locked readings use `lockedTtlMs` (2 seconds), and
+unknown readings use `failureTtlMs` (5 seconds). The first known reading after
+invalidation is capped by `settleTtlMs` (2 seconds); subsequent readings use the
+normal TTL. Stale in-flight reads cannot consume this settling period. Button presses, wake-and-unlock (before and after),
+and device release invalidate the cache. Observe waits at most 750 ms for a reading;
+`deviceLockUnknown.reason` is `pending` while the shared 4-second probe continues,
+or `timeout`, `error`, or `unparseable` after a failed read. Unknown readings omit
+`deviceLock`; they never imply an unlocked device. Probe reads never reject.
+Caller abort detaches cache/budget waits with an unknown `pending` reading and
+message `caller aborted`; the shared read continues and can populate the cache.
+A notifyutil executor abort becomes an unknown `error` reading.
+
 ## Settled embedded observations
 
 A navigation-class action (`tapOn`, `tapAny`, `openLink`, `homeScreen`,
@@ -50,7 +63,7 @@ attached yet — for Settings rows, the `switchWidget` node that is the only
 carrier of `toggle` / `checked` — and the parent row's content-derived `s2-…`
 elementId would then change on the client's next `observe`.
 
-For those actions AutoMobile now gates the embedded capture on hierarchy
+For those actions AutoMobile gates the embedded capture on hierarchy
 stability before returning it, using the same settle primitive standalone
 `observe(waitFor: {for: "stable"})` uses: re-observe until two consecutive
 hierarchies are structurally equal, bounded at 1000 ms and cancelled with the
@@ -94,10 +107,13 @@ Without an explicit choice (unset or other env values), proxies relay no prefere
 and use the shared daemon's effective setting.
 With an external action call's `sessionUuid` and session store,
 this omits each unchanged `observation` block independently: `insets`,
-`systemInsets`, `backStack`, `gfxMetrics`, `displayedTimeMetrics`, `deviceLock`,
+`systemInsets`, `backStack`, `gfxMetrics`, `displayedTimeMetrics`, `deviceLock`, `deviceLockUnknown`,
 `accessibilityState`, and `freshness`. Raw observations' `viewHierarchy.insets`
 and `viewHierarchy.systemInsets` copies follow the same rule independently.
-Values must be deeply equal except `backStack.capturedAt`. Stale freshness,
+`deviceLock` and `deviceLockUnknown` form one mutually exclusive block: a delivered
+variant replaces the sibling in both the server snapshot and the client's state.
+A variant transition always sends the new field in full; omission of both means
+unchanged. Values must be deeply equal except `backStack.capturedAt`. Stale freshness,
 unstable gfx metrics, and partial back stacks remain inline even if unchanged.
 The first action response sends available blocks in full, changes resend the
 changed block, and a new session or any device switch sends available blocks

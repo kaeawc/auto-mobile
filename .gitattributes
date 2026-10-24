@@ -17,6 +17,7 @@ test/fixtures/android-app-links/*.txt text eol=lf
 test/fixtures/ios-simctl/*.txt text eol=lf
 test/fixtures/android-emulator/*.txt text eol=lf
 test/fixtures/android-startup/*.txt text eol=lf
+test/fixtures/android-profiling/*.txt text eol=lf
 test/fixtures/duo-enumerate.txt text eol=lf
 test/fixtures/ios-duo/*.json text eol=lf
 test/fixtures/ios-simctl/*.json text eol=lf
@@ -80,6 +81,8 @@ test/fixtures/android-locale/*.txt text eol=lf
 test/fixtures/android-am-start/*.txt text eol=lf
 # Real `adb install` downgrade failure capture from the mt36 emulator run (#10191).
 test/fixtures/android-install/*.txt text eol=lf
+# Real ProtoViewer MCP transport captures from the API 37 emulator round 4 run (#15174).
+test/fixtures/android-protoviewer/* text eol=lf
 
 # Git LFS tracking for binary assets
 # Keeps clone size small for SPM consumers and other tooling
@@ -214,3 +217,11 @@ android/protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol/PrototypeS
 ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeSpecModels.generated.swift text eol=lf
 test/fixtures/android-sdkmanager/*.txt text eol=lf
 test/fixtures/ios-safari-url-field/*.json text eol=lf
+# Generated prototype embedding samples are compared byte-for-byte with the
+# native resource output (#13732), so a Windows CRLF checkout must not rewrite them.
+samples/prototype-embedding/** text eol=lf
+samples/prototype-embedding/**/*.png -text
+ios/prototype-agent/Fixtures/EmbedConsumer/Sources/EmbedConsumer/EmbeddingSamplePrototype.swift text eol=lf
+
+test/fixtures/ios-runner-progress/*.txt text eol=lf
+test/fixtures/ios-runner-launch-failure/*.txt text eol=lf

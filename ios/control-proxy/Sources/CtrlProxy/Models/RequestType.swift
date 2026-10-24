@@ -67,6 +67,7 @@ public enum RequestType: String, CaseIterable, Sendable {
     case setPreference = "set_preference"
     case removePreference = "remove_preference"
     case clearPreferences = "clear_preferences"
+    case deleteKeychainItem = "delete_keychain_item"
 
     /// Network mocking
     case setNetworkMockRules = "set_network_mock_rules"
@@ -136,6 +137,7 @@ extension RequestType {
         case .setPreference: return .setPreferenceResult
         case .removePreference: return .removePreferenceResult
         case .clearPreferences: return .clearPreferencesResult
+        case .deleteKeychainItem: return .deleteKeychainItemResult
         case .setNetworkMockRules: return .setNetworkMockRulesResult
         case .setNetworkFaultRules: return .setNetworkFaultRulesResult
         case .setNetworkErrorSimulation: return .setNetworkErrorSimulationResult

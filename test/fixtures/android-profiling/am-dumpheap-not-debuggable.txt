@@ -1,0 +1,1 @@
+java.lang.SecurityException: Process not debuggable, and not profileable by shell: com.example.release

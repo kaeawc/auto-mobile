@@ -6,6 +6,8 @@ setup() {
   TEST_ROOT="$(cd "$TEST_ROOT" && pwd -P)"
   mkdir -p "$TEST_ROOT/scripts/android" "$TEST_ROOT/android"
   SCRIPT="$TEST_ROOT/scripts/android/gradlew_task.sh"
+  mkdir -p "$TEST_ROOT/scripts/lib"
+  cp scripts/lib/spotlight-exclude.sh "$TEST_ROOT/scripts/lib/"
   cp scripts/android/gradlew_task.sh "$SCRIPT"
   cat > "$TEST_ROOT/android/gradlew" <<'EOF'
 #!/usr/bin/env bash

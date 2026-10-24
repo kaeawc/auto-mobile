@@ -15,8 +15,6 @@ import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { logger } from "../../src/utils/logger";
 import * as hostBootRegistry from "../../src/features/bootAdmission/HostBootAdmissionRegistry";
-import * as downloadsRefusals from "../../src/server/downloadsFixtureService";
-import * as downloadsStageRefusal from "../../src/server/StageSessionDownloadsRefusal";
 import * as adbHealth from "../../src/utils/android-cmdline-tools/AdbDeviceHealth";
 import * as deviceLost from "../../src/models/DeviceLostError";
 import * as bindingConfig from "../../src/daemon/sessionBroker/provisioning/provisionRequest";
@@ -157,8 +155,6 @@ import {
 const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unknown>>>> = {
   "models/DirectSessionNotActiveError": directSessionNotActive,
   "features/bootAdmission/HostBootAdmissionRegistry": hostBootRegistry,
-  "server/downloadsFixtureService": downloadsRefusals,
-  "server/StageSessionDownloadsRefusal": downloadsStageRefusal,
   "utils/android-cmdline-tools/AdbDeviceHealth": adbHealth,
   "models/DeviceLostError": deviceLost,
   "daemon/sessionBroker/provisioning/provisionRequest": bindingConfig,
@@ -263,6 +259,8 @@ const EXEMPT_CODED_ERROR_MODULES: Readonly<Record<string, string>> = {
     "Emulator launch refusal is thrown as an ActionableError through the generic tool-error path, which serializes only the message; the code is a property on the error, not a structured wire field.",
   "features/deviceLifecycle/teardown/stuckEmulatorEscalation":
     "Emulator teardown failure (#14018) is thrown as an ActionableError through the generic tool-error path, which serializes only the message; the code is a property on the error, not a structured wire field.",
+  "models/ResetCapacityWaitExceededError":
+    "Broker-internal iOS reset failure (#15107): drainFailureOutcome turns it into a device destroy and the reset timing receipt records its message; it never reaches an MCP/tool or daemon refusal as a structured code.",
   "features/prototype/ios/installerErrors/PrototypeInstallPhysicalDeviceError":
     INSTALLER_ERROR_EXEMPTION,
   "features/prototype/ios/installerErrors/InvalidPrototypeIdError": INSTALLER_ERROR_EXEMPTION,
@@ -292,6 +290,8 @@ const EXEMPT_CODED_ERROR_MODULES: Readonly<Record<string, string>> = {
     "Request owner mismatch is mapped to a {success:false, code, retryable, retryAfterMs} daemon reply (retryAfterMs only when retryable) by the release/abandon handlers (test/daemon/sessionBroker/handlers.test.ts), not a tool refusal serializer.",
   "daemon/sessionBroker/SessionBrokerInvariantError":
     "Store precondition failure raised inside the broker; it is classified as a permanent clean-release failure by cleanReleaseFailure.ts and never serialized as a coded tool or daemon refusal (session_broker_invariant_failed appears nowhere on the wire). It reaches daemon RPCs only as an untyped rethrow (brokerRejection rethrows unknown errors; store requireValue/ownedResource can throw it out of releaseOnce).",
+  "features/profiling/HeapDumpRefusedError":
+    "heapDump refusal (heap_dump_not_debuggable) thrown by AndroidHeapDump and carried to the client as the tool error text (test/features/profiling/AndroidHeapDump.test.ts); it is not a daemon or session-broker refusal and has no wire fields beyond the message.",
   "server/SessionLogSourceError":
     "Session-log source failure caught by DefaultSessionLogService.runSource and reported as that source's {status, reason, code} outcome inside a successful collection (test/server/physicalIosSessionLog.test.ts); it never escapes as a tool or daemon refusal.",
   "daemon/sessionBroker/SessionBrokerStoppingError":

@@ -178,6 +178,7 @@ describe("Rotate", () => {
     ).toEqual([
       "shell settings put system accelerometer_rotation 0",
       "shell settings put system user_rotation 1",
+      "shell settings put system accelerometer_rotation 1",
     ]);
   });
 
@@ -402,7 +403,7 @@ describe("Rotate", () => {
       expect(result.message).toContain("lockOrientation: true");
       expect(result.message).toContain("device session");
       expect(result.observation?.rotation).toBe(1);
-      expect(commandsAtObservation.filter((command) => command === liveCommand)).toHaveLength(3);
+      expect(commandsAtObservation.filter((command) => command === liveCommand)).toHaveLength(9);
       expect(commandsAtObservation).toContain("shell settings put system accelerometer_rotation 1");
       expect(fakeAdb.getExecutedCommands().slice(commandsAtObservation.length)).toEqual([
         liveCommand,
@@ -411,7 +412,7 @@ describe("Rotate", () => {
         "shell settings get system user_rotation",
         "shell cmd device_state print-states",
       ]);
-      expect(fakeTimer.getSleepHistory()).toEqual([150]);
+      expect(fakeTimer.getSleepHistory()).toEqual(Array(7).fill(150));
       expect(fakeTimer.now()).toBe(observationTime);
       expect(
         fakeAdb
@@ -434,8 +435,8 @@ describe("Rotate", () => {
       expect(result.message).toContain("Successfully rotated from portrait to landscape");
       expect(
         fakeAdb.getExecutedCommands().filter((command) => command === liveCommand),
-      ).toHaveLength(4);
-      expect(fakeTimer.getSleepHistory()).toEqual([150]);
+      ).toHaveLength(10);
+      expect(fakeTimer.getSleepHistory()).toEqual(Array(7).fill(150));
     });
 
     test.each(["session", "direct lock"])(
@@ -529,15 +530,16 @@ describe("Rotate", () => {
         );
         try {
           const result = await rotate.execute("landscape");
-          expect(result.success).toBe(true); // Existing unconfirmed-orientation contract.
+          expect(result.success).toBe(false);
+          expect(result.error).toContain("could not be confirmed");
           expect(result.currentOrientation).toBe("unknown");
           expect(result.warning).toContain("end-of-call orientation could not be confirmed");
           expect(result.message).toContain("end-of-call orientation could not be confirmed");
           expect(result.observation).toBeDefined();
-          expect(fakeTimer.getSleepHistory()).toEqual([150]);
+          expect(fakeTimer.getSleepHistory()).toEqual(Array(7).fill(150));
           expect(
             fakeAdb.getExecutedCommands().filter((command) => command === liveCommand),
-          ).toHaveLength(4);
+          ).toHaveLength(10);
           if (outcome === "times out") {
             expect(fakeTimer.now() - observationTime).toBe(1000);
           }
@@ -556,7 +558,7 @@ describe("Rotate", () => {
       );
       expect(
         fakeAdb.getExecutedCommands().filter((command) => command === liveCommand),
-      ).toHaveLength(4);
+      ).toHaveLength(10);
     });
 
     test.each(["mRotation=0", ""])(
@@ -572,7 +574,7 @@ describe("Rotate", () => {
           createExecResult(live),
         ]);
         const result = await rotate.execute("landscape");
-        expect(result.success).toBe(live === "");
+        expect(result.success).toBe(false);
         expect(result.currentOrientation).toBe(live === "" ? "unknown" : "portrait");
         expect(fakeAdb.getExecutedCommands()).toEqual(commandsAtObservation);
         expect(result.observation).toBeDefined();
@@ -1219,7 +1221,7 @@ describe("Rotate", () => {
 
       const result = await rotate.execute("portrait");
 
-      expect(result.success).toBe(true);
+      expect(result.success).toBe(false);
       expect(result.rotationPerformed).toBe(true);
       expect(result.previousOrientation).toBe("landscape");
       // Must NOT falsely report the requested orientation as achieved/held.
@@ -1371,7 +1373,7 @@ describe("Rotate", () => {
       }) as typeof fakeAdb.executeCommand;
 
       const rotation = rotate.execute("landscape", { lockOrientation: true });
-      for (let i = 0; i < 50 && !disableWriteStarted; i++) {
+      for (let i = 0; i < 100 && !disableWriteStarted; i++) {
         await Promise.resolve();
       }
 
@@ -1395,6 +1397,11 @@ describe("Rotate", () => {
         createExecResult(),
       );
       fakeAdb.setCommandResponse("shell settings put system user_rotation 0", createExecResult());
+
+      fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
+        createExecResult(mirrorLandscape),
+        createExecResult(mirrorPortrait),
+      ]);
 
       const result = await rotate.execute("portrait");
 
@@ -1632,6 +1639,11 @@ describe("Rotate", () => {
         createExecResult("not-a-number"),
       );
 
+      fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
+        createExecResult(mirrorLandscape),
+        createExecResult(mirrorPortrait),
+      ]);
+
       const result = await rotate.execute("portrait");
 
       expect(result.success).toBe(true);
@@ -1681,8 +1693,8 @@ describe("Rotate", () => {
     test("does not accept a lone match on the FINAL settle-wait attempt, since there is no later sample to confirm it (#6211)", async () => {
       // Auto-rotate is on; the device starts landscape. After forcing
       // portrait and restoring auto-rotate, the settle-wait budget
-      // (SETTLE_WAIT_MAX_ATTEMPTS=3) is exhausted with landscape, landscape,
-      // then the requested portrait on the very last attempt — a single,
+      // (3000 ms) is exhausted with a stable landscape streak,
+      // then the requested portrait on the very last sample — a single,
       // unconfirmed match with no opportunity for a later stability read.
       // Unconditionally returning that final value would falsely report
       // "portrait" held; it must instead be reported as unconfirmed.
@@ -1694,12 +1706,13 @@ describe("Rotate", () => {
         createExecResult("mRotation=1"), // pre-rotation state check
         createExecResult("mRotation=1"), // post-restore confirm attempt 1: landscape
         createExecResult("mRotation=1"), // post-restore confirm attempt 2: landscape
-        createExecResult("mRotation=0"), // post-restore confirm attempt 3 (final): lone portrait match
+        ...Array.from({ length: 17 }, () => createExecResult(mirrorLandscape)),
+        createExecResult("mRotation=0"), // post-restore confirm sample 20 (final): lone portrait match
       ]);
 
       const result = await rotate.execute("portrait");
 
-      expect(result.success).toBe(true);
+      expect(result.success).toBe(false);
       expect(result.rotationPerformed).toBe(true);
       // Must NOT report the requested orientation as confirmed off a single,
       // unconfirmable final-attempt sample.
@@ -1708,7 +1721,7 @@ describe("Rotate", () => {
       expect(result.warning ?? "").toMatch(/could not be confirmed/i);
       // The settle-wait must have exhausted its full retry budget (slept
       // between every attempt) rather than stopping early on the lone match.
-      expect(fakeTimer.getSleepCallCount()).toBe(2);
+      expect(fakeTimer.getSleepCallCount()).toBe(20);
     });
 
     test("does not report a lone final opposite-orientation sample as a confirmed reversion (#6211)", async () => {
@@ -1720,23 +1733,24 @@ describe("Rotate", () => {
         createExecResult("mRotation=1"), // pre-rotation state check
         createExecResult(), // settle attempt 1: unreadable
         createExecResult(), // settle attempt 2: unreadable
-        createExecResult("mRotation=1"), // settle attempt 3: lone landscape sample
+        ...Array.from({ length: 17 }, () => createExecResult()),
+        createExecResult("mRotation=1"), // settle sample 20: lone landscape sample
       ]);
 
       const result = await rotate.execute("portrait");
 
-      expect(result.success).toBe(true);
+      expect(result.success).toBe(false);
       expect(result.currentOrientation).toBe("unknown");
       expect(result.warning ?? "").toMatch(/could not be confirmed/i);
-      expect(fakeTimer.getSleepCallCount()).toBe(2);
+      expect(fakeTimer.getSleepCallCount()).toBe(20);
     });
 
     test("does not accept a lone match on the FINAL settle-wait attempt after an earlier non-adjacent match resets the streak (#6211)", async () => {
       // Alternate sequence from the review finding: portrait, landscape,
       // portrait. The first attempt matches but is immediately broken by the
       // second (non-matching) attempt, resetting the consecutive-match
-      // streak; the third (final) attempt matches again but, being the last
-      // attempt, has no later sample to confirm it either.
+      // streak; unreadable samples then break it again, and the final sample
+      // matches but has no later sample to confirm it.
       fakeAdb.setCommandResponse(
         "shell settings get system accelerometer_rotation",
         createExecResult("1"),
@@ -1745,12 +1759,13 @@ describe("Rotate", () => {
         createExecResult("mRotation=1"), // pre-rotation state check
         createExecResult("mRotation=0"), // post-restore confirm attempt 1: portrait (lone, then broken)
         createExecResult("mRotation=1"), // post-restore confirm attempt 2: landscape (breaks the streak)
-        createExecResult("mRotation=0"), // post-restore confirm attempt 3 (final): lone portrait match again
+        ...Array.from({ length: 17 }, () => createExecResult()),
+        createExecResult("mRotation=0"), // post-restore confirm sample 20 (final): lone portrait match again
       ]);
 
       const result = await rotate.execute("portrait");
 
-      expect(result.success).toBe(true);
+      expect(result.success).toBe(false);
       expect(result.rotationPerformed).toBe(true);
       expect(result.currentOrientation).toBe("unknown");
       expect(result.warning).toBeDefined();
@@ -1772,7 +1787,7 @@ describe("Rotate", () => {
 
       const result = await rotate.execute("portrait");
 
-      expect(result.success).toBe(true);
+      expect(result.success).toBe(false);
       expect(result.currentOrientation).toBe("unknown");
       expect(result.warning ?? "").toMatch(/could not be confirmed/i);
     });
@@ -1880,7 +1895,7 @@ describe("Rotate", () => {
 
       const result = await rotate.execute("portrait");
 
-      expect(result.success).toBe(true);
+      expect(result.success).toBe(false);
       expect(result.rotationPerformed).toBe(true);
       expect(result.currentOrientation).toBe("unknown");
       expect(result.warning).toBeDefined();
@@ -1898,6 +1913,13 @@ describe("Rotate", () => {
         "shell settings get system accelerometer_rotation",
         createExecResult("1"),
       );
+
+      fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
+        createExecResult(mirrorPortrait),
+        ...Array.from({ length: 8 }, () => createExecResult(mirrorLandscape)),
+        createExecResult(mirrorPortrait),
+        createExecResult(mirrorLandscape),
+      ]);
 
       // Gate the FIRST rotation's waitForRotation call so it parks mid-flight
       // — after reading state and writing accelerometer_rotation=0, but

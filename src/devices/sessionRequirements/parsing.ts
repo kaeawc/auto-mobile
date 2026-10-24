@@ -280,7 +280,7 @@ function parseIosRequest(
     : os;
 }
 
-function isManufacturerProfileId(value: unknown): value is ManufacturerProfileId {
+export function isManufacturerProfileId(value: unknown): value is ManufacturerProfileId {
   return (MANUFACTURER_PROFILE_IDS as readonly unknown[]).includes(value);
 }
 

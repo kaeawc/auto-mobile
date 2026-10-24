@@ -1,8 +1,10 @@
+import { exponentialBackoff, type BackoffPolicy } from "../../../utils/Backoff";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import type { Timer } from "../../../utils/SystemTimer";
 import type { PowerDeviceClient } from "./AndroidPowerClient";
 import type { SessionPower } from "./PowerRegistry";
+import { settleDoze } from "./PowerSettle";
 import {
   STANDBY_BUCKETS,
   type PowerField,
@@ -13,9 +15,13 @@ import {
 
 const RESTORE_ATTEMPTS = 2;
 const RESTORE_RETRY_DELAY_MS = 1_000;
+/** How long a restored Doze mode may take to show in deviceidle before it counts as a mismatch. */
+const DOZE_RESTORE_SETTLE_MS = 3_000;
 
 export interface PowerRestoreDependencies {
-  timer: Pick<Timer, "sleep">;
+  timer: Pick<Timer, "sleep" | "now">;
+  /** Delays between Doze read-backs while deviceidle settles (#15042). */
+  dozeBackoff?: BackoffPolicy;
 }
 
 /** One field's restore: the write, then a fresh read that must match the baseline. */
@@ -52,16 +58,53 @@ function batteryRestore(record: SessionPower, client: PowerDeviceClient): FieldR
   };
 }
 
-function dozeRestore(record: SessionPower, client: PowerDeviceClient): FieldRestore {
+/** Wake the screen the session put to sleep; a screen already awake is left alone. */
+export async function wakeSleptScreen(
+  record: Pick<SessionPower, "screenSlept">,
+  client: Pick<PowerDeviceClient, "isScreenOn" | "wakeScreen">,
+): Promise<void> {
+  if (record.screenSlept && !(await client.isScreenOn())) {
+    await client.wakeScreen();
+  }
+}
+
+function dozeRestore(
+  record: SessionPower,
+  client: PowerDeviceClient,
+  dependencies: PowerRestoreDependencies,
+): FieldRestore {
   const mode = record.baseline.doze ?? "off";
   return {
     apply: async () => {
       await client.unforceDoze();
+      // Forced deep Doze only reads ACTIVE once the screen is awake, and the session's own screen
+      // sleep is otherwise undone later by the screen field: wake first so the read-back below
+      // judges a device that can settle (#15161).
+      try {
+        await wakeSleptScreen(record, client);
+      } catch (error) {
+        // The screen field retries the wake; the Doze read-back still says whether Doze left.
+        logger.warn(
+          `[power] Could not wake the screen before the Doze read-back: ${errorMessage(error)}`,
+          error,
+        );
+      }
       if (mode !== "off") {
         await client.forceDoze(mode);
       }
     },
-    verify: async () => (await client.readDoze()).mode === mode,
+    // deviceidle can report the forced state for a moment after unforce: poll before failing.
+    verify: async () => {
+      const settlement = await settleDoze(client, mode, {
+        timer: dependencies.timer,
+        budgetMs: DOZE_RESTORE_SETTLE_MS,
+        backoff:
+          dependencies.dozeBackoff ??
+          exponentialBackoff({ initialDelayMs: 250, multiplier: 2, maxDelayMs: 1_000 }),
+        reading: await client.readDoze(),
+      });
+      return settlement.settled;
+    },
   };
 }
 
@@ -135,9 +178,10 @@ function inactiveRestore(record: SessionPower, client: PowerDeviceClient): Field
   };
 }
 
-function screenRestore(client: PowerDeviceClient): FieldRestore {
+function screenRestore(record: SessionPower, client: PowerDeviceClient): FieldRestore {
   return {
-    apply: () => client.wakeScreen(),
+    // An earlier Doze restore may already have woken it (#15161): do not send the key twice.
+    apply: () => wakeSleptScreen(record, client),
     verify: () => client.isScreenOn(),
   };
 }
@@ -146,14 +190,15 @@ function fieldRestore(
   field: PowerField,
   record: SessionPower,
   client: PowerDeviceClient,
+  dependencies: PowerRestoreDependencies,
 ): FieldRestore | undefined {
   switch (field) {
     case "battery":
       return batteryRestore(record, client);
     case "screen":
-      return record.screenSlept ? screenRestore(client) : undefined;
+      return record.screenSlept ? screenRestore(record, client) : undefined;
     case "doze":
-      return dozeRestore(record, client);
+      return dozeRestore(record, client, dependencies);
     case "batterySaver":
       return batterySaverRestore(record, client);
     case "dataSaver":
@@ -227,8 +272,9 @@ function leftoverFor(record: SessionPower, failed: PowerField[]): string {
 
 /**
  * Put back what a released session changed, newest change first (so Doze is left before the
- * battery is replugged). Best effort per field: one failing field never stops the others. Never
- * throws; failures become a `partial` or `failed` report the release result carries.
+ * battery is replugged; the Doze restore wakes a screen the session slept before it reads back,
+ * #15161). Best effort per field: one failing field never stops the others. Never throws;
+ * failures become a `partial` or `failed` report the release result carries.
  */
 export async function restoreSessionPower(
   record: SessionPower,
@@ -237,7 +283,7 @@ export async function restoreSessionPower(
 ): Promise<PowerRestoreReport> {
   const fields: PowerFieldRestoreReport[] = [];
   for (const field of [...record.changed].reverse()) {
-    const restore = fieldRestore(field, record, client);
+    const restore = fieldRestore(field, record, client, dependencies);
     if (restore) {
       fields.push(await runFieldRestore(field, restore, dependencies));
     }

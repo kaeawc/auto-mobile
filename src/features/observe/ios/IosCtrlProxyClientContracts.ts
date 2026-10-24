@@ -1,6 +1,12 @@
 import { resolveAssetVersion, resolvePinnedVersion } from "../../../constants/release";
 import { CtrlProxyIosManager, IOSCtrlProxyManager } from "../../../ctrlProxy/IOSCtrlProxyManager";
-import { BootedDevice, HighlightShape, ImeAction, ViewHierarchyResult } from "../../../models";
+import {
+  BootedDevice,
+  HighlightShape,
+  ImeAction,
+  ScreenScaleMetadata,
+  ViewHierarchyResult,
+} from "../../../models";
 import type { IosAppMetadataSource } from "../../../models/IosAppMetadataSource";
 import type { ContentHashProvider } from "../../../utils/ContentHashProvider";
 import { compareStrictNumericVersions } from "../../../utils/deviceMatcher";
@@ -93,6 +99,7 @@ export interface IosCtrlProxyClientDependencies extends IosCtrlProxyClientOption
   bootedDeviceLister?: BootedDeviceLister;
   deviceConnectionLostNotifier?: DeviceConnectionLostNotifier;
   sdkEventIngestor?: IosSdkEventIngestor;
+  logDemandProbe?: (deviceId: string) => boolean;
   retryExecutor?: RetryExecutor;
   /** Replaces the side effects `processMessage` runs for hierarchy messages; tests observe their order. */
   messageEffects?: IosHierarchyMessageEffects;
@@ -104,6 +111,7 @@ export interface IosCtrlProxyClientTestOptions {
   bootedDeviceLister?: BootedDeviceLister;
   deviceConnectionLostNotifier?: DeviceConnectionLostNotifier;
   sdkEventIngestor?: IosSdkEventIngestor;
+  logDemandProbe?: (deviceId: string) => boolean;
   retryExecutor?: RetryExecutor;
   options?: boolean | IosCtrlProxyClientOptions;
 }
@@ -170,6 +178,9 @@ export interface IosCtrlProxy extends Omit<CtrlProxyClient, "requestPinch"> {
   ): Promise<CtrlProxySyncedHierarchy | null>;
 
   convertToViewHierarchyResult(hierarchy: XCTestHierarchy): ViewHierarchyResult;
+
+  /** The runner's reported screen scale, or null until a hierarchy that carried it arrives. */
+  getScreenScaleMetadata(): ScreenScaleMetadata | null;
 
   requestSwipe(request: SwipeRequest): Promise<IOSDispatchResult<CtrlProxySwipeResult>>;
 
@@ -442,6 +453,7 @@ export function iosCtrlProxyTestDependencies(
     bootedDeviceLister,
     deviceConnectionLostNotifier,
     sdkEventIngestor,
+    logDemandProbe,
     retryExecutor,
     options = false,
   } = dependencies;
@@ -460,6 +472,7 @@ export function iosCtrlProxyTestDependencies(
     bootedDeviceLister: lister,
     deviceConnectionLostNotifier,
     sdkEventIngestor,
+    logDemandProbe,
     retryExecutor,
   };
 }

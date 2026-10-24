@@ -1,162 +1,208 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import { useScratchRoot } from "../helpers/scratchRoot";
-import { existsSync, writeFileSync } from "node:fs";
-import { createServer, type Server } from "node:net";
-import { join } from "node:path";
+import { EventEmitter } from "node:events";
+import type { createConnection, Socket } from "node:net";
+import { describe, expect, test } from "bun:test";
 import {
+  classifySocketConnectError,
+  createObservationOnlyConnectAttempt,
   DaemonSocketReachability,
-  type DaemonSocketConnectAttempt,
+  type SocketReachability,
 } from "../../src/daemon/daemonSocketReachability";
-import type { PidFileData } from "../../src/daemon/types";
-import type { Timer } from "../../src/utils/SystemTimer";
 import { FakeTimer } from "../fakes/FakeTimer";
 
-describe("DaemonSocketReachability", () => {
-  const scratch = useScratchRoot("daemon-reachability-test-");
-  const servers: Server[] = [];
-
-  function createTempDir(): string {
-    const dir = scratch.next();
-    return dir;
+describe("classifySocketConnectError", () => {
+  for (const platform of ["linux", "darwin", "win32"] satisfies NodeJS.Platform[]) {
+    test(`${platform} only treats explicitly absent errnos as absent`, () => {
+      for (const code of ["ECONNREFUSED", "ENOENT"]) {
+        expect(classifySocketConnectError(code, platform)).toBe("absent");
+      }
+      for (const code of [
+        "EACCES",
+        "EPERM",
+        "EMFILE",
+        "ENFILE",
+        "EAGAIN",
+        "EBUSY",
+        "ECONNRESET",
+        "EPIPE",
+        "ETIMEDOUT",
+        "ENOTSOCK",
+        "ENOMEM",
+        undefined,
+        "EWHATEVER",
+      ]) {
+        expect(classifySocketConnectError(code, platform)).toBe("unknown");
+      }
+    });
   }
+});
 
-  afterEach(async () => {
-    await Promise.all(
-      servers.map((server) => new Promise<void>((resolve) => server.close(() => resolve()))),
-    );
-    servers.length = 0;
-  });
-
-  test("attempts the connection on Windows even though the named pipe has no filesystem entry (#6103 #1)", async () => {
-    let connectCalls = 0;
-    const connectAttempt: DaemonSocketConnectAttempt = async () => {
-      connectCalls++;
-      return true;
-    };
-    const reachability = new DaemonSocketReachability({
-      platform: "win32",
-      // A named pipe never has a filesystem entry, so existsSync is always false.
-      existsSyncFn: () => false,
-      connectAttempt,
-    });
-
-    await expect(reachability.isReachable("\\\\.\\pipe\\auto-mobile", 500)).resolves.toBe(true);
-    // The FS gate must be bypassed on Windows — the connection is what decides.
-    expect(connectCalls).toBe(1);
-  });
-
-  test("skips the connect on POSIX when the socket path is missing", async () => {
-    let connectCalls = 0;
-    const connectAttempt: DaemonSocketConnectAttempt = async () => {
-      connectCalls++;
-      return true;
-    };
-    const reachability = new DaemonSocketReachability({
+describe("DaemonSocketReachability", () => {
+  test("missing POSIX paths are absent without connecting", async () => {
+    let calls = 0;
+    const probe = new DaemonSocketReachability({
       platform: "linux",
       existsSyncFn: () => false,
-      connectAttempt,
-    });
-
-    await expect(reachability.isReachable("/tmp/missing.sock", 500)).resolves.toBe(false);
-    // A missing Unix socket must not be hammered with a connect attempt.
-    expect(connectCalls).toBe(0);
-  });
-
-  test("reports reachable on POSIX when the socket exists and the connect succeeds", async () => {
-    const reachability = new DaemonSocketReachability({
-      platform: "linux",
-      existsSyncFn: () => true,
-      connectAttempt: async () => true,
-    });
-
-    await expect(reachability.isReachable("/tmp/present.sock", 500)).resolves.toBe(true);
-  });
-
-  test("threads the injected timer through to the connect attempt (#6103)", async () => {
-    // Proves the manager's `new DaemonSocketReachability({ timer })` wiring reaches the
-    // connect layer, so a slow probe under a FakeTimer advances the fake clock rather
-    // than blocking on real wall-clock.
-    const fakeTimer = new FakeTimer();
-    let receivedTimer: Timer | undefined;
-    const reachability = new DaemonSocketReachability({
-      platform: "linux",
-      existsSyncFn: () => true,
-      timer: fakeTimer,
-      connectAttempt: async (_socketPath, _timeoutMs, timer) => {
-        receivedTimer = timer;
-        return false;
-      },
-    });
-
-    await reachability.isReachable("/tmp/present.sock", 500);
-    expect(receivedTimer).toBe(fakeTimer);
-  });
-
-  test("returns false without attempting a connect when the budget is non-positive", async () => {
-    let connectCalls = 0;
-    const reachability = new DaemonSocketReachability({
-      platform: "linux",
-      existsSyncFn: () => true,
       connectAttempt: async () => {
-        connectCalls++;
-        return true;
+        calls++;
+        return "answered";
       },
     });
-
-    await expect(reachability.isReachable("/tmp/present.sock", 0)).resolves.toBe(false);
-    expect(connectCalls).toBe(0);
+    expect(await probe.probe("missing.sock", 50)).toBe("absent");
+    expect(calls).toBe(0);
   });
 
-  // #6140 design change: client-side stale-socket recovery (the destructive,
-  // cleanup-capable primitive this test used to contrast against) has been
-  // removed from DaemonClient entirely — recovery is now exclusively the
-  // daemon's own lock-guarded bind-time unlink (UnixSocketServer.start(), under
-  // DaemonManager's O_EXCL startup lock). This probe remains observation-only:
-  // it has no filesystem-mutating code path at all, which is what keeps the
-  // rejoin path in manager.ts safe to use even against a stale, dead-PID-owned
-  // socket inode.
-  test("never unlinks the socket file on a refused connection (#6103)", async () => {
-    const dir = createTempDir();
-    const socketPath = join(dir, "peer.sock");
-    const pidPath = join(dir, "daemon.pid");
-    // A stale socket inode is present but nothing is listening (a race winner that
-    // bound then died), and the PID file records a now-dead process.
-    writeFileSync(socketPath, "stale socket placeholder");
-    const pidData: PidFileData = {
-      pid: 2147483646,
-      socketPath,
-      port: 0,
-      startedAt: 0,
-      version: "test",
-    };
-    writeFileSync(pidPath, JSON.stringify(pidData), { mode: 0o600 });
-
-    // Observation-only probe: the connection is refused, but the socket file is left
-    // completely untouched. The probe has no filesystem-mutating code path at all.
-    const reachability = new DaemonSocketReachability({
-      platform: "linux",
-      existsSyncFn: () => true,
-      connectAttempt: async () => false,
+  test("missing Windows filesystem paths still connect", async () => {
+    let calls = 0;
+    const probe = new DaemonSocketReachability({
+      platform: "win32",
+      existsSyncFn: () => false,
+      connectAttempt: async () => {
+        calls++;
+        return "answered";
+      },
     });
-    await expect(reachability.isReachable(socketPath, 500)).resolves.toBe(false);
-    expect(existsSync(socketPath)).toBe(true);
+    expect(await probe.probe("pipe", 50)).toBe("answered");
+    expect(calls).toBe(1);
   });
 
-  // Gated off Windows: net.Server.listen(path) there is a named pipe, not a filesystem
-  // socket inode, so this real-connect happy path cannot be set up the same way.
-  test.skipIf(process.platform === "win32")(
-    "reports reachable through a real connection to a listening socket",
-    async () => {
-      const dir = createTempDir();
-      const socketPath = join(dir, "listening.sock");
-      const server = createServer();
-      servers.push(server);
-      await new Promise<void>((resolve) => server.listen(socketPath, resolve));
-
-      // Default (real) connect attempt against a genuinely listening socket.
-      const reachability = new DaemonSocketReachability({ platform: process.platform });
-      await expect(reachability.isReachable(socketPath, 500)).resolves.toBe(true);
-      expect(existsSync(socketPath)).toBe(true);
+  test.each([0, -1])(
+    "budget %s learns nothing without filesystem or connect I/O",
+    async (budget) => {
+      const probe = new DaemonSocketReachability({
+        existsSyncFn: () => {
+          throw new Error("no budget for filesystem");
+        },
+        connectAttempt: async () => {
+          throw new Error("no budget for connect");
+        },
+      });
+      expect(await probe.probe("socket", budget)).toBe("unknown");
     },
   );
+
+  test.each(["answered", "absent", "unknown"] satisfies SocketReachability[])(
+    "passes through %s and injected dependencies",
+    async (result) => {
+      const timer = new FakeTimer();
+      const probe = new DaemonSocketReachability({
+        platform: "darwin",
+        existsSyncFn: () => true,
+        timer,
+        connectAttempt: async (path, budget, receivedTimer, platform) => {
+          expect(path).toBe("socket");
+          expect(budget).toBe(50);
+          expect(receivedTimer).toBe(timer);
+          expect(platform).toBe("darwin");
+          return result;
+        },
+      });
+      const pending = probe.probe("socket", 50);
+      await Promise.resolve();
+      timer.advanceTime(50);
+      expect(await pending).toBe(result);
+    },
+  );
+
+  test.each(["answered", "unknown", "absent"] satisfies SocketReachability[])(
+    "confirms POSIX absence after 50 ms and returns %s",
+    async (second) => {
+      const timer = new FakeTimer();
+      let calls = 0;
+      const probe = new DaemonSocketReachability({
+        platform: "darwin",
+        existsSyncFn: () => true,
+        timer,
+        connectAttempt: async () => (++calls === 1 ? "absent" : second),
+      });
+      const pending = probe.probe("socket", 20);
+      await Promise.resolve();
+      expect(calls).toBe(1);
+      expect(timer.getPendingSleeps()).toEqual([50]);
+      timer.advanceTime(49);
+      await Promise.resolve();
+      expect(calls).toBe(1);
+      timer.advanceTime(1);
+      expect(await pending).toBe(second);
+      expect(calls).toBe(2);
+    },
+  );
+
+  test("Windows absence is not retried", async () => {
+    const timer = new FakeTimer();
+    let calls = 0;
+    const probe = new DaemonSocketReachability({
+      platform: "win32",
+      existsSyncFn: () => true,
+      timer,
+      connectAttempt: async () => {
+        calls++;
+        return "absent";
+      },
+    });
+    expect(await probe.probe("pipe", 20)).toBe("absent");
+    expect(calls).toBe(1);
+    expect(timer.getSleepCallCount()).toBe(0);
+  });
+});
+
+class FakeProbeSocket extends EventEmitter {
+  destroyCalls = 0;
+  destroy(): this {
+    this.destroyCalls++;
+    return this;
+  }
+}
+
+function connectFixture() {
+  const socket = new FakeProbeSocket();
+  const timer = new FakeTimer();
+  const events: EventEmitter = socket;
+  let connected = () => {};
+  // Only the path/callback overload is used; no native socket is constructed.
+  const connect = ((_path: string, callback: () => void) => {
+    connected = callback;
+    return events as Socket;
+  }) as typeof createConnection;
+  const attempt = createObservationOnlyConnectAttempt(connect);
+  const pending = attempt("probe.sock", 20, timer, "linux");
+  return { socket, timer, pending, connected: () => connected() };
+}
+
+describe("createObservationOnlyConnectAttempt", () => {
+  test("connect answers, destroys the socket and clears its timeout", async () => {
+    const f = connectFixture();
+    expect(f.timer.getPendingTimeoutCount()).toBe(1);
+    f.connected();
+    expect(await f.pending).toBe("answered");
+    expect(f.socket.destroyCalls).toBe(1);
+    expect(f.timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test.each([
+    ["ECONNREFUSED", "absent"],
+    ["ENOENT", "absent"],
+    ["EACCES", "unknown"],
+    ["EMFILE", "unknown"],
+    [undefined, "unknown"],
+  ] as const)("error %s reports %s and cleans up", async (code, expected) => {
+    const f = connectFixture();
+    f.socket.emit("error", Object.assign(new Error("connect failed"), { code }));
+    expect(await f.pending).toBe(expected);
+    expect(f.socket.destroyCalls).toBe(1);
+    expect(f.timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("timeout reports unknown and ignores late error and connect", async () => {
+    const f = connectFixture();
+    f.timer.advanceTime(19);
+    expect(f.socket.destroyCalls).toBe(0);
+    f.timer.advanceTime(1);
+    expect(await f.pending).toBe("unknown");
+    expect(f.socket.destroyCalls).toBe(1);
+    expect(f.timer.getPendingTimeoutCount()).toBe(0);
+    f.socket.emit("error", Object.assign(new Error("late"), { code: "ENOENT" }));
+    f.connected();
+    expect(await f.pending).toBe("unknown");
+    expect(f.socket.destroyCalls).toBe(1);
+  });
 });

@@ -61,7 +61,7 @@ navigation3 = "1.1.5"              # Used in playground app
 circuit = "0.39.0"
 
 # Kotlin ecosystem
-kotlinx-serialization-json = "1.11.0"
+kotlinx-serialization-json = "1.12.0"
 appcompat = "1.8.0"
 material = "1.14.0"
 lifecycleViewmodelNavigation3Android = "2.11.0"

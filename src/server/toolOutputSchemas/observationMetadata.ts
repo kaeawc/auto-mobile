@@ -173,6 +173,7 @@ export const freshnessSchema = z
         "auto_setup_failed",
         "unknown",
         "service_recovering",
+        "runner_launch_queued",
         "device_locked",
         "incomplete_capture",
         "runner_unavailable",
@@ -261,4 +262,9 @@ export const perfSnapshotSchema = z.object({
     })
     .nullable(),
   startup: z.object({ displayedMs: z.number(), ageMs: z.number() }).nullable(),
+});
+
+export const deviceLockUnknownSchema = z.object({
+  reason: z.enum(["timeout", "pending", "error", "unparseable"]),
+  message: z.string().optional(),
 });

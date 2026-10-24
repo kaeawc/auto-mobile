@@ -50,6 +50,7 @@ public enum ResponseType: String, CaseIterable, Sendable {
     case setPreferenceResult = "set_preference_result"
     case removePreferenceResult = "remove_preference_result"
     case clearPreferencesResult = "clear_preferences_result"
+    case deleteKeychainItemResult = "delete_keychain_item_result"
     case setNetworkMockRulesResult = "set_network_mock_rules_result"
     case setNetworkFaultRulesResult = "set_network_fault_rules_result"
     case setNetworkErrorSimulationResult = "set_network_error_simulation_result"

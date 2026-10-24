@@ -122,6 +122,7 @@ describe("AndroidSnapshotReset", () => {
     host.resetTimeoutMs = 10;
     const baseline = new AndroidBaselineReset(host);
     await baseline.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-a", {
+      stableDeviceId: "stable-avd",
       timer,
       fresh: true,
       timeoutMs: 30_000,
@@ -434,6 +435,7 @@ test("full snapshot strategy restores added packages only when the activity veto
   host.timer = timer;
   const baseline = new AndroidBaselineReset(host);
   await baseline.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-a", {
+    stableDeviceId: "stable-avd",
     timer,
     fresh: true,
     timeoutMs: 30_000,
@@ -459,6 +461,7 @@ async function capturedSnapshotRig() {
   host.timer = timer;
   const baseline = new AndroidBaselineReset(host);
   await baseline.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-a", {
+    stableDeviceId: "stable-avd",
     timer,
     fresh: true,
     timeoutMs: 30_000,
@@ -506,6 +509,7 @@ test("successful wipe-data reset leaves the replacement launch signal live and c
   const baseline = new AndroidBaselineReset(host);
   const capture = () =>
     baseline.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-a", {
+      stableDeviceId: "stable-avd",
       timer,
       fresh: true,
       timeoutMs: 30_000,

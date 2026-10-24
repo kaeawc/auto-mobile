@@ -916,8 +916,8 @@ export abstract class AndroidCtrlProxyServices extends AndroidCtrlProxyDelegatin
    * Runs on every (re)connect, and after a session release clears the store so
    * the device drops what that session installed (issue #10061).
    */
-  public syncNetworkStateToDevice(): void {
-    this.getDeviceStateSync().syncNetworkState();
+  public syncNetworkStateToDevice(): boolean {
+    return this.getDeviceStateSync().syncNetworkState();
   }
 
   protected syncAccessibilityFlagsToDevice(): void {

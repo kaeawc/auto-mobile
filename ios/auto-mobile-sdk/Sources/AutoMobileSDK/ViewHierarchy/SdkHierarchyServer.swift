@@ -64,6 +64,7 @@
         private let storageQueue = DispatchQueue(label: "dev.jasonpearson.automobile.sdk.storage")
         private weak var tracker: (any SdkHierarchyServing)?
         let databaseRouteHandler = SdkDatabaseRouteHandler()
+        let keychainDeletionRouteHandler = SdkKeychainDeletionRouteHandler()
         let preferenceRouteHandler = SdkPreferenceRouteHandler()
         private let triggerRouteHandler = SdkTriggerRouteHandler()
 

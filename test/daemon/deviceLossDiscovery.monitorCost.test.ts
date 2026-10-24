@@ -93,6 +93,7 @@ function missingMonitorHarness(device: BootedDevice, source: DiscoverySource, he
   const sweep = async (planActive = false) => {
     timer.advanceTime(5_000);
     const discovery = await discoverAndReconcile(pool, manager, {
+      iosDeviceListMaxAgeMs: 15_000,
       isPlanDevice: (id) => planActive && id === device.deviceId,
       heldDevices: heldOnly ? [{ platform: device.platform, assignedDevice: device.deviceId }] : [],
     });
@@ -159,6 +160,49 @@ function managerWithPhysicalCounter() {
 
 describe("deviceLossDiscovery monitor cost", () => {
   beforeEach(() => resetAndroidInventoryEnrichmentCache());
+
+  test("monitor cheap read allows a fifteen-second simulator snapshot; missing confirmation is fresh", async () => {
+    const h = missingMonitorHarness(SIM, "ios-simulator");
+    await h.sweep();
+    expect(h.manager.requests).toHaveLength(2);
+    expect(h.manager.requests[0]).toMatchObject({ iosDeviceListMaxAgeMs: 15_000 });
+    expect(h.manager.requests[0]?.bypassIosDeviceListCache).toBeUndefined();
+    expect(h.manager.requests[1]?.bypassIosDeviceListCache).toBe(true);
+    expect(h.manager.requests[1]).not.toHaveProperty("iosDeviceListMaxAgeMs");
+  });
+
+  test.each([undefined, 15_000])(
+    "transitional listings refresh only with max age %s, reusing missing confirmation",
+    async (iosDeviceListMaxAgeMs) => {
+      for (const tracked of [false, true]) {
+        const requests: BootedDeviceDiscoveryOptions[] = [];
+        const manager: MonitorDeviceManager = {
+          getBootedDevicesDetailed: async (_platform, options = {}) => {
+            requests.push(options);
+            return {
+              devices: options.bypassIosDeviceListCache ? [SIM] : [],
+              transitionalSimulators: options.bypassIosDeviceListCache
+                ? []
+                : [{ device: SIM, state: "Booting" }],
+              succeededPlatforms: new Set(["ios"]),
+              succeededSources: new Set(["ios-simulator"]),
+            };
+          },
+        };
+        const discovery = await discoverAndReconcile(poolFor(tracked ? [SIM] : []), manager, {
+          iosDeviceListMaxAgeMs,
+        });
+        const refresh = tracked || iosDeviceListMaxAgeMs !== undefined;
+        expect(requests).toHaveLength(refresh ? 2 : 1);
+        if (refresh) {
+          expect(requests[1]?.bypassIosDeviceListCache).toBe(true);
+          expect(requests[1]).not.toHaveProperty("iosDeviceListMaxAgeMs");
+          expect(discovery.devices).toEqual([SIM]);
+          expect(discovery.transitionalSimulators).toEqual([]);
+        }
+      }
+    },
+  );
 
   test("reconciles other devices while plan observations remain presence-only", async () => {
     const rig = managerWithPhysicalCounter();

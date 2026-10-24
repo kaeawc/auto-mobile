@@ -52,9 +52,15 @@ final class FakePinnedConnector: PrototypePinnedConnecting, @unchecked Sendable 
     private var outcomes: [Result<any PrototypePinnedConnection, Error>]
     init(_ connections: [FakePinnedConnection]) { outcomes = connections.map { .success($0) } }
     init(outcomes: [Result<any PrototypePinnedConnection, Error>]) { self.outcomes = outcomes }
+    var started: FakePinnedSignal?
+    var pause: FakePinnedSignal?
+    let finished = FakePinnedSignal()
     var dials: [Dial] { lock.withLock { calls } }
     func connect(address: String, port: Int, tlsServerName: String?) async throws -> any PrototypePinnedConnection {
-        try lock.withLock {
+        started?.release()
+        if let pause { await pause.wait() }
+        defer { finished.release() }
+        return try lock.withLock {
             calls.append(Dial(address: address, port: port, tlsServerName: tlsServerName))
             guard !outcomes.isEmpty else { throw URLError(.cannotConnectToHost) }
             return try outcomes.removeFirst().get()

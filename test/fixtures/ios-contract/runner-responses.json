@@ -1288,6 +1288,32 @@
         "totalTimeMs" : 17,
         "type" : "error"
       }
+    },
+    {
+      "name" : "delete_keychain_item_result",
+      "wire" : {
+        "deletedScope" : {
+          "accessGroup" : "TEAM.app",
+          "account" : "fixture",
+          "itemClass" : "genericPassword",
+          "service" : "test.service"
+        },
+        "outcome" : "deleted",
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "totalTimeMs" : 17,
+        "type" : "delete_keychain_item_result"
+      }
+    },
+    {
+      "name" : "delete_keychain_item_denied",
+      "wire" : {
+        "outcome" : "mutation_not_authorized",
+        "requestId" : "fixture-request-id",
+        "success" : false,
+        "totalTimeMs" : 17,
+        "type" : "delete_keychain_item_result"
+      }
     }
   ],
   "responseTypes" : [
@@ -1300,6 +1326,7 @@
     "clipboard_result",
     "connected",
     "current_focus_result",
+    "delete_keychain_item_result",
     "drag_result",
     "execute_sql_result",
     "get_preference_result",

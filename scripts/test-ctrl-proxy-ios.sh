@@ -24,8 +24,11 @@ TIMEOUT=5
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# shellcheck source=scripts/lib/spotlight-exclude.sh
+source "${PROJECT_ROOT}/scripts/lib/spotlight-exclude.sh"
 CTRL_PROXY_IOS_DIR="${PROJECT_ROOT}/ios/control-proxy"
 DERIVED_DATA="${AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA:-/tmp/automobile-ctrl-proxy}"
+spotlight_exclude_dir "${DERIVED_DATA}"
 
 echo -e "${CYAN}========================================${NC}"
 echo -e "${CYAN}  CtrlProxy iOS Diagnostic Script${NC}"

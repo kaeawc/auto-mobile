@@ -1,3 +1,4 @@
+import { InMemoryMutationRecordingGaps } from "../../../src/daemon/sessionBroker/mutations/recordingGaps";
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import type { Kysely } from "kysely";
 import { SessionBroker } from "../../../src/daemon/sessionBroker/broker";
@@ -133,6 +134,7 @@ describe("session broker provider restart handoff", () => {
         scopeKey,
         { acquire: () => {}, release: () => {} },
         timer,
+        new InMemoryMutationRecordingGaps(),
       );
       return { broker, service, sessions };
     }

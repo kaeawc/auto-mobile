@@ -133,6 +133,9 @@ function iosProvisioningFormFactor(formFactor: FormFactor | undefined): IosProvi
     case "tablet":
       return "tablet";
     case "foldable":
+    case "tv":
+    case "watch":
+    case "automotive":
     case "unknown":
       throw new ActionableError(
         `iOS provisioning supports only phone or tablet form factors, not '${formFactor}'.`,
@@ -627,6 +630,19 @@ export class DefaultDeviceProvisioner implements DeviceProvisioner {
     signal?: AbortSignal,
     identityHooks?: DeviceProvisioningIdentityHooks,
   ): Promise<ProvisionedDevice> {
+    if (
+      criteria.formFactor === "tv" ||
+      criteria.formFactor === "watch" ||
+      criteria.formFactor === "automotive"
+    ) {
+      // pickAndroidSystemImage selects handheld images only; creating one here would silently
+      // satisfy a TV/watch/car request with a phone.
+      throw new ActionableError(
+        `Creating a '${criteria.formFactor}' AVD is not supported yet; AutoMobile only creates ` +
+          "phone, tablet and foldable AVDs. Create the AVD with avdmanager and the matching " +
+          "system image, or use provisionDevice with an explicit runtime and deviceType.",
+      );
+    }
     const avdManager = this.dependencies.androidCreator();
 
     let installed: SystemImage[];

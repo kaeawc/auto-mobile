@@ -128,6 +128,7 @@ const CLASSIFICATION: Classification = {
     "biometricAuth",
     "changeLocalization",
     "clearKeyValueFile",
+    "deleteKeychainItem",
     "clearMockNetwork",
     "crashApp",
     "criticalSection",
@@ -137,6 +138,7 @@ const CLASSIFICATION: Classification = {
     "dragPath",
     "executePlan",
     "explore",
+    "focusNavigate",
     "highlight",
     "homeScreen",
     "installApp",
@@ -148,6 +150,9 @@ const CLASSIFICATION: Classification = {
     "openLink",
     // Starts and stops an on-device tracer (perfetto) or a device-attached xctrace.
     "performanceTrace",
+    // Starts and stops an on-device Perfetto recorder from typed categories; heapDump makes the app write a dump.
+    "captureTrace",
+    "heapDump",
     "phoneCall",
     "pinchOn",
     "multiTouch",
@@ -155,6 +160,7 @@ const CLASSIFICATION: Classification = {
     "pressButton",
     "putAppFile",
     "recentApps",
+    "rotaryScroll",
     "reconcileDeviceResources",
     "recordDeviceGestures",
     "removeKeyValue",
@@ -177,7 +183,6 @@ const CLASSIFICATION: Classification = {
     "setUIState",
     "shake",
     "siri",
-    "stageSessionDownloads",
     "swipeAt",
     "swipeOn",
     // Pulls the notification shade down, even to list or find.

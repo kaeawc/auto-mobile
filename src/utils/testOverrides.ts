@@ -1,3 +1,4 @@
+import type { HostLoadReader } from "./hostLoadBudget";
 import type { BootedDevice } from "../models";
 import type { GitMetadataClient } from "./GitMetadataClient";
 import type { PerformanceTracker } from "./PerformanceTracker";
@@ -23,6 +24,8 @@ export type DeviceReadinessProxyDriverProvider = (
 
 /** Test-only values read lazily by production modules. All imports here are erased types. */
 export const testOverrides: {
+  /** Host load seam so load-scaled budgets never depend on the machine running the tests. */
+  hostLoad: HostLoadReader | undefined;
   /** In-process version metadata seam; never inherited by spawned children. */
   gitMetadataClient: GitMetadataClient | undefined;
   hostPortAvailabilityChecker: PortAvailabilityChecker | undefined;
@@ -37,6 +40,7 @@ export const testOverrides: {
   /** True while in-process log records are discarded before formatting instead of reaching the file, stderr or stdout sinks. */
   logSinksDisabled: (() => boolean) | undefined;
 } = {
+  hostLoad: undefined,
   gitMetadataClient: undefined,
   hostPortAvailabilityChecker: undefined,
   deviceReadinessProxyDriverProvider: null,

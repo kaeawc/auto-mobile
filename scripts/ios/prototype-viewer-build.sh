@@ -13,8 +13,10 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=scripts/lib/spotlight-exclude.sh
+source "${repo_root}/scripts/lib/spotlight-exclude.sh"
 out_dir="${1:-${repo_root}/scratch/prototype-viewer}"
-mkdir -p "${out_dir}"
+mkdir_spotlight_excluded_within "${repo_root}" "${out_dir}"
 out_dir="$(cd "${out_dir}" && pwd)"
 app="${out_dir}/PrototypeViewer.app"
 mkdir -p "${app}"

@@ -26,7 +26,7 @@ class LibraryImportTest {
       },
       AutoMobilePrototype.capabilities,
       ImportAssetCheck { invalidAsset },
-      LibraryImportCommit { bundle, origin ->
+      LibraryImportCommit { bundle, origin, _ ->
         committed = bundle
         source = origin
         commitError?.let { LibraryResult.Failure(it) } ?: LibraryResult.Success(Fixtures.entry())
@@ -151,7 +151,7 @@ class LibraryImportTest {
         },
         emptySet(),
         ImportAssetCheck { null },
-        LibraryImportCommit { _, _ -> error("Must not commit") },
+        LibraryImportCommit { _, _, _ -> error("Must not commit") },
       )
     assertTrue(
       (old.import(LibraryImportRequest(ImportAction.View, "content://external/spec"))

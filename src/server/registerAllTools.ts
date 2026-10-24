@@ -25,7 +25,9 @@ import { registerSnapshotOfTools } from "./snapshotOfTools";
 import { registerBiometricTools } from "./biometricTools";
 import { registerTelephonyTools } from "./telephonyTools";
 import { registerMeasureStartupTools } from "./measureStartupTools";
+import { registerProfilingTools } from "./profilingTools";
 import { registerMediaSessionTools } from "./mediaSessionTools";
+import { registerRotaryScrollTools } from "./rotaryScrollTool";
 import { registerWindowModeTools } from "./windowModeTools";
 import { registerPrototypeTools } from "./prototypeTools";
 import { prototypeAgentRegistry } from "../features/prototype/ios/prototypeAgentInjection";
@@ -40,10 +42,10 @@ import { registerPreferenceTools } from "./preferenceTools";
 import { registerAppFileTools } from "./appFileTools";
 import { registerSessionLogTools } from "./sessionLogTools";
 import { registerPerformanceTraceTools } from "./performanceTraceTools";
-import { registerDownloadsFixtureTools } from "./downloadsFixtureTools";
 import { registerFormTools } from "./formTools";
 import { registerAccessibilityTools } from "./accessibilityTools";
 import { registerAccessibilityFocusTools } from "./accessibilityFocusTools";
+import { focusNavigateTool } from "./focusNavigateTool";
 import { registerNetworkTools } from "./networkTools";
 import { registerKillProfileTools } from "./killProfileTools";
 import { registerSystemAlertTools } from "./systemAlertTools";
@@ -110,8 +112,10 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerBiometricTools();
   registerTelephonyTools();
   registerMeasureStartupTools();
+  registerProfilingTools();
   registerMediaSessionTools();
   registerWindowModeTools();
+  registerRotaryScrollTools();
   registerHighlightTools();
   registerPrototypeTools({
     agentConnections: new CompositePrototypeAgentConnections(
@@ -125,10 +129,10 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerAppFileTools();
   registerSessionLogTools();
   registerPerformanceTraceTools();
-  registerDownloadsFixtureTools();
   registerFormTools();
   registerAccessibilityTools();
   registerAccessibilityFocusTools();
+  focusNavigateTool.register();
   registerNetworkTools();
   registerKillProfileTools();
   registerSystemAlertTools();

@@ -23,6 +23,9 @@ import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { toSearchable } from "../utility/SearchableNode";
+import { nodeBounds } from "../../models/ViewHierarchyResult";
+import { parseBounds } from "../../utils/bounds";
+import { IosKeyboardNativeEditableTracker } from "./iosKeyboardNativeEditable";
 import { ANDROID_INPUT_CLASSES, isTruthyFlag } from "../utility/elementProperties";
 import { OBSERVED_INTERACTION_PROFILES, SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
 
@@ -147,6 +150,8 @@ export interface FocusedTextField {
   secure: boolean;
   /** Non-secure native iOS values, used only when native focus is unavailable. */
   nativeEditableValues?: Readonly<Record<string, string>>;
+  /** Value of the sole native iOS editable above the on-screen keyboard (blank reads as ""). */
+  keyboardNativeEditableValue?: string;
 }
 
 export interface FocusedTextFieldOptions {
@@ -172,6 +177,9 @@ export function getFocusedTextField(
     let firstField: FocusedTextField | undefined;
     const nativeEditableValues: Record<string, string> | undefined =
       options.includeIosNativeEditableValues ? {} : undefined;
+    const keyboardTracker = options.includeIosNativeEditableValues
+      ? new IosKeyboardNativeEditableTracker()
+      : undefined;
     for (const root of rootGroup) {
       let nativeField: FocusedTextField | undefined;
       let webViewDepth: number | undefined;
@@ -186,6 +194,7 @@ export function getFocusedTextField(
         }
         if (webViewDepth === undefined) {
           captureIosNativeEditableValue(properties, nativeEditableValues);
+          trackKeyboardNativeEditable(node, properties, keyboardTracker);
         }
         if (!isFocusedTextInputProperties(properties)) {
           return;
@@ -204,7 +213,7 @@ export function getFocusedTextField(
       }
     }
     if (nativeEditableValues && Object.keys(nativeEditableValues).length > 0) {
-      return { ...(firstField ?? { secure: false }), nativeEditableValues };
+      return withNativeEditables(firstField, nativeEditableValues, keyboardTracker);
     }
     if (firstField !== undefined) {
       return firstField;
@@ -225,7 +234,44 @@ function captureIosNativeEditableValue(
   const id = properties["view-id"] ?? searchable.nativeId;
   if (typeof id === "string" && id !== "") {
     // Runner omissions represent empty native values; labels are never editable values.
-    values[id] = typeof properties.value === "string" ? properties.value : "";
+    const value = typeof properties.value === "string" ? properties.value : "";
+    // XCUI reports an empty field's placeholder as its value.
+    values[id] = value === properties["hint-text"] ? "" : value;
+  }
+}
+
+function withNativeEditables(
+  field: FocusedTextField | undefined,
+  nativeEditableValues: Record<string, string>,
+  tracker: IosKeyboardNativeEditableTracker | undefined,
+): FocusedTextField {
+  const keyboardNativeEditableValue = tracker?.soleValueAboveKeyboard();
+  return {
+    ...(field ?? { secure: false }),
+    nativeEditableValues,
+    ...(keyboardNativeEditableValue === undefined ? {} : { keyboardNativeEditableValue }),
+  };
+}
+
+function trackKeyboardNativeEditable(
+  node: ViewHierarchyNode,
+  properties: Record<string, unknown>,
+  tracker: IosKeyboardNativeEditableTracker | undefined,
+): void {
+  if (!tracker) {
+    return;
+  }
+  const nodeClass = properties.class ?? properties.className;
+  if (nodeClass === "UIKeyboard") {
+    tracker.recordKeyboard(parseBounds(nodeBounds(node)));
+    return;
+  }
+  if (isNonSecureIosEditable(properties)) {
+    const value = typeof properties.value === "string" ? properties.value : "";
+    tracker.recordEditable(
+      value === properties["hint-text"] ? "" : value,
+      parseBounds(nodeBounds(node)),
+    );
   }
 }
 

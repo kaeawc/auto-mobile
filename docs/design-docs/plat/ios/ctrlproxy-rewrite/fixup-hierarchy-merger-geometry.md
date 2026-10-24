@@ -1,12 +1,9 @@
 # Fixup: HierarchyMerger geometry-key matching
 
-**Status:** Phase 8 geometry matching is implemented. Containment uses per-coordinate
-sorted indices and signed-area ranking; nearest matching uses coordinate windows
-with L∞ distance, then document order. Worst case remains O(n) per distinct query.
-Golden replay of seven real Playground hierarchy pairs found no merged-output
-difference from the old loop-order tie-break (#5837; see `golden-replay.md`).
-**Scope:** pure logic in `HierarchyMerger` (`Sources/CtrlProxy*/HierarchyMerger.swift`).
-Decoupled from the concurrency migration — can land as its own PR.
+**Status:** implemented. Golden replay of seven real Playground hierarchy pairs found no
+merged-output difference from the old loop-order tie-break (#5837; see `golden-replay.md`).
+**Scope:** pure logic in `HierarchyMerger` (`Sources/CtrlProxy*/HierarchyMerger.swift`),
+decoupled from the concurrency migration.
 
 ## Context
 
@@ -38,7 +35,7 @@ worst case remains `O(n)`.
 | Enclosing match         | Smallest signed area, then stable document order | Same selection; overflowing areas saturate to `Int.min` or `Int.max`                     |
 | `probeToleranceMatch`   | First hit in ascending delta-loop order          | Nearest bounds by L∞ distance, then document order; this is the reviewed behavior change |
 
-## Validation and remaining work
+## Validation
 
 Real `(xcuitest, sdk)` pairs captured from a live simulator runner are replayed
 through both tie-breaks by `HierarchyMergerGoldenReplayTests`. None of the 50
@@ -49,8 +46,3 @@ windows saturate at `Int.min`/`Int.max`. Signed dimensions and areas saturate by
 and centers retain origin + half the saturated signed dimension (truncated toward
 zero). Endpoints remain unchanged, including inverted bounds. Results for all
 previously non-overflowing inputs are preserved.
-
-Done: containment indexing with signed-area/document-order selection, and ±tol
-coordinate-window matching with nearest-distance/document-order selection.
-Also done: golden replay on a live runner. No nearest-match differences were
-observed; the result is documented in `golden-replay.md`.

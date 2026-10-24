@@ -1,3 +1,4 @@
+import { androidCtrlProxyClientForPlatform } from "../observe/android/androidCtrlProxyClientFor";
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import { TapDisplayRouter } from "./TapDisplayRouter";
 import { TapExecution } from "./TapExecution";
@@ -28,7 +29,6 @@ import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { DefaultElementGeometry } from "../utility/ElementGeometry";
-import { AndroidCtrlProxyClient } from "../observe/android";
 import {
   DEFAULT_VISION_CONFIG,
   type VisionAnalyzer,
@@ -392,7 +392,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       options.waitForCondition ?? new RealWaitForCondition(this.observeScreen, this.timer);
     this.geometry = new DefaultElementGeometry();
     this.elementParser = new DefaultElementParser();
-    this.accessibilityService = AndroidCtrlProxyClient.getInstance(device, this.adbFactory);
+    this.accessibilityService = androidCtrlProxyClientForPlatform(device, this.adbFactory);
     this.visionConfig = options.visionConfig || DEFAULT_VISION_CONFIG;
     this.screenshotCapturer =
       options.screenshotCapturer ?? new TakeScreenshotCapturer(device, this.adbFactory);

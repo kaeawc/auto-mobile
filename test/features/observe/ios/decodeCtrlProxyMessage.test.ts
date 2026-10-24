@@ -869,6 +869,7 @@ const EXPECTED_RESHAPED_RESPONSE_TYPES = [
   "clear_preferences_result",
   "clear_text_result",
   "clipboard_result",
+  "delete_keychain_item_result",
   "drag_result",
   "execute_sql_result",
   "get_preference_result",
@@ -939,8 +940,8 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
     "connected",
   ];
 
-  test("Swift ResponseType declares exactly 55 rawValues", () => {
-    expect(rawValues.length).toBe(55);
+  test("Swift ResponseType declares exactly 56 rawValues", () => {
+    expect(rawValues.length).toBe(56);
   });
 
   test("rawValues are unique (no accidental duplicate)", () => {
@@ -953,9 +954,9 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
     }
   });
 
-  test("the decoder explicitly reshapes exactly the 50 expected response types", () => {
+  test("the decoder explicitly reshapes exactly the 51 expected response types", () => {
     const reshaped = rawValues.filter(isExplicitlyDecoded).sort();
-    expect(reshaped.length).toBe(50);
+    expect(reshaped.length).toBe(51);
     expect(reshaped).toEqual(EXPECTED_RESHAPED_RESPONSE_TYPES);
   });
 
@@ -1121,6 +1122,7 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     { type: "set_preference_result", expected: false },
     { type: "remove_preference_result", expected: false },
     { type: "clear_preferences_result", expected: false },
+    { type: "delete_keychain_item_result", expected: false },
     { type: "set_network_mock_rules_result", expected: false },
     { type: "set_network_fault_rules_result", expected: false },
     { type: "set_network_error_simulation_result", expected: false },
@@ -1184,7 +1186,7 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     expect(decoded?.result).toMatchObject({ success: false, error: "key failed", verified: false });
   });
 
-  test("the default table covers all 49 explicitly-decoded types", () => {
+  test("the default table covers all 50 explicitly-decoded types", () => {
     expect(DEFAULT_WHEN_ABSENT.map((row) => row.type).sort()).toEqual(
       EXPECTED_RESHAPED_RESPONSE_TYPES,
     );
@@ -1225,8 +1227,8 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     });
   });
 
-  test("the passthrough set is the 49 success-reading types", () => {
-    expect(READS_MESSAGE_SUCCESS.length).toBe(49);
+  test("the passthrough set is the 50 success-reading types", () => {
+    expect(READS_MESSAGE_SUCCESS.length).toBe(50);
   });
 
   for (const type of READS_MESSAGE_SUCCESS) {
@@ -1404,4 +1406,25 @@ describe("decodeCtrlProxyMessage swipe route report (#13145)", () => {
     expect("swipeRoute" in result).toBe(false);
     expect("effectiveDurationMs" in result).toBe(false);
   });
+});
+
+test("preserves structured keychain denial and deletion scope", () => {
+  const selector = { itemClass: "genericPassword", service: "s", account: "a", accessGroup: "g" };
+  for (const outcome of ["deleted", "scope_not_authorized"]) {
+    expect(
+      decodeCtrlProxyMessage({
+        type: "delete_keychain_item_result",
+        requestId: "keychain",
+        success: outcome === "deleted",
+        outcome,
+        deletedScope: outcome === "deleted" ? selector : null,
+        totalTimeMs: 1,
+      })?.result,
+    ).toEqual({
+      success: outcome === "deleted",
+      outcome,
+      deletedScope: outcome === "deleted" ? selector : null,
+      totalTimeMs: 1,
+    });
+  }
 });

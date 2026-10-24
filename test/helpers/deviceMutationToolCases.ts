@@ -58,6 +58,20 @@ export const DEVICE_MUTATION_TOOL_CASES: readonly {
     kind: "preference",
   },
   {
+    name: "deleteKeychainItem",
+    args: {
+      appId: "com.example",
+      selector: {
+        itemClass: "genericPassword",
+        service: "svc",
+        account: "acct",
+        accessGroup: "TEAM.com.example",
+      },
+      confirm: true,
+    },
+    kind: "preference",
+  },
+  {
     name: "removeKeyValue",
     args: { appId: "com.example", name: "settings", key: "enabled" },
     kind: "preference",
@@ -114,4 +128,4 @@ export const DEVICE_MUTATION_TOOL_CASES: readonly {
 ];
 
 /** Journaled tools that record from their own service path, not from the dispatch boundary. */
-export const SERVICE_RECORDED_TOOLS: readonly string[] = ["stageSessionDownloads"];
+export const SERVICE_RECORDED_TOOLS: readonly string[] = [];

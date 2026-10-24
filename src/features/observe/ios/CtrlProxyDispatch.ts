@@ -51,6 +51,7 @@ const IOS_WIRE_DEADLINE_REQUEST_TYPES: ReadonlySet<string> = new Set([
   "set_preference",
   "remove_preference",
   "clear_preferences",
+  "delete_keychain_item",
 ]);
 
 /** The single place iOS requests learn their wire deadline; installed on the iOS delegate context. */

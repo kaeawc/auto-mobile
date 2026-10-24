@@ -109,6 +109,7 @@ type RestartStopsState = Pick<
   | "adbServerResetRecoveryReservations"
   | "devices"
   | "intentionalShutdowns"
+  | "shutdownReservationCoordinator"
   | "settledLateShutdowns"
   | "recoveryCoordinator"
   | "rehydrationReservations"
@@ -411,6 +412,7 @@ export class DevicePoolRestartStops {
   }
 
   clearIntentionalShutdown(deviceId: string): void {
+    this.state.shutdownReservationCoordinator.clearUnpooledShutdown(deviceId);
     this.state.intentionalShutdowns.delete(deviceId);
     this.state.settledLateShutdowns.delete(deviceId);
   }

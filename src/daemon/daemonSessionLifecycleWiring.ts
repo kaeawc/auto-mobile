@@ -30,6 +30,7 @@ import { registerPerformanceMonitorSessionCleanup } from "./performanceMonitorSe
 import { registerAppLinksSessionCleanup } from "./appLinksSessionCleanup";
 import { registerScreenLockSessionCleanup } from "./screenLockSessionCleanup";
 import { registerPowerSessionCleanup } from "./powerSessionCleanup";
+import { registerProfilingSessionCleanup } from "./profilingSessionCleanup";
 import { registerSystemAlertSessionCleanup } from "./systemAlertSessionCleanup";
 import {
   createOwnerlessRecordingAcquisitionCleanup,
@@ -60,6 +61,7 @@ import type { ActiveSessionExecutionQuery } from "./sessionManager";
  * construction (servers, per-shutdown sets) are accessors so each callback sees the current value.
  */
 export interface DaemonSessionLifecycleHost {
+  markMutationUnrecorded(sessionUuid: string, reason: string): void;
   deviceReadiness(): Pick<DeviceReadiness, "clearExplicitDevicePin">;
   deviceDataStreamServer(): {
     invalidateDeviceFrames(deviceId: string): void;
@@ -90,6 +92,26 @@ export interface DaemonSessionLifecycleHost {
   ): void;
 }
 
+// Capture aliases before release removes the session and derived-label relationships.
+function captureNetworkGapMarker(
+  sessionManager: SessionManager,
+  host: Pick<DaemonSessionLifecycleHost, "markMutationUnrecorded">,
+  sessionId: string,
+): (reason: string) => void {
+  const ids = new Set(
+    [
+      sessionId,
+      sessionManager.ownershipSessionUuid(sessionId),
+      sessionManager.getBaseSessionOfDerivedLabel(sessionId),
+    ].filter((id) => id !== undefined),
+  );
+  return (reason) => {
+    for (const id of ids) {
+      host.markMutationUnrecorded(id, reason);
+    }
+  };
+}
+
 /**
  * Registers every SessionManager listener/setter the daemon needs for session-scoped cleanup,
  * in the order the daemon has always registered them (release listeners fire in that order).
@@ -100,7 +122,10 @@ export function wireSessionLifecycle(
   host: DaemonSessionLifecycleHost,
 ): void {
   registerLocationRouteSessionCleanup(sessionManager);
-  registerNetworkStateSessionCleanup(sessionManager);
+  registerNetworkStateSessionCleanup(sessionManager, {
+    timer,
+    gapMarkerFor: (sessionId) => captureNetworkGapMarker(sessionManager, host, sessionId),
+  });
   registerStatusBarSessionCleanup(sessionManager);
   registerAppLinksSessionCleanup(sessionManager);
   registerKillProfileSessionCleanup(sessionManager);
@@ -111,6 +136,7 @@ export function wireSessionLifecycle(
   registerPerformanceMonitorSessionCleanup(sessionManager);
   registerScreenLockSessionCleanup(sessionManager);
   registerPowerSessionCleanup(sessionManager);
+  registerProfilingSessionCleanup(sessionManager);
   registerSystemAlertSessionCleanup(sessionManager);
   registerRecordingSessionCleanup(sessionManager, {
     ...defaultRecordingSessionCleanupDeps,

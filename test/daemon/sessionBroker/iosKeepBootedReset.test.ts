@@ -75,7 +75,7 @@ async function harness(
   missingBaseline = false,
   budgets: Pick<
     IosKeepBootedResetDependencies,
-    "hostLoad" | "budgetCeilingMs" | "recordingGaps"
+    "hostLoad" | "budgetCeilingMs" | "recordingGaps" | "fallback"
   > = {},
 ) {
   const timer = new FakeTimer();
@@ -806,4 +806,53 @@ test.each([false, true])("app-container write with baseline app=%s", async (base
   expect(await rig.run()).toMatchObject({ outcome: baselineApp ? "fallback:erase" : "clean" });
   expect(rig.state.eraseCalls).toBe(baselineApp ? 1 : 0);
   expect(rig.mutations.sanitizeCount).toBe(baselineApp ? 0 : 1);
+});
+
+describe("iOS keep-booted destroy fallback (#15232)", () => {
+  const DESTROY = { fallback: "destroy" } as const;
+
+  test("a cleaning failure hands the simulator back to be destroyed, never erasing", async () => {
+    const rig = await harness([], false, DESTROY);
+    rig.state.healthy = false;
+    const result = await rig.run();
+    expect(result).toMatchObject({ outcome: "fallback:destroy", mode: "keep-booted" });
+    expect(result.fallbackReason).toBeString();
+    expect(rig.state.eraseCalls).toBe(0);
+  });
+
+  test("a missing app baseline destroys instead of erasing", async () => {
+    const rig = await harness([], true, DESTROY);
+    expect(await rig.run()).toMatchObject({ outcome: "fallback:destroy", mode: "keep-booted" });
+    expect(rig.state.eraseCalls).toBe(0);
+  });
+
+  test("a fallback-forcing opaque journal row destroys instead of erasing", async () => {
+    const rig = await harness([], false, DESTROY);
+    await rig.journal.record(SCOPE, {
+      kind: "opaque",
+      key: opaqueIntentKey("sendBroadcast", "com.example.app"),
+      priorValue: { state: "unobservable" },
+      toolName: "sendBroadcast",
+    });
+    const result = await rig.run();
+    expect(result).toMatchObject({ outcome: "fallback:destroy", mode: "keep-booted" });
+    expect(result.fallbackReason).toContain("sendBroadcast");
+    expect(rig.state.eraseCalls).toBe(0);
+  });
+
+  test("maxUses destroys after N uses and never erases", async () => {
+    const rig = await harness([], false, DESTROY);
+    expect(await rig.run(1)).toMatchObject({ outcome: "clean" });
+    expect(await rig.run(2)).toMatchObject({
+      outcome: "fallback:destroy",
+      fallbackReason: "maxUses reached",
+    });
+    expect(rig.state.eraseCalls).toBe(0);
+  });
+
+  test("the default fallback still erases", async () => {
+    const rig = await harness([], true);
+    expect(await rig.run()).toMatchObject({ outcome: "fallback:erase", mode: "erase" });
+    expect(rig.state.eraseCalls).toBe(1);
+  });
 });

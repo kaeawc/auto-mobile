@@ -396,6 +396,31 @@ describe("durable broker timing", () => {
     expect((await broker.release(ready.sessionUuid!)).timing?.reset?.outcome).toBe("destroyed");
   });
 
+  test("a destroy fallback retires the resource with its reason and the next acquisition creates", async () => {
+    const ready = await broker.prepare(exportConfig("first"), "token");
+    harness.options.devices.reset = async () => ({
+      outcome: "fallback:destroy",
+      mode: "keep-booted",
+      phases: { journal: 2 },
+      fallbackReason: "maxUses reached",
+    });
+    const released = await broker.release(ready.sessionUuid!);
+    expect(released.timing?.reset).toMatchObject({
+      mode: "keep-booted",
+      outcome: "destroyed",
+      phases: { journal: 2 },
+      fallbackReason: "maxUses reached",
+    });
+    const retired = await harness.store.getResource(
+      (await harness.store.getRequest(ready.requestId))!.resourceId!,
+    );
+    expect(retired?.state).toBe("destroyed");
+
+    const next = await broker.prepare(exportConfig("second"), "token");
+
+    expect(next.timing?.acquisition?.admission).toBe("create");
+  });
+
   test("cleanup finalizes timing without an unfenced post-destruction request read", async () => {
     harness.options.reuseCleanDevices = false;
     harness.devices.canDestroy = false;

@@ -69,6 +69,8 @@ export interface IosKeepBootedResetDependencies {
     ): Promise<ResetOutcome>;
   };
   maxUses: number;
+  /** What a non-clean release does: erase the simulator, or hand it back to be destroyed (#15232). */
+  fallback?: "erase" | "destroy";
   budgetMs?: number;
   budgetCeilingMs?: number;
   hostLoad?: HostLoadReader;
@@ -176,11 +178,29 @@ export class IosKeepBootedReset {
     }
     await owned();
     await this.assertSettled(scope, owned, signal);
-    return this.eraseFallback(
+    return this.nonCleanFallback(
       { device, profile, scope, assertOwned: owned, phases, signal },
       fallbackReason,
       runResetBoot,
     );
+  }
+
+  /** Erase the simulator, or hand it back to the broker to destroy when the fallback is `destroy`. */
+  private async nonCleanFallback(
+    attempt: IosResetAttempt,
+    fallbackReason: string,
+    runResetBoot?: ResetBootRunner,
+  ): Promise<ResetOutcome> {
+    if (this.dependencies.fallback !== "destroy") {
+      return this.eraseFallback(attempt, fallbackReason, runResetBoot);
+    }
+    // No erase port call and no reset-boot slot: the broker deletes the simulator and the next
+    // acquisition creates a fresh one through boot admission.
+    const { scope, phases } = attempt;
+    this.eraseReasons.delete(
+      JSON.stringify([scope.deviceId, scope.incarnation, scope.sessionUuid]),
+    );
+    return { outcome: "fallback:destroy", mode: "keep-booted", phases, fallbackReason };
   }
 
   private async eraseFallback(

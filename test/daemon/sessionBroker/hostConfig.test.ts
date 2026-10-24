@@ -134,6 +134,24 @@ describe("session broker host configuration", () => {
     ).toEqual({ mode: "erase", maxUses: 20, fallback: "erase" });
   });
 
+  test("iOS keep-booted accepts the destroy fallback; erase mode and unknown values stay rejected (#15232)", () => {
+    expect(
+      iosReusePolicy(
+        parseSessionBrokerHostConfig(
+          config({ reuse: { ios: { mode: "keep-booted", fallback: "destroy" } } }),
+        ),
+      ),
+    ).toEqual({ mode: "keep-booted", maxUses: 10, fallback: "destroy" });
+    for (const ios of [
+      { mode: "erase", fallback: "destroy" },
+      { mode: "keep-booted", fallback: "snapshot" },
+    ]) {
+      expect(() => parseSessionBrokerHostConfig(config({ reuse: { ios } }))).toThrow(
+        "Invalid session broker host configuration",
+      );
+    }
+  });
+
   test("iOS reuse rejects conflicting aliases, invalid bounds, unsupported fallback and Android keys", () => {
     for (const ios of [{ mode: "keep-booted" }, { mode: "off" }]) {
       expect(() =>

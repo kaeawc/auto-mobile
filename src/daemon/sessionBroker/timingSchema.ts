@@ -32,6 +32,7 @@ const timing: z.ZodType<SessionBrokerTiming> = z.object({
         "fallback:erase",
         "fallback:snapshot",
         "fallback:wipe-data",
+        "fallback:destroy",
       ]),
       retired: z.boolean().optional(),
       phases: z.record(z.string(), duration),

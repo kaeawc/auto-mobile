@@ -21,6 +21,7 @@ export interface SessionBrokerResetTiming {
   outcome:
     | "clean"
     | `fallback:${Exclude<SessionBrokerResetMode, "none">}`
+    | "fallback:destroy"
     | "destroyed"
     | "pending";
   retired?: boolean;

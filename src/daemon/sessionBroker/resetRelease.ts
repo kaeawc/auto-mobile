@@ -12,6 +12,20 @@ import type {
   SessionBrokerReleaseResult,
 } from "../../devices/sessionBrokerResult";
 
+/** Reset outcomes after which the device may be published idle. */
+const REUSABLE_RESET_OUTCOMES: ReadonlySet<string> = new Set([
+  "clean",
+  "fallback:keep-booted",
+  "fallback:erase",
+  "fallback:snapshot",
+  "fallback:wipe-data",
+]);
+
+/** A destroy fallback keeps its receipt outcome and reason; any other unusable outcome is pending. */
+function retiredResetOutcome(outcome: string): "fallback:destroy" | "pending" {
+  return outcome === "fallback:destroy" ? outcome : "pending";
+}
+
 export class BrokerResetRelease {
   private readonly resetBoots: ResetBootQueue;
   async releaseStatus(
@@ -117,16 +131,8 @@ export class BrokerResetRelease {
         : resetDevice());
       timing.phases.reset = this.now() - resetStarted;
       timing = this.timing.mergeResetTiming(timing, reset);
-      if (
-        ![
-          "clean",
-          "fallback:keep-booted",
-          "fallback:erase",
-          "fallback:snapshot",
-          "fallback:wipe-data",
-        ].includes(timing.outcome)
-      ) {
-        timing.outcome = "pending";
+      if (!REUSABLE_RESET_OUTCOMES.has(timing.outcome)) {
+        timing.outcome = retiredResetOutcome(timing.outcome);
         await record();
         return "destroy";
       }

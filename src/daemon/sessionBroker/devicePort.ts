@@ -6,7 +6,11 @@ import type { SessionBrokerFailure } from "../../devices/sessionBrokerResult";
 import type { SessionBrokerResetMode } from "../../devices/sessionBrokerResult";
 
 export interface ResetOutcome {
-  outcome: "clean" | "pending" | `fallback:${Exclude<SessionBrokerResetMode, "none">}`;
+  outcome:
+    | "clean"
+    | "pending"
+    | `fallback:${Exclude<SessionBrokerResetMode, "none">}`
+    | "fallback:destroy";
   mode: SessionBrokerResetMode;
   phases: Record<string, number>;
   fallbackReason?: string;

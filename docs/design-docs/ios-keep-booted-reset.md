@@ -12,7 +12,8 @@ Host configuration selects iOS reuse independently of Android:
 
 This fragment supplements the existing contractVersion, limits and defaults.
 The other modes are `erase` and `off`. For `off`, omit maxUses and fallback.
-Enabled modes default to fallback `erase`; maxUses defaults to 10 for
+Enabled modes default to fallback `erase`; `keep-booted` also accepts fallback
+`destroy` (see below); maxUses defaults to 10 for
 `keep-booted` and 20 for `erase`, and must be a positive safe integer. The
 keep-booted cap bounds the residue that cleaning cannot see: every Nth release
 erases the device instead (#15017). iOS reuse requires defaults.ios. The legacy
@@ -124,6 +125,16 @@ while the read is unsettled, rather than destroying the device or invoking erase
 Successful fallback reports `fallback:erase`, mode `erase`, its initial reason,
 and cleaning plus erase phases. Failed erase uses existing destruction/pending
 classification, including boot-capacity redrive.
+
+With fallback `destroy`, every path above that would erase (a cleaning failure,
+a missing installed-app baseline, an opaque row that forces fallback, a redrive
+after a cleaning failure, and every `maxUses`-th release) returns outcome
+`fallback:destroy`, mode `keep-booted` and its reason without calling the erase
+port or taking a ResetBootQueue slot. The broker never publishes that simulator
+idle: it deletes it through the normal destroy path, the receipt settles as
+`destroyed` and keeps the reason, and the next acquisition creates a fresh
+simulator through boot admission. `maxUses` then means "destroy after N uses".
+A redrive after a daemon restart does not resume as an erase.
 
 Total lifetime uses equal durable reuseCount + 1. Each multiple of maxUses still
 takes erase, without resetting the counter. Only erase reserves a ResetBootQueue

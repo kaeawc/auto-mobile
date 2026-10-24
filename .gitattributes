@@ -35,6 +35,7 @@ test/fixtures/android-launcher/*.txt text eol=lf
 test/fixtures/android-launcher/*.json text eol=lf
 test/fixtures/android-adb/*.txt text eol=lf
 test/fixtures/android-getevent/*.txt text eol=lf
+test/fixtures/android-settings-list/*.txt text eol=lf
 test/fixtures/android-touch-node/*.txt text eol=lf
 test/fixtures/android-window-policy/*.txt text eol=lf
 test/fixtures/ios-devicectl/*.json text eol=lf

@@ -12,7 +12,7 @@ import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * #10906: the desktop control-socket / PID resolver must agree with the daemon's
- * `resolveDaemonStatePath` (`src/daemon/constants.ts`). Both are tested against the shared vectors
+ * `resolveDaemonStatePath` (`src/daemon/wire/constants.ts`). Both are tested against the shared vectors
  * in `test/fixtures/daemon-isolation-paths.json`, as are the JUnit runner and XCTestRunner ports.
  */
 class DaemonIsolationPathVectorsTest {

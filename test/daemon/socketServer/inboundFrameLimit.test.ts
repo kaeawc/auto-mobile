@@ -11,7 +11,7 @@ import {
   AUX_SOCKET_MAX_FRAME_BYTES,
   CONTROL_SOCKET_MAX_FRAME_BYTES,
   FAILURES_STREAM_MAX_FRAME_BYTES,
-} from "../../../src/daemon/socketServer/LineFramer";
+} from "../../../src/daemon/wire/LineFramer";
 import type {
   SocketRequest,
   SocketResponse,

@@ -11,8 +11,8 @@ import {
   FakeInventory,
   FakeMatcher,
 } from "../daemon/sessionBroker/registry/fixtures/reconcilerFakes";
-import * as buildIdentity from "../../src/daemon/buildIdentity";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
+import * as buildIdentity from "../../src/daemon/wire/buildIdentity";
+import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {

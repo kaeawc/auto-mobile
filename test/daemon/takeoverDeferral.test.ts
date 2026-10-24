@@ -5,7 +5,7 @@ import {
   TAKEOVER_ACTIVE_OPERATIONS_TIME_BOUND_MS,
   TAKEOVER_DEFERRAL_TIME_BOUND_MS,
 } from "../../src/daemon/manager/TakeoverDeferralLedger";
-import { DAEMON_VERSION_RESTART_COOLDOWN_MS } from "../../src/daemon/constants";
+import { DAEMON_VERSION_RESTART_COOLDOWN_MS } from "../../src/daemon/wire/constants";
 import {
   DaemonRestartDeferredError,
   type DaemonRestartPreparation,

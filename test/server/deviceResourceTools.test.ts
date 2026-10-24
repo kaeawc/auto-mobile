@@ -28,7 +28,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import {
   INTERNAL_TOOL_PARAM_NAMES,
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import { INTERNAL_NO_DIFF_PARAM } from "../../src/daemon/internalToolCall";
 
 isolateToolRegistry();

@@ -10,7 +10,7 @@ import {
   getToolCallRecordingStatus,
 } from "../daemon/toolCallRecordingManager";
 import { serverConfig } from "../utils/ServerConfig";
-import { INTERNAL_MCP_SESSION_PARAM } from "../daemon/constants";
+import { INTERNAL_MCP_SESSION_PARAM } from "../daemon/wire/constants";
 
 // ============================================================================
 // Tool Call Recording — "recordToolCalls" tool

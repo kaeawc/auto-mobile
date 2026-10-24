@@ -1,6 +1,6 @@
 import { InputDeviceOwnedError } from "./inputDeviceOwnership";
 import { SessionNoLongerOwnsDeviceError } from "../models/sessionNoLongerOwnsDevice";
-import type { StreamSubscriptionIdentity } from "./streamSubscriptionPolicy";
+import type { StreamSubscriptionIdentity } from "./wire/streamSubscriptionPolicy";
 import { isSessionReleasing } from "./sessionReleaseState";
 import { sessionForIngress } from "./sessionForIngress";
 import { ActionableError } from "../models";

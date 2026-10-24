@@ -2,7 +2,7 @@ import {
   decideLifecycleEvent,
   type StreamSubscriptionEndReason,
   type StreamSubscriptionDecision,
-} from "../../src/daemon/streamSubscriptionPolicy";
+} from "../../src/daemon/wire/streamSubscriptionPolicy";
 import type {
   endWebRtcStreamsForDevice,
   stopAllWebRtcStreams,

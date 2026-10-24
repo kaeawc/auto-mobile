@@ -4,7 +4,10 @@ import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DaemonClient } from "../../src/daemon/client";
-import { DAEMON_TOOL_SELECTION_PROFILE_PARAM, DAEMON_VERSION } from "../../src/daemon/constants";
+import {
+  DAEMON_TOOL_SELECTION_PROFILE_PARAM,
+  DAEMON_VERSION,
+} from "../../src/daemon/wire/constants";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import {
   createHarnessServer,

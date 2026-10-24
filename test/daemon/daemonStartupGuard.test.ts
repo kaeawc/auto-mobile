@@ -6,7 +6,7 @@ import {
   resolveDaemonStartupExitCode,
   MAX_STARTUP_BACKOFF_MS,
 } from "../../src/daemon/daemonStartupGuard";
-import { DAEMON_STARTUP_TIMEOUT_MS } from "../../src/daemon/constants";
+import { DAEMON_STARTUP_TIMEOUT_MS } from "../../src/daemon/wire/constants";
 import { DefaultStartupFailureTracker } from "../../src/daemon/DaemonStartupFailureTracker";
 import {
   createIncompleteExtractionError,

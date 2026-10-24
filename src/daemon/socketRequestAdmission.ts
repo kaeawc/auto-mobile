@@ -2,7 +2,7 @@ import {
   DAEMON_BOUND_SESSION_PARAM,
   DAEMON_OWNED_SESSIONS_PARAM,
   DAEMON_RELEASED_SESSION_PARAM,
-} from "./constants";
+} from "./wire/constants";
 import type { DaemonRequest } from "./types";
 import type { Timer } from "../utils/SystemTimer";
 

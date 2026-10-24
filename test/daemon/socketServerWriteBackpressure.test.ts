@@ -6,13 +6,13 @@ import { FakeSocket } from "../fakes/FakeNetServer";
 import { expect, spyOn, test } from "bun:test";
 import { DaemonSocketQueueOverflowError } from "../../src/daemon/socketServer";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
-import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
+import { McpTimeoutError } from "../../src/daemon/wire/McpTimeoutError";
 import { ProgressExtendableDeadline } from "../../src/daemon/mcpRequestTimeout";
 import {
   DAEMON_CANCEL_REQUEST_METHOD,
   DAEMON_HEARTBEAT_METHOD,
   DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import { DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
 import {
   DAEMON_RPC_SOCKET_MAX_QUEUED_BYTES as MAX_QUEUED_BYTES,

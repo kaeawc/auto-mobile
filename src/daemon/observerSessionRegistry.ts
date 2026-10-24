@@ -1,6 +1,6 @@
 import { logger } from "../utils/logger";
 import { getDefaultSessionHeartbeatTimeoutMs } from "./sessionManager";
-import { SUSPECT_GRACE_MS } from "./sessionLivenessWindows";
+import { SUSPECT_GRACE_MS } from "./wire/sessionLivenessWindows";
 import {
   forgivenLeaseStart,
   leaseRunningAt,

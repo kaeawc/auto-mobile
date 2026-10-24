@@ -4,7 +4,7 @@ import {
   DAEMON_VERSION,
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
   INTERNAL_ACTIONS_COMPACT_METADATA_PARAM,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import type { DaemonOptions } from "../../src/daemon/types";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";

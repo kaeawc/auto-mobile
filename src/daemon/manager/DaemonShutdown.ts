@@ -10,7 +10,7 @@ import {
   DAEMON_SHUTDOWN_TIMEOUT_MS,
   DAEMON_FORCED_STOP_TIMEOUT_MS,
   DEFAULT_DAEMON_PORT,
-} from "../constants";
+} from "../wire/constants";
 import { DaemonStatus, PidFileData, DaemonOptions } from "../types";
 import { Timer } from "../../utils/SystemTimer";
 import { cleanupDaemonFiles, isConfirmedRecycledProcess } from "../daemonFiles";

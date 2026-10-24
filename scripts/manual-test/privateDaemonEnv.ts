@@ -8,7 +8,7 @@ export { STATE_PATH_VARIABLES } from "./productPathEnv";
 import { lstatSync, readlinkSync, realpathSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { DEFAULT_DAEMON_PORT, resolveDaemonStatePath } from "../../src/daemon/constants";
+import { DEFAULT_DAEMON_PORT, resolveDaemonStatePath } from "../../src/daemon/wire/constants";
 import { isDaemonNamespaceIsolated } from "../../src/daemon/sharedNamespaceGuard";
 import { resolveAuxSocketDir } from "../../src/daemon/socketServer/SocketServerTypes";
 import { resolveDatabasePathFromEnvironment } from "../../src/db/database";

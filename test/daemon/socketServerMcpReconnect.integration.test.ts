@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { sendSocketRequest } from "./helpers/socketRequest";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { DAEMON_BOUND_SESSION_PARAM } from "../../src/daemon/constants";
+import { DAEMON_BOUND_SESSION_PARAM } from "../../src/daemon/wire/constants";
 import type { DaemonResponse } from "../../src/daemon/types";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import type { Session, SessionReleaseSnapshot } from "../../src/daemon/sessionManager";

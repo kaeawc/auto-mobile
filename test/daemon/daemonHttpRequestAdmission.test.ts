@@ -8,7 +8,7 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { Daemon } from "../../src/daemon/daemon";
 import { FakeDaemonHttpTokenStore } from "../../src/daemon/daemonHttpToken";
-import { MCP_STREAMABLE_PATH } from "../../src/daemon/constants";
+import { MCP_STREAMABLE_PATH } from "../../src/daemon/wire/constants";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { PrivateDaemonOrphanWatchdog } from "../../src/daemon/privateDaemonOrphanWatchdog";
 import type { ObserverSessionRegistry } from "../../src/daemon/observerSessionRegistry";

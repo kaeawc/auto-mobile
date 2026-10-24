@@ -1,4 +1,4 @@
-import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/constants";
+import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/wire/constants";
 import { subscribeToolCallEndActivity } from "../../src/daemon/toolCallActivity";
 import { executionTracker } from "../../src/daemon/executionTracker";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";

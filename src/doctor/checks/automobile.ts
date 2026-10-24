@@ -19,8 +19,8 @@ import {
   buildIdentityFromStatus,
   describeBuildIdentity,
   getCurrentBuildIdentity,
-} from "../../daemon/buildIdentity";
-import type { BuildIdentity } from "../../daemon/buildIdentity";
+} from "../../daemon/wire/buildIdentity";
+import type { BuildIdentity } from "../../daemon/wire/buildIdentity";
 import {
   LATEST_RELEASE_VERSION,
   resolveApkUrl,

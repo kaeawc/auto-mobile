@@ -260,7 +260,7 @@ export function resolveMigrationLockTimeoutMs(
  * per-uid) because the trigger — two openers on one DB file — is per-file. The
  * busy-wait ceiling can be overridden via `AUTOMOBILE_MIGRATION_LOCK_TIMEOUT_MS`
  * (with the legacy `AUTO_MOBILE_` alias), mirroring the daemon timeout knobs in
- * `src/daemon/constants.ts`.
+ * `src/daemon/wire/constants.ts`.
  */
 export function createFileMigrationLock(dbPath: string): MigrationLock {
   const lockFilePath = migrationLockPathFor(dbPath);

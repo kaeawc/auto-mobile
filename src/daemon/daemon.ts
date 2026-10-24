@@ -26,7 +26,7 @@ import { ENV, readEnvRaw } from "../config/env";
 import { ManagedExecutionReowner } from "./sessionBroker/provisioning/executionReowner";
 import { type DaemonBrokerDeviceAcquisitionHandle } from "./sessionBroker/provisioning/daemonDeviceAcquisition";
 import { DeviceSessionRegistry } from "./deviceSessionRegistry";
-import { DEFAULT_DAEMON_PORT } from "./constants";
+import { DEFAULT_DAEMON_PORT } from "./wire/constants";
 import { DaemonOptions } from "./types";
 import {
   DaemonSelfExitRecorder,
@@ -35,7 +35,7 @@ import {
 } from "./daemonExitRecord";
 import { daemonProcessOptions } from "./daemonOptionScopes";
 import { resolve } from "node:path";
-import { getCurrentBuildIdentity } from "./buildIdentity";
+import { getCurrentBuildIdentity } from "./wire/buildIdentity";
 import { type LiveDaemonSessionIdProvider } from "./daemonFiles";
 import { IncumbentOwnerGuard } from "./incumbentOwnerGuard";
 import {

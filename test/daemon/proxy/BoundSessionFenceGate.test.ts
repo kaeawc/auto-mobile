@@ -12,7 +12,7 @@ import { ReleaseEpochLedger } from "../../../src/daemon/proxy/ReleaseEpochLedger
 import { fakeBindLock, unreachableMcpDispatcher } from "../../helpers/createTestUnixSocketServer";
 import { UnixSocketServerHarness } from "../helpers/UnixSocketServerHarness";
 import { createFakeDaemonState, createFakeSession } from "../helpers/inputSocketHarness";
-import { DAEMON_BOUND_SESSION_PARAM } from "../../../src/daemon/constants";
+import { DAEMON_BOUND_SESSION_PARAM } from "../../../src/daemon/wire/constants";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 function harness() {

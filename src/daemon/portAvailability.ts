@@ -1,7 +1,7 @@
 import { createServer as createNetServer } from "node:net";
 import { logger } from "../utils/logger";
 import { defaultTimer } from "../utils/SystemTimer";
-import { DAEMON_PORT_AVAILABILITY_PROBE_TIMEOUT_MS } from "./constants";
+import { DAEMON_PORT_AVAILABILITY_PROBE_TIMEOUT_MS } from "./wire/constants";
 
 /**
  * Confirms whether a TCP port is free to bind, from the MANAGER side (issue

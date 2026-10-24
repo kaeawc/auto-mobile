@@ -8,7 +8,7 @@ import {
 } from "../../src/daemon/daemonRequestHandlers";
 import { DAEMON_SESSION_NOT_FOUND_CODE as NOT_FOUND } from "../../src/daemon/types";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
-import { DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS } from "../../src/daemon/sessionLivenessWindows";
+import { DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS } from "../../src/daemon/wire/sessionLivenessWindows";
 import { buildDeviceLabelMap } from "../../src/server/deviceLabelMapping";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";

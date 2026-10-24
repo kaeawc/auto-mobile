@@ -3,12 +3,12 @@ import { SCREEN_READER_RESTORE_TIMEOUT_MS } from "../../features/accessibility/S
 import { exponentialBackoff, type BackoffPolicy } from "../../utils/Backoff";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../utils/deviceTimeouts";
 import { readEnvPositiveInteger } from "../../utils/envNumbers";
-import { SESSION_RELEASE_DRAIN_TIMEOUT_MS } from "../constants";
+import { SESSION_RELEASE_DRAIN_TIMEOUT_MS } from "../wire/constants";
 import type { SessionReleaseReason } from "../releaseReasons";
 import {
   DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,
   getSessionHeartbeatCheckIntervalMs,
-} from "../sessionLivenessWindows";
+} from "../wire/sessionLivenessWindows";
 import type { Session, SessionCacheData } from "./sessionTypes";
 
 /**

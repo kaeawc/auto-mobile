@@ -6,7 +6,7 @@ import {
   DEFAULT_MCP_REQUEST_TIMEOUT_MS,
   MAX_PROGRESS_EXTENDED_MCP_REQUEST_TIMEOUT_MS,
 } from "../../src/daemon/mcpRequestTimeout";
-import { DAEMON_CANCEL_REQUEST_METHOD } from "../../src/daemon/constants";
+import { DAEMON_CANCEL_REQUEST_METHOD } from "../../src/daemon/wire/constants";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 afterEach(() => {

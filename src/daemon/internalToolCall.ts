@@ -1,4 +1,4 @@
-import { INTERNAL_NO_DIFF_PARAM } from "./constants";
+import { INTERNAL_NO_DIFF_PARAM } from "./wire/constants";
 import { ActionableError } from "../models";
 import { logger } from "../utils/logger";
 
@@ -18,7 +18,7 @@ import { logger } from "../utils/logger";
  * The wrapped handler reads `INTERNAL_NO_DIFF_PARAM` off its args at entry (see
  * `toolRegistry.registerDeviceAware`), and `ToolCallRecorder.INTERNAL_PARAMS`
  * strips it from recordings. Both reference this constant so the literal has a
- * single source of truth. It lives in `daemon/constants` as part of the canonical
+ * single source of truth. It lives in `daemon/wire/constants` as part of the canonical
  * `INTERNAL_TOOL_PARAM_NAMES`, so every strict-schema handler that strips that list
  * also accepts internal calls (#11266).
  */

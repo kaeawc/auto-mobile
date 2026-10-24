@@ -2,7 +2,7 @@ import { z as specZ, type ZodTypeAny } from "zod";
 import { PROTOVIEWER_DEFAULT_TIMEOUT_MS } from "../../features/prototype/protoViewer/AndroidProtoViewer";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { z } from "zod/v4";
-import { deleteInternalToolParams } from "../../daemon/constants";
+import { deleteInternalToolParams } from "../../daemon/wire/constants";
 import {
   PROTOTYPE_EVENT_KINDS,
   SAVED_PROTOTYPE_ERROR_CODES,

@@ -2,7 +2,7 @@ import { FakeSocket } from "../fakes/FakeNetServer";
 import { createHarnessServer } from "./helpers/UnixSocketServerHarness";
 import { expect, test } from "bun:test";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
-import { DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD } from "../../src/daemon/constants";
+import { DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD } from "../../src/daemon/wire/constants";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 /**

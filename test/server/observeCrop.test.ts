@@ -31,7 +31,7 @@ import { loadAndroidHomeObserve } from "../fixtures/observe/observeFixture";
 import { RealObserveScreen } from "../../src/features/observe/ObserveScreen";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
-import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../../src/daemon/constants";
+import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../../src/daemon/wire/constants";
 
 import { screenshotPathProtection } from "../../src/features/observe/ScreenshotPathProtection";
 import { selectScreenshotsToEvict } from "../../src/features/observe/screenshotCacheEviction";

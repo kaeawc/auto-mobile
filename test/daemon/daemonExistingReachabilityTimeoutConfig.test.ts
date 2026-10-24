@@ -19,7 +19,7 @@ describe("daemon existing-daemon reachability timeout configuration", () => {
   }
 
   async function importFreshConstants() {
-    return import(`../../src/daemon/constants.ts?reachability=${Date.now()}-${Math.random()}`);
+    return import(`../../src/daemon/wire/constants.ts?reachability=${Date.now()}-${Math.random()}`);
   }
 
   afterEach(restoreEnvironment);

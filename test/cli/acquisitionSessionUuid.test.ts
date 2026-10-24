@@ -6,7 +6,7 @@ import {
   type CliOutput,
 } from "../../src/cli";
 import { DEVICE_SESSION_ACQUISITION_TOOLS } from "../../src/daemon/deviceSessionResult";
-import { DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS } from "../../src/daemon/constants";
+import { DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS } from "../../src/daemon/wire/constants";
 import { isolateCliDataDir, type IsolatedCliDataDir } from "../helpers/cliDataDirIsolation";
 
 /**

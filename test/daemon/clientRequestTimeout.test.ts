@@ -12,7 +12,7 @@ import {
 } from "../../src/daemon/client";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { pushProgressNotification } from "../../src/daemon/socketServer/notificationFanOut";
-import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
+import { McpTimeoutError } from "../../src/daemon/wire/McpTimeoutError";
 import { MAX_CANCELLED_REQUEST_IDS } from "../../src/daemon/clientResponseDecoding";
 import { DaemonDisconnectError } from "../../src/daemon/DaemonDisconnectError";
 import {
@@ -40,7 +40,7 @@ import {
 } from "../../src/daemon/types";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 import { FakeSocket } from "../fakes/FakeNetServer";
-import { DAEMON_CANCEL_REQUEST_METHOD } from "../../src/daemon/constants";
+import { DAEMON_CANCEL_REQUEST_METHOD } from "../../src/daemon/wire/constants";
 import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { ISOLATED_DAEMON_RECOVERY } from "../helpers/isolatedDaemonRecovery";

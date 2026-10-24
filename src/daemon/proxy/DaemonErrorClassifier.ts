@@ -3,7 +3,7 @@ import { DaemonHandshakeMismatchError } from "../DaemonHandshakeMismatchError";
 import { DaemonRequestNotDeliveredError } from "../DaemonRequestNotDeliveredError";
 import { DaemonShuttingDownError } from "../DaemonShuttingDownError";
 import { DaemonUnavailableError } from "../client";
-import { isMcpQueueTimeoutError } from "../McpTimeoutError";
+import { isMcpQueueTimeoutError } from "../wire/McpTimeoutError";
 import {
   DAEMON_SESSION_NOT_ACTIVE_CODE,
   DAEMON_SESSION_NOT_FOUND_CODE,

@@ -4,7 +4,7 @@ import {
   CLI_SESSION_LIVENESS_POLICY,
   DAEMON_RELEASE_LIVENESS_OWNERSHIP_METHOD,
   getCliSessionIdleTimeoutMs,
-} from "../constants";
+} from "../wire/constants";
 import { vetoedIdleReleaseAt } from "../sessionHoldDiagnostics";
 import { isSessionReleasing } from "../sessionReleaseState";
 import { releaseSessionAndDevice } from "../releaseSessionAndDevice";
@@ -24,7 +24,7 @@ import {
   buildIdentitiesMatch,
   describeBuildIdentity,
   type BuildIdentity,
-} from "../buildIdentity";
+} from "../wire/buildIdentity";
 import type { DaemonClientFactory } from "../client";
 import type { DaemonStateLike } from "../daemonState";
 import type { DaemonManager, DaemonManagerOptions } from "../manager";

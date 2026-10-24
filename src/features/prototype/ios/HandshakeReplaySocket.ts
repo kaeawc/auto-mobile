@@ -1,4 +1,4 @@
-import { LineFramer } from "../../../daemon/socketServer/LineFramer";
+import { LineFramer } from "../../../daemon/wire/LineFramer";
 import { ActionableError } from "../../../models/ActionableError";
 import {
   PROTOTYPE_AGENT_CLIENT_MAX_FRAME_BYTES,

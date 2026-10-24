@@ -9,7 +9,7 @@ import {
   DAEMON_BOUND_SESSION_PARAM,
   DAEMON_OWNED_SESSIONS_PARAM,
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import { createFakeDaemonState } from "./helpers/inputSocketHarness";
 import { createHarnessServer } from "./helpers/UnixSocketServerHarness";
 import { FakeSocket } from "../fakes/FakeNetServer";

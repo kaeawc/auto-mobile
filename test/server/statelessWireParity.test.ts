@@ -7,7 +7,7 @@ import { InMemoryTransport, type JSONRPCMessage } from "@modelcontextprotocol/se
 import { DaemonClient } from "../../src/daemon/client";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
-import { DAEMON_VERSION, MCP_STREAMABLE_PATH } from "../../src/daemon/constants";
+import { DAEMON_VERSION, MCP_STREAMABLE_PATH } from "../../src/daemon/wire/constants";
 import { registerMcpTools } from "../../src/server";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { ToolRegistry } from "../../src/server/toolRegistry";

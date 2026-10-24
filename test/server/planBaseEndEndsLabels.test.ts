@@ -4,7 +4,7 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { beforeAll, describe, expect, test } from "bun:test";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
 import { planBaseEndFields } from "../../src/server/planExecutionOrchestrator";
-import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/constants";
+import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/wire/constants";
 import { SESSION_OWNERSHIP_LOST_CODE } from "../../src/daemon/sessionReleasedDuringCall";
 import { TerminalSessionError } from "../../src/daemon/sessionManager";
 import {

@@ -6,7 +6,7 @@ import {
   SHARED_DAEMON_NAMESPACE_CODE,
 } from "../../src/daemon/sharedNamespaceGuard";
 import type { DaemonClientLike } from "../../src/daemon/client";
-import { resolveDaemonStatePath } from "../../src/daemon/constants";
+import { resolveDaemonStatePath } from "../../src/daemon/wire/constants";
 import { runDaemonCommand } from "../../src/daemon/cli/runDaemonCommand";
 import { SafeDaemonManager } from "../fakes/SafeDaemonManager";
 

@@ -2,7 +2,7 @@ import type {
   AndroidDeviceSpecification,
   IosDeviceSpecification,
 } from "../../../devices/exactDeviceProvisioning";
-import { MIN_CONFIGURED_SESSION_IDLE_TIMEOUT_MS } from "../../sessionLivenessWindows";
+import { MIN_CONFIGURED_SESSION_IDLE_TIMEOUT_MS } from "../../wire/sessionLivenessWindows";
 import type { BindingDeviceFamily } from "../../../utils/provisionDeviceSpecSchemas";
 import { ActionableError } from "../../../models/ActionableError";
 export type BrokerDeviceRequest = {

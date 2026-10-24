@@ -5,7 +5,7 @@ import { DaemonRestartDeferredError } from "../../src/daemon/daemonRestartAdmiss
 import type { DaemonClientLike } from "../../src/daemon/clientResponseDecoding";
 import type { DaemonMethodCallOptions } from "../../src/daemon/client";
 import type { DaemonStatus } from "../../src/daemon/types";
-import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
+import { McpTimeoutError } from "../../src/daemon/wire/McpTimeoutError";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 /**

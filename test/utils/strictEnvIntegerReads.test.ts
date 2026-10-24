@@ -21,7 +21,7 @@ import {
   resolveConnectionTimeoutMs,
   resolveDaemonStartupTimeoutMs,
   resolveExistingDaemonReachabilityTimeoutMs,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import { resolveWorkProfilePollIntervalMs } from "../../src/utils/WorkProfileMonitor";
 import { DefaultIosTunnelClient } from "../../src/ctrlProxy/ios/IosTunnelClient";
 import { FakeTimer } from "../fakes/FakeTimer";

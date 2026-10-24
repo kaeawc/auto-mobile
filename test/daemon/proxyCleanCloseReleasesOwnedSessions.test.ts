@@ -6,7 +6,7 @@ import {
 } from "../../src/daemon/daemonRequestHandlers";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
-import { DAEMON_RELEASE_SESSION_METHOD, DAEMON_VERSION } from "../../src/daemon/constants";
+import { DAEMON_RELEASE_SESSION_METHOD, DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import { DAEMON_LIVENESS_OWNER_NOT_OWNER_CODE } from "../../src/daemon/types";
 import { BROKER_EXECUTION_RELEASE_TIMEOUT_MS } from "../../src/daemon/sessionBroker/provisioning/executionLiveness";
 import { PROCESS_SHUTDOWN_TIMEOUT_MS } from "../../src/processLifecycle";

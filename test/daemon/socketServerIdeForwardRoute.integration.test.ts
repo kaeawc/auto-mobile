@@ -1,4 +1,4 @@
-import { DAEMON_BOUND_SESSION_PARAM } from "../../src/daemon/constants";
+import { DAEMON_BOUND_SESSION_PARAM } from "../../src/daemon/wire/constants";
 import { SessionToolBinding } from "../../src/server/SessionToolBinding";
 import { describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";

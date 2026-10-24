@@ -17,7 +17,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { rename, unlink, writeFile } from "node:fs/promises";
-import { DEFAULT_PID_FILE_PATH, PID_FILE_PATH, SOCKET_PATH } from "./constants";
+import { DEFAULT_PID_FILE_PATH, PID_FILE_PATH, SOCKET_PATH } from "./wire/constants";
 import { sameFileIdentity, statFileIdentity, type SocketFileIdentity } from "./socketFileIdentity";
 import {
   compareProcessGenerationTokens,
@@ -591,7 +591,7 @@ function logSafeDebug(message: string, error: unknown): void {
  * A single-directory scan can NEVER prove it discovered every namespace that
  * could share this log directory — `AUTOMOBILE_LOG_DIR` and
  * `AUTOMOBILE_DAEMON_PID_FILE_PATH` are independent overrides
- * (`src/daemon/constants.ts:119-123`), so a peer can leave the log directory at
+ * (`src/daemon/wire/constants.ts:119-123`), so a peer can leave the log directory at
  * its default (making it discoverable-looking) while relocating ONLY its pid
  * file to an arbitrary directory this scan never visits (e.g. `/state/a/daemon.pid`).
  * That combination is invisible to a directory listing regardless of whether

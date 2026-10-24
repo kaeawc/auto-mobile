@@ -1,4 +1,4 @@
-import { DAEMON_SHUTTING_DOWN_ERROR_MESSAGE } from "./constants";
+import { DAEMON_SHUTTING_DOWN_ERROR_MESSAGE } from "./wire/constants";
 import { DaemonUnavailableError } from "./DaemonUnavailableError";
 
 /** Shutdown response; only unadmitted requests are safe to replay unconditionally. */

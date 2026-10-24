@@ -1,4 +1,4 @@
-import { type BuildIdentity, describeBuildIdentity } from "../buildIdentity";
+import { type BuildIdentity, describeBuildIdentity } from "../wire/buildIdentity";
 import { DAEMON_TOOL_UNAVAILABLE_CODE } from "../types";
 
 /** Raised when a frontend-advertised tool is rejected by the daemon as unknown. */

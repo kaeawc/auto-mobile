@@ -108,7 +108,19 @@ function bindingRanges(text: string): { start: number; end: number }[] {
     .filter((range) =>
       pointers.every((span) => range.end <= span.start || range.start >= span.end),
     );
-  return [...pointers, ...plain].sort((a, b) => a.start - b.start);
+  // Coalesce overlaps (a data pointer may itself hold a `{platform:/…}` or `{key}`), so no text is
+  // emitted twice.
+  return [...pointers, ...plain]
+    .sort((a, b) => a.start - b.start)
+    .reduce<{ start: number; end: number }[]>((merged, range) => {
+      const last = merged.at(-1);
+      if (last && range.start < last.end) {
+        last.end = Math.max(last.end, range.end);
+      } else {
+        merged.push({ ...range });
+      }
+      return merged;
+    }, []);
 }
 
 /** Accents the letters of text; bindings stay as written. */

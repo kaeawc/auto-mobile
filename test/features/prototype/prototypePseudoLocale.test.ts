@@ -21,6 +21,12 @@ describe("pseudo-locale text (#14126)", () => {
     );
   });
 
+  test("nested bindings are emitted once", () => {
+    const out = pseudoLocalizeText("{data:/a{platform:/b}");
+    expect(out.split("{platform:/b}")).toHaveLength(2);
+    expect(out).toContain("{data:/a{platform:/b}");
+  });
+
   test("leaves bindings and blank text alone", () => {
     expect(pseudoLocalizeText("Hi {data:/user/name}!")).toContain("{data:/user/name}");
     expect(pseudoLocalizeText("{item.title}")).toContain("{item.title}");

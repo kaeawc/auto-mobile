@@ -1,3 +1,4 @@
+import type { DeviceServicePreflight } from "../utils/deviceServicePreflight";
 import {
   type AppFileFileSystem,
   type AppFileWriteProvider,
@@ -17,6 +18,7 @@ export class IosSimulatorMediaLibraryProvider implements AppFileWriteProvider {
   constructor(
     private readonly mediaClient: IosSimulatorMediaClient,
     private readonly fileSystem: AppFileFileSystem,
+    private readonly servicePreflight: DeviceServicePreflight = { assertEnabled: async () => {} },
   ) {}
 
   async putFile(request: PutAppFileProviderRequest) {
@@ -33,6 +35,7 @@ export class IosSimulatorMediaLibraryProvider implements AppFileWriteProvider {
         `iOS media-library staging is only supported on iOS simulators. Device ${request.device.deviceId} looks like a physical iOS device.`,
       );
     }
+    await this.servicePreflight.assertEnabled(request.device, "putAppFile", request.signal);
     for (const file of requests) {
       if (!hasSupportedSimulatorMediaExtension(file.destinationPath)) {
         throw new ActionableError(

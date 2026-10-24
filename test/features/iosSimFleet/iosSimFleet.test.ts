@@ -256,10 +256,12 @@ describe("fleet cost collector", () => {
 });
 
 describe("capacity policy", () => {
-  test("derives the limit from the smaller of memory and cores", () => {
+  test("derives the limit from the smaller of memory and settled CPU", () => {
     expect(resolveCapacityLimits({}, { totalMemoryBytes: 128 * GIB, cpuCount: 16 })).toEqual({
-      maxBooted: 8,
+      maxBooted: 21,
       source: "derived",
+      bootConcurrency: 2,
+      bootConcurrencySource: "derived",
     });
     expect(resolveCapacityLimits({}, { totalMemoryBytes: 16 * GIB, cpuCount: 16 }).maxBooted).toBe(
       2,
@@ -272,6 +274,8 @@ describe("capacity policy", () => {
     expect(resolveCapacityLimits({ [IOS_SIM_MAX_BOOTED_ENV]: "5" }, resources)).toEqual({
       maxBooted: 5,
       source: "env",
+      bootConcurrency: 2,
+      bootConcurrencySource: "derived",
     });
     const bad = resolveCapacityLimits({ [IOS_SIM_MAX_BOOTED_ENV]: "0" }, resources);
     expect(bad.source).toBe("derived");

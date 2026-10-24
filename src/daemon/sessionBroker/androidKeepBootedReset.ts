@@ -28,12 +28,17 @@ import { parsePowerIntentKey } from "./mutations/deviceStateKeys";
 import {
   opaqueForcesFallback,
   type DeviceBaseline,
+  type DeviceMutationEntry,
   type DeviceMutationJournal,
   type DeviceMutationScope,
 } from "./mutations/types";
 
 export interface AndroidKeepBootedResetPort extends DeviceMutationResetPort {
-  cleanBaseline(baseline: DeviceBaseline, context: DeviceMutationResetContext): Promise<void>;
+  cleanBaseline(
+    baseline: DeviceBaseline,
+    context: DeviceMutationResetContext,
+    journalEntries?: readonly DeviceMutationEntry[],
+  ): Promise<void>;
 }
 
 export interface AndroidKeepBootedResetDependencies {
@@ -560,10 +565,14 @@ export class AndroidKeepBootedReset implements AndroidResetStrategy {
       throw new ActionableError("Android keep-booted baseline is missing");
     }
     await cleaningContext.assertOwned();
-    await this.measure("journal", phases, () =>
-      this.replayJournal(port, cleaningContext, baseline),
+    let entries: readonly DeviceMutationEntry[] = [];
+    await this.measure("journal", phases, async () => {
+      entries = await this.dependencies.journal.list(cleaningContext.scope);
+      await this.replayJournal(port, cleaningContext, baseline, entries);
+    });
+    await this.measure("clean", phases, () =>
+      port.cleanBaseline(baseline, cleaningContext, entries),
     );
-    await this.measure("clean", phases, () => port.cleanBaseline(baseline, cleaningContext));
     await cleaningContext.assertOwned();
     await this.measure(
       "health",
@@ -577,8 +586,8 @@ export class AndroidKeepBootedReset implements AndroidResetStrategy {
     port: AndroidKeepBootedResetPort,
     context: DeviceMutationResetContext,
     baseline: DeviceBaseline,
+    entries: readonly DeviceMutationEntry[],
   ): Promise<void> {
-    const entries = await this.dependencies.journal.list(context.scope);
     for (const mutation of [...entries].sort((left, right) => right.sequence - left.sequence)) {
       await context.assertOwned();
       const baselinePackage =

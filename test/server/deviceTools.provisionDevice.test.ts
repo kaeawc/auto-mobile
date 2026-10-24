@@ -1439,7 +1439,30 @@ describe("provisionDevice handler", () => {
     const payload = JSON.parse(response.content[0].text);
     expect(payload.sessionId).toEqual(expect.any(String));
     expect(payload.resources.success).toBe(true);
+    expect(payload.resources.disabledResources).toEqual([
+      expect.objectContaining({
+        resource: "wallpaperRendering",
+        automobileImpact: expect.any(Array),
+        appImpact: expect.any(Array),
+      }),
+    ]);
     expect(harness.readinessCalls()).toBe(1);
+  });
+
+  test("omits provisioned disabled impacts when the profile leaves everything enabled", async () => {
+    const resources = new FakeDeviceResourceController();
+    resources.result.resources = { wallpaperRendering: { state: "enabled" } };
+    resources.result.changed = [];
+    resourceObserver.result.resources.wallpaperRendering = { state: "enabled" };
+    setupSimulator(false, resources);
+    const response = toolResponseSchema.parse(
+      await ToolRegistry.getTool("provisionDevice")!.handler({
+        ...provisionTestArgs("ios"),
+        resources: { wallpaperRendering: "enabled" },
+      }),
+    );
+    expect(response.isError).not.toBe(true);
+    expect(JSON.parse(response.content[0].text).resources.disabledResources).toBeUndefined();
   });
 
   test("accepts omitted boot and readiness with their documented defaults", () => {

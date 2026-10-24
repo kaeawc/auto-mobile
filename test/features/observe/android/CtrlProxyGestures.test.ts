@@ -136,7 +136,7 @@ describe("Android gesture duration wire", () => {
       const client = AndroidCtrlProxyClient.createForTesting(device, adb, {
         timer,
       });
-      client["_gestures"] = new CtrlProxyGestures(context);
+      client.testHooks.installedGestures = new CtrlProxyGestures(context);
       const getInstance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
       try {
         const pending = new ExecuteGesture(device, adb, timer).swipe(10, 20, 30, 40, {
@@ -177,7 +177,7 @@ describe("Android swipe request duration bounds", () => {
         timer,
       },
     );
-    client["_gestures"] = new CtrlProxyGestures(context);
+    client.testHooks.installedGestures = new CtrlProxyGestures(context);
     const forwardDuration = new DefaultElementGeometry().getSwipeDurationFromSpeed("slow");
     const options = { boomerang: true, apexPause: 1400, returnSpeed: 0.2 };
     expect(validateSwipeTimingOptions(options, forwardDuration)).toBeNull();
@@ -260,7 +260,7 @@ describe("Android swipe request duration bounds", () => {
     const client = AndroidCtrlProxyClient.createForTesting(device, adb, {
       timer,
     });
-    client["_gestures"] = new CtrlProxyGestures(context);
+    client.testHooks.installedGestures = new CtrlProxyGestures(context);
     const getInstance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
     try {
       const pending = new ExecuteGesture(device, adb, timer).swipe(10, 20, 30, 40, {
@@ -713,7 +713,7 @@ describe("Android client forwards gesture displayId", () => {
         timer,
       },
     );
-    client["_gestures"] = new CtrlProxyGestures(context);
+    client.testHooks.installedGestures = new CtrlProxyGestures(context);
     const controller = new AbortController();
     const pending = client.requestSwipe({
       x1: 1,
@@ -828,7 +828,7 @@ describe("Android client forwards gesture displayId", () => {
           timer,
         },
       );
-      client["_gestures"] = new CtrlProxyGestures(context);
+      client.testHooks.installedGestures = new CtrlProxyGestures(context);
       const pending = send(client);
       await flush();
       const message = JSON.parse(sent.at(-1)!) as { requestId: string; displayId: number };
@@ -908,7 +908,7 @@ describe("Android display gesture cancellation", () => {
             timer,
           },
         );
-        client["_gestures"] = new CtrlProxyGestures(context);
+        client.testHooks.installedGestures = new CtrlProxyGestures(context);
         const pending = send(client, controller.signal);
         await flush();
         if (phase === "connecting") {
@@ -1051,7 +1051,7 @@ describe("gesture pre-send display fence during reconnect", () => {
             timer,
           },
         );
-        client["_gestures"] = new CtrlProxyGestures(context);
+        client.testHooks.installedGestures = new CtrlProxyGestures(context);
         const controller = new AbortController();
         const add = spyOn(controller.signal, "addEventListener");
         const remove = spyOn(controller.signal, "removeEventListener");
@@ -1109,7 +1109,7 @@ it("tap cancellation inside the pre-send guard prevents dispatch and cleans regi
       timer,
     },
   );
-  client["_gestures"] = new CtrlProxyGestures(context);
+  client.testHooks.installedGestures = new CtrlProxyGestures(context);
   const controller = new AbortController();
   const reason = new Error("Operation cancelled at send");
   const pending = client
@@ -1235,10 +1235,10 @@ it("atomic tap capability requires explicit advertisement even on legacy handsha
   );
   for (const commands of [null, new Set<string>(), new Set(["full_command_set_v1"])]) {
     client.connectionTestHooks.supportedCommands = commands;
-    expect(client["isCommandSupported"]("tap_double_v1")).toBe(false);
+    expect(client.testHooks.isCommandSupported("tap_double_v1")).toBe(false);
   }
   client.connectionTestHooks.supportedCommands = new Set(["tap_double_v1"]);
-  expect(client["isCommandSupported"]("tap_double_v1")).toBe(true);
+  expect(client.testHooks.isCommandSupported("tap_double_v1")).toBe(true);
 });
 
 describe("Android client drag dispatch hook", () => {
@@ -1253,7 +1253,7 @@ describe("Android client drag dispatch hook", () => {
         timer,
       },
     );
-    client["_gestures"] = new CtrlProxyGestures(context);
+    client.testHooks.installedGestures = new CtrlProxyGestures(context);
     const controller = new AbortController();
     const phases: string[] = [];
     const pending = client.requestDrag({

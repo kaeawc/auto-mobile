@@ -69,6 +69,10 @@ export class FakePrototypePlist implements PlistReader, PlistWriter {
     this.operations.record("plist-read");
     return this.value;
   }
+  async writeBinaryFromJson(path: string, value: Record<string, unknown>): Promise<void> {
+    this.operations.record("plist-write-binary");
+    this.written = { path, value };
+  }
   async writeXmlFromJson(path: string, value: Record<string, unknown>): Promise<void> {
     this.operations.record("plist-write");
     this.written = { path, value };

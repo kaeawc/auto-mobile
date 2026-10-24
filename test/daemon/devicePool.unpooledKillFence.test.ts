@@ -130,11 +130,11 @@ test("pickup inserts after the unpooled shutdown fence expires", async () => {
     ),
   ).toBeUndefined();
   expect(
-    pool["state"].shutdownReservationCoordinator.isUnpooledShutdownFenced(device.deviceId),
+    pool.testHooks.shutdownReservationCoordinator.isUnpooledShutdownFenced(device.deviceId),
   ).toBe(true);
   timer.advanceTime(31_000);
   expect(
-    pool["state"].shutdownReservationCoordinator.isUnpooledShutdownFenced(device.deviceId),
+    pool.testHooks.shutdownReservationCoordinator.isUnpooledShutdownFenced(device.deviceId),
   ).toBe(true);
   pool.settleUnpooledShutdown(device.deviceId);
   timer.advanceTime(UNPOOLED_SHUTDOWN_FENCE_LIFETIME_MS);
@@ -155,7 +155,7 @@ test("clearIntentionalShutdown lifts an unpooled shutdown fence", async () => {
     ),
   ).toBeUndefined();
   expect(
-    pool["state"].shutdownReservationCoordinator.isUnpooledShutdownFenced(device.deviceId),
+    pool.testHooks.shutdownReservationCoordinator.isUnpooledShutdownFenced(device.deviceId),
   ).toBe(true);
   pool.clearIntentionalShutdown(device.deviceId);
   await pool.pickUpRunningDevice(device);
@@ -176,7 +176,7 @@ test("pooled shutdown reserves the entry without an unpooled fence", async () =>
   );
   expect(reservation?.device).toBe(entry);
   expect(
-    pool["state"].shutdownReservationCoordinator.isUnpooledShutdownFenced(device.deviceId),
+    pool.testHooks.shutdownReservationCoordinator.isUnpooledShutdownFenced(device.deviceId),
   ).toBe(false);
   await reservation?.release();
 });
@@ -185,7 +185,7 @@ test("unpooled recovery reservation without opt-in permits pickup", async () => 
   const { pool } = harness();
   expect(await pool.reserveDeviceForShutdown(device.deviceId)).toBeUndefined();
   expect(
-    pool["state"].shutdownReservationCoordinator.isUnpooledShutdownFenced(device.deviceId),
+    pool.testHooks.shutdownReservationCoordinator.isUnpooledShutdownFenced(device.deviceId),
   ).toBe(false);
   await pool.pickUpRunningDevice(device);
   expect(pool.getDevice(device.deviceId)?.id).toBe(device.deviceId);
@@ -224,7 +224,7 @@ test("refresh refuses a shutdown marker recorded during discovery", async () => 
   const gate = parkDiscovery(manager);
   const refresh = pool.refreshDevices();
   await gate.entered;
-  pool["state"].intentionalShutdowns.set(device.deviceId, -1);
+  pool.testHooks.intentionalShutdowns.set(device.deviceId, -1);
   gate.release();
   expect(await refresh).toBe(0);
   expect(pool.getDevice(device.deviceId)).toBeNull();
@@ -240,17 +240,17 @@ test("refresh still folds an existing pooled entry with a stale fence", async ()
   await pool.refreshDevices();
   expect(pool.getDevice(device.deviceId)?.name).toBe("Updated handset");
   expect(
-    pool["state"].shutdownReservationCoordinator.isUnpooledShutdownFenced(device.deviceId),
+    pool.testHooks.shutdownReservationCoordinator.isUnpooledShutdownFenced(device.deviceId),
   ).toBe(true);
 });
 
 test("refresh remembers an entry-time marker cleared during discovery", async () => {
   const { pool, manager } = harness();
-  pool["state"].intentionalShutdowns.set(device.deviceId, -1);
+  pool.testHooks.intentionalShutdowns.set(device.deviceId, -1);
   const gate = parkDiscovery(manager);
   const refresh = pool.refreshDevices();
   await gate.entered;
-  pool["state"].intentionalShutdowns.delete(device.deviceId);
+  pool.testHooks.intentionalShutdowns.delete(device.deviceId);
   gate.release();
   expect(await refresh).toBe(0);
   expect(pool.getDevice(device.deviceId)).toBeNull();
@@ -263,11 +263,11 @@ test("a stale unpooled fence settler cannot shorten a newer shutdown", () => {
   settleOld();
   timer.advanceTime(UNPOOLED_SHUTDOWN_FENCE_LIFETIME_MS);
   expect(
-    pool["state"].shutdownReservationCoordinator.isUnpooledShutdownFenced(device.deviceId),
+    pool.testHooks.shutdownReservationCoordinator.isUnpooledShutdownFenced(device.deviceId),
   ).toBe(true);
   settleCurrent();
   timer.advanceTime(UNPOOLED_SHUTDOWN_FENCE_LIFETIME_MS);
   expect(
-    pool["state"].shutdownReservationCoordinator.isUnpooledShutdownFenced(device.deviceId),
+    pool.testHooks.shutdownReservationCoordinator.isUnpooledShutdownFenced(device.deviceId),
   ).toBe(false);
 });

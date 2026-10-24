@@ -629,6 +629,14 @@
         "retryable": true,
         "acquireNewSession": false
       }
+    },
+    "device_service_disabled": {
+      "expected": "fail",
+      "fields": {
+        "code": "device_service_disabled",
+        "retryable": false,
+        "acquireNewSession": false
+      }
     }
   }
 }

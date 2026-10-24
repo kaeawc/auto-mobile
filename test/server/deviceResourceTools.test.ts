@@ -4,6 +4,7 @@ import { DefaultDeviceResourceObserver } from "../../src/utils/deviceResourceObs
 import { DefaultDeviceResourceController } from "../../src/utils/deviceResourceController";
 import { FakeWallpaperSimctl, FakeWallpaperPlist } from "../fakes/FakeIosResourceRuntime";
 import { iosDeviceResourceCatalog } from "../../src/utils/iosDeviceResourceCatalog";
+import { describeDisabledDeviceResources } from "../../src/utils/iosDeviceResourceImpact";
 import { androidDeviceResourceCatalog } from "../../src/utils/androidDeviceResourceCatalog";
 import { logger } from "../../src/utils/logger";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
@@ -60,6 +61,26 @@ describe("setDeviceResources", () => {
   });
   afterEach(() => resetDeviceToolsDependencies());
 
+  test("reports disabled impacts and omits them when all resources are enabled", async () => {
+    const handler = ToolRegistry.getTool("setDeviceResources")!.deviceAwareHandler!;
+    expect(
+      toolJson(await handler(device, { resources: controller.result.requested })).disabledResources,
+    ).toEqual([
+      expect.objectContaining({
+        resource: "wallpaperRendering",
+        automobileImpact: expect.any(Array),
+        appImpact: expect.any(Array),
+      }),
+    ]);
+    observer.result.resources.wallpaperRendering = { state: "enabled" };
+    controller.result.disabledResources = [
+      { resource: "wallpaperRendering", labels: [], automobileImpact: [], appImpact: [] },
+    ];
+    expect(
+      toolJson(await handler(device, { resources: controller.result.requested })).disabledResources,
+    ).toBeUndefined();
+  });
+
   test.each(["android", "ios"] as const)(
     "returns the independent full %s snapshot without changing mutation fields",
     async (platform) => {
@@ -107,7 +128,14 @@ describe("setDeviceResources", () => {
         { resources: controller.result.requested, timeoutMs: 10_000 },
       );
       const payload = toolJson(response);
-      expect(payload).toEqual({ device: target, ...controller.result, observed: observer.result });
+      expect(payload).toEqual({
+        device: target,
+        ...controller.result,
+        observed: observer.result,
+        ...(platform === "ios"
+          ? { disabledResources: [expect.objectContaining({ resource: "wallpaperRendering" })] }
+          : {}),
+      });
       expect(Object.keys(observedResources.parse(payload).observed.resources)).toEqual(
         expect.arrayContaining(Object.keys(catalog)),
       );
@@ -131,7 +159,7 @@ describe("setDeviceResources", () => {
         { resources: { wallpaperRendering: requested } },
       );
       expect(toolIsError(response)).toBe(true);
-      expect(toolJson(response)).toEqual({
+      expect(toolJson(response)).toMatchObject({
         device,
         ...controller.result,
         requested: { wallpaperRendering: requested },
@@ -152,13 +180,25 @@ describe("setDeviceResources", () => {
         { resources: controller.result.requested },
       );
       expect(toolIsError(response)).toBe(false);
-      expect(toolJson(response)).toEqual({
+      expect(toolJson(response)).toMatchObject({
         device,
         ...controller.result,
         observed: observer.result,
+        disabledResources: [expect.objectContaining({ resource: "wallpaperRendering" })],
       });
     },
   );
+
+  test("includes disabled groups outside the requested map", async () => {
+    observer.result.resources.widgets = { state: "disabled" };
+    const response = await ToolRegistry.getTool("setDeviceResources")!.deviceAwareHandler!(device, {
+      resources: controller.result.requested,
+    });
+    expect(toolJson(response).disabledResources).toEqual([
+      expect.objectContaining({ resource: "wallpaperRendering" }),
+      expect.objectContaining({ resource: "widgets" }),
+    ]);
+  });
 
   test("an undefined requested entry is omitted, never a contradiction", async () => {
     observer.result.resources.wallpaperRendering = { state: "enabled" };
@@ -180,7 +220,14 @@ describe("setDeviceResources", () => {
         device,
         { resources: controller.result.requested },
       );
-      expect(toolJson(response)).toEqual({ device, ...controller.result });
+      expect(toolJson(response)).toMatchObject({ device, ...controller.result });
+      expect(toolJson(response).disabledResources).toEqual([
+        expect.objectContaining({
+          resource: "wallpaperRendering",
+          automobileImpact: expect.any(Array),
+          appImpact: expect.any(Array),
+        }),
+      ]);
       expect(toolIsError(response)).toBe(false);
       expect(warning).toHaveBeenCalled();
     } finally {
@@ -439,6 +486,12 @@ describe("reconcileDeviceResources", () => {
   });
 
   test("defaults to a report-only run with a bounded deadline", async () => {
+    reconciler.result = {
+      ...reconciler.result,
+      disabledResources: describeDisabledDeviceResources({
+        wallpaperRendering: { state: "disabled" },
+      }),
+    };
     const response = await handler()(device, { resources: { wallpaperRendering: "disabled" } });
     expect(reconciler.requests[0]).toMatchObject({
       device,
@@ -447,7 +500,14 @@ describe("reconcileDeviceResources", () => {
       releaseOwnedExtras: false,
       deadlineMs: timer.now() + DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS,
     });
-    expect(toolJson(response)).toEqual({ device, ...reconciler.result });
+    expect(toolJson(response)).toMatchObject({ device, ...reconciler.result });
+    expect(toolJson(response).disabledResources).toEqual([
+      expect.objectContaining({
+        resource: "wallpaperRendering",
+        automobileImpact: expect.any(Array),
+        appImpact: expect.any(Array),
+      }),
+    ]);
     expect(toolIsError(response)).toBe(false);
   });
 

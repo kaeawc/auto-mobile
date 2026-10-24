@@ -201,10 +201,17 @@ export class SimCtlInventory {
     string,
     { lastUsedAt?: string; displays?: SimulatorDisplay[]; enumeratedAt: number }
   >();
+  // Concurrent listings during a boot storm would otherwise each spawn their own
+  // `simctl io enumerate` for a boot whose first read has not finished (#15214).
+  private static readonly simulatorDisplayFlights = new Map<
+    string,
+    { lastUsedAt?: string; promise: Promise<SimulatorDisplay[]> }
+  >();
 
   static invalidateDeviceListCache(): void {
     SimCtlInventory.lastLoggedDeviceListSignature = undefined;
     SimCtlInventory.simulatorDisplays.clear();
+    SimCtlInventory.simulatorDisplayFlights.clear();
     SimCtlInventory.deviceListCache = null;
     SimCtlInventory.lastGoodDeviceList = null;
     SimCtlInventory.inFlightDeviceList = null;
@@ -527,6 +534,7 @@ export class SimCtlInventory {
     for (const udid of SimCtlInventory.simulatorDisplays.keys()) {
       if (!bootedIds.has(udid)) {
         SimCtlInventory.simulatorDisplays.delete(udid);
+        SimCtlInventory.simulatorDisplayFlights.delete(udid);
       }
     }
   }
@@ -538,6 +546,7 @@ export class SimCtlInventory {
   ): Promise<SimulatorDisplay[]> {
     if (device.state !== "Booted") {
       SimCtlInventory.simulatorDisplays.delete(device.udid);
+      SimCtlInventory.simulatorDisplayFlights.delete(device.udid);
       return [];
     }
     // Duo panels can change with fold state without a new boot timestamp.
@@ -551,7 +560,51 @@ export class SimCtlInventory {
     if (remainingMs !== undefined && remainingMs <= 0) {
       return [];
     }
-    return this.enumerateBootedSimulatorDisplays(device, remainingMs, signal, cacheable);
+    const inFlight = SimCtlInventory.simulatorDisplayFlights.get(device.udid);
+    if (inFlight && inFlight.lastUsedAt === device.lastUsedAt) {
+      return this.awaitDisplayFlight(inFlight.promise, remainingMs, signal);
+    }
+    // The starter's signal and remaining budget bound the command; a joined listing whose
+    // starter was cancelled degrades to no displays (optional enrichment) and the next
+    // listing retries. Each waiter bounds only its own wait.
+    const flight: { lastUsedAt?: string; promise: Promise<SimulatorDisplay[]> } = {
+      lastUsedAt: device.lastUsedAt,
+      promise: this.enumerateBootedSimulatorDisplays(
+        device,
+        remainingMs,
+        signal,
+        cacheable,
+      ).finally(() => {
+        if (SimCtlInventory.simulatorDisplayFlights.get(device.udid) === flight) {
+          SimCtlInventory.simulatorDisplayFlights.delete(device.udid);
+        }
+      }),
+    };
+    SimCtlInventory.simulatorDisplayFlights.set(device.udid, flight);
+    return this.awaitDisplayFlight(flight.promise, remainingMs, signal);
+  }
+
+  /** Bound one waiter on a shared display read; leaving never cancels the read for others. */
+  private async awaitDisplayFlight(
+    flight: Promise<SimulatorDisplay[]>,
+    remainingMs: number | undefined,
+    signal: AbortSignal | undefined,
+  ): Promise<SimulatorDisplay[]> {
+    try {
+      return await raceWithDeadline(flight, {
+        timer: this.context.timer,
+        timeoutMs: remainingMs,
+        signal,
+        label: "iOS simulator display enumeration",
+      });
+    } catch (error) {
+      if (signal?.aborted) {
+        throw error;
+      }
+      // Optional display enrichment cannot make the device inventory unavailable.
+      logger.debug(`Display enrichment wait ended early: ${errorMessage(error)}`);
+      return [];
+    }
   }
 
   private async enumerateBootedSimulatorDisplays(

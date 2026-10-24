@@ -1,3 +1,4 @@
+import { DeviceServiceDisabledError } from "../models/DeviceServiceDisabledError";
 import { SdkCapabilityQueryError } from "../features/observe/ios/SdkCapabilityQueryError";
 import { AdbDeviceTransportUnavailableError } from "../utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import { PrototypeHiddenError } from "../features/prototype/prototypeHidden";
@@ -169,6 +170,7 @@ function hasSelfDescribedRefusalPayload(
   | AdbDeviceTransportUnavailableError
   | AndroidAvdIdentityUnresolvedError
   | AndroidDeviceIdentityUnresolvedError
+  | DeviceServiceDisabledError
   | DeviceUnhealthyError
   | PlanExecutionInProgressError
   | AmbiguousDeviceTargetError
@@ -190,6 +192,7 @@ function hasSelfDescribedRefusalPayload(
     AdbDeviceTransportUnavailableError,
     AndroidAvdIdentityUnresolvedError,
     AndroidDeviceIdentityUnresolvedError,
+    DeviceServiceDisabledError,
     DeviceUnhealthyError,
     PlanExecutionInProgressError,
     AmbiguousDeviceTargetError,

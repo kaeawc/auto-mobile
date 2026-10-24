@@ -1,3 +1,6 @@
+import { FakeDeviceServicePreflight } from "../fakes/FakeDeviceServicePreflight";
+import { DeviceServiceDisabledError } from "../../src/models/DeviceServiceDisabledError";
+import { IosSimulatorMediaLibraryProvider } from "../../src/server/IosSimulatorMediaLibraryProvider";
 import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
@@ -1516,11 +1519,65 @@ describe("AppFileService", () => {
     expect(rollbackWarnings[0]).toContain("second.png");
   });
 
+  test("putAppFile preserves a disabled media service refusal before provider staging or import", async () => {
+    const fileSystem = new TestAppFileFileSystem();
+    const servicePreflight = new FakeDeviceServicePreflight();
+    const error = new DeviceServiceDisabledError({
+      tool: "putAppFile",
+      resource: "mediaTranscoding",
+      labels: ["com.apple.photos.ImageConversionService"],
+      disabledLabels: ["com.apple.photos.ImageConversionService"],
+      unavailable: "Media import",
+      deviceId: iosSimulatorDevice.deviceId,
+    });
+    servicePreflight.error = error;
+    let imports = 0;
+    const mediaClient = {
+      importMedia: async () => {
+        imports++;
+      },
+    };
+    const provider = new IosSimulatorMediaLibraryProvider(
+      mediaClient,
+      fileSystem,
+      servicePreflight,
+    );
+    const mkdtemp = spyOn(fileSystem, "mkdtemp");
+    await expect(
+      provider.putFiles([
+        {
+          device: iosSimulatorDevice,
+          target: { domain: "media_library" },
+          sourcePath: "/fake/photo.png",
+          destinationPath: "photo.png",
+          byteCount: 3,
+        },
+      ]),
+    ).rejects.toBe(error);
+    expect(mkdtemp).not.toHaveBeenCalled();
+    const service = createAppFileServiceForTesting({
+      fileSystem,
+      iosSimulatorMediaClient: mediaClient,
+      servicePreflight,
+      timer: new FakeTimer(),
+    });
+    await expect(
+      service.putFile({
+        device: iosSimulatorDevice,
+        target: { domain: "media_library" },
+        files: [{ destinationPath: "photo.png", contentBase64: "AQID" }],
+      }),
+    ).rejects.toMatchObject({ code: "device_service_disabled", retryable: false });
+    expect(imports).toBe(0);
+    expect(servicePreflight.calls).toHaveLength(2);
+  });
+
   test("imports iOS Simulator media through an injected argv-safe client and preserves filenames", async () => {
     const fileSystem = new TestAppFileFileSystem();
     const imports: Array<{ deviceId: string; paths: string[] }> = [];
     const service = createAppFileServiceForTesting({
       fileSystem,
+      servicePreflight: new FakeDeviceServicePreflight(),
       iosSimulatorMediaClient: {
         importMedia: async (device, paths) => {
           imports.push({ deviceId: device.deviceId, paths: [...paths] });

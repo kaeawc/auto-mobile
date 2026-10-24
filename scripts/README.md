@@ -378,6 +378,7 @@ covers the script with a fake server, adb and clock.
   - `matrix` (default) - Print a Markdown capability matrix; `OUT_FILE` also writes it to a file
   - `persistence-prepare` / `persistence-verify` - Check whether `-writable-system` changes survive an `avd snapshot save` + cold reload
   - See `docs/design-docs/plat/android/device-condition-capability-probe.md`
+- `capture-oem-evidence.sh <serial> [out-dir]` - Capture the non-interactive OEM evidence for #14048 from one connected device: `getprop` (device identifiers redacted), `pm list features`, system packages and default-app holders, under `test/fixtures/android-oem/<manufacturer>-<model>-<date>/` with a provenance manifest. The README it writes there lists the hierarchy captures still to take by hand. Tests: `test/bats/capture-oem-evidence.bats` (stub adb).
 
 ### Tool Definition Scripts
 

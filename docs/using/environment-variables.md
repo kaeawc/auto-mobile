@@ -315,9 +315,11 @@ budget-driven fallback reasons.
 | `AUTOMOBILE_BUNDLETOOL_JAR`                                                           | bundletool-all jar, run with `java`, for `installApp` of `.aab`/`.apks`; otherwise `bundletool` on `PATH`. Never downloaded.                            | unset                                                             |
 | `AUTOMOBILE_IOS_HEADLESS`                                                             | On macOS, exact `true`/`1` runs headless and any other set value shows a window. Non-macOS is always headless.                                          | detect a graphical login session                                  |
 | `AUTOMOBILE_BOOT_CAPACITY_GATE`                                                       | Boot limit check for emulator and simulator cold boots; exact `0` disables it on both platforms. See [Boot capacity](#boot-capacity).                   | on                                                                |
+| `AUTOMOBILE_IOS_PREBOOT_LEAN_PROFILE`                                                 | New iOS simulators: `none`, `minimal`, or `catalog-cpu`; unknown values use `none`. Explicit resources override the profile.                            | `none`                                                            |
 | `AUTOMOBILE_IOS_SIM_CAPACITY_GATE`                                                    | iOS-only override of the gate above: exact `0` disables, exact `1` enables.                                                                             | unset (follows the shared switch)                                 |
 | `AUTOMOBILE_ANDROID_MAX_BOOTED`                                                       | Cap on concurrently booted Android emulators; positive integer. Invalid values are ignored with a warning.                                              | derived from host RAM and cores, at least 1                       |
-| `AUTOMOBILE_IOS_SIM_MAX_BOOTED`                                                       | Cap on concurrently booted iOS simulators; positive integer. Invalid values are ignored with a warning.                                                 | derived from host RAM and cores, at least 1                       |
+| `AUTOMOBILE_IOS_SIM_BOOT_CONCURRENCY`                                                 | Concurrent iOS simulator boot bursts; positive integer. Extra boots queue in FIFO order. Invalid values warn and use the derived limit.                 | ceil(host cores / 13), at least 2                                 |
+| `AUTOMOBILE_IOS_SIM_MAX_BOOTED`                                                       | Cap on concurrently booted iOS simulators; positive integer. Invalid values are ignored with a warning.                                                 | derived from host RAM and settled-CPU cost, at least 1            |
 | `AUTOMOBILE_WORK_PROFILE_POLL_INTERVAL_MS`                                            | Android work-profile package polling interval; positive integer milliseconds.                                                                           | `5000` ms                                                         |
 
 </div>
@@ -500,10 +502,13 @@ To keep an installed CtrlProxy APK through device readiness, set
 
 When simultaneous cold iOS `observe` calls exceed
 `AUTOMOBILE_IOS_RUNNER_LAUNCH_CONCURRENCY`, a read can reach its bounded budget
-while its runner launch is queued. It returns `ok: true`, no hierarchy, and
+while its runner launch is queued or already running. It returns `ok: true`, no hierarchy, and
 `freshness` with `isFresh: false` and `unavailableReason: "runner_launch_queued"`.
-The detail names its queue position. The runner keeps launching; retry the
-observe shortly after launch completes.
+The detail names its queue position when queued, or says the runner is still
+starting in the background. Any captured screenshot is kept. The start continues
+for up to 60 seconds from the moment its launch leaves the queue (waiting in the
+queue is bounded separately, at 5 minutes), and a retry joins that same start.
+Retry the observe shortly.
 
 ## iOS builds and signing
 

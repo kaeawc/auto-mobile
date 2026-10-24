@@ -1,3 +1,4 @@
+import type { DisabledIosDeviceResource } from "./DeviceResourceImpact";
 import type { AppleDeviceResource } from "./AppleDeviceResource";
 import type { DeviceResourceStatus } from "./DeviceResource";
 import type {
@@ -62,6 +63,8 @@ export interface DeviceResourceDrift {
 }
 
 export interface DeviceResourceReconciliation {
+  /** Proven disabled iOS Simulator groups and their feature consequences. */
+  disabledResources?: DisabledIosDeviceResource[];
   /** True only when every requested resource is observed in its requested state after the run. */
   success: boolean;
   identity: SimulatorResourceIdentity;

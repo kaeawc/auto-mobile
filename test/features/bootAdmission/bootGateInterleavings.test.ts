@@ -90,8 +90,8 @@ interface Shape {
 }
 
 /** Let queued promise continuations run; no timer involved. */
-async function settle(): Promise<void> {
-  for (let i = 0; i < 20; i++) {
+async function settle(turns = 20): Promise<void> {
+  for (let i = 0; i < turns; i++) {
     await Promise.resolve();
   }
 }
@@ -418,7 +418,8 @@ function iosScenario(shape: Shape): Scenario {
     run: async (action) => {
       const [name, index] = action.split(":");
       actions[name](Number(index));
-      await settle();
+      // Include the boot-permit acquisition continuations before enumerating the next action.
+      await settle(40);
     },
   };
 }

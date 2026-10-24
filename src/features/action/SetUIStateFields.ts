@@ -6,7 +6,6 @@ import { BootedDevice, Element, ObserveResult, ViewHierarchyResult } from "../..
 import { FieldSpec, SetUIStateElementSelector } from "../../models/SetUIStateOptions";
 import { FieldResult, FieldType } from "../../models/SetUIStateResult";
 import { FieldTypeDetector, type FieldTypeDetection } from "./FieldTypeDetector";
-import type { InputTextOptions } from "./InputText";
 import type { Keyboard } from "./Keyboard";
 import { KeyboardOcclusionError } from "../../models/KeyboardOcclusionError";
 import { ActionableError } from "../../models/ActionableError";
@@ -30,100 +29,17 @@ import { logger } from "../../utils/logger";
 import { throwIfAborted } from "../../utils/toolUtils";
 import { Timer } from "../../utils/SystemTimer";
 import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
-import type { ActionCall, TapOnCall } from "./ActionCall";
+import type {
+  ClearTextLike,
+  InputTextLike,
+  SetUIStateDependencies,
+  TapOnElementLike,
+} from "./SetUIStateDependencies";
+
+export type { SetUIStateDependencies };
 
 // Dropdown controls need time to open before selection.
 export const DROPDOWN_OPEN_SETTLE_MS = 200;
-
-/**
- * Interface for TapOnElement dependency
- */
-interface TapOnElementLike {
-  execute(
-    options: {
-      text?: string;
-      elementId?: string;
-      action: string;
-      container?: { text?: string; elementId?: string };
-    },
-    call?: TapOnCall,
-  ): Promise<{
-    success: boolean;
-    element?: Element;
-    focusVerified?: boolean;
-    observation?: ObserveResult;
-    error?: string;
-  }>;
-}
-
-/**
- * Interface for InputText dependency
- */
-interface InputTextLike {
-  execute(
-    text: string,
-    options?: InputTextOptions,
-    call?: ActionCall,
-  ): Promise<{
-    success: boolean;
-    text: string;
-    observation?: ObserveResult;
-    error?: string;
-    retryable?: boolean;
-  }>;
-}
-
-/**
- * Interface for ClearText dependency
- */
-interface ClearTextLike {
-  execute(
-    progress?: ProgressCallback,
-    signal?: AbortSignal,
-  ): Promise<{
-    success: boolean;
-    observation?: ObserveResult;
-    error?: string;
-    warnings?: string[];
-    retryable?: boolean;
-  }>;
-}
-
-/**
- * Interface for SwipeOn dependency
- */
-interface SwipeOnLike {
-  execute(
-    options: {
-      direction: string;
-      gestureType?: "scrollTowardsDirection";
-      lookFor?: { text?: string; elementId?: string };
-      scrollToFind?: boolean;
-    },
-    call?: ActionCall,
-  ): Promise<{
-    success: boolean;
-    found?: boolean;
-    element?: Element;
-    observation?: ObserveResult;
-    error?: string;
-  }>;
-}
-
-/**
- * Dependencies that can be injected for testing
- */
-export interface SetUIStateDependencies {
-  keyboard?: Pick<Keyboard, "execute">;
-  tapOnElement?: TapOnElementLike;
-  tapAt?: Pick<TapAtCoordinate, "execute">;
-  inputText?: InputTextLike;
-  clearText?: ClearTextLike;
-  swipeOn?: SwipeOnLike;
-  observeScreen?: ObserveScreen;
-  fieldTypeDetector?: FieldTypeDetection;
-  timer?: Timer;
-}
 
 /**
  * Internal per-field outcome. Carries the fresh observation (if
@@ -803,6 +719,11 @@ export class SetUIStateFields {
     inputText: InputTextLike,
     signal?: AbortSignal,
   ): Promise<FieldApplicationResult> {
+    // A verified clear left the field blank; typing "" is a no-op iOS rejects (#15212).
+    if (fieldSpec.value === "") {
+      return { success: true };
+    }
+
     // Input new text. Intentionally passes no mode so the shared
     // InputText.execute applies event-all marker auto-promotion here too
     // (a form field value containing a configured marker, e.g. an
@@ -972,6 +893,10 @@ export class SetUIStateFields {
     switch (fieldType) {
       case "text":
         if (fieldSpec.value !== undefined) {
+          // iOS omits `value` once a field is blank, leaving only its label in `text` (#15212).
+          if (this.fieldTypeDetector.shouldSkipVerification(element, fieldType)) {
+            return { verified: false, observation, unverifiable: true };
+          }
           const observedValue = this.fieldTypeDetector.getTextValue(element);
           return { verified: observedValue === fieldSpec.value, observation, observedValue };
         }

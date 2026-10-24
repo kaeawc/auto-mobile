@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { ActivateSiri, SIRI_PHRASE_MAX_LENGTH } from "../../../src/features/action/ActivateSiri";
+import { DeviceServiceDisabledError } from "../../../src/models/DeviceServiceDisabledError";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
@@ -92,4 +93,31 @@ describe("ActivateSiri (#14109)", () => {
       expect(runner.siriHistory).toEqual([]);
     },
   );
+
+  test("a disabled siriAndAppIntents service fails fast before reaching the runner", async () => {
+    const disabled = new DeviceServiceDisabledError({
+      tool: "siri",
+      resource: "siriAndAppIntents",
+      labels: ["com.apple.assistantd"],
+      disabledLabels: ["com.apple.assistantd"],
+      unavailable: "Siri activation",
+      deviceId: SIMULATOR.deviceId,
+    });
+    const preflighted: string[] = [];
+    const action = new ActivateSiri(SIMULATOR, new FakeAdbExecutor(), timer, {
+      observeScreen,
+      awaitIdle: new FakeAwaitIdle(),
+      window: new FakeWindow(),
+      iosClientProvider: () => runner,
+      servicePreflight: {
+        assertEnabled: async (_device, tool) => {
+          preflighted.push(tool);
+          throw disabled;
+        },
+      },
+    });
+    await expect(action.execute("Show my orders")).rejects.toBe(disabled);
+    expect(preflighted).toEqual(["siri"]);
+    expect(runner.siriHistory).toEqual([]);
+  });
 });

@@ -4,6 +4,7 @@ import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/A
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
+import type { DeviceServicePreflight } from "../../utils/deviceServicePreflight";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import type { IosCtrlProxy } from "../observe/ios/IOSCtrlProxyClient";
@@ -27,6 +28,8 @@ export interface ActivateSiriResult extends BaseActionResult {
 
 export interface ActivateSiriDependencies extends DisplayFenceDependencies {
   iosClientProvider?: (device: BootedDevice) => Pick<IosCtrlProxy, "requestSiri">;
+  /** Fails fast with `device_service_disabled` on a lean-profile simulator (#15223). */
+  servicePreflight?: DeviceServicePreflight;
 }
 
 /**
@@ -35,6 +38,7 @@ export interface ActivateSiriDependencies extends DisplayFenceDependencies {
  */
 export class ActivateSiri extends BaseVisualChange {
   private readonly iosClientProvider: NonNullable<ActivateSiriDependencies["iosClientProvider"]>;
+  private readonly servicePreflight: DeviceServicePreflight;
 
   constructor(
     device: BootedDevice,
@@ -44,6 +48,7 @@ export class ActivateSiri extends BaseVisualChange {
   ) {
     super(device, adb, timer, undefined, dependencies);
     this.iosClientProvider = dependencies.iosClientProvider ?? iosCtrlProxyClientFor;
+    this.servicePreflight = dependencies.servicePreflight ?? { assertEnabled: async () => {} };
   }
 
   async execute(phrase: string, call: ActionCall = {}): Promise<ActivateSiriResult> {
@@ -60,6 +65,7 @@ export class ActivateSiri extends BaseVisualChange {
         error: `siri phrase must be 1 to ${SIRI_PHRASE_MAX_LENGTH} characters.`,
       };
     }
+    await this.servicePreflight.assertEnabled(this.device, "siri", signal);
     const perf = createGlobalPerformanceTracker();
     perf.serial("siri");
     let unsupported = false;

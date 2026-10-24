@@ -1,4 +1,5 @@
 import { z } from "zod/v4";
+import { DefaultDeviceServicePreflight } from "../utils/deviceServicePreflight";
 import {
   ActivateSiri,
   SIRI_PHRASE_MAX_LENGTH,
@@ -35,7 +36,12 @@ function statusOf(result: ActivateSiriResult): "activated" | "unsupported" | "fa
 }
 
 export function createSiriHandler(deps: SiriToolDependencies = {}) {
-  const siriFactory = deps.siriFactory ?? ((device: BootedDevice) => new ActivateSiri(device));
+  const siriFactory =
+    deps.siriFactory ??
+    ((device: BootedDevice) =>
+      new ActivateSiri(device, null, undefined, {
+        servicePreflight: new DefaultDeviceServicePreflight(),
+      }));
   return async (
     device: BootedDevice,
     args: SiriArgs,

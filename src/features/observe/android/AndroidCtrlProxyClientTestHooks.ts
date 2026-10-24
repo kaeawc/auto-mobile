@@ -12,6 +12,24 @@ import type { CachedHierarchy } from "./types";
 import type { AndroidInboundMessageRouter } from "./AndroidInboundMessageRouter";
 import type { DelegateContext } from "../shared/types";
 
+/** Constructor-injected collaborators and flags a test may read back to prove wiring. */
+export type AndroidCtrlProxyInjectedState = Readonly<
+  Record<
+    | "ctrlProxyForwardLease"
+    | "forwardClientProbe"
+    | "loggerInstance"
+    | "transientObserver"
+    | "timer"
+    | "webSocketFactory"
+    | "certificateFileSystem"
+    | "serviceManagerFactory"
+    | "idGenerator"
+    | "screenshotBackoffScheduler"
+    | "portAllocationId",
+    unknown
+  >
+>;
+
 /**
  * The one typed view of `AndroidCtrlProxyClient` internals that unit tests need
  * (`client.testHooks`). It replaces ad hoc casts into private state; production
@@ -31,6 +49,7 @@ export interface AndroidCtrlProxyClientTestHooks {
   /** Own-property handler table keyed by wire message type. */
   webSocketMessageHandlers(): AndroidInboundMessageRouter["webSocketMessageHandlers"];
   createDelegateContext(): DelegateContext;
+  injected(): AndroidCtrlProxyInjectedState;
   cachedHierarchy(): CachedHierarchy | null;
   handleWebSocketMessage(data: string): Promise<void>;
   getWebSocketUrl(): string;

@@ -1844,8 +1844,21 @@ translucent ones. Under a `gradient`, a `style.alpha`, or a component that paint
 `chip`) the background is unknown and contrast is not checked. `styleWhen` overrides are not
 evaluated.
 
-The on-device audit of a shown prototype, a `pseudoLocale` option and the RTL check that #14126
-also proposes are not implemented yet.
+### Pseudo-locale (#14126)
+
+`show` takes `pseudoLocale: true`. The device receives a copy of the spec in which every `text`,
+`label`, `placeholder`, `headline`, `title`, `supporting`, `supportingText`, `trailingText`, check `message` and span `text` is
+accented, padded by about 40% and wrapped in `[ ]`, so truncation and clipping are visible without a
+translation. `{key}`, `{data:/pointer}` and `{item.field}` bindings are left intact, as are
+`contentDescription`, state, data, request bodies, `emit` context and payload, `repeat` and option `value`s. The authored
+spec is what status, `patch` and the accessibility lint see, so `patch` ops (other than a
+`replaceNode`) edit the device copy and a `replaceNode` sends authored text. A `linkify` text keeps its mention, hashtag and URL tokens as written and takes no `[ ]`
+wrapper, so links stay detectable. Stack screen and component names are never treated as spec
+fields. Each show states the
+option afresh.
+
+The on-device audit of a shown prototype and the RTL check that #14126 also proposes are not
+implemented yet.
 
 ## Rejection paths and deterministic first error
 

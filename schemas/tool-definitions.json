@@ -24152,6 +24152,10 @@
           "description": "show only: true (default) replaces other prototypes; false adds this prototype as another window (max 4 on screen; a fifth is refused listing the ones shown). A same-id show replaces only that prototype when false. Needs an Android device advertising prototype_multi_surface_v1; iOS shows one prototype at a time.",
           "type": "boolean"
         },
+        "pseudoLocale": {
+          "description": "show only: true sends a pseudo-localized copy of the spec: every text, label, placeholder, headline, title and span is accented and padded by about 40%, wrapped in [ ], with {bindings} left intact, so truncation and clipping show without a translation. The authored spec, status and patch base are unchanged; patch ops apply to the device copy. Each show states it afresh.",
+          "type": "boolean"
+        },
         "reset": {
           "description": "show only: when the prototype with spec.id is already shown, start it fresh (pager pages from the spec, display re-resolved) instead of replacing it in place",
           "type": "boolean"

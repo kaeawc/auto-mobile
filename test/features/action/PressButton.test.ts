@@ -65,17 +65,32 @@ describe("PressButton", () => {
       hierarchy: { className: "XCUIApplication" },
     });
     const getInstanceSpy = spyOnIosClientInstance(client);
+    const invalidated: string[] = [];
     const launches: string[][] = [];
     try {
-      const pressButton = new PressButton(iosSimulator, null, timer, {
-        executeCommandArgs: async (args) => {
-          launches.push(args);
-          return createExecResult("", "");
+      const pressButton = new PressButton(
+        iosSimulator,
+        null,
+        timer,
+        {
+          executeCommandArgs: async (args) => {
+            launches.push(args);
+            return createExecResult("", "");
+          },
         },
-      });
+        undefined,
+        {
+          iosLockStateInvalidator: {
+            invalidate: (id) => {
+              invalidated.push(id);
+            },
+          },
+        },
+      );
 
       const result = await pressButton.press("home");
       expect(result.success).toBe(true);
+      expect(invalidated).toEqual([iosSimulator.deviceId]);
       expect(launches).toEqual([["launch", iosSimulator.deviceId, "com.apple.springboard"]]);
       expect(client.getPressHomeRequestCount()).toBe(0);
     } finally {
@@ -942,3 +957,27 @@ describe("iOS Home press on the real home screen (#14954, runner reports fallbac
     expect(elsewhere.success).toBe(false);
   });
 });
+
+for (const platform of ["ios", "android"] as const) {
+  test(`${platform} press invalidates iOS lock state only for iOS, including failures`, async () => {
+    const invalidated: string[] = [];
+    const device: BootedDevice = { platform, deviceId: "fake-device", name: "fake" };
+    const press = new PressButton(
+      device,
+      new FakeAdbExecutor(),
+      new FakeTimer(),
+      undefined,
+      undefined,
+      {
+        iosLockStateInvalidator: {
+          invalidate: (id) => {
+            invalidated.push(id);
+          },
+        },
+      },
+    );
+    // Unsupported input completes without touching a transport on either platform.
+    await press.press("unsupported");
+    expect(invalidated).toEqual(platform === "ios" ? [device.deviceId] : []);
+  });
+}

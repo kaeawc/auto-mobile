@@ -489,6 +489,12 @@ describe("IOSCtrlProxyClient auto-setup", function () {
   });
 
   test("skips auto-setup when target simulator is no longer booted", async function () {
+    const mark = spyOn(
+      Object.assign(fakeManager, {
+        markSimulatorShutDownIfNotBooted: async (_reason?: string) => {},
+      }),
+      "markSimulatorShutDownIfNotBooted",
+    );
     // Device lister returns empty — simulator has been shut down
     const lister: BootedDeviceLister = async () => [];
 
@@ -503,13 +509,14 @@ describe("IOSCtrlProxyClient auto-setup", function () {
     const result = await client.ensureConnected();
 
     expect(result).toBe(false);
+    expect(mark).toHaveBeenCalledTimes(1);
     // setup should NOT have been called since the simulator is not booted
     expect(fakeManager.wasMethodCalled("setup:force=true")).toBe(false);
 
     await client.close();
   });
 
-  test("skips auto-setup when a different simulator is booted", async function () {
+  test("missing optional shutdown method preserves simulator_not_booted reason", async function () {
     // A different simulator is booted, but not our target
     const otherDevice: BootedDevice = {
       deviceId: "FFFFFFFF-0000-1111-2222-333333333333",
@@ -526,9 +533,9 @@ describe("IOSCtrlProxyClient auto-setup", function () {
       { serviceManagerFactory: createManagerFactory(), bootedDeviceLister: lister },
     );
 
-    const result = await client.ensureConnected();
+    const result = await client.getLatestHierarchy();
 
-    expect(result).toBe(false);
+    expect(result.unavailableReason).toBe("simulator_not_booted");
     expect(fakeManager.wasMethodCalled("setup:force=true")).toBe(false);
 
     await client.close();

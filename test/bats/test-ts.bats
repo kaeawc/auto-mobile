@@ -3483,6 +3483,55 @@ EOF
   ! grep -q '"test/lint/iosDeviceKindRouting.test.ts"' "$config"
 }
 
+# #15237: Bun REPLACES the config's pathIgnorePatterns with any --path-ignore-patterns
+# flag, so the Windows unit lane (which carried the lane's two flags) ran ~300 iOS files
+# while logging that it skipped them. The skip list and the lane's own patterns must
+# travel in the config alone.
+@test "Windows unit shards carry no --path-ignore-patterns flag that would replace the skip config" {
+  run env RUNNER_OS=Windows PATH="$STUB_BIN:$PATH" AUTOMOBILE_MACOS_ONLY_TESTS=skip TEST_TS_PRINT_CMD=1 \
+    bash "$SCRIPT" unit
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--config=$SHARD_SCRATCH/bunfig.macos-only.toml"* ]]
+  [[ "$output" != *"--path-ignore-patterns"* ]]
+  config="$SHARD_SCRATCH/bunfig.macos-only.toml"
+  grep -q '"\*\*/\*.integration.test.ts"' "$config"
+  grep -q '"test/stress/\*\*"' "$config"
+  grep -q '"test/utils/ios-cmdline-tools/simctl.test.ts"' "$config"
+}
+
+@test "Windows explicit-target and changed unit commands also keep the lane patterns in the config only" {
+  run env RUNNER_OS=Windows PATH="$STUB_BIN:$PATH" AUTOMOBILE_MACOS_ONLY_TESTS=skip TEST_TS_PRINT_CMD=1 \
+    bash "$SCRIPT" unit test/lint/iosDeviceKindRouting.test.ts
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--config=$SHARD_SCRATCH/bunfig.macos-only.toml"* ]]
+  [[ "$output" != *"--path-ignore-patterns"* ]]
+  grep -q '"test/stress/\*\*"' "$SHARD_SCRATCH/bunfig.macos-only.toml"
+}
+
+@test "Windows safe integration shards re-state the macOS-only files next to their own ignore flags" {
+  windows_tier_fixture
+  run env RUNNER_OS=Windows PATH="$STUB_BIN:$PATH" AUTOMOBILE_MACOS_ONLY_TESTS=skip TEST_TS_PRINT_CMD=1 \
+    bash "$SCRIPT" integration
+  [ "$status" -eq 0 ]
+  [ "$(grep -c -- '--shard=' <<< "$output")" -eq 2 ]
+  while IFS= read -r shard_line; do
+    [[ "$shard_line" == *"--path-ignore-patterns $UNSAFE_ONE "* ]]
+    [[ "$shard_line" == *"--path-ignore-patterns test/integration/iosVideoRecordingStartStop.integration.test.ts "* ]]
+  done < <(grep -- '--shard=' <<< "$output")
+}
+
+@test "Bun with every ignore pattern in the config skips iOS files even when handed them by path" {
+  dir="$BATS_TEST_TMPDIR/bunproj2"
+  mkdir -p "$dir/test"
+  printf 'import { test } from "bun:test";\ntest("ios", () => { throw new Error("must not run"); });\n' > "$dir/test/ios.test.ts"
+  printf 'import { test } from "bun:test";\ntest("slow", () => { throw new Error("must not run"); });\n' > "$dir/test/slow.integration.test.ts"
+  printf 'import { test } from "bun:test";\ntest("ok", () => {});\n' > "$dir/test/ok.test.ts"
+  printf '[test]\npathIgnorePatterns = ["**/*.integration.test.ts", "test/ios.test.ts"]\n' > "$dir/skip.toml"
+  run bash -c 'cd "$1" && "$REAL_BUN" test --config=skip.toml' _ "$dir"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"1 pass"* ]]
+}
+
 @test "macOS-only integration files are ignored through the same bunfig" {
   windows_tier_fixture
   run env RUNNER_OS=Windows PATH="$STUB_BIN:$PATH" AUTOMOBILE_MACOS_ONLY_TESTS=skip TEST_TS_PRINT_CMD=1 \

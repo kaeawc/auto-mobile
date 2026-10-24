@@ -95,7 +95,7 @@ describe("slice 2 registered handler cancellation", () => {
         const probe = {
           read: async () => {
             reads++;
-            return { locked: true, keyguardShowing: true };
+            return { kind: "known" as const, lock: { locked: true, keyguardShowing: true } };
           },
         };
         const shake = new Shake(device, adb, timer);
@@ -296,7 +296,9 @@ describe("slice 2 registered handler cancellation", () => {
       new WakeAndUnlock(device, adb, {
         timer,
         iosUnlocker: unlocker,
-        iosLockStateProbe: { read: async () => ({ locked: true, keyguardShowing: true }) },
+        iosLockStateProbe: {
+          read: async () => ({ kind: "known", lock: { locked: true, keyguardShowing: true } }),
+        },
       });
     try {
       const pending = handler("wakeAndUnlock")(device, {}, undefined, controller.signal);

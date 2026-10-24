@@ -285,6 +285,11 @@ export interface TeardownContext {
   /** Android runtime and pool state captured by the first teardown booted scan. */
   initialScan: TeardownInitialAndroidScan;
   /**
+   * Unnamed foreign emulators resolution read and cleared (they ran a different AVD). Their serials
+   * are re-read before the image is deleted, even if discovery stops marking them foreign by then.
+   */
+  clearedForeignSerials?: Set<string>;
+  /**
    * `force` exists to escape wedged emulator consoles, so every Android
    * discovery run for THIS teardown must stay serial-only rather than
    * re-probing consoles one call site at a time (#6946). Computed once at

@@ -1,3 +1,4 @@
+import { SimulatorPrebootProfile } from "./SimulatorPrebootProfile";
 import {
   SIMCTL_COMMAND_TIMEOUT_MS,
   SHUTDOWN_SETTLE_MS,
@@ -25,6 +26,7 @@ import { SimulatorStillShuttingDownError } from "./SimulatorStillShuttingDownErr
 import { isIosSimulatorAlreadyStoppedError } from "./simulatorStateErrors";
 
 export interface SimCtlShutdownContext {
+  prebootProfile?: Pick<SimulatorPrebootProfile, "removeHostState">;
   executeCommandArgs(args: string[], timeoutMs?: number, signal?: AbortSignal): Promise<ExecResult>;
   invalidateDeviceListCache(): void;
   timer: Timer;
@@ -56,7 +58,10 @@ export interface SimCtlShutdownContext {
   ) => Promise<ExecResult>;
 }
 export class SimCtlShutdown {
-  constructor(private readonly context: SimCtlShutdownContext) {}
+  private readonly prebootProfile: Pick<SimulatorPrebootProfile, "removeHostState">;
+  constructor(private readonly context: SimCtlShutdownContext) {
+    this.prebootProfile = context.prebootProfile ?? new SimulatorPrebootProfile();
+  }
 
   async shutdownAfterFailedStart(udid: string, lease: SimulatorBootLease): Promise<void> {
     try {
@@ -421,6 +426,15 @@ export class SimCtlShutdown {
         options.signal,
         true,
       );
+      try {
+        await this.prebootProfile.removeHostState(udid);
+      } catch (error) {
+        // Host-state cleanup is best effort after the simulator itself has been deleted.
+        logger.warn(
+          `Failed to clean up deleted simulator host state: ${errorMessage(error)}`,
+          error,
+        );
+      }
       lease.state.lastBootSucceeded = false;
       lease.state.ownerToken = undefined;
       this.context.invalidateDeviceListCache();

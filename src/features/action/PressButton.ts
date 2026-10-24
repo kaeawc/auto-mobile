@@ -1,3 +1,5 @@
+import { getIosLockStateCache } from "../observe/ios/IosLockStateCacheRegistry";
+import type { IosLockStateInvalidator } from "../observe/ios/CachedIosLockStateProbe";
 import type { DispatchedRequestHold } from "../../daemon/dispatchedRequestHold";
 import type { IOSDispatchResult } from "../observe/ios/CtrlProxyDispatch";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
@@ -50,6 +52,7 @@ export function unsupportedIosButtonResult(button: string, error: string): Press
 
 /** CtrlProxy slices a button press uses; each defaults to the device's real client. */
 export interface PressButtonCtrlProxyOverrides {
+  iosLockStateInvalidator?: IosLockStateInvalidator;
   globalActionClient?: Pick<AndroidCtrlProxyClient, "requestGlobalAction">;
   frameContextClient?: Pick<AndroidCtrlProxyClient, "validateFrameContext">;
   /** Capability check plus global-action dispatch for the Android system actions (#14095). */
@@ -161,10 +164,13 @@ export class PressButton extends BaseVisualChange {
   ) {
     super(device, adb, timer, undefined, collaborators);
     this.device = device;
+    this.iosLockStateInvalidator = collaborators.iosLockStateInvalidator;
     this.globalActionClient = collaborators.globalActionClient;
     this.frameContextClient = collaborators.frameContextClient;
     this.systemActionClient = collaborators.systemActionClient;
   }
+
+  private iosLockStateInvalidator?: IosLockStateInvalidator;
 
   private defaultCtrlProxyClient(): ReturnType<typeof AndroidCtrlProxyClient.getInstance> {
     return AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
@@ -344,6 +350,9 @@ export class PressButton extends BaseVisualChange {
         error: `Failed to press button: ${errorMessage(error)}`,
       };
     } finally {
+      if (this.device.platform === "ios") {
+        (this.iosLockStateInvalidator ?? getIosLockStateCache()).invalidate(this.device.deviceId);
+      }
       if (isNavigationPressButton(button)) {
         this.windowCacheInvalidator.invalidate(this.device, true);
       }

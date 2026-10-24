@@ -1,4 +1,5 @@
 import { z as specZ, type ZodTypeAny } from "zod";
+import { PROTOVIEWER_DEFAULT_TIMEOUT_MS } from "../../features/prototype/protoViewer/AndroidProtoViewer";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { z } from "zod/v4";
 import { deleteInternalToolParams } from "../../daemon/constants";
@@ -238,12 +239,13 @@ export const prototypeSchema = addDeviceTargetingToSchema(
           "save",
           "listSaved",
           "deleteSaved",
+          "open",
           "clearStorage",
         ],
         {
           error: (issue) =>
             getRemovedToolActionHint(PROTOTYPE_TOOL_NAME, issue.input) ??
-            "action must be one of show, patch, dismiss, status, inspect or awaitEvent; saved actions: save, listSaved or deleteSaved; storage action: clearStorage",
+            "action must be one of show, patch, dismiss, status, inspect or awaitEvent; saved actions: save, listSaved, deleteSaved or open; storage action: clearStorage",
         },
       ),
       spec: specInput
@@ -302,6 +304,12 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .describe(
           "show only: true (default) replaces other prototypes; false adds this prototype as another window (max 4 on screen; a fifth is refused listing the ones shown). A same-id show replaces only that prototype when false. Needs an Android device advertising prototype_multi_surface_v1; iOS shows one prototype at a time.",
         ),
+      pseudoLocale: z
+        .boolean()
+        .optional()
+        .describe(
+          "show only: true sends a pseudo-localized copy of the spec: every text, label, placeholder, headline, title and span is accented and padded by about 40%, wrapped in [ ], with {bindings} left intact, so truncation and clipping show without a translation. The authored spec, status and patch base are unchanged; patch ops apply to the device copy. Each show states it afresh.",
+        ),
       reset: z
         .boolean()
         .optional()
@@ -319,7 +327,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .min(1)
         .optional()
         .describe(
-          "Prototype id required for dismiss (unless all: true), awaitEvent, deleteSaved and clearStorage",
+          "Prototype id required for dismiss (unless all: true), awaitEvent, deleteSaved and clearStorage; for open, the ProtoViewer library id (viewer.libraryId) a save returned",
         ),
       assets: assetsInput
         .optional()
@@ -331,7 +339,9 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .min(1)
         .max(120)
         .optional()
-        .describe("save only: label, defaults to spec.id"),
+        .describe(
+          "save only: label, defaults to spec.id; ProtoViewer takes one line without control or direction-override characters",
+        ),
       icon: z
         .string()
         .min(1)
@@ -380,7 +390,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .positive()
         .optional()
         .describe(
-          `Device request timeout; awaitEvent defaults to ${DEFAULT_PROTOTYPE_EVENT_TIMEOUT_MS} ms, maximum ${MAX_PROTOTYPE_EVENT_TIMEOUT_MS} ms; timeout is a successful empty result.`,
+          `Device request timeout; awaitEvent defaults to ${DEFAULT_PROTOTYPE_EVENT_TIMEOUT_MS} ms, maximum ${MAX_PROTOTYPE_EVENT_TIMEOUT_MS} ms; timeout is a successful empty result. save and open through ProtoViewer wait up to ${PROTOVIEWER_DEFAULT_TIMEOUT_MS} ms by default, maximum ${MAX_PROTOTYPE_EVENT_TIMEOUT_MS} ms.`,
         ),
     })
     .strict(),
@@ -393,6 +403,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     "display",
     "reset",
     "replaceOthers",
+    "pseudoLocale",
     "appearance",
     "eventName",
     "kind",
@@ -407,11 +418,21 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     "removeIcon",
   ] as const;
   const allowed: Record<typeof value.action, readonly string[]> = {
-    show: ["spec", "specPath", "display", "reset", "appearance", "assets", "replaceOthers"],
+    show: [
+      "spec",
+      "specPath",
+      "display",
+      "reset",
+      "appearance",
+      "assets",
+      "replaceOthers",
+      "pseudoLocale",
+    ],
     patch: ["id", "ops", "baseRevision"],
     save: ["spec", "assets", "label", "icon", "pin", "autoConfirm"],
     listSaved: [],
     deleteSaved: ["id", "removeIcon"],
+    open: ["id"],
     clearStorage: ["id"],
     dismiss: ["id", "all"],
     status: [],
@@ -439,6 +460,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
   if (value.action === "awaitEvent") {
     validateAwaitEventInput(value, ctx);
   }
+  validateProtoViewerTimeout(value, ctx);
   if (value.action === "show" && (value.spec === undefined) === (value.specPath === undefined)) {
     ctx.addIssue({
       code: "custom",
@@ -457,6 +479,21 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     });
   }
 });
+
+/** save and open may wait on ProtoViewer; the daemon budgets at most the awaitEvent maximum. */
+function validateProtoViewerTimeout(
+  value: { action: string; timeoutMs?: number },
+  ctx: z.RefinementCtx,
+): void {
+  const waits = value.action === "save" || value.action === "open";
+  if (waits && (value.timeoutMs ?? 0) > MAX_PROTOTYPE_EVENT_TIMEOUT_MS) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["timeoutMs"],
+      message: `${value.action} timeoutMs must not exceed ${MAX_PROTOTYPE_EVENT_TIMEOUT_MS}`,
+    });
+  }
+}
 
 function validateAwaitEventInput(
   value: z.infer<typeof prototypeSchema>,
@@ -589,6 +626,16 @@ const prototypeEventOutputSchema = z.object({
 });
 export const prototypeOutputSchema = z.object({
   saved: z.object({ id: z.string(), slug: z.string(), replaced: z.boolean() }).optional(),
+  viewer: z
+    .object({
+      app: z.literal("protoviewer"),
+      libraryId: z.string().describe("Pass as id to open to launch this entry."),
+      label: z.string(),
+    })
+    .optional()
+    .describe(
+      "save and open on Android with ProtoViewer installed: the ProtoViewer library entry. The entry is imported: ProtoViewer sets its source, keeps its network off until the user allows it, and it is not attached to this host.",
+    ),
   savedPrototypes: z
     .array(
       z.object({

@@ -84,6 +84,13 @@ describe("simulator workload profile reconciliation (#6694)", () => {
     ]);
     expect(result.remainingDrift).toEqual(result.drift);
     expect(result.applied).toBeUndefined();
+    expect(result.disabledResources).toEqual([
+      expect.objectContaining({
+        resource: "widgets",
+        automobileImpact: expect.any(Array),
+        appImpact: expect.any(Array),
+      }),
+    ]);
     expect(simctl.mutations()).toEqual([]);
     expect(store.writes).toBe(0);
   });
@@ -99,6 +106,10 @@ describe("simulator workload profile reconciliation (#6694)", () => {
       ["spawn", udid, "launchctl", "bootout", `system/${label}`],
     ]);
     expect(result.observed.resources.wallpaperRendering.state).toBe("disabled");
+    expect(result.disabledResources?.map((entry) => entry.resource)).toEqual([
+      "wallpaperRendering",
+      "widgets",
+    ]);
     // Widgets were disabled by someone else, so AutoMobile records only its own change.
     expect((await store.get(result.identity))?.resources).toEqual({
       wallpaperRendering: "disabled",
@@ -121,6 +132,7 @@ describe("simulator workload profile reconciliation (#6694)", () => {
     await reconciler.reconcile({ ...request, repair: true });
     erase();
     const report = await reconciler.reconcile(request);
+    expect(report.disabledResources).toBeUndefined();
     expect(report.drift.map(({ resource, kind }) => [resource, kind])).toEqual([
       ["wallpaperRendering", "missingRequested"],
       ["widgets", "missingRequested"],

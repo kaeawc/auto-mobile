@@ -144,7 +144,7 @@ export abstract class IosCtrlProxyDelegatingFacade extends IosCtrlProxyDiagnosti
     };
   }
 
-  private createHierarchyDelegateContext(): HierarchyDelegateContext {
+  protected createHierarchyDelegateContext(): HierarchyDelegateContext {
     return {
       ...this.createDelegateContext(),
       getLastConnectFailure: () => this.lastConnectFailure,
@@ -820,6 +820,12 @@ export abstract class IosCtrlProxyDelegatingFacade extends IosCtrlProxyDiagnosti
     ...args: Parameters<CtrlProxyStorage["removePreference"]>
   ): ReturnType<CtrlProxyStorage["removePreference"]> {
     return this.storage.removePreference(...args);
+  }
+
+  async deleteKeychainItemForIos(
+    ...args: Parameters<CtrlProxyStorage["deleteKeychainItemForIos"]>
+  ): ReturnType<CtrlProxyStorage["deleteKeychainItemForIos"]> {
+    return this.storage.deleteKeychainItemForIos(...args);
   }
 
   async clearPreferenceStore(

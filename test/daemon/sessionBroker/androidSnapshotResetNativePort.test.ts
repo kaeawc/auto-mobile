@@ -1,3 +1,4 @@
+import { ActionableError } from "../../../src/models/ActionableError";
 import { AdbCommandTimeoutError } from "../../../src/utils/android-cmdline-tools/AdbCommandTimeoutError";
 import { SETTINGS_TIMEOUT, CTRL_PROXY_FAILED } from "./fixtures/androidResetLoadTimeouts";
 import { describe, expect, test } from "bun:test";
@@ -15,7 +16,7 @@ import { FakeAvdConfigReader } from "../../fakes/FakeAvdConfigReader";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { ANDROID_RESET_DEVICE } from "./fixtures/androidReset";
-import { drainUntil } from "../../helpers/fakeTimerStepping";
+import { drainMicrotasks, drainUntil } from "../../helpers/fakeTimerStepping";
 import { resolveRunningAvdNameOnce } from "../../../src/utils/android-cmdline-tools/runningAvdName";
 import { DeviceClockRestoreRegistry } from "../../../src/features/utility/DeviceClock";
 import { FakeEmulatorProcessStopper } from "../../fakes/FakeEmulatorProcessStopper";
@@ -357,10 +358,138 @@ describe("NativeAndroidSnapshotResetPort", () => {
         step.timeoutMs,
         null,
         ANDROID_RESET_DEVICE.deviceId,
-        step.signal,
+        expect.any(AbortSignal),
         { skipWakeAndUnlock: true },
       ],
     ]);
+  });
+
+  describe("restore readiness against emulator death (#15177)", () => {
+    function pendingRestore() {
+      const rig = nativeRig();
+      rig.step.timeoutMs = 600_000;
+      const readinessSignals: AbortSignal[] = [];
+      rig.dependencies.emulator.waitForEmulatorReady = (...args) => {
+        const signal = args[4];
+        if (signal) {
+          readinessSignals.push(signal);
+        }
+        return new Promise((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+        });
+      };
+      const match = {
+        kind: "match" as const,
+        pid: 4242,
+        avdName: ANDROID_RESET_DEVICE.name,
+        port: 5554,
+        command: "qemu-system",
+      };
+      const settled: { error?: unknown; done: boolean } = { done: false };
+      const start = () => {
+        const restore = rig.port.waitForRestore(ANDROID_RESET_DEVICE, rig.step);
+        void restore.then(
+          () => {
+            settled.done = true;
+          },
+          (error: unknown) => {
+            settled.error = error;
+            settled.done = true;
+          },
+        );
+        return restore;
+      };
+      const tick = async (ms: number) => {
+        await drainUntil(() => rig.timer.getPendingSleeps().length > 0, {
+          description: "liveness sleep",
+        });
+        rig.timer.advanceTime(ms);
+        await drainMicrotasks(50);
+      };
+      return { ...rig, readinessSignals, match, settled, start, tick };
+    }
+
+    test("a dead emulator process fails the wait promptly instead of waiting out the budget", async () => {
+      const { processStopper, match, settled, start, tick, readinessSignals, timer } =
+        pendingRestore();
+      processStopper.identities = [match, { kind: "absent" }, { kind: "absent" }];
+      const restore = start();
+      const startedAt = timer.now();
+      await tick(500);
+      expect(settled.done).toBe(false);
+      await tick(1000);
+      expect(settled.done).toBe(false);
+      await tick(2000);
+      await expect(restore).rejects.toThrow("exited during snapshot restore");
+      expect(settled.error).toBeInstanceOf(ActionableError);
+      expect(timer.now() - startedAt).toBe(3500);
+      expect(readinessSignals[0]?.aborted).toBe(true);
+    });
+
+    test("an identity mismatch on the serial counts as the owned process being gone", async () => {
+      const { processStopper, settled, start, tick } = pendingRestore();
+      const mismatch = {
+        kind: "mismatch" as const,
+        pid: 7,
+        runningAvdName: "foreign",
+        port: 5554,
+        command: "qemu-system",
+      };
+      processStopper.identities = [mismatch, { kind: "absent" }];
+      const restore = start();
+      await tick(500);
+      await tick(1000);
+      await expect(restore).rejects.toThrow("exited during snapshot restore");
+      expect(settled.done).toBe(true);
+    });
+
+    test("one torn process-table read does not abort the wait", async () => {
+      const { processStopper, match, settled, start, tick, readinessSignals } = pendingRestore();
+      processStopper.identities = [{ kind: "absent" }, match, { kind: "absent" }];
+      void start();
+      await tick(500);
+      await tick(1000);
+      await tick(2000);
+      expect(settled.done).toBe(false);
+      expect(readinessSignals[0]?.aborted).toBe(false);
+    });
+
+    test("an unreadable process table never proves death", async () => {
+      const { processStopper, settled, start, tick } = pendingRestore();
+      processStopper.identity = { kind: "unreadable", detail: "ps failed" };
+      void start();
+      await tick(500);
+      await tick(1000);
+      await tick(2000);
+      await tick(2000);
+      expect(settled.done).toBe(false);
+    });
+
+    test("losing ownership during the wait fails it", async () => {
+      const { processStopper, match, loseOwnership, start, tick } = pendingRestore();
+      processStopper.identity = match;
+      const restore = start();
+      await tick(500);
+      loseOwnership();
+      await tick(1000);
+      await expect(restore).rejects.toThrow("ownership lost");
+    });
+
+    test("readiness completing stops the liveness watch", async () => {
+      const { processStopper, port, step, dependencies, timer } = nativeRig();
+      let resolveReady: (() => void) | undefined;
+      dependencies.emulator.waitForEmulatorReady = () =>
+        new Promise((resolve) => {
+          resolveReady = () => resolve(ANDROID_RESET_DEVICE);
+        });
+      const restore = port.waitForRestore(ANDROID_RESET_DEVICE, step);
+      await drainUntil(() => resolveReady !== undefined, { description: "readiness started" });
+      resolveReady?.();
+      await restore;
+      timer.advanceTime(10_000);
+      await drainMicrotasks(50);
+      expect(processStopper.identifyCalls).toHaveLength(0);
+    });
   });
 
   test("replacement releases launch lifetime before readiness and survives later deadline abort", async () => {

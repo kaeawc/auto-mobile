@@ -171,6 +171,8 @@ export interface RunnerAccessibilityAuditIssue {
 }
 
 export interface WebSocketMessage {
+  outcome?: string;
+  deletedScope?: import("./CtrlProxyStorage").KeychainItemSelector | null;
   type: string;
   timestamp?: number;
   requestId?: string;

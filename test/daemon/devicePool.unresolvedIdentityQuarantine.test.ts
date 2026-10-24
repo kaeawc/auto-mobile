@@ -67,6 +67,19 @@ describe("DevicePool", () => {
       await devicePool.refreshDevices();
     };
 
+    test("refresh ignores foreign placeholders and resolved names without changing identity", async () => {
+      const device = poolDevice("emulator-5610", "Pixel_8_API_35");
+      await initializeLiveDevices([device]);
+      const pooled = requirePooledDevice(devicePool, device.deviceId);
+      const before = { ...pooled };
+      await refreshWith([{ ...unresolved(device.deviceId), foreignOwned: true, observedAt: 20 }]);
+      expect(pooled).toEqual(before);
+      pooled.identityUnresolved = true;
+      await refreshWith([{ ...device, foreignOwned: true, observedAt: 21 }]);
+      expect(pooled.identityUnresolved).toBe(true);
+      expect(pooled.identityObservedAt).toBe(before.identityObservedAt);
+    });
+
     test("immediately quarantines a live entry without a confirmed AVD identity", async () => {
       const device = poolDevice("emulator-5554", "Pixel_8_API_35");
       await initializeLiveDevices([device]);

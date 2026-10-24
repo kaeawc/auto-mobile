@@ -272,7 +272,16 @@ describe("SDK capability transport uncertainty", () => {
       });
       const warn = spyOn(logger, "warn").mockImplementation(() => {});
       try {
-        await client.syncNetworkStateFromHost({ deadlineMs: 100 });
+        if (boundary === "deadline") {
+          // The app has no SDK and nothing was ever delivered, so there is nothing to clear.
+          await expect(
+            client.syncNetworkStateFromHost({ deadlineMs: 100 }),
+          ).resolves.toBeUndefined();
+        } else {
+          await expect(client.syncNetworkStateFromHost({ deadlineMs: 100 })).rejects.toThrow(
+            "probe failed",
+          );
+        }
         expect(frames).toContainEqual(
           expect.objectContaining({
             type: "set_network_error_simulation",
@@ -947,4 +956,51 @@ describe("best-effort SDK refresh diagnostics", () => {
       }
     },
   );
+});
+
+test.each([
+  "sent",
+  "unconfirmed",
+  "noCapability",
+  "disabled",
+  "superseded",
+  "failed",
+  "throw",
+  "simulation-false",
+] as const)("release network sync outcome %s always syncs simulation", async (outcome) => {
+  const timer = new FakeTimer();
+  const client = IOSCtrlProxyClient.createForTesting(
+    { deviceId: "outcome-test", platform: "ios", name: "fake" },
+    8765,
+    () => new FakeOpenSocket(),
+    timer,
+  );
+  const frames: string[] = [];
+  const send = spyOn(client, "sendMessage").mockImplementation((data) => {
+    frames.push(JSON.parse(data).type);
+    return outcome !== "simulation-false";
+  });
+  const sync = spyOn(client, "syncNetworkMockRulesIfAvailable").mockImplementation(async () => {
+    if (outcome === "throw") {
+      throw new Error("probe exploded");
+    }
+    if (outcome === "unconfirmed") {
+      return { outcome: "sent", report: { status: "unconfirmed" } };
+    }
+    return { outcome: outcome === "simulation-false" ? "sent" : outcome };
+  });
+  try {
+    const pending = client.syncNetworkStateFromHost();
+    // noCapability with no rules ever delivered has nothing to clear (#15179).
+    if (["failed", "throw", "superseded", "simulation-false"].includes(outcome)) {
+      await expect(pending).rejects.toThrow("iOS network");
+    } else {
+      await expect(pending).resolves.toBeUndefined();
+    }
+    expect(frames).toContain("set_network_error_simulation");
+  } finally {
+    send.mockRestore();
+    sync.mockRestore();
+    await client.close();
+  }
 });

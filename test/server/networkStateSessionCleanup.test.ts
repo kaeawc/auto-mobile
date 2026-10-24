@@ -1,13 +1,18 @@
+import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { drainUntil } from "../helpers/fakeTimerStepping";
-import { beforeEach, describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, test, spyOn } from "bun:test";
 import { NetworkState } from "../../src/utils/NetworkState";
 import { buildNetworkMockRules } from "../../src/utils/networkMockRules";
 import {
   createOwnerlessNetworkStateAcquisitionCleanup,
   registerNetworkStateSessionCleanup,
   type NetworkDeviceStatePusher,
+  defaultNetworkDeviceStatePusher,
 } from "../../src/daemon/networkStateSessionCleanup";
 import { FakeSessionCleanupManager } from "../fakes/FakeSessionCleanupManager";
+import { FakeOpenSocket } from "../fakes/FakeOpenSocket";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 /** Records, per device, the rules the device would receive when the push runs. */
@@ -49,6 +54,7 @@ describe("registerNetworkStateSessionCleanup (#10061)", () => {
   let state: NetworkState;
   let manager: FakeSessionCleanupManager;
   let pusher: FakePusher;
+  let gaps: Array<{ sessionId: string; reason: string }>;
 
   beforeEach(() => {
     state = new NetworkState({
@@ -57,7 +63,14 @@ describe("registerNetworkStateSessionCleanup (#10061)", () => {
     });
     manager = new FakeSessionCleanupManager();
     pusher = new FakePusher(state);
-    registerNetworkStateSessionCleanup(manager, { state: () => state, pusher });
+    gaps = [];
+    registerNetworkStateSessionCleanup(manager, {
+      state: () => state,
+      pusher,
+      gapMarkerFor: (sessionId) => (reason) => {
+        gaps.push({ sessionId, reason });
+      },
+    });
   });
 
   test("release cleanup cancels an unanswered SDK push within the ten-second cap", async () => {
@@ -78,6 +91,9 @@ describe("registerNetworkStateSessionCleanup (#10061)", () => {
       state: () => state,
       pusher: boundedPusher,
       timer,
+      gapMarkerFor: (sessionId) => (reason) => {
+        gaps.push({ sessionId, reason });
+      },
     });
     state.addMock(DEVICE_A, rule("a.com"), "session-1");
     boundedManager.release("session-1", DEVICE_A);
@@ -94,6 +110,12 @@ describe("registerNetworkStateSessionCleanup (#10061)", () => {
     await cleanup;
     expect(signal?.aborted).toBe(true);
     expect(timer.getPendingTimeoutCount()).toBe(0);
+    expect(gaps).toEqual([
+      {
+        sessionId: "session-1",
+        reason: expect.stringContaining("Network cleanup deadline expired"),
+      },
+    ]);
   });
 
   test("releasing the owning session empties the device store and pushes the empty set", async () => {
@@ -106,6 +128,7 @@ describe("registerNetworkStateSessionCleanup (#10061)", () => {
     expect(state.getSimulation(DEVICE_A)).toBeNull();
     expect(manager.pendingCleanups.map((entry) => entry.deviceId)).toEqual([DEVICE_A]);
     await manager.pendingCleanups[0].cleanup;
+    expect(gaps).toEqual([]);
     expect(pusher.pushes).toEqual([{ deviceId: DEVICE_A, ruleIds: [], simulating: false }]);
   });
 
@@ -117,6 +140,7 @@ describe("registerNetworkStateSessionCleanup (#10061)", () => {
     expect(state.getSimulation(DEVICE_A)).toBeNull();
     expect(pusher.pushes).toEqual([]);
     expect(manager.pendingCleanups).toEqual([]);
+    expect(gaps).toEqual([]);
   });
 
   test("a second session's device keeps its rules when the first session is released", async () => {
@@ -210,7 +234,37 @@ describe("registerNetworkStateSessionCleanup (#10061)", () => {
     manager.release("session-1", DEVICE_A);
 
     expect(state.getMocks(DEVICE_A).size).toBe(0);
-    await expect(manager.pendingCleanups[0].cleanup).resolves.toBeUndefined();
+    await expect(
+      manager.pendingCleanups[0].cleanup.then((value) => {
+        expect(gaps).toEqual([
+          { sessionId: "session-1", reason: expect.stringContaining(`${DEVICE_A}: socket closed`) },
+        ]);
+        return value;
+      }),
+    ).resolves.toBeUndefined();
+  });
+  test("unbound failure marks its session", async () => {
+    pusher.failWith = new Error("unbound failed");
+    state.addMock(DEVICE_A, rule("a.com"), "session-1");
+    manager.unbind("session-1", DEVICE_A);
+    await manager.pendingCleanups[0]!.cleanup;
+    expect(gaps).toEqual([
+      { sessionId: "session-1", reason: expect.stringContaining("unbound failed") },
+    ]);
+  });
+  test("a throwing gap callback cannot reject cleanup", async () => {
+    const local = new FakeSessionCleanupManager();
+    registerNetworkStateSessionCleanup(local, {
+      state: () => state,
+      pusher,
+      gapMarkerFor: () => () => {
+        throw new Error("marker failed");
+      },
+    });
+    pusher.failWith = new Error("push failed");
+    state.addMock(DEVICE_A, rule("a.com"), "session-1");
+    local.release("session-1", DEVICE_A);
+    await expect(local.pendingCleanups[0]!.cleanup).resolves.toBeUndefined();
   });
 });
 
@@ -271,3 +325,201 @@ describe("createOwnerlessNetworkStateAcquisitionCleanup (#11130)", () => {
     expect(acquisitionCleanups).toEqual([]);
   });
 });
+
+test("default pusher rejects an Android false delivery result", async () => {
+  const client = AndroidCtrlProxyClient.createForTesting(
+    { deviceId: "fake-android", platform: "android", name: "fake" },
+    new FakeAdbExecutor(),
+    {
+      timer: new FakeTimer(),
+      webSocketFactory: () => {
+        throw new Error("no socket in unit test");
+      },
+    },
+  );
+  const existing = spyOn(AndroidCtrlProxyClient, "getExistingInstance").mockReturnValue(client);
+  const sync = spyOn(client, "syncNetworkStateToDevice").mockReturnValue(false);
+  try {
+    await expect(defaultNetworkDeviceStatePusher.push("fake-android")).rejects.toThrow(
+      "Android network state was not delivered to fake-android",
+    );
+  } finally {
+    existing.mockRestore();
+    sync.mockRestore();
+  }
+});
+
+test("failed ownerless acquisition never marks a session gap", async () => {
+  const state = new NetworkState({
+    timer: new FakeTimer(),
+    notifier: { notifyResourceUpdated: () => {} },
+  });
+  const pusher = new FakePusher(state);
+  pusher.failWith = new Error("ownerless failed");
+  const gaps: string[] = [];
+  const pending: Promise<unknown>[] = [];
+  const acquire = createOwnerlessNetworkStateAcquisitionCleanup(
+    {
+      registerAcquisitionDeviceCleanup: (_deviceId, cleanup) => {
+        pending.push(cleanup);
+      },
+    },
+    {
+      state: () => state,
+      pusher,
+      timer: new FakeTimer(),
+      gapMarkerFor: (sessionId) => () => {
+        gaps.push(sessionId);
+      },
+    },
+  );
+  state.addMock(DEVICE_A, rule("a.com"));
+  acquire(DEVICE_A);
+  await pending[0];
+  expect(gaps).toEqual([]);
+});
+
+const IOS_UDID = "03731F37-F704-4176-8C1E-0A5A1E5104FA";
+
+function createAndroidClientFor(deviceId: string): AndroidCtrlProxyClient {
+  return AndroidCtrlProxyClient.createForTesting(
+    { deviceId, platform: "android", name: "fake" },
+    new FakeAdbExecutor(),
+    {
+      timer: new FakeTimer(),
+      webSocketFactory: () => {
+        throw new Error("no socket in unit test");
+      },
+    },
+  );
+}
+
+test("default pusher lets the iOS push decide when a stray Android client shares the iOS UDID (#15179)", async () => {
+  const stray = createAndroidClientFor(IOS_UDID);
+  const ios = IOSCtrlProxyClient.createForTesting(
+    { deviceId: IOS_UDID, platform: "ios", name: "fake" },
+    8765,
+    () => new FakeOpenSocket(),
+    new FakeTimer(),
+  );
+  const android = spyOn(AndroidCtrlProxyClient, "getExistingInstance").mockReturnValue(stray);
+  const iosExisting = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue(ios);
+  const androidSync = spyOn(stray, "syncNetworkStateToDevice").mockReturnValue(false);
+  const iosSync = spyOn(ios, "syncNetworkStateFromHost").mockResolvedValue(undefined);
+  try {
+    await expect(defaultNetworkDeviceStatePusher.push(IOS_UDID)).resolves.toBeUndefined();
+    expect(androidSync).not.toHaveBeenCalled();
+    expect(iosSync).toHaveBeenCalledTimes(1);
+
+    iosSync.mockRejectedValue(new Error("iOS network mock rules were not delivered"));
+    const failure = await defaultNetworkDeviceStatePusher.push(IOS_UDID).catch((e: Error) => e);
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).not.toContain("Android");
+  } finally {
+    android.mockRestore();
+    iosExisting.mockRestore();
+    androidSync.mockRestore();
+    iosSync.mockRestore();
+  }
+});
+
+test("default pusher still runs the Android push when a stray iOS client shares an Android serial", async () => {
+  const android = createAndroidClientFor("emulator-5554");
+  const stray = IOSCtrlProxyClient.createForTesting(
+    { deviceId: "emulator-5554", platform: "ios", name: "fake" },
+    8765,
+    () => new FakeOpenSocket(),
+    new FakeTimer(),
+  );
+  const androidExisting = spyOn(AndroidCtrlProxyClient, "getExistingInstance").mockReturnValue(
+    android,
+  );
+  const iosExisting = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue(stray);
+  const androidSync = spyOn(android, "syncNetworkStateToDevice").mockReturnValue(false);
+  const iosSync = spyOn(stray, "syncNetworkStateFromHost").mockResolvedValue(undefined);
+  try {
+    await expect(defaultNetworkDeviceStatePusher.push("emulator-5554")).rejects.toThrow(
+      "Android network state was not delivered to emulator-5554",
+    );
+    expect(androidSync).toHaveBeenCalledTimes(1);
+  } finally {
+    androidExisting.mockRestore();
+    iosExisting.mockRestore();
+    androidSync.mockRestore();
+    iosSync.mockRestore();
+  }
+});
+
+test("default pusher never falls back to an Android client for an iOS UDID", async () => {
+  const stray = createAndroidClientFor(IOS_UDID);
+  const android = spyOn(AndroidCtrlProxyClient, "getExistingInstance").mockReturnValue(stray);
+  const ios = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue(null);
+  const androidSync = spyOn(stray, "syncNetworkStateToDevice").mockReturnValue(true);
+  try {
+    await expect(defaultNetworkDeviceStatePusher.push(IOS_UDID)).rejects.toThrow(
+      `No live CtrlProxy client to clear network state on ${IOS_UDID}`,
+    );
+    expect(androidSync).not.toHaveBeenCalled();
+  } finally {
+    android.mockRestore();
+    ios.mockRestore();
+    androidSync.mockRestore();
+  }
+});
+
+test("default pusher rejects when neither platform has a live client", async () => {
+  const android = spyOn(AndroidCtrlProxyClient, "getExistingInstance").mockReturnValue(null);
+  const ios = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue(null);
+  try {
+    await expect(defaultNetworkDeviceStatePusher.push("missing-client")).rejects.toThrow(
+      "No live CtrlProxy client to clear network state on missing-client",
+    );
+  } finally {
+    android.mockRestore();
+    ios.mockRestore();
+  }
+});
+
+test.each(["release", "unbind"] as const)(
+  "%s captures gap ids before a non-cooperative push settles",
+  async (event) => {
+    const timer = new FakeTimer();
+    const state = new NetworkState({ timer, notifier: { notifyResourceUpdated: () => {} } });
+    const manager = new FakeSessionCleanupManager();
+    let candidates = ["derived", "owner", "base"];
+    const gaps: string[] = [];
+    let captured = false;
+    registerNetworkStateSessionCleanup(manager, {
+      state: () => state,
+      timer,
+      gapMarkerFor: (sessionId) => {
+        expect(sessionId).toBe("derived");
+        expect(manager.pendingCleanups).toHaveLength(0);
+        captured = true;
+        const ids = [...candidates];
+        return () => {
+          gaps.push(...ids);
+        };
+      },
+      pusher: {
+        push: () => {
+          expect(captured).toBe(true);
+          return new Promise<void>(() => {});
+        },
+      },
+    });
+    state.addMock(DEVICE_A, rule("a.com"), "derived");
+    manager[event]("derived", DEVICE_A);
+    expect(captured).toBe(true);
+    candidates = [];
+    let settled = false;
+    const cleanup = manager.pendingCleanups[0]!.cleanup.then(() => {
+      settled = true;
+    });
+    timer.advanceTime(10_000);
+    await drainUntil(() => settled, { description: "non-cooperative cleanup cap" });
+    await cleanup;
+    expect(gaps).toEqual(["derived", "owner", "base"]);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  },
+);

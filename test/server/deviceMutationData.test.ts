@@ -1,3 +1,7 @@
+import {
+  opaqueIntentKey,
+  opaqueForcesFallback,
+} from "../../src/daemon/sessionBroker/mutations/types";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
 import type {
@@ -193,7 +197,25 @@ describe("data mutation identities", () => {
   ])("mutating or unproven SQL journals opaque database intent: %s", (query) => {
     expect(
       deviceToolMutations("sqlQuery", { appId: "com.example", databasePath: "db", query }),
-    ).toEqual([{ kind: "opaque", key: JSON.stringify(["sql", "com.example", "db"]) }]);
+    ).toEqual([{ kind: "opaque", key: opaqueIntentKey("sql", "com.example", "db") }]);
+  });
+
+  test.each(["sendSms", "phoneCall"])("%s records a persistent fallback intent", (name) => {
+    expect(deviceToolMutations(name, {}, "android")).toEqual([
+      { kind: "opaque", key: opaqueIntentKey(name) },
+    ]);
+  });
+
+  test("SQL with no classifiable query records a fallback", () => {
+    expect(
+      deviceToolMutations("sqlQuery", { appId: "a.b", databasePath: "db" }, "android"),
+    ).toEqual([{ kind: "opaque", key: opaqueIntentKey("sql", "a.b", "db") }]);
+  });
+
+  test("network mocks remain a covered non-fallback opaque breadcrumb", () => {
+    const rows = deviceToolMutations("mockNetwork", { host: "example.com" });
+    expect(rows).toEqual([{ kind: "opaque", key: "network-mocks" }]);
+    expect(rows.some(opaqueForcesFallback)).toBe(false);
   });
 
   test("network mock creation and clearing share an opaque scope", () => {
@@ -206,9 +228,26 @@ describe("data mutation identities", () => {
     expect(
       deviceToolMutations("resetAppLogs", { appId: "com.example", paths: ["a.log", "b.log"] }),
     ).toEqual([
-      { kind: "opaque", key: JSON.stringify(["app-logs", "com.example", "documents", "a.log"]) },
-      { kind: "opaque", key: JSON.stringify(["app-logs", "com.example", "documents", "b.log"]) },
+      {
+        kind: "opaque",
+        key: opaqueIntentKey("resetAppLogs", "app-logs", "com.example", "documents", "a.log"),
+      },
+      {
+        kind: "opaque",
+        key: opaqueIntentKey("resetAppLogs", "app-logs", "com.example", "documents", "b.log"),
+      },
     ]);
+    for (const platform of ["ios", "android"] as const) {
+      const rows = deviceToolMutations(
+        "deviceSnapshot",
+        { action: "restore", snapshotName: "baseline" },
+        platform,
+      );
+      expect(rows).toEqual([
+        { kind: "opaque", key: opaqueIntentKey("deviceSnapshot", "restore", "baseline") },
+      ]);
+      expect(rows.every(opaqueForcesFallback)).toBe(true);
+    }
     expect(deviceToolMutations("deviceSnapshot", { action: "capture" })).not.toEqual(
       deviceToolMutations("deviceSnapshot", { action: "restore", snapshotName: "baseline" }),
     );
@@ -499,4 +538,13 @@ describe("data mutation prior recording", () => {
     expect(acted).toBe(false);
     expect(await journal.list(SCOPE)).toEqual([]);
   });
+});
+
+test("keychain deletion journals exact scope without values", () => {
+  const selector = { itemClass: "genericPassword", service: "s", account: "a", accessGroup: "g" };
+  expect(
+    deviceToolMutations("deleteKeychainItem", { appId: "app", selector, confirm: true }, "ios"),
+  ).toEqual([
+    { kind: "preference", key: JSON.stringify({ store: "keychain", appId: "app", selector }) },
+  ]);
 });

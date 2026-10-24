@@ -1,3 +1,6 @@
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { shutdownDevice } from "../../src/server/deviceToolsShutdown";
+import { getDeviceToolsDependencies } from "../../src/features/deviceLifecycle/deviceLifecycleCore";
 import { DeviceLossState } from "../../src/daemon/deviceLossState";
 import { makePool } from "../helpers/makePool";
 import { concreteCtrlProxyClient } from "../helpers/concreteCtrlProxyClient";
@@ -890,6 +893,47 @@ describe("killDevice handler", () => {
   beforeEach(reset);
   afterEach(cleanup);
   afterAll(cleanup);
+
+  test("unpooled pre-kill observer failure clears the fence on the real shutdown path", async () => {
+    const timer = new FakeTimer();
+    const controller = new AbortController();
+    const device: BootedDevice = {
+      deviceId: "unpooled-pre-kill",
+      name: "Handset",
+      platform: "android",
+    };
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = makePool(sessionManager, "pre-kill-test", { timer, deviceManager: manager });
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    setDeviceToolsDependencies({
+      timer,
+      stopAndroidObservers: async () => {
+        expect(
+          pool.testHooks.shutdownReservationCoordinator.isUnpooledShutdownFenced(device.deviceId),
+        ).toBe(true);
+        controller.abort(new Error("observer preparation cancelled"));
+        throw controller.signal.reason;
+      },
+    });
+    await expect(
+      shutdownDevice(
+        {
+          device,
+          timer,
+          stopPerformanceMonitoring: async () => {},
+          deadlineMs: timer.now() + 1_000,
+          requestAbortSignal: controller.signal,
+        },
+        getDeviceToolsDependencies(),
+        "test-kill",
+        { strictDeadline: true, timeoutMs: 1_000 },
+      ),
+    ).rejects.toThrow();
+    expect(manager.killedDeviceIds).toEqual([]);
+    expect(
+      pool.testHooks.shutdownReservationCoordinator.isUnpooledShutdownFenced(device.deviceId),
+    ).toBe(false);
+  });
 
   test("confirmed direct-mode kill keeps IME quarantine without a pool", async () => {
     const device: BootedDevice = {
@@ -4342,6 +4386,8 @@ describe("killDevice handler", () => {
         clearIntentionalShutdown: () => {
           clearedIntentionalShutdown++;
         },
+        clearUnpooledShutdown: () => {},
+        settleUnpooledShutdown: () => {},
         reserveDeviceForShutdown: async () => undefined,
         assertNotClaimedByForeignDaemon: async () => {},
       } as never,
@@ -5406,6 +5452,8 @@ describe("killDevice handler", () => {
               clearedIntentionalShutdown++;
             },
             assertDeviceActionable: () => {},
+            clearUnpooledShutdown: () => {},
+            settleUnpooledShutdown: () => {},
             reserveDeviceForShutdown: async () => undefined,
             assertNotClaimedByForeignDaemon: async () => {},
             getDevice: () => null,

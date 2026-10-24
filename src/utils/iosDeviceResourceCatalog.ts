@@ -50,6 +50,18 @@ export const iosDeviceResourceCatalog = {
     "com.apple.rtcreportingd",
     "com.apple.geoanalyticsd",
   ],
+  siriAndAppIntents: [
+    "com.apple.assistantd",
+    "com.apple.assistant_service",
+    "com.apple.assistant_cdmd",
+    "com.apple.siriactionsd",
+    "com.apple.linkd",
+  ],
+  speechServices: ["com.apple.corespeechd", "com.apple.speechmaintenanced", "com.apple.sirittsd"],
+  mediaTranscoding: [
+    "com.apple.photos.ImageConversionService",
+    "com.apple.photos.VideoConversionService",
+  ],
   photoAnalysis: ["com.apple.photoanalysisd"],
   assistantSuggestions: [
     "com.apple.siriinferenced",

@@ -44,6 +44,7 @@ test/daemon/daemonClientHandshake.integration.test.ts | safe | tmpdir socket L59
 test/daemon/daemonClientStaleSocketRecovery.integration.test.ts | safe | temp pid and socket paths, isProcessRunning stubbed L86-L161
 test/daemon/daemonManagerReadiness.integration.test.ts | unsafe | deletes AUTOMOBILE_DATA_DIR L158 in afterEach, unsetting isolation for later files
 test/daemon/daemonSessionReleaseSignal.integration.test.ts | safe | in-memory DB L52; Daemon never started; FakeDeviceManager L36
+test/daemon/daemonSocketReachability.integration.test.ts | safe | real net server and probes confined to a private mkdtemp directory removed after each test
 test/daemon/daemonStreamWiring.integration.test.ts | safe | Daemon built with fake repo/initializer L392; never started
 test/daemon/daemonTransportError.integration.test.ts | safe | mkdtemp sockets L43, local net servers, DaemonClient only connects
 test/daemon/directModeGuard.integration.test.ts | safe | guard deps injected as fakes L186; fake /home/tester paths are strings only

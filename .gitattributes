@@ -2,6 +2,7 @@ test/fixtures/android-display/**/*.txt text eol=lf
 test/fixtures/crashReports/* text eol=lf
 test/fixtures/android-display-config/*.txt text eol=lf
 test/fixtures/android-power/*.txt text eol=lf
+test/fixtures/android-oem/**/*.txt text eol=lf
 test/fixtures/android-display-geometry/*.txt text eol=lf
 test/fixtures/macos-profiles/*.txt text eol=lf
 test/fixtures/bats-joblog/*.tsv text eol=lf
@@ -35,6 +36,7 @@ test/fixtures/android-launcher/*.txt text eol=lf
 test/fixtures/android-launcher/*.json text eol=lf
 test/fixtures/android-adb/*.txt text eol=lf
 test/fixtures/android-getevent/*.txt text eol=lf
+test/fixtures/android-settings-list/*.txt text eol=lf
 test/fixtures/android-touch-node/*.txt text eol=lf
 test/fixtures/android-window-policy/*.txt text eol=lf
 test/fixtures/ios-devicectl/*.json text eol=lf
@@ -81,6 +83,8 @@ test/fixtures/android-locale/*.txt text eol=lf
 test/fixtures/android-am-start/*.txt text eol=lf
 # Real `adb install` downgrade failure capture from the mt36 emulator run (#10191).
 test/fixtures/android-install/*.txt text eol=lf
+# Real ProtoViewer MCP transport captures from the API 37 emulator round 4 run (#15174).
+test/fixtures/android-protoviewer/* text eol=lf
 
 # Git LFS tracking for binary assets
 # Keeps clone size small for SPM consumers and other tooling
@@ -220,3 +224,6 @@ test/fixtures/ios-safari-url-field/*.json text eol=lf
 samples/prototype-embedding/** text eol=lf
 samples/prototype-embedding/**/*.png -text
 ios/prototype-agent/Fixtures/EmbedConsumer/Sources/EmbedConsumer/EmbeddingSamplePrototype.swift text eol=lf
+
+test/fixtures/ios-runner-progress/*.txt text eol=lf
+test/fixtures/ios-runner-launch-failure/*.txt text eol=lf

@@ -869,9 +869,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       onlyEmulators,
       {
         ...options,
-        resolveForeignSerials:
-          options.resolveForeignSerials ??
-          (options.readinessOnly ? this.foreignInventoryResolver : undefined),
+        resolveForeignSerials: options.resolveForeignSerials ?? this.foreignInventoryResolver,
       },
       signal,
     );

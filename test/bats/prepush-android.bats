@@ -690,3 +690,53 @@ SCRIPT
   [ "$status" -eq 0 ]
   [ "$(cat "$invocations_file")" = ':bar:lintDebug :foo:lintDebug --continue' ]
 }
+
+@test "ProtoViewer selection verifies dependencies and runs unit tests" {
+  fixture_repo="$(cd "$(mktemp -d)" && pwd -P)"
+  invocations_file="$(mktemp)"
+  export GIT_CONFIG_GLOBAL=/dev/null
+  export GIT_CONFIG_SYSTEM=/dev/null
+
+  mkdir -p "${fixture_repo}/android/config/detekt" "${fixture_repo}/android/protoviewer/src/main/kotlin"
+  mkdir -p "${fixture_repo}/android/protoviewer/src/test"
+  copy_prepush_fixture
+  cat > "${fixture_repo}/scripts/ktfmt/validate_ktfmt.sh" <<'SCRIPT'
+#!/usr/bin/env bash
+exit 0
+SCRIPT
+  cat > "${fixture_repo}/android/gradlew" <<'SCRIPT'
+#!/usr/bin/env bash
+printf '%s\n' "$@" >> "${GRADLEW_INVOCATIONS_FILE}"
+SCRIPT
+  chmod +x "${fixture_repo}/android/gradlew"
+  printf '%s\n' 'config: initial' > "${fixture_repo}/android/config/detekt/detekt.yml"
+  printf '%s\n' 'plugins { id("automobile.android-application") }' > "${fixture_repo}/android/protoviewer/build.gradle.kts"
+  printf '%s\n' 'class X' > "${fixture_repo}/android/protoviewer/src/main/kotlin/X.kt"
+
+  cd "${fixture_repo}"
+  git init -q
+  git add -A
+  git commit -qm "initial Android module and Detekt config"
+  base_sha="$(git rev-parse HEAD)"
+  printf '%s\n' 'config: changed' > android/config/detekt/detekt.yml
+  printf '%s\n' '// changed Kotlin source' >> android/protoviewer/src/main/kotlin/X.kt
+  git add android/config/detekt/detekt.yml android/protoviewer/src/main/kotlin/X.kt
+  git commit -qm "change Kotlin source and Detekt config"
+
+  run env ANDROID_PREPUSH_BASE_REF="${base_sha}" \
+    GRADLEW_INVOCATIONS_FILE="${invocations_file}" \
+    bash "${fixture_repo}/${SCRIPT}"
+
+  [ "$status" -eq 0 ]
+  grep -qx ':protoviewer:verifyProtoViewerDependencies' "${invocations_file}"
+  grep -qx ':protoviewer:test' "${invocations_file}"
+  grep -qx 'detektMain' "${invocations_file}"
+  grep -qx 'detektTest' "${invocations_file}"
+  grep -qx ':protoviewer:compileDebugKotlin' "${invocations_file}"
+  if grep -qx ':protoviewer:compileKotlin' "${invocations_file}"; then
+    false
+  fi
+  if grep -qx ':protoviewer:detekt' "${invocations_file}"; then
+    false
+  fi
+}

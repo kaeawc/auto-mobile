@@ -20,6 +20,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 
 const UDID = "BCC31307-1A19-4D67-A7F0-44FC98F78921";
 const limits = { maxBooted: 1, source: "derived" } as const;
+const allowLimits = { ...limits, bootConcurrency: 1, bootConcurrencySource: "derived" } as const;
 const queue: CapacityDecision = {
   outcome: "refuse",
   reason: "at-capacity",
@@ -85,7 +86,11 @@ describe("FleetBootInstrumentation", () => {
   });
 
   test("an admitted boot keeps the caller's full budget", async () => {
-    const { gate, history, instrumentation } = setup({ outcome: "allow", limits, bootedCount: 0 });
+    const { gate, history, instrumentation } = setup({
+      outcome: "allow",
+      limits: allowLimits,
+      bootedCount: 0,
+    });
     let budget = 0;
     await instrumentation.run({ udid: UDID, timeoutMs: 60_000 }, async (remainingMs) => {
       budget = remainingMs;
@@ -109,7 +114,11 @@ describe("FleetBootInstrumentation", () => {
   // #11064: the boot path's signal reaches the capacity check, and an admitted
   // boot holds its slot only until the boot ends, success or failure.
   test("threads the boot signal into the capacity check and releases the admission after boot", async () => {
-    const { gate, instrumentation } = setup({ outcome: "allow", limits, bootedCount: 0 });
+    const { gate, instrumentation } = setup({
+      outcome: "allow",
+      limits: allowLimits,
+      bootedCount: 0,
+    });
     const controller = new AbortController();
     let admittedDuringBoot = 0;
     await instrumentation.run(
@@ -125,7 +134,11 @@ describe("FleetBootInstrumentation", () => {
   });
 
   test("a failed boot still releases its capacity admission", async () => {
-    const { gate, instrumentation } = setup({ outcome: "allow", limits, bootedCount: 0 });
+    const { gate, instrumentation } = setup({
+      outcome: "allow",
+      limits: allowLimits,
+      bootedCount: 0,
+    });
     await expect(
       instrumentation.run({ udid: UDID, timeoutMs: 1_000 }, async () => {
         throw new Error("boot failed");

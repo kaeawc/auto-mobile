@@ -1,3 +1,4 @@
+import { assertAndroidCtrlProxyDevice } from "./androidCtrlProxyDeviceGuard";
 import { AndroidCtrlProxyClientDeps } from "./AndroidCtrlProxyClientDeps";
 import { AndroidCtrlProxyObservationClient } from "./AndroidCtrlProxyObservationClient";
 import { defaultAndroidServiceManagerFactory } from "./AndroidCtrlProxyServices";
@@ -197,6 +198,7 @@ export class AndroidCtrlProxyClient
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
   ): AndroidCtrlProxy {
     requireBootedDevice(device, "AndroidCtrlProxyClient.getInstance");
+    assertAndroidCtrlProxyDevice(device);
     daemonDeviceAdmissionGate.assertDeviceActionable(device.deviceId, CTRL_PROXY_CLIENT_PURPOSE);
     const deviceId = device.deviceId;
     const registry = AndroidCtrlProxyClient.registry;
@@ -250,6 +252,8 @@ export class AndroidCtrlProxyClient
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     existing?: AndroidCtrlProxyClient,
   ): AndroidCtrlProxyClient {
+    requireBootedDevice(device, "AndroidCtrlProxyClient.createForObservationRead");
+    assertAndroidCtrlProxyDevice(device);
     return new AndroidCtrlProxyClient(device, adbFactory.create(device), {
       ctrlProxyForwardLease:
         existing?.ctrlProxyForwardLease.fork?.() ?? existing?.ctrlProxyForwardLease,
@@ -529,6 +533,27 @@ export class AndroidCtrlProxyClient
       prototypes: () => client.prototypes,
       highlights: () => client.highlights,
       webSocketMessageHandlers: () => client.webSocketMessageHandlers,
+      createDelegateContext: () => client.createDelegateContext(),
+      isCommandSupported: (messageType) => client.isCommandSupported(messageType),
+      get installedGestures() {
+        return client._gestures;
+      },
+      set installedGestures(value) {
+        client._gestures = value;
+      },
+      injected: () => ({
+        ctrlProxyForwardLease: client.ctrlProxyForwardLease,
+        forwardClientProbe: client.forwardClientProbe,
+        loggerInstance: client.loggerInstance,
+        transientObserver: client.transientObserver,
+        timer: client.timer,
+        webSocketFactory: client.webSocketFactory,
+        certificateFileSystem: client.certificateFileSystem,
+        serviceManagerFactory: client.serviceManagerFactory,
+        idGenerator: client.idGenerator,
+        screenshotBackoffScheduler: client.screenshotBackoffScheduler,
+        portAllocationId: client.portAllocationId,
+      }),
       cachedHierarchy: () => client.cachedHierarchy,
       handleWebSocketMessage: (data) => client.handleWebSocketMessage(data),
       getWebSocketUrl: () => client.getWebSocketUrl(),

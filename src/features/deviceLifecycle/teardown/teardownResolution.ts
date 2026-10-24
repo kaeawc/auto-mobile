@@ -3,6 +3,7 @@ import {
   type BootedDeviceDiscovery,
   type DeviceImageDiscovery,
 } from "../../../devices/deviceUtils";
+import { type BootedDevice } from "../../../models";
 import { AndroidCtrlProxyManager } from "../../../ctrlProxy/CtrlProxyManager";
 import { unregisterDirectSessionsForStableIdentity } from "../../../utils/directSessionDeviceRegistry";
 import { type DevicePool, type PooledDevice } from "../../../daemon/devicePool";
@@ -17,12 +18,14 @@ import {
   captureTeardownInitialAndroidScan,
   findMatchingBootedTeardownDevices,
   findBootedTeardownTarget,
+  type TeardownToolResponse,
 } from "./teardownContracts";
 import {
   findAbsentTeardownPooledDevices,
   evictTeardownManagers,
   notifyResourcesAfterShutdown,
 } from "./shutdownPreparation";
+import { probeForeignUnnamedRuntimes } from "./foreignRuntimeProbe";
 import { retireTeardownPooledOwnership } from "./shutdownOwnership";
 import { readTeardownInventory, readTeardownTargetDiscovery } from "./teardownDiscovery";
 import {
@@ -211,6 +214,60 @@ export async function finalizeIosNameResolvedTeardownTarget(
   return { target };
 }
 
+/**
+ * Refuse the stopped-image path while a booted emulator that could not name itself might be the
+ * AVD about to be destroyed (#6863).
+ *
+ * An emulator another daemon owns is the one exception that can be settled without trusting a
+ * cache: its name was deliberately not read by discovery (the foreign-serial skip), so the
+ * placeholder says nothing about the runtime. Left as an unconditional veto, one such emulator
+ * stalled every broker destruction until its owner shut it down (#15213). A `named` teardown asks
+ * the runtime once, within its own deadline, and refuses only when the answer is missing or is
+ * the target. A `serial-only` (`force`) teardown never probes -- that mode exists to escape wedged
+ * consoles (#6874) -- so it keeps the unconditional refusal.
+ */
+async function refuseUnresolvedAndroidRuntime(
+  context: TeardownContext,
+  booted: BootedDeviceDiscovery,
+): Promise<TeardownToolResponse | undefined> {
+  const unresolvedRuntimes = booted.devices.filter(
+    (device) =>
+      device.platform === "android" &&
+      isVirtualAndroidDevice(device) &&
+      isUnknownAndroidRuntimeName(device),
+  );
+  const unresolvedRefusal = (runtime: BootedDevice) =>
+    createTeardownFailureResponse(
+      context.args,
+      "precondition",
+      "target_identity_unresolved",
+      `Android emulator runtime '${runtime.deviceId}' has no resolvable AVD name; refusing deletion.`,
+    );
+  // A runtime this daemon could have read, or any runtime of a `force` teardown, stays a veto
+  // without spending a probe on the others.
+  const unprobeable = unresolvedRuntimes.find(
+    (runtime) => !runtime.foreignOwned || context.mode !== "named",
+  );
+  if (unprobeable) {
+    return unresolvedRefusal(unprobeable);
+  }
+  const probe = await probeForeignUnnamedRuntimes(context, unresolvedRuntimes);
+  if (probe.kind === "unresolved") {
+    return unresolvedRefusal(probe.runtime);
+  }
+  if (probe.kind === "runs-target") {
+    return createTeardownFailureResponse(
+      context.args,
+      "precondition",
+      "target_identity_conflict",
+      `Android AVD '${probe.avdName}' is running on emulator '${probe.runtime.deviceId}', which ` +
+        "another AutoMobile daemon owns; refusing deletion.",
+    );
+  }
+  context.clearedForeignSerials = new Set(unresolvedRuntimes.map((runtime) => runtime.deviceId));
+  return undefined;
+}
+
 export async function resolveTeardownTarget(context: TeardownContext): Promise<TeardownResolution> {
   const devicePool = defaultDaemonContext.devicePool();
   const booted = await readTeardownTargetDiscovery(context, devicePool);
@@ -284,21 +341,9 @@ export async function resolveTeardownTarget(context: TeardownContext): Promise<T
   // it was running. The teardown's own observation is the newer evidence of the
   // two, so it decides ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863)
   // review).
-  const unresolvedAndroidRuntime = booted.devices.find(
-    (device) =>
-      device.platform === "android" &&
-      isVirtualAndroidDevice(device) &&
-      isUnknownAndroidRuntimeName(device),
-  );
-  if (unresolvedAndroidRuntime) {
-    return {
-      response: createTeardownFailureResponse(
-        context.args,
-        "precondition",
-        "target_identity_unresolved",
-        `Android emulator runtime '${unresolvedAndroidRuntime.deviceId}' has no resolvable AVD name; refusing deletion.`,
-      ),
-    };
+  const unresolvedRuntimeRefusal = await refuseUnresolvedAndroidRuntime(context, booted);
+  if (unresolvedRuntimeRefusal) {
+    return { response: unresolvedRuntimeRefusal };
   }
   const inventory = await readTeardownInventory(
     context,

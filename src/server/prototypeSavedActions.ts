@@ -38,6 +38,12 @@ import { ActionableError, toActionableError } from "../models/ActionableError";
 import { outputLooksLikeShellFailure } from "../utils/android-cmdline-tools/shellOutputHeuristics";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
+import type { ProtoViewerDevice } from "../features/prototype/protoViewer/AndroidProtoViewer";
+import {
+  protoViewerHandles,
+  routeToProtoViewer,
+  type ProtoViewerEntry,
+} from "../features/prototype/protoViewer/protoViewerSaved";
 import {
   confirmPinDialog,
   type PinConfirmationDriver,
@@ -58,6 +64,7 @@ export interface PrototypeSavedOutput {
   pinned?: "pinned" | "pending" | "unsupported";
   warning?: string;
   uploadedAssets?: UploadedPrototypeAsset[];
+  viewer?: ProtoViewerEntry;
 }
 export interface PrototypeSavedInput {
   action: PrototypeSavedAction;
@@ -415,6 +422,12 @@ async function removeIconWarning(
   }
 }
 
+function requireSavedId(value: { action: string; id?: string }, ctx: z.RefinementCtx): void {
+  if ((value.action === "deleteSaved" || value.action === "open") && value.id === undefined) {
+    ctx.addIssue({ code: "custom", path: ["id"], message: `${value.action} requires id` });
+  }
+}
+
 /** Action-specific refinements keep the existing actions' validation unchanged. */
 export function validatePrototypeSavedInput(
   value: {
@@ -431,9 +444,7 @@ export function validatePrototypeSavedInput(
   if (value.action === "save" && value.spec === undefined) {
     ctx.addIssue({ code: "custom", path: ["spec"], message: "save requires spec" });
   }
-  if (value.action === "deleteSaved" && value.id === undefined) {
-    ctx.addIssue({ code: "custom", path: ["id"], message: "deleteSaved requires id" });
-  }
+  requireSavedId(value, ctx);
   if (value.autoConfirm && !value.pin) {
     ctx.addIssue({ code: "custom", path: ["autoConfirm"], message: "autoConfirm requires pin" });
   }
@@ -455,9 +466,17 @@ interface IosSavedDependencies {
   installer?: IosSavedPrototypeInstaller;
   assetFileReader: PrototypeAssetFileReader;
   observationScreenshotReader: PrototypeObservationScreenshotReader;
+  /** ProtoViewer on an Android device (#13621); absent means saves keep the CtrlProxy path. */
+  protoViewer?: (device: BootedDevice) => ProtoViewerDevice;
 }
 
-/** Intercept saved iOS actions, otherwise retain the existing platform validation. */
+const OPEN_NEEDS_ANDROID_PROTOVIEWER =
+  "open needs ProtoViewer on an Android device; the iOS ProtoViewer route is not available yet.";
+
+/**
+ * Intercept saved iOS actions and ProtoViewer-routed Android ones, otherwise retain the existing
+ * platform validation. A promise that settles undefined means "not routed": continue as before.
+ */
 export function createPrototypeSavedPlatformDispatch(dependencies: IosSavedDependencies) {
   let installer = dependencies.installer;
   const backend = () => (installer ??= createDefaultIosPrototypeInstaller());
@@ -468,10 +487,31 @@ export function createPrototypeSavedPlatformDispatch(dependencies: IosSavedDepen
     platformError: () =>
       | (Pick<ActionableError, "message"> & { errorCode?: PrototypeSavedErrorCode })
       | undefined,
-  ): Promise<PrototypeSavedOutput> | PrototypeSavedOutput | undefined => {
+  ): Promise<PrototypeSavedOutput | undefined> | PrototypeSavedOutput | undefined => {
     const error = platformError();
     if (error) {
       return prototypePlatformFailure(error);
+    }
+    if (device.platform === "android" && dependencies.protoViewer && protoViewerHandles(args)) {
+      return routeToProtoViewer(
+        args,
+        { ...dependencies, device: dependencies.protoViewer(device) },
+        signal,
+      );
+    }
+    if (device.platform === "android" && args.action === "open" && !dependencies.protoViewer) {
+      return {
+        success: false,
+        errorCode: "unsupported_capability",
+        error: OPEN_NEEDS_ANDROID_PROTOVIEWER,
+      };
+    }
+    if (device.platform === "ios" && args.action === "open") {
+      return {
+        success: false,
+        errorCode: "unsupported_platform",
+        error: OPEN_NEEDS_ANDROID_PROTOVIEWER,
+      };
     }
     if (device.platform !== "ios" || !isPrototypeSavedAction(args.action)) {
       return undefined;
@@ -622,11 +662,19 @@ async function performIosSavedAction(
 /** Dispatches saved actions without adding decisions to the shared tool handler. */
 export function dispatchPrototypeSavedAction<T>(
   args: Omit<PrototypeSavedInput, "action"> & {
-    action: PrototypeSavedAction | "show" | "patch" | "dismiss";
+    action: PrototypeSavedAction | "open" | "show" | "patch" | "dismiss";
   },
   dependencies: () => PrototypeSavedDependencies,
   fallback: (action: "show" | "patch" | "dismiss") => Promise<T>,
 ): Promise<PrototypeSavedOutput | T> {
+  if (args.action === "open") {
+    // The platform dispatch answers every open it can route; nothing reaches CtrlProxy.
+    return Promise.resolve({
+      success: false,
+      errorCode: "unsupported_capability",
+      error: OPEN_NEEDS_ANDROID_PROTOVIEWER,
+    });
+  }
   if (isPrototypeSavedAction(args.action)) {
     return performPrototypeSavedAction(dependencies(), { ...args, action: args.action });
   }

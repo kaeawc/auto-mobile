@@ -60,9 +60,9 @@ describe.serial("AdbClient missing ADB recovery", () => {
         throw new Error("SDK detection unavailable");
       },
     });
-    client["isTestMode"] = false;
+    client.testHooks.isTestMode = false;
     let whichCalls = 0;
-    client["execWithSignal"] = async (file, args) => {
+    client.testHooks.execWithSignal = async (file, args) => {
       if (file === "which" && args[0] === "adb") {
         whichCalls++;
         return result(whichCalls === 1 ? "" : "/sdk/platform-tools/adb\n");
@@ -84,10 +84,10 @@ describe.serial("AdbClient missing ADB recovery", () => {
         throw new Error("SDK detection unavailable");
       },
     });
-    client["isTestMode"] = false;
+    client.testHooks.isTestMode = false;
     let resolvedPath = false;
     let deviceCalls = 0;
-    client["execWithSignal"] = async (file, args) => {
+    client.testHooks.execWithSignal = async (file, args) => {
       if (file === "which" && args[0] === "adb") {
         return result(resolvedPath ? "/sdk/platform-tools/adb\n" : "");
       }
@@ -127,9 +127,9 @@ describe.serial("AdbClient missing ADB recovery", () => {
         throw new Error("SDK detection unavailable");
       },
     });
-    client["isTestMode"] = false;
+    client.testHooks.isTestMode = false;
     let deviceCalls = 0;
-    client["execWithSignal"] = async (file, args) => {
+    client.testHooks.execWithSignal = async (file, args) => {
       if (file === "which" && args[0] === "adb") {
         return result("");
       }
@@ -164,9 +164,9 @@ describe.serial("AdbClient missing ADB recovery", () => {
         throw new Error("SDK detection unavailable");
       },
     });
-    client["isTestMode"] = false;
+    client.testHooks.isTestMode = false;
     let deviceCalls = 0;
-    client["execWithSignal"] = async (file, args) => {
+    client.testHooks.execWithSignal = async (file, args) => {
       if (file === "which" && args[0] === "adb") {
         return result("");
       }

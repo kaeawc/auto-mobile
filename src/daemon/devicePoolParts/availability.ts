@@ -1,3 +1,4 @@
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { isErrored, holderOf, isIdle, statusOf } from "../deviceBinding";
 import {
   deviceHold,
@@ -16,6 +17,7 @@ import type { DevicePoolState } from "./state";
 export interface AvailabilityOperations {
   /** Conservative, read-only admission for session-less hierarchy service setup. */
   isSafeForObservationServiceStart(deviceId: string): boolean;
+  waitForAssignmentTransition(deviceId: string, signal?: AbortSignal): Promise<boolean>;
   holdFactsFor(
     device: PooledDevice,
     forSessionId?: string,
@@ -113,6 +115,7 @@ export interface AvailabilityOperations {
 }
 type AvailabilityState = Pick<
   DevicePoolState,
+  | "timer"
   | "devices"
   | "recoveryCoordinator"
   | "shutdownReservationCoordinator"
@@ -145,6 +148,26 @@ export class DevicePoolAvailability {
     private readonly state: AvailabilityState,
     private readonly callbacks: AvailabilityCallbacks,
   ) {}
+  async waitForAssignmentTransition(deviceId: string, signal?: AbortSignal): Promise<boolean> {
+    const device = this.state.devices.get(deviceId);
+    if (
+      !device ||
+      !this.state.assignmentMutex.isLocked() ||
+      !deviceHold(this.holdFactsFor(device, undefined, "observation")).reasons.every(
+        (reason) => reason.kind === "assignment",
+      )
+    ) {
+      return false;
+    }
+    // A timed-out/aborted caller's waiter stays registered until the next unlock (bounded).
+    await raceWithDeadline(() => this.state.assignmentMutex.waitForUnlock(), {
+      timer: this.state.timer,
+      signal,
+      label: "Observer pool assignment transition",
+    });
+    return true;
+  }
+
   /** Conservative, read-only admission for session-less hierarchy service setup. */
   isSafeForObservationServiceStart(deviceId: string): boolean {
     const device = this.state.devices.get(deviceId);
@@ -458,6 +481,7 @@ export function connectAvailability(
   part: () => DevicePoolAvailability,
   seams: Pick<
     DevicePoolOperations,
+    | "waitForAssignmentTransition"
     | "isSafeForObservationServiceStart"
     | "reserveDevicesForRehydration"
     | "notifyRehydrationReservationChanged"
@@ -468,6 +492,7 @@ export function connectAvailability(
   >,
 ): AvailabilityOperations {
   return {
+    waitForAssignmentTransition: (...args) => seams.waitForAssignmentTransition(...args),
     isSafeForObservationServiceStart: (...args) => seams.isSafeForObservationServiceStart(...args),
     holdFactsFor: (...args) => part().holdFactsFor(...args),
     isReservedForAssignment: (...args) => part().isReservedForAssignment(...args),

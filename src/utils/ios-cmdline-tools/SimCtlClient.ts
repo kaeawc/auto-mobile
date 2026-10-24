@@ -80,9 +80,10 @@ export { SimulatorStillShuttingDownError } from "./SimulatorStillShuttingDownErr
 
 export class SimCtlClient implements SimCtl {
   private readonly simCtlShutdown: SimCtlShutdown;
-  private createSimCtlShutdown(): SimCtlShutdown {
+  private createSimCtlShutdown(p?: SimCtlClientDependencies["prebootProfile"]): SimCtlShutdown {
     const client = this;
     return new SimCtlShutdown({
+      prebootProfile: p,
       executeCommandArgs: (...args) => client.executeCommandArgs(...args),
       invalidateDeviceListCache: (...args) => SimCtlClient.invalidateDeviceListCache(...args),
       get timer() {
@@ -264,7 +265,7 @@ export class SimCtlClient implements SimCtl {
 
     this.simCtlScreenshot = this.createSimCtlScreenshot();
 
-    this.simCtlShutdown = this.createSimCtlShutdown();
+    this.simCtlShutdown = this.createSimCtlShutdown(dependencies.prebootProfile);
   }
 
   private resolveSimulatorAppPresenter(presenter?: SimulatorAppPresenter): SimulatorAppPresenter {
@@ -539,7 +540,7 @@ export class SimCtlClient implements SimCtl {
    * Get the list of all simulators and devices
    * @returns Promise with simulator list data
    */
-  private async listSimulators(timeoutMs?: number, signal?: AbortSignal): Promise<SimulatorList> {
+  async listSimulators(timeoutMs?: number, signal?: AbortSignal): Promise<SimulatorList> {
     const perf = createGlobalPerformanceTracker();
     perf.startOperation("simctlListDevices");
     const result = await this.executeCommandArgs(["list", "devices", "--json"], timeoutMs, signal);
@@ -657,7 +658,7 @@ export class SimCtlClient implements SimCtl {
   getBootedSimulatorsChecked(
     timeoutMs?: number,
     signal?: AbortSignal,
-    options: { bypassCache?: boolean } = {},
+    options: { bypassCache?: boolean; maxCacheAgeMs?: number } = {},
   ): Promise<BootedDevice[]> {
     return this.simCtlInventory.getBootedSimulatorsChecked(timeoutMs, signal, options);
   }
@@ -665,7 +666,7 @@ export class SimCtlClient implements SimCtl {
   getSimulatorListingChecked(
     timeoutMs?: number,
     signal?: AbortSignal,
-    options: { bypassCache?: boolean } = {},
+    options: { bypassCache?: boolean; maxCacheAgeMs?: number } = {},
   ): Promise<{ booted: BootedDevice[]; transitional: TransitionalSimulator[] }> {
     return this.simCtlInventory.getSimulatorListingChecked(timeoutMs, signal, options);
   }
@@ -701,6 +702,12 @@ export class SimCtlClient implements SimCtl {
     return this.simCtlInventory.getRuntimesChecked(timeoutMs, signal);
   }
 
+  cloneSimulator(sourceUdid: string, name: string, signal?: AbortSignal): Promise<string> {
+    return this.simCtlInventory.cloneSimulator(sourceUdid, name, signal);
+  }
+  shutdownSimulator(udid: string, signal?: AbortSignal): Promise<void> {
+    return this.simCtlShutdown.shutdownSimulatorCoordinated(udid, 120_000, signal);
+  }
   createSimulator(
     name: string,
     deviceType: string,
@@ -710,17 +717,7 @@ export class SimCtlClient implements SimCtl {
     return this.simCtlInventory.createSimulator(name, deviceType, runtime, signal);
   }
 
-  /**
-   * Drop the shared device-list snapshot so the next list re-reads simctl.
-   * Also drops the last-good fallback: a caller invalidating the cache knows
-   * something changed (a device was created/deleted, or a test is resetting
-   * state), so a subsequent transient failure must not resurrect the
-   * pre-invalidation snapshot as if it were still trustworthy (issue #6576).
-   *
-   * Also bumps `deviceListGeneration` so an in-flight listing that was already
-   * running when this invalidation fires cannot repopulate the cache with the
-   * obsolete snapshot it captured before the mutation (issue #6576).
-   */
+  /** Drop shared inventory snapshots and fence older in-flight listings. */
   static invalidateDeviceListCache(): void {
     SimCtlInventory.invalidateDeviceListCache();
   }

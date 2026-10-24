@@ -14,6 +14,13 @@ export function dataToolMutations(
     case "removeKeyValue":
     case "clearKeyValueFile":
       return keyValueMutations(name, args, platform);
+    case "deleteKeychainItem":
+      return [
+        {
+          kind: "preference",
+          key: JSON.stringify({ store: "keychain", appId: args.appId, selector: args.selector }),
+        },
+      ];
     case "setPreference":
       return preferenceMutations(args);
     case "sendBroadcast":
@@ -81,25 +88,40 @@ function opaqueDataToolMutations(
 ): ToolMutation[] | undefined {
   switch (name) {
     case "sqlQuery":
-      return [{ kind: "opaque", key: JSON.stringify(["sql", args.appId, args.databasePath]) }];
+      return [{ kind: "opaque", key: opaqueIntentKey("sql", args.appId, args.databasePath) }];
     case "mockNetwork":
     case "clearMockNetwork":
+      // Release pushes rejected, aborted/timed-out or hung, missing CtrlProxy clients, and
+      // iOS noCapability/superseded outcomes mark the session gap before cleanup settles,
+      // escalating keep-booted reset. Unconfirmed iOS replies count as delivered; Android
+      // delivery means socket write success, with no device ack. Residuals: a failed
+      // in-session clearMockNetwork push leaves nothing owned to push/mark at release;
+      // the gap map is in memory and keyed by session only. Keep this non-fallback.
       return [{ kind: "opaque", key: "network-mocks" }];
     case "phoneCall":
     case "sendSms":
-      return [{ kind: "opaque", key: `tool:${name}` }];
+      return [{ kind: "opaque", key: opaqueIntentKey(name) }];
     case "resetAppLogs":
       return Array.isArray(args.paths)
         ? args.paths.map((path) => ({
             kind: "opaque",
-            key: JSON.stringify(["app-logs", args.appId, args.container ?? "documents", path]),
+            key: opaqueIntentKey(
+              "resetAppLogs",
+              "app-logs",
+              args.appId,
+              args.container ?? "documents",
+              path,
+            ),
           }))
         : [];
     case "deviceSnapshot":
       return [
         {
           kind: "opaque",
-          key: JSON.stringify(["snapshot", args.action, args.snapshotName ?? null]),
+          key:
+            args.action === "restore"
+              ? opaqueIntentKey("deviceSnapshot", "restore", args.snapshotName)
+              : JSON.stringify(["snapshot", args.action, args.snapshotName ?? null]),
         },
       ];
     default:

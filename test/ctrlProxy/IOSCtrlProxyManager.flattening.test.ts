@@ -1,3 +1,5 @@
+import { IosRunnerLaunchFailures } from "../../src/ctrlProxy/ios/IosRunnerLaunchFailure";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { DefaultIosTunnelClient } from "../../src/ctrlProxy/ios/IosTunnelClient";
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
@@ -101,6 +103,39 @@ describe("IOSCtrlProxyManager flattening characterization", () => {
       steps,
     });
   }
+
+  test.each(["spawned", "adopted"])(
+    "retracking a %s PID clears its previous launch failure",
+    async (mode) => {
+      const remote = remoteRunner();
+      remote.status = async () => ({
+        success: true,
+        data: { running: true, pid: 123, port: 8767 },
+      });
+      const manager = makeManager(simulator, remote);
+      const child = new FakeChildProcess(timer);
+      child.pid = 123;
+      manager.trackStartedXcodebuild(child);
+      child.stdout.emit("data", "CtrlProxy listener failed: Address already in use");
+      const clearFailure = IosRunnerLaunchFailures.prototype.clear;
+      const clear = spyOn(IosRunnerLaunchFailures.prototype, "clear").mockImplementation(function (
+        this: IosRunnerLaunchFailures,
+        pid: number,
+      ) {
+        expect(this.get(pid)?.reason).toBe("listener-bind-failed");
+        clearFailure.call(this, pid);
+        expect(this.get(pid)).toBeUndefined();
+      });
+      restores.push(() => clear.mockRestore());
+      if (mode === "adopted") {
+        expect(await manager.startOnSimulator()).toBe("adopted");
+      } else {
+        manager.trackStartedXcodebuild(child);
+      }
+      expect(manager.getXcTestProcessId()).toBe(123);
+      expect(clear).toHaveBeenCalledWith(123);
+    },
+  );
 
   test.each(["installed", "absent", "failed", "missing data", "throws"])(
     "remote installation: %s preserves result, cache, and warning",
@@ -643,6 +678,7 @@ describe("IOSCtrlProxyManager flattening characterization", () => {
       "CtrlProxy failed to start within timeout (30s)",
     );
     expect(events).toEqual([
+      "[IOSCtrlProxy] Runner launch progress sample unavailable",
       "[IOSCtrlProxy] Deferred-to CtrlProxy runner (PID 123) never became healthy within 30s; terminating it so the next start spawns a fresh runner",
       "remote stop",
       "[IOSCtrlProxy] Remote runner stop of hung runner 123 failed: remote stop unavailable",

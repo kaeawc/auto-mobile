@@ -1,3 +1,4 @@
+import * as deviceServiceDisabled from "../../src/models/DeviceServiceDisabledError";
 import { fakeServerContext } from "../helpers/fakeServerContext";
 import { Server } from "@modelcontextprotocol/server";
 import * as prototypeHidden from "../../src/features/prototype/prototypeHidden";
@@ -217,6 +218,7 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "models/DeviceOwnedByOtherDaemonError": deviceOwnedByOtherDaemon,
   "models/DeviceCleanupInProgressError": deviceCleanupInProgress,
   "models/DeviceUnhealthyError": deviceUnhealthy,
+  "models/DeviceServiceDisabledError": deviceServiceDisabled,
   "models/DeviceTransportOfflineError": deviceTransportOffline,
   "models/InputDeviceOwnedError": inputOwnedError,
   "models/DeviceAssignedToBindingError": deviceAssignedToBinding,
@@ -259,6 +261,8 @@ const EXEMPT_CODED_ERROR_MODULES: Readonly<Record<string, string>> = {
     "Emulator launch refusal is thrown as an ActionableError through the generic tool-error path, which serializes only the message; the code is a property on the error, not a structured wire field.",
   "features/deviceLifecycle/teardown/stuckEmulatorEscalation":
     "Emulator teardown failure (#14018) is thrown as an ActionableError through the generic tool-error path, which serializes only the message; the code is a property on the error, not a structured wire field.",
+  "models/ResetCapacityWaitExceededError":
+    "Broker-internal iOS reset failure (#15107): drainFailureOutcome turns it into a device destroy and the reset timing receipt records its message; it never reaches an MCP/tool or daemon refusal as a structured code.",
   "features/prototype/ios/installerErrors/PrototypeInstallPhysicalDeviceError":
     INSTALLER_ERROR_EXEMPTION,
   "features/prototype/ios/installerErrors/InvalidPrototypeIdError": INSTALLER_ERROR_EXEMPTION,
@@ -881,6 +885,7 @@ describe("refusal wire contract", () => {
       }
     }
     expect(drivenErrorClasses.has(acquisitionRefusals.DeviceUnhealthyError)).toBe(true);
+    expect(drivenErrorClasses.has(deviceServiceDisabled.DeviceServiceDisabledError)).toBe(true);
     expect(
       isTypedToolRefusal(
         new acquisitionRefusals.DeviceUnhealthyError(

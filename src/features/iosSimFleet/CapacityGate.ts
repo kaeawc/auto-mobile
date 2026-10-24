@@ -31,9 +31,11 @@ import {
   IOS_SIM_MAX_BOOTED_ENV,
   isPressured,
   resolveCapacityLimits,
+  type IosCapacityLimits,
   type CapacityLimits,
   type WarmDeviceRequest,
 } from "./capacityPolicy";
+import { BootConcurrencyGate, type BootConcurrencyPool } from "./BootConcurrencyGate";
 import type { FleetCostReport } from "./types";
 
 const DEFAULT_SUSTAINED_SAMPLES = 3;
@@ -45,7 +47,7 @@ export type CapacityDecision =
    */
   | { outcome: "reuse-warm"; udid: string }
   /** A new boot fits within capacity. */
-  | { outcome: "allow"; limits: CapacityLimits; bootedCount: number }
+  | { outcome: "allow"; limits: IosCapacityLimits; bootedCount: number }
   /** A new boot would exceed the booted-device limit; refuse it. */
   | RefusedCapacityDecision;
 
@@ -82,6 +84,7 @@ type OwnershipFleetReport = FleetCostReport & { ownershipReadFailed?: boolean };
 
 export interface CapacityGateOptions {
   ownership?: IosSimulatorOwnershipReader;
+  bootGate?: BootConcurrencyPool;
   env?: NodeJS.ProcessEnv;
   retryAfterMs?: number;
   /** Consecutive pressured samples before `describeCapacity` reports sustained host pressure. */
@@ -100,6 +103,8 @@ export class IosSimCapacityGate
   private readonly retryAfterMs: number;
   private readonly sustainedSamples: number;
   private pressuredStreak = 0;
+  private readonly bootGate: BootConcurrencyPool;
+  private warnedBootConcurrency: string | undefined;
   private warnedLimit: string | undefined;
   private warnedHostUnreadable = false;
   private latestReport: FleetCostReport | undefined;
@@ -118,6 +123,7 @@ export class IosSimCapacityGate
     private readonly timer: Timer,
     options: CapacityGateOptions = {},
   ) {
+    this.bootGate = options.bootGate ?? new BootConcurrencyGate();
     this.optionsOwnership = options.ownership;
     this.env = options.env ?? process.env;
     this.retryAfterMs = options.retryAfterMs ?? DEFAULT_ADMISSION_RETRY_AFTER_MS;
@@ -185,6 +191,7 @@ export class IosSimCapacityGate
     warmMatch: "substitute" | "hint",
     bootUdid?: string,
     window?: LedgerSampleWindow,
+    carriesOwnSlot = false,
   ): CapacityDecision {
     this.assertCountKnown(report);
     const heldUdids = report.simulators
@@ -203,8 +210,12 @@ export class IosSimCapacityGate
     const occupied = occupyingUdids(report, bootUdid);
     this.forgetExitedStarted(report);
     const bootedCount = occupied.length + this.inFlightBootCount(report, bootUdid, window);
+    // A replacement of an occupying target retains its slot even above the limit.
+    if (carriesOwnSlot) {
+      return { outcome: "allow", limits, bootedCount };
+    }
     const owned = new Set([...this.startedUdids, ...heldUdids]);
-    const refused = atCapacityDecision(bootedCount, limits, this.retryAfterMs, {
+    const refused = atCapacityDecision(bootedCount, this.countLimits(limits), this.retryAfterMs, {
       noun: "simulator",
       envName: IOS_SIM_MAX_BOOTED_ENV,
       externalDevices: occupied.filter((udid) => !owned.has(udid)),
@@ -232,9 +243,9 @@ export class IosSimCapacityGate
     options.signal?.throwIfAborted();
     const reserved = this.reservations.take(options.bootUdid);
     if (reserved) {
-      return reserved;
+      return this.withBootPermit(reserved, options);
     }
-    return await admitBootNow<FleetCostReport, CapacityDecision>({
+    const admission = await admitBootNow<FleetCostReport, CapacityDecision>({
       timer: this.timer,
       platform: "ios",
       signal: options.signal,
@@ -247,6 +258,58 @@ export class IosSimCapacityGate
       decide: (report, window) => this.decide(report, request, "hint", options.bootUdid, window),
       admit: () => this.recordAdmission(options.bootUdid, undefined, options.reason),
     });
+    return this.withBootPermit(admission, options);
+  }
+
+  private async withBootPermit(
+    admission: CapacityAdmission,
+    options: CapacityAdmitOptions,
+  ): Promise<CapacityAdmission> {
+    const release = admission.releaseAdmission;
+    if (!release || admission.decision.outcome === "refuse") {
+      return admission;
+    }
+    const status = this.bootGate.status();
+    const queued = status.running >= status.limit || status.queued > 0;
+    const startedAt = this.timer.now();
+    if (queued) {
+      logger.info(
+        `[BootAdmission] iOS simulator boot queued behind ${status.running} running boots (limit ${status.limit})`,
+      );
+    }
+    let granted = false;
+    try {
+      const permit = await this.bootGate.acquire(options.signal, options.bootUdid);
+      granted = true;
+      if (queued) {
+        logger.info(
+          `[BootAdmission] iOS simulator boot granted after ${this.timer.now() - startedAt}ms queued`,
+        );
+      }
+      // Held only from admitBoot's return to boot-to-ready completion in
+      // FleetBootInstrumentation.run. That window never acquires a second boot
+      // permit; runner launch happens after release, so neither gate nests.
+      let released = false;
+      return {
+        ...admission,
+        releaseAdmission: (outcome) => {
+          if (released) {
+            return;
+          }
+          released = true;
+          try {
+            release(outcome);
+          } finally {
+            permit.release();
+          }
+        },
+      };
+    } finally {
+      // Cancellation while queued must return the count slot as a failed boot.
+      if (!granted) {
+        release({ bootFailed: true });
+      }
+    }
   }
 
   async reserveBoot(options: BootReservationOptions): Promise<BootSlotReservation> {
@@ -263,7 +326,18 @@ export class IosSimCapacityGate
       },
       ledger: this.admittedBoots,
       decide: (report, window) =>
-        this.decide(report, undefined, "hint", options.replacingDeviceId, window),
+        this.decide(
+          report,
+          undefined,
+          "hint",
+          options.replacingDeviceId,
+          window,
+          // Only a reset re-boots the same device it stopped. Binding replacement deletes the old
+          // device and creates another, so it still needs capacity for the new one.
+          options.reason === "reset" &&
+            options.replacingDeviceId !== undefined &&
+            occupyingUdids(report).includes(options.replacingDeviceId),
+        ),
       admit: () => {
         admission = this.admittedBoots.admit(options.replacingDeviceId, true, options.reason);
         return admission.release;
@@ -450,7 +524,12 @@ export class IosSimCapacityGate
     return this.admittedBoots.inFlightCount(new Set(occupyingUdids(report)), bootUdid, window);
   }
 
-  private limitsFor(report: FleetCostReport, window?: LedgerSampleWindow): CapacityLimits {
+  /** Keep boot-concurrency metadata out of the shared refusal wire format. */
+  private countLimits({ maxBooted, source, warning }: IosCapacityLimits): CapacityLimits {
+    return { maxBooted, source, ...(warning ? { warning } : {}) };
+  }
+
+  private limitsFor(report: FleetCostReport, window?: LedgerSampleWindow): IosCapacityLimits {
     if (!report.host) {
       // Without host numbers we cannot derive a limit; fall back to a single concurrent boot.
       // A failed `ps` no longer lands here: its snapshot still carries the os totals (#11389).
@@ -471,11 +550,19 @@ export class IosSimCapacityGate
   }
 
   /** Log an unusable `AUTOMOBILE_IOS_SIM_MAX_BOOTED` once per distinct warning, as Android does. */
-  private warnOnUnusableLimit(limits: CapacityLimits): CapacityLimits {
+  private warnOnUnusableLimit(limits: IosCapacityLimits): IosCapacityLimits {
     if (limits.warning && limits.warning !== this.warnedLimit) {
       this.warnedLimit = limits.warning;
       logger.warn(`[BootAdmission] ${limits.warning}`);
     }
+    if (
+      limits.bootConcurrencyWarning &&
+      limits.bootConcurrencyWarning !== this.warnedBootConcurrency
+    ) {
+      this.warnedBootConcurrency = limits.bootConcurrencyWarning;
+      logger.warn(`[BootAdmission] ${limits.bootConcurrencyWarning}`);
+    }
+    this.bootGate.setLimit(limits.bootConcurrency);
     return limits;
   }
 }

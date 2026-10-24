@@ -67,6 +67,25 @@ export function runDeviceMutationJournalContract(
         expect(await journal.getBaseline(SCOPE)).toBeNull();
       }));
 
+    test("strays include only other incarnations for the exact session and device in sequence order", () =>
+      withJournal(async (journal) => {
+        expect(await journal.listStrayIncarnations(SCOPE)).toEqual([]);
+        for (const [index, scope] of [
+          { ...SCOPE, incarnation: "legacy" },
+          SCOPE,
+          { ...SCOPE, sessionUuid: "other", incarnation: "legacy" },
+          { ...SCOPE, deviceId: "other", incarnation: "legacy" },
+          { ...SCOPE, incarnation: "replacement" },
+        ].entries()) {
+          await journal.record(scope, { ...LOCALE, key: `key-${index}` });
+        }
+        const entries = await journal.listStrayIncarnations(SCOPE);
+        expect(entries.map((entry) => entry.key)).toEqual(["key-0", "key-4"]);
+        expect(entries[0].sequence).toBeLessThan(entries[1].sequence);
+        entries[0].key = "mutated-result";
+        expect((await journal.listStrayIncarnations(SCOPE))[0].key).toBe("key-0");
+      }));
+
     test("a recorded mutation lists exactly its journal fields, stamped with the clock", () =>
       withJournal(async (journal, timer) => {
         timer.setCurrentTime(42_000);
@@ -206,6 +225,50 @@ export function runDeviceMutationJournalContract(
         const read = await journal.getBaseline(SCOPE);
         read?.unobservable.push("mutated");
         expect(await journal.getBaseline(SCOPE)).toEqual(BASELINE);
+      }));
+
+    test("deleteResource removes rows and baselines of that resource across sessions and devices", () =>
+      withJournal(async (journal) => {
+        const resource = "binding-1";
+        const doomed: DeviceMutationScope[] = [
+          { ...SCOPE, incarnation: resource },
+          { sessionUuid: "session-b", deviceId: "emulator-5556", incarnation: resource },
+          { ...SCOPE, incarnation: JSON.stringify([resource, "generation-7"]) },
+        ];
+        const kept: DeviceMutationScope[] = [
+          { ...SCOPE, incarnation: `${resource}-2` },
+          { ...SCOPE, incarnation: JSON.stringify(["other", resource]) },
+          { ...SCOPE, incarnation: "generation-1" },
+        ];
+        for (const scope of [...doomed, ...kept]) {
+          await journal.record(scope, LOCALE);
+          await journal.captureBaseline(scope, BASELINE);
+        }
+        await journal.deleteResource(resource);
+        for (const scope of doomed) {
+          expect(await journal.list(scope)).toEqual([]);
+          expect(await journal.getBaseline(scope)).toBeNull();
+        }
+        for (const scope of kept) {
+          expect(await journal.list(scope)).toHaveLength(1);
+          expect(await journal.getBaseline(scope)).toEqual(BASELINE);
+        }
+      }));
+
+    test("deleteResource is idempotent and skips an unparsable array-looking incarnation", () =>
+      withJournal(async (journal) => {
+        const malformed: DeviceMutationScope = { ...SCOPE, incarnation: "[not json" };
+        await journal.record(malformed, LOCALE);
+        await journal.deleteResource("binding-1");
+        await journal.deleteResource("binding-1");
+        expect(await journal.list(malformed)).toHaveLength(1);
+      }));
+
+    test("deleteResource refuses a blank resource id and deletes nothing", () =>
+      withJournal(async (journal) => {
+        await journal.record(SCOPE, LOCALE);
+        expect(await rejection(journal.deleteResource("  "))).toBeInstanceOf(ActionableError);
+        expect(await journal.list(SCOPE)).toHaveLength(1);
       }));
 
     test("an invalid baseline is rejected and none is stored", () =>

@@ -1,3 +1,7 @@
+import type { RunnerLaunchFailure } from "./IosRunnerLaunchFailure";
+import { IosRunnerLaunchWindow } from "./IosRunnerLaunchWindow";
+import type { RunnerLaunchProgressProbe } from "./IosRunnerLaunchProgress";
+import { exponentialBackoff, sequenceBackoff, type BackoffPolicy } from "../../utils/Backoff";
 import type { IosCtrlProxyRuntime } from "./IosCtrlProxyRuntime";
 import type { RunnerStartupProvenance, SharedCtrlProxyStart } from "./IosCtrlProxyLifecycleSteps";
 import { logger } from "../../utils/logger";
@@ -19,6 +23,7 @@ interface IosCtrlProxyReadinessHost {
     options?: { requireDeviceId?: boolean },
   ): Promise<boolean>;
   adoptServicePort(port: number): void;
+  quarantineServicePort(port: number): void;
   clearCaches(): void;
   startProcessSupervision(): Promise<void>;
   assertDeviceNotRetired(): void;
@@ -43,6 +48,8 @@ export class IosCtrlProxyReadiness {
   constructor(
     private readonly state: Pick<
       IosCtrlProxyRuntime,
+      | "runnerLaunchFailures"
+      | "runnerLaunchProgressProbe"
       | "timer"
       | "xcTestProcessId"
       | "steps"
@@ -55,6 +62,11 @@ export class IosCtrlProxyReadiness {
       | "tunnelClient"
     >,
     private readonly host: IosCtrlProxyReadinessHost,
+    private readonly policies: {
+      progressProbe?: RunnerLaunchProgressProbe;
+      extensionBackoff?: BackoffPolicy;
+      relaunchBackoff?: BackoffPolicy;
+    } = {},
   ) {}
 
   extendHealthPollDeadline(
@@ -93,7 +105,8 @@ export class IosCtrlProxyReadiness {
    * whole acquisition budget; without a per-launch window a runner frozen at
    * launch was polled for that entire budget and never replaced. When a window
    * elapses unanswered while the extended deadline still has time left, the
-   * runner is terminated and relaunched, at most
+   * runner is retained while its CPU usage grows, up to a bounded total launch
+   * duration. An idle runner is terminated and relaunched, at most
    * {@link MAX_UNRESPONSIVE_RUNNER_RELAUNCHES} times; after the last window it is
    * terminated and startup fails with an actionable error inside the deadline.
    *
@@ -113,47 +126,148 @@ export class IosCtrlProxyReadiness {
     firstLaunchOwned: boolean,
   ): Promise<boolean> {
     const launchWindowsMs: number[] = [];
+    let lastFailure: RunnerLaunchFailure | undefined;
     for (;;) {
       const launchWindowMs =
         launchWindowsMs.length === 0
           ? windowMs * IOS_CTRL_PROXY_FIRST_LAUNCH_HEALTH_WINDOW_MULTIPLIER
           : windowMs;
-      launchWindowsMs.push(launchWindowMs);
-      const bounded = this.state.xcTestProcessId !== null;
-      const launchDeadlineMs = bounded
-        ? this.state.timer.now() + launchWindowMs
-        : Number.POSITIVE_INFINITY;
-      this.extendFirstLaunchDeadline(
-        sharedStart,
-        firstLaunchOwned && launchWindowsMs.length === 1,
-        launchDeadlineMs,
-      );
-      if (
-        await this.state.steps.waitForHealthEndpoint(sharedStart, perf, delayMs, launchDeadlineMs)
-      ) {
+
+      const result = await this.pollRunnerLaunch(sharedStart, perf, delayMs, launchWindowMs, {
+        firstLaunch: firstLaunchOwned && launchWindowsMs.length === 0,
+        windowMs,
+      });
+      launchWindowsMs.push(result.elapsedMs);
+      if (result.ready) {
         await this.state.steps.completeHealthStartup(sharedStart, perf);
         return true;
       }
-      const now = this.state.timer.now();
-      if (!bounded || now < launchDeadlineMs || (sharedStart.healthPollDeadlineMs ?? 0) <= now) {
+      if (!result.canRetire) {
         return false;
       }
       if (await this.adoptHealthyDefaultPortRunner(sharedStart)) {
         return true;
       }
+      lastFailure = result.failure ?? lastFailure;
       const final = launchWindowsMs.length > IOS_CTRL_PROXY_MAX_UNRESPONSIVE_RUNNER_RELAUNCHES;
-      await this.retireUnresponsiveRunner(sharedStart, launchWindowMs, final);
+      await this.retireUnresponsiveRunner(sharedStart, result.elapsedMs, final, result.failure);
       if (final) {
         const windows = launchWindowsMs.map((ms) => `${Math.round(ms / 1000)}s`).join(", ");
         throw new ActionableError(
           `CtrlProxy runner health check failed: the runner never answered its health ` +
             `endpoint on port ${this.state.servicePort} in any of ${launchWindowsMs.length} launches ` +
             `(windows ${windows}), and each was terminated. The runner may be frozen at ` +
-            `launch; check the device or simulator, then retry device acquisition.`,
+            `launch; check the device or simulator, then retry device acquisition.` +
+            (lastFailure
+              ? ` Last launch failure: ${lastFailure.reason}: ${lastFailure.detail}`
+              : ""),
         );
+      }
+      if (!(await this.pauseBeforeRelaunch(sharedStart, launchWindowsMs.length))) {
+        return false;
       }
       await this.relaunchUnresponsiveRunner(sharedStart, perf);
     }
+  }
+
+  private async pauseBeforeRelaunch(
+    sharedStart: SharedCtrlProxyStart,
+    attempt: number,
+  ): Promise<boolean> {
+    const remainingMs = (sharedStart.healthPollDeadlineMs ?? 0) - this.state.timer.now();
+    if (remainingMs <= 0) {
+      return false;
+    }
+    await this.sleepForHealthPoll(
+      Math.min(
+        (this.policies.relaunchBackoff ?? sequenceBackoff([0])).delayForAttempt(attempt),
+        remainingMs,
+      ),
+      sharedStart.controller.signal,
+    );
+    return (sharedStart.healthPollDeadlineMs ?? 0) > this.state.timer.now();
+  }
+
+  private async pollRunnerLaunch(
+    sharedStart: SharedCtrlProxyStart,
+    perf: PerformanceTracker,
+    delayMs: number,
+    launchWindowMs: number,
+    options: { firstLaunch: boolean; windowMs: number },
+  ): Promise<{
+    ready: boolean;
+    canRetire: boolean;
+    elapsedMs: number;
+    failure: RunnerLaunchFailure | undefined;
+  }> {
+    const startedAt = this.state.timer.now();
+    const launch = this.createLaunchWindow(launchWindowMs, options.windowMs);
+    const deadlineMs = launch?.deadlineMs ?? Number.POSITIVE_INFINITY;
+    this.extendFirstLaunchDeadline(sharedStart, options.firstLaunch, deadlineMs);
+    if (launch) {
+      await launch.initialize();
+    }
+    const ready = await this.waitForLaunchHealth(sharedStart, perf, delayMs, deadlineMs, launch);
+    const now = this.state.timer.now();
+    const failure = this.trackedLaunchFailure();
+    const canRetire =
+      launch !== undefined &&
+      (failure !== undefined || now >= launch.deadlineMs) &&
+      (launch.ceilingReached || (sharedStart.healthPollDeadlineMs ?? 0) > now);
+    return { ready, canRetire, elapsedMs: now - startedAt, failure };
+  }
+
+  private createLaunchWindow(
+    launchWindowMs: number,
+    windowMs: number,
+  ): IosRunnerLaunchWindow | undefined {
+    if (this.state.xcTestProcessId === null) {
+      return undefined;
+    }
+    return new IosRunnerLaunchWindow(
+      this.state.timer,
+      this.policies.progressProbe ?? this.state.runnerLaunchProgressProbe,
+      this.policies.extensionBackoff ??
+        exponentialBackoff({ initialDelayMs: windowMs, maxDelayMs: 60_000 }),
+      { pid: this.state.xcTestProcessId, deviceId: this.state.device.deviceId },
+      launchWindowMs,
+    );
+  }
+
+  private async waitForLaunchHealth(
+    sharedStart: SharedCtrlProxyStart,
+    perf: PerformanceTracker,
+    delayMs: number,
+    initialDeadlineMs: number,
+    launch: IosRunnerLaunchWindow | undefined,
+  ): Promise<boolean> {
+    for (;;) {
+      const deadlineMs = launch?.deadlineMs ?? initialDeadlineMs;
+      if (await this.state.steps.waitForHealthEndpoint(sharedStart, perf, delayMs, deadlineMs)) {
+        return true;
+      }
+      if (
+        this.trackedLaunchFailure() ||
+        !launch ||
+        this.state.timer.now() < deadlineMs ||
+        sharedStart.controller.signal.aborted
+      ) {
+        return false;
+      }
+      const callerDeadlineMs =
+        sharedStart.callerHealthPollDeadlinesMs.size > 0
+          ? Math.max(...sharedStart.callerHealthPollDeadlinesMs.values())
+          : Number.POSITIVE_INFINITY;
+      if (!(await launch.extend(callerDeadlineMs))) {
+        return false;
+      }
+      this.extendFirstLaunchDeadline(sharedStart, true, launch.deadlineMs);
+    }
+  }
+
+  private trackedLaunchFailure(): RunnerLaunchFailure | undefined {
+    const pid = this.state.xcTestProcessId;
+    return pid === null ? undefined : this.state.runnerLaunchFailures.get(pid);
   }
 
   private extendFirstLaunchDeadline(
@@ -210,9 +324,13 @@ export class IosCtrlProxyReadiness {
    */
   private async retireUnresponsiveRunner(
     sharedStart: SharedCtrlProxyStart,
-    launchWindowMs: number,
+    elapsedMs: number,
     final: boolean,
+    failure?: RunnerLaunchFailure,
   ): Promise<void> {
+    if (failure?.reason === "listener-bind-failed") {
+      this.host.quarantineServicePort(this.state.servicePort);
+    }
     const pid = this.state.xcTestProcessId;
     const stillOurs = await this.state.steps.isOwnRunnerProcessAlive(pid);
     if (final) {
@@ -225,8 +343,11 @@ export class IosCtrlProxyReadiness {
         // this start and schedule a duplicate supervisor restart (#10653).
         this.state.retiredRunnerPids.add(pid);
         logger.warn(
-          `[IOSCtrlProxy] CtrlProxy runner (PID ${pid}) did not answer its health endpoint ` +
-            `within ${Math.round(launchWindowMs / 1000)}s of launch; terminating it` +
+          `[IOSCtrlProxy] CtrlProxy runner (PID ${pid}) ` +
+            (failure
+              ? `failed during launch after ${Math.round(elapsedMs / 1000)}s (${failure.reason}: ${failure.detail})`
+              : `did not answer its health endpoint within ${Math.round(elapsedMs / 1000)}s of launch`) +
+            `; terminating it` +
             (final ? "" : " and relaunching"),
         );
         await this.state.steps.terminateHungRunnerProcess(pid);
@@ -239,6 +360,7 @@ export class IosCtrlProxyReadiness {
       if (this.state.xcTestProcessId === pid) {
         if (pid !== null) {
           this.state.runnerGenerationTokens.delete(pid);
+          this.state.runnerLaunchFailures.clear(pid);
         }
         this.state.xcTestProcessId = null;
         this.state.xcTestProcess = null;
@@ -288,6 +410,14 @@ export class IosCtrlProxyReadiness {
         perf.endOperation("healthPolling");
         return true;
       }
+      const failure = this.trackedLaunchFailure();
+      if (failure) {
+        logger.warn(
+          `[IOSCtrlProxy] Stopping runner launch health wait (PID ${this.state.xcTestProcessId}): ${failure.reason}: ${failure.detail}`,
+        );
+        perf.endOperation("healthPolling");
+        return false;
+      }
       if (attempts > 1 && attempts % 10 === 0) {
         logger.info(
           `[IOSCtrlProxy] Still waiting for service... (attempt ${attempts}, ` +
@@ -313,6 +443,9 @@ export class IosCtrlProxyReadiness {
     sharedStart: SharedCtrlProxyStart,
     _perf: PerformanceTracker,
   ): Promise<void> {
+    if (this.state.xcTestProcessId !== null) {
+      this.state.runnerLaunchFailures.clear(this.state.xcTestProcessId);
+    }
     logger.info("[IOSCtrlProxy] HTTP health endpoint is ready");
     this.host.clearCaches();
     await this.host.startProcessSupervision();

@@ -1,4 +1,5 @@
 import { prototypeAccessibilityOutput } from "../../features/prototype/prototypeAccessibilityLint";
+import { pseudoLocalizeSpec } from "../../features/prototype/prototypePseudoLocale";
 import { z } from "zod/v4";
 import { createDeviceHierarchyCapture } from "../../features/observe/DeviceHierarchyCapture";
 import { type DeviceWindowCacheInvalidator } from "../../features/observe/DeviceWindowCacheInvalidator";
@@ -194,7 +195,8 @@ async function performMutation(
       ),
     );
     // The device is sent resolved bounds anchors; host status keeps the authored spec's identity.
-    const sendArgs = resolved.spec ? { ...args, spec: resolved.spec } : args;
+    const authoredArgs = resolved.spec ? { ...args, spec: resolved.spec } : args;
+    const sendArgs = pseudoLocalizedArgs(authoredArgs);
     const comparable = await withdrawOnAbort(
       ordering,
       signal,
@@ -246,7 +248,7 @@ async function performMutation(
       action: args.action,
       success: result.success,
       id: target.id,
-      spec: sendArgs.spec,
+      spec: authoredArgs.spec,
       replaceOthers: args.replaceOthers,
       result,
     });
@@ -297,7 +299,7 @@ async function performMutation(
       lastResult,
       ...(stage.uploaded.length > 0 ? { uploadedAssets: stage.uploaded } : {}),
       ...anchorsOutput(resolved),
-      ...showAdviceOutput(sendArgs, device, prototypeTarget, result.success),
+      ...showAdviceOutput(authoredArgs, device, prototypeTarget, result.success),
       ...visibility,
       ...reversing.output(reverseReport, result.success),
       ...missingAssetsOutput(result, [warning, placed.warning, visibilityWarning], legacy),
@@ -314,6 +316,15 @@ async function performMutation(
     endShownSpec(store, ordering);
     settleGeneration(ordering);
   }
+}
+
+/** A pseudo-localized show sends altered copy; status and patch keep the authored spec. */
+function pseudoLocalizedArgs<T extends { action: string; pseudoLocale?: boolean; spec?: unknown }>(
+  args: T,
+): T {
+  return args.action === "show" && args.pseudoLocale === true && args.spec
+    ? { ...args, spec: pseudoLocalizeSpec(args.spec) }
+    : args;
 }
 
 /** Advisory platform notes and accessibility findings for a successful show. */

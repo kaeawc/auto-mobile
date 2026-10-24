@@ -28,7 +28,21 @@ describe("AndroidDeviceStateSync", () => {
         throw new Error("socket gone");
       },
     });
-    expect(() => sync.syncNetworkState()).not.toThrow();
+    expect(sync.syncNetworkState()).toBe(false);
     expect(() => sync.syncAccessibilityFlags()).not.toThrow();
   });
+});
+
+test.each([
+  [true, true, true],
+  [false, true, false],
+  [true, false, false],
+])("network delivery %s / %s returns %s", (first, second, expected) => {
+  let sends = 0;
+  const sync = new AndroidDeviceStateSync({
+    deviceId: "fake",
+    sendMessage: () => (++sends === 1 ? first : second),
+  });
+  expect(sync.syncNetworkState()).toBe(expected);
+  expect(sends).toBe(2);
 });

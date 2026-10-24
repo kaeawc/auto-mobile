@@ -1,4 +1,5 @@
 import { ActionableError } from "../../models/ActionableError";
+import { adbFailureOutput } from "../../utils/android-cmdline-tools/adbFailureOutput";
 import { DUMPSYS_MAX_BUFFER } from "../../utils/android-cmdline-tools/dumpsysLimits";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { shellQuote } from "../../utils/shellQuote";
@@ -146,24 +147,10 @@ export class AndroidHeapDump {
   }
 
   private async runDump(request: HeapDumpRequest, remotePath: string): Promise<HeapDumpAttempt[]> {
-    const { adb } = this.deps;
     const attempts: HeapDumpAttempt[] = [];
     for (const base of DUMP_COMMANDS) {
       const command = `${base}${request.native ? " -n" : ""} ${shellQuote(request.appId)} ${remotePath}`;
-      const run = await adb.execute(["shell", command], {
-        timeoutMs: DUMP_TIMEOUT_MS,
-        noRetry: true,
-        signal: request.signal,
-      });
-      const output = `${run.stdout}\n${run.stderr}`.trim();
-      if (NOT_DEBUGGABLE_OUTPUT.test(output)) {
-        throw new HeapDumpRefusedError(request.appId, output.split("\n")[0]);
-      }
-      if (NOT_RUNNING_OUTPUT.test(output)) {
-        throw new ActionableError(
-          `${request.appId} is not running on ${request.deviceId}; launch it before dumping its heap. ${output}`,
-        );
-      }
+      const output = await this.runDumpCommand(request, command);
       const size = await this.awaitDumpWritten(remotePath, request.signal);
       attempts.push({ command, outcome: size > 0 ? "dumped" : "empty", output });
       if (size > 0) {
@@ -173,6 +160,40 @@ export class AndroidHeapDump {
     throw new ActionableError(
       `No heap dump was written for ${request.appId}; tried ${attempts.map((a) => a.command).join(", ")}. Last output: ${attempts.at(-1)?.output ?? ""}`,
     );
+  }
+
+  /**
+   * Run one dump command and return its output. `adb shell` propagates the remote exit status, so
+   * a refusal usually arrives as a rejected call, not a resolved result: classify the output a
+   * rejection carries too, and rethrow anything unrecognized unchanged.
+   */
+  private async runDumpCommand(request: HeapDumpRequest, command: string): Promise<string> {
+    let output: string;
+    try {
+      const run = await this.deps.adb.execute(["shell", command], {
+        timeoutMs: DUMP_TIMEOUT_MS,
+        noRetry: true,
+        signal: request.signal,
+      });
+      output = `${run.stdout}\n${run.stderr}`.trim();
+    } catch (error) {
+      const failure = adbFailureOutput(error);
+      this.classifyDumpOutput(request, `${failure.stdout}\n${failure.stderr}`.trim());
+      throw error;
+    }
+    this.classifyDumpOutput(request, output);
+    return output;
+  }
+
+  private classifyDumpOutput(request: HeapDumpRequest, output: string): void {
+    if (NOT_DEBUGGABLE_OUTPUT.test(output)) {
+      throw new HeapDumpRefusedError(request.appId, output.split("\n")[0]);
+    }
+    if (NOT_RUNNING_OUTPUT.test(output)) {
+      throw new ActionableError(
+        `${request.appId} is not running on ${request.deviceId}; launch it before dumping its heap. ${output}`,
+      );
+    }
   }
 
   /**

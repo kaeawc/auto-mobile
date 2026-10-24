@@ -80,6 +80,7 @@ A read never writes settings on a device another session holds. A sessionless re
 | 🧹 <code>resetAppLogs</code>          | Reset named app log files                                                                      |
 | ⚙️ <code>getPreference</code>         | Read an Android system property, Android SharedPreferences key, or iOS UserDefaults key        |
 | ⚙️ <code>setPreference</code>         | Write a system property, SharedPreferences, or UserDefaults key                                |
+| 🗝️ <code>deleteKeychainItem</code>    | Delete one allowlisted app-owned iOS Keychain item (SDK opt-in, requires confirm)              |
 | 🔑 <code>setKeyValue</code>           | Set app key-value storage entry                                                                |
 | ❌ <code>removeKeyValue</code>        | Remove app key-value storage entry                                                             |
 | 🧼 <code>clearKeyValueFile</code>     | Clear app key-value storage file                                                               |
@@ -112,6 +113,7 @@ A read never writes settings on a device another session holds. A sessionless re
 | 📐 <code>setPosture</code>                  | Set foldable / Duo posture                                                           |
 | 📶 <code>statusBar</code>                   | Pin status-bar time, battery, and signal for clean screenshots                       |
 | 🪟 <code>windowMode</code>                  | Fullscreen, PiP, or split-screen an Android task                                     |
+| 🎛️ <code>rotaryScroll</code>                | Wear OS crown scroll with read-back; reports every attempted method                  |
 | 🌍 <code>openLink</code>                    | Open URL in browser                                                                  |
 | 🏠 <code>homeScreen</code>                  | Go to home screen                                                                    |
 | 🕘 <code>recentApps</code>                  | Open recent apps                                                                     |
@@ -153,7 +155,7 @@ A read never writes settings on a device another session holds. A sessionless re
 | 🎬 <code>recordDeviceGestures</code> | Start recording on-device user input (not tool calls) for exportPlan                                                                                                              |
 | 📤 <code>exportPlan</code>           | Stop active recording and export a YAML plan                                                                                                                                      |
 | 🎥 <code>videoRecording</code>       | Start or stop device video recording                                                                                                                                              |
-| 📈 <code>performanceTrace</code>     | Record an xctrace / Perfetto trace                                                                                                                                                |
+| 📈 <code>performanceTrace</code>     | Record an xctrace / Perfetto trace; read it back at <code>automobile:device-session/{sessionUuid}/performance-traces/{traceId}{?offset,maxBytes}</code>                           |
 | 🔬 <code>captureTrace</code>         | Android: record a Perfetto trace from typed categories (`sched`, `gfx`, `view`, `am`, `wm`, `binder_driver`, `memory`, `app`); `stop` pulls the `.perfetto-trace`. Off by default |
 | 🧠 <code>heapDump</code>             | Android: dump a debuggable or profileable app's heap to a host `.hprof` (`heap_dump_not_debuggable` otherwise). Off by default                                                    |
 
@@ -182,7 +184,7 @@ separate `select` key exists. Android only; not yet verified on a TV image
 ## 📝 Notes
 
 - ⌨️ Compact observations fold soft-keyboard keys into one `keyboard: { visible: true, package: "…" }` summary plus at most one skeleton row (`<ime> | Keyboard (…) | input`). The row appears only with at least one bounded accessible descendant.
-- 📸 Screenshot paths are kept for **at least 10 minutes after return**; each path has a `screenshotExpiresAt`/`expiresAt` (host epoch ms, not a promise). Retention is capped at **128 MiB and 4096 files**. After a restart, existing files get a process-start grace of ten minutes.
+- 📸 Screenshot paths are kept for **at least 10 minutes after return** unless evicted early under capacity pressure; each path has a `screenshotExpiresAt`/`expiresAt` (host epoch ms, not a promise). Retention starts at **128 MiB** and scales by 64 MiB per active device up to 1 GiB, within a limit of **4096 files**. Each device’s newest 3 screenshots (counting its incoming frame) are evicted only as a last resort, and a capture is admitted even if nothing fits. The byte limits and per-device allowance are [configurable](using/environment-variables.md#screenshot-retention). After a restart, existing files get a process-start grace of ten minutes.
 - 🧹 `holdSessionOnFailure` keeps plan sessions instead of auto-releasing them.
 
 ### prototype

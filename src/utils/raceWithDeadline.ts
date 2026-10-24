@@ -1,4 +1,5 @@
 import { ActionableError } from "../models";
+import type { AdjustableDeadline } from "./AdjustableDeadline";
 import type { Timer } from "./SystemTimer";
 
 type DeadlineTimer = Pick<Timer, "setTimeout" | "clearTimeout">;
@@ -15,6 +16,11 @@ function hasUnref(handle: NodeJS.Timeout): handle is NodeJS.Timeout & { unref: (
 interface RaceWithDeadlineOptions {
   timer: DeadlineTimer;
   timeoutMs?: number;
+  /**
+   * A movable absolute deadline, used instead of `timeoutMs`. The timer re-arms whenever the
+   * deadline moves, so a later (or earlier) deadline applies to a race already in flight.
+   */
+  deadline?: AdjustableDeadline;
   unref?: boolean;
   signal?: AbortSignal;
   label: string;
@@ -22,6 +28,40 @@ interface RaceWithDeadlineOptions {
   relabelDefaultAbort?: boolean;
   timeoutError?: () => unknown;
   onTimeout?: () => void;
+}
+
+/** Arm the race's timeout: a fixed `timeoutMs`, or a movable `deadline` that wins when both are set. */
+function armTimeout(
+  options: Pick<
+    RaceWithDeadlineOptions,
+    "timeoutMs" | "deadline" | "unref" | "label" | "timeoutError" | "onTimeout"
+  > & { timer: DeadlineTimer },
+): { promise: Promise<never>; cancel: () => void } | undefined {
+  const { timer, timeoutMs, deadline, unref, label, timeoutError, onTimeout } = options;
+  if (deadline === undefined && timeoutMs === undefined) {
+    return undefined;
+  }
+  const fixedMs = timeoutMs ?? 0;
+  let cancel: () => void = () => {};
+  const promise = new Promise<never>((_resolve, reject) => {
+    const fail = (message: string): void => {
+      reject(timeoutError?.() ?? new ActionableError(message));
+      onTimeout?.();
+    };
+    const unrefHandle = (handle: NodeJS.Timeout): void => {
+      if (unref && hasUnref(handle)) {
+        handle.unref();
+      }
+    };
+    if (deadline) {
+      cancel = deadline.whenExpired(timer, () => fail(`${label} timed out`), unrefHandle);
+      return;
+    }
+    const handle = timer.setTimeout(() => fail(`${label} timed out after ${fixedMs}ms`), fixedMs);
+    unrefHandle(handle);
+    cancel = () => timer.clearTimeout(handle);
+  });
+  return { promise, cancel: () => cancel() };
 }
 
 function abortReason(signal: AbortSignal, label: string, relabelDefaultAbort: boolean): unknown {
@@ -85,6 +125,7 @@ export async function raceWithDeadline<T>(
   {
     timer,
     timeoutMs,
+    deadline,
     unref = false,
     signal,
     label,
@@ -101,7 +142,6 @@ export async function raceWithDeadline<T>(
     throw abortReason(signal, label, relabelDefaultAbort);
   }
 
-  let timeoutHandle: NodeJS.Timeout | undefined;
   let removeAbortListener: (() => void) | undefined;
   const abortPromise = signal
     ? new Promise<never>((_resolve, reject) => {
@@ -113,20 +153,7 @@ export async function raceWithDeadline<T>(
         }
       })
     : undefined;
-  const timeoutPromise =
-    timeoutMs === undefined
-      ? undefined
-      : new Promise<never>((_resolve, reject) => {
-          timeoutHandle = timer.setTimeout(() => {
-            reject(
-              timeoutError?.() ?? new ActionableError(`${label} timed out after ${timeoutMs}ms`),
-            );
-            onTimeout?.();
-          }, timeoutMs);
-          if (unref && hasUnref(timeoutHandle)) {
-            timeoutHandle.unref();
-          }
-        });
+  const timeout = armTimeout({ timer, timeoutMs, deadline, unref, label, timeoutError, onTimeout });
 
   try {
     const started = startOperations(operation);
@@ -135,12 +162,10 @@ export async function raceWithDeadline<T>(
     return await Promise.race([
       ...started,
       ...(abortPromise ? [abortPromise] : []),
-      ...(timeoutPromise ? [timeoutPromise] : []),
+      ...(timeout ? [timeout.promise] : []),
     ]);
   } finally {
-    if (timeoutHandle !== undefined) {
-      timer.clearTimeout(timeoutHandle);
-    }
+    timeout?.cancel();
     removeAbortListener?.();
   }
 }

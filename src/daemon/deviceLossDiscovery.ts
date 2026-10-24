@@ -35,6 +35,10 @@ import { MISSING_DEVICE_MISS_THRESHOLD } from "./missingDeviceLiveness";
  * below, so each is unit-testable with fakes; the miss maps and the tick itself stay on `Daemon`.
  */
 
+// Reuse pool refresh snapshots to reduce simctl cost; held simulator loss can wait up to 15 seconds.
+// Missing devices still require a fresh confirmation before their absence counts.
+export const MONITOR_IOS_LIST_MAX_AGE_MS = 15_000;
+
 export const DEVICE_DISCONNECT_MISS_THRESHOLD = MISSING_DEVICE_MISS_THRESHOLD;
 // Retain plan-time evidence while requiring two inactive observations before cleanup.
 export const PLAN_DEVICE_DISCONNECT_MISS_CAP = DEVICE_DISCONNECT_MISS_THRESHOLD - 2;
@@ -61,6 +65,13 @@ export type DeviceLossDiscoveryPool = Pick<
   | "reconcileDiscoveryObservation"
 >;
 
+function needsFreshTransitionalSimulatorRead(
+  discovery: BootedDeviceDiscovery,
+  iosDeviceListMaxAgeMs: number | undefined,
+): boolean {
+  return iosDeviceListMaxAgeMs !== undefined && (discovery.transitionalSimulators?.length ?? 0) > 0;
+}
+
 export async function discoverAndReconcile(
   devicePool: DeviceLossDiscoveryPool,
   deviceManager: Pick<MultiPlatformDeviceManager, "getBootedDevicesDetailed">,
@@ -69,7 +80,9 @@ export async function discoverAndReconcile(
     platform = "either",
     bypassAndroidDeviceListCache = false,
     heldDevices = [],
+    iosDeviceListMaxAgeMs,
   }: {
+    iosDeviceListMaxAgeMs?: number;
     isPlanDevice?: (deviceId: string) => boolean;
     heldDevices?: readonly { platform: "android" | "ios"; assignedDevice: string }[];
     platform?: Parameters<MultiPlatformDeviceManager["getBootedDevicesDetailed"]>[0];
@@ -93,12 +106,20 @@ export async function discoverAndReconcile(
     observation.devices = await mapMonitorAndroidDiscovery(devicePool, observation.devices);
     return observation;
   };
-  let discovery = await read(options);
+  let discovery = await read({
+    ...options,
+    ...(iosDeviceListMaxAgeMs === undefined ? {} : { iosDeviceListMaxAgeMs }),
+  });
+  const refreshTransitionalSimulators = needsFreshTransitionalSimulatorRead(
+    discovery,
+    iosDeviceListMaxAgeMs,
+  );
   const present = new Set(discovery.devices.map((device) => device.deviceId));
   const missingDevices = trackedDevices.filter(
     (device) => !isPlanDevice(device.id) && !present.has(device.id),
   );
   if (
+    refreshTransitionalSimulators ||
     missingDevices.some(
       (device) =>
         didSourceSucceedForDevice(discovery, device.platform, device.id) &&
@@ -106,6 +127,7 @@ export async function discoverAndReconcile(
     )
   ) {
     // Plan-time misses are capped below confirmation; its own loss check already reads fresh.
+    // Transitional snapshots read with an extended max age also need fresh state.
     // Otherwise only the fresh confirmation reaches reconciliation and miss counting. Healthy/
     // idle sweeps keep the cheap cached path; a failed confirmation supplies no absence evidence.
     discovery = await read({
@@ -113,9 +135,11 @@ export async function discoverAndReconcile(
       bypassAndroidDeviceListCache:
         bypassAndroidDeviceListCache ||
         missingDevices.some((device) => device.platform === "android"),
-      bypassIosDeviceListCache: missingDevices.some(
-        (device) => discoverySourceFor(device.platform, device.id) === "ios-simulator",
-      ),
+      bypassIosDeviceListCache:
+        refreshTransitionalSimulators ||
+        missingDevices.some(
+          (device) => discoverySourceFor(device.platform, device.id) === "ios-simulator",
+        ),
       bypassPhysicalIosDeviceListCache: missingDevices.some(
         (device) => discoverySourceFor(device.platform, device.id) === "ios-physical",
       ),

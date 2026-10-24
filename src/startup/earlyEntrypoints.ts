@@ -26,6 +26,13 @@ export async function runEarlyEntrypoints(rawArgs: string[]): Promise<void> {
     process.exit(0);
   }
 
+  const templatesIndex = rawArgs.indexOf("--ios-templates");
+  if (templatesIndex >= 0) {
+    const { runIosTemplatesCommand } = await import("../cli/iosTemplates");
+    startupBenchmark.endPhase("moduleImports");
+    process.exit(await runIosTemplatesCommand(rawArgs.slice(templatesIndex + 1)));
+  }
+
   const networkFilterIndex = rawArgs.indexOf("--ios-network-filter");
   if (networkFilterIndex >= 0) {
     // Opt-in host action (#10588): installing a system extension changes the

@@ -1228,7 +1228,14 @@ describe("handleDaemonRequest", () => {
         new FakeDaemonState(sessionManager, pool),
         tracker,
       ),
-    ).toMatchObject({ success: true, result: { alreadyReleased: true } });
+    ).toMatchObject({
+      success: true,
+      result: {
+        alreadyReleased: false,
+        known: false,
+        message: expect.stringContaining("not known"),
+      },
+    });
   });
 
   test("releasing an already released session stays idempotent (#11148)", async () => {
@@ -1243,7 +1250,10 @@ describe("handleDaemonRequest", () => {
       );
     await release();
 
-    expect(await release()).toMatchObject({ success: true, result: { alreadyReleased: true } });
+    expect(await release()).toMatchObject({
+      success: true,
+      result: { alreadyReleased: true, known: true },
+    });
   });
 
   test("releases session and device without a cancellation await when idle", async () => {

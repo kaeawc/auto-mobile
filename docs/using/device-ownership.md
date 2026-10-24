@@ -5,6 +5,15 @@ Acquiring a device with `getAndroid`, `getApple` or `startDevice` creates the
 session and returns its `sessionUuid`; the session holds the device until it is
 released (idle timeout, lost heartbeat, or an explicit release).
 
+`daemon/releaseSession` returns `alreadyReleased:true` and `known:true` when
+this daemon remembers an earlier release. An unrecognized session returns
+`alreadyReleased:false` and `known:false`; it still succeeds so releases remain
+idempotent after a daemon restart. Set `requireKnown:true` to refuse unrecognized
+sessions with `daemon_session_not_found`. When restoration is incomplete,
+`cleanup` is `pending` or `failed` (failure takes precedence); inspect the restore
+reports before relying on the device being fully restored. Completed restoration
+omits `cleanup`.
+
 ## Passing the session
 
 - **MCP:** a connection that acquired a device is bound to it, so its calls route
@@ -81,6 +90,20 @@ control.
   Boot capacity limits still apply.
 - Ownership is a guard between cooperating clients, not a security boundary
   against other local processes.
+
+### Cold iOS observe freshness
+
+With more simultaneous cold iOS observes than the configured launch concurrency,
+a queued launch or one already running can outlast the read budget. `observe`
+keeps that budget and reports the pending state with `ok: true`, `freshness.isFresh: false`, and
+`freshness.unavailableReason: "runner_launch_queued"`, without a hierarchy.
+The detail includes the queue position when queued, or says the runner is still
+starting in the background. Any captured screenshot is kept. The start continues
+for up to 60 seconds from the moment its launch leaves the queue (waiting in the
+queue is bounded separately, at 5 minutes), and a retry joins that same start. While it runs it holds the
+device's readiness lock, so a concurrent `startDevice` or session upgrade for that
+simulator waits within its own deadline. Retry the observe shortly.
+A warm retry can complete in about 1.4 seconds; timing depends on the device and host.
 
 ## When a session is released
 
@@ -226,10 +249,12 @@ in error stays `error`. `idle + assigned + error` equals the total.
 ## Boot capacity
 
 Cold boots are admitted against host capacity. Each platform has its own limit on
-booted devices: the smaller of half the host RAM divided by the measured
-per-device memory and half the CPU cores, at least 1. Every booted emulator or
+booted devices: for Android, the smaller of half the host RAM divided by the
+measured per-device memory and half the CPU cores; for iOS, the smaller of that
+memory budget and a settled-CPU budget (about 0.055 core per simulator, half the
+cores), at least 1. Every booted emulator or
 simulator counts, including ones started outside AutoMobile. A boot over the
-limit is not queued: it fails at once with the retryable `capacity_exhausted`,
+count limit is not queued: it fails at once with the retryable `capacity_exhausted`,
 which carries `retryAfterMs`, `limit`, `booted`, `platform` and, when relevant,
 `externalDevices` (running devices AutoMobile did not start) and `heldDevices`
 (iOS simulators held by AutoMobile sessions or bindings; release the session

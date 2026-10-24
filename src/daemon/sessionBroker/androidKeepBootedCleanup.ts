@@ -1,3 +1,4 @@
+import { SCREEN_STATE_MUTATION_KEY } from "./mutations/screenStateMutation";
 import { ActionableError } from "../../models/ActionableError";
 import { isDeepStrictEqual } from "node:util";
 import { parseAndroidRuntimePermissions } from "../../features/action/parseAndroidRuntimePermissions";
@@ -14,7 +15,12 @@ import {
   type AndroidBaselineCommand,
 } from "./androidMutationBaseline";
 import type { DeviceMutationResetContext } from "./mutations/reset";
-import type { DeviceBaseline, DeviceMutationInput, MutationValue } from "./mutations/types";
+import type {
+  DeviceBaseline,
+  DeviceMutationEntry,
+  DeviceMutationInput,
+  MutationValue,
+} from "./mutations/types";
 
 export function isAndroidCriticalSetting(key: string): boolean {
   return /^(?:global|secure):(?:user:\d+:)?(?:adb_enabled|adb_wifi_enabled|development_settings_enabled|airplane_mode_on|wifi_on|mobile_data|enabled_accessibility_services|accessibility_enabled)$/.test(
@@ -22,13 +28,95 @@ export function isAndroidCriticalSetting(key: string): boolean {
   );
 }
 
+/**
+ * Baseline cleaning covers installed apps, clipboard, rotation, screen-reader, keep-awake,
+ * transient opened URLs, raw global/secure/system settings and verified display rows
+ * (density, nightMode and display:*). Settings-backed adapter keys (fontScale, timeFormat
+ * and accessibility display fields) require a journal revert because they are not raw
+ * settings rows. Failed raw settings restores are re-read against the baseline.
+ * Screen state is restored by wakeAndUnlock.
+ * App-owned interaction breadcrumbs are exempted separately from store preferences.
+ * Production file intents use JSON keys and require a revert; CtrlProxy keyboard profiles
+ * are not settings rows. Power controls also require their verified journal revert.
+ */
+export function androidBaselineCleanCovers(
+  entry: Pick<DeviceMutationInput, "kind" | "key" | "priorValue">,
+): boolean {
+  if (
+    [
+      "installed-app",
+      "clipboard",
+      "rotation",
+      "screen-reader",
+      "keep-awake",
+      "opened-url",
+    ].includes(entry.kind)
+  ) {
+    return true;
+  }
+  const settingsKey = /^(?:global|secure|system):/.test(entry.key);
+  return (
+    entry.kind === "device-setting" &&
+    (settingsKey ||
+      entry.key.startsWith("display:") ||
+      entry.key === SCREEN_STATE_MUTATION_KEY ||
+      ["density", "nightMode"].includes(entry.key))
+  );
+}
+
+/**
+ * Settings the session's own tools write under a journal row whose key is not a raw settings key
+ * (rotation, TalkBack and keep-awake journal `device`). `androidBaselineCleanCovers` leaves these
+ * kinds to the baseline clean, so the clean may delete them when the baseline lacks them.
+ */
+const TOOL_OWNED_SETTINGS: Readonly<Record<string, readonly string[]>> = {
+  rotation: ["system:accelerometer_rotation", "system:user_rotation"],
+  "screen-reader": ["secure:enabled_accessibility_services", "secure:accessibility_enabled"],
+  "keep-awake": ["global:stay_on_while_plugged_in", "system:screen_off_timeout"],
+};
+
+/**
+ * Whether the session journal shows the session created a settings key (`namespace:key`,
+ * `namespace:user:N:key`): a `device-setting` row on that raw key whose prior value was absent, or
+ * a key owned by a tool whose journal row covers it. The Android system creates and maintains
+ * settings of its own after the baseline is captured (ringtone and alarm URIs,
+ * `systemui.google.opa_enabled`, Phenotype flags, ...), so a key missing from the baseline is not
+ * evidence that the session added it (#15178); only these keys may be deleted by cleaning.
+ */
+export function sessionCreatedSettingMatcher(
+  entries: readonly Pick<DeviceMutationEntry, "kind" | "key" | "priorValue">[],
+): (key: string) => boolean {
+  const rawKeys = new Set(
+    entries
+      .filter(
+        (entry) =>
+          entry.kind === "device-setting" &&
+          entry.priorValue.state === "absent" &&
+          /^(?:global|system|secure):/.test(entry.key),
+      )
+      .map((entry) => entry.key),
+  );
+  const owned = new Set(
+    entries.flatMap((entry) => (entry.kind in TOOL_OWNED_SETTINGS ? [entry.kind] : [])),
+  );
+  const ownedKeys = new Set([...owned].flatMap((kind) => TOOL_OWNED_SETTINGS[kind] ?? []));
+  return (key) => rawKeys.has(key) || ownedKeys.has(key.replace(/^(\w+):user:\d+:/, "$1:"));
+}
+
 export async function cleanAndroidBaseline(
   baseline: DeviceBaseline,
   context: DeviceMutationResetContext,
   command: AndroidBaselineCommand,
   revert: (mutation: DeviceMutationInput) => Promise<void>,
+  journalEntries: readonly DeviceMutationEntry[] = [],
 ): Promise<void> {
-  await new AndroidBaselineCleaner(baseline, context, command, revert).clean();
+  await new AndroidBaselineCleaner(
+    baseline,
+    context,
+    command,
+    revert,
+    sessionCreatedSettingMatcher(journalEntries),
+  ).clean();
 }
 
 class AndroidBaselineCleaner {
@@ -39,6 +127,7 @@ class AndroidBaselineCleaner {
     private readonly context: DeviceMutationResetContext,
     private readonly command: AndroidBaselineCommand,
     private readonly revert: (mutation: DeviceMutationInput) => Promise<void>,
+    private readonly sessionCreated: (key: string) => boolean,
   ) {
     this.prior = new Map(
       baseline.observations.map((observation) => [
@@ -134,7 +223,7 @@ class AndroidBaselineCleaner {
     }
   }
 
-  private async cleanSettings(namespace: string, user: number): Promise<void> {
+  private async readSettings(namespace: string, user: number): Promise<Map<string, MutationValue>> {
     const current = new Map<string, MutationValue>();
     observeSettings(
       await this.command(`shell settings --user ${user} list ${namespace}`),
@@ -144,6 +233,12 @@ class AndroidBaselineCleaner {
         current.set(key, value === null ? { state: "absent" } : { state: "present", value });
       },
     );
+    return current;
+  }
+
+  private async cleanSettings(namespace: string, user: number): Promise<void> {
+    const current = await this.readSettings(namespace, user);
+    const failed = new Map<string, MutationValue>();
     const prefix = user === 0 ? `${namespace}:` : `${namespace}:user:${user}:`;
     const baselineSettings = this.baseline.observations.filter(
       (observation) =>
@@ -151,9 +246,17 @@ class AndroidBaselineCleaner {
         observation.key.startsWith(prefix) &&
         (user !== 0 || !observation.key.startsWith(`${namespace}:user:`)),
     );
+    let preserved = 0;
     for (const key of new Set([...current.keys(), ...baselineSettings.map((entry) => entry.key)])) {
-      const previous = this.prior.get(`device-setting:${key}`) ?? { state: "absent" };
+      const baselineValue = this.prior.get(`device-setting:${key}`);
+      const previous = baselineValue ?? { state: "absent" };
       if (isDeepStrictEqual(current.get(key) ?? { state: "absent" }, previous)) {
+        continue;
+      }
+      if (!baselineValue && !this.sessionCreated(key)) {
+        // Absent from the baseline and not journaled as created: the system added it, so
+        // deleting it would destroy device state the session start already had (#15178).
+        preserved++;
         continue;
       }
       try {
@@ -162,9 +265,23 @@ class AndroidBaselineCleaner {
         logger.warn(`Android cleaning could not restore setting ${key}`, error);
         await this.context.assertOwned();
         this.context.signal.throwIfAborted();
+        failed.set(key, previous);
         if (isAndroidCriticalSetting(key)) {
           throw error;
         }
+      }
+    }
+    if (failed.size > 0) {
+      const live = await this.readSettings(namespace, user);
+      const dirty = [...failed]
+        .filter(
+          ([key, previous]) => !isDeepStrictEqual(live.get(key) ?? { state: "absent" }, previous),
+        )
+        .map(([key]) => key);
+      if (dirty.length > 0) {
+        throw new ActionableError(
+          `Android cleaning settings remain dirty after failed restore: ${dirty.join(", ")}`,
+        );
       }
     }
   }

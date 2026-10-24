@@ -161,8 +161,12 @@ cleaning (so journal ops cannot reintroduce drift):
 - Keep baseline app data and fixtures; never `pm clear` by default. Revoke runtime
   grants not in the baseline for retained third-party apps per user; never run
   device-wide `pm reset-permissions`.
-- Restore changed/missing global/system/secure keys, delete added ones (settings
-  commands target the captured user, including 0). Non-critical failures warn and
+- Restore changed/missing global/system/secure keys. Delete an added key only when
+  the session journal proves the session created it (a raw `ns:key` row with an
+  absent prior, or a key owned by a journaled rotation, screen-reader or keep-awake
+  tool). Keys absent from the baseline without that evidence, such as
+  system-maintained ringtone, alarm and `opa_enabled` settings, are preserved
+  (settings commands target the captured user, including 0). Non-critical failures warn and
   continue; connectivity, adb/developer, or accessibility restoration failure is
   hard.
 - Remove added regular files under the inventoried roots with canonical-path and

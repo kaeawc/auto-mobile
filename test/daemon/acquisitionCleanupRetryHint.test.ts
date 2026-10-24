@@ -349,8 +349,9 @@ describe("device_cleanup_in_progress retryAfterMs for a capped recording finaliz
       description: "acquisition quarantine cleared",
     });
     expect(manager.hasDeviceCleanupInProgress(DEVICE.deviceId)).toBe(false);
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn.mock.calls[0][0]).toContain("push cleared network state");
+    // The push's own deadline race and the bounded acquisition cleanup both report the cap.
+    expect(warn).toHaveBeenCalledTimes(2);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("exceeded 10000ms"));
     await pool.bindOrReuseDeviceSession({
       sessionId: "next-owner",
       deviceId: DEVICE.deviceId,

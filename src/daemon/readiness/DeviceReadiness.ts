@@ -1,3 +1,4 @@
+import { getDefaultSimulatorCreationService } from "../../features/iosTemplates/defaultSimulatorCreationService";
 import type { BootedDeviceDiscoveryOptions } from "../../devices/deviceDiscoveryContracts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { IOSCtrlProxyManager } from "../../ctrlProxy/IOSCtrlProxyManager";
@@ -92,7 +93,12 @@ import {
 } from "./DeviceReadinessContracts";
 import { ReadinessSelection } from "./ReadinessSelection";
 import { lifecycleIdentityForDevice, type LifecycleStartHold } from "./readinessLifecycleIdentity";
-import { runWithLifecycleLease, startDeviceOwningCancelledLaunch } from "./readinessLifecycleStart";
+import {
+  assertReadBootNotStoppedWhileWaiting,
+  iosReadNotBootedMessage,
+  runWithLifecycleLease,
+  startDeviceOwningCancelledLaunch,
+} from "./readinessLifecycleStart";
 import {
   assertIosDeviceAvailable,
   assertUsableIosOverride,
@@ -209,7 +215,6 @@ export class DeviceReadiness implements DeviceReadinessContract {
         return owner.deviceUtils;
       },
       bootAndroidReadinessImage: (...args) => this.bootAndroidReadinessImage(...args),
-      bootIosReadinessImage: (...args) => this.bootIosReadinessImage(...args),
       clearExplicitDevicePin: (...args) => this.clearExplicitDevicePin(...args),
       admissionGate: this.admissionGate,
     });
@@ -492,6 +497,11 @@ export class DeviceReadiness implements DeviceReadinessContract {
 
     // If simulator is not booted, we could boot it, but for now we'll just check
     if (deviceInfo.state !== "Booted") {
+      if (options?.intent === "read") {
+        throw new ActionableError(
+          iosReadNotBootedMessage(deviceInfo.name, deviceId, deviceInfo.state),
+        );
+      }
       logger.info(`iOS simulator ${deviceId} is not booted (state: ${deviceInfo.state})`);
       // Note: We could auto-boot here if desired, but keeping consistent with current behavior
       return;
@@ -684,6 +694,7 @@ export class DeviceReadiness implements DeviceReadinessContract {
         if (running) {
           return running;
         }
+        assertReadBootNotStoppedWhileWaiting(deviceImage, options, hold.lease);
         perf.startOperation("startDevice");
         const childProcess = await runWithAbortSignal(
           signal,
@@ -802,19 +813,23 @@ export class DeviceReadiness implements DeviceReadinessContract {
         let lifecycleLease: VirtualDeviceLifecycleLease | undefined;
         let created: ProvisionedDevice | undefined;
         try {
-          const provisioner = createDefaultDeviceProvisioner(() => this.simctl, {
-            reserveBeforeCreate: async (identity) => {
-              lifecycleLease = await this.lifecycleCoordinator.reserve(
-                { kind: "selector", platform: "ios", selector: identity.name },
-                { operation: "start", deadlineMs, signal: options?.signal },
-              );
-              return lifecycleLease.signal;
+          const provisioner = createDefaultDeviceProvisioner(
+            () => this.simctl,
+            {
+              reserveBeforeCreate: async (identity) => {
+                lifecycleLease = await this.lifecycleCoordinator.reserve(
+                  { kind: "selector", platform: "ios", selector: identity.name },
+                  { operation: "start", deadlineMs, signal: options?.signal },
+                );
+                return lifecycleLease.signal;
+              },
+              bindAfterCreate: async (device) => {
+                created = device;
+                await this.bindCreatedIosReadinessIdentity(lifecycleLease, device);
+              },
             },
-            bindAfterCreate: async (device) => {
-              created = device;
-              await this.bindCreatedIosReadinessIdentity(lifecycleLease, device);
-            },
-          });
+            getDefaultSimulatorCreationService(() => this.simctl),
+          );
           // simctl may already have created it: a failed identity bind must not orphan it (#11100).
           const { provisioned, lease } = await this.rollBackCreatedIosOnFailure(
             () => created,
@@ -907,30 +922,22 @@ export class DeviceReadiness implements DeviceReadinessContract {
     return await this.bootIosReadinessImage(device, options, perf);
   }
 
-  /** Shared exact-image boot; a named read never reaches simulator creation. */
+  /** Boot an exact image for acquisition or explicit start. */
   private async bootIosReadinessImage(
     device: DeviceInfo,
     options?: DeviceReadyOptions,
     perf = createGlobalPerformanceTracker(),
   ): Promise<BootedDevice> {
     const deviceId = device.deviceId!;
+    if (options?.intent === "read") {
+      throw new ActionableError(iosReadNotBootedMessage(device.name, deviceId));
+    }
     logger.info(`[DeviceReadiness] Booting iOS simulator ${device.name} (${deviceId})...`);
 
     return await this.withLifecycleStart(
       { platform: "ios", stableId: deviceId },
       options,
       async (signal) => {
-        if (options?.beforeReadBoot) {
-          await options.beforeReadBoot(device);
-          signal.throwIfAborted();
-        }
-        const running = await this.readinessSelection.recheckReadBootImage(device, {
-          ...options,
-          signal,
-        });
-        if (running) {
-          return running;
-        }
         perf.startOperation("bootSimulator");
         const bootedDevice = await this.bootIosSimulatorAdmitted(
           this.simctl!,

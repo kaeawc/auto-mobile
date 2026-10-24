@@ -3,6 +3,7 @@ import {
   buildSkipReport,
   classifyTestPath,
   hasIosPathToken,
+  parseIgnoreFlags,
   parseManifest,
   partitionTestPaths,
   pathTokens,
@@ -214,5 +215,32 @@ describe("skip report", () => {
     expect(renderReportLine(report)).toContain("skipping 3 macOS-only (iOS) test files");
     expect(renderReportMarkdown(report, "linux")).toContain("| iOS path token | 2 |");
     expect(renderReportMarkdown(report, "linux")).toContain("skipped on linux");
+  });
+});
+
+describe("parseIgnoreFlags", () => {
+  test("reads --ignore <glob> pairs in order", () => {
+    expect(
+      parseIgnoreFlags(["--ignore", "**/*.integration.test.ts", "--ignore", "test/stress/**"]),
+    ).toEqual(["**/*.integration.test.ts", "test/stress/**"]);
+    expect(parseIgnoreFlags([])).toEqual([]);
+  });
+
+  test("rejects a dangling flag, an unknown flag and an empty glob", () => {
+    expect(parseIgnoreFlags(["--ignore"])).toBeNull();
+    expect(parseIgnoreFlags(["--skip", "x"])).toBeNull();
+    expect(parseIgnoreFlags(["--ignore", ""])).toBeNull();
+  });
+
+  test("lane patterns land before the skipped files in one pathIgnorePatterns list (#15237)", () => {
+    const bunfig = '[test]\npathIgnorePatterns = ["scratch/**"]\n';
+    const parsed = Bun.TOML.parse(
+      renderSkipBunfig(bunfig, ["**/*.integration.test.ts", "test/x/ios.test.ts"]),
+    );
+    expect(parsed).toEqual({
+      test: {
+        pathIgnorePatterns: ["scratch/**", "**/*.integration.test.ts", "test/x/ios.test.ts"],
+      },
+    });
   });
 });

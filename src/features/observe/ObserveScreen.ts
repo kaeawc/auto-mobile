@@ -98,6 +98,7 @@ import { computeFreshness, inheritWrongWindowEvidence } from "./observationFresh
 import { SafeAreaAuditor, capLayoutWarnings } from "./audits/SafeAreaAuditor";
 import { ObservedAndroidDisplayCache, observedIosDisplay } from "./ObservationDisplay";
 import { displayTransitions } from "./DisplayTransition";
+import { AdbScreenRoundReader, type ScreenRoundReader } from "../wear/screenRound";
 import { selectedDisplayPin } from "./SessionDisplayContext";
 import { resolveTargetDisplay } from "./DisplaySelection";
 export { resolveMissingForegroundWindow } from "./observationVerdict";
@@ -167,6 +168,7 @@ export class RealObserveScreen implements ObserveScreen {
   private captureStage!: SingleDisplayCaptureStage;
   private reconcileStage!: SingleDisplayReconcileStage;
   private enrichStage!: SingleDisplayEnrichStage;
+  private readonly screenRound: ScreenRoundReader;
   private settleStage!: SingleDisplaySettleStage;
 
   // ---------- Static API (kept for back-compat with resource handlers/daemon) ----------
@@ -263,6 +265,7 @@ export class RealObserveScreen implements ObserveScreen {
     this.requestedDisplay = dependencies?.display;
     this.selectedDisplayRead = dependencies?.selectedDisplayRead ?? {};
     this.idGenerator = idGenerator;
+    this.screenRound = new AdbScreenRoundReader(this.adb);
 
     const wiring = createObserveScreenWiring({
       device,
@@ -404,6 +407,7 @@ export class RealObserveScreen implements ObserveScreen {
       predictiveUIState: () => this.predictiveUIState,
       safeAreaAuditor: () => this.safeAreaAuditor,
       elementsBuilder: () => this.elementsBuilder,
+      screenRound: () => this.screenRound,
       deferredBackStackDisplays: () => this.deferredBackStackDisplays,
       stampScreenSizeUnits: (result) => this.stampScreenSizeUnits(result),
       processRecomposition: (result, perf) => this.processRecomposition(result, perf),

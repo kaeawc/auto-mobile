@@ -211,7 +211,7 @@ function createHarness(
     launchCommandResolver: () => ({ command: "auto-mobile", args: ["--daemon-mode"] }),
     processSignaler: signaler,
     idGenerator: { next: () => "namespace-test-owner" },
-    peerSocketReachability: { isReachable: async () => false },
+    peerSocketReachability: { probe: async () => "absent" },
     portAvailabilityChecker: {
       isPortFree: async (port) => {
         ports.push(port);

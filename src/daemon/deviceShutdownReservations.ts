@@ -8,6 +8,7 @@ import type {
   ShutdownIdentityReservation,
 } from "./devicePool";
 import type { Session } from "./sessionManager";
+import { UnpooledShutdownFences } from "./unpooledShutdownFences";
 
 interface ReadinessReservationTarget {
   deviceId: string;
@@ -23,6 +24,7 @@ export interface ShutdownDeviceReservation {
 
 /** All mutable pool state is obtained when used, including after awaits. */
 export interface DeviceShutdownReservationsPoolPort {
+  now(): number;
   getDevices(): ReadonlyMap<string, PooledDevice>;
   withAssignmentLock<T>(operation: () => Promise<T> | T): Promise<T>;
   getIntentionalShutdowns(): ReadonlyMap<string, number>;
@@ -59,7 +61,30 @@ export class DeviceShutdownReservations {
   private readonly readinessReservationNames: Map<string, Map<symbol, ReadinessReservationTarget>> =
     new Map();
   private readonly shutdownReservations: Map<string, PooledDevice> = new Map();
-  constructor(private readonly pool: DeviceShutdownReservationsPoolPort) {}
+  private readonly unpooledShutdownFences: UnpooledShutdownFences;
+  constructor(private readonly pool: DeviceShutdownReservationsPoolPort) {
+    this.unpooledShutdownFences = new UnpooledShutdownFences(() => pool.now());
+  }
+
+  isUnpooledShutdownFenced(deviceId: string): boolean {
+    return this.unpooledShutdownFences.isActive(deviceId);
+  }
+
+  fenceUnpooledShutdown(deviceId: string): () => void {
+    if (this.pool.getDevices().has(deviceId)) {
+      return () => {};
+    }
+    const token = this.unpooledShutdownFences.record(deviceId);
+    return () => this.unpooledShutdownFences.settle(deviceId, token);
+  }
+
+  settleUnpooledShutdown(deviceId: string): void {
+    this.unpooledShutdownFences.settle(deviceId);
+  }
+
+  clearUnpooledShutdown(deviceId: string): void {
+    this.unpooledShutdownFences.clear(deviceId);
+  }
 
   /**
    * Keep an exact device out of general pool allocation while startDevice
@@ -207,6 +232,7 @@ export class DeviceShutdownReservations {
     abortSignal?: AbortSignal,
     autolockClient?: AutolockClient,
     assertHolder?: () => void,
+    options?: { fenceUnpooled?: boolean },
   ): Promise<ShutdownDeviceReservation | undefined> {
     if (abortSignal?.aborted) {
       throw abortSignal.reason ?? new Error("Shutdown reservation cancelled");
@@ -220,7 +246,7 @@ export class DeviceShutdownReservations {
       abortSignal,
       autolockClient,
       recoveryRouteLease,
-      assertHolder,
+      { assertHolder, ...options },
     );
     if (!expectedDevice) {
       identity.releaseSession?.();
@@ -257,22 +283,24 @@ export class DeviceShutdownReservations {
     abortSignal: AbortSignal | undefined,
     autolockClient: AutolockClient | undefined,
     recoveryRouteLease: symbol | undefined,
-    assertHolder: (() => void) | undefined,
+    options: { assertHolder?: () => void; fenceUnpooled?: boolean },
   ): Promise<PooledDevice | undefined> {
     const releaseSessionOnAbort = () => identity.releaseSession?.();
     abortSignal?.addEventListener("abort", releaseSessionOnAbort, { once: true });
     try {
-      const expectedDevice = await this.reserveShutdownDeviceUnderLock(
+      const { expectedDevice, unpooledFenceToken } = await this.reserveShutdownDeviceUnderLock(
         deviceId,
         identity,
         abortSignal,
         autolockClient,
         recoveryRouteLease,
-        assertHolder,
+        options,
       );
       if (abortSignal?.aborted) {
         if (expectedDevice && this.shutdownReservations.get(deviceId) === expectedDevice) {
           this.shutdownReservations.delete(deviceId);
+        } else if (unpooledFenceToken !== undefined) {
+          this.unpooledShutdownFences.clear(deviceId, unpooledFenceToken);
         }
         throw abortSignal.reason ?? new Error("Shutdown reservation cancelled");
       }
@@ -292,8 +320,8 @@ export class DeviceShutdownReservations {
     abortSignal: AbortSignal | undefined,
     autolockClient: AutolockClient | undefined,
     recoveryRouteLease: symbol | undefined,
-    assertHolder: (() => void) | undefined,
-  ): Promise<PooledDevice | undefined> {
+    options: { assertHolder?: () => void; fenceUnpooled?: boolean },
+  ): Promise<{ expectedDevice?: PooledDevice; unpooledFenceToken?: symbol }> {
     return await this.pool.withAssignmentLock(() => {
       if (abortSignal?.aborted) {
         throw abortSignal.reason ?? new Error("Shutdown reservation cancelled");
@@ -309,14 +337,18 @@ export class DeviceShutdownReservations {
         );
       }
       if (!currentDevice) {
-        return undefined;
+        return {
+          unpooledFenceToken: options.fenceUnpooled
+            ? this.unpooledShutdownFences.record(deviceId)
+            : undefined,
+        };
       }
       // A readiness await can outlive this client's ownership. Check it while
       // reserving shutdown so a stale request cannot reboot another session's device.
       this.pool.getOwnedAutolockSession(currentDevice, autolockClient);
       // The caller's entry-time ownership check predates its lifecycle-lease wait; a start can
       // bind another session meanwhile, so the holder is re-checked under the assignment mutex.
-      assertHolder?.();
+      options.assertHolder?.();
       if (this.shutdownReservations.get(deviceId) === currentDevice) {
         throw new ActionableError(`Device '${deviceId}' is already shutting down.`);
       }
@@ -327,7 +359,7 @@ export class DeviceShutdownReservations {
         recoveryRouteLease,
       );
       this.shutdownReservations.set(deviceId, currentDevice);
-      return currentDevice;
+      return { expectedDevice: currentDevice };
     });
   }
 

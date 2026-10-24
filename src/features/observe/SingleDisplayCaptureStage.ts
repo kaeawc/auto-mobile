@@ -1,3 +1,4 @@
+import { applyIosLockStateReading } from "./ios/IosLockStateProbe";
 import type { ObservationCollectionRequest } from "./collectors/ObservationCollectionRequest";
 import { displayPinFailure } from "./SessionDisplayContext";
 import { SelectedDisplayReadPolicy } from "./SelectedDisplayRead";
@@ -202,7 +203,7 @@ export class SingleDisplayCaptureStage {
     );
     const fallback = this.d.createBaseResult();
     if (iosLockState) {
-      fallback.deviceLock = await iosLockState;
+      applyIosLockStateReading(fallback, await iosLockState);
     }
     return this.d.createCriticalFallback(err, { fallback });
   }

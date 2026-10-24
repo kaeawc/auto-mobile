@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { ResetCapacityWaitExceededError } from "../../../src/models/ResetCapacityWaitExceededError";
 import { IosBaselineReset } from "../../../src/daemon/sessionBroker/iosBaselineReset";
 import type { BrokerNativeProfile } from "../../../src/daemon/sessionBroker/profile";
 import { InMemoryBootDurationHistory } from "../../../src/features/iosSimFleet/BootDurationHistory";
@@ -264,19 +265,129 @@ describe("IosBaselineReset", () => {
     },
   );
 
-  test("reservation capacity exhaustion is not retried in process", async () => {
+  test("reservation capacity retries backoff then mutates exactly once", async () => {
     const timer = new FakeTimer();
+    timer.enableAutoAdvance();
     const h = harness({ timer });
-    const failure = capacityRefusal();
+    const timeouts: number[] = [];
+    h.instrumentation.reserveBoot = async ({ timeoutMs }) => {
+      timeouts.push(timeoutMs);
+      if (timeouts.length <= 4) {
+        throw capacityRefusal();
+      }
+      return RESERVATION;
+    };
+    await expect(h.resetter.reset(DEVICE, PROFILE, h.assertOwned)).resolves.toBe("clean");
+    expect(timer.getSleepHistory()).toEqual([1000, 2000, 4000, 8000]);
+    expect(timeouts).toEqual(Array(5).fill(DEFAULT_DEVICE_READY_TIMEOUT_MS));
+    expect(h.events.filter((event) => /^(stop|erase|boot):/.test(event))).toEqual([
+      `stop:${UDID}`,
+      `erase:${UDID}`,
+      `boot:${UDID}`,
+    ]);
+  });
+
+  test("capacity and discovery retain independent budgets and backoffs", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const h = harness({ timer });
+    const timeouts: number[] = [];
+    h.instrumentation.reserveBoot = async ({ timeoutMs }) => {
+      timeouts.push(timeoutMs);
+      if (timeouts.length === 1 || timeouts.length === 3) {
+        throw discoveryFailure();
+      }
+      if (timeouts.length === 2) {
+        throw capacityRefusal();
+      }
+      return RESERVATION;
+    };
+    await expect(h.resetter.reset(DEVICE, PROFILE, h.assertOwned)).resolves.toBe("clean");
+    expect(timer.getSleepHistory()).toEqual([1000, 1000, 2000]);
+    expect(timeouts).toEqual([
+      DEFAULT_DEVICE_READY_TIMEOUT_MS,
+      DEFAULT_DEVICE_READY_TIMEOUT_MS - 1000,
+      DEFAULT_DEVICE_READY_TIMEOUT_MS - 1000,
+      DEFAULT_DEVICE_READY_TIMEOUT_MS - 3000,
+    ]);
+  });
+
+  test.each([0, 60_000])(
+    "persistent capacity refusal terminates with actionable details (attempt cost %i)",
+    async (cost) => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const h = harness({ timer });
+      const failure = new BootCapacityExhaustedError(
+        {
+          platform: "ios",
+          limit: 2,
+          booted: 3,
+          retryAfterMs: 5000,
+          externalDevices: ["EXTERNAL-A", "EXTERNAL-B"],
+          heldDevices: [UDID],
+        },
+        "full",
+      );
+      h.instrumentation.reserveBoot = async () => {
+        timer.advanceTime(cost);
+        throw failure;
+      };
+      const error = await h.resetter
+        .reset(DEVICE, PROFILE, h.assertOwned)
+        .catch((error: unknown) => error);
+      expect(error).toBeInstanceOf(ResetCapacityWaitExceededError);
+      expect(error).toMatchObject({
+        code: "reset_capacity_wait_exceeded",
+        cause: failure,
+        details: {
+          platform: "ios",
+          deviceId: UDID,
+          limit: 2,
+          booted: 3,
+          externalDevices: ["EXTERNAL-A", "EXTERNAL-B"],
+          heldDevices: [UDID],
+          waitedMs: timer.now(),
+        },
+      });
+      expect(String(error)).toContain("EXTERNAL-A");
+      expect(String(error)).toContain("EXTERNAL-B");
+      expect(timer.now()).toBe(cost || 55_000);
+      expect(h.events.filter((event) => /^(stop|erase|boot):/.test(event))).toEqual([]);
+    },
+  );
+
+  test.each(["abort", "ownership"])("capacity backoff stops after %s loss", async (kind) => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const controller = new AbortController();
+    const failure = new ActionableError("interrupted");
+    let lost = false;
+    const h = harness({
+      timer,
+      assertOwned: async () => {
+        if (lost) {
+          throw failure;
+        }
+      },
+    });
     let attempts = 0;
     h.instrumentation.reserveBoot = async () => {
       attempts++;
-      throw failure;
+      timer.setTimeout(() => {
+        if (kind === "abort") {
+          controller.abort(failure);
+        } else {
+          lost = true;
+        }
+      }, 500);
+      throw capacityRefusal();
     };
-    await expect(h.resetter.reset(DEVICE, PROFILE, h.assertOwned)).rejects.toBe(failure);
+    await expect(h.resetter.reset(DEVICE, PROFILE, h.assertOwned, controller.signal)).rejects.toBe(
+      failure,
+    );
     expect(attempts).toBe(1);
-    expect(timer.getSleepHistory()).toEqual([]);
-    expect(h.events).toEqual(["list:1", "owned:1"]);
+    expect(timer.getSleepHistory()).toEqual([1000]);
   });
 
   test("incomplete discovery before boot defers an already erased Shutdown simulator", async () => {
@@ -611,7 +722,12 @@ describe("IosBaselineReset", () => {
     const history = new InMemoryBootDurationHistory();
     const gate = new FakeSimulatorCapacityGate(timer, {
       outcome: "allow",
-      limits: { maxBooted: 1, source: "derived" },
+      limits: {
+        maxBooted: 1,
+        source: "derived",
+        bootConcurrency: 1,
+        bootConcurrencySource: "derived",
+      },
       bootedCount: 0,
     });
     const h = harness({
@@ -637,7 +753,10 @@ describe("IosBaselineReset", () => {
   });
 
   test("a deferred reset keeps its shutdown retry when reserving capacity is refused", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
     const h = harness({
+      timer,
       inventories: [
         [image()],
         [image("Shutdown")],
@@ -654,7 +773,9 @@ describe("IosBaselineReset", () => {
     h.instrumentation.reserveBoot = async () => {
       throw refusal;
     };
-    await expect(h.resetter.reset(DEVICE, PROFILE, h.assertOwned)).rejects.toBe(refusal);
+    await expect(h.resetter.reset(DEVICE, PROFILE, h.assertOwned)).rejects.toBeInstanceOf(
+      ResetCapacityWaitExceededError,
+    );
     h.instrumentation.reserveBoot = undefined;
     await expect(h.resetter.reset(DEVICE, PROFILE, h.assertOwned)).resolves.toBe("clean");
     expect(h.events.filter((event) => event.startsWith("stop:"))).toHaveLength(1);
@@ -667,7 +788,12 @@ describe("IosBaselineReset", () => {
       const history = new InMemoryBootDurationHistory();
       const gate = new FakeSimulatorCapacityGate(timer, {
         outcome: "allow",
-        limits: { maxBooted: 1, source: "derived" },
+        limits: {
+          maxBooted: 1,
+          source: "derived",
+          bootConcurrency: 1,
+          bootConcurrencySource: "derived",
+        },
         bootedCount: 0,
       });
       const controller = new AbortController();
@@ -707,6 +833,7 @@ describe("IosBaselineReset", () => {
 
   test("the real instrumentation's gate refusal prevents boot and records no duration", async () => {
     const timer = new FakeTimer();
+    timer.enableAutoAdvance();
     const history = new InMemoryBootDurationHistory();
     const gate = new FakeSimulatorCapacityGate(timer, {
       outcome: "refuse",
@@ -722,7 +849,7 @@ describe("IosBaselineReset", () => {
     });
 
     await expect(h.resetter.reset(DEVICE, PROFILE, h.assertOwned)).rejects.toBeInstanceOf(
-      BootCapacityExhaustedError,
+      ResetCapacityWaitExceededError,
     );
     expect(h.events).not.toContain(`boot:${UDID}`);
     expect(history.latestFor(UDID)).toBeUndefined();

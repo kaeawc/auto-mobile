@@ -1,3 +1,8 @@
+import type { MutationRecordingGaps } from "./mutations/recordingGaps";
+import {
+  storePreferenceCoveredByBaseline,
+  APP_INTERACTION_BREADCRUMB_KEYS,
+} from "./mutations/appInventory";
 import { ANDROID_RESET_MIN_ATTEMPT_MS, ANDROID_RESET_SETTLEMENT_MS } from "./androidResetBudget";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import type { BootedDevice } from "../../models/DeviceInfo";
@@ -18,22 +23,29 @@ import {
 } from "./mutations/reset";
 import type { ResetOutcome } from "./devicePort";
 import { ResetFailureError } from "./ResetFailureError";
-import { isAndroidCriticalSetting } from "./androidKeepBootedCleanup";
+import { androidBaselineCleanCovers, isAndroidCriticalSetting } from "./androidKeepBootedCleanup";
+import { parsePowerIntentKey } from "./mutations/deviceStateKeys";
 import {
   opaqueForcesFallback,
   type DeviceBaseline,
+  type DeviceMutationEntry,
   type DeviceMutationJournal,
   type DeviceMutationScope,
 } from "./mutations/types";
 
 export interface AndroidKeepBootedResetPort extends DeviceMutationResetPort {
-  cleanBaseline(baseline: DeviceBaseline, context: DeviceMutationResetContext): Promise<void>;
+  cleanBaseline(
+    baseline: DeviceBaseline,
+    context: DeviceMutationResetContext,
+    journalEntries?: readonly DeviceMutationEntry[],
+  ): Promise<void>;
 }
 
 export interface AndroidKeepBootedResetDependencies {
+  recordingGaps?: Pick<MutationRecordingGaps, "reasonFor" | "clear">;
   journal: Pick<
     DeviceMutationJournal,
-    "getBaseline" | "captureBaseline" | "list" | "deleteResource"
+    "getBaseline" | "captureBaseline" | "list" | "deleteResource" | "listStrayIncarnations"
   >;
   port(device: BootedDevice): AndroidKeepBootedResetPort;
   timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
@@ -360,6 +372,7 @@ export class AndroidKeepBootedReset implements AndroidResetStrategy {
           await this.drainOperation(fallbackOperation);
         }
         await fence();
+        this.dependencies.recordingGaps?.clear(mutationContext.scope.sessionUuid);
         session.uses = 0;
         const mode = fallbackTiming.mode;
         return {
@@ -391,11 +404,48 @@ export class AndroidKeepBootedReset implements AndroidResetStrategy {
     if (context.opaquePersistentChanges) {
       return "opaque persistent changes (deviceSnapshot) cannot be journal-reverted";
     }
-    const opaque = (await this.dependencies.journal.list(mutationContext.scope)).find(
-      opaqueForcesFallback,
-    );
+    const gap = this.dependencies.recordingGaps?.reasonFor(mutationContext.scope.sessionUuid);
+    if (gap !== undefined) {
+      return `device mutation recording failed (${gap}); journal is incomplete`;
+    }
+    const strays = await this.dependencies.journal.listStrayIncarnations(mutationContext.scope);
+    if (strays.length > 0) {
+      return `journaled mutations recorded under a different incarnation (${strays.length}) cannot be journal-reverted`;
+    }
+    const entries = await this.dependencies.journal.list(mutationContext.scope);
+    const opaque = entries.find(opaqueForcesFallback);
     if (opaque) {
       return `opaque journaled mutation (${opaque.toolName}) cannot be journal-reverted`;
+    }
+    const appState = entries.filter(
+      (entry) =>
+        entry.kind === "preference" && !APP_INTERACTION_BREADCRUMB_KEYS.includes(entry.key),
+    );
+    if (appState.length > 0) {
+      let baseline: DeviceBaseline | null;
+      try {
+        baseline = await this.dependencies.journal.getBaseline(mutationContext.scope);
+      } catch (error) {
+        logger.warn("Android app-state baseline is unreadable; baseline fallback required", error);
+        return "journaled app state has an unreadable baseline";
+      }
+      const uncovered = appState.find(
+        (entry) => !storePreferenceCoveredByBaseline(entry, baseline),
+      );
+      if (uncovered) {
+        return `journaled ${uncovered.kind} (${uncovered.toolName}) cannot be baseline-cleaned`;
+      }
+    }
+    // Non-fallback opaque rows are diagnostic breadcrumbs, not persistent-state claims.
+    const unrevertible = entries.find(
+      (entry) =>
+        entry.kind !== "opaque" &&
+        entry.kind !== "preference" &&
+        !androidBaselineCleanCovers(entry) &&
+        !port.canRevert(entry),
+    );
+    if (unrevertible) {
+      return `journaled mutation ${unrevertible.kind}:${unrevertible.key} (${unrevertible.toolName}) cannot be journal-reverted`;
     }
     return this.cleanWithDeadline(port, mutationContext, context, phases);
   }
@@ -515,10 +565,14 @@ export class AndroidKeepBootedReset implements AndroidResetStrategy {
       throw new ActionableError("Android keep-booted baseline is missing");
     }
     await cleaningContext.assertOwned();
-    await this.measure("journal", phases, () =>
-      this.replayJournal(port, cleaningContext, baseline),
+    let entries: readonly DeviceMutationEntry[] = [];
+    await this.measure("journal", phases, async () => {
+      entries = await this.dependencies.journal.list(cleaningContext.scope);
+      await this.replayJournal(port, cleaningContext, baseline, entries);
+    });
+    await this.measure("clean", phases, () =>
+      port.cleanBaseline(baseline, cleaningContext, entries),
     );
-    await this.measure("clean", phases, () => port.cleanBaseline(baseline, cleaningContext));
     await cleaningContext.assertOwned();
     await this.measure(
       "health",
@@ -532,8 +586,8 @@ export class AndroidKeepBootedReset implements AndroidResetStrategy {
     port: AndroidKeepBootedResetPort,
     context: DeviceMutationResetContext,
     baseline: DeviceBaseline,
+    entries: readonly DeviceMutationEntry[],
   ): Promise<void> {
-    const entries = await this.dependencies.journal.list(context.scope);
     for (const mutation of [...entries].sort((left, right) => right.sequence - left.sequence)) {
       await context.assertOwned();
       const baselinePackage =
@@ -557,7 +611,14 @@ export class AndroidKeepBootedReset implements AndroidResetStrategy {
           error,
         );
         await context.assertOwned();
-        if (mutation.kind !== "device-setting" || isAndroidCriticalSetting(mutation.key)) {
+        // Power controls live in system_server state the baseline settings clean cannot reach, and
+        // their revert is verified by read-back (#15110): a failure means the device is still dirty.
+        if (
+          mutation.kind !== "device-setting" ||
+          !androidBaselineCleanCovers(mutation) ||
+          isAndroidCriticalSetting(mutation.key) ||
+          parsePowerIntentKey(mutation.key) !== null
+        ) {
           throw error;
         }
       }

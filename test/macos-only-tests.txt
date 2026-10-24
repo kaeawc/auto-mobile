@@ -33,6 +33,8 @@ portable test/features/observe/ios/ctrlProxyWireScan.test.ts             # repo 
 portable test/features/prototype/prototypeIosSpecContract.test.ts        # generator output equals the embedded Swift contract file
 portable test/features/prototype/prototypeIosIconSymbols.test.ts         # schema table equals generated Swift symbols
 
+portable test/utils/iosDeviceResourceImpact.test.ts                     # pure catalog metadata and documentation parity, no iOS host
+
 # Fakes are shared by platform-neutral suites; their self-tests guard that drift.
 portable test/fakes/FakeIOSCtrlProxy.test.ts                             # fake used outside iOS-only suites
 portable test/fakes/FakeIosVoiceOverDetector.test.ts                     # fake used outside iOS-only suites
@@ -54,6 +56,7 @@ portable test/features/action/IosClearEntryPoints.test.ts                # asser
 portable test/features/action/IosSelectionScreenSize.test.ts             # tapAny geometry for iOS and Android
 portable test/features/action/TapOnElement.iosCachedResolution.test.ts   # Android failure text stays byte-identical
 portable test/features/action/TapOnElement.iosClippedTargetOwnership.test.ts # PIN cases for Android dispatch
+portable test/features/action/SetUIState.iosSafariEmptyValue.test.ts      # SetUIState fakes plus committed captures; no iOS host needed
 portable test/features/action/TapOnElement.iosKeyboardChromeCover.test.ts # PIN case for Android dispatch
 portable test/features/action/TapOnElementIosScreenSize.test.ts          # Android keeps legacy raw metadata
 portable test/features/action/swipeon/iosChromeInsets.test.ts            # Android auto-target inset comparison
@@ -68,6 +71,10 @@ portable test/server/databaseIos.test.ts                                 # keeps
 portable test/server/prototypeToolsIos.test.ts                           # shared prototype tool; Android inspect shape
 portable test/utils/ios-cmdline-tools/iosDeviceType.test.ts              # device-id classification disjoint from Android serials
 portable test/utils/ios-cmdline-tools/iosDeviceType.property.test.ts     # Android serials are never classified as iOS
+
+portable test/ctrlProxy/ios/IosRunnerLaunchGate.test.ts                  # FIFO admission and env parsing use no platform commands
+portable test/ctrlProxy/ios/IosRunnerLaunchFailure.test.ts               # pure output classification and PID failure ledger
+portable test/ctrlProxy/ios/IosRunnerLaunchProgress.test.ts              # pure ps parsing and an injected fake host executor
 
 # --- macos: no iOS token in the path, but the test exercises only iOS code -------
 

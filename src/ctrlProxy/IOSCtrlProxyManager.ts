@@ -1,4 +1,5 @@
 import { MapDeviceClientRegistry } from "./deviceClientRegistry";
+import { DefaultIosRunnerLaunchGate } from "./ios/IosRunnerLaunchGate";
 import { type IosTunnelClient } from "./ios/IosTunnelClient";
 import type { IosCtrlProxyManagerDiagnostics } from "./ios/IosCtrlProxyManagerDiagnostics";
 import type {
@@ -45,6 +46,7 @@ import { IosCtrlProxyStartup } from "./ios/IosCtrlProxyStartup";
 import { IosCtrlProxyTeardown } from "./ios/IosCtrlProxyTeardown";
 import { IosCtrlProxySetup } from "./ios/IosCtrlProxySetup";
 import { IosCtrlProxyPorts } from "./ios/IosCtrlProxyPorts";
+import { SimulatorShutDownError } from "./ios/SimulatorShutDownError";
 import { IosCtrlProxyLaunch } from "./ios/IosCtrlProxyLaunch";
 import { IosCtrlProxyRestart } from "./ios/IosCtrlProxyRestart";
 import { IosCtrlProxyReadiness } from "./ios/IosCtrlProxyReadiness";
@@ -68,6 +70,7 @@ export type {
 /** Public iOS CtrlProxy facade; collaborators share explicit state and lifecycle capabilities. */
 export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   private readonly state: IosCtrlProxyRuntime;
+  private suspendedForSimulatorShutdown = false;
   private readonly startup: IosCtrlProxyStartup;
   private readonly teardown: IosCtrlProxyTeardown;
   private readonly setupWorkflow: IosCtrlProxySetup;
@@ -133,6 +136,19 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     this.launch = new IosCtrlProxyLaunch(
       this.state,
       {
+        assertSimulatorNotShutDown: async () => {
+          if (await this.state.deviceDetector.isSimulatorShutDown()) {
+            // Startup must settle before stop can drain it; do not await removal here.
+            void this.markSimulatorShutDown("runner launch refused").catch((error) => {
+              logger.warn(
+                `[IOSCtrlProxy] Simulator shutdown cleanup failed: ${errorMessage(error)}`,
+              );
+            });
+            throw new SimulatorShutDownError(this.state.device.deviceId);
+          }
+        },
+        isSimulatorNotBooted: () => this.isSimulatorNotBooted(),
+        markSimulatorShutDown: (reason) => this.markSimulatorShutDown(reason),
         useRemoteRunner: () => this.useRemoteRunner(),
         adoptServicePort: (...args) => this.ports.adoptServicePort(...args),
         ensureRemoteServicePortAvailable: (...args) =>
@@ -168,6 +184,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       removeHealthPollDeadline: (...args) => this.readiness.removeHealthPollDeadline(...args),
     });
     this.readiness = new IosCtrlProxyReadiness(this.state, {
+      quarantineServicePort: (port) => PortManager.quarantine(port),
       isSimulator: () => this.isSimulator(),
       checkHealthEndpointOnPortForDevice: (...args) =>
         this.health.checkHealthEndpointOnPortForDevice(...args),
@@ -285,6 +302,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
   private assertDeviceNotSuspended(): void {
     if (this.state.forcedRestartBudget.snapshot().state === "suspended") {
+      if (this.suspendedForSimulatorShutdown) {
+        throw new SimulatorShutDownError(this.state.device.deviceId);
+      }
       throw new ActionableError(
         `iOS device ${this.state.device.deviceId} is absent from discovery`,
       );
@@ -333,9 +353,61 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     return this.state.forcedRestartBudget;
   }
   /** Suspend recovery immediately, then retire any runner owned by this device. */
-  public suspendForDeviceRemoval(): Promise<void> {
-    return this.restart.suspendForDeviceRemoval();
+  public suspendForDeviceRemoval(reason?: string): Promise<void> {
+    this.suspendedForSimulatorShutdown = false;
+    return this.restart.suspendForDeviceRemoval(reason);
   }
+
+  private async isSimulatorNotBooted(): Promise<boolean> {
+    if (!this.isSimulator()) {
+      return false;
+    }
+    const state = await this.state.deviceDetector.getSimulatorState();
+    return state !== undefined && state !== "Booted";
+  }
+
+  public async markSimulatorShutDownIfNotBooted(reason?: string): Promise<void> {
+    if (await this.isSimulatorNotBooted()) {
+      await this.markSimulatorShutDown(reason);
+    }
+  }
+
+  /** Suspension deduplicates shutdown cleanup, including an in-flight pool removal. */
+  public markSimulatorShutDown(reason = "simulator shut down externally"): Promise<void> {
+    if (!this.isSimulator()) {
+      return Promise.resolve();
+    }
+    if (this.state.forcedRestartBudget.snapshot().state === "suspended") {
+      return this.state.removalCleanup ?? Promise.resolve();
+    }
+    logger.warn(`[IOSCtrlProxy] Simulator ${this.state.device.deviceId} shut down: ${reason}`);
+    const cleanup = this.suspendForDeviceRemoval(reason);
+    this.suspendedForSimulatorShutdown = true;
+    return cleanup;
+  }
+
+  private async rearmIfSimulatorBackUp(): Promise<void> {
+    if (!this.suspendedForSimulatorShutdown) {
+      return;
+    }
+    if (this.state.forcedRestartBudget.snapshot().state !== "suspended") {
+      this.suspendedForSimulatorShutdown = false;
+      return;
+    }
+    const generation = this.state.removalGeneration;
+    if ((await this.state.deviceDetector.getSimulatorState()) !== "Booted") {
+      return;
+    }
+    // A pool removal during the probe owns suspension and must not be rearmed here.
+    if (!this.suspendedForSimulatorShutdown || generation !== this.state.removalGeneration) {
+      return;
+    }
+    await this.rearmAfterDeviceReappearance();
+    if (generation === this.state.removalGeneration) {
+      this.suspendedForSimulatorShutdown = false;
+    }
+  }
+
   supersededSinceRemoval(removalGeneration: number): boolean {
     return this.restart.supersededSinceRemoval(removalGeneration);
   }
@@ -361,6 +433,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       tunnelClient,
       processExecutor,
       physicalDeviceLister: NO_PHYSICAL_DEVICES,
+      // A fresh gate per test manager: a start left pending must not exhaust the
+      // process-wide gate for later tests sharing this process.
+      runnerLaunchGate: new DefaultIosRunnerLaunchGate(),
     });
   }
 
@@ -393,6 +468,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         ),
       processClient: options.processClient ?? new IosCtrlProxyProcessClient(processExecutor, timer),
       physicalDeviceLister: options.physicalDeviceLister ?? NO_PHYSICAL_DEVICES,
+      runnerLaunchGate: options.runnerLaunchGate ?? new DefaultIosRunnerLaunchGate(),
     });
   }
 
@@ -741,6 +817,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    * Start CtrlProxy
    */
   public start(options: CtrlProxyStartOptions = {}): Promise<void> {
+    if (this.suspendedForSimulatorShutdown) {
+      return this.rearmIfSimulatorBackUp().then(() => this.startup.start(options));
+    }
     return this.startup.start(options);
   }
   /** Start the runner after a forced restart. Public so tests can stub the restart launch. */
@@ -789,6 +868,11 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     signal?: AbortSignal,
     minimumHealthPollDurationMs?: number,
   ): Promise<CtrlProxyIosSetupResult> {
+    if (this.suspendedForSimulatorShutdown) {
+      return this.rearmIfSimulatorBackUp().then(() =>
+        this.setupWorkflow.setup(force, perf, signal, minimumHealthPollDurationMs),
+      );
+    }
     return this.setupWorkflow.setup(force, perf, signal, minimumHealthPollDurationMs);
   }
   trackStartedXcodebuild(child: ChildProcess): void {
@@ -834,6 +918,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    * Force restart the service (useful when client detects issues)
    */
   public forceRestart(options: CtrlProxyStartOptions = {}): Promise<void> {
+    if (this.suspendedForSimulatorShutdown) {
+      return this.rearmIfSimulatorBackUp().then(() => this.restart.forceRestart(options));
+    }
     return this.restart.forceRestart(options);
   }
   /**

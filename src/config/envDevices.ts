@@ -2,12 +2,52 @@ import type { EnvVarSpec } from "./envSpec";
 
 /** Device, emulator, simulator and CtrlProxy variables. */
 export const DEVICES_ENV = {
+  CTRL_PROXY_REBIND_WRITE_TIMEOUT_MS: {
+    name: "AUTOMOBILE_CTRL_PROXY_REBIND_WRITE_TIMEOUT_MS",
+    kind: "int",
+    min: 1,
+    default: "5000",
+    fallback: 5000,
+    doc: "Base timeout for each Android accessibility rebind command.",
+  },
+  CTRL_PROXY_REBIND_WRITE_TIMEOUT_MAX_MS: {
+    name: "AUTOMOBILE_CTRL_PROXY_REBIND_WRITE_TIMEOUT_MAX_MS",
+    kind: "int",
+    min: 1,
+    default: "30000",
+    fallback: 30000,
+    doc: "Ceiling for Android accessibility rebind command timeouts.",
+  },
+  IOS_RESET_STEP_BUDGET_MS: {
+    name: "AUTOMOBILE_IOS_RESET_STEP_BUDGET_MS",
+    kind: "int",
+    min: 1,
+    default: "30000",
+    fallback: 30000,
+    doc: "Base budget for each iOS keep-booted reset step and health probe.",
+  },
+  IOS_RESET_STEP_BUDGET_MAX_MS: {
+    name: "AUTOMOBILE_IOS_RESET_STEP_BUDGET_MAX_MS",
+    kind: "int",
+    min: 1,
+    default: "120000",
+    fallback: 120000,
+    doc: "Ceiling for iOS keep-booted reset step and health probe budgets.",
+  },
+
   ANDROID_MAX_BOOTED: {
     name: "AUTOMOBILE_ANDROID_MAX_BOOTED",
     kind: "int",
     default: "see docs",
     min: 1,
     doc: "Positive integer cap on concurrently booted Android emulators.",
+  },
+  IOS_SIM_BOOT_CONCURRENCY: {
+    name: "AUTOMOBILE_IOS_SIM_BOOT_CONCURRENCY",
+    kind: "int",
+    default: "see docs",
+    min: 1,
+    doc: "Concurrent iOS simulator boot bursts; positive integer, otherwise derived from host cores.",
   },
   IOS_SIM_MAX_BOOTED: {
     name: "AUTOMOBILE_IOS_SIM_MAX_BOOTED",
@@ -120,6 +160,18 @@ export const DEVICES_ENV = {
     kind: "string",
     default: "on",
     doc: "Boot admission gate for every platform; exact 0 disables.",
+  },
+  IOS_TEMPLATE_CLONE: {
+    name: "AUTOMOBILE_IOS_TEMPLATE_CLONE",
+    kind: "string",
+    default: "false",
+    doc: "Provision iOS simulators from settled templates: 1/true enables; 0/false disables.",
+  },
+  IOS_PREBOOT_LEAN_PROFILE: {
+    name: "AUTOMOBILE_IOS_PREBOOT_LEAN_PROFILE",
+    kind: "string",
+    default: "none",
+    doc: "Pre-boot iOS simulator lean profile: none, minimal, or catalog-cpu; unknown values use none.",
   },
   IOS_SIM_CAPACITY_GATE: {
     name: "AUTOMOBILE_IOS_SIM_CAPACITY_GATE",
@@ -255,6 +307,13 @@ export const DEVICES_ENV = {
     kind: "bool",
     default: "off",
     doc: "Promote all iOS CtrlProxy output to info logs (1/true).",
+  },
+  IOS_RUNNER_LAUNCH_CONCURRENCY: {
+    name: "AUTOMOBILE_IOS_RUNNER_LAUNCH_CONCURRENCY",
+    kind: "int",
+    default: "2",
+    min: 1,
+    doc: "Maximum concurrent iOS runner launches per daemon; positive integer.",
   },
   CTRL_PROXY_HEALTH_MAX_ATTEMPTS: {
     name: "AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS",

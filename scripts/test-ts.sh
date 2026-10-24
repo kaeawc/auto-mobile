@@ -138,6 +138,12 @@ macos_only_filter() {
 # pattern beats an explicit file argument, and a config file has no argv length cap.
 # The path is relative to the repo root (the lane's cwd) unless the scratch dir is
 # overridden, so Git Bash never rewrites it. $1 is the argument array to extend.
+#
+# Bun REPLACES the config's pathIgnorePatterns with any --path-ignore-patterns flag
+# (#15237: the Windows unit lane carried the lane's two flags, so the macOS-only
+# list in the config was dropped and ~300 iOS files ran). So the unit lane's own
+# flags move into the config here, and every other lane that adds such a flag
+# appends macos_only_integration_ignore_args to it.
 add_macos_only_bun_config() {
   [[ "$skip_macos_only" -eq 1 ]] || return 0
   local config="scratch/bunfig.macos-only.toml"
@@ -145,11 +151,35 @@ add_macos_only_bun_config() {
     config="$AUTOMOBILE_TEST_TS_SCRATCH_DIR/bunfig.macos-only.toml"
   fi
   mkdir -p "$(dirname "$config")"
-  bun "$macos_only_tool" write-bunfig "$config"
+  local lane_ignores=() kept_args=() index=0
+  if [[ "$1" == unit ]]; then
+    while ((index < ${#unit_args[@]})); do
+      if [[ "${unit_args[index]}" == --path-ignore-patterns ]]; then
+        lane_ignores+=(--ignore "${unit_args[index + 1]}")
+        index=$((index + 2))
+      else
+        kept_args+=("${unit_args[index]}")
+        index=$((index + 1))
+      fi
+    done
+    unit_args=("${kept_args[@]}")
+  fi
+  bun "$macos_only_tool" write-bunfig "$config" ${lane_ignores[@]+"${lane_ignores[@]}"}
   case "$1" in
     unit) unit_args+=("--config=$config") ;;
     integration) integration_args+=("--config=$config") ;;
   esac
+}
+
+# --path-ignore-patterns flags for the macOS-only integration files, for lanes
+# that already pass their own such flags (which would replace the config's list).
+# Only a handful of integration files are macOS-only, so argv length is no concern.
+macos_only_integration_ignore_args() {
+  [[ "$skip_macos_only" -eq 1 ]] || return 0
+  local file
+  while IFS= read -r file; do
+    printf '%s\n' --path-ignore-patterns "$file"
+  done < <(grep -F '.integration.test.ts' "$macos_only_skip_file" || true)
 }
 
 # shellcheck source=scripts/lib/host-slots.sh
@@ -338,7 +368,7 @@ run_test_command() {
       run_managed_command gtimeout -k 2 "$AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" "$@"
     else
       local pgid_prefix
-      mkdir_spotlight_excluded "${AUTOMOBILE_TEST_TS_SCRATCH_DIR:-$ROOT/scratch}"
+      mkdir_spotlight_excluded_within "$ROOT" "${AUTOMOBILE_TEST_TS_SCRATCH_DIR:-$ROOT/scratch}"
       pgid_prefix="$(mktemp "${AUTOMOBILE_TEST_TS_SCRATCH_DIR:-$ROOT/scratch}/test-ts-pgid.XXXXXX")"
       rm -f "$pgid_prefix"
       cleanup_pgid_prefixes+=("$pgid_prefix")
@@ -1100,7 +1130,7 @@ run_windows_unit_shards() {
   local pids=() labels=() log_names=() starts=()
   if [[ "${TEST_TS_PRINT_CMD:-}" != 1 ]]; then
     rm -rf "$shard_root"
-    mkdir_spotlight_excluded "$shard_root"
+    mkdir_spotlight_excluded_within "$ROOT" "$shard_root"
   fi
   for ((shard = 1; shard <= unit_workers; shard += 1)); do
     launch_windows_test_process "unit shard $shard/$unit_workers" "shard-$shard" \
@@ -1132,9 +1162,12 @@ run_windows_integration_shards() {
       ignore_args+=(--path-ignore-patterns "$path")
     fi
   done < <(integration_tier_paths "$tier_file" unsafe | macos_only_filter)
+  while IFS= read -r path; do
+    ignore_args+=("$path")
+  done < <(macos_only_integration_ignore_args)
   if [[ "${TEST_TS_PRINT_CMD:-}" != 1 ]]; then
     rm -rf "$shard_root"
-    mkdir_spotlight_excluded "$shard_root"
+    mkdir_spotlight_excluded_within "$ROOT" "$shard_root"
   fi
   safe_workers="$workers"
   if [[ "${#unsafe_paths[@]}" -gt 0 ]]; then
@@ -1209,7 +1242,7 @@ run_unit_shards() {
 
   if [[ "${TEST_TS_PRINT_CMD:-}" != 1 ]]; then
     rm -rf "$shard_root"
-    mkdir_spotlight_excluded "$shard_root"
+    mkdir_spotlight_excluded_within "$ROOT" "$shard_root"
   fi
   if [[ -n "${AUTOMOBILE_UNIT_JUNIT_DIR:-}" ]]; then
     rm -rf "$AUTOMOBILE_UNIT_JUNIT_DIR"
@@ -1218,7 +1251,7 @@ run_unit_shards() {
   if [[ "$shard_mode" == changed ]]; then
     # Print-only runs skip the scratch reset above but still need somewhere to
     # hold the resolved list.
-    mkdir_spotlight_excluded "$shard_root"
+    mkdir_spotlight_excluded_within "$ROOT" "$shard_root"
     unit_selection_file="$shard_root/selected-unit.txt"
     # Resolve once before sharding. The selector unions a parse-only Bun graph
     # with affectedTests' reference/always-run extras; uncertain edges select
@@ -1627,7 +1660,11 @@ case "$mode" in
         fi
         main_status=0
         if [[ "$has_test_targets" -eq 0 ]]; then
-          main_targets=(--path-ignore-patterns "**/proxyServerTransportFailure.integration.test.ts" ".integration.test.ts")
+          main_targets=(--path-ignore-patterns "**/proxyServerTransportFailure.integration.test.ts")
+          while IFS= read -r macos_only_ignore; do
+            main_targets+=("$macos_only_ignore")
+          done < <(macos_only_integration_ignore_args)
+          main_targets+=(".integration.test.ts")
         else
           main_targets=("${integration_main_paths[@]+"${integration_main_paths[@]}"}")
         fi
@@ -1791,7 +1828,7 @@ case "$mode" in
     fi
     if [[ "${TEST_TS_PRINT_CMD:-}" != "1" ]]; then
       rm -rf "$coverage_root"
-      mkdir_spotlight_excluded "$coverage_root"
+      mkdir_spotlight_excluded_within "$ROOT" "$coverage_root"
       mkdir -p "$coverage_root/shards"
     fi
     # Coverage uses the unit shard supervisor too: the same 720s attempts,

@@ -101,7 +101,7 @@ function harness(
     )(block, options)),
     observation,
   });
-  const client = AndroidCtrlProxyClient.getExistingInstance(device.deviceId)!;
+  const client = AndroidCtrlProxyClient.getInstance(device);
   const capability = spyOn(client, "supportsCommand").mockResolvedValue(ctrlProxy);
   const dispatches: Array<number | undefined> = [];
   let onDispatch = () => {};

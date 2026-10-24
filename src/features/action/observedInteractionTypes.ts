@@ -1,3 +1,4 @@
+import type { DeviceLockUnknown } from "../../models/DeviceLockState";
 import type { DeviceLockState } from "../../models/DeviceLockState";
 import type { ObserveResult } from "../../models/ObserveResult";
 import type { StaleDisplayDetails } from "../observe/StaleDisplayError";
@@ -33,6 +34,7 @@ export interface ObservedEnvelope {
   effect?: TapEffect;
   /** Pre-action lock state, attached when an Android keyguard was up (#4280). */
   deviceLock?: DeviceLockState;
+  deviceLockUnknown?: DeviceLockUnknown;
   deviceLockWarning?: string;
 }
 

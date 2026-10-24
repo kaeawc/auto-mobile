@@ -172,6 +172,12 @@ export class DevicePool {
     return this.parts.membership.notifyDeviceReady(...args);
   }
 
+  pickUpRunningDevice(
+    ...args: Parameters<PoolOps["pickUpRunningDevice"]>
+  ): ReturnType<PoolOps["pickUpRunningDevice"]> {
+    return this.parts.targetDiscovery.pickUpRunningDevice(...args);
+  }
+
   addDevice(...args: Parameters<PoolOps["addDevice"]>): ReturnType<PoolOps["addDevice"]> {
     return this.parts.membership.addDevice(...args);
   }
@@ -522,6 +528,18 @@ export class DevicePool {
     return this.parts.reservations.reserveRestartRecoveryReadiness(...args);
   }
 
+  clearUnpooledShutdown(deviceId: string): void {
+    this.parts.reservations.clearUnpooledShutdown(deviceId);
+  }
+
+  fenceUnpooledShutdown(deviceId: string): () => void {
+    return this.parts.reservations.fenceUnpooledShutdown(deviceId);
+  }
+
+  settleUnpooledShutdown(deviceId: string): void {
+    this.parts.reservations.settleUnpooledShutdown(deviceId);
+  }
+
   reserveDeviceForShutdown(
     ...args: Parameters<PoolOps["reserveDeviceForShutdown"]>
   ): ReturnType<PoolOps["reserveDeviceForShutdown"]> {
@@ -544,6 +562,12 @@ export class DevicePool {
     ...args: Parameters<PoolOps["assertNotPreparedForOtherRequest"]>
   ): ReturnType<PoolOps["assertNotPreparedForOtherRequest"]> {
     return this.parts.reservations.assertNotPreparedForOtherRequest(...args);
+  }
+
+  waitForAssignmentTransition(
+    ...args: Parameters<PoolOps["waitForAssignmentTransition"]>
+  ): ReturnType<PoolOps["waitForAssignmentTransition"]> {
+    return this.parts.availability.waitForAssignmentTransition(...args);
   }
 
   isSafeForObservationServiceStart(

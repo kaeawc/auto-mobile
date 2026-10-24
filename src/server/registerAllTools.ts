@@ -26,6 +26,7 @@ import { registerTelephonyTools } from "./telephonyTools";
 import { registerMeasureStartupTools } from "./measureStartupTools";
 import { registerProfilingTools } from "./profilingTools";
 import { registerMediaSessionTools } from "./mediaSessionTools";
+import { registerRotaryScrollTools } from "./rotaryScrollTool";
 import { registerWindowModeTools } from "./windowModeTools";
 import { registerPrototypeTools } from "./prototypeTools";
 import { prototypeAgentRegistry } from "../features/prototype/ios/prototypeAgentInjection";
@@ -112,6 +113,7 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerProfilingTools();
   registerMediaSessionTools();
   registerWindowModeTools();
+  registerRotaryScrollTools();
   registerHighlightTools();
   registerPrototypeTools({
     agentConnections: new CompositePrototypeAgentConnections(

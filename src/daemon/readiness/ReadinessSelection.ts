@@ -1,3 +1,4 @@
+import { iosReadNotBootedMessage } from "./readinessLifecycleStart";
 import {
   type AppearanceMode,
   ActionableError,
@@ -96,11 +97,6 @@ interface ReadinessSelectionDependencies {
   readonly deviceUtils: PlatformDeviceManager;
   bootAndroidReadinessImage(
     deviceImage: DeviceInfo,
-    options?: DeviceReadyOptions,
-    perf?: ReturnType<typeof createGlobalPerformanceTracker>,
-  ): Promise<BootedDevice>;
-  bootIosReadinessImage(
-    device: DeviceInfo,
     options?: DeviceReadyOptions,
     perf?: ReturnType<typeof createGlobalPerformanceTracker>,
   ): Promise<BootedDevice>;
@@ -633,8 +629,7 @@ export class ReadinessSelection {
       await options.beforeReadBoot?.(image);
       return await this.dependencies.bootAndroidReadinessImage(image, options);
     }
-    await options.beforeReadBoot?.(image);
-    return await this.dependencies.bootIosReadinessImage(image, options);
+    throw new ActionableError(iosReadNotBootedMessage(image.name, image.deviceId!));
   }
 
   private findPinnedReadinessDevice(
@@ -653,22 +648,7 @@ export class ReadinessSelection {
     if (options?.intent !== "read") {
       return undefined;
     }
-    let running: BootedDevice | undefined;
-    if (image.platform === "android") {
-      running = await this.recheckAndroidReadBootImage(image, options);
-    } else {
-      const images = await this.listProvidedReadinessImages("ios", options);
-      const matches = images.filter((candidate) => candidate.deviceId === image.deviceId);
-      const current = matches.length === 1 ? matches[0] : undefined;
-      if (!current || current.isAvailable === false) {
-        throw providedReadTargetNotFound(image.deviceId!, "ios", []);
-      }
-      if (current.isRunning === true) {
-        running = { ...current, deviceId: image.deviceId! };
-      } else if (current.isRunning !== false) {
-        throw providedReadTargetNotFound(image.deviceId!, "ios", []);
-      }
-    }
+    const running = await this.recheckAndroidReadBootImage(image, options);
     if (running) {
       await options.beforeReadReadiness?.(running);
       options.signal?.throwIfAborted();

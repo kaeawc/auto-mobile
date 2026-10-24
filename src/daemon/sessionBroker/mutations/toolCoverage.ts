@@ -44,7 +44,7 @@ function tools(
 }
 
 const SESSION_DISPATCH_REASON =
-  "Session-scoped tool dispatch attempts to record before action; recording failures warn and proceed. Unreadable priors and opaque intents are non-revertible. Legacy sessions are unchanged.";
+  "Session-scoped tool dispatch attempts to record before action; recording failures warn, proceed, and force the session's next keep-booted reset to fall back. Unreadable priors and opaque intents are non-revertible. Legacy sessions are unchanged.";
 
 export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationToolCoverage>> = {
   ...tools(
@@ -63,7 +63,6 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationTool
       "postNotification",
       "putAppFile",
       "resetKeychain",
-      "rotate",
       "mediaSession",
       "setAppLinks",
       "setSensor",
@@ -73,18 +72,22 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationTool
       "setPosture",
       "setUIState",
       "clearKeyValueFile",
+      "deleteKeychainItem",
       "clearMockNetwork",
       "mockNetwork",
-      "phoneCall",
       "removeKeyValue",
-      "resetAppLogs",
-      "sendSms",
       "setKeyValue",
       "setPreference",
-      "sqlQuery",
     ],
     SESSION_DISPATCH_REASON,
     "journaled",
+  ),
+  ...tools(
+    ["sendSms", "phoneCall", "sqlQuery", "resetAppLogs", "rotate"],
+    SESSION_DISPATCH_REASON +
+      " SMS, calls, SQL writes or unclassified queries, log deletion and secondary-display rotation record fallback intents because baseline cleaning cannot restore those effects; read-only SQL records nothing and primary-display rotation remains revertible.",
+    "journaled",
+    { fallback: true },
   ),
   ...tools(
     ["setDeviceState"],
@@ -107,12 +110,19 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationTool
   ),
   ...tools(
     ["manufacturerProfile"],
-    "apply records the keyboard profile row plus a breadcrumb for the kill and display facets, whose session-owned restore receipts bypass the recorded dispatcher; list, describe, reset, iOS and refused calls change nothing.",
+    "apply records the keyboard profile row plus a fallback intent for kill/display facets or an unknown persona; their in-memory restore receipts bypass the recorded dispatcher and cannot prove a clean reset; list, describe, reset and iOS calls change nothing.",
     "journaled",
+    { fallback: true },
   ),
   ...tools(
-    ["pressButton", "sendKeys"],
-    "Only some calls persist: power/lock journal the screen state with a readable prior, volume presses leave a breadcrumb, a typed keyboardProfile journals the keyboard profile row. Every other button or text call is transient input.",
+    ["pressButton"],
+    "Power/lock journal the screen state with a readable prior; volume presses record a fallback intent because live audio levels have no revert on either platform. iOS power/action retain diagnostic breadcrumbs; other buttons are transient input.",
+    "journaled",
+    { fallback: true },
+  ),
+  ...tools(
+    ["sendKeys"],
+    "A typed keyboardProfile journals the keyboard profile row. Other text calls are transient input.",
     "journaled",
   ),
   ...tools(
@@ -144,6 +154,7 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationTool
       "multiTouch",
       "pinchOn",
       "recentApps",
+      "rotaryScroll",
       "selectAllText",
       "shake",
       "swipeAt",

@@ -576,6 +576,26 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
     resolveWith: { success: true },
   },
   {
+    name: "delete_keychain_item",
+    builder: "CtrlProxyStorage.deleteKeychainItemForIos",
+    invoke: (h) =>
+      new CtrlProxyStorage(
+        h.context,
+        () => "fixture-session-id",
+        () => "fixture-mutation-token",
+      ).deleteKeychainItemForIos(
+        "com.example.app",
+        {
+          itemClass: "genericPassword",
+          service: "test.service",
+          account: "fixture",
+          accessGroup: "TEAM.app",
+        },
+        true,
+      ),
+    resolveWith: { success: true, outcome: "deleted", deletedScope: null },
+  },
+  {
     name: "clear_preferences",
     builder: "CtrlProxyStorage.clearPreferenceStore",
     invoke: (h) =>
@@ -784,6 +804,7 @@ describe("iOS control-proxy — request snapshot fixture matches live TS builder
       "set_preference",
       "remove_preference",
       "clear_preferences",
+      "delete_keychain_item",
       // database
       "execute_sql",
       "list_databases",
@@ -930,3 +951,34 @@ describe("iOS integer millisecond request boundary", () => {
     expect(serializeIosRequest(message)).toBe(JSON.stringify(message));
   });
 });
+
+test.each(["sent", "false", "throw", "no-capability", "unsupported"] as const)(
+  "simulation sync reports delivery: %s",
+  (outcome) => {
+    const h = createHarness();
+    let sends = 0;
+    const sync = new CtrlProxyNetworkSync({
+      getDevice: () => ({ deviceId: "simulation-result", platform: "ios", name: "fake" }),
+      requestManager: h.requestManager,
+      sdkCapability: {
+        hasSdkCapability: () => outcome !== "no-capability",
+        isLegacySdkCommandSupported: () => false,
+        ensureSdkCapability: async () => true,
+        sdkCapabilityGate: async () => null,
+      },
+      sendMessage: () => {
+        sends++;
+        if (outcome === "throw") {
+          throw new Error("socket closed");
+        }
+        return outcome !== "false";
+      },
+      isCommandSupported: () => outcome !== "unsupported",
+      createDelegateContext: () => h.context,
+    });
+    expect(sync.syncNetworkErrorSimulationToDevice()).toBe(
+      outcome !== "false" && outcome !== "throw",
+    );
+    expect(sends).toBe(outcome === "no-capability" || outcome === "unsupported" ? 0 : 1);
+  },
+);

@@ -6,6 +6,15 @@
     import XCTest
 
     extension SdkHierarchyServerTests {
+        func testHttpKeychainDeleteRejectsInvalidSelector() throws {
+            try withRunningServer(tracker: HttpContractTracker()) { port in
+                try assertHttpContract(
+                    roundTrip(port: port, head: requestHead("POST", "/keychain/delete", length: 2), body: "{}"),
+                    status: "400 Bad Request", body: #"{"outcome":"invalid_selector"}"#, unorderedObjectKeys: true
+                )
+            }
+        }
+
         func testHttpCachedHierarchyWithoutSnapshotHasEmpty204Body() throws {
             try withRunningServer(tracker: HttpContractTracker()) { port in
                 try assertHttpContract(

@@ -1,3 +1,5 @@
+import { disabledDeviceResourceReport } from "../utils/iosDeviceResourceImpact";
+import { mergeProvenResourceStates } from "../utils/deviceResourceStates";
 import type {
   DeviceResourceConfigurationResult,
   ConfigurableDeviceResource,
@@ -34,7 +36,7 @@ import {
 export function registerDeviceResourceTools(dependencies: () => DeviceToolsDependencies): void {
   ToolRegistry.registerDeviceAware(
     "setDeviceResources",
-    "Set selected device resources and verify native state. All settings are opt-in; omitted resources stay unchanged. iOS Simulator services and Android optional apps/settings are runtime-dependent. Android changes return a restore receipt for exact restoration during the same boot. Disabling Google infrastructure changes push/auth behavior.",
+    "Set selected device resources and verify native state, including disabled iOS service impacts. All settings are opt-in; omitted resources stay unchanged. iOS Simulator services and Android optional apps/settings are runtime-dependent. Android changes return a restore receipt for exact restoration during the same boot. Disabling Google infrastructure changes push/auth behavior.",
     setDeviceResourcesSchema,
     async (device, args: z.infer<typeof setDeviceResourcesSchema>, _progress, signal) => {
       const callerSignal = signal ?? getAbortSignal();
@@ -182,6 +184,9 @@ export async function observeConfiguredDeviceResources(
   result: DeviceResourceConfigurationResult,
   request: DeviceResourceObservationRequest,
 ): Promise<DeviceResourceConfigurationResult> {
+  // Recompute the companion report from current evidence, including on repeated calls.
+  result = { ...result };
+  delete result.disabledResources;
   const now = deps.timer.now();
   request = {
     ...request,
@@ -207,6 +212,7 @@ export async function observeConfiguredDeviceResources(
     return {
       ...result,
       observed,
+      ...configuredResourceImpact(request.device, result, states),
       ...(contradictions.length
         ? { success: false, observationContradictions: contradictions }
         : {}),
@@ -219,11 +225,21 @@ export async function observeConfiguredDeviceResources(
       const abort =
         reason instanceof Error ? reason : new DOMException(String(reason), "AbortError");
       throw Object.assign(abort, {
-        deviceResourceResult: result,
+        deviceResourceResult: { ...result, ...configuredResourceImpact(request.device, result) },
       }) satisfies DeviceResourceObservationAbort;
     }
     logger.warn(`Device resource observation failed: ${errorMessage(error)}`, error);
     // Keep mutation evidence usable when independent observation cannot complete.
-    return result;
+    return { ...result, ...configuredResourceImpact(request.device, result) };
   }
+}
+
+function configuredResourceImpact(
+  device: BootedDevice,
+  result: DeviceResourceConfigurationResult,
+  observed?: DeviceResourceConfigurationResult["resources"],
+): Pick<DeviceResourceConfigurationResult, "disabledResources"> {
+  return device.platform === "ios"
+    ? disabledDeviceResourceReport(mergeProvenResourceStates(result.resources, observed))
+    : {};
 }

@@ -4,7 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DaemonClientLike } from "../../src/daemon/client";
 import type { IdentityRecoveryIO } from "../../src/daemon/identityRecovery";
-import type { DaemonSocketReachabilityLike } from "../../src/daemon/daemonSocketReachability";
+import type {
+  DaemonSocketReachabilityLike,
+  SocketReachability,
+} from "../../src/daemon/daemonSocketReachability";
 import type { PidFileData } from "../../src/daemon/types";
 import { readPidFileDataSync } from "../../src/daemon/daemonFiles";
 import { FakeDaemonSpawner } from "../fakes/FakeDaemonSpawner";
@@ -18,9 +21,11 @@ import { FakeTimer } from "../fakes/FakeTimer";
 
 class PeerReachability implements DaemonSocketReachabilityLike {
   calls = 0;
+  resultOverride?: SocketReachability;
   reachable: (call: number) => boolean = () => false;
-  async isReachable(): Promise<boolean> {
-    return this.reachable(++this.calls);
+  async probe(): Promise<SocketReachability> {
+    const answered = this.reachable(++this.calls);
+    return this.resultOverride ?? (answered ? "answered" : "absent");
   }
 }
 
@@ -119,6 +124,19 @@ function expectNoPending(h: ReturnType<typeof harness>) {
 }
 
 describe("daemon peer rejoin through injected process discovery", () => {
+  test.each(["unknown", "absent"] satisfies SocketReachability[])(
+    "does not join an %s peer after either probe",
+    async (result) => {
+      const h = harness();
+      h.reachability.resultOverride = result;
+      await expect(h.manager.start()).rejects.toThrow(originalExit);
+      expect(h.reachability.calls).toBe(2);
+      expect(h.connections()).toBe(0);
+      expectNoSignals(h);
+      expectNoPending(h);
+    },
+  );
+
   test("joins a marked namespace peer after the child's exit with exactly two scans", async () => {
     const h = harness();
     h.table.script = (call) => (call === 1 ? [] : [namespaceDaemonProcess(999999, h.socketPath)]);

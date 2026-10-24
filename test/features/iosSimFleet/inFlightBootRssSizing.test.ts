@@ -56,7 +56,9 @@ function setup(simulators: SimulatorCost[] = [simulator("settled", 3.5)]) {
     collect: async () => report,
     collectFresh: async () => report,
   };
-  const gate = new IosSimCapacityGate(source, new FakeTimer(), { env: {} });
+  const gate = new IosSimCapacityGate(source, new FakeTimer(), {
+    env: { AUTOMOBILE_IOS_SIM_BOOT_CONCURRENCY: "100" },
+  });
   return { report, source, gate };
 }
 
@@ -109,7 +111,7 @@ test("a lone admitted simulator's small RSS keeps the default-derived limit", as
   expect((await gate.describeCapacity()).limit).toBe(2);
   boot.releaseAdmission?.();
   // Release defines settlement: no new grace timer changes the existing steady-fleet behavior.
-  expect((await gate.describeCapacity()).limit).toBe(4);
+  expect((await gate.describeCapacity()).limit).toBe(5);
 });
 
 test("a boot released during sampling stays excluded for that sample", async () => {
@@ -160,7 +162,7 @@ test("an admission without a UDID still charges the policy default", async () =>
 
 test.each([
   { rss: [], expectedGiB: 3, limit: 2 },
-  { rss: [0.8], expectedGiB: 1.5, limit: 4 },
+  { rss: [0.8], expectedGiB: 1.5, limit: 5 },
   { rss: [2], expectedGiB: 2, limit: 4 },
   { rss: [3.5], expectedGiB: 3.5, limit: 2 },
   { rss: [2, 4], expectedGiB: 3, limit: 2 },

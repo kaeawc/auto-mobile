@@ -343,7 +343,7 @@ async function runAdmittedCall(deps: ToolCallIngressDeps, call: AdmittedCall) {
       );
     }
     if (acquiredSessionUuid && sessionToolBinding.bind(sessionId, acquiredSessionUuid)) {
-      ToolRegistry.notifyToolListChanged();
+      ToolRegistry.notifyToolSelectionChanged();
     }
     return call.withRoutedSession(response);
   } catch (error) {

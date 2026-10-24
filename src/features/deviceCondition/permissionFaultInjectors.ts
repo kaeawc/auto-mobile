@@ -9,6 +9,7 @@ import { DUMPSYS_MAX_BUFFER } from "../../utils/android-cmdline-tools/dumpsysLim
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
+import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { normalizeAndroidPermissionName } from "../action/GrantAndroidPermissions";
 import { parseAndroidRuntimePermissions } from "../action/parseAndroidRuntimePermissions";
 import type {
@@ -43,12 +44,30 @@ const paramsSchema = z
 
 type PermissionState = "granted" | "denied";
 
-interface Target {
+interface RequestedTarget {
   packageName: string;
   permission: string;
 }
 
-const targetKey = (target: Target): string => `${target.packageName}|${target.permission}`;
+/** The permission on the Android user whose instance of the app is being tested. */
+interface Target extends RequestedTarget {
+  userId: number;
+}
+
+const targetKey = (target: Target): string =>
+  `${target.userId}|${target.packageName}|${target.permission}`;
+
+/** Which Android user to act on for an app; production asks the same resolver the permission tool uses. */
+export type ResolvePermissionUser = (packageName: string, signal?: AbortSignal) => Promise<number>;
+
+const pmArgs = (action: "grant" | "revoke", target: Target): string[] => [
+  "pm",
+  action,
+  "--user",
+  String(target.userId),
+  target.packageName,
+  target.permission,
+];
 
 /** What `dumpsys package` says about one runtime permission, or why it cannot be revoked. */
 type PermissionReading =
@@ -71,6 +90,7 @@ async function readPermission(
   const state = parseAndroidRuntimePermissions(
     result.stdout.replace(/\r\n?/g, "\n"),
     target.packageName,
+    target.userId,
   );
   if (state === undefined) {
     return "package-missing";
@@ -104,7 +124,7 @@ async function readState(
   return reading === "package-missing" || reading.kind === "refused" ? undefined : reading.state;
 }
 
-function parseTarget(params: Record<string, unknown> | undefined): Target {
+function parseTarget(params: Record<string, unknown> | undefined): RequestedTarget {
   const parsed = paramsSchema.safeParse(params);
   if (!parsed.success) {
     rejectValue("faults.revokePermission", JSON.stringify(params ?? null), [
@@ -123,7 +143,13 @@ function parseTarget(params: Record<string, unknown> | undefined): Target {
  * injector already revoked re-asserts it, and one already denied before AutoMobile touched it is
  * left alone and not owned.
  */
-export function createPermissionFaultInjector(adb: AdbExecutor): DeviceConditionInjector {
+export function createPermissionFaultInjector(
+  adb: AdbExecutor,
+  resolveUser: ResolvePermissionUser = (packageName, signal) =>
+    new AndroidUserTargetResolver(adb)
+      .resolve({ packageName, installedOnly: true, signal })
+      .then((resolved) => resolved.userId),
+): DeviceConditionInjector {
   /** Pairs this injector revoked and has not yet re-granted, in revoke order. */
   const owned = new Map<string, Target>();
   const serialize = createSerializer();
@@ -132,7 +158,7 @@ export function createPermissionFaultInjector(adb: AdbExecutor): DeviceCondition
     if ((await readState(adb, target, signal)) === undefined) {
       return;
     }
-    await shell(adb, ["pm", "grant", target.packageName, target.permission], signal);
+    await shell(adb, pmArgs("grant", target), signal);
     if ((await readState(adb, target, signal)) !== "granted") {
       throw new ActionableError(
         `${target.permission} is still not granted to ${target.packageName} after pm grant.`,
@@ -198,7 +224,7 @@ export function createPermissionFaultInjector(adb: AdbExecutor): DeviceCondition
     // Own the pair before the write, so a failure after it is still undone.
     owned.set(targetKey(target), target);
     try {
-      await shell(adb, ["pm", "revoke", target.packageName, target.permission], signal);
+      await shell(adb, pmArgs("revoke", target), signal);
       if ((await readState(adb, target, signal)) !== "denied") {
         unsupported(`pm revoke did not revoke ${target.permission} from ${target.packageName}`);
       }
@@ -216,7 +242,11 @@ export function createPermissionFaultInjector(adb: AdbExecutor): DeviceCondition
     params: Record<string, unknown> | undefined,
     signal?: AbortSignal,
   ): Promise<DeviceConditionApplyOutcome> => {
-    const target = parseTarget(params);
+    const requested = parseTarget(params);
+    const target: Target = {
+      ...requested,
+      userId: await resolveUser(requested.packageName, signal),
+    };
     const reading = await readPermission(adb, target, signal);
     if (reading === "package-missing") {
       unsupported(`${target.packageName} is not installed`);

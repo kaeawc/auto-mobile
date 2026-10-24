@@ -1914,7 +1914,21 @@
                 "doze": { "type": "string", "enum": ["on", "unset"] },
                 "thermal": { "type": "string", "enum": ["throttling", "critical", "unset"] },
                 "storage": { "type": "string", "enum": ["low", "full", "unset"] },
-                "dontKeepActivities": { "type": "string", "enum": ["on", "unset"] }
+                "dontKeepActivities": { "type": "string", "enum": ["on", "unset"] },
+                "revokePermission": {
+                  "oneOf": [
+                    { "type": "string", "const": "unset" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "package": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$" },
+                        "permission": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.]*$" }
+                      },
+                      "required": ["package", "permission"],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
               },
               "additionalProperties": false
             },

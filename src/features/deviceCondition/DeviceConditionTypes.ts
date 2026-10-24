@@ -21,6 +21,24 @@ export type DeviceConditionKey = "rootState" | "integrityState" | `faults.${stri
 export const DEVICE_CONDITION_UNSET = "unset";
 
 /**
+ * The injector value for a fault requested with an object (#14069), whose fields travel as the
+ * change's `params`. A fault with parameters has no enum value to hand the injector.
+ */
+export const DEVICE_CONDITION_APPLY = "apply";
+
+/** Android application ID: dot-separated segments, each starting with a letter. */
+export const ANDROID_PACKAGE_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$/;
+
+/** A full permission name, or a bare platform constant such as `CAMERA`. */
+export const ANDROID_PERMISSION_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_.]*$/;
+
+/** The app and runtime permission a `revokePermission` fault targets. */
+export interface DeviceConditionPermissionTarget {
+  package: string;
+  permission: string;
+}
+
+/**
  * A validated `deviceCondition` request. Declared as an explicit interface (not
  * `z.infer`) so that embedding {@link deviceConditionInputSchema} in the large
  * `setDeviceState` schema references this named type instead of re-inferring the
@@ -45,6 +63,8 @@ export interface DeviceConditionInput {
     dontKeepActivities?: "on" | typeof DEVICE_CONDITION_UNSET;
     /** Storage fault (#14066). */
     storage?: "low" | "full" | typeof DEVICE_CONDITION_UNSET;
+    /** Permission revocation (#14069); the one fault so far that takes an object. */
+    revokePermission?: DeviceConditionPermissionTarget | typeof DEVICE_CONDITION_UNSET;
   };
   expiresInSeconds?: number;
   reset?: true;
@@ -98,6 +118,20 @@ export const deviceConditionInputSchema: z.ZodType<DeviceConditionInput> = z
           .describe(
             "Use up free space on /data with a ballast file (`fallocate`): 'low' leaves about 128 MiB, 'full' about 8 MiB. Reset deletes the ballast. Or unset.",
           ),
+        revokePermission: z
+          .union([
+            z.literal(DEVICE_CONDITION_UNSET),
+            z
+              .object({
+                package: z.string().regex(ANDROID_PACKAGE_NAME_PATTERN),
+                permission: z.string().regex(ANDROID_PERMISSION_NAME_PATTERN),
+              })
+              .strict(),
+          ])
+          .optional()
+          .describe(
+            "Revoke one runtime permission from an installed app with `pm revoke` ({ package, permission }); reset re-grants it. Revoking kills the app's process, so it also restarts the app. Or unset.",
+          ),
       })
       .strict()
       .optional()
@@ -122,6 +156,8 @@ export const deviceConditionInputSchema: z.ZodType<DeviceConditionInput> = z
 export interface DeviceConditionChange {
   key: DeviceConditionKey;
   value: string;
+  /** The request object when the fault was requested with parameters (`value` is then "apply"). */
+  params?: Record<string, unknown>;
 }
 
 /** Split a validated request into ordered changes; fields absent from the request are untouched. */
@@ -135,9 +171,15 @@ export function deviceConditionChanges(input: DeviceConditionInput): DeviceCondi
   }
   const faults = input.faults ?? {};
   for (const name of Object.keys(faults).sort()) {
-    const value = (faults as Record<string, string | undefined>)[name];
-    if (value !== undefined) {
+    const value = (faults as Record<string, unknown>)[name];
+    if (typeof value === "string") {
       changes.push({ key: `faults.${name}`, value });
+    } else if (value !== null && typeof value === "object") {
+      changes.push({
+        key: `faults.${name}`,
+        value: DEVICE_CONDITION_APPLY,
+        params: { ...value },
+      });
     }
   }
   return changes;

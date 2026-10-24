@@ -1,8 +1,7 @@
 # iOS simulator first-boot load: settled clones and a lean service profile
 
-Status: research with measurements (#15097). Nothing here changes production code; the follow-up
-implementation issues are listed at the end. All numbers are from one host (16 cores, macOS 26, Xcode 27)
-and iOS 27.0 / iPhone 18 Pro.
+Measurements from #15097 inform the optional template-clone and preboot lean profile paths.
+All numbers are from one host (16 cores, macOS 26, Xcode 27) and iOS 27.0 / iPhone 18 Pro.
 
 ## Question
 
@@ -154,6 +153,47 @@ verification, which remains `current_boot`.
 The database survives reboot and erase and is specific to the UDID; clones do not inherit it.
 After successful simulator deletion, AutoMobile removes that UDID's host directory on a best-effort
 basis. Orphan directories belonging to simulators already deleted are not swept.
+
+## Settled template creation
+
+`AUTOMOBILE_IOS_TEMPLATE_CLONE` defaults to disabled. Both creation seams use the same creation
+service when wired for production; preboot application stays after identity binding and before any
+workload boot. The disabled path resolves no template storage, locks or host version probes.
+
+Templates are keyed by runtime identifier and build, Xcode build, device type and resolved default preboot
+profile. Xcode build discovery is cached once per process with a five-second timeout; an unknown
+build disables cloning for that process. Runtime discovery uses the cached catalog. Manifests and per-key locks live in the shared coordination directory under
+`ios-sim-templates`. A ready template must still be shut down and match the current Xcode and
+runtime builds. Clone failures mark it stale and fall back to fresh creation. Deletion and manifest mutation take the build lock; successful clones only read template state.
+Changed build inputs select a new key without deleting other Xcode installations' templates in
+the foreground. Builds replace inconsistent manifests only under their own key lock.
+
+A missing template starts a background build without waiting for it. Builders are single-flight
+per key and use the shared boot admission instrumentation. They apply the selected preboot profile,
+boot, require measured CPU below 5 percent of one core for 120 seconds (up to 900 seconds total),
+then shut down and verify before publishing ready. Missing CPU measurements reset the quiet window.
+Failures delete partial templates and defer attempts exponentially from 60 seconds up to six
+hours, resetting the attempt count on success. Capacity refusal uses a fixed short delay without
+incrementing attempts or recording failure. Builders skip starting when the read-only capacity
+check reports no spare slot; a later creation retries. A template build counts as an AutoMobile
+boot by design under the owner rule, so foreground boots can be refused retryably while it settles. Cancelled builds clean up outside the cancelled request signal.
+Only names matching `^automobile-template-[0-9a-f]{8}$` are hidden from device projections and auto-start while remaining in
+the raw fleet capacity inventory. Explicit template maintenance can build or clean templates;
+cleanup shares the build lock and supports forced manifest-owned removal. `--ios-templates clean
+--stale` removes host templates whose recorded Xcode or runtime builds differ from the current
+catalog; `clean --all` and `clean --runtime <identifier>` also remove corrupt manifests. Unreadable
+files cannot always be assigned to a runtime and are safe to remove without deleting a simulator.
+
+Background builds detach from request performance tracking and receive a daemon lifetime signal;
+shutdown aborts the flight so partial-template deletion and lock release run. Explicit CLI builds
+use SIGINT cancellation. Manifest UDIDs are validated, and cloning requires a fresh raw row with
+the exact key-derived name and Shutdown state. Manifest-owned deletion also requires a fresh name
+check. Clone failure deletes only newly appeared matching work simulators before fresh creation.
+
+Daemons with different `AUTOMOBILE_COORDINATION_DIR` values do not share template locks, even
+though CoreSimulator inventory is host-wide. Manifest-owned deletions use both UDID and name;
+name-only crash cleanup requires this daemon's lock. This mitigates accidental deletion but does
+not coordinate builds across distinct coordination roots.
 
 ## Risks
 

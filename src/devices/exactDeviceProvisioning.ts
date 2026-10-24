@@ -1,3 +1,4 @@
+import type { SimulatorCreator } from "./SimulatorCreator";
 import type { DeviceResourceConfiguration } from "../models/DeviceResourceConfiguration";
 import { SimulatorPrebootProfile } from "../utils/ios-cmdline-tools/SimulatorPrebootProfile";
 export {
@@ -134,6 +135,7 @@ export interface ExactDeviceProvisioner {
 }
 
 export interface DefaultExactDeviceProvisionerDependencies {
+  simulatorCreation?: SimulatorCreator;
   prebootProfile?: Pick<SimulatorPrebootProfile, "apply">;
   listDeviceImages: PlatformDeviceManager["listDeviceImages"];
   isCreationAllowed: DeviceCreationGate["isCreationAllowed"];
@@ -559,12 +561,22 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
     spec: IosDeviceSpecification,
     displayCutout: DisplayCutoutClassification,
   ): Promise<ExactProvisionedDevice> {
-    const deviceId = await this.dependencies.iosSimulator.createSimulator(
-      request.name,
-      spec.deviceType,
-      spec.runtime,
-      request.signal,
-    );
+    const deviceId = this.dependencies.simulatorCreation
+      ? (
+          await this.dependencies.simulatorCreation.create({
+            name: request.name,
+            deviceType: spec.deviceType,
+            runtime: spec.runtime,
+            resources: request.resources,
+            signal: request.signal,
+          })
+        ).udid
+      : await this.dependencies.iosSimulator.createSimulator(
+          request.name,
+          spec.deviceType,
+          spec.runtime,
+          request.signal,
+        );
     await this.dependencies.prebootProfile?.apply(
       deviceId,
       { resources: request.resources },
@@ -621,6 +633,11 @@ export function createDefaultExactDeviceProvisioner(
   deviceCreationGate: DeviceCreationGate,
   androidConfigWriter: AndroidAvdConfigWriter = new FileAndroidAvdConfigWriter(),
   assertAdoptable?: ExactDeviceAdoptionGuard,
+  simulatorCreation?: SimulatorCreator,
+  ios?: Pick<
+    DefaultExactDeviceProvisionerDependencies,
+    "iosSimulator" | "iosRuntimeCatalog" | "prebootProfile" | "timer" | "lifecycleCoordinator"
+  >,
 ): ExactDeviceProvisioner {
   return new DefaultExactDeviceProvisioner({
     assertAdoptable,
@@ -629,8 +646,10 @@ export function createDefaultExactDeviceProvisioner(
     avdManager: new AvdManagerClient(),
     androidConfigReader: new FileAvdConfigReader(),
     androidConfigWriter,
+    simulatorCreation,
     prebootProfile: new SimulatorPrebootProfile(),
     iosSimulator: new SimCtlClient(null),
     iosRuntimeCatalog: new SimCtlClient(null),
+    ...ios,
   });
 }

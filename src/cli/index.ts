@@ -753,6 +753,8 @@ AutoMobile CLI - Android Device Automation
 Usage:
   bunx ${installSpecifier} --cli [--session-uuid <uuid>] <tool-name> [--param value ...]
   bunx ${installSpecifier} --cli help [tool-name]
+  bunx ${installSpecifier} --ios-templates build --runtime <identifier> --device-type <identifier>
+  bunx ${installSpecifier} --ios-templates clean (--all | --stale | --runtime <identifier> [--device-type <identifier>]) [--force]
 
 Examples:
   bunx ${installSpecifier} --cli listDeviceImages

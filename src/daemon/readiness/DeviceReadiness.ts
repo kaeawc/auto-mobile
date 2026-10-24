@@ -1,3 +1,4 @@
+import { getDefaultSimulatorCreationService } from "../../features/iosTemplates/defaultSimulatorCreationService";
 import type { BootedDeviceDiscoveryOptions } from "../../devices/deviceDiscoveryContracts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { IOSCtrlProxyManager } from "../../ctrlProxy/IOSCtrlProxyManager";
@@ -812,19 +813,23 @@ export class DeviceReadiness implements DeviceReadinessContract {
         let lifecycleLease: VirtualDeviceLifecycleLease | undefined;
         let created: ProvisionedDevice | undefined;
         try {
-          const provisioner = createDefaultDeviceProvisioner(() => this.simctl, {
-            reserveBeforeCreate: async (identity) => {
-              lifecycleLease = await this.lifecycleCoordinator.reserve(
-                { kind: "selector", platform: "ios", selector: identity.name },
-                { operation: "start", deadlineMs, signal: options?.signal },
-              );
-              return lifecycleLease.signal;
+          const provisioner = createDefaultDeviceProvisioner(
+            () => this.simctl,
+            {
+              reserveBeforeCreate: async (identity) => {
+                lifecycleLease = await this.lifecycleCoordinator.reserve(
+                  { kind: "selector", platform: "ios", selector: identity.name },
+                  { operation: "start", deadlineMs, signal: options?.signal },
+                );
+                return lifecycleLease.signal;
+              },
+              bindAfterCreate: async (device) => {
+                created = device;
+                await this.bindCreatedIosReadinessIdentity(lifecycleLease, device);
+              },
             },
-            bindAfterCreate: async (device) => {
-              created = device;
-              await this.bindCreatedIosReadinessIdentity(lifecycleLease, device);
-            },
-          });
+            getDefaultSimulatorCreationService(() => this.simctl),
+          );
           // simctl may already have created it: a failed identity bind must not orphan it (#11100).
           const { provisioned, lease } = await this.rollBackCreatedIosOnFailure(
             () => created,

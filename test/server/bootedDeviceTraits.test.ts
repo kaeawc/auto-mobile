@@ -48,6 +48,7 @@ describe("bootedDeviceTraits.enrich", () => {
       model: "23090RA98G",
       sdk: 35,
       abi: "arm64-v8a",
+      formFactor: null,
     });
     expect(devices[1].traits).toBeUndefined();
     expect(devices[2].traits).toBeUndefined();

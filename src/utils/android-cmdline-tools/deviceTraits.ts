@@ -37,6 +37,39 @@ export interface AndroidDeviceTraits {
    * (e.g. a MIUI or One UI prop) would mislabel devices.
    */
   skin: DeviceSkin | null;
+  /**
+   * `watch` or `automotive` from `ro.build.characteristics`; null for a phone, tablet, foldable or
+   * when the prop is empty or unreadable. Other form factors are deliberately left unclassified:
+   * geometry cannot tell a car screen from a tablet, but the build characteristics can.
+   */
+  formFactor: AndroidDeviceFormFactor | null;
+}
+
+export type AndroidDeviceFormFactor = "watch" | "automotive";
+
+/** `ro.build.characteristics` is a comma-separated list such as `emulator,watch`. */
+export const BUILD_CHARACTERISTICS_PROP = "ro.build.characteristics";
+
+/** Interpret a raw `ro.build.characteristics` value; see {@link AndroidDeviceTraits.formFactor}. */
+export function parseAndroidFormFactor(raw: string | null): AndroidDeviceFormFactor | null {
+  const characteristics = (raw ?? "")
+    .toLowerCase()
+    .split(",")
+    .map((entry) => entry.trim());
+  if (characteristics.includes("watch")) {
+    return "watch";
+  }
+  return characteristics.includes("automotive") ? "automotive" : null;
+}
+
+/** Whether the traits describe a Wear OS watch. Absent traits are not a watch. */
+export function isWatch(traits: Pick<AndroidDeviceTraits, "formFactor"> | undefined): boolean {
+  return traits?.formFactor === "watch";
+}
+
+/** Whether the traits describe an Android Automotive OS device. Absent traits are not a car. */
+export function isAutomotive(traits: Pick<AndroidDeviceTraits, "formFactor"> | undefined): boolean {
+  return traits?.formFactor === "automotive";
 }
 
 export interface DeviceTraitsReadOptions {
@@ -164,15 +197,25 @@ export class AndroidDeviceTraitsReader implements DeviceTraits {
         return null;
       }
     };
-    const [isEmulator, model, sdk, abi, manufacturer, brand] = await Promise.all([
+    const [isEmulator, model, sdk, abi, manufacturer, brand, characteristics] = await Promise.all([
       readAndroidEmulatorFlag(getprop),
       optional("ro.product.model"),
       optional("ro.build.version.sdk"),
       optional("ro.product.cpu.abi"),
       optional("ro.product.manufacturer"),
       optional("ro.product.brand"),
+      optional(BUILD_CHARACTERISTICS_PROP),
     ]);
-    return { isEmulator, model, sdk: parseSdk(sdk), abi, manufacturer, brand, skin: null };
+    return {
+      isEmulator,
+      model,
+      sdk: parseSdk(sdk),
+      abi,
+      manufacturer,
+      brand,
+      skin: null,
+      formFactor: parseAndroidFormFactor(characteristics),
+    };
   }
 }
 

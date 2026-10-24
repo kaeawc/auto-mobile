@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test";
 import {
   AndroidDeviceTraitsReader,
   DEVICE_TRAITS_CACHE_TTL_MS,
+  isAutomotive,
+  isWatch,
   parseAndroidEmulatorFlag,
+  parseAndroidFormFactor,
   readAndroidEmulatorFlag,
 } from "../../../src/utils/android-cmdline-tools/deviceTraits";
 import { createExecResult } from "../../../src/utils/execResult";
@@ -21,6 +24,7 @@ function samsungAdb(): FakeAdbExecutor {
   adb.setCommandResponse("getprop ro.product.cpu.abi", createExecResult("arm64-v8a\n", ""));
   adb.setCommandResponse("getprop ro.product.manufacturer", createExecResult("samsung\n", ""));
   adb.setCommandResponse("getprop ro.product.brand", createExecResult("samsung\n", ""));
+  adb.setCommandResponse("getprop ro.build.characteristics", createExecResult("phone\n", ""));
   return adb;
 }
 
@@ -50,6 +54,55 @@ describe("parseAndroidEmulatorFlag", () => {
   });
 });
 
+describe("form factor from ro.build.characteristics", () => {
+  test.each([
+    ["emulator,watch", "watch"],
+    ["watch", "watch"],
+    ["automotive,emulator", "automotive"],
+    [" Automotive \n", "automotive"],
+    ["phone", null],
+    ["tablet,nosdcard", null],
+    ["default", null],
+    ["", null],
+    [null, null],
+  ] as const)("%j reads as %j", (raw, expected) => {
+    expect(parseAndroidFormFactor(raw)).toBe(expected);
+  });
+
+  test("a build that names no known form factor is neither a watch nor a car", () => {
+    expect(isWatch({ formFactor: null })).toBe(false);
+    expect(isAutomotive({ formFactor: null })).toBe(false);
+    expect(isWatch(undefined)).toBe(false);
+    expect(isAutomotive(undefined)).toBe(false);
+    expect(isWatch({ formFactor: "watch" })).toBe(true);
+    expect(isAutomotive({ formFactor: "automotive" })).toBe(true);
+  });
+
+  test("the reader reports a watch and a car from their build props, a failed prop as null", async () => {
+    const watch = samsungAdb();
+    watch.setCommandResponse(
+      "getprop ro.build.characteristics",
+      createExecResult("emulator,watch\n", ""),
+    );
+    const car = samsungAdb();
+    car.setCommandResponse(
+      "getprop ro.build.characteristics",
+      createExecResult("automotive,emulator\n", ""),
+    );
+    const unreadable = samsungAdb();
+    unreadable.setCommandError(
+      "getprop ro.build.characteristics",
+      new Error("adb: device offline"),
+    );
+
+    const reader = new AndroidDeviceTraitsReader(new FakeTimer());
+
+    expect((await reader.read(watch, "emulator-5554")).formFactor).toBe("watch");
+    expect((await reader.read(car, "emulator-5556")).formFactor).toBe("automotive");
+    expect((await reader.read(unreadable, "emulator-5558")).formFactor).toBeNull();
+  });
+});
+
 describe("AndroidDeviceTraitsReader", () => {
   test("reads manufacturer, brand and the existing identifying props", async () => {
     const reader = new AndroidDeviceTraitsReader(new FakeTimer());
@@ -64,6 +117,7 @@ describe("AndroidDeviceTraitsReader", () => {
       manufacturer: "samsung",
       brand: "samsung",
       skin: null,
+      formFactor: null,
     });
   });
 
@@ -81,7 +135,7 @@ describe("AndroidDeviceTraitsReader", () => {
       timeoutMs: 750,
     });
 
-    expect(options).toHaveLength(6);
+    expect(options).toHaveLength(7);
     expect(options.every((option) => option?.noRetry === true && option.timeoutMs === 750)).toBe(
       true,
     );
@@ -185,6 +239,7 @@ describe("AndroidDeviceTraitsReader", () => {
       manufacturer: null,
       brand: null,
       skin: null,
+      formFactor: null,
     });
   });
 });

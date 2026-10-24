@@ -5,6 +5,7 @@ import {
 } from "../utils/android-cmdline-tools/AdbClientFactory";
 import {
   defaultDeviceTraits,
+  type AndroidDeviceFormFactor,
   type DeviceTraits,
 } from "../utils/android-cmdline-tools/deviceTraits";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -23,6 +24,8 @@ export interface BootedDeviceTraits {
   model: string | null;
   sdk: number | null;
   abi: string | null;
+  /** `watch` or `automotive` when the build says so; null for every other Android device. */
+  formFactor: AndroidDeviceFormFactor | null;
 }
 
 export interface WithTraits {
@@ -59,8 +62,8 @@ async function readTraits(
       }),
       { timer, timeoutMs: DEVICE_TRAITS_TIMEOUT_MS, label: "Device traits probe" },
     );
-    const { manufacturer, brand, model, sdk, abi } = traits;
-    return { manufacturer, brand, model, sdk, abi };
+    const { manufacturer, brand, model, sdk, abi, formFactor } = traits;
+    return { manufacturer, brand, model, sdk, abi, formFactor };
   } catch (error) {
     // Traits are descriptive; a failed read only leaves them off this entry.
     logger.warn(

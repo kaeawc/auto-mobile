@@ -1,3 +1,4 @@
+import { getDefaultSimulatorCreationService } from "../features/iosTemplates/defaultSimulatorCreationService";
 import { ActionableError } from "../models";
 import { DEVICE_POOL_MATCHING } from "../daemon/poolConfig";
 import { getDeviceCreationGate } from "../devices/deviceCreationGate";
@@ -91,7 +92,9 @@ export async function runBootDeviceCommand(args: string[]): Promise<void> {
     deviceManager: ciConfiguration?.deviceManager ?? new MultiPlatformDeviceManager(),
     deviceMatcher: new DefaultDeviceMatcher(),
     deviceCreationGate: getDeviceCreationGate(),
-    deviceProvisioner: ciConfiguration?.deviceProvisioner ?? createDefaultDeviceProvisioner(),
+    deviceProvisioner:
+      ciConfiguration?.deviceProvisioner ??
+      createDefaultDeviceProvisioner(undefined, undefined, getDefaultSimulatorCreationService()),
     matchingStrategy: DEVICE_POOL_MATCHING,
     bootRecovery: ciConfiguration?.recovery,
     // Deliberately no `cleanupMayOutliveRequest`: the process exits as soon as boot

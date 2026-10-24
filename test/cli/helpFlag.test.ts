@@ -11,6 +11,7 @@ describe("global help", () => {
     expect(hasGlobalHelpFlag(["--cli", "sendKeys", "--commands", "--help"])).toBe(false);
     expect(hasGlobalHelpFlag(["--daemon", "status", "-h"])).toBe(false);
     expect(hasGlobalHelpFlag(["--boot-device", "--name", "-h"])).toBe(false);
+    expect(hasGlobalHelpFlag(["--ios-templates", "build", "--help"])).toBe(false);
   });
 });
 

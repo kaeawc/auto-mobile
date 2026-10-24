@@ -161,6 +161,12 @@ export const DEVICES_ENV = {
     default: "on",
     doc: "Boot admission gate for every platform; exact 0 disables.",
   },
+  IOS_TEMPLATE_CLONE: {
+    name: "AUTOMOBILE_IOS_TEMPLATE_CLONE",
+    kind: "string",
+    default: "false",
+    doc: "Provision iOS simulators from settled templates: 1/true enables; 0/false disables.",
+  },
   IOS_PREBOOT_LEAN_PROFILE: {
     name: "AUTOMOBILE_IOS_PREBOOT_LEAN_PROFILE",
     kind: "string",

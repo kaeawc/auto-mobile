@@ -1,3 +1,4 @@
+import { stopTemplateBuilds } from "../../features/iosTemplates/defaultSimulatorCreationService";
 import type { DaemonCoreServices, DaemonLifecycleState } from "./DaemonCoreState";
 import { getNativeHelperRegistry } from "../../utils/nativeHelpers/NativeHelperRegistry";
 import { terminateActiveAdbProcesses } from "../../utils/android-cmdline-tools/AdbClient";
@@ -216,9 +217,12 @@ export class DaemonShutdown {
         "provisioning interruption",
         "interrupted provisionDevice calls persisting their handoff",
         (stage) =>
-          interruptProvisioningForShutdown(
-            boundWithinStage(stage, DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS),
-          ),
+          Promise.all([
+            stopTemplateBuilds(),
+            interruptProvisioningForShutdown(
+              boundWithinStage(stage, DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS),
+            ),
+          ]).then(() => undefined),
       ),
       shutdownStage("shutdown release snapshot", "nothing (synchronous)", () => {
         this.host.lifecycle.setShutdownReleaseNotifications(new Set());

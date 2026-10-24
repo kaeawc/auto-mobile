@@ -315,6 +315,7 @@ budget-driven fallback reasons.
 | `AUTOMOBILE_BUNDLETOOL_JAR`                                                           | bundletool-all jar, run with `java`, for `installApp` of `.aab`/`.apks`; otherwise `bundletool` on `PATH`. Never downloaded.                            | unset                                                             |
 | `AUTOMOBILE_IOS_HEADLESS`                                                             | On macOS, exact `true`/`1` runs headless and any other set value shows a window. Non-macOS is always headless.                                          | detect a graphical login session                                  |
 | `AUTOMOBILE_BOOT_CAPACITY_GATE`                                                       | Boot limit check for emulator and simulator cold boots; exact `0` disables it on both platforms. See [Boot capacity](#boot-capacity).                   | on                                                                |
+| `AUTOMOBILE_IOS_TEMPLATE_CLONE`                                                       | Clone new iOS simulators from settled templates; `1`/`true` enables, `0`/`false` opts out. No template yet: normal create.                              | `false`                                                           |
 | `AUTOMOBILE_IOS_PREBOOT_LEAN_PROFILE`                                                 | New iOS simulators: `none`, `minimal`, or `catalog-cpu`; unknown values use `none`. Explicit resources override the profile.                            | `none`                                                            |
 | `AUTOMOBILE_IOS_SIM_CAPACITY_GATE`                                                    | iOS-only override of the gate above: exact `0` disables, exact `1` enables.                                                                             | unset (follows the shared switch)                                 |
 | `AUTOMOBILE_ANDROID_MAX_BOOTED`                                                       | Cap on concurrently booted Android emulators; positive integer. Invalid values are ignored with a warning.                                              | derived from host RAM and cores, at least 1                       |
@@ -641,3 +642,14 @@ normal use.
 
 Do not use `AUTOMOBILE_DB_PATH=:memory:` in production. Tests may allow it by also setting
 `AUTOMOBILE_ALLOW_IN_MEMORY_DB` to `1`, `true` or `yes`.
+
+When template cloning is enabled, the first request uses normal creation and starts a background
+template build. Later requests can clone a settled, shut-down template for the same runtime,
+device type and preboot profile. Template builds consume a boot capacity slot and may take several minutes.
+
+Use `auto-mobile --ios-templates build --runtime <identifier> --device-type <identifier>` to build
+one explicitly. Use `auto-mobile --ios-templates clean --all` to remove templates, or replace
+`--all` with `--runtime <identifier> --device-type <identifier>` to select one. The selected preboot
+profile comes from `AUTOMOBILE_IOS_PREBOOT_LEAN_PROFILE`. Cleanup refuses active builds unless
+`--force` is supplied. These commands require macOS; explicit maintenance works independently of
+the cloning flag. A failed or deferred build exits with status 1; successful build and cleanup exit 0.

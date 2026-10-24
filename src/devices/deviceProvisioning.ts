@@ -1,3 +1,4 @@
+import type { SimulatorCreator } from "./SimulatorCreator";
 /**
  * Device provisioning — creating a simulator/emulator when none matches.
  *
@@ -521,6 +522,7 @@ export function pickAndroidSystemImage(
 // ---------------------------------------------------------------------------
 
 export interface DefaultDeviceProvisionerDependencies {
+  simulatorCreation?: SimulatorCreator;
   prebootProfile?: Pick<SimulatorPrebootProfile, "apply">;
   iosCreator: () => IosSimulatorCreator | undefined;
   androidCreator: () => AndroidAvdCreator;
@@ -599,7 +601,16 @@ export class DefaultDeviceProvisioner implements DeviceProvisioner {
 
     let deviceId: string;
     try {
-      deviceId = await simctl.createSimulator(name, deviceType.identifier, runtime, creationSignal);
+      deviceId = this.dependencies.simulatorCreation
+        ? (
+            await this.dependencies.simulatorCreation.create({
+              name,
+              deviceType: deviceType.identifier,
+              runtime,
+              signal: creationSignal,
+            })
+          ).udid
+        : await simctl.createSimulator(name, deviceType.identifier, runtime, creationSignal);
     } catch (error) {
       throw toActionableError(
         error,
@@ -712,9 +723,11 @@ export function createDefaultAndroidAvdCreator(): AndroidAvdCreator {
 export function createDefaultDeviceProvisioner(
   iosCreator: () => IosSimulatorCreator | undefined = () => new SimCtlClient(null),
   identityHooks?: DeviceProvisioningIdentityHooks,
+  simulatorCreation?: SimulatorCreator,
 ): DeviceProvisioner {
   return new DefaultDeviceProvisioner({
     iosCreator,
+    simulatorCreation,
     prebootProfile: new SimulatorPrebootProfile(),
     androidCreator: createDefaultAndroidAvdCreator,
     identityHooks,

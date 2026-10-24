@@ -130,6 +130,20 @@ describe("crash report resource (#14103)", () => {
     expect(readerRequests).toEqual([]);
   });
 
+  test("a connection reads reports of an earlier session it still owns", async () => {
+    harness();
+    const owned = new Set([sessionUuid]);
+    const context = {
+      sessionUuid: "later-session",
+      ownsSession: (uuid: string) => owned.has(uuid),
+    };
+    expect(await parse(`${baseUri}/${REPORT_ID}`, context)).toMatchObject({ reportId: REPORT_ID });
+    owned.clear();
+    expect(await parse(`${baseUri}/${REPORT_ID}`, context)).toMatchObject({
+      code: "SESSION_NOT_BOUND",
+    });
+  });
+
   test("reports an inactive session", async () => {
     const { readerRequests } = harness({ active: false });
     expect(await parse(`${baseUri}/${REPORT_ID}`)).toMatchObject({ code: "SESSION_NOT_ACTIVE" });

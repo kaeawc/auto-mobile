@@ -26,7 +26,10 @@ import {
   DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS,
   START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
 } from "../utils/deviceTimeouts";
-import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM, deleteInternalToolParams } from "../daemon/constants";
+import {
+  INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
+  deleteInternalToolParams,
+} from "../daemon/wire/constants";
 import {
   trackDeviceAcquisitionReadiness,
   deviceReadinessLockKey,

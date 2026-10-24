@@ -17,7 +17,7 @@ import { holdDispatchedRequest } from "../dispatchedRequestHold";
 
 import { logger } from "../../utils/logger";
 
-import { McpTimeoutError } from "../McpTimeoutError";
+import { McpTimeoutError } from "../wire/McpTimeoutError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { DaemonRequest } from "../types";

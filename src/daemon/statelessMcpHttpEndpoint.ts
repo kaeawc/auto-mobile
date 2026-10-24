@@ -5,7 +5,7 @@ import { describeUnknownError, errorMessage } from "../utils/describeUnknownErro
 import type { IdGenerator } from "../utils/IdGenerator";
 import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
-import { INTERNAL_MCP_SESSION_PARAM } from "./constants";
+import { INTERNAL_MCP_SESSION_PARAM } from "./wire/constants";
 
 /**
  * The daemon's internal MCP HTTP endpoint, stateless (#4678, owner decision 2026-10-17).

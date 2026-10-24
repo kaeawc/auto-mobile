@@ -122,7 +122,7 @@ async function main(): Promise<void> {
   const [{ Daemon }, { MCP_STREAMABLE_PATH }, { PlatformDeviceManagerFactory }, { defaultTimer }] =
     await Promise.all([
       import("../src/daemon/daemon"),
-      import("../src/daemon/constants"),
+      import("../src/daemon/wire/constants"),
       import("../src/utils/factories/PlatformDeviceManagerFactory"),
       import("../src/utils/SystemTimer"),
     ]);

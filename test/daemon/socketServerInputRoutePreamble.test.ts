@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
+import { McpTimeoutError } from "../../src/daemon/wire/McpTimeoutError";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import type { DaemonRequest } from "../../src/daemon/types";
 import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";

@@ -22,8 +22,8 @@ import {
   type ProvisionDeviceRecoveryEvidence,
   type ProvisionDeviceRecoveryInput,
 } from "../provisionDeviceRecoveryEvidence";
-import { getCurrentBuildIdentity } from "../../daemon/buildIdentity";
-import { DAEMON_VERSION } from "../../daemon/constants";
+import { getCurrentBuildIdentity } from "../../daemon/wire/buildIdentity";
+import { DAEMON_VERSION } from "../../daemon/wire/constants";
 import { DaemonHandoffInterruptionError } from "../../daemon/daemonHandoffInterruption";
 import { SimctlCommandTimeoutError } from "../../utils/ios-cmdline-tools/SimctlCommandTimeoutError";
 import { DeviceBootTimeoutError } from "../../devices/deviceBootService";

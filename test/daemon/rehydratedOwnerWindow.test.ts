@@ -5,7 +5,7 @@ import {
   DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS,
   DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,
   SUSPECT_GRACE_MS,
-} from "../../src/daemon/sessionLivenessWindows";
+} from "../../src/daemon/wire/sessionLivenessWindows";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
 import { SessionReleaseBroadcaster } from "../../src/daemon/sessionReleaseBroadcast";

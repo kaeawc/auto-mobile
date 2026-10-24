@@ -13,7 +13,7 @@ import {
   SocketServerSingleton,
   type SocketServerLifecycle,
 } from "../../src/daemon/socketServerSingleton";
-import { SOCKET_PATH, DAEMON_LAUNCH_NONCE_ENV } from "../../src/daemon/constants";
+import { SOCKET_PATH, DAEMON_LAUNCH_NONCE_ENV } from "../../src/daemon/wire/constants";
 import { logger } from "../../src/utils/logger";
 import { createHarnessServer } from "./helpers/UnixSocketServerHarness";
 import { FakeTimer } from "../fakes/FakeTimer";

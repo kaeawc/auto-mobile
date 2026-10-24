@@ -7,7 +7,7 @@ import {
 import { Platform, BootedDevice, DeviceInfo } from "../../../models";
 import { type ProvisionDeviceLifecycleOutcome } from "../../../devices/provisionDeviceLifecycle";
 import { serverConfig } from "../../../utils/ServerConfig";
-import { deleteInternalToolParams } from "../../../daemon/constants";
+import { deleteInternalToolParams } from "../../../daemon/wire/constants";
 import { type Timer } from "../../../utils/SystemTimer";
 import {
   DEFAULT_PROVISION_DEVICE_TIMEOUT_MS,

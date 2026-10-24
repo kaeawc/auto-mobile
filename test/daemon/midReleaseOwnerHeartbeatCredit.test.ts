@@ -1,7 +1,7 @@
 import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
-import { getSessionHeartbeatCheckIntervalMs } from "../../src/daemon/sessionLivenessWindows";
+import { getSessionHeartbeatCheckIntervalMs } from "../../src/daemon/wire/sessionLivenessWindows";
 import {
   handleDaemonRequest,
   type DaemonStateAccess,

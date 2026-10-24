@@ -4,7 +4,7 @@ import {
   DAEMON_BOUND_SESSION_PARAM,
   DAEMON_BOUND_SESSION_REPLAY_TTL_MS,
   DAEMON_VERSION,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import {
   handleDaemonRequest,
@@ -17,7 +17,7 @@ import {
   DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS,
   DEFAULT_SESSION_IDLE_TIMEOUT_MS,
   PROXY_HEARTBEAT_INTERVAL_MS,
-} from "../../src/daemon/sessionLivenessWindows";
+} from "../../src/daemon/wire/sessionLivenessWindows";
 import { releaseSessionAndDevice } from "../../src/daemon/releaseSessionAndDevice";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import {

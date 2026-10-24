@@ -20,7 +20,7 @@ import type { HttpListener } from "../../src/daemon/daemonHttpIngress";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import * as buildIdentity from "../../src/daemon/buildIdentity";
+import * as buildIdentity from "../../src/daemon/wire/buildIdentity";
 import { daemonProcessOptions } from "../../src/daemon/daemonOptionScopes";
 import type { DaemonOptions } from "../../src/daemon/types";
 import { DaemonState } from "../../src/daemon/daemonState";

@@ -1,4 +1,4 @@
-import { INTERNAL_MCP_SESSION_PARAM } from "../../daemon/constants";
+import { INTERNAL_MCP_SESSION_PARAM } from "../../daemon/wire/constants";
 import { getToolSelectionContext } from "../toolSelection/toolSelectionContext";
 
 // Leaf module: shared by deviceLifecycleCore and lifecycleDeviceOwnership so neither

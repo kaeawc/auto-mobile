@@ -1,4 +1,4 @@
-import { INTERNAL_MCP_SESSION_PARAM } from "../daemon/constants";
+import { INTERNAL_MCP_SESSION_PARAM } from "../daemon/wire/constants";
 import type { ToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 
 /**

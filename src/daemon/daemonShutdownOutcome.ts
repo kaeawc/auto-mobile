@@ -1,5 +1,8 @@
 import { getStructuredPayload } from "../utils/toolUtils";
-import { DAEMON_SHUTTING_DOWN_ERROR_CODE, DAEMON_SHUTTING_DOWN_ERROR_MESSAGE } from "./constants";
+import {
+  DAEMON_SHUTTING_DOWN_ERROR_CODE,
+  DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
+} from "./wire/constants";
 
 export interface DaemonShuttingDownFailure {
   code: typeof DAEMON_SHUTTING_DOWN_ERROR_CODE;

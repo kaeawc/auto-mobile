@@ -7,7 +7,7 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import {
   DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM,
   DAEMON_OWNED_SESSIONS_PARAM,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import { sessionOwnerLeaseSnapshot } from "../../src/daemon/livenessOwnerLease";
 import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";

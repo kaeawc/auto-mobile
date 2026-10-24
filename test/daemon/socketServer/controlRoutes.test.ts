@@ -7,7 +7,7 @@ import {
   type PassthroughClient,
 } from "../../../src/daemon/socketServer/controlRoutes";
 import { INPUT_ROUTES, inputRouteFor } from "../../../src/daemon/inputRoutes";
-import { INTERNAL_MCP_REQUEST_TIMEOUT_PARAM } from "../../../src/daemon/constants";
+import { INTERNAL_MCP_REQUEST_TIMEOUT_PARAM } from "../../../src/daemon/wire/constants";
 import type { DaemonRequest } from "../../../src/daemon/types";
 
 const req = (method: string, params: Record<string, unknown> = {}): DaemonRequest =>

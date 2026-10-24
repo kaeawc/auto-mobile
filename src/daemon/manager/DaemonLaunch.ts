@@ -13,7 +13,12 @@ import { resolveAutoMobileLogsDir } from "../../utils/tempDir";
 import { outputReductionFlagsToArgs } from "../../utils/outputReductionFlags";
 import { EVENT_ALL_MARKERS_FLAG } from "../../utils/eventAllMarkers";
 import { ActionableError } from "../../models";
-import { DAEMON_LAUNCH_NONCE_ENV, PID_FILE_PATH, SOCKET_PATH, LOCK_FILE_PATH } from "../constants";
+import {
+  DAEMON_LAUNCH_NONCE_ENV,
+  PID_FILE_PATH,
+  SOCKET_PATH,
+  LOCK_FILE_PATH,
+} from "../wire/constants";
 import { DaemonStatus, DaemonOptions } from "../types";
 import {
   DAEMON_LAUNCH_CWD_ENV,

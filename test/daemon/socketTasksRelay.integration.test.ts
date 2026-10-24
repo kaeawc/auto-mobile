@@ -17,7 +17,7 @@ import { join } from "node:path";
 import { InMemoryTransport, type JSONRPCMessage } from "@modelcontextprotocol/server";
 import { z } from "zod/v4";
 import { DaemonClient, type DaemonMethodCallOptions } from "../../src/daemon/client";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
+import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import { InProcessMcpDispatcher } from "../../src/daemon/inProcessMcpDispatcher";
 import type { Session } from "../../src/daemon/sessionManager";

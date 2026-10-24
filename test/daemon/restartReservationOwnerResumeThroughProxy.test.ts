@@ -3,7 +3,7 @@ import { describe, expect, spyOn } from "bun:test";
 import {
   DAEMON_OWNED_SESSIONS_PARAM,
   DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { getDbWriteBarrier, resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";

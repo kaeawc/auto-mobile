@@ -6,7 +6,7 @@ import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
-import { DAEMON_CANCEL_REQUEST_METHOD } from "../../src/daemon/constants";
+import { DAEMON_CANCEL_REQUEST_METHOD } from "../../src/daemon/wire/constants";
 import type { DaemonRequest } from "../../src/daemon/types";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import type { Client } from "@modelcontextprotocol/client";

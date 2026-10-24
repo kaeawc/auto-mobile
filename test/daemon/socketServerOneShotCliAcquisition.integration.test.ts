@@ -24,7 +24,7 @@ import { up as addLivenessWriterFence } from "../../src/db/migrations/2026_09_17
 import { up as addActivitySequence } from "../../src/db/migrations/2026_10_15_000_device_session_activity_seq";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import type { Database } from "../../src/db/types";
-import { DAEMON_ONE_SHOT_CLI_PARAM } from "../../src/daemon/constants";
+import { DAEMON_ONE_SHOT_CLI_PARAM } from "../../src/daemon/wire/constants";
 import { DaemonClient } from "../../src/daemon/client";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";

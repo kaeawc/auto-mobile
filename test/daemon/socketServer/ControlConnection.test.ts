@@ -6,7 +6,7 @@ import {
   isExpectedPeerClose,
   type ControlConnectionHandlers,
 } from "../../../src/daemon/socketServer/ControlConnection";
-import { DAEMON_RPC_SOCKET_PEER_END_FLUSH_GRACE_MS } from "../../../src/daemon/constants";
+import { DAEMON_RPC_SOCKET_PEER_END_FLUSH_GRACE_MS } from "../../../src/daemon/wire/constants";
 import { DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS } from "../../../src/utils/deviceTimeouts";
 import { FakeTimer } from "../../fakes/FakeTimer";
 

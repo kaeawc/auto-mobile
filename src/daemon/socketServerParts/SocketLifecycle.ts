@@ -12,7 +12,7 @@ import {
   DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
   resolveDaemonVersion,
   syncSettledDaemonVersion,
-} from "../constants";
+} from "../wire/constants";
 
 import { daemonShuttingDownFailure, daemonShuttingDownFrameFields } from "../daemonShutdownOutcome";
 

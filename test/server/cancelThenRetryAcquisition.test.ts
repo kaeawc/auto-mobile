@@ -11,7 +11,7 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import { DEFAULT_SESSION_IDLE_TIMEOUT_MS } from "../../src/daemon/sessionLivenessWindows";
+import { DEFAULT_SESSION_IDLE_TIMEOUT_MS } from "../../src/daemon/wire/sessionLivenessWindows";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import { clearDirectSessionDevices } from "../../src/utils/directSessionDeviceRegistry";
 import { setDeviceManager } from "../../src/server/bootedDeviceResources";

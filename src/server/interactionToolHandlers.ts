@@ -64,7 +64,7 @@ import { SystemTray } from "../features/systemTray/SystemTray";
 import { RecompositionTracker } from "../features/performance/RecompositionTracker";
 import { dismissKeyboardAfterSendKeys } from "../features/action/dismissKeyboardAfterSendKeys";
 import { serverConfig } from "../utils/ServerConfig";
-import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../daemon/constants";
+import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../daemon/wire/constants";
 import { assertActiveWindowWaitForSupportedOnPlatform, waitForObservation } from "./observeTools";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { displayWaitInventory } from "../utils/deviceMatcher";

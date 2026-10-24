@@ -3,7 +3,7 @@ import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import { getStaticToolDefinitions } from "../../src/daemon/staticToolDefinitions";
 import { DaemonClient } from "../../src/daemon/client";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
+import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import { foreignOwnedSessionUuidFromResult } from "../../src/daemon/routedSessionMeta";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";

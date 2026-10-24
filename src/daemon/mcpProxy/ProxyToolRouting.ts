@@ -6,7 +6,7 @@ import {
   DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM,
   DAEMON_OWNED_SESSIONS_PARAM,
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
-} from "../constants";
+} from "../wire/constants";
 import { anyDeviceReadOnlyArgShapeMatches } from "../deviceReadOnlyArgShapes";
 import {
   getActiveDeviceSelectionFromResult,

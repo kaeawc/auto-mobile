@@ -1,4 +1,4 @@
-import { deleteInternalToolParams, INTERNAL_TOOL_PARAM_NAMES } from "../daemon/constants";
+import { deleteInternalToolParams, INTERNAL_TOOL_PARAM_NAMES } from "../daemon/wire/constants";
 
 export function stripInternalToolParams(params: unknown): unknown {
   if (!params || typeof params !== "object" || Array.isArray(params)) {

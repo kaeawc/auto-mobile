@@ -23,9 +23,9 @@ import {
   mcpOverloadResult,
 } from "../../src/server/proxyServer";
 import { DaemonClient } from "../../src/daemon/client";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
+import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import { DaemonRestartDeferredError } from "../../src/daemon/daemonMcpProxy";
-import { McpOverloadError } from "../../src/daemon/McpTimeoutError";
+import { McpOverloadError } from "../../src/daemon/wire/McpTimeoutError";
 import { ActionableError } from "../../src/models";
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";

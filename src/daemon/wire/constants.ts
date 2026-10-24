@@ -5,17 +5,17 @@ import {
   getMcpServerVersion,
   getSettledMcpServerVersion,
   isMcpServerVersionSettled,
-} from "../utils/mcpVersion";
-import { DAEMON_NON_FINITE_ENCODED_PARAM } from "../utils/nonFiniteJson";
-import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
-import { readEnvPositiveInteger } from "../utils/envNumbers";
+} from "../../utils/mcpVersion";
+import { DAEMON_NON_FINITE_ENCODED_PARAM } from "../../utils/nonFiniteJson";
+import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
+import { readEnvPositiveInteger } from "../../utils/envNumbers";
 import {
   DEFAULT_SESSION_IDLE_TIMEOUT_MS,
   MIN_CONFIGURED_SESSION_IDLE_TIMEOUT_MS,
 } from "./sessionLivenessWindows";
-import { AMBIENT_ENV, ENV, readEnvBool, readEnvRaw } from "../config/env";
+import { AMBIENT_ENV, ENV, readEnvBool, readEnvRaw } from "../../config/env";
 export const DAEMON_LAUNCH_NONCE_ENV = ENV.DAEMON_LAUNCH_NONCE.name;
-export { DAEMON_NON_FINITE_ENCODED_PARAM } from "../utils/nonFiniteJson";
+export { DAEMON_NON_FINITE_ENCODED_PARAM } from "../../utils/nonFiniteJson";
 
 /**
  * Get the user ID for the current process

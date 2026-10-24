@@ -1,6 +1,6 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { PID_FILE_PATH } from "./constants";
+import { PID_FILE_PATH } from "./wire/constants";
 import {
   isConfirmedRecycledProcess,
   isProcessRunning,

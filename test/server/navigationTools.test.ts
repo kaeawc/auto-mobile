@@ -3,7 +3,7 @@ import { z } from "zod/v4";
 import {
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import { defaultAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeTimer } from "../fakes/FakeTimer";

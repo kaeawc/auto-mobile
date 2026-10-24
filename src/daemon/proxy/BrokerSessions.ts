@@ -16,7 +16,7 @@ import {
   DAEMON_RELEASE_BROKER_SESSION_METHOD,
 } from "../sessionBrokerProxyAcquisition";
 import { SESSION_OWNERSHIP_LOST_CODE } from "../sessionReleasedDuringCall";
-import { DAEMON_REGISTER_SESSION_METHOD } from "../constants";
+import { DAEMON_REGISTER_SESSION_METHOD } from "../wire/constants";
 
 const SESSION_BROKER_PROXY_CLIENT_NAME = "auto-mobile-session-broker-proxy";
 const BROKER_RELEASE_RETRY_DEFAULT_MS = 250;

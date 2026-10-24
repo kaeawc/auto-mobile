@@ -3,7 +3,7 @@ import { DaemonClient } from "../../src/daemon/client";
 import {
   DAEMON_CANCEL_REQUEST_METHOD,
   DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";

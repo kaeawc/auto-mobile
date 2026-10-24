@@ -4,8 +4,8 @@ import {
   extractClientHandshake,
   hasClientHandshake,
   type DaemonSelfIdentity,
-} from "../../src/daemon/daemonHandshake";
-import type { BuildIdentity } from "../../src/daemon/buildIdentity";
+} from "../../src/daemon/wire/daemonHandshake";
+import type { BuildIdentity } from "../../src/daemon/wire/buildIdentity";
 
 const daemonBuild: BuildIdentity = { entryScript: "/repo/dist/index.js", buildId: "abc123def456" };
 

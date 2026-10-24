@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import fc from "fast-check";
-import { INTERNAL_TOOL_PARAM_NAMES } from "../../src/daemon/constants";
+import { INTERNAL_TOOL_PARAM_NAMES } from "../../src/daemon/wire/constants";
 import { stripInternalToolParams } from "../../src/server/index";
 
 const RUN_OPTIONS = { seed: 1_234_567, numRuns: 100 } as const;

@@ -2,7 +2,7 @@ import { createHarnessServer } from "./helpers/UnixSocketServerHarness";
 import { StubMcpClient } from "./helpers/fakeMcpClient";
 import { createFakeDaemonState } from "./helpers/inputSocketHarness";
 import { describe, expect, spyOn, test } from "bun:test";
-import { DAEMON_CANCEL_REQUEST_METHOD } from "../../src/daemon/constants";
+import { DAEMON_CANCEL_REQUEST_METHOD } from "../../src/daemon/wire/constants";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { logger } from "../../src/utils/logger";

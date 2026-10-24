@@ -1,7 +1,7 @@
 import {
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
-} from "../../daemon/constants";
+} from "../../daemon/wire/constants";
 import { stripNavigationToolParams } from "../../models/navigationToolParams";
 import { ActionableError, BootedDevice, NavigateToResult } from "../../models";
 import {

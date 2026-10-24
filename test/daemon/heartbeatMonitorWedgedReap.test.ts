@@ -7,7 +7,7 @@ import {
 } from "../../src/daemon/SessionHeartbeatMonitor";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 import { SessionManager, type Session } from "../../src/daemon/sessionManager";
-import { DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS } from "../../src/daemon/sessionLivenessWindows";
+import { DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS } from "../../src/daemon/wire/sessionLivenessWindows";
 import { logger } from "../../src/utils/logger";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";

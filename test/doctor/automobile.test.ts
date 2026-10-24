@@ -13,7 +13,7 @@ import {
   runAutoMobileChecks,
   runPostRepairAutoMobileChecks,
 } from "../../src/doctor/checks/automobile";
-import type { BuildIdentity } from "../../src/daemon/buildIdentity";
+import type { BuildIdentity } from "../../src/daemon/wire/buildIdentity";
 import {
   LATEST_RELEASE_VERSION,
   RELEASE_CHECKSUM_REGISTRY,

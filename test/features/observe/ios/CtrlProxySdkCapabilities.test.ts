@@ -273,9 +273,10 @@ describe("SDK capability transport uncertainty", () => {
       const warn = spyOn(logger, "warn").mockImplementation(() => {});
       try {
         if (boundary === "deadline") {
-          await expect(client.syncNetworkStateFromHost({ deadlineMs: 100 })).rejects.toThrow(
-            "noCapability",
-          );
+          // The app has no SDK and nothing was ever delivered, so there is nothing to clear.
+          await expect(
+            client.syncNetworkStateFromHost({ deadlineMs: 100 }),
+          ).resolves.toBeUndefined();
         } else {
           await expect(client.syncNetworkStateFromHost({ deadlineMs: 100 })).rejects.toThrow(
             "probe failed",
@@ -287,7 +288,7 @@ describe("SDK capability transport uncertainty", () => {
             enabled: false,
           }),
         );
-        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn).toHaveBeenCalledTimes(boundary === "deadline" ? 0 : 1);
       } finally {
         send.mockRestore();
         ensure.mockRestore();
@@ -990,7 +991,8 @@ test.each([
   });
   try {
     const pending = client.syncNetworkStateFromHost();
-    if (["failed", "throw", "noCapability", "superseded", "simulation-false"].includes(outcome)) {
+    // noCapability with no rules ever delivered has nothing to clear (#15179).
+    if (["failed", "throw", "superseded", "simulation-false"].includes(outcome)) {
       await expect(pending).rejects.toThrow("iOS network");
     } else {
       await expect(pending).resolves.toBeUndefined();

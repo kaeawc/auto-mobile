@@ -68,3 +68,33 @@ test.each([
     ),
   ).toBe(expected);
 });
+
+test("queue status tracks waiting owners, grants and aborts", async () => {
+  const gate = new DefaultIosRunnerLaunchGate(2);
+  const first = await gate.acquire(undefined, "held-1");
+  const second = await gate.acquire(undefined, "held-2");
+  const controller = new AbortController();
+  const third = gate.acquire(undefined, "third");
+  const fourth = gate.acquire(controller.signal, "fourth");
+  const fifth = gate.acquire(undefined, "fifth");
+  const rejected = fourth.then(
+    () => undefined,
+    (error: unknown) => error,
+  );
+  expect(gate.queueStatus("third")).toEqual({ position: 1, ahead: 2, limit: 2 });
+  expect(gate.queueStatus("fourth")).toEqual({ position: 2, ahead: 3, limit: 2 });
+  expect(gate.queueStatus("fifth")).toEqual({ position: 3, ahead: 4, limit: 2 });
+  expect(gate.queueStatus("unknown")).toBeUndefined();
+  expect(gate.queueStatus("held-1")).toBeUndefined();
+  first.release();
+  expect(gate.queueStatus("third")).toBeUndefined();
+  expect(gate.queueStatus("fifth")).toEqual({ position: 2, ahead: 3, limit: 2 });
+  controller.abort(new Error("cancelled"));
+  expect(await rejected).toEqual(new Error("cancelled"));
+  expect(gate.queueStatus("fourth")).toBeUndefined();
+  expect(gate.queueStatus("fifth")).toEqual({ position: 1, ahead: 2, limit: 2 });
+  second.release();
+  (await third).release();
+  (await fifth).release();
+  expect(gate.queueStatus("fifth")).toBeUndefined();
+});

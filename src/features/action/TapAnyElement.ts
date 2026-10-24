@@ -1,3 +1,4 @@
+import { androidCtrlProxyClientForPlatform } from "../observe/android/androidCtrlProxyClientFor";
 import {
   TapAnyAndroidTapper,
   assertSelectedCapture,
@@ -62,7 +63,7 @@ import {
 } from "../utility/ElementGeometry";
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 import { logger } from "../../utils/logger";
-import { type AndroidCtrlProxy, AndroidCtrlProxyClient } from "../observe/android";
+import { type AndroidCtrlProxy } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import {
   createGlobalPerformanceTracker,
@@ -190,11 +191,8 @@ export class TapAnyElement extends BaseVisualChange {
         iosMultiPanel: this.iosMultiPanel,
       });
     this.accessibilityService =
-      options.accessibilityService ?? AndroidCtrlProxyClient.getInstance(device, this.adbFactory);
-    this.hierarchyAccessibilityService = AndroidCtrlProxyClient.getInstance(
-      device,
-      this.adbFactory,
-    );
+      options.accessibilityService ?? androidCtrlProxyClientForPlatform(device, this.adbFactory);
+    this.hierarchyAccessibilityService = androidCtrlProxyClientForPlatform(device, this.adbFactory);
     this.viewHierarchy = new ViewHierarchy(device, this.adbFactory);
     this.hierarchyCapture =
       options.hierarchyCapture ??

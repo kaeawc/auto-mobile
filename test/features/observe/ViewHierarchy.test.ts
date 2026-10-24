@@ -544,6 +544,47 @@ describe("ViewHierarchy", function () {
       }
     });
 
+    test("queued runner freshness never starts recovery even with reconnect metadata", async () => {
+      const iosDevice: BootedDevice = { deviceId: "queued-ios", name: "Test", platform: "ios" };
+      let recoveryStarts = 0;
+      let recoveryWaits = 0;
+      const spy = spyOnIosClientInstance({
+        convertToViewHierarchyResult: convertIosHierarchy,
+        getLatestHierarchy: async () => ({
+          hierarchy: null,
+          unavailableReason: "runner_launch_queued",
+          unavailableDetail: "queue position 2",
+          reconnectStatus: {
+            state: "cooldown",
+            retryAfterMs: 1000,
+            retryAfterSeconds: 1,
+            connectionAttempts: 3,
+            maxConnectionAttempts: 3,
+          },
+        }),
+        ensureRecoveryStarted: () => {
+          recoveryStarts++;
+        },
+        awaitRecovery: async () => {
+          recoveryWaits++;
+          return "timed_out";
+        },
+      });
+      try {
+        const subject = new ViewHierarchy(
+          iosDevice,
+          new FakeAdbClientFactory(fakeAdb),
+          mockCtrlProxyClient,
+          new FakeTimer(),
+        );
+        const result = await subject.getViewHierarchy();
+        expect(result.hierarchy.unavailableReason).toBe("runner_launch_queued");
+        expect([recoveryStarts, recoveryWaits]).toEqual([0, 0]);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
     test("waits once after a superseded iOS startup reports service_recovering", async function () {
       const iosDevice: BootedDevice = {
         deviceId: "test-ios-device",

@@ -1,3 +1,4 @@
+import { findRunnerLaunchQueuedError } from "../../ctrlProxy/ios/RunnerLaunchQueuedError";
 import type { ViewHierarchyResult } from "../../models";
 import type { Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
@@ -104,13 +105,15 @@ export async function captureObserverHierarchy(
     if (request.signal?.aborted) {
       throw error;
     }
-    const detail = describeError(error);
+    const queued = findRunnerLaunchQueuedError(error);
+    const detail = queued?.message ?? describeError(error);
     logger.warn(`[ObserveScreen] Observer hierarchy unavailable: ${detail}`, error);
     return {
       hierarchy: {
         error: "Hierarchy service unavailable",
-        unavailableReason:
-          error instanceof ObserverPendingRequestTimeoutError
+        unavailableReason: queued
+          ? "runner_launch_queued"
+          : error instanceof ObserverPendingRequestTimeoutError
             ? "request_timed_out"
             : "connection_lost",
         unavailableDetail: detail,

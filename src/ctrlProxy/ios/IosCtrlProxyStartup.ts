@@ -264,7 +264,10 @@ export class IosCtrlProxyStartup {
     // Only callers already waiting when the queue began are owed the credit; a
     // later joiner's budget starts at its own join time.
     const queuedCallers = new Set(sharedStart.callerHealthPollDeadlinesMs.keys());
-    this.launchSlot = await this.state.runnerLaunchGate.acquire(sharedStart.controller.signal);
+    this.launchSlot = await this.state.runnerLaunchGate.acquire(
+      sharedStart.controller.signal,
+      this.state.device.deviceId,
+    );
     const waitedMs = this.state.timer.now() - queuedAt;
     if (waitedMs > 0) {
       logger.info(`[IOSCtrlProxy] Runner launch queued for ${waitedMs}ms`);

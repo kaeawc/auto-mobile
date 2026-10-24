@@ -173,6 +173,7 @@ export const freshnessSchema = z
         "auto_setup_failed",
         "unknown",
         "service_recovering",
+        "runner_launch_queued",
         "device_locked",
         "incomplete_capture",
         "runner_unavailable",

@@ -1,3 +1,10 @@
+import { RunnerReadinessError } from "../../ctrlProxy/RunnerReadinessError";
+import {
+  getSharedIosRunnerLaunchQueueView,
+  type IosRunnerLaunchQueueView,
+  type IosRunnerLaunchQueueStatus,
+} from "../../ctrlProxy/ios/IosRunnerLaunchGate";
+import { RunnerLaunchQueuedError } from "../../ctrlProxy/ios/RunnerLaunchQueuedError";
 import { isIdle, holderOf } from "../../daemon/deviceBinding";
 import { AndroidCtrlProxyClient } from "./android";
 import { IOSCtrlProxyClient } from "./ios";
@@ -80,8 +87,13 @@ export interface ObservationServiceStartRequest {
   signal?: AbortSignal;
 }
 
+interface LaunchQueueSnapshot {
+  status?: IosRunnerLaunchQueueStatus;
+}
+
 /** One flight per device. Individual reads abandon their wait without cancelling other readers. */
 export class ObservationReadServiceStart {
+  private readonly queueSnapshots = new Map<string, LaunchQueueSnapshot>();
   private readonly flights = new SingleFlight<string, boolean>();
   private readonly pickupFlights = new SingleFlight<string, string | undefined>();
   private readonly unpooledPickupAt = new Map<string, number>();
@@ -92,6 +104,7 @@ export class ObservationReadServiceStart {
   constructor(
     private readonly options: {
       timer?: Timer;
+      launchQueue?: IosRunnerLaunchQueueView;
       ownershipGuard?: ObservationServiceOwnershipGuard;
       poolPickup?: ObservationPoolPickup;
       readiness?: Pick<RunnerReadinessService, "ensureReady">;
@@ -113,12 +126,14 @@ export class ObservationReadServiceStart {
       await this.admit(request);
     }
     const key = deviceReadinessLockKey(request.device.platform, request.device.deviceId);
+    // Each waiter retains the flight's snapshot even after setup removes the map entry.
+    const snapshot = this.queueSnapshotFor(key);
     try {
       return await raceWithDeadline(
         () =>
           this.flights.run(
             key,
-            (signal) => this.setup({ request, flightSignal: signal }),
+            (signal) => this.setup({ request, flightSignal: signal, snapshot }),
             request.signal,
             {
               cancelWhenAllWaitersAbort: true,
@@ -134,7 +149,12 @@ export class ObservationReadServiceStart {
     } catch (error) {
       request.signal?.throwIfAborted();
       logger.warn(`[observe] Hierarchy service start failed: ${errorMessage(error)}`, error);
-      throw error;
+      return this.rethrowStartupFailure(error, request, snapshot);
+    } finally {
+      // setup may still be running for other readers; their closures retain this snapshot.
+      if (!this.flights.has(key)) {
+        this.clearQueueSnapshot(key, snapshot);
+      }
     }
   }
 
@@ -163,6 +183,44 @@ export class ObservationReadServiceStart {
         "service start declined: ownership or pool transition cannot be excluded",
       );
     }
+  }
+
+  private queueSnapshotFor(key: string): LaunchQueueSnapshot {
+    const snapshot = this.flights.has(key) ? (this.queueSnapshots.get(key) ?? {}) : {};
+    this.queueSnapshots.set(key, snapshot);
+    return snapshot;
+  }
+
+  private clearQueueSnapshot(key: string, snapshot: LaunchQueueSnapshot): void {
+    if (this.queueSnapshots.get(key) === snapshot) {
+      this.queueSnapshots.delete(key);
+    }
+  }
+
+  private rethrowStartupFailure(
+    error: unknown,
+    request: ObservationServiceStartRequest,
+    snapshot: LaunchQueueSnapshot,
+  ): never {
+    const timedOut =
+      (error instanceof RunnerReadinessError && error.deadlineExhausted) ||
+      (error instanceof Error &&
+        error.message.startsWith("Observer hierarchy service start timed out"));
+    const status = timedOut
+      ? (snapshot.status ?? this.launchQueueStatus(request.device))
+      : undefined;
+    if (status) {
+      throw new RunnerLaunchQueuedError(request.device.deviceId, status, { cause: error });
+    }
+    throw error;
+  }
+
+  private launchQueueStatus(device: BootedDevice): IosRunnerLaunchQueueStatus | undefined {
+    return device.platform === "ios"
+      ? (this.options.launchQueue ?? getSharedIosRunnerLaunchQueueView()).queueStatus(
+          device.deviceId,
+        )
+      : undefined;
   }
 
   private async pickupIfUnpooled(request: ObservationServiceStartRequest): Promise<void> {
@@ -226,8 +284,10 @@ export class ObservationReadServiceStart {
   private async setup(options: {
     request: ObservationServiceStartRequest;
     flightSignal?: AbortSignal;
+    snapshot: LaunchQueueSnapshot;
   }): Promise<boolean> {
-    const { request, flightSignal } = options;
+    const { request, flightSignal, snapshot } = options;
+    snapshot.status = undefined;
     // A stale failed dial can arrive after the earlier flight completed. Reuse
     // its resident client rather than resetting a service that is now healthy.
     if (
@@ -249,10 +309,10 @@ export class ObservationReadServiceStart {
     // The first read supplies the shared setup's ceiling. Its cancellation only
     // cancels setup when every waiter aborts; later readers retain their own bounds.
     const deadline = new AbortController();
-    const timeout = this.timer.setTimeout(
-      () => deadline.abort(new ActionableError("Observer hierarchy service start timed out")),
-      remaining,
-    );
+    const timeout = this.timer.setTimeout(() => {
+      snapshot.status = this.launchQueueStatus(request.device);
+      deadline.abort(new ActionableError("Observer hierarchy service start timed out"));
+    }, remaining);
     const signal = flightSignal
       ? AbortSignal.any([flightSignal, deadline.signal])
       : deadline.signal;
@@ -290,6 +350,7 @@ export class ObservationReadServiceStart {
       return true;
     } finally {
       this.timer.clearTimeout(timeout);
+      this.clearQueueSnapshot(key, snapshot);
     }
   }
 }

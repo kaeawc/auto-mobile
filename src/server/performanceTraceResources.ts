@@ -140,6 +140,10 @@ async function describeArtifact(
   };
 }
 
+function isOwnSession(context: ResourceReadContext, sessionUuid: string): boolean {
+  return context.sessionUuid === sessionUuid || context.ownsSession?.(sessionUuid) === true;
+}
+
 function createPerformanceTraceHandler(deps: PerformanceTraceResourceDependencies) {
   return async (
     params: Record<string, string>,
@@ -151,8 +155,9 @@ function createPerformanceTraceHandler(deps: PerformanceTraceResourceDependencie
       getRequestedResourceUri(params) ??
       `automobile:device-session/${rawSessionUuid}/performance-traces/${rawTraceId}`;
 
-    // Binding first, before any parsing or device access, exactly as for crash reports.
-    if (context.sessionUuid !== sessionUuid) {
+    // Binding first, before any parsing or device access. An earlier session this connection
+    // acquired still counts as its own, as for observation resources.
+    if (!isOwnSession(context, sessionUuid)) {
       return jsonError(
         uri,
         "SESSION_NOT_BOUND",

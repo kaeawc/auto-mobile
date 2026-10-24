@@ -153,6 +153,18 @@ describe("performance trace resource (#14102)", () => {
     expect(await parse(`${baseUri}/trace-1`)).toMatchObject({ code: "SESSION_NOT_ACTIVE" });
   });
 
+  test("a connection reads traces of an earlier session it still owns", async () => {
+    harness();
+    const owned = new Set([sessionUuid]);
+    const context = {
+      sessionUuid: "later-session",
+      ownsSession: (uuid: string) => owned.has(uuid),
+    };
+    expect(await parse(`${baseUri}/trace-1`, context)).toMatchObject({ traceId: "trace-1" });
+    owned.clear();
+    expect(await parse(`${baseUri}/trace-1`, context)).toMatchObject({ code: "SESSION_NOT_BOUND" });
+  });
+
   test("never serves a trace started by another session or on another device", async () => {
     harness({ known: { result: traceResult(), ownerSessionUuid: "other" } });
     expect(await parse(`${baseUri}/trace-1`)).toMatchObject({ code: "NOT_FOUND" });

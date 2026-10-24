@@ -534,6 +534,13 @@ export class AndroidCtrlProxyClient
       highlights: () => client.highlights,
       webSocketMessageHandlers: () => client.webSocketMessageHandlers,
       createDelegateContext: () => client.createDelegateContext(),
+      isCommandSupported: (messageType) => client.isCommandSupported(messageType),
+      get installedGestures() {
+        return client._gestures;
+      },
+      set installedGestures(value) {
+        client._gestures = value;
+      },
       injected: () => ({
         ctrlProxyForwardLease: client.ctrlProxyForwardLease,
         forwardClientProbe: client.forwardClientProbe,

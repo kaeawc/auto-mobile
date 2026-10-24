@@ -1852,7 +1852,9 @@ accented, padded by about 40% and wrapped in `[ ]`, so truncation and clipping a
 translation. `{key}`, `{data:/pointer}` and `{item.field}` bindings are left intact, as are
 `contentDescription`, state, data, request bodies, `emit` context and payload, `repeat` and option `value`s. The authored
 spec is what status, `patch` and the accessibility lint see, so `patch` ops (other than a
-`replaceNode`) edit the device copy and a `replaceNode` sends authored text. Each show states the
+`replaceNode`) edit the device copy and a `replaceNode` sends authored text. A `linkify` text keeps its mention, hashtag and URL tokens as written and takes no `[ ]`
+wrapper, so links stay detectable. Stack screen and component names are never treated as spec
+fields. Each show states the
 option afresh.
 
 The on-device audit of a shown prototype and the RTL check that #14126 also proposes are not

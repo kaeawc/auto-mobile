@@ -4,6 +4,7 @@
  * never changed; only the copy sent to the device is.
  */
 
+import { prototypeLinkifyMatches, type PrototypeLinkifyKind } from "./prototypeLinkify";
 import { record } from "./prototypeTemplate";
 
 /** Spec fields that hold text a user reads. Identifiers, state keys and `contentDescription` stay. */
@@ -95,18 +96,74 @@ const ACCENTS: Record<string, string> = {
 /** `{key}`, `{data:/pointer}` and `{item.field}` bindings are resolved by the device: left intact. */
 const PLACEHOLDER = /\{[^{}]*\}/g;
 
+/** Accents the letters of text; `{...}` bindings stay as written. */
+function pseudoLocalizeSegment(text: string): string {
+  const accented = text
+    .split(PLACEHOLDER)
+    .map((part) => [...part].map((char) => ACCENTS[char] ?? char).join(""));
+  const placeholders = text.match(PLACEHOLDER) ?? [];
+  return accented.map((part, index) => part + (placeholders[index] ?? "")).join("");
+}
+
 /** Accented, bracketed and padded to ~140% of the original length; placeholders are untouched. */
 export function pseudoLocalizeText(text: string): string {
   if (text.trim() === "") {
     return text;
   }
-  const accented = text
-    .split(PLACEHOLDER)
-    .map((part) => [...part].map((char) => ACCENTS[char] ?? char).join(""));
-  const placeholders = text.match(PLACEHOLDER) ?? [];
-  const body = accented.map((part, index) => part + (placeholders[index] ?? "")).join("");
   const padding = PAD.repeat(Math.ceil([...text].length * PSEUDO_LOCALE_EXPANSION));
-  return `[${body}${padding}]`;
+  return `[${pseudoLocalizeSegment(text)}${padding}]`;
+}
+
+const LINKIFY_KINDS = new Set<unknown>(["mention", "hashtag", "url"]);
+/** Maps keyed by an author-chosen name: the names are not spec fields, so only the values count. */
+const NAME_KEYED_FIELDS = new Set(["screens", "components"]);
+
+/**
+ * Linkified text keeps its mention, hashtag and URL tokens as written, and has no bracket prefix, so
+ * each token still starts the text or follows whitespace; the padding is space-separated for the same
+ * reason. Both platform runtimes detect links in the text they receive.
+ */
+function pseudoLocalizeLinkifiedText(text: string, kinds: readonly PrototypeLinkifyKind[]): string {
+  if (text.trim() === "") {
+    return text;
+  }
+  const matches = prototypeLinkifyMatches(text, kinds);
+  const pieces = matches.flatMap((match, index) => [
+    pseudoLocalizeSegment(text.slice(index === 0 ? 0 : matches[index - 1]!.end, match.start)),
+    match.text,
+  ]);
+  const tail = text.slice(matches.at(-1)?.end ?? 0);
+  const padding = PAD.repeat(Math.ceil([...text].length * PSEUDO_LOCALE_EXPANSION));
+  return `${pieces.join("")}${pseudoLocalizeSegment(tail)} ${padding}`;
+}
+
+function linkifyKinds(object: Record<string, unknown>): PrototypeLinkifyKind[] | undefined {
+  const kinds = record(object.linkify)?.kinds;
+  return Array.isArray(kinds) && kinds.every((kind) => LINKIFY_KINDS.has(kind))
+    ? (kinds as PrototypeLinkifyKind[])
+    : undefined;
+}
+
+function pseudoLocalizeEntry(
+  object: Record<string, unknown>,
+  key: string,
+  child: unknown,
+): [string, unknown] {
+  if (OPAQUE_FIELDS.has(key)) {
+    return [key, child];
+  }
+  if (NAME_KEYED_FIELDS.has(key) && record(child)) {
+    const named = Object.entries(record(child)!).map(([name, value]) => [
+      name,
+      pseudoLocalizeValue(value),
+    ]);
+    return [key, Object.fromEntries(named)];
+  }
+  if (DISPLAY_TEXT_FIELDS.has(key) && typeof child === "string") {
+    const kinds = key === "text" ? linkifyKinds(object) : undefined;
+    return [key, kinds ? pseudoLocalizeLinkifiedText(child, kinds) : pseudoLocalizeText(child)];
+  }
+  return [key, pseudoLocalizeValue(child)];
 }
 
 function pseudoLocalizeValue(value: unknown): unknown {
@@ -118,15 +175,7 @@ function pseudoLocalizeValue(value: unknown): unknown {
     return value;
   }
   return Object.fromEntries(
-    Object.entries(object).map(([key, child]) => {
-      if (OPAQUE_FIELDS.has(key)) {
-        return [key, child];
-      }
-      if (DISPLAY_TEXT_FIELDS.has(key) && typeof child === "string") {
-        return [key, pseudoLocalizeText(child)];
-      }
-      return [key, pseudoLocalizeValue(child)];
-    }),
+    Object.entries(object).map(([key, child]) => pseudoLocalizeEntry(object, key, child)),
   );
 }
 

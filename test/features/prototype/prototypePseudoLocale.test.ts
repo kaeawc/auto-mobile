@@ -4,6 +4,7 @@ import {
   pseudoLocalizeSpec,
   pseudoLocalizeText,
 } from "../../../src/features/prototype/prototypePseudoLocale";
+import { prototypeLinkifyMatches } from "../../../src/features/prototype/prototypeLinkify";
 
 describe("pseudo-locale text (#14126)", () => {
   test("accents, brackets and pads to about 140%", () => {
@@ -17,6 +18,30 @@ describe("pseudo-locale text (#14126)", () => {
     expect(pseudoLocalizeText("Hi {data:/user/name}!")).toContain("{data:/user/name}");
     expect(pseudoLocalizeText("{item.title}")).toContain("{item.title}");
     expect(pseudoLocalizeText("  ")).toBe("  ");
+  });
+});
+
+describe("pseudo-locale structure (#14126)", () => {
+  test("linkified text keeps its link tokens detectable", () => {
+    const out = pseudoLocalizeSpec({
+      type: "text",
+      text: "Visit https://example.com or @sam now",
+      linkify: { kinds: ["url", "mention"], onTap: [] },
+    });
+    expect(
+      prototypeLinkifyMatches(out.text, ["url", "mention"]).map((match) => match.text),
+    ).toEqual(["https://example.com", "@sam"]);
+    expect(out.text.startsWith("Ṽíšíť ")).toBe(true);
+  });
+
+  test("a screen or component named like an opaque field is still transformed", () => {
+    const out = pseudoLocalizeSpec({
+      screens: { theme: { type: "text", text: "Hello" }, data: { type: "text", text: "Bye" } },
+      components: { state: { root: { type: "text", text: "Hi" } } },
+    });
+    expect(out.screens.theme.text).toContain("Ĥéļļó");
+    expect(out.screens.data.text).toContain("Ɓýé");
+    expect(out.components.state.root.text).toContain("Ĥí");
   });
 });
 

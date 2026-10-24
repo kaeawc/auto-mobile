@@ -13,9 +13,15 @@ import kotlinx.serialization.json.put
  * app's external files directory under mcp/inbox/, then starts McpActivity, which only the adb
  * shell can start (android.permission.DUMP). Keep these names, paths and the result shape in step
  * with src/features/prototype/protoViewer/protoViewerContract.ts.
+ *
+ * This app creates mcp/, mcp/inbox/ and mcp/results/ itself ([McpInbox.ensureDirectories], reached
+ * from the PREPARE action): on API 30+ scoped storage a directory the adb shell creates under this
+ * app's Android/data is shell-owned and this app can neither traverse nor create entries in it
+ * (#15174), while the shell can still write a file into a directory this app created.
  */
 const val MCP_IMPORT_ACTION = "dev.jasonpearson.automobile.protoviewer.mcp.IMPORT"
 const val MCP_OPEN_ACTION = "dev.jasonpearson.automobile.protoviewer.mcp.OPEN"
+const val MCP_PREPARE_ACTION = "dev.jasonpearson.automobile.protoviewer.mcp.PREPARE"
 const val MCP_EXTRA_REQUEST = "request"
 const val MCP_EXTRA_LABEL = "label"
 const val MCP_EXTRA_LIBRARY_ID = "libraryId"
@@ -30,6 +36,9 @@ sealed interface McpCommand {
 
   data class Open(override val request: String, val libraryId: String) : McpCommand
 
+  /** Creates the shared-storage folders the host pushes into and reads results from. */
+  data class Prepare(override val request: String) : McpCommand
+
   /** A usable request id with an action this build cannot run: answered, never left waiting. */
   data class Unsupported(override val request: String, val reason: String) : McpCommand
 
@@ -39,6 +48,7 @@ sealed interface McpCommand {
       if (request == null || !REQUEST_ID.matches(request)) return null
       return when (action) {
         MCP_IMPORT_ACTION -> Import(request, label)
+        MCP_PREPARE_ACTION -> Prepare(request)
         MCP_OPEN_ACTION ->
           libraryId?.let { Open(request, it) } ?: Unsupported(request, "open needs a library id")
         else -> Unsupported(request, "Unknown MCP action; update ProtoViewer")
@@ -67,12 +77,28 @@ class McpInbox(
         write(command.request, importResult(command))
         null
       }
+      is McpCommand.Prepare -> {
+        write(
+          command.request,
+          if (ensureDirectories()) prepared(command.request)
+          else rejected(command.request, "storage", "Cannot create the MCP folders"),
+        )
+        null
+      }
       is McpCommand.Unsupported -> {
         write(command.request, rejected(command.request, "action", command.reason))
         null
       }
       is McpCommand.Open -> open(command)
     }
+
+  /**
+   * Creates `mcp/inbox` and `mcp/results` as this app. False when a folder is missing afterwards,
+   * e.g. a shell-created `mcp`.
+   */
+  fun ensureDirectories(): Boolean =
+    // Every folder is attempted, so a blocked inbox does not stop the results folder existing.
+    listOf(root, File(root, "inbox"), File(root, "results")).map(::ensureDirectory).all { it }
 
   fun reportOpened(command: McpCommand.Open, entry: LibraryEntry) {
     write(command.request, entry("opened", command.request, entry))
@@ -136,8 +162,7 @@ class McpInbox(
   /** Written under a temporary name and renamed, so the host never reads a partial result. */
   private fun write(request: String, result: JsonObject) {
     val results = File(root, "results")
-    // mkdirs() is false when a concurrent request created the directory first; that is fine.
-    if (!results.mkdirs() && !results.isDirectory) throw IOException("Cannot create MCP results")
+    if (!ensureDirectory(results)) throw IOException("Cannot create MCP results")
     val temporary = File(results, ".$request.json.tmp")
     temporary.writeText(result.toString())
     if (!temporary.renameTo(File(results, "$request.json"))) {
@@ -147,6 +172,9 @@ class McpInbox(
   }
 }
 
+// mkdirs() is false when a concurrent request created the directory first; that is fine.
+private fun ensureDirectory(directory: File) = directory.mkdirs() || directory.isDirectory
+
 /** One line of 1 to 120 characters: no controls, bidi or other format characters, or separators. */
 private fun validLabel(label: String) =
   label.length in 1..MAX_LABEL_LENGTH &&
@@ -155,6 +183,11 @@ private fun validLabel(label: String) =
         it.category in
           setOf(CharCategory.FORMAT, CharCategory.LINE_SEPARATOR, CharCategory.PARAGRAPH_SEPARATOR)
     }
+
+private fun prepared(request: String) = buildJsonObject {
+  put("status", "prepared")
+  put("request", request)
+}
 
 private fun notFound(request: String) = buildJsonObject {
   put("status", "not_found")

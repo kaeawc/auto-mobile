@@ -329,9 +329,17 @@ The shared request-policy and storage work is tracked in #13622.
   section 6 policy applies. It writes one result, `mcp/results/<request>.json`
   (`imported`/`opened` with `libraryId` and `label`, `rejected` with `path` and `reason`, or
   `not_found`), under a temporary name and renames it; the host polls for it and removes it. The
-  exported `ImportActivity` keeps rejecting `file://` and its own authority. Known risk to verify
-  on a device: scoped storage does not guarantee shell write access to another app's
-  `Android/data` on every API level; a refused push is reported to the caller.
+  exported `ImportActivity` keeps rejecting `file://` and its own authority. On API 30+ scoped
+  storage a directory the adb shell creates under another app's `Android/data` is shell-owned and
+  the app can neither traverse it nor create entries in it (#15174, seen on API 37), while the
+  shell can still write a file into a directory the app created. So the app owns `mcp/`,
+  `mcp/inbox/` and `mcp/results/`: it creates them on start, and the host never runs `mkdir`; when
+  they are missing it first starts `McpActivity` with action `….mcp.PREPARE`, which creates them
+  and answers `prepared`. The host's result poll treats "not there yet" as pending until its
+  deadline (a bare `cat` of a missing file exits 1, which adb turns into an error). When the
+  folders cannot be prepared, the push is refused, or the app answers `rejected` at `inbox` (it
+  cannot see the pushed file), nothing was imported and the host keeps the CtrlProxy save path
+  with a logged warning instead of failing the call.
   iOS (simulator and dev-signed devices) uses `simctl` or `devicectl` file copy into the app's
   inbox plus the internal launch scheme `automobile-proto://open`, which the iOS app registers in
   the first release (section 4). Opening the scheme with an unknown id or an inbox name that does

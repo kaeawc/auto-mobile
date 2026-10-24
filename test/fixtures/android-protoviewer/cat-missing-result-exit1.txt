@@ -1,0 +1,3 @@
+Command failed: /Users/jason/Library/Android/sdk/platform-tools/adb -s emulator-5610 shell cat '/sdcard/Android/data/dev.jasonpearson.automobile.protoviewer/files/mcp/results/mcp-186a10db-2cd7-4efc-ab57-5225bc407050.json' 2>/dev/null
+exit code: 1
+raw error: (last 4000 chars) Command failed: /Users/jason/Library/Android/sdk/platform-tools/adb -s emulator-5610 shell cat '/sdcard/Android/data/dev.jasonpearson.automobile.protoviewer/files/mcp/results/mcp-186a10db-2cd7-4efc-ab57-5225bc407050.json' 2>/dev/null

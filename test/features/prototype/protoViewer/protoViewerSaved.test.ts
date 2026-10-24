@@ -6,6 +6,7 @@ import {
 } from "../../../../src/features/prototype/protoViewer/protoViewerSaved";
 import {
   ProtoViewerEntryPointMissingError,
+  ProtoViewerStorageError,
   type ProtoViewerDevice,
 } from "../../../../src/features/prototype/protoViewer/AndroidProtoViewer";
 import type { ProtoViewerResult } from "../../../../src/features/prototype/protoViewer/protoViewerContract";
@@ -261,6 +262,16 @@ describe("ProtoViewer route degradation", () => {
     device.importResult = new ProtoViewerEntryPointMissingError();
     expect(await routeToProtoViewer({ action: "save", spec }, deps(device))).toBeUndefined();
     device.openResult = new ProtoViewerEntryPointMissingError();
+    expect(
+      await routeToProtoViewer({ action: "open", id: LIBRARY_ID }, deps(device)),
+    ).toMatchObject({ success: false, errorCode: "unsupported_capability" });
+  });
+
+  test("storage the adb shell cannot use keeps the CtrlProxy path for save, and is reported by open", async () => {
+    const device = new FakeProtoViewerDevice();
+    device.importResult = new ProtoViewerStorageError("ProtoViewer could not prepare its inbox");
+    expect(await routeToProtoViewer({ action: "save", spec }, deps(device))).toBeUndefined();
+    device.openResult = new ProtoViewerStorageError("ProtoViewer could not prepare its inbox");
     expect(
       await routeToProtoViewer({ action: "open", id: LIBRARY_ID }, deps(device)),
     ).toMatchObject({ success: false, errorCode: "unsupported_capability" });

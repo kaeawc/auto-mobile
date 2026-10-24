@@ -94,6 +94,14 @@ describe("pseudo-locale spec", () => {
         },
         { type: "select", stateKey: "s", options: [{ value: "a", label: "Alpha" }] },
         { type: "iconButton", icon: "close", contentDescription: "Close" },
+        {
+          type: "textField",
+          stateKey: "e",
+          checks: [
+            { required: true, message: "Enter email" },
+            { pattern: "^a.*", message: "Bad" },
+          ],
+        },
         { type: "listItem", headline: "Name", supporting: "Description" },
         { type: "tabBar", items: [{ label: "Home" }] },
         { type: "row", repeat: { items: [{ label: "Raw" }], key: "label" } },
@@ -115,10 +123,12 @@ describe("pseudo-locale spec", () => {
     expect(select.options[0]).toEqual({ value: "a", label: expect.stringContaining("Áļþĥá") });
     expect(icon.contentDescription).toBe("Close");
     expect(out.state).toEqual({ label: "keep" });
-    const [, , , , , listItem, tabBar, repeated, emitting] = out.root.children as Record<
+    const [, , , , , field, listItem, tabBar, repeated, emitting] = out.root.children as Record<
       string,
       any
     >[];
+    expect(field.checks[0]).toEqual({ required: true, message: expect.stringContaining("Éñťéŕ") });
+    expect(field.checks[1].pattern).toBe("^a.*");
     expect(listItem.supporting).toContain("Ďéšçŕ");
     expect(tabBar.items[0].label).toContain("Ĥóɱé");
     expect(repeated.repeat).toEqual({ items: [{ label: "Raw" }], key: "label" });

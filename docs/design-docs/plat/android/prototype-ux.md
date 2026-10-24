@@ -1847,7 +1847,7 @@ evaluated.
 ### Pseudo-locale (#14126)
 
 `show` takes `pseudoLocale: true`. The device receives a copy of the spec in which every `text`,
-`label`, `placeholder`, `headline`, `title`, `supporting`, `supportingText`, `trailingText` and span `text` is
+`label`, `placeholder`, `headline`, `title`, `supporting`, `supportingText`, `trailingText`, check `message` and span `text` is
 accented, padded by about 40% and wrapped in `[ ]`, so truncation and clipping are visible without a
 translation. `{key}`, `{data:/pointer}` and `{item.field}` bindings are left intact, as are
 `contentDescription`, state, data, request bodies, `emit` context and payload, `repeat` and option `value`s. The authored

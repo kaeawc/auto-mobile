@@ -222,3 +222,4 @@ samples/prototype-embedding/**/*.png -text
 ios/prototype-agent/Fixtures/EmbedConsumer/Sources/EmbedConsumer/EmbeddingSamplePrototype.swift text eol=lf
 
 test/fixtures/ios-runner-progress/*.txt text eol=lf
+test/fixtures/ios-runner-launch-failure/*.txt text eol=lf

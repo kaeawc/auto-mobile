@@ -31,7 +31,7 @@ export interface ScreenshotRetentionLimits {
 export const DEFAULT_SCREENSHOT_RETENTION_LIMITS: Readonly<ScreenshotRetentionLimits> = {
   baseBytes: SCREENSHOT_CACHE_MAX_SIZE_BYTES,
   perDeviceBytes: 64 * 1024 * 1024,
-  ceilingBytes: 1024 * 1024 * 1024,
+  ceilingBytes: 2 * 1024 * 1024 * 1024,
   keepPerDevice: 3,
 };
 
@@ -42,6 +42,23 @@ export function effectiveScreenshotCacheBytes(
 ): number {
   return Math.min(
     Math.max(limits.baseBytes, activeDevices * limits.perDeviceBytes),
+    Math.max(limits.ceilingBytes, limits.baseBytes),
+  );
+}
+
+/**
+ * Capacity that also honours the return guarantee: bytes still inside their guarantee lift
+ * the device-scaled capacity, up to the ceiling. Only past the ceiling does admission evict
+ * a frame before its guarantee expires (#15182: 3.2 MB frames every 10 s need about 192 MiB
+ * per device for the 10-minute guarantee, three times the per-device scale).
+ */
+export function guaranteedScreenshotCacheBytes(
+  limits: ScreenshotRetentionLimits,
+  activeDevices: number,
+  guaranteedBytes: number,
+): number {
+  return Math.min(
+    Math.max(effectiveScreenshotCacheBytes(limits, activeDevices), guaranteedBytes),
     Math.max(limits.ceilingBytes, limits.baseBytes),
   );
 }

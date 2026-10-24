@@ -1,3 +1,4 @@
+import { IosRunnerLaunchFailures } from "./IosRunnerLaunchFailure";
 import { getSharedIosRunnerLaunchGate, type IosRunnerLaunchGate } from "./IosRunnerLaunchGate";
 import type { RunnerLaunchProgressProbe } from "./IosRunnerLaunchProgress";
 import { CtrlProxyRunnerExitedDuringStartupError } from "./CtrlProxyRunnerExitedDuringStartupError";
@@ -94,6 +95,7 @@ export class IosCtrlProxyRuntime {
   readonly xcodebuild: Xcodebuild;
   readonly processClient: IosCtrlProxyProcessClient;
   readonly runnerLaunchGate: IosRunnerLaunchGate;
+  readonly runnerLaunchFailures = new IosRunnerLaunchFailures();
   readonly runnerLaunchProgressProbe: RunnerLaunchProgressProbe;
   readonly signingManager: XcodeSigningManager;
   readonly deviceAppManager: DeviceAppManager;
@@ -333,6 +335,7 @@ export class IosCtrlProxyRuntime {
         if (!retainRunner) {
           if (this.xcTestProcessId !== null) {
             this.runnerGenerationTokens.delete(this.xcTestProcessId);
+            this.runnerLaunchFailures.clear(this.xcTestProcessId);
           }
           this.xcTestProcessId = null;
           this.xcTestProcess = null;

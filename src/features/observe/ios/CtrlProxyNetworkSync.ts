@@ -88,6 +88,16 @@ export interface IosNetworkErrorSimulationConfig {
 }
 /** Capability-gated synchronization of this device's host network state. */
 export class CtrlProxyNetworkSync {
+  /**
+   * True once a non-empty rule set was written to the app and no empty set has been written
+   * since: the app's in-process SDK may still hold rules. Decides whether a release-time
+   * `noCapability` (the foreground app has no SDK to clear) leaves something uncleared (#15179).
+   */
+  private mockRulesMayRemainOnDevice = false;
+  /** Rule writes so far, and the latest non-empty one: a late empty confirmation cannot clear a newer write. */
+  private ruleWriteCount = 0;
+  private lastNonEmptyRuleWrite = 0;
+
   constructor(private readonly host: NetworkSyncHost) {}
 
   /**
@@ -95,7 +105,9 @@ export class CtrlProxyNetworkSync {
    * Used after a session release clears the store (issue #10061); the
    * reconnect path runs the same two syncs. Rejects failed, noCapability or superseded
    * rule delivery and failed simulation writes so cleanup can mark a recording gap.
-   * Sent rules (including unconfirmed replies) and disabled mocking succeed.
+   * Sent rules (including unconfirmed replies) and disabled mocking succeed. So does
+   * `noCapability` when no rules were ever delivered to this device (or the last write was
+   * an empty set): the foreground app has no SDK, so no stale in-process rules can exist.
    * Simulation sync is always attempted, even when rule delivery fails.
    */
   public async syncNetworkStateFromHost(
@@ -108,7 +120,11 @@ export class CtrlProxyNetworkSync {
     let simulationDelivered = true;
     try {
       const result = await syncMockRules(options);
-      if (["failed", "noCapability", "superseded"].includes(result.outcome)) {
+      if (result.outcome === "noCapability" && !this.mockRulesMayRemainOnDevice) {
+        logger.debug(
+          "[IOSCtrlProxyClient] No SDK network_mocking capability and no rules were delivered; nothing to clear",
+        );
+      } else if (["failed", "noCapability", "superseded"].includes(result.outcome)) {
         throw new Error(`Network mock rule sync ${result.outcome}`);
       }
     } catch (error) {
@@ -123,6 +139,16 @@ export class CtrlProxyNetworkSync {
       logger.warn("[IOSCtrlProxyClient] Failed to sync network simulation during cleanup", error);
       throw toActionableError(error, "iOS network error simulation was not delivered");
     }
+  }
+
+  /** Record a rule set written to the app; returns the write's sequence number. */
+  private noteRuleWrite(ruleCount: number): number {
+    const write = ++this.ruleWriteCount;
+    if (ruleCount > 0) {
+      this.lastNonEmptyRuleWrite = write;
+      this.mockRulesMayRemainOnDevice = true;
+    }
+    return write;
   }
 
   /** Why the rules cannot be pushed at all right now, or null when they can. */
@@ -184,13 +210,19 @@ export class CtrlProxyNetworkSync {
         );
         return { outcome: "failed" };
       }
-      return interpretIosMockRulesReply(
+      // Non-empty rules are on the wire; an empty set only clears once the runner confirms below.
+      const write = this.noteRuleWrite(rules.length);
+      const result = interpretIosMockRulesReply(
         await raceWithDeadline(reply, {
           timer: context.timer,
           signal: options.abortSignal,
           label: "Network mock rules",
         }),
       );
+      if (rules.length === 0 && result.outcome === "sent" && this.lastNonEmptyRuleWrite < write) {
+        this.mockRulesMayRemainOnDevice = false;
+      }
+      return result;
     } catch (e) {
       this.host.requestManager.reject(requestId, new Error("set_network_mock_rules send failed"));
       logger.warn(`[IOSCtrlProxyClient] Failed to push network mock rules: ${e}`);
@@ -214,9 +246,12 @@ export class CtrlProxyNetworkSync {
         this.host.getDevice().deviceId,
       );
       // sendMessage returns false (and logs) when the socket is not open.
-      return this.host.sendMessage(JSON.stringify({ type: "set_network_mock_rules", rules }))
-        ? "sent"
-        : "failed";
+      if (!this.host.sendMessage(JSON.stringify({ type: "set_network_mock_rules", rules }))) {
+        return "failed";
+      }
+      // Fire-and-forget on reconnect: unconfirmed, so it can only add to what may remain.
+      this.noteRuleWrite(rules.length);
+      return "sent";
     } catch (e) {
       logger.warn(`[IOSCtrlProxyClient] Failed to sync network mock rules on reconnect: ${e}`);
       return "failed";

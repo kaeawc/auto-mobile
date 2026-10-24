@@ -205,6 +205,7 @@ describe("IOSCtrlProxyManager service port and force restart", function () {
       expect(manager.getServicePort()).not.toBe(retiredPort);
       expect(PortManager.getPort(testDevice.deviceId)).toBe(manager.getServicePort());
       expect(manager.getRunnerGeneration()).toBe(1);
+      expect(PortManager.allocate("another-device")).not.toBe(retiredPort);
     });
 
     test("reuses the retired port when the configured range has no spare capacity", async function () {
@@ -221,6 +222,7 @@ describe("IOSCtrlProxyManager service port and force restart", function () {
       await manager.forceRestart();
 
       expect(manager.getServicePort()).toBe(retiredPort);
+      expect(PortManager.isPortAvailable(retiredPort)).toBe(true);
       expect(PortManager.getPort(testDevice.deviceId)).toBe(retiredPort);
       expect(start).toHaveBeenCalledTimes(1);
       expect(manager.getRunnerGeneration()).toBe(1);

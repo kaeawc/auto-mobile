@@ -12,6 +12,7 @@ import {
   defaultNetworkDeviceStatePusher,
 } from "../../src/daemon/networkStateSessionCleanup";
 import { FakeSessionCleanupManager } from "../fakes/FakeSessionCleanupManager";
+import { FakeOpenSocket } from "../fakes/FakeOpenSocket";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 /** Records, per device, the rules the device would receive when the push runs. */
@@ -376,6 +377,94 @@ test("failed ownerless acquisition never marks a session gap", async () => {
   acquire(DEVICE_A);
   await pending[0];
   expect(gaps).toEqual([]);
+});
+
+const IOS_UDID = "03731F37-F704-4176-8C1E-0A5A1E5104FA";
+
+function createAndroidClientFor(deviceId: string): AndroidCtrlProxyClient {
+  return AndroidCtrlProxyClient.createForTesting(
+    { deviceId, platform: "android", name: "fake" },
+    new FakeAdbExecutor(),
+    {
+      timer: new FakeTimer(),
+      webSocketFactory: () => {
+        throw new Error("no socket in unit test");
+      },
+    },
+  );
+}
+
+test("default pusher lets the iOS push decide when a stray Android client shares the iOS UDID (#15179)", async () => {
+  const stray = createAndroidClientFor(IOS_UDID);
+  const ios = IOSCtrlProxyClient.createForTesting(
+    { deviceId: IOS_UDID, platform: "ios", name: "fake" },
+    8765,
+    () => new FakeOpenSocket(),
+    new FakeTimer(),
+  );
+  const android = spyOn(AndroidCtrlProxyClient, "getExistingInstance").mockReturnValue(stray);
+  const iosExisting = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue(ios);
+  const androidSync = spyOn(stray, "syncNetworkStateToDevice").mockReturnValue(false);
+  const iosSync = spyOn(ios, "syncNetworkStateFromHost").mockResolvedValue(undefined);
+  try {
+    await expect(defaultNetworkDeviceStatePusher.push(IOS_UDID)).resolves.toBeUndefined();
+    expect(androidSync).not.toHaveBeenCalled();
+    expect(iosSync).toHaveBeenCalledTimes(1);
+
+    iosSync.mockRejectedValue(new Error("iOS network mock rules were not delivered"));
+    const failure = await defaultNetworkDeviceStatePusher.push(IOS_UDID).catch((e: Error) => e);
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).not.toContain("Android");
+  } finally {
+    android.mockRestore();
+    iosExisting.mockRestore();
+    androidSync.mockRestore();
+    iosSync.mockRestore();
+  }
+});
+
+test("default pusher still runs the Android push when a stray iOS client shares an Android serial", async () => {
+  const android = createAndroidClientFor("emulator-5554");
+  const stray = IOSCtrlProxyClient.createForTesting(
+    { deviceId: "emulator-5554", platform: "ios", name: "fake" },
+    8765,
+    () => new FakeOpenSocket(),
+    new FakeTimer(),
+  );
+  const androidExisting = spyOn(AndroidCtrlProxyClient, "getExistingInstance").mockReturnValue(
+    android,
+  );
+  const iosExisting = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue(stray);
+  const androidSync = spyOn(android, "syncNetworkStateToDevice").mockReturnValue(false);
+  const iosSync = spyOn(stray, "syncNetworkStateFromHost").mockResolvedValue(undefined);
+  try {
+    await expect(defaultNetworkDeviceStatePusher.push("emulator-5554")).rejects.toThrow(
+      "Android network state was not delivered to emulator-5554",
+    );
+    expect(androidSync).toHaveBeenCalledTimes(1);
+  } finally {
+    androidExisting.mockRestore();
+    iosExisting.mockRestore();
+    androidSync.mockRestore();
+    iosSync.mockRestore();
+  }
+});
+
+test("default pusher never falls back to an Android client for an iOS UDID", async () => {
+  const stray = createAndroidClientFor(IOS_UDID);
+  const android = spyOn(AndroidCtrlProxyClient, "getExistingInstance").mockReturnValue(stray);
+  const ios = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue(null);
+  const androidSync = spyOn(stray, "syncNetworkStateToDevice").mockReturnValue(true);
+  try {
+    await expect(defaultNetworkDeviceStatePusher.push(IOS_UDID)).rejects.toThrow(
+      `No live CtrlProxy client to clear network state on ${IOS_UDID}`,
+    );
+    expect(androidSync).not.toHaveBeenCalled();
+  } finally {
+    android.mockRestore();
+    ios.mockRestore();
+    androidSync.mockRestore();
+  }
 });
 
 test("default pusher rejects when neither platform has a live client", async () => {

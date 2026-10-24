@@ -10,6 +10,8 @@ import type {
 import { nodeAttributes } from "../../../src/models/ViewHierarchyResult";
 import compactCapture from "../../fixtures/ios-safari-url-field/hierarchy-compact.json";
 import editingCapture from "../../fixtures/ios-safari-url-field/hierarchy-editing.json";
+import typedCapture from "../../fixtures/ios-safari-url-field/runner-typed-keyboard-up.json";
+import { observationFromRunnerCapture } from "../../helpers/iosSafariRunnerCapture";
 import { buildObserveResult, viewHierarchyFromFixture } from "../../helpers/observeFixture";
 
 function verifier(platform: BootedDevice["platform"] = "ios"): FocusVerifier {
@@ -64,40 +66,27 @@ describe("FocusVerifier Safari expanded URL field", () => {
     compact = observation(compactHierarchy);
     editing = observation(viewHierarchyFromFixture(editingCapture));
 
-    // Clone captures only during setup; each timed test just projects and verifies its capture.
+    // The settled frame is a real runner capture (round 4 of #15175): the URL editor sits above
+    // the on-screen keyboard. Clone it only during setup; each timed test just verifies a capture.
+    const settledHierarchy = observationFromRunnerCapture(typedCapture).viewHierarchy!;
     function variant(
       change: (
         hierarchy: ViewHierarchyResult,
         source: NonNullable<ViewHierarchyResult["hierarchy"]["node"]>,
       ) => void,
     ): ObserveResult {
-      const hierarchy = structuredClone(viewHierarchyFromFixture(editingCapture));
+      const hierarchy = structuredClone(settledHierarchy);
       const url = projection
         .project(hierarchy)
         .find((node) => node.className === "UITextField" && node.nativeId === "URL");
       if (!url) {
-        throw new Error("Captured editing URL field missing");
+        throw new Error("Captured settled URL field missing");
       }
       change(hierarchy, url.source);
       return observation(hierarchy);
     }
 
-    // Round-3 settled frames: ~/.claude/orchestrate/kaeawc__auto-mobile/verify/
-    // int-r3/evidence/ios-r3/A-loop1.txt and batch/sessions/i1/out skeletons.
-    function settle(
-      hierarchy: ViewHierarchyResult,
-      source: NonNullable<ViewHierarchyResult["hierarchy"]["node"]>,
-    ) {
-      source.bounds = { left: 20, top: 517, right: 294, bottom: 565 };
-      const keyboard = projection
-        .project(hierarchy)
-        .find((node) => node.className === "UIKeyboard");
-      if (!keyboard) {
-        throw new Error("Captured keyboard missing");
-      }
-      keyboard.source.bounds = { left: 4, top: 597, right: 399, bottom: 813 };
-    }
-    settled = variant(settle);
+    settled = variant(() => {});
     const url = projection
       .project(settled.viewHierarchy!)
       .find((node) => node.nativeId === "URL")?.element;
@@ -115,9 +104,14 @@ describe("FocusVerifier Safari expanded URL field", () => {
       throw new Error("Captured editing URL or keyboard missing");
     }
     editingTarget = editingUrl;
+    const settledKeyboard = projection
+      .project(settledHierarchy)
+      .find((node) => node.className === "UIKeyboard");
+    if (!settledKeyboard) {
+      throw new Error("Captured settled keyboard missing");
+    }
     const compactWithKeyboardHierarchy = structuredClone(compactHierarchy);
-    const keyboard = structuredClone(capturedKeyboard.source);
-    keyboard.bounds = { left: 4, top: 597, right: 399, bottom: 813 };
+    const keyboard = structuredClone(settledKeyboard.source);
     const compactContainer = projection
       .project(compactWithKeyboardHierarchy)
       .find((node) => Array.isArray(node.source.node));
@@ -126,27 +120,24 @@ describe("FocusVerifier Safari expanded URL field", () => {
     }
     compactContainer.source.node.push(keyboard);
     compactWithKeyboard = observation(compactWithKeyboardHierarchy);
-    offscreenKeyboard = variant((hierarchy, source) => {
-      settle(hierarchy, source);
-      const settledKeyboard = projection
+    offscreenKeyboard = variant((hierarchy) => {
+      const keyboardNode = projection
         .project(hierarchy)
         .find((node) => node.className === "UIKeyboard");
-      if (!settledKeyboard) {
+      if (!keyboardNode) {
         throw new Error("Settled keyboard missing");
       }
       // Restore the captured off-screen preview bounds, retaining the settled editor.
-      delete settledKeyboard.source.bounds;
-      nodeAttributes(settledKeyboard.source).bounds = structuredClone(
+      delete keyboardNode.source.bounds;
+      nodeAttributes(keyboardNode.source).bounds = structuredClone(
         nodeAttributes(capturedKeyboard.source).bounds,
       );
     });
-    overlappingEditor = variant((hierarchy, source) => {
-      settle(hierarchy, source);
+    overlappingEditor = variant((_hierarchy, source) => {
       // The captured mid-animation URL frame overlaps the settled keyboard.
       source.bounds = { ...editingTarget.bounds };
     });
-    noKeyboard = variant((hierarchy, source) => {
-      settle(hierarchy, source);
+    noKeyboard = variant((hierarchy) => {
       const keyboard = projection
         .project(hierarchy)
         .find((node) => node.className === "UIKeyboard");
@@ -178,16 +169,13 @@ describe("FocusVerifier Safari expanded URL field", () => {
       hierarchy.hierarchy.node?.node?.push(web.source);
       return web.source;
     }
-    secondNativeField = variant((hierarchy, source) => {
-      settle(hierarchy, source);
+    secondNativeField = variant((hierarchy) => {
       delete nodeAttributes(promoteWebInput(hierarchy)).focused;
     });
-    conflictingLabel = variant((hierarchy, source) => {
-      settle(hierarchy, source);
+    conflictingLabel = variant((_hierarchy, source) => {
       nodeAttributes(source).text = "Google Search";
     });
-    otherNativeFocused = variant((hierarchy, source) => {
-      settle(hierarchy, source);
+    otherNativeFocused = variant((hierarchy) => {
       promoteWebInput(hierarchy);
     });
   });

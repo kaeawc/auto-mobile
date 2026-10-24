@@ -184,6 +184,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       removeHealthPollDeadline: (...args) => this.readiness.removeHealthPollDeadline(...args),
     });
     this.readiness = new IosCtrlProxyReadiness(this.state, {
+      quarantineServicePort: (port) => PortManager.quarantine(port),
       isSimulator: () => this.isSimulator(),
       checkHealthEndpointOnPortForDevice: (...args) =>
         this.health.checkHealthEndpointOnPortForDevice(...args),

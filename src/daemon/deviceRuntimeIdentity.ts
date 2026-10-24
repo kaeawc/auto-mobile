@@ -136,7 +136,7 @@ export class DeviceRuntimeIdentity {
     source: string,
     options: DiscoveryReconcileOptions = {},
   ): Promise<void> {
-    for (const device of devices) {
+    for (const device of devices.filter((observed) => observed.foreignOwned !== true)) {
       // A caller that settled its deadline/abort can no longer safely apply a
       // stale snapshot to pooled entries an unrelated acquisition may have bound
       // while this loop was draining (#6955 review).

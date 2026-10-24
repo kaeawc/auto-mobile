@@ -13,6 +13,7 @@ import type { RunnerReadinessRequest } from "../../../src/ctrlProxy/RunnerReadin
 import {
   ObservationReadServiceStart,
   IOS_SERVICE_START_FLIGHT_CEILING_MS,
+  IOS_SERVICE_START_QUEUE_CEILING_MS,
   daemonObservationServiceOwnershipGuard,
 } from "../../../src/features/observe/ObservationReadServiceStart";
 import {
@@ -533,10 +534,11 @@ test.each([false, true])(
     expect(error.message).toContain("queue position 2");
     // A reader whose deadline outlasts the ceiling receives its abort snapshot,
     // even if abort synchronously clears the live queue.
-    const ceiling = h.starter.start({ device: h.device, deadlineMs: 70_000 });
+    const ceiling = h.starter.start({ device: h.device, deadlineMs: 400_000 });
     const ceilingFailure = ceiling.catch((error: unknown) => error);
     await drainMicrotasks(40);
-    h.timer.advanceTime(59_900);
+    // The launch is queued, so the flight is bounded by the queue ceiling (#15227).
+    h.timer.advanceTime(IOS_SERVICE_START_QUEUE_CEILING_MS - 100);
     const ceilingError = await ceilingFailure;
     expect(ceilingError).toBeInstanceOf(RunnerLaunchQueuedError);
     if (!(ceilingError instanceof RunnerLaunchQueuedError)) {
@@ -657,7 +659,8 @@ test.each([false, true])(
       expect(result.freshness?.unavailableDetail).toContain("still starting in the background");
     }
     expect(observeToolResultSchema.safeParse(result).success).toBe(true);
-    h.timer.advanceTime(60_000);
+    // Flush the hung flight: a queued launch is bounded by the queue ceiling (#15227).
+    h.timer.advanceTime(queued ? IOS_SERVICE_START_QUEUE_CEILING_MS : 60_000);
     await drainMicrotasks(40);
   },
 );
@@ -967,4 +970,179 @@ test("a device becoming busy at the readiness re-check declines without waiting 
   } finally {
     wait.mockRestore();
   }
+});
+
+// #15227: the runner launch waits in the launch gate (#15103). The flight's launch window starts at
+// gate admission, so a launch admitted after 55-57 s in the queue is not cancelled seconds later.
+async function coldFlightWithQueuedLaunch(h: Awaited<ReturnType<typeof harness>>) {
+  const setup = Promise.withResolvers<void>();
+  let signal: AbortSignal | undefined;
+  h.setSetup(async (request) => {
+    signal = request.signal;
+    await setup.promise;
+  });
+  const startedAt = h.timer.now();
+  const first = h.starter
+    .start({ device: h.device, deadlineMs: startedAt + 15_000 })
+    .catch((error: unknown) => error);
+  await drainUntil(() => h.admitted() === 1, { description: "cold start" });
+  h.timer.advanceTime(2_000);
+  h.launchQueue.queued.set(h.device.deviceId, queuedStatus);
+  h.launchQueue.emitQueued(h.device.deviceId);
+  h.timer.advanceTime(13_000);
+  // The first reader gives up at its own 15 s budget; the queued launch keeps running.
+  const firstError = await first;
+  expect(firstError).toBeInstanceOf(RunnerLaunchQueuedError);
+  return { setup, startedAt, isAborted: () => signal?.aborted ?? false };
+}
+
+test.each([55_000, 57_000])(
+  "iOS launch admitted %d ms into the flight keeps a full launch window",
+  async (admittedAtMs) => {
+    const h = await harness("ios");
+    const flight = await coldFlightWithQueuedLaunch(h);
+    h.timer.advanceTime(flight.startedAt + admittedAtMs - h.timer.now());
+    // Still queued past the old 60 s ceiling's neighbourhood: nothing was cancelled.
+    expect(flight.isAborted()).toBe(false);
+    h.launchQueue.queued.clear();
+    h.launchQueue.emitAdmitted(h.device.deviceId);
+    // The old ceiling lands 3-5 s after admission; the launch window now runs 60 s from admission.
+    h.timer.advanceTime(IOS_SERVICE_START_FLIGHT_CEILING_MS - admittedAtMs + 2_000);
+    expect(flight.isAborted()).toBe(false);
+    const joined = h.starter.start({ device: h.device, deadlineMs: h.timer.now() + 15_000 });
+    await drainMicrotasks(20);
+    flight.setup.resolve();
+    expect(await joined).toBe(true);
+    expect(h.calls()).toBe(1);
+    expect(h.launchQueue.observerCount(h.device.deviceId)).toBe(0);
+  },
+);
+
+test("iOS launch window ends 60 s after admission and reports a pending start", async () => {
+  const h = await harness("ios");
+  const flight = await coldFlightWithQueuedLaunch(h);
+  h.timer.advanceTime(flight.startedAt + 55_000 - h.timer.now());
+  h.launchQueue.queued.clear();
+  h.launchQueue.emitAdmitted(h.device.deviceId);
+  const joined = h.starter
+    .start({ device: h.device, deadlineMs: h.timer.now() + 120_000 })
+    .catch((error: unknown) => error);
+  await drainMicrotasks(20);
+  h.timer.advanceTime(IOS_SERVICE_START_FLIGHT_CEILING_MS - 1);
+  expect(flight.isAborted()).toBe(false);
+  h.timer.advanceTime(1);
+  const error = await joined;
+  expect(flight.isAborted()).toBe(true);
+  expect(error).toBeInstanceOf(RunnerLaunchQueuedError);
+  expect(String((error as RunnerLaunchQueuedError).cause)).toContain(
+    "Observer hierarchy service start timed out",
+  );
+  expect(h.launchQueue.observerCount(h.device.deviceId)).toBe(0);
+});
+
+test("iOS launch that stays queued is cancelled at the queue ceiling with its queue position", async () => {
+  const h = await harness("ios");
+  const flight = await coldFlightWithQueuedLaunch(h);
+  const joined = h.starter
+    .start({ device: h.device, deadlineMs: h.timer.now() + 400_000 })
+    .catch((error: unknown) => error);
+  await drainMicrotasks(20);
+  // Queued at +2 s; the old 60 s ceiling no longer cancels it.
+  h.timer.advanceTime(
+    flight.startedAt + 2_000 + IOS_SERVICE_START_QUEUE_CEILING_MS - 1 - h.timer.now(),
+  );
+  expect(flight.isAborted()).toBe(false);
+  h.timer.advanceTime(1);
+  const error = await joined;
+  expect(flight.isAborted()).toBe(true);
+  expect(error).toBeInstanceOf(RunnerLaunchQueuedError);
+  expect((error as RunnerLaunchQueuedError).status).toEqual(queuedStatus);
+});
+
+test("iOS flight total is capped when a launch re-queues after admission", async () => {
+  const h = await harness("ios");
+  const flight = await coldFlightWithQueuedLaunch(h);
+  h.timer.advanceTime(flight.startedAt + 100_000 - h.timer.now());
+  h.launchQueue.emitAdmitted(h.device.deviceId);
+  h.timer.advanceTime(50_000);
+  h.launchQueue.emitQueued(h.device.deviceId);
+  const joined = h.starter
+    .start({ device: h.device, deadlineMs: h.timer.now() + 900_000 })
+    .catch((error: unknown) => error);
+  await drainMicrotasks(20);
+  const hardCap =
+    flight.startedAt + IOS_SERVICE_START_QUEUE_CEILING_MS + IOS_SERVICE_START_FLIGHT_CEILING_MS;
+  h.timer.advanceTime(hardCap - 1 - h.timer.now());
+  expect(flight.isAborted()).toBe(false);
+  h.timer.advanceTime(1);
+  expect(await joined).toBeInstanceOf(RunnerLaunchQueuedError);
+  expect(flight.isAborted()).toBe(true);
+});
+
+test("a flight that never queued keeps the plain 60 s ceiling and stops watching the queue", async () => {
+  const h = await harness("ios");
+  const failure = await joinReaderUntilCeiling(h);
+  expect(failure).toBeInstanceOf(RunnerLaunchQueuedError);
+  expect(h.launchQueue.observerCount(h.device.deviceId)).toBe(0);
+});
+
+test("a flight that completes stops watching the launch queue", async () => {
+  const h = await harness("ios");
+  expect(await h.starter.start({ device: h.device, deadlineMs: h.timer.now() + 15_000 })).toBe(
+    true,
+  );
+  expect(h.launchQueue.observerCount(h.device.deviceId)).toBe(0);
+});
+
+test("Android start never watches the launch queue", async () => {
+  const h = await harness("android");
+  const watch = spyOn(h.launchQueue, "watchQueue");
+  expect(await h.starter.start({ device: h.device, deadlineMs: h.timer.now() + 15_000 })).toBe(
+    true,
+  );
+  expect(watch).not.toHaveBeenCalled();
+  watch.mockRestore();
+});
+
+test("iOS launch already queued by another start path extends the flight when it joins", async () => {
+  const h = await harness("ios");
+  h.launchQueue.queued.set(h.device.deviceId, queuedStatus);
+  const setup = Promise.withResolvers<void>();
+  let signal: AbortSignal | undefined;
+  h.setSetup(async (request) => {
+    signal = request.signal;
+    await setup.promise;
+  });
+  const first = h.starter
+    .start({ device: h.device, deadlineMs: h.timer.now() + 15_000 })
+    .catch((error: unknown) => error);
+  await drainUntil(() => h.admitted() === 1, { description: "cold start" });
+  h.timer.advanceTime(IOS_SERVICE_START_FLIGHT_CEILING_MS + 5_000);
+  expect(await first).toBeInstanceOf(RunnerLaunchQueuedError);
+  expect(signal?.aborted).toBe(false);
+  h.launchQueue.queued.clear();
+  h.launchQueue.emitAdmitted(h.device.deviceId);
+  h.timer.advanceTime(IOS_SERVICE_START_FLIGHT_CEILING_MS - 1);
+  expect(signal?.aborted).toBe(false);
+  const joined = h.starter.start({ device: h.device, deadlineMs: h.timer.now() + 15_000 });
+  await drainMicrotasks(20);
+  setup.resolve();
+  expect(await joined).toBe(true);
+});
+
+test("iOS queue entry that is cancelled restarts the launch window instead of waiting out the queue ceiling", async () => {
+  const h = await harness("ios");
+  const flight = await coldFlightWithQueuedLaunch(h);
+  const joined = h.starter
+    .start({ device: h.device, deadlineMs: h.timer.now() + 400_000 })
+    .catch((error: unknown) => error);
+  await drainMicrotasks(20);
+  h.timer.advanceTime(20_000);
+  h.launchQueue.queued.clear();
+  h.launchQueue.emitLeft(h.device.deviceId);
+  h.timer.advanceTime(IOS_SERVICE_START_FLIGHT_CEILING_MS - 1);
+  expect(flight.isAborted()).toBe(false);
+  h.timer.advanceTime(1);
+  expect(await joined).toBeInstanceOf(RunnerLaunchQueuedError);
+  expect(flight.isAborted()).toBe(true);
 });

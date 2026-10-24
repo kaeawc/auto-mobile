@@ -98,3 +98,70 @@ test("queue status tracks waiting owners, grants and aborts", async () => {
   (await fifth).release();
   expect(gate.queueStatus("fifth")).toBeUndefined();
 });
+
+test("queue observers see queued and admitted only for a launch that waited", async () => {
+  const gate = new DefaultIosRunnerLaunchGate(1);
+  const events: string[] = [];
+  const watch = (owner: string) =>
+    gate.watchQueue(owner, {
+      queued: () => events.push(`${owner}:queued`),
+      admitted: () => events.push(`${owner}:admitted`),
+      left: () => events.push(`${owner}:left`),
+    });
+  const stopImmediate = watch("immediate");
+  const held = await gate.acquire(undefined, "immediate");
+  expect(events).toEqual([]);
+  stopImmediate();
+  const stopWaiter = watch("waiter");
+  watch("bystander");
+  const waiting = gate.acquire(undefined, "waiter");
+  expect(events).toEqual(["waiter:queued"]);
+  held.release();
+  expect(events).toEqual(["waiter:queued", "waiter:admitted"]);
+  stopWaiter();
+  (await waiting).release();
+  expect(events).toEqual(["waiter:queued", "waiter:admitted"]);
+});
+
+test("a queued launch that aborts is reported as left, never admitted and unsubscribing is idempotent", async () => {
+  const gate = new DefaultIosRunnerLaunchGate(1);
+  const events: string[] = [];
+  const stop = gate.watchQueue("owner", {
+    queued: () => events.push("queued"),
+    admitted: () => events.push("admitted"),
+    left: () => events.push("left"),
+  });
+  const held = await gate.acquire();
+  const controller = new AbortController();
+  const aborted = gate.acquire(controller.signal, "owner").then(
+    () => undefined,
+    (error: unknown) => error,
+  );
+  controller.abort(new Error("cancelled"));
+  expect(await aborted).toEqual(new Error("cancelled"));
+  held.release();
+  expect(events).toEqual(["queued", "left"]);
+  stop();
+  stop();
+  const next = gate.acquire();
+  const waiting = gate.acquire(undefined, "owner");
+  (await next).release();
+  (await waiting).release();
+  expect(events).toEqual(["queued", "left"]);
+});
+
+test("a throwing queue observer cannot stall the hand-off to the next launch", async () => {
+  const gate = new DefaultIosRunnerLaunchGate(1);
+  gate.watchQueue("owner", {
+    queued: () => {},
+    admitted: () => {
+      throw new Error("observer failed");
+    },
+    left: () => {},
+  });
+  const held = await gate.acquire();
+  const waiting = gate.acquire(undefined, "owner");
+  held.release();
+  (await waiting).release();
+  expect((await gate.acquire()).release).toBeFunction();
+});

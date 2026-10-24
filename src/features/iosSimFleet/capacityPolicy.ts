@@ -2,7 +2,8 @@ import {
   estimatePerDeviceBytes,
   estimateSettledPerDeviceBytes,
   IOS_SIMULATOR_MEMORY_POLICY,
-  resolveBootCapacityLimits,
+  MEMORY_BUDGET_FRACTION,
+  parseOverride,
   type CapacityLimits,
   type InFlightBootMemory,
 } from "../bootAdmission/capacityLimits";
@@ -14,9 +15,34 @@ export type { CapacityLimits } from "../bootAdmission/capacityLimits";
 /** Env override: positive integer cap on concurrently booted simulators. */
 export const IOS_SIM_MAX_BOOTED_ENV = ENV.IOS_SIM_MAX_BOOTED.name;
 
+/** Settled Apple processes (0.04 core) plus AutoMobile (0.015 core), measured in #15097. */
+export const SETTLED_CPU_CORES_PER_SIMULATOR = 0.04 + 0.015;
+/** Leave half the cores for the app under test, IDE and runners. */
+export const CPU_BUDGET_FRACTION = 0.5;
+/** First-boot bursts consume about 13 cores for 50–130 seconds (#15097). */
+export const BOOT_BURST_CORES = 13;
+/**
+ * Derived boot concurrency never drops below 2 on a readable host: CPU-seconds are conserved, so
+ * serializing boots cannot beat two overlapping ones by much, but a queue of one makes the third
+ * concurrent caller wait out two full bursts and risk its outer deadline. Matches the runner
+ * launch gate's default (#15103).
+ */
+export const MIN_DERIVED_BOOT_CONCURRENCY = 2;
+export const IOS_SIM_BOOT_CONCURRENCY_ENV = ENV.IOS_SIM_BOOT_CONCURRENCY.name;
+
+export interface IosCapacityLimits extends CapacityLimits {
+  bootConcurrency: number;
+  bootConcurrencySource: "env" | "derived";
+  bootConcurrencyWarning?: string;
+}
+
 const HIGH_LOAD_PER_CORE = 1.5;
 
-/** Settled simulator memory, charging active admissions and external Booting devices conservatively. */
+/**
+ * Whole simulator-tree RSS includes the CtrlProxy runner app; no extra runner charge.
+ * Average measured settled RSS is clamped to 1.5–6 GiB, falling back to 3 GiB.
+ * Settled simulator memory, charging active admissions and external Booting devices conservatively.
+ */
 export function estimatePerSimulatorBytes(
   report?: FleetCostReport,
   inFlight: readonly InFlightBootMemory[] = [],
@@ -59,14 +85,56 @@ export function estimatePerSimulatorBytes(
 
 /**
  * Max concurrently booted simulators: the smaller of the memory budget and the
- * core budget (at least 1), unless the env override supplies a positive integer.
+ * settled-CPU budget (at least 1), unless the env override supplies a positive integer.
  */
 export function resolveCapacityLimits(
   env: NodeJS.ProcessEnv,
   resources: Pick<HostResources, "totalMemoryBytes" | "cpuCount">,
   perSimulatorBytes: number = IOS_SIMULATOR_MEMORY_POLICY.defaultBytes,
-): CapacityLimits {
-  return resolveBootCapacityLimits(env, IOS_SIM_MAX_BOOTED_ENV, resources, perSimulatorBytes);
+): IosCapacityLimits {
+  const raw = env[IOS_SIM_MAX_BOOTED_ENV];
+  const override = parseOverride(raw);
+  const byMemory = Math.floor(
+    (resources.totalMemoryBytes * MEMORY_BUDGET_FRACTION) / perSimulatorBytes,
+  );
+  const bySettledCpu = Math.floor(
+    (resources.cpuCount * CPU_BUDGET_FRACTION) / SETTLED_CPU_CORES_PER_SIMULATOR,
+  );
+  const bootRaw = env[IOS_SIM_BOOT_CONCURRENCY_ENV];
+  const parsedBootOverride = parseOverride(bootRaw);
+  const bootOverride = Number.isSafeInteger(parsedBootOverride) ? parsedBootOverride : undefined;
+  const warning = unusableOverrideWarning(IOS_SIM_MAX_BOOTED_ENV, raw, override);
+  const bootConcurrencyWarning = unusableOverrideWarning(
+    IOS_SIM_BOOT_CONCURRENCY_ENV,
+    bootRaw,
+    bootOverride,
+  );
+  return {
+    maxBooted: override ?? Math.max(1, Math.min(byMemory, bySettledCpu)),
+    source: override === undefined ? "derived" : "env",
+    ...(warning ? { warning } : {}),
+    bootConcurrency: bootOverride ?? deriveBootConcurrency(resources.cpuCount),
+    bootConcurrencySource: bootOverride === undefined ? "derived" : "env",
+    ...(bootConcurrencyWarning ? { bootConcurrencyWarning } : {}),
+  };
+}
+
+/** Unreadable host (no cores reported) boots one at a time; otherwise `ceil(cores / 13)`, at least 2. */
+function deriveBootConcurrency(cpuCount: number): number {
+  return cpuCount > 0
+    ? Math.max(MIN_DERIVED_BOOT_CONCURRENCY, Math.ceil(cpuCount / BOOT_BURST_CORES))
+    : 1;
+}
+
+/** Shared warning wording for the two independent iOS overrides. */
+function unusableOverrideWarning(
+  name: string,
+  raw: string | undefined,
+  value: number | undefined,
+): string | undefined {
+  return value === undefined && raw?.trim()
+    ? `${name}=${JSON.stringify(raw)} is not a positive integer; using the derived limit`
+    : undefined;
 }
 
 /** True for one sample that shows the host is under memory or CPU pressure. */

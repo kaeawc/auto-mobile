@@ -23,7 +23,7 @@ export abstract class IosCtrlProxyDiagnosticsFacade extends DeviceServiceClient 
    * dials: its promises, timers, budgets and handshake cache belong to the probe.
    * Never close, reconnect, or update any state on the resident client.
    */
-  private async readForDiagnostics<T>(
+  protected async readForDiagnostics<T>(
     read: (client: IosCtrlProxyDiagnosticsFacade) => Promise<T>,
     unavailable: T,
     signal?: AbortSignal,

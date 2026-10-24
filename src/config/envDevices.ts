@@ -42,6 +42,13 @@ export const DEVICES_ENV = {
     min: 1,
     doc: "Positive integer cap on concurrently booted Android emulators.",
   },
+  IOS_SIM_BOOT_CONCURRENCY: {
+    name: "AUTOMOBILE_IOS_SIM_BOOT_CONCURRENCY",
+    kind: "int",
+    default: "see docs",
+    min: 1,
+    doc: "Concurrent iOS simulator boot bursts; positive integer, otherwise derived from host cores.",
+  },
   IOS_SIM_MAX_BOOTED: {
     name: "AUTOMOBILE_IOS_SIM_MAX_BOOTED",
     kind: "int",
@@ -153,6 +160,18 @@ export const DEVICES_ENV = {
     kind: "string",
     default: "on",
     doc: "Boot admission gate for every platform; exact 0 disables.",
+  },
+  IOS_TEMPLATE_CLONE: {
+    name: "AUTOMOBILE_IOS_TEMPLATE_CLONE",
+    kind: "string",
+    default: "false",
+    doc: "Provision iOS simulators from settled templates: 1/true enables; 0/false disables.",
+  },
+  IOS_PREBOOT_LEAN_PROFILE: {
+    name: "AUTOMOBILE_IOS_PREBOOT_LEAN_PROFILE",
+    kind: "string",
+    default: "none",
+    doc: "Pre-boot iOS simulator lean profile: none, minimal, or catalog-cpu; unknown values use none.",
   },
   IOS_SIM_CAPACITY_GATE: {
     name: "AUTOMOBILE_IOS_SIM_CAPACITY_GATE",

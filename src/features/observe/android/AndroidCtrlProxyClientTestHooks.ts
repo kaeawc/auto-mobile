@@ -9,6 +9,26 @@ import type { CtrlProxyPackages } from "./CtrlProxyPackages";
 import type { CtrlProxyPrototypes } from "./CtrlProxyPrototypes";
 import type { CtrlProxyHighlights } from "./CtrlProxyHighlights";
 import type { CachedHierarchy } from "./types";
+import type { AndroidInboundMessageRouter } from "./AndroidInboundMessageRouter";
+import type { DelegateContext } from "../shared/types";
+
+/** Constructor-injected collaborators and flags a test may read back to prove wiring. */
+export type AndroidCtrlProxyInjectedState = Readonly<
+  Record<
+    | "ctrlProxyForwardLease"
+    | "forwardClientProbe"
+    | "loggerInstance"
+    | "transientObserver"
+    | "timer"
+    | "webSocketFactory"
+    | "certificateFileSystem"
+    | "serviceManagerFactory"
+    | "idGenerator"
+    | "screenshotBackoffScheduler"
+    | "portAllocationId",
+    unknown
+  >
+>;
 
 /**
  * The one typed view of `AndroidCtrlProxyClient` internals that unit tests need
@@ -27,7 +47,12 @@ export interface AndroidCtrlProxyClientTestHooks {
   prototypes(): CtrlProxyPrototypes;
   highlights(): CtrlProxyHighlights;
   /** Own-property handler table keyed by wire message type. */
-  webSocketMessageHandlers(): object;
+  webSocketMessageHandlers(): AndroidInboundMessageRouter["webSocketMessageHandlers"];
+  createDelegateContext(): DelegateContext;
+  injected(): AndroidCtrlProxyInjectedState;
+  isCommandSupported(messageType: string): boolean;
+  /** The memoised gestures delegate; assign a prebuilt one to drive it with a custom context. */
+  installedGestures: CtrlProxyGestures | null;
   cachedHierarchy(): CachedHierarchy | null;
   handleWebSocketMessage(data: string): Promise<void>;
   getWebSocketUrl(): string;

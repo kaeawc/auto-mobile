@@ -94,6 +94,13 @@ export function prototypeDataPlaceholders(text: string): string[] {
   return Array.from(dataPlaceholderSpans(text), ({ pointer }) => pointer);
 }
 
+/** Spans of every `{data:/pointer}` and `{platform:/pointer}` placeholder, found by the same scan. */
+export function prototypeBindingSpans(text: string): { start: number; end: number }[] {
+  return [...dataPlaceholderSpans(text), ...dataPlaceholderSpans(text, "platform:")]
+    .map(({ start, end }) => ({ start, end }))
+    .sort((a, b) => a.start - b.start);
+}
+
 /** `{platform:/pointer}` placeholders (#14294), scanned exactly as `{data:/pointer}` ones. */
 export function prototypePlatformPlaceholders(text: string): string[] {
   return Array.from(dataPlaceholderSpans(text, "platform:"), ({ pointer }) => pointer);

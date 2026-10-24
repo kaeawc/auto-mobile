@@ -29,6 +29,11 @@ export interface PlistReader {
 }
 
 export interface PlistWriter {
+  writeBinaryFromJson(
+    path: string,
+    value: Record<string, unknown>,
+    options?: PlistReadOptions,
+  ): Promise<void>;
   writeXmlFromJson(path: string, value: Record<string, unknown>): Promise<void>;
 }
 
@@ -121,6 +126,18 @@ export class PlistClient implements PlistReader, PlistWriter {
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.maxOutputBytes = options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
     this.timer = options.timer ?? defaultTimer;
+  }
+
+  async writeBinaryFromJson(
+    path: string,
+    value: Record<string, unknown>,
+    options?: PlistReadOptions,
+  ): Promise<void> {
+    await this.run(
+      ["-convert", "binary1", "-o", path, "--", "-"],
+      Buffer.from(JSON.stringify(value), "utf8"),
+      options,
+    );
   }
 
   async writeXmlFromJson(path: string, value: Record<string, unknown>): Promise<void> {

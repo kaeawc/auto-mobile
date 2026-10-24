@@ -1,6 +1,7 @@
 import { ActionableError, toActionableError } from "../models";
 import { isAndroidFrameworkUnavailable } from "../utils/android-cmdline-tools/isAndroidFrameworkUnavailable";
 import { runWithAbortSignal } from "../utils/AbortContext";
+import type { AdjustableDeadline } from "../utils/AdjustableDeadline";
 import { trackAmbient } from "../utils/PerfContext";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { runPhaseWithSettlement } from "../utils/runPhaseWithSettlement";
@@ -53,7 +54,7 @@ export class ReadinessPhaseRunner {
     let operationFailure: unknown;
     let callerTimedOut = false;
     const recordCallerAbort = () => {
-      callerTimedOut = this.timer.now() >= context.totalDeadlineMs;
+      callerTimedOut = this.timer.now() >= this.totalDeadlineMs(context);
     };
     context.signal?.addEventListener("abort", recordCallerAbort, { once: true });
     if (context.signal?.aborted) {
@@ -98,6 +99,7 @@ export class ReadinessPhaseRunner {
         {
           timer: this.timer,
           timeoutMs: remainingMs,
+          deadline: ReadinessPhaseRunner.movableDeadline(context, phase, operationDeadlineMs),
           signal: context.signal,
           graceMs: ABORT_SETTLEMENT_GRACE_MS,
           label: `Runner readiness ${phase}`,
@@ -178,13 +180,29 @@ export class ReadinessPhaseRunner {
     return phase === "runner-setup" || phase === "package-compatibility";
   }
 
+  /** Only a setup phase bounded by the movable total deadline itself follows its moves. */
+  private static movableDeadline(
+    context: ReadinessAttemptContext,
+    phase: RunnerReadinessPhase,
+    operationDeadlineMs: number | undefined,
+  ): AdjustableDeadline | undefined {
+    return operationDeadlineMs === undefined && ReadinessPhaseRunner.isSetupPhase(phase)
+      ? context.deadline
+      : undefined;
+  }
+
+  /** The request's total deadline, following a movable deadline when the caller supplied one. */
+  private totalDeadlineMs(context: ReadinessAttemptContext): number {
+    return context.deadline?.deadlineMs ?? context.totalDeadlineMs;
+  }
+
   private phaseDeadlineMs(context: ReadinessAttemptContext, phase: RunnerReadinessPhase): number {
     if (ReadinessPhaseRunner.isSetupPhase(phase)) {
-      return context.totalDeadlineMs;
+      return this.totalDeadlineMs(context);
     }
     // Before the health window opens (fast-path probes run before setup), fall
     // back to the total deadline; those probes self-bound via `probeTimeout`.
-    return context.healthDeadlineMs ?? context.totalDeadlineMs;
+    return context.healthDeadlineMs ?? this.totalDeadlineMs(context);
   }
 
   remainingForPhase(context: ReadinessAttemptContext, phase: RunnerReadinessPhase): number {
@@ -201,7 +219,7 @@ export class ReadinessPhaseRunner {
       return;
     }
     context.healthDeadlineMs = Math.min(
-      context.totalDeadlineMs,
+      this.totalDeadlineMs(context),
       this.timer.now() + context.readinessTimeoutMs,
     );
   }

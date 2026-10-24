@@ -944,3 +944,44 @@ describe("DefaultDeviceProvisioner", () => {
     },
   );
 });
+
+it.each(["none", "minimal"] as const)(
+  "applies only the default %s preboot profile after iOS creation",
+  async (selectedProfile) => {
+    const { SimulatorPrebootProfile, resolvePrebootLabels } =
+      await import("../../src/utils/ios-cmdline-tools/SimulatorPrebootProfile");
+    const { FakeSimulatorHostState } = await import("../fakes/FakeSimulatorHostState");
+    const udid = "12345678-1234-ABCD-9876-123456789ABC";
+    const host = new FakeSimulatorHostState();
+    const simctl = new FakeIosSimulatorCreator([deviceType("iPhone 17")], "iOS-26", udid);
+    const profile = new SimulatorPrebootProfile(host, () => selectedProfile);
+    const calls: string[] = [];
+    const provisioner = new DefaultDeviceProvisioner({
+      iosCreator: () => simctl,
+      androidCreator: () => new FakeAndroidAvdCreator(),
+      idGenerator: new CountingIdGenerator("uuid"),
+      prebootProfile: {
+        apply: async (...args) => {
+          expect(calls).toEqual(["bind"]);
+          expect(simctl.createCalls).toHaveLength(1);
+          expect(args).toEqual([udid, {}, undefined]);
+          calls.push("apply");
+          return profile.apply(...args);
+        },
+      },
+    });
+    await provisioner.provision({ platform: "ios" }, undefined, {
+      reserveBeforeCreate: async () => undefined,
+      bindAfterCreate: async () => {
+        calls.push("bind");
+      },
+    });
+    expect(calls).toEqual(["bind", "apply"]);
+    expect(Object.keys(host.written ?? {}).sort()).toEqual(
+      resolvePrebootLabels({ profile: selectedProfile }),
+    );
+    if (selectedProfile === "none") {
+      expect(host.calls).toEqual([]);
+    }
+  },
+);

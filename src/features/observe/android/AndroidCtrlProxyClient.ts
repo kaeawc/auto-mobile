@@ -533,6 +533,27 @@ export class AndroidCtrlProxyClient
       prototypes: () => client.prototypes,
       highlights: () => client.highlights,
       webSocketMessageHandlers: () => client.webSocketMessageHandlers,
+      createDelegateContext: () => client.createDelegateContext(),
+      isCommandSupported: (messageType) => client.isCommandSupported(messageType),
+      get installedGestures() {
+        return client._gestures;
+      },
+      set installedGestures(value) {
+        client._gestures = value;
+      },
+      injected: () => ({
+        ctrlProxyForwardLease: client.ctrlProxyForwardLease,
+        forwardClientProbe: client.forwardClientProbe,
+        loggerInstance: client.loggerInstance,
+        transientObserver: client.transientObserver,
+        timer: client.timer,
+        webSocketFactory: client.webSocketFactory,
+        certificateFileSystem: client.certificateFileSystem,
+        serviceManagerFactory: client.serviceManagerFactory,
+        idGenerator: client.idGenerator,
+        screenshotBackoffScheduler: client.screenshotBackoffScheduler,
+        portAllocationId: client.portAllocationId,
+      }),
       cachedHierarchy: () => client.cachedHierarchy,
       handleWebSocketMessage: (data) => client.handleWebSocketMessage(data),
       getWebSocketUrl: () => client.getWebSocketUrl(),

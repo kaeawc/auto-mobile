@@ -1,5 +1,8 @@
+import { FleetBootInstrumentation } from "../../../src/features/iosSimFleet/IosBootInstrumentation";
+import { BootConcurrencyGate } from "../../../src/features/iosSimFleet/BootConcurrencyGate";
+import { logger } from "../../../src/utils/logger";
 import { BootCapacityExhaustedError } from "../../../src/models/BootCapacityExhaustedError";
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test, spyOn } from "bun:test";
 import { IosSimCapacityGate } from "../../../src/features/iosSimFleet/CapacityGate";
 import { InMemoryBootDurationHistory } from "../../../src/features/iosSimFleet/BootDurationHistory";
 import { IosSimFleetCostCollector } from "../../../src/features/iosSimFleet/FleetCostCollector";
@@ -48,10 +51,14 @@ class ScriptedSource implements FleetHostSource {
   }
 }
 
-function build(source: ScriptedSource, env: NodeJS.ProcessEnv = ENV) {
+function build(
+  source: ScriptedSource,
+  env: NodeJS.ProcessEnv = ENV,
+  bootGate?: BootConcurrencyGate,
+) {
   const timer = new FakeTimer();
   const collector = new IosSimFleetCostCollector(source, new InMemoryBootDurationHistory(), timer);
-  return { gate: new IosSimCapacityGate(collector, timer, { env }), timer };
+  return { gate: new IosSimCapacityGate(collector, timer, { env, bootGate }), timer };
 }
 
 /** Let queued promise continuations run; no timer involved. */
@@ -297,4 +304,159 @@ test("a non-reset replacement still refuses when other simulators fill the cap",
   await expect(gate.reserveBoot({ replacingDeviceId: A, timeoutMs: 1000 })).rejects.toBeInstanceOf(
     BootCapacityExhaustedError,
   );
+});
+
+const QUEUED_ENV = {
+  AUTOMOBILE_IOS_SIM_MAX_BOOTED: "3",
+  AUTOMOBILE_IOS_SIM_BOOT_CONCURRENCY: "1",
+};
+
+test("boot bursts queue with their ledger slots, log the wait, and release once", async () => {
+  const source = new ScriptedSource();
+  source.immediate = [];
+  const pool = new BootConcurrencyGate();
+  const { gate, timer } = build(source, QUEUED_ENV, pool);
+  const info = spyOn(logger, "info").mockImplementation(() => {});
+  try {
+    const first = await gate.admitBoot(undefined, { bootUdid: A });
+    let settled = false;
+    const second = gate.admitBoot(undefined, { bootUdid: B }).then((result) => {
+      settled = true;
+      return result;
+    });
+    await tick();
+    expect(settled).toBe(false);
+    expect(pool.status()).toEqual({ limit: 1, running: 1, queued: 1 });
+    expect(await gate.describeCapacity()).toMatchObject({ inFlight: 2 });
+    timer.advanceTime(123);
+    first.releaseAdmission?.();
+    first.releaseAdmission?.();
+    const admitted = await second;
+    expect(admitted.decision.outcome).toBe("allow");
+    expect(pool.status().running).toBe(1);
+    expect(info).toHaveBeenCalledWith(
+      "[BootAdmission] iOS simulator boot queued behind 1 running boots (limit 1)",
+    );
+    expect(info).toHaveBeenCalledWith(
+      "[BootAdmission] iOS simulator boot granted after 123ms queued",
+    );
+    admitted.releaseAdmission?.();
+    expect(pool.status().running).toBe(0);
+  } finally {
+    info.mockRestore();
+  }
+});
+
+test("queued abort returns its ledger slot and preserves the abort reason", async () => {
+  const source = new ScriptedSource();
+  source.immediate = [];
+  const pool = new BootConcurrencyGate();
+  const { gate } = build(source, QUEUED_ENV, pool);
+  const first = await gate.admitBoot(undefined, { bootUdid: A });
+  const controller = new AbortController();
+  const second = gate.admitBoot(undefined, { bootUdid: B, signal: controller.signal });
+  await tick();
+  expect((await gate.describeCapacity()).inFlight).toBe(2);
+  const reason = new Error("outer deadline");
+  controller.abort(reason);
+  await expect(second).rejects.toBe(reason);
+  expect((await gate.describeCapacity()).inFlight).toBe(1);
+  expect(pool.status()).toEqual({ limit: 1, running: 1, queued: 0 });
+  first.releaseAdmission?.();
+  expect(pool.status().running).toBe(0);
+});
+
+test.each([false, true])(
+  "reservation takes a boot permit only when consumed; abort=%s",
+  async (abort) => {
+    const source = new ScriptedSource();
+    source.immediate = [];
+    const pool = new BootConcurrencyGate();
+    const { gate } = build(source, QUEUED_ENV, pool);
+    const reserved = await gate.reserveBoot({ timeoutMs: 1000, reason: "reset" });
+    expect(pool.status()).toEqual({ limit: 1, running: 0, queued: 0 });
+    const first = await gate.admitBoot(undefined, { bootUdid: A });
+    const controller = new AbortController();
+    const pending = reserved.run(() =>
+      gate.admitBoot(undefined, { bootUdid: B, signal: controller.signal }),
+    );
+    await tick();
+    expect(pool.status().queued).toBe(1);
+    expect((await gate.describeCapacity()).inFlight).toBe(2);
+    if (abort) {
+      const reason = new Error("cancel reserved boot");
+      controller.abort(reason);
+      await expect(pending).rejects.toBe(reason);
+      expect((await gate.describeCapacity()).inFlight).toBe(1);
+    } else {
+      first.releaseAdmission?.();
+      const result = await pending;
+      expect(result.decision.outcome).toBe("allow");
+      result.releaseAdmission?.();
+      result.releaseAdmission?.();
+    }
+    first.releaseAdmission?.();
+    reserved.release();
+    expect(pool.status()).toEqual({ limit: 1, running: 0, queued: 0 });
+  },
+);
+
+test("count overflow refuses immediately even when a boot permit is busy", async () => {
+  const source = new ScriptedSource();
+  source.immediate = [];
+  const pool = new BootConcurrencyGate();
+  const { gate } = build(source, { ...QUEUED_ENV, AUTOMOBILE_IOS_SIM_MAX_BOOTED: "1" }, pool);
+  const first = await gate.admitBoot(undefined, { bootUdid: A });
+  const second = await gate.admitBoot(undefined, { bootUdid: B });
+  expect(second.decision).toMatchObject({
+    outcome: "refuse",
+    limits: { maxBooted: 1, source: "env" },
+  });
+  if (second.decision.outcome === "refuse") {
+    expect(Object.keys(second.decision.limits)).toEqual(["maxBooted", "source"]);
+  }
+  expect(second.releaseAdmission).toBeUndefined();
+  expect(pool.status().queued).toBe(0);
+  first.releaseAdmission?.();
+});
+
+test("invalid boot concurrency warns once and uses the derived pool limit", async () => {
+  const source = new ScriptedSource();
+  source.immediate = [];
+  const pool = new BootConcurrencyGate();
+  const { gate } = build(source, { AUTOMOBILE_IOS_SIM_BOOT_CONCURRENCY: "bad" }, pool);
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  try {
+    await gate.describeCapacity();
+    await gate.describeCapacity();
+    expect(pool.status().limit).toBe(2);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]?.[0]).toContain("AUTOMOBILE_IOS_SIM_BOOT_CONCURRENCY");
+  } finally {
+    warn.mockRestore();
+  }
+});
+
+test("queue wait does not consume the boot budget or recorded boot duration", async () => {
+  const source = new ScriptedSource();
+  source.immediate = [];
+  const pool = new BootConcurrencyGate();
+  const { gate, timer } = build(source, QUEUED_ENV, pool);
+  const history = new InMemoryBootDurationHistory();
+  const instrumentation = new FleetBootInstrumentation({ gate, timer, history });
+  const first = await gate.admitBoot(undefined, { bootUdid: A });
+  let budget: number | undefined;
+  const boot = instrumentation.run({ udid: B, timeoutMs: 1000 }, async (remainingMs) => {
+    budget = remainingMs;
+    timer.advanceTime(7);
+  });
+  await tick();
+  expect(pool.status().queued).toBe(1);
+  expect(budget).toBeUndefined();
+  timer.advanceTime(2000);
+  first.releaseAdmission?.();
+  await boot;
+  expect(budget).toBe(1000);
+  expect(history.latestFor(B)?.durationMs).toBe(7);
+  expect(pool.status().running).toBe(0);
 });

@@ -909,7 +909,7 @@ describe("killDevice handler", () => {
       timer,
       stopAndroidObservers: async () => {
         expect(
-          pool["state"].shutdownReservationCoordinator.isUnpooledShutdownFenced(device.deviceId),
+          pool.testHooks.shutdownReservationCoordinator.isUnpooledShutdownFenced(device.deviceId),
         ).toBe(true);
         controller.abort(new Error("observer preparation cancelled"));
         throw controller.signal.reason;
@@ -931,7 +931,7 @@ describe("killDevice handler", () => {
     ).rejects.toThrow();
     expect(manager.killedDeviceIds).toEqual([]);
     expect(
-      pool["state"].shutdownReservationCoordinator.isUnpooledShutdownFenced(device.deviceId),
+      pool.testHooks.shutdownReservationCoordinator.isUnpooledShutdownFenced(device.deviceId),
     ).toBe(false);
   });
 

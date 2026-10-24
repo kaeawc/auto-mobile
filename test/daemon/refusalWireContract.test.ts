@@ -1,3 +1,4 @@
+import * as deviceServiceDisabled from "../../src/models/DeviceServiceDisabledError";
 import { fakeServerContext } from "../helpers/fakeServerContext";
 import { Server } from "@modelcontextprotocol/server";
 import * as prototypeHidden from "../../src/features/prototype/prototypeHidden";
@@ -217,6 +218,7 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "models/DeviceOwnedByOtherDaemonError": deviceOwnedByOtherDaemon,
   "models/DeviceCleanupInProgressError": deviceCleanupInProgress,
   "models/DeviceUnhealthyError": deviceUnhealthy,
+  "models/DeviceServiceDisabledError": deviceServiceDisabled,
   "models/DeviceTransportOfflineError": deviceTransportOffline,
   "models/InputDeviceOwnedError": inputOwnedError,
   "models/DeviceAssignedToBindingError": deviceAssignedToBinding,
@@ -883,6 +885,7 @@ describe("refusal wire contract", () => {
       }
     }
     expect(drivenErrorClasses.has(acquisitionRefusals.DeviceUnhealthyError)).toBe(true);
+    expect(drivenErrorClasses.has(deviceServiceDisabled.DeviceServiceDisabledError)).toBe(true);
     expect(
       isTypedToolRefusal(
         new acquisitionRefusals.DeviceUnhealthyError(

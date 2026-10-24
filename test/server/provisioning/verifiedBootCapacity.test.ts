@@ -3,6 +3,7 @@ import { withVerifiedBootCapacity } from "../../../src/devices/bootAdmission/Ver
 import type { ExactDeviceProvisionRequest } from "../../../src/devices/exactDeviceProvisioning";
 import { provisionExactDevice } from "../../../src/server/provisioning/provisioningBoot";
 import { createPerformanceTracker } from "../../../src/utils/PerformanceTracker";
+import type { ProvisionDeviceArgs } from "../../../src/features/deviceLifecycle/deviceLifecycleCore";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 const DEVICE: Pick<ExactDeviceProvisionRequest, "platform" | "name" | "spec"> = {
@@ -16,11 +17,18 @@ function harness() {
   timer.setCurrentTime(10_000);
   let capacityChecks = 0;
   let creates = 0;
-  const provision = async (device = DEVICE, beforeAssert = () => {}, signal?: AbortSignal) =>
+  const requests: ExactDeviceProvisionRequest[] = [];
+  const provision = async (
+    device = DEVICE,
+    beforeAssert = () => {},
+    signal?: AbortSignal,
+    options: Pick<ProvisionDeviceArgs, "boot" | "resources"> = { boot: true },
+  ) =>
     await provisionExactDevice(
-      { device, boot: true, readiness: "none" },
+      { device, readiness: "none", ...options },
       {
         provision: async (request) => {
+          requests.push(request);
           beforeAssert();
           await request.assertCapacityBeforeCreate?.(request.signal);
           request.onBeforeCreate?.();
@@ -51,7 +59,7 @@ function harness() {
         },
       },
     );
-  return { timer, provision, counts: () => ({ capacityChecks, creates }) };
+  return { timer, provision, requests, counts: () => ({ capacityChecks, creates }) };
 }
 
 test("without a verified verdict the provisioner still checks before creating", async () => {
@@ -141,4 +149,15 @@ test("a late async descendant cannot use a verdict after its request returns", a
   released.resolve();
   await descendant;
   expect(h.counts()).toEqual({ capacityChecks: 1, creates: 1 });
+});
+
+test("forwards resources only when provisioning for boot with resources", async () => {
+  const h = harness();
+  const resources = { widgets: "disabled" } as const;
+  await h.provision(DEVICE, undefined, undefined, { boot: true, resources });
+  await h.provision(DEVICE, undefined, undefined, { boot: false, resources });
+  await h.provision(DEVICE, undefined, undefined, { boot: true });
+  expect(h.requests[0]?.resources).toEqual(resources);
+  expect(h.requests[1]).not.toHaveProperty("resources");
+  expect(h.requests[2]).not.toHaveProperty("resources");
 });

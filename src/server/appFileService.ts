@@ -1,3 +1,7 @@
+import {
+  DefaultDeviceServicePreflight,
+  type DeviceServicePreflight,
+} from "../utils/deviceServicePreflight";
 import type { AppFileProviderCoverage } from "../features/storage/storageCapabilities";
 import { setDefaultAppFileProviderCoverageSource } from "../features/storage/defaultAppFileProviderCoverage";
 import {
@@ -170,6 +174,7 @@ export interface ForegroundAppLookup {
 export type AppFileSimCtl = Pick<SimCtlClient, "executeCommand" | "executeCommandArgs">;
 
 export interface AppFileServiceDependencies {
+  servicePreflight?: DeviceServicePreflight;
   timer?: Timer;
   foregroundAppLookup?: ForegroundAppLookup;
   adbFactory?: AdbClientFactory;
@@ -220,6 +225,8 @@ export function createAppFileServiceForTesting(
     deps.providers ??
       createDefaultProviders(resolvedDeps, {
         ...deps,
+        // Hermetic by default: tests inject a fake preflight to exercise the check.
+        servicePreflight: deps.servicePreflight ?? { assertEnabled: async () => {} },
         sharedStorageService: deps.sharedStorageService ?? getSharedStorageService(),
       }),
     resolvedDeps.deviceResolver,
@@ -232,6 +239,7 @@ function createDefaultProviders(
     Pick<AppFileServiceDependencies, "timer">,
   options: Pick<
     AppFileServiceDependencies,
+    | "servicePreflight"
     | "idGenerator"
     | "sharedStorageService"
     | "iosSimulatorMediaClient"
@@ -257,6 +265,7 @@ function createDefaultProviders(
     new IosSimulatorMediaLibraryProvider(
       options.iosSimulatorMediaClient ?? new SimctlIosSimulatorMediaClient(deps.simctlFactory),
       deps.fileSystem,
+      options.servicePreflight ?? new DefaultDeviceServicePreflight(),
     ),
   ];
 }

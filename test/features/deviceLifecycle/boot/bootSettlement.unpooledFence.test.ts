@@ -44,7 +44,7 @@ function harness() {
   });
   const child = new FakeChildProcess(timer);
   const fenced = () =>
-    pool["state"].shutdownReservationCoordinator.isUnpooledShutdownFenced(device.deviceId);
+    pool.testHooks.shutdownReservationCoordinator.isUnpooledShutdownFenced(device.deviceId);
   const fencesAtKill: boolean[] = [];
   const kill = spyOn(child, "kill").mockImplementation(() => {
     fencesAtKill.push(fenced());
@@ -122,7 +122,7 @@ test.each(["pooled", "tracked", "holder", "previously-running"] as const)(
     });
     expect(fenced()).toBe(false);
     expect(kill).toHaveBeenCalledTimes(path === "holder" || path === "previously-running" ? 0 : 1);
-    expect(pool["state"].intentionalShutdowns.has(device.deviceId)).toBe(path === "tracked");
+    expect(pool.testHooks.intentionalShutdowns.has(device.deviceId)).toBe(path === "tracked");
   },
 );
 
@@ -131,7 +131,7 @@ test("a retried cold boot lifts the cancelled boot's fence the way startDevice c
   child.exitCode = 0;
   await stopUnownedColdBoot(boot);
   expect(
-    pool["state"].shutdownReservationCoordinator.isUnpooledShutdownFenced(device.deviceId),
+    pool.testHooks.shutdownReservationCoordinator.isUnpooledShutdownFenced(device.deviceId),
   ).toBe(true);
   await expect(pool.pickUpRunningDevice(device)).rejects.toThrow("being shut down");
   clearColdBootShutdownMarker("cold-boot", device.deviceId);

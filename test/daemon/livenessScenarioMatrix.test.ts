@@ -1100,10 +1100,11 @@ describe("selector-routed calls (#10821)", () => {
     const provisioned = await scenario.provision(DEVICE_A);
     const other = await scenario.acquire(DEVICE_B);
 
-    // Held side: A is used every minute through its device id for four idle windows. The proxy
-    // must credit those calls to the provisioned session, or it stops heartbeating it.
+    // Held side: A is used every minute through its device id for two idle windows. A session the
+    // proxy stopped heartbeating would already be freed after the first, so holding through the
+    // second needs the proxy to credit those calls to the provisioned session.
     const callEvery = 60_000;
-    for (let call = 0; call < (4 * IDLE_WINDOW_MS) / callEvery; call++) {
+    for (let call = 0; call < (2 * IDLE_WINDOW_MS) / callEvery; call++) {
       await scenario.idle(callEvery);
       await scenario.selectorCall(DEVICE_A);
     }

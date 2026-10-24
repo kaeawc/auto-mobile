@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
+import { beforeAll, describe, expect, spyOn } from "bun:test";
 import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/constants";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -24,6 +24,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
+import { warmedTests } from "../helpers/warmedTests";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 
 isolateToolRegistry();
@@ -61,7 +62,8 @@ describe("a plain control tool naming a session another connection owns", () => 
   let timer: FakeTimer;
   let fixture: McpTestFixture | undefined;
   let restorePipeline: () => void;
-  let spies: Array<ReturnType<typeof spyOn>>;
+  let spies: Array<ReturnType<typeof spyOn>> = [];
+  let harnessArranged = false;
   let previousAutolock: string | undefined;
 
   const call = (args: Record<string, unknown>) =>
@@ -77,6 +79,7 @@ describe("a plain control tool naming a session another connection owns", () => 
   });
 
   async function arrangeHarness(): Promise<void> {
+    harnessArranged = true;
     previousAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     spies = [
@@ -131,19 +134,11 @@ describe("a plain control tool naming a session another connection owns", () => 
     await fixture.setup();
   }
 
-  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
-  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
-    test(
-      name,
-      async () => {
-        await arrangeHarness();
-        await fn();
-      },
-      timeout,
-    );
-  }
-
-  afterEach(async () => {
+  async function teardownHarness(): Promise<void> {
+    if (!harnessArranged) {
+      return;
+    }
+    harnessArranged = false;
     await fixture?.teardown();
     fixture = undefined;
     ToolRegistry.clearTools();
@@ -161,7 +156,21 @@ describe("a plain control tool naming a session another connection owns", () => 
     } else {
       process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = previousAutolock;
     }
-  });
+  }
+
+  // First-use costs (the tool call path, the refusal) are paid in beforeAll. The DevicePool
+  // harness is still built inside each test, so its cost is paid in the test body.
+  const test = warmedTests(teardownHarness);
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
 
   arranged(
     "the setup: another connection is foreign to the session, and its sessionless kill is refused",

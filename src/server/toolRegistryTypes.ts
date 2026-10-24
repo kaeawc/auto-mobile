@@ -243,6 +243,9 @@ export interface ToolListingOptions {
 }
 
 export interface CachedToolDefinitionSchemas {
+  /** The Zod sources these were built from; a re-registered tool with the same ones reuses them. */
+  readonly sourceSchema: ToolSchema;
+  readonly sourceOutputSchema: ZodType | undefined;
   inputSchema: Record<string, unknown>;
   outputSchemasByRuntimeFlags: Map<string, Record<string, unknown> | undefined>;
 }

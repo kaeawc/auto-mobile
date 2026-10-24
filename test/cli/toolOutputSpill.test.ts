@@ -1,5 +1,5 @@
 import { FakeArtifactWriter } from "../fakes/FakeArtifactWriter";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import {
   CLI_OUTPUT_INLINE_MAX_BYTES,
   CLI_TOOL_RESULT_ARTIFACT_PAYLOAD,
@@ -28,6 +28,17 @@ import { isolateCliDataDir, type IsolatedCliDataDir } from "../helpers/cliDataDi
 
 let isolatedCliDataDir: IsolatedCliDataDir;
 
+// The first runCliCommand loads and compiles the whole CLI command path (~15 ms); pay that once
+// here, in the same isolated data dir a measured test gets, rather than inside the 100 ms budget.
+beforeAll(async () => {
+  const isolated = isolateCliDataDir();
+  try {
+    await runCliOverOversizedResult();
+  } finally {
+    isolated.restore();
+  }
+});
+
 beforeEach(() => {
   isolatedCliDataDir = isolateCliDataDir();
 });
@@ -39,6 +50,42 @@ afterEach(() => {
 /** A result whose pretty-printed JSON is comfortably past the CLI ceiling. */
 function oversizedResult(): Record<string, unknown> {
   return { success: true, rows: "x".repeat(CLI_OUTPUT_INLINE_MAX_BYTES + 1_024) };
+}
+
+/** The `runCliCommand` path over an oversized result, in a fresh tool-outputs dir. */
+async function runCliOverOversizedResult(): Promise<void> {
+  const toolOutputsDir = mkdtempSync(path.join(tmpdir(), "automobile-cli-toolout-"));
+  const written: string[] = [];
+  setCliOutputSinksForTesting({
+    stdout: { write: (text) => written.push(text) },
+    stderr: { write: () => {} },
+  });
+  setDaemonProxyFactoryForTesting((): any => ({
+    callTool: async (): Promise<any> => oversizedResult(),
+    adoptCliSessionLiveness: async (): Promise<string | undefined> => undefined,
+    close: async (): Promise<void> => {},
+  }));
+  serverConfig.setToolOutputsDir(toolOutputsDir);
+
+  try {
+    await runCliCommand(["tapOn"]);
+
+    const parsed = JSON.parse(written[0]);
+    expect(parsed.artifact.path).toStartWith(toolOutputsDir);
+    expect(existsSync(parsed.artifact.path)).toBe(true);
+  } finally {
+    resetDaemonProxyFactoryForTesting();
+    resetCliOutputSinksForTesting();
+    serverConfig.setToolOutputsDir(undefined);
+    rmSync(toolOutputsDir, { recursive: true, force: true });
+  }
+
+  expect(written).toHaveLength(1);
+  const parsed = JSON.parse(written[0]);
+  // Either it spilled (a real tool-outputs dir is writable) or it said it
+  // could not — never a severed prefix of the payload.
+  expect(parsed.truncated === false || parsed.truncated === true).toBe(true);
+  expect(parsed.rows).toBeUndefined();
 }
 
 /**
@@ -131,38 +178,7 @@ describe("CLI tool output never emits truncated JSON (#6870)", () => {
   });
 
   test("runCliCommand writes complete, parseable JSON for an oversized result", async () => {
-    const toolOutputsDir = mkdtempSync(path.join(tmpdir(), "automobile-cli-toolout-"));
-    const written: string[] = [];
-    setCliOutputSinksForTesting({
-      stdout: { write: (text) => written.push(text) },
-      stderr: { write: () => {} },
-    });
-    setDaemonProxyFactoryForTesting((): any => ({
-      callTool: async (): Promise<any> => oversizedResult(),
-      adoptCliSessionLiveness: async (): Promise<string | undefined> => undefined,
-      close: async (): Promise<void> => {},
-    }));
-    serverConfig.setToolOutputsDir(toolOutputsDir);
-
-    try {
-      await runCliCommand(["tapOn"]);
-
-      const parsed = JSON.parse(written[0]);
-      expect(parsed.artifact.path).toStartWith(toolOutputsDir);
-      expect(existsSync(parsed.artifact.path)).toBe(true);
-    } finally {
-      resetDaemonProxyFactoryForTesting();
-      resetCliOutputSinksForTesting();
-      serverConfig.setToolOutputsDir(undefined);
-      rmSync(toolOutputsDir, { recursive: true, force: true });
-    }
-
-    expect(written).toHaveLength(1);
-    const parsed = JSON.parse(written[0]);
-    // Either it spilled (a real tool-outputs dir is writable) or it said it
-    // could not — never a severed prefix of the payload.
-    expect(parsed.truncated === false || parsed.truncated === true).toBe(true);
-    expect(parsed.rows).toBeUndefined();
+    await runCliOverOversizedResult();
   });
 
   test("renders a non-serializable result as an explicit failure, not a crash", () => {

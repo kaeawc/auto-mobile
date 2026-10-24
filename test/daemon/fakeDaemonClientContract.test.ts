@@ -1,4 +1,4 @@
-import { describe, expect } from "bun:test";
+import { beforeAll, describe, expect } from "bun:test";
 import type { DaemonClientLike } from "../../src/daemon/client";
 import type { DaemonNotification } from "../../src/daemon/types";
 import { ROUTED_SESSION_META_KEY } from "../../src/daemon/routedSessionMeta";
@@ -73,7 +73,19 @@ function recording(
 
 let scenario: LivenessScenario | undefined;
 
-// Two daemons start in one test; the first run's module warm-up stays out of the measured time.
+type ProxyRun = Awaited<ReturnType<typeof proxySession>>;
+/** The session through the real client: the reference the fake is compared against, run once. */
+let real: ProxyRun;
+// Declared before warmedTests so its warm-up already finds the reference; the real session is
+// one daemon start and one full session, so it stays out of the measured time of the row that
+// compares against it.
+beforeAll(async () => {
+  real = await proxySession((daemon) => daemon);
+  await scenario?.stop();
+  scenario = undefined;
+});
+
+// The first run's module warm-up stays out of the measured time.
 const test = warmedTests(async () => {
   await scenario?.stop();
   scenario = undefined;
@@ -116,7 +128,6 @@ async function proxySession(client: (daemon: DaemonClientLike) => DaemonClientLi
 
 describe("FakeDaemonClient backed by the daemon answers as the daemon does (#11441)", () => {
   test("a proxy session gets the same answers, refusals and pushed frames through the fake as through the real client", async () => {
-    const real = await proxySession((daemon) => daemon);
     const fakes: FakeDaemonClient[] = [];
     const faked = await proxySession((daemon) => {
       const fake = new FakeDaemonClient({ daemon });

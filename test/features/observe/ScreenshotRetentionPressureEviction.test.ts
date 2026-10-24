@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { BASE_CAP_SCREENSHOT_LIMITS } from "../../helpers/screenshotRetentionLimits";
 import {
   BoundedScreenshotPathProtection,
   SCREENSHOT_PRESSURE_EVICTION_MIN_AGE_MS,
@@ -68,7 +69,12 @@ beforeEach(() => {
   state = new ReferencingStateStore(timer);
   setObserveCacheStore(new FakeObserveCacheStore(timer));
   setScreenshotStateStore(state);
-  protection = new BoundedScreenshotPathProtection(timer);
+  protection = new BoundedScreenshotPathProtection(
+    timer,
+    undefined,
+    undefined,
+    BASE_CAP_SCREENSHOT_LIMITS,
+  );
 });
 
 afterEach(() => {
@@ -194,7 +200,12 @@ describe("screenshot retention under capacity pressure (#8758)", () => {
   });
 
   test("the file-count cap also evicts the oldest frame", async () => {
-    protection = new BoundedScreenshotPathProtection(timer, undefined, 3);
+    protection = new BoundedScreenshotPathProtection(
+      timer,
+      undefined,
+      3,
+      BASE_CAP_SCREENSHOT_LIMITS,
+    );
     for (let index = 0; index < 5; index++) {
       await capture(index, 1);
       timer.advanceTime(SCREENSHOT_PRESSURE_EVICTION_MIN_AGE_MS);

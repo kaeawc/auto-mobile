@@ -21,10 +21,10 @@ export const MEDIA_ENV = {
   SCREENSHOT_CACHE_CEILING_MB: {
     name: "AUTOMOBILE_SCREENSHOT_CACHE_CEILING_MB",
     kind: "number",
-    default: "1024",
+    default: "2048",
     min: 0,
     minExclusive: true,
-    doc: "Host screenshot cache ceiling in MiB; never lowers the base capacity.",
+    doc: "Host screenshot cache ceiling in MiB; frames inside their 10-minute guarantee grow the cache up to it. Never lowers the base capacity.",
   },
   SCREENSHOT_KEEP_PER_DEVICE: {
     name: "AUTOMOBILE_SCREENSHOT_KEEP_PER_DEVICE",

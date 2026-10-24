@@ -127,6 +127,10 @@ function appDevice(options: AppDeviceOptions): AppDevice {
       return Promise.resolve(execResult(""));
     }
     if (options.debuggable === false) {
+      // On a device the trailing `2>/dev/null; true` hides run-as's refusal and exits 0.
+      if (match[3].endsWith("2>/dev/null; true")) {
+        return Promise.resolve(execResult(""));
+      }
       return Promise.reject(new Error(`run-as: package not debuggable: ${match[1]}`));
     }
     const tokens = match[3]

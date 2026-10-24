@@ -118,16 +118,19 @@ async function exists(
   return out !== "";
 }
 
-/** Refuse, with the reason, a file `run-as` cannot reach (a release build, or a missing file). */
+/**
+ * Refuse, with the reason, a file `run-as` cannot reach (a release build, or a missing file).
+ * `run-as` is tried first with a plain command: the existence probe below ends in `2>/dev/null;
+ * true`, which on a device would also swallow `run-as`'s own refusal and make a release build look
+ * like a missing file.
+ */
 async function assertReachable(
   adb: AdbExecutor,
   target: Target,
   signal?: AbortSignal,
 ): Promise<void> {
   try {
-    if (await exists(adb, target, target.path, signal)) {
-      return;
-    }
+    await runAs(adb, target, ["id"], signal);
   } catch (error) {
     if (signal?.aborted) {
       throw error;
@@ -138,7 +141,9 @@ async function assertReachable(
       `cannot reach ${target.path} of ${target.packageName} with run-as (the app must be a debuggable build): ${errorMessage(error)}`,
     );
   }
-  unsupported(`${target.path} does not exist in the data directory of ${target.packageName}`);
+  if (!(await exists(adb, target, target.path, signal))) {
+    unsupported(`${target.path} does not exist in the data directory of ${target.packageName}`);
+  }
 }
 
 async function damage(

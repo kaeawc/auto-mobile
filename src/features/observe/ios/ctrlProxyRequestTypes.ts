@@ -62,6 +62,7 @@ export const IOS_KNOWN_REQUEST_TYPES = [
   "request_location",
   "set_hinge_angle",
   "request_appearance",
+  "request_siri",
 
   // Clipboard
   "request_clipboard",

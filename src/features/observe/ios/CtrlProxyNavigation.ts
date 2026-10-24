@@ -20,6 +20,7 @@ import type {
   CtrlProxyLocationRequest,
   CtrlProxyLocationResult,
   CtrlProxyAppearanceResult,
+  CtrlProxySiriResult,
 } from "./types";
 import { sendCommand } from "../DeviceServiceUtils";
 
@@ -237,6 +238,38 @@ export class CtrlProxyNavigation {
         success: false,
         totalTimeMs: timeout,
         error: `Location request timed out after ${timeout}ms`,
+      }),
+    });
+  }
+
+  /**
+   * Activate Siri with `text` as recognized speech through `XCUISiriService` (#14109), for
+   * example an App Shortcut phrase. Resolves once Siri accepted the text, not when an intent ran.
+   */
+  async requestSiri(
+    text: string,
+    timeoutMs: number = 10000,
+    signal?: AbortSignal,
+  ): Promise<CtrlProxySiriResult> {
+    return sendCommand<CtrlProxySiriResult>(this.context, {
+      idPrefix: "siri",
+      responseType: "siri",
+      messageType: "request_siri",
+      params: { text },
+      timeoutMs,
+      abortSignal: signal,
+      cancelScreenshotBackoff: false,
+      notConnectedError: () => ({ success: false, totalTimeMs: 0, error: "Not connected" }),
+      unsupportedCommandError: (_messageType, error) => ({
+        success: false,
+        unsupported: true,
+        totalTimeMs: 0,
+        error,
+      }),
+      timeoutError: (timeout) => ({
+        success: false,
+        totalTimeMs: timeout,
+        error: `Siri request timed out after ${timeout}ms`,
       }),
     });
   }

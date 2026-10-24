@@ -121,6 +121,7 @@ object ValidTools {
         "setPreference",
         "setSensor",
         "setToolEnabled",
+        "siri",
         "snapshotOf",
         "statusBar",
         "tapAny",

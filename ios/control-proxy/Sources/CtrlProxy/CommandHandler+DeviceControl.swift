@@ -40,6 +40,26 @@ struct DefaultAppearanceControl: AppearanceControlling {
     }
 }
 
+/// Activates Siri with recognized-speech text (#14109). `@MainActor`: the default impl drives
+/// `XCUIDevice.shared.siriService`; the async `CommandHandler` `await`s it.
+protocol SiriControlling: Sendable {
+    @MainActor
+    func activate(text: String) throws
+}
+
+/// `XCUISiriService.activate(voiceRecognitionText:)` (iOS 10.3+). Whether Siri accepts text on a
+/// given Simulator runtime, and without a signed-in Apple ID, is device-verified separately.
+struct DefaultSiriControl: SiriControlling {
+    @MainActor
+    func activate(text: String) throws {
+        #if canImport(XCTest) && os(iOS)
+            XCUIDevice.shared.siriService.activate(voiceRecognitionText: text)
+        #else
+            throw VerbatimLocalizedError(message: "Activating Siri requires an iOS runner.")
+        #endif
+    }
+}
+
 extension CommandHandler {
     // MARK: - Device Control
 
@@ -104,6 +124,21 @@ extension CommandHandler {
             requestId: request.requestId,
             totalTimeMs: totalTimeMs(from: startTime),
             text: current
+        )
+    }
+
+    // MARK: - Siri
+
+    func handleSiri(_ request: RequestSiri, startTime: Date) async throws -> WebSocketResponse {
+        let text = request.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            throw CommandError.invalidParameter("text", request.text)
+        }
+        try await siriControl.activate(text: text)
+        return WebSocketResponse.success(
+            type: ResponseType.siriResult.rawValue,
+            requestId: request.requestId,
+            totalTimeMs: totalTimeMs(from: startTime)
         )
     }
 

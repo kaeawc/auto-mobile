@@ -969,6 +969,7 @@ describe("MCP Booted Device Resources", () => {
         model: "SM-S921B",
         sdk: 35,
         abi: "arm64-v8a",
+        formFactor: null,
       });
       expect(traits.reads.map((read) => read.deviceId)).toEqual([mockAndroidDevice1.deviceId]);
     });

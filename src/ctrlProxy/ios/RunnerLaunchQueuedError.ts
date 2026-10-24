@@ -1,15 +1,17 @@
 import { ActionableError } from "../../models/ActionableError";
 import type { IosRunnerLaunchQueueStatus } from "./IosRunnerLaunchGate";
 
-/** A bounded read expired while a healthy runner launch was waiting for admission. */
+/** A bounded read expired while a runner launch was queued or still starting. */
 export class RunnerLaunchQueuedError extends ActionableError {
   constructor(
     readonly deviceId: string,
-    readonly status: IosRunnerLaunchQueueStatus,
+    readonly status: IosRunnerLaunchQueueStatus | undefined,
     options?: ErrorOptions,
   ) {
     super(
-      `iOS runner launch for ${deviceId} is queued at queue position ${status.position} behind ${status.ahead} other runner launch(es) (launch concurrency ${status.limit}); the runner is still starting. Retry the observe shortly.`,
+      status
+        ? `iOS runner launch for ${deviceId} is queued at queue position ${status.position} behind ${status.ahead} other runner launch(es) (launch concurrency ${status.limit}); the runner is still starting. Retry the observe shortly.`
+        : `iOS runner for ${deviceId} is still starting in the background; the next observe joins that start. Retry the observe shortly.`,
       options,
     );
   }

@@ -1,3 +1,4 @@
+import type { DisabledIosDeviceResource } from "./DeviceResourceImpact";
 import type { AndroidDeviceResource } from "./AndroidDeviceResource";
 import type { AppleDeviceResource } from "./AppleDeviceResource";
 import type { DeviceResourceStatus } from "./DeviceResource";
@@ -13,6 +14,8 @@ export type DeviceResourceConfiguration = Partial<
 >;
 
 export interface DeviceResourceConfigurationResult {
+  /** Proven disabled iOS Simulator groups and their feature consequences. */
+  disabledResources?: DisabledIosDeviceResource[];
   success: boolean;
   requested: DeviceResourceConfiguration;
   /** Independent full-platform snapshot, when observation completed. */

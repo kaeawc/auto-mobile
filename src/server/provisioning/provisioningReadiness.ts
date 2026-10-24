@@ -1,3 +1,4 @@
+import { mergeProvenResourceStates } from "../../utils/deviceResourceStates";
 import { observeConfiguredDeviceResources } from "../deviceResourceTools";
 import { computeDeviceResourceDrift } from "../../utils/deviceResourceDrift";
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
@@ -284,22 +285,4 @@ function provisionReadinessStatus(
       ? "automation_ready"
       : "device_ready"
     : "not_requested";
-}
-
-function mergeProvenResourceStates(
-  controller: DeviceResourceConfigurationResult["resources"],
-  observed: DeviceResourceConfigurationResult["resources"] | undefined,
-): DeviceResourceConfigurationResult["resources"] {
-  const merged = { ...controller };
-  for (const [resource, status] of Object.entries(observed ?? {}) as [
-    keyof typeof merged,
-    NonNullable<(typeof merged)[keyof typeof merged]>,
-  ][]) {
-    const proven = merged[resource];
-    const unreadable = status.state === "unknown" || status.state === "unsupported";
-    if (!(unreadable && proven && proven.state !== "unknown" && proven.state !== "unsupported")) {
-      merged[resource] = status;
-    }
-  }
-  return merged;
 }

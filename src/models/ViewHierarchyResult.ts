@@ -203,6 +203,8 @@ export type IosHierarchyUnavailableReason =
   | "simulator_not_booted"
   | "request_timed_out"
   | "auto_setup_failed"
+  /** Runner launch is waiting in the launch gate; retry. */
+  | "runner_launch_queued"
   | "service_recovering"
   | "unknown";
 

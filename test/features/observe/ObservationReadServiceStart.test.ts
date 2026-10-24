@@ -1,3 +1,9 @@
+import { RunnerReadinessError } from "../../../src/ctrlProxy/RunnerReadinessError";
+import {
+  RunnerLaunchQueuedError,
+  findRunnerLaunchQueuedError,
+} from "../../../src/ctrlProxy/ios/RunnerLaunchQueuedError";
+import { FakeIosRunnerLaunchGate } from "../../fakes/FakeIosRunnerLaunchGate";
 import { wireCapture } from "../../helpers/wireCapture";
 import { afterEach, beforeAll, expect, spyOn, test } from "bun:test";
 import iosFixture from "../../fixtures/observe/ios-fractional-bounds.json";
@@ -81,7 +87,9 @@ async function harness(platform: "android" | "ios" = "android") {
     requestHierarchySyncForObserver: async () => ({ hierarchy }),
     convertToViewHierarchyResult: () => hierarchy,
   };
+  const launchQueue = new FakeIosRunnerLaunchGate();
   const starter = new ObservationReadServiceStart({
+    launchQueue,
     timer: base.timer,
     ownershipGuard: {
       canStart: (device) => canStart && daemonObservationServiceOwnershipGuard.canStart(device),
@@ -133,12 +141,21 @@ async function harness(platform: "android" | "ios" = "android") {
       hierarchyCapture: capture,
       cacheStore: new FakeObserveCacheStore(base.timer),
       screenshotStateStore: new FakeScreenshotStateStore(base.timer),
+      screenshot: {
+        execute: async () => ({ success: true, path: "/fake/queued.png" }),
+        generateScreenshotPath: () => "/fake/queued.png",
+        getActivityHash: async () => "",
+      },
+      screenshotEvidenceFiles: {
+        stat: async () => ({ isFile: () => true, size: 12, mtimeMs: 0 }),
+      },
     },
     base.timer,
   );
   return {
     ...base,
     capture,
+    launchQueue,
     screen,
     starter,
     client,
@@ -469,4 +486,196 @@ test("a delayed stale failed dial reuses the resident service after the first fl
   expect(later.nodes.length).toBeGreaterThan(0);
   expect(later.hierarchy.hierarchyServiceStarted).toBeUndefined();
   expect(h.calls()).toBe(1);
+});
+
+const queuedStatus = { position: 2, ahead: 3, limit: 2 };
+
+test.each([false, true])(
+  "queued iOS timeout preserves status (queue clears on abort: %s)",
+  async (clearOnAbort) => {
+    const h = await harness("ios");
+    h.launchQueue.queued.set(h.device.deviceId, queuedStatus);
+    h.setSetup(async (request) => {
+      if (clearOnAbort) {
+        request.signal?.addEventListener("abort", () => h.launchQueue.queued.clear(), {
+          once: true,
+        });
+      }
+      await new Promise<void>(() => {});
+    });
+    const pending = h.starter.start({ device: h.device, deadlineMs: h.timer.now() + 100 });
+    const failure = pending.then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    await drainUntil(() => h.admitted() === 1, { description: "queued setup" });
+    h.timer.advanceTime(100);
+    const error = await failure;
+    expect(error).toBeInstanceOf(RunnerLaunchQueuedError);
+    if (!(error instanceof RunnerLaunchQueuedError)) {
+      throw new Error("Expected queued error");
+    }
+    expect(error.deviceId).toBe(h.device.deviceId);
+    expect(error.status).toEqual(queuedStatus);
+    expect(error.cause).toBeInstanceOf(Error);
+    expect(String(error.cause)).toContain("timed out");
+    expect(error.message).toContain("queue position 2");
+    await drainMicrotasks(40);
+    // A later flight must not inherit the timeout snapshot.
+    h.launchQueue.queued.clear();
+    h.setSetup(async () => new Promise<void>(() => {}));
+    const later = h.starter.start({ device: h.device, deadlineMs: h.timer.now() + 100 });
+    const laterFailure = later.then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    await drainUntil(() => h.admitted() === 2, { description: "later setup" });
+    h.timer.advanceTime(100);
+    const laterError = await laterFailure;
+    expect(laterError).not.toBeInstanceOf(RunnerLaunchQueuedError);
+    expect(String(laterError)).toContain("timed out");
+  },
+);
+
+test.each(["ios", "android"] as const)(
+  "unqueued %s timeout retains the original error",
+  async (platform) => {
+    const h = await harness(platform);
+    const lookup = spyOn(h.launchQueue, "queueStatus");
+    h.setSetup(async () => new Promise<void>(() => {}));
+    const pending = h.starter.start({ device: h.device, deadlineMs: h.timer.now() + 100 });
+    const failure = pending.then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    await drainUntil(() => h.admitted() === 1, { description: "setup" });
+    h.timer.advanceTime(100);
+    const error = await failure;
+    expect(error).not.toBeInstanceOf(RunnerLaunchQueuedError);
+    expect(String(error)).toContain("timed out");
+    if (platform === "android") {
+      expect(lookup).not.toHaveBeenCalled();
+    }
+    lookup.mockRestore();
+  },
+);
+
+test("queued iOS request cancellation retains the caller abort", async () => {
+  const h = await harness("ios");
+  h.launchQueue.queued.set(h.device.deviceId, queuedStatus);
+  h.setSetup(async () => new Promise<void>(() => {}));
+  const controller = new AbortController();
+  const pending = h.starter.start({
+    device: h.device,
+    deadlineMs: h.timer.now() + 100,
+    signal: controller.signal,
+  });
+  const failure = pending.then(
+    () => undefined,
+    (error: unknown) => error,
+  );
+  await drainUntil(() => h.admitted() === 1, { description: "setup" });
+  const abort = new Error("caller abort");
+  controller.abort(abort);
+  expect(await failure).toBe(abort);
+});
+
+test("queued iOS non-timeout failure is not relabelled", async () => {
+  const h = await harness("ios");
+  h.launchQueue.queued.set(h.device.deviceId, queuedStatus);
+  h.setSetup(async () => {
+    throw new Error("setup failed");
+  });
+  await expect(
+    h.starter.start({ device: h.device, deadlineMs: h.timer.now() + 100 }),
+  ).rejects.toThrow("setup failed");
+});
+
+test.each([false, true])(
+  "cold iOS observation retains screenshot and typed freshness (queued: %s)",
+  async (queued) => {
+    const h = await harness("ios");
+    if (queued) {
+      h.launchQueue.queued.set(h.device.deviceId, queuedStatus);
+    }
+    h.setSetup(async () => new Promise<void>(() => {}));
+    const pending = h.screen.executeDeviceRead();
+    await drainUntil(() => h.admitted() === 1, { description: "setup" });
+    h.timer.advanceTime(15000);
+    const result = await pending;
+    expect(result.freshness).toMatchObject({
+      isFresh: false,
+      category: "unavailable",
+      unavailableReason: queued ? "runner_launch_queued" : "connection_lost",
+    });
+    expect(result.screenshotPath).toBe("/fake/queued.png");
+    expect(Object.values(result.elements ?? {}).flat()).toHaveLength(0);
+    if (queued) {
+      expect(result.freshness?.unavailableDetail).toContain("queue position 2");
+    }
+    expect(observeToolResultSchema.safeParse(result).success).toBe(true);
+  },
+);
+
+test("queued error lookup follows bounded, cycle-safe causes", () => {
+  const queued = new RunnerLaunchQueuedError("ios-device", queuedStatus);
+  expect(findRunnerLaunchQueuedError(new ActionableError("wrapper", { cause: queued }))).toBe(
+    queued,
+  );
+  const cycle = new Error("cycle");
+  cycle.cause = cycle;
+  expect(findRunnerLaunchQueuedError(cycle)).toBeUndefined();
+  expect(findRunnerLaunchQueuedError("timeout")).toBeUndefined();
+  let deep: Error = queued;
+  for (let depth = 0; depth < 40; depth++) {
+    deep = new Error("wrapper", { cause: deep });
+  }
+  expect(findRunnerLaunchQueuedError(deep)).toBeUndefined();
+});
+
+test("queued readiness budget exhaustion is typed before the outer read timer fires", async () => {
+  const h = await harness("ios");
+  h.launchQueue.queued.set(h.device.deviceId, queuedStatus);
+  const timeout = new RunnerReadinessError(
+    "automation runner readiness failed: remainingBudgetMs=0",
+    false,
+    true,
+  );
+  h.setSetup(async () => {
+    throw timeout;
+  });
+  const error = await h.starter.start({ device: h.device, deadlineMs: h.timer.now() + 100 }).then(
+    () => undefined,
+    (error: unknown) => error,
+  );
+  expect(error).toBeInstanceOf(RunnerLaunchQueuedError);
+  if (!(error instanceof RunnerLaunchQueuedError)) {
+    throw new Error("Expected queued error");
+  }
+  expect(error.cause).toBe(timeout);
+});
+
+test("a shorter queued reader uses the live queue while another reader retains setup", async () => {
+  const h = await harness("ios");
+  h.launchQueue.queued.set(h.device.deviceId, queuedStatus);
+  const setup = Promise.withResolvers<void>();
+  let setupSignal: AbortSignal | undefined;
+  h.setSetup(async (request) => {
+    setupSignal = request.signal;
+    await setup.promise;
+  });
+  const first = h.starter.start({ device: h.device, deadlineMs: h.timer.now() + 100 });
+  await drainUntil(() => h.admitted() === 1, { description: "shared setup" });
+  const later = h.starter.start({ device: h.device, deadlineMs: h.timer.now() + 10 });
+  const failure = later.then(
+    () => undefined,
+    (error: unknown) => error,
+  );
+  await drainMicrotasks(20);
+  h.timer.advanceTime(10);
+  expect(await failure).toBeInstanceOf(RunnerLaunchQueuedError);
+  expect(setupSignal?.aborted).toBe(false);
+  h.launchQueue.queued.clear();
+  setup.resolve();
+  expect(await first).toBe(true);
 });

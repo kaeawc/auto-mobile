@@ -496,6 +496,15 @@ To keep an installed CtrlProxy APK through device readiness, set
 `AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD=1` together with
 `AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM=1`.
 
+### Queued iOS runner launches
+
+When simultaneous cold iOS `observe` calls exceed
+`AUTOMOBILE_IOS_RUNNER_LAUNCH_CONCURRENCY`, a read can reach its bounded budget
+while its runner launch is queued. It returns `ok: true`, no hierarchy, and
+`freshness` with `isFresh: false` and `unavailableReason: "runner_launch_queued"`.
+The detail names its queue position. The runner keeps launching; retry the
+observe shortly after launch completes.
+
 ## iOS builds and signing
 
 <div class="environment-variable-table" markdown>

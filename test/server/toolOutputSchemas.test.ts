@@ -19,6 +19,7 @@ import { toJSONSchema, type z } from "zod/v4";
 import {
   elementBoundsSchema,
   freshnessSchema,
+  observeToolResultSchema,
   elementSchema,
   observationOutputSchema,
   observationSummarySchema,
@@ -1064,4 +1065,18 @@ test("compact bounds collapse reaches definitions and resolves referenced object
   expect(output.$defs.bounds).not.toHaveProperty("anyOf");
   expect(JSON.stringify(input)).toBe(snapshot);
   expect(advertiseBoundsForCompact(input, true)).toBe(input);
+});
+
+test("observe tool schema accepts queued runner freshness", () => {
+  const result = {
+    observationId: "queued",
+    deviceId: "ios-device",
+    freshness: {
+      isFresh: false,
+      category: "unavailable",
+      unavailableReason: "runner_launch_queued",
+      unavailableDetail: "queue position 2",
+    },
+  };
+  expect(observeToolResultSchema.safeParse(result).success).toBe(true);
 });

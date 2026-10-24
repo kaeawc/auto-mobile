@@ -137,6 +137,26 @@ const LINKIFY_KINDS = new Set<unknown>(["mention", "hashtag", "url"]);
 const NAME_KEYED_FIELDS = new Set(["screens", "components"]);
 
 /**
+ * Link matches that respect bindings. A token that starts inside a binding (a pointer such as
+ * `/hello @sam`) is part of it, not a link. A token whose end cuts a binding (`https://x.com/{id}`,
+ * where the link scan trims the closing brace) is extended to take the whole binding.
+ */
+function linkMatchesAroundBindings(
+  text: string,
+  kinds: readonly PrototypeLinkifyKind[],
+): { start: number; end: number; text: string }[] {
+  const bindings = bindingRanges(text);
+  return prototypeLinkifyMatches(text, kinds)
+    .filter((match) =>
+      bindings.every(({ start, end }) => match.start <= start || match.start >= end),
+    )
+    .map((match) => {
+      const cut = bindings.find(({ start, end }) => match.end > start && match.end < end);
+      return cut ? { ...match, end: cut.end, text: text.slice(match.start, cut.end) } : match;
+    });
+}
+
+/**
  * Linkified text keeps its mention, hashtag and URL tokens as written, and has no bracket prefix, so
  * each token still starts the text or follows whitespace; the padding is space-separated for the same
  * reason. Both platform runtimes detect links in the text they receive.
@@ -147,13 +167,7 @@ function pseudoLocalizeLinkifiedText(text: string, kinds: readonly PrototypeLink
   }
   // A token that cuts through a binding (a pointer such as `/hello @sam`) is part of the binding,
   // not a link: the device resolves the whole binding first.
-  const bindings = bindingRanges(text);
-  const matches = prototypeLinkifyMatches(text, kinds).filter((match) =>
-    bindings.every(
-      ({ start, end }) =>
-        match.end <= start || match.start >= end || (match.start <= start && match.end >= end),
-    ),
-  );
+  const matches = linkMatchesAroundBindings(text, kinds);
   const pieces = matches.flatMap((match, index) => [
     pseudoLocalizeSegment(text.slice(index === 0 ? 0 : matches[index - 1]!.end, match.start)),
     match.text,

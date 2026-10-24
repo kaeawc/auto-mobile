@@ -52,6 +52,15 @@ describe("pseudo-locale structure (#14126)", () => {
     expect(out.text).toContain(" @ann ");
   });
 
+  test("a URL ending in a binding keeps its scheme and host", () => {
+    const out = pseudoLocalizeSpec({
+      type: "text",
+      text: "Visit https://example.com/{id}",
+      linkify: { kinds: ["url"], onTap: [] },
+    });
+    expect(out.text.startsWith("Ṽíšíť https://example.com/{id} ")).toBe(true);
+  });
+
   test("a screen or component named like an opaque field is still transformed", () => {
     const out = pseudoLocalizeSpec({
       screens: { theme: { type: "text", text: "Hello" }, data: { type: "text", text: "Bye" } },

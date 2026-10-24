@@ -53,7 +53,7 @@ const fullAndroidAdvertisement = [
 
 async function sendWithClientContext(client: AndroidCtrlProxyClient, messageType: string) {
   const sent: string[] = [];
-  const actualContext = client["createDelegateContext"]();
+  const actualContext = client.testHooks.createDelegateContext();
   const context: DelegateContext = {
     ...actualContext,
     ensureConnected: async () => true,
@@ -99,15 +99,15 @@ function iosClient(): IOSCtrlProxyClient {
 describe("CtrlProxy command support", () => {
   test("Android preserves old APK fallback without a completeness marker", () => {
     const client = androidClient();
-    const context = client["createDelegateContext"]();
+    const context = client.testHooks.createDelegateContext();
     expect(context.isCommandSupported?.("request_select_all")).toBe(true);
     expect(context.isCommandSupported?.("request_insert_text")).toBe(true);
     expect(context.isCommandSupported?.("gesture_display_id_v1")).toBe(false);
     expect(context.isCommandSupported?.("tap_double_v1")).toBe(false);
-    client["webSocketMessageHandlers"].connected({ type: "connected" });
+    client.testHooks.webSocketMessageHandlers().connected({ type: "connected" });
     expect(context.isCommandSupported?.("request_select_all")).toBe(true);
     expect(context.isCommandSupported?.("request_insert_text")).toBe(true);
-    client["webSocketMessageHandlers"].connected({
+    client.testHooks.webSocketMessageHandlers().connected({
       type: "connected",
       supportedCommands: ["set_hierarchy_interval"],
     });
@@ -116,7 +116,7 @@ describe("CtrlProxy command support", () => {
     expect(context.isCommandSupported?.("request_insert_text")).toBe(false);
     expect(context.isCommandSupported?.("gesture_display_id_v1")).toBe(false);
     expect(context.isCommandSupported?.("tap_double_v1")).toBe(false);
-    client["webSocketMessageHandlers"].connected({
+    client.testHooks.webSocketMessageHandlers().connected({
       type: "connected",
       supportedCommands: oldApkAdvertisedCommands,
     });
@@ -125,7 +125,7 @@ describe("CtrlProxy command support", () => {
     }
     expect(context.isCommandSupported?.("gesture_display_id_v1")).toBe(true);
     expect(context.isCommandSupported?.("tap_double_v1")).toBe(true);
-    client["webSocketMessageHandlers"].error({
+    client.testHooks.webSocketMessageHandlers().error({
       type: "error",
       success: false,
       error: "Unknown command type: request_select_all",
@@ -184,11 +184,11 @@ describe("CtrlProxy command support", () => {
 
   test("Android sends core commands with the old APK partial advertisement", async () => {
     const client = androidClient();
-    client["webSocketMessageHandlers"].connected({
+    client.testHooks.webSocketMessageHandlers().connected({
       type: "connected",
       supportedCommands: oldApkAdvertisedCommands,
     });
-    const context = client["createDelegateContext"]();
+    const context = client.testHooks.createDelegateContext();
     for (const messageType of [
       "request_tap_coordinates",
       "request_swipe",
@@ -215,11 +215,11 @@ describe("CtrlProxy command support", () => {
   test("Android full advertisement decides every request and flag from membership", () => {
     const client = androidClient();
     const commands = fullAndroidAdvertisement.filter((command) => command !== "request_pinch");
-    client["webSocketMessageHandlers"].connected({
+    client.testHooks.webSocketMessageHandlers().connected({
       type: "connected",
       supportedCommands: commands,
     });
-    const context = client["createDelegateContext"]();
+    const context = client.testHooks.createDelegateContext();
     for (const command of KNOWN_REQUEST_TYPES) {
       expect(context.isCommandSupported?.(command)).toBe(command !== "request_pinch");
     }
@@ -227,13 +227,13 @@ describe("CtrlProxy command support", () => {
       expect(context.isCommandSupported?.(flag)).toBe(true);
     }
     expect(context.isCommandSupported?.("request_future_command")).toBe(false);
-    client["webSocketMessageHandlers"].error({
+    client.testHooks.webSocketMessageHandlers().error({
       type: "error",
       success: false,
       error: "Unknown command type: request_set_text",
     });
     expect(context.isCommandSupported?.("request_set_text")).toBe(false);
-    client["webSocketMessageHandlers"].connected({
+    client.testHooks.webSocketMessageHandlers().connected({
       type: "connected",
       supportedCommands: fullAndroidAdvertisement,
     });
@@ -243,7 +243,7 @@ describe("CtrlProxy command support", () => {
 
   test("Android sends full-advertisement core requests and blocks an omitted request", async () => {
     const client = androidClient();
-    client["webSocketMessageHandlers"].connected({
+    client.testHooks.webSocketMessageHandlers().connected({
       type: "connected",
       supportedCommands: fullAndroidAdvertisement,
     });
@@ -252,7 +252,7 @@ describe("CtrlProxy command support", () => {
       expect(result.success).toBe(true);
       expect(sent.map((message) => message.type)).toEqual([command]);
     }
-    client["webSocketMessageHandlers"].connected({
+    client.testHooks.webSocketMessageHandlers().connected({
       type: "connected",
       supportedCommands: fullAndroidAdvertisement.filter((command) => command !== "request_pinch"),
     });
@@ -263,11 +263,11 @@ describe("CtrlProxy command support", () => {
 
   test("Android marker alone authoritatively rejects unadvertised requests and flags", () => {
     const client = androidClient();
-    client["webSocketMessageHandlers"].connected({
+    client.testHooks.webSocketMessageHandlers().connected({
       type: "connected",
       supportedCommands: [ANDROID_FULL_COMMAND_SET_CAPABILITY],
     });
-    const context = client["createDelegateContext"]();
+    const context = client.testHooks.createDelegateContext();
     for (const command of [...KNOWN_REQUEST_TYPES, ...ANDROID_CAPABILITY_FLAGS]) {
       expect(context.isCommandSupported?.(command)).toBe(false);
     }
@@ -275,7 +275,7 @@ describe("CtrlProxy command support", () => {
 
   test("Android rejects an absent optional command and sends an advertised one", async () => {
     const client = androidClient();
-    client["webSocketMessageHandlers"].connected({
+    client.testHooks.webSocketMessageHandlers().connected({
       type: "connected",
       supportedCommands: ["set_hierarchy_interval"],
     });
@@ -292,7 +292,7 @@ describe("CtrlProxy command support", () => {
 
   test("Android sends core and optional commands before an advertised list arrives", async () => {
     const client = androidClient();
-    client["webSocketMessageHandlers"].connected({ type: "connected" });
+    client.testHooks.webSocketMessageHandlers().connected({ type: "connected" });
     for (const messageType of ["request_set_text", "request_insert_text"]) {
       const { result, sent } = await sendWithClientContext(client, messageType);
       expect(result.success).toBe(true);
@@ -302,23 +302,23 @@ describe("CtrlProxy command support", () => {
 
   test("Android remembers an unknown command error until reconnection", () => {
     const client = androidClient();
-    const context = client["createDelegateContext"]();
-    client["webSocketMessageHandlers"].error({
+    const context = client.testHooks.createDelegateContext();
+    client.testHooks.webSocketMessageHandlers().error({
       type: "error",
       success: false,
       error: "Unknown command type: request_select_all",
     });
     expect(context.isCommandSupported?.("request_select_all")).toBe(false);
     expect(context.isCommandSupported?.("request_ime_action")).toBe(true);
-    client["webSocketMessageHandlers"].connected({ type: "connected" });
+    client.testHooks.webSocketMessageHandlers().connected({ type: "connected" });
     expect(context.isCommandSupported?.("request_select_all")).toBe(true);
   });
 
   test("iOS remembers an unknown command error until reconnection", () => {
     const client = iosClient();
-    const context = client["createDelegateContext"]();
+    const context = client.testHooks.createDelegateContext();
     expect(context.isCommandSupported?.("request_select_all")).toBe(true);
-    client["processMessage"]({
+    client.testHooks.processMessage({
       type: "error",
       success: false,
       requestId: "unknown-command",
@@ -326,14 +326,14 @@ describe("CtrlProxy command support", () => {
     });
     expect(context.isCommandSupported?.("request_select_all")).toBe(false);
     expect(context.isCommandSupported?.("request_ime_action")).toBe(true);
-    client["processMessage"]({ type: "connected" });
+    client.testHooks.processMessage({ type: "connected" });
     expect(context.isCommandSupported?.("request_select_all")).toBe(true);
   });
 
   test("iOS still treats advertised commands as a complete list", () => {
     const client = iosClient();
-    client["processMessage"]({ type: "connected", supportedCommands: ["request_set_text"] });
-    const context = client["createDelegateContext"]();
+    client.testHooks.processMessage({ type: "connected", supportedCommands: ["request_set_text"] });
+    const context = client.testHooks.createDelegateContext();
     expect(context.isCommandSupported?.("request_set_text")).toBe(true);
     expect(context.isCommandSupported?.("request_tap_coordinates")).toBe(false);
   });

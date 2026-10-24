@@ -533,6 +533,7 @@ export class AndroidCtrlProxyClient
       prototypes: () => client.prototypes,
       highlights: () => client.highlights,
       webSocketMessageHandlers: () => client.webSocketMessageHandlers,
+      createDelegateContext: () => client.createDelegateContext(),
       cachedHierarchy: () => client.cachedHierarchy,
       handleWebSocketMessage: (data) => client.handleWebSocketMessage(data),
       getWebSocketUrl: () => client.getWebSocketUrl(),

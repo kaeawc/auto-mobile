@@ -95,6 +95,7 @@ export type DevicePoolSeams = Pick<
   | "isUnderShutdownReservation"
   | "isReservedForReadiness"
   | "assertNotPreparedForOtherRequest"
+  | "waitForAssignmentTransition"
   | "isSafeForObservationServiceStart"
   | "reserveDevicesForRehydration"
   | "releaseRehydrationReservation"

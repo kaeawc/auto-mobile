@@ -29,9 +29,17 @@ export function existingHierarchyClient(
 /** Admission only: never resolves sessions or changes pool state. */
 export interface ObservationServiceOwnershipGuard {
   canStart(device: BootedDevice): boolean;
+  /** True when an in-flight pool transition required a wait. */
+  awaitTransition?(device: BootedDevice, signal?: AbortSignal): Promise<boolean>;
 }
 
 export const daemonObservationServiceOwnershipGuard: ObservationServiceOwnershipGuard = {
+  async awaitTransition(device, signal) {
+    return (
+      defaultDaemonContext.devicePool()?.waitForAssignmentTransition(device.deviceId, signal) ??
+      false
+    );
+  },
   canStart(device) {
     const pool = defaultDaemonContext.devicePool();
     if (!pool) {
@@ -102,11 +110,7 @@ export class ObservationReadServiceStart {
       if (this.poolPickup.available() && !this.poolPickup.isPooled(request.device)) {
         await this.pickupIfUnpooled(request);
       }
-      if (!this.guard.canStart(request.device)) {
-        throw new ActionableError(
-          "service start declined: ownership or pool transition cannot be excluded",
-        );
-      }
+      await this.admit(request);
     }
     const key = deviceReadinessLockKey(request.device.platform, request.device.deviceId);
     try {
@@ -131,6 +135,33 @@ export class ObservationReadServiceStart {
       request.signal?.throwIfAborted();
       logger.warn(`[observe] Hierarchy service start failed: ${errorMessage(error)}`, error);
       throw error;
+    }
+  }
+
+  private async admit(request: ObservationServiceStartRequest): Promise<void> {
+    const awaitTransition = this.guard.awaitTransition?.bind(this.guard);
+    let iterations = 0;
+    while (!this.guard.canStart(request.device)) {
+      const remaining = request.deadlineMs - this.timer.now();
+      // An expired deadline intentionally falls through to the same decline.
+      if (!awaitTransition || remaining <= 0 || iterations >= 8) {
+        break;
+      }
+      iterations++;
+      const waited = await raceWithDeadline(() => awaitTransition(request.device, request.signal), {
+        timer: this.timer,
+        timeoutMs: remaining,
+        signal: request.signal,
+        label: "Observer pool assignment transition",
+      });
+      if (!waited) {
+        break;
+      }
+    }
+    if (!this.guard.canStart(request.device)) {
+      throw new ActionableError(
+        "service start declined: ownership or pool transition cannot be excluded",
+      );
     }
   }
 

@@ -1,3 +1,5 @@
+import { DaemonState } from "../../src/daemon/daemonState";
+import { ObservationReadServiceStart } from "../../src/features/observe/ObservationReadServiceStart";
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { ActionableError, type BootedDevice } from "../../src/models";
@@ -39,7 +41,7 @@ function harness() {
     sessions.stopCleanupTimer();
     timer.reset();
   });
-  return { pool, manager };
+  return { pool, manager, timer, sessions };
 }
 
 function parkDiscovery(manager: FakeDeviceUtils) {
@@ -226,5 +228,37 @@ test("aborted pickup waiting for assignment mutex cannot publish after discovery
   } finally {
     release();
     runExclusive.mockRestore();
+  }
+});
+
+test("three concurrent real pickups proceed through daemon observation admission", async () => {
+  const { pool, manager, timer, sessions } = harness();
+  const devices = [0, 1, 2].map((index): BootedDevice => ({
+    deviceId: `concurrent-pickup-${index}`,
+    name: `Concurrent pickup ${index}`,
+    platform: "android",
+  }));
+  manager.setBootedDevices("android", devices);
+  DaemonState.getInstance().initialize(sessions, pool);
+  const ready: string[] = [];
+  const starter = new ObservationReadServiceStart({
+    timer,
+    readiness: {
+      ensureReady: async (request) => {
+        request.assertCanSetup?.();
+        ready.push(request.device.deviceId);
+      },
+    },
+    isServiceConnected: () => false,
+  });
+  try {
+    const results = await Promise.allSettled(
+      devices.map((target) => starter.start({ device: target, deadlineMs: 100 })),
+    );
+    expect(results).toEqual(devices.map(() => ({ status: "fulfilled", value: true })));
+    expect(ready.toSorted()).toEqual(devices.map((target) => target.deviceId).toSorted());
+    expect(sessions.getAllSessions()).toEqual([]);
+  } finally {
+    DaemonState.getInstance().reset();
   }
 });

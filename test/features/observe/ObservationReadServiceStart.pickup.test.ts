@@ -7,7 +7,9 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { drainUntil } from "../../helpers/fakeTimerStepping";
 import { observationServiceStartHarness } from "../../helpers/observationServiceStartHarness";
 
-function harness() {
+function harness(
+  awaitTransition?: (device: BootedDevice, signal?: AbortSignal) => Promise<boolean>,
+) {
   const timer = new FakeTimer();
   const device: BootedDevice = {
     deviceId: "late-device",
@@ -24,7 +26,7 @@ function harness() {
   let pickup = async () => {};
   const starter = new ObservationReadServiceStart({
     timer,
-    ownershipGuard: { canStart: () => state.pooled && state.allowed },
+    ownershipGuard: { canStart: () => state.pooled && state.allowed, awaitTransition },
     poolPickup: {
       available: () => state.available,
       isPooled: () => state.pooled,
@@ -198,4 +200,174 @@ test("default daemon pickup uses fenced pickup through its narrow writes view", 
     pickup.mockRestore();
     h.close();
   }
+});
+
+const decline = "service start declined: ownership or pool transition cannot be excluded";
+
+test.each([false, true])("transition parks admission (already pooled: %s)", async (pooled) => {
+  const gate = Promise.withResolvers<boolean>();
+  let waits = 0;
+  const h = harness(async () => {
+    waits++;
+    return gate.promise;
+  });
+  h.state.pooled = pooled;
+  h.state.allowed = false;
+  h.setPickup(async () => {
+    h.state.pooled = true;
+  });
+  const pending = h.start();
+  void pending.catch(() => {});
+  await drainUntil(() => waits === 1, { description: "transition wait" });
+  expect(h.state.readinessCalls).toBe(0);
+  h.state.allowed = true;
+  gate.resolve(true);
+  expect(await pending).toBe(true);
+  expect(h.state.readinessCalls).toBe(1);
+});
+
+test("three first pickups hand the shared mutex to the next pickup", async () => {
+  const timer = new FakeTimer();
+  const gates = Array.from({ length: 3 }, () => Promise.withResolvers<void>());
+  const pickups = Array.from({ length: 3 }, () => Promise.withResolvers<void>());
+  const pooled = new Set<string>();
+  let owner = 0;
+  let waits = 0;
+  let readiness = 0;
+  const starter = new ObservationReadServiceStart({
+    timer,
+    ownershipGuard: {
+      canStart: (device) => pooled.has(device.deviceId) && owner === 3,
+      awaitTransition: async () => {
+        waits++;
+        if (owner === 3) {
+          return false;
+        }
+        await gates[owner]!.promise;
+        return true;
+      },
+    },
+    poolPickup: {
+      available: () => true,
+      isPooled: (device) => pooled.has(device.deviceId),
+      ensurePooled: async (device) => {
+        const index = Number(device.deviceId);
+        if (index > 0) {
+          await gates[index - 1]!.promise;
+        }
+        await pickups[index]!.promise;
+        pooled.add(device.deviceId);
+        owner = index + 1;
+        gates[index]!.resolve();
+      },
+    },
+    readiness: {
+      ensureReady: async (request) => {
+        request.assertCanSetup?.();
+        readiness++;
+      },
+    },
+    isServiceConnected: () => false,
+  });
+  const starts = [0, 1, 2].map((index) =>
+    starter.start({
+      device: { deviceId: String(index), name: String(index), platform: "android" },
+      deadlineMs: 100,
+    }),
+  );
+  for (const pending of starts) {
+    void pending.catch(() => {});
+  }
+  // Each release hands the mutex to the next queued pickup before admission rechecks.
+  pickups[0]!.resolve();
+  await drainUntil(() => waits === 1, { description: "first admission sees second pickup mutex" });
+  pickups[1]!.resolve();
+  await drainUntil(() => waits >= 3, { description: "both admissions see third pickup mutex" });
+  pickups[2]!.resolve();
+  expect(await Promise.all(starts)).toEqual([true, true, true]);
+  expect(readiness).toBe(3);
+});
+
+test("persistent decline stops without timer waits", async () => {
+  let probes = 0;
+  const h = harness(async () => {
+    probes++;
+    return false;
+  });
+  h.state.pooled = true;
+  h.state.allowed = false;
+  await expect(h.start()).rejects.toThrow(decline);
+  expect(probes).toBe(1);
+  expect(h.timer.getSleepCallCount()).toBe(0);
+  expect(h.timer.now()).toBe(0);
+  expect(h.timer.getPendingTimeoutCount()).toBe(0);
+});
+
+test.each(["deadline", "abort"])("transition wait respects %s", async (kind) => {
+  const gate = Promise.withResolvers<boolean>();
+  let waiting = false;
+  const h = harness(async () => {
+    waiting = true;
+    return gate.promise;
+  });
+  h.state.pooled = true;
+  h.state.allowed = false;
+  const controller = new AbortController();
+  const pending = h.start(controller.signal);
+  const reason = new Error("transition cancelled");
+  void pending.catch(() => {});
+  await drainUntil(() => waiting, { description: "transition" });
+  if (kind === "abort") {
+    controller.abort(reason);
+  } else {
+    h.timer.advanceTime(101);
+  }
+  if (kind === "abort") {
+    await expect(pending).rejects.toBe(reason);
+  } else {
+    await expect(pending).rejects.toThrow("timed out");
+  }
+  expect(h.state.readinessCalls).toBe(0);
+});
+
+test("transition retry cap stops after eight waits", async () => {
+  let waits = 0;
+  let settled = false;
+  const h = harness(async () => {
+    waits++;
+    return true;
+  });
+  h.state.pooled = true;
+  h.state.allowed = false;
+  const pending = h.start();
+  void pending.then(
+    () => {
+      settled = true;
+    },
+    () => {
+      settled = true;
+    },
+  );
+  // A bounded microtask drain makes removal of the cap fail without hanging the suite.
+  await drainUntil(() => settled || waits > 8, { description: "bounded admission" });
+  const attempts = waits;
+  if (attempts > 8) {
+    h.state.allowed = true;
+    await pending;
+  } else {
+    await expect(pending).rejects.toThrow(decline);
+  }
+  expect(attempts).toBe(8);
+});
+
+test("guard without a transition hook retains the post-pickup decline", async () => {
+  const h = harness();
+  h.state.allowed = false;
+  h.setPickup(async () => {
+    h.state.pooled = true;
+  });
+  await expect(h.start()).rejects.toThrow(decline);
+  expect(h.state.pickupCalls).toBe(1);
+  expect(h.state.readinessCalls).toBe(0);
+  expect(h.timer.getPendingTimeoutCount()).toBe(0);
 });

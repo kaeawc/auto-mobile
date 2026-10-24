@@ -99,6 +99,16 @@ export function initializedDeviceSessionUuid(deviceId: string): string | undefin
   return defaultDaemonContext.deviceSessionRegistry()?.getByDeviceId(deviceId)?.deviceSessionUuid;
 }
 
+/**
+ * The pool's hold on a device. A pooled entry answers for its own device. An id the pool does not
+ * list at all can still be broker-bound: a simulator an erase reset shut down leaves the pool while
+ * the broker keeps its binding (#15233). An entry that exists but fails runtime identity (a serial
+ * another AVD now answers on) lends no ownership to the device on that serial.
+ */
+function holdFor(devicePool: DevicePoolReads | undefined, deviceId: string, pooled: boolean) {
+  return pooled || !devicePool?.getDevice(deviceId) ? poolHoldFor(devicePool, deviceId) : undefined;
+}
+
 export function listDevicePayloads(
   booted: BootedDevice[],
   devicePool: DevicePoolReads | undefined,
@@ -128,9 +138,7 @@ export function listDevicePayloads(
       configuredImages,
       sessionsById: sessions,
       deviceSessionUuid: pooled ? initializedDeviceSessionUuid(device.deviceId) : undefined,
-      // Not gated on `pooled`: a simulator an erase reset shut down leaves the pool while the broker
-      // still binds it, and the hold lookup answers for ids the pool does not list.
-      hold: poolHoldFor(devicePool, device.deviceId),
+      hold: holdFor(devicePool, device.deviceId, pooled !== undefined),
       poolStatus: pooled ? devicePool?.poolBucket(device.deviceId) : undefined,
       ...transitionalHoldInputs(transitionalHolds.get(device.deviceId)),
       transportAvdName: transportAvdNameForDevice(device.deviceId),

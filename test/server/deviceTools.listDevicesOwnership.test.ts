@@ -83,6 +83,23 @@ describe("listDevices reports ownership allocation enforces", () => {
     expect(free.runtime.heldBy).toBeUndefined();
   });
 
+  test("a pooled entry that fails runtime identity lends no binding to the device on its id", async () => {
+    const registry = new FakeBindingRegistry(timer);
+    await assignBindingDevice(registry, "ios", "SIM-SLOT");
+    const pool = await makePool([ios("SIM-SLOT")], {
+      bindingExclusion: new RegistryBindingExclusion(async () => registry, timer),
+    });
+    await pool.bindingStableIds("ios");
+    // The id is still pooled, but the runtime now answering on it is not the pooled incarnation.
+    const stale = Object.assign(Object.create(pool) as DevicePool, {
+      describesPooledRuntime: () => false,
+    });
+
+    const [replacement] = listDevicePayloads([ios("SIM-SLOT")], stale, new Map());
+
+    expect(replacement.runtime.heldBy).toBeUndefined();
+  });
+
   test("a device another daemon drives is assigned/held", async () => {
     const ownership: ForeignDeviceOwnership = {
       async refresh() {},

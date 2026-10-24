@@ -564,6 +564,12 @@ export class DevicePool {
     return this.parts.reservations.assertNotPreparedForOtherRequest(...args);
   }
 
+  waitForAssignmentTransition(
+    ...args: Parameters<PoolOps["waitForAssignmentTransition"]>
+  ): ReturnType<PoolOps["waitForAssignmentTransition"]> {
+    return this.parts.availability.waitForAssignmentTransition(...args);
+  }
+
   isSafeForObservationServiceStart(
     ...args: Parameters<PoolOps["isSafeForObservationServiceStart"]>
   ): ReturnType<PoolOps["isSafeForObservationServiceStart"]> {

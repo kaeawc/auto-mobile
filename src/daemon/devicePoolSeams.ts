@@ -101,6 +101,7 @@ export function createDevicePoolSeams(
     isUnderShutdownReservation: (...args) => pool.isUnderShutdownReservation(...args),
     isReservedForReadiness: (...args) => pool.isReservedForReadiness(...args),
     assertNotPreparedForOtherRequest: (...args) => pool.assertNotPreparedForOtherRequest(...args),
+    waitForAssignmentTransition: (...args) => pool.waitForAssignmentTransition(...args),
     isSafeForObservationServiceStart: (...args) => pool.isSafeForObservationServiceStart(...args),
     reserveDevicesForRehydration: (...args) => pool.reserveDevicesForRehydration(...args),
     releaseRehydrationReservation: (...args) => pool.releaseRehydrationReservation(...args),

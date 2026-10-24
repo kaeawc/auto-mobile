@@ -4,7 +4,11 @@ import type { DeviceInfo } from "../../src/models";
 import { markDeviceError } from "../../src/daemon/deviceBinding";
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { observationServiceStartHarness } from "../helpers/observationServiceStartHarness";
-import { daemonObservationServiceOwnershipGuard } from "../../src/features/observe/ObservationReadServiceStart";
+import { drainUntil } from "../helpers/fakeTimerStepping";
+import {
+  ObservationReadServiceStart,
+  daemonObservationServiceOwnershipGuard,
+} from "../../src/features/observe/ObservationReadServiceStart";
 import { DaemonState } from "../../src/daemon/daemonState";
 
 const cleanups: Array<() => void> = [];
@@ -309,3 +313,144 @@ test("observation still evaluates later blockers through the live instance after
     await release();
   }
 });
+
+test("assignment transition returns false when free and waits for release when held", async () => {
+  const h = await harness();
+  expect(await h.pool.waitForAssignmentTransition(h.device.deviceId)).toBe(false);
+  const release = await h.pool.testHooks.assignmentMutex.acquire();
+  let settled = false;
+  const pending = h.pool.waitForAssignmentTransition(h.device.deviceId).then((result) => {
+    settled = true;
+    return result;
+  });
+  try {
+    await Promise.resolve();
+    expect(settled).toBe(false);
+  } finally {
+    release();
+  }
+  expect(await pending).toBe(true);
+});
+
+test("assignment transition preserves abort reason", async () => {
+  const h = await harness();
+  const release = await h.pool.testHooks.assignmentMutex.acquire();
+  const controller = new AbortController();
+  const reason = new Error("stop waiting");
+  try {
+    const pending = h.pool.waitForAssignmentTransition(h.device.deviceId, controller.signal);
+    controller.abort(reason);
+    await expect(pending).rejects.toBe(reason);
+  } finally {
+    release();
+  }
+});
+
+test("real daemon guard waits for the post-pickup assignment transition", async () => {
+  const h = await harness();
+  let pooled = false;
+  let release: (() => void) | undefined;
+  let waiting = false;
+  let readiness = 0;
+  const original = h.pool.waitForAssignmentTransition.bind(h.pool);
+  const wait = spyOn(h.pool, "waitForAssignmentTransition").mockImplementation(
+    (deviceId, signal) => {
+      waiting = true;
+      return original(deviceId, signal);
+    },
+  );
+  const starter = new ObservationReadServiceStart({
+    timer: h.timer,
+    ownershipGuard: {
+      canStart: (device) => pooled && daemonObservationServiceOwnershipGuard.canStart(device),
+      awaitTransition: (device, signal) =>
+        daemonObservationServiceOwnershipGuard.awaitTransition!(device, signal),
+    },
+    poolPickup: {
+      available: () => true,
+      isPooled: () => pooled,
+      ensurePooled: async () => {
+        pooled = true;
+        release = await h.pool.testHooks.assignmentMutex.acquire();
+      },
+    },
+    readiness: {
+      ensureReady: async (request) => {
+        request.assertCanSetup?.();
+        readiness++;
+      },
+    },
+    isServiceConnected: () => false,
+  });
+  try {
+    const pending = starter.start({ device: h.device, deadlineMs: h.timer.now() + 100 });
+    void pending.catch(() => {});
+    await drainUntil(() => waiting, { description: "real pool transition" });
+    expect(readiness).toBe(0);
+    release!();
+    release = undefined;
+    expect(await pending).toBe(true);
+    expect(readiness).toBe(1);
+  } finally {
+    release?.();
+    wait.mockRestore();
+  }
+});
+
+// A resolved waiter makes accidental waits fail deterministically without parking the test.
+for (const consumer of ["pool", "start"] as const) {
+  test.each(["bound", "busy", "readiness", "recovery", "unpooled"] as const)(
+    `${consumer} never waits for %s device`,
+    async (kind) => {
+      const h = await harness();
+      const device = h.pool.getDevice(h.device.deviceId)!;
+      let releaseReservation: (() => Promise<void>) | undefined;
+      if (kind === "bound") {
+        patchDeviceBinding(device, { sessionId: "owner" });
+      } else if (kind === "busy") {
+        patchDeviceBinding(device, { status: "busy" });
+      } else if (kind === "readiness") {
+        releaseReservation = await h.pool.reserveDeviceForReadiness(h.device.deviceId, h.device);
+      } else if (kind === "recovery") {
+        recoveryInternals(h.pool).recoveringAndroidDeviceIds.add(h.device.deviceId);
+      }
+      const target = kind === "unpooled" ? { ...h.device, deviceId: "missing" } : h.device;
+      const release = await h.pool.testHooks.assignmentMutex.acquire();
+      const wait = spyOn(h.pool.testHooks.assignmentMutex, "waitForUnlock").mockResolvedValue();
+      let readiness = 0;
+      const starter = new ObservationReadServiceStart({
+        timer: h.timer,
+        ownershipGuard: daemonObservationServiceOwnershipGuard,
+        poolPickup: {
+          available: () => false,
+          isPooled: () => kind !== "unpooled",
+          ensurePooled: async () => {},
+        },
+        readiness: {
+          ensureReady: async () => {
+            readiness++;
+          },
+        },
+        isServiceConnected: () => false,
+      });
+      try {
+        if (consumer === "pool") {
+          expect(await h.pool.waitForAssignmentTransition(target.deviceId)).toBe(false);
+        } else {
+          await expect(starter.start({ device: target, deadlineMs: 100 })).rejects.toThrow(
+            "service start declined: ownership or pool transition cannot be excluded",
+          );
+        }
+        expect(wait).not.toHaveBeenCalled();
+        expect(readiness).toBe(0);
+        expect(h.timer.now()).toBe(0);
+        expect(h.timer.getSleepCallCount()).toBe(0);
+        expect(h.timer.getPendingTimeoutCount()).toBe(0);
+      } finally {
+        wait.mockRestore();
+        release();
+        await releaseReservation?.();
+      }
+    },
+  );
+}

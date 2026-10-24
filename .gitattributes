@@ -81,6 +81,8 @@ test/fixtures/android-locale/*.txt text eol=lf
 test/fixtures/android-am-start/*.txt text eol=lf
 # Real `adb install` downgrade failure capture from the mt36 emulator run (#10191).
 test/fixtures/android-install/*.txt text eol=lf
+# Real ProtoViewer MCP transport captures from the API 37 emulator round 4 run (#15174).
+test/fixtures/android-protoviewer/* text eol=lf
 
 # Git LFS tracking for binary assets
 # Keeps clone size small for SPM consumers and other tooling

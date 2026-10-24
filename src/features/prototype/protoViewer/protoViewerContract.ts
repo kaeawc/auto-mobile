@@ -8,11 +8,16 @@ import { z } from "zod/v4";
  * directory, then starts an explicit, `android.permission.DUMP`-guarded activity that only the adb
  * shell can launch. The app validates and commits it exactly like a user import, sets the entry's
  * source itself, and writes one result file the host reads back.
+ *
+ * The app, not the host, creates `mcp/`, `mcp/inbox/` and `mcp/results/` (the PREPARE action):
+ * on API 30+ scoped storage a directory the adb shell creates under another app's `Android/data`
+ * is owned by the shell and the app can neither traverse nor create entries in it (#15174).
  */
 export const PROTOVIEWER_PACKAGE = "dev.jasonpearson.automobile.protoviewer";
 export const PROTOVIEWER_MCP_COMPONENT = `${PROTOVIEWER_PACKAGE}/.McpActivity`;
 export const PROTOVIEWER_MCP_IMPORT_ACTION = `${PROTOVIEWER_PACKAGE}.mcp.IMPORT`;
 export const PROTOVIEWER_MCP_OPEN_ACTION = `${PROTOVIEWER_PACKAGE}.mcp.OPEN`;
+export const PROTOVIEWER_MCP_PREPARE_ACTION = `${PROTOVIEWER_PACKAGE}.mcp.PREPARE`;
 export const PROTOVIEWER_EXTRA_REQUEST = "request";
 export const PROTOVIEWER_EXTRA_LABEL = "label";
 export const PROTOVIEWER_EXTRA_LIBRARY_ID = "libraryId";
@@ -25,6 +30,8 @@ export const PROTOVIEWER_LIBRARY_ID =
 export const PROTOVIEWER_MAX_LABEL_LENGTH = 120;
 /** Characters the app refuses in a label: controls, format (bidi) and line/paragraph separators. */
 const PROTOVIEWER_LABEL_FORBIDDEN = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
+/** Result path the app uses when a pushed bundle is missing or unreadable from its side. */
+export const PROTOVIEWER_INBOX_PATH = "inbox";
 /** Result path the app uses when the spec needs a capability this ProtoViewer build lacks. */
 export const PROTOVIEWER_CAPABILITY_PATH = "capability";
 
@@ -50,18 +57,26 @@ export function protoViewerDefaultLabel(specId: string): string | undefined {
 }
 
 /** `getExternalFilesDir(null)/mcp` for the given Android user, as adb shell sees it. */
-function protoViewerMcpRoot(userId: number): string {
+export function protoViewerMcpRoot(userId: number): string {
   // Same user-0 spelling as the externalFiles app-file container (appFileSupport.ts).
   const storage = userId === 0 ? "/sdcard" : `/storage/emulated/${userId}`;
   return `${storage}/Android/data/${PROTOVIEWER_PACKAGE}/files/mcp`;
 }
 
+export function protoViewerInboxDir(userId: number): string {
+  return `${protoViewerMcpRoot(userId)}/inbox`;
+}
+
+export function protoViewerResultsDir(userId: number): string {
+  return `${protoViewerMcpRoot(userId)}/results`;
+}
+
 export function protoViewerInboxPath(userId: number, request: string): string {
-  return `${protoViewerMcpRoot(userId)}/inbox/${request}${PROTOVIEWER_BUNDLE_SUFFIX}`;
+  return `${protoViewerInboxDir(userId)}/${request}${PROTOVIEWER_BUNDLE_SUFFIX}`;
 }
 
 export function protoViewerResultPath(userId: number, request: string): string {
-  return `${protoViewerMcpRoot(userId)}/results/${request}.json`;
+  return `${protoViewerResultsDir(userId)}/${request}.json`;
 }
 
 const entry = {
@@ -70,8 +85,7 @@ const entry = {
   label: z.string(),
 };
 
-// Unknown keys are stripped, not refused, so a newer app may add fields without breaking this host.
-export const protoViewerResultSchema = z.discriminatedUnion("status", [
+const workResultSchema = z.discriminatedUnion("status", [
   z.object({ status: z.literal("imported"), ...entry }),
   z.object({ status: z.literal("opened"), ...entry }),
   z.object({
@@ -82,4 +96,10 @@ export const protoViewerResultSchema = z.discriminatedUnion("status", [
   }),
   z.object({ status: z.literal("not_found"), request: z.string() }),
 ]);
-export type ProtoViewerResult = z.infer<typeof protoViewerResultSchema>;
+const preparedResultSchema = z.object({ status: z.literal("prepared"), request: z.string() });
+
+// Unknown keys are stripped, not refused, so a newer app may add fields without breaking this host.
+export const protoViewerWireResultSchema = z.union([workResultSchema, preparedResultSchema]);
+export type ProtoViewerWireResult = z.infer<typeof protoViewerWireResultSchema>;
+/** What an import or open answers with; the storage-preparing answer never leaves the transport. */
+export type ProtoViewerResult = z.infer<typeof workResultSchema>;

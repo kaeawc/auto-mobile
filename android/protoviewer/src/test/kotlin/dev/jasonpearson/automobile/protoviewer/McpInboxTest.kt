@@ -178,6 +178,40 @@ class McpInboxTest {
   }
 
   @Test
+  fun prepareCreatesTheInboxAndResultsFoldersAndReportsThem() {
+    val fresh = Files.createTempDirectory("mcp-fresh").toFile()
+    try {
+      val mcp = File(fresh, "mcp")
+      val freshInbox = McpInbox(mcp, { _, _, _ -> importResult }, repository)
+
+      assertNull(freshInbox.handle(McpCommand.Prepare("mcp-18")))
+
+      assertTrue(File(mcp, "inbox").isDirectory)
+      assertTrue(File(mcp, "results").isDirectory)
+      val written = Json.parseToJsonElement(File(mcp, "results/mcp-18.json").readText()).jsonObject
+      assertEquals("prepared", written.text("status"))
+      assertEquals("mcp-18", written.text("request"))
+      // A second prepare, or a concurrent request, finds the folders and is still answered.
+      assertNull(freshInbox.handle(McpCommand.Prepare("mcp-19")))
+      assertTrue(File(mcp, "results/mcp-19.json").isFile)
+    } finally {
+      fresh.deleteRecursively()
+    }
+  }
+
+  @Test
+  fun aFolderTheAppCannotCreateIsReportedNotPretendedReady() {
+    // A file where the inbox folder belongs stands in for a folder owned by someone else.
+    File(root, "inbox").writeText("not a directory")
+
+    assertFalse(inbox.ensureDirectories())
+    assertNull(inbox.handle(McpCommand.Prepare("mcp-20")))
+
+    assertEquals("rejected", result("mcp-20").text("status"))
+    assertEquals("storage", result("mcp-20").text("path"))
+  }
+
+  @Test
   fun parseNeedsASafeRequestIdAndAnswersEveryOtherLaunch() {
     assertEquals(
       McpCommand.Import("mcp-1", "L"),
@@ -186,6 +220,10 @@ class McpInboxTest {
     assertEquals(
       McpCommand.Open("mcp-1", FIRST),
       McpCommand.parse(MCP_OPEN_ACTION, "mcp-1", null, FIRST),
+    )
+    assertEquals(
+      McpCommand.Prepare("mcp-1"),
+      McpCommand.parse(MCP_PREPARE_ACTION, "mcp-1", null, null),
     )
     assertTrue(
       McpCommand.parse("android.intent.action.VIEW", "mcp-1", null, null) is McpCommand.Unsupported,

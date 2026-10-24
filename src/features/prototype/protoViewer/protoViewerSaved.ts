@@ -13,6 +13,7 @@ import { errorMessage } from "../../../utils/describeUnknownError";
 import {
   PROTOVIEWER_DEFAULT_TIMEOUT_MS,
   ProtoViewerEntryPointMissingError,
+  ProtoViewerStorageError,
   type ProtoViewerDevice,
 } from "./AndroidProtoViewer";
 import {
@@ -142,7 +143,8 @@ async function saveInProtoViewer(
         signal,
       ),
     (error) => {
-      // An older ProtoViewer without the MCP entry point: keep saving through CtrlProxy.
+      // An older ProtoViewer without the MCP entry point, or one whose shared storage the adb
+      // shell cannot use (#15174): nothing was imported, so keep saving through CtrlProxy.
       logger.warn(`[protoviewer] ${error.message} Keeping the CtrlProxy path.`);
       return undefined;
     },
@@ -238,14 +240,19 @@ async function canonicalBundle(
 
 async function deviceCall(
   call: () => Promise<ProtoViewerResult>,
-  onMissingEntryPoint: (error: ProtoViewerEntryPointMissingError) => ProtoViewerOutput | undefined,
+  onUnreachable: (
+    error: ProtoViewerEntryPointMissingError | ProtoViewerStorageError,
+  ) => ProtoViewerOutput | undefined,
 ): Promise<ProtoViewerOutput | undefined> {
   let result: ProtoViewerResult;
   try {
     result = await call();
   } catch (error) {
-    if (error instanceof ProtoViewerEntryPointMissingError) {
-      return onMissingEntryPoint(error);
+    if (
+      error instanceof ProtoViewerEntryPointMissingError ||
+      error instanceof ProtoViewerStorageError
+    ) {
+      return onUnreachable(error);
     }
     logger.warn(`[protoviewer] request failed: ${errorMessage(error)}`, error);
     return { success: false, error: `ProtoViewer request failed: ${errorMessage(error)}` };

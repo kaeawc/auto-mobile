@@ -228,13 +228,17 @@ export class ObservationReadServiceStart {
       (error instanceof RunnerReadinessError && error.deadlineExhausted) ||
       (error instanceof Error &&
         error.message.startsWith("Observer hierarchy service start timed out"));
-    const status = timedOut
-      ? (snapshot.status ?? this.launchQueueStatus(request.device))
-      : undefined;
-    if (status || (timedOut && backgroundStart)) {
-      throw new RunnerLaunchQueuedError(request.device.deviceId, status, { cause: error });
+    if (!timedOut || request.device.platform !== "ios") {
+      throw error;
     }
-    throw error;
+    // The flight ceiling or readiness budget can expire after the launch left the queue
+    // (admitted but still starting), so a missing queue entry must not demote an expired
+    // iOS start to a lost connection (#15214).
+    const status = snapshot.status ?? this.launchQueueStatus(request.device);
+    throw new RunnerLaunchQueuedError(request.device.deviceId, status, {
+      cause: error,
+      startWindowExpired: !status && !backgroundStart,
+    });
   }
 
   private launchQueueStatus(device: BootedDevice): IosRunnerLaunchQueueStatus | undefined {

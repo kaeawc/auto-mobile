@@ -700,6 +700,115 @@ test("queued readiness budget exhaustion is typed before the outer read timer fi
   expect(error.cause).toBe(timeout);
 });
 
+// #15214: six simulators booted back to back. A launch that waited ~55 s in the queue was admitted
+// and started, then the 60 s flight ceiling cancelled it; the queue entry was already gone, so
+// readers joined mid-flight surfaced connection_lost instead of the typed pending state.
+async function joinReaderUntilCeiling(h: Awaited<ReturnType<typeof harness>>) {
+  h.setSetup(async () => new Promise<void>(() => {}));
+  const first = h.starter.start({ device: h.device, deadlineMs: 15_000 });
+  const firstFailure = first.catch((error: unknown) => error);
+  await drainUntil(() => h.admitted() === 1, { description: "cold start" });
+  h.timer.advanceTime(15_000);
+  expect(await firstFailure).toBeInstanceOf(RunnerLaunchQueuedError);
+  h.timer.advanceTime(43_000);
+  // Joins the running flight with its own 15 s budget; the ceiling lands 2 s later.
+  const joined = h.starter.start({ device: h.device, deadlineMs: h.timer.now() + 15_000 });
+  const joinedFailure = joined.catch((error: unknown) => error);
+  await drainMicrotasks(40);
+  expect(h.calls()).toBe(1);
+  h.timer.advanceTime(IOS_SERVICE_START_FLIGHT_CEILING_MS - h.timer.now());
+  return joinedFailure;
+}
+
+test("iOS flight ceiling after the launch left the queue is typed as a pending start", async () => {
+  const h = await harness("ios");
+  const error = await joinReaderUntilCeiling(h);
+  expect(error).toBeInstanceOf(RunnerLaunchQueuedError);
+  if (!(error instanceof RunnerLaunchQueuedError)) {
+    throw new Error("Expected typed pending start");
+  }
+  expect(error.status).toBeUndefined();
+  expect(error.message).toContain("did not finish within its start window");
+  expect(error.message).not.toContain("joins that start");
+  expect(String(error.cause)).toContain("Observer hierarchy service start timed out");
+});
+
+test("iOS flight ceiling reaches the observer as runner_launch_queued, never connection_lost", async () => {
+  const h = await harness("ios");
+  h.setSetup(async () => new Promise<void>(() => {}));
+  const first = h.screen.executeDeviceRead();
+  await drainUntil(() => h.admitted() === 1, { description: "cold start" });
+  h.timer.advanceTime(15_000);
+  expect((await first).freshness?.unavailableReason).toBe("runner_launch_queued");
+  h.timer.advanceTime(43_000);
+  const joined = h.screen.executeDeviceRead();
+  await drainMicrotasks(40);
+  h.timer.advanceTime(IOS_SERVICE_START_FLIGHT_CEILING_MS - h.timer.now());
+  const result = await joined;
+  expect(result.freshness).toMatchObject({
+    isFresh: false,
+    category: "unavailable",
+    unavailableReason: "runner_launch_queued",
+  });
+  expect(result.freshness?.unavailableDetail).toContain("did not finish within its start window");
+  expect(result.screenshotPath).toBe("/fake/queued.png");
+  expect(observeToolResultSchema.safeParse(result).success).toBe(true);
+});
+
+test("iOS readiness budget exhaustion after admission is typed even when the reader still has budget", async () => {
+  const h = await harness("ios");
+  const timeout = new RunnerReadinessError(
+    "observe deviceId automation runner readiness failed: phase=runner-setup remainingBudgetMs=0",
+    false,
+    true,
+    "runner-setup",
+    1,
+  );
+  h.setSetup(async () => {
+    throw timeout;
+  });
+  const error = await h.starter
+    .start({ device: h.device, deadlineMs: h.timer.now() + 15_000 })
+    .then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+  expect(error).toBeInstanceOf(RunnerLaunchQueuedError);
+  if (!(error instanceof RunnerLaunchQueuedError)) {
+    throw new Error("Expected typed pending start");
+  }
+  expect(error.status).toBeUndefined();
+  expect(error.cause).toBe(timeout);
+  expect(error.message).toContain("did not finish within its start window");
+});
+
+test.each([
+  ["ios", false],
+  ["android", true],
+] as const)(
+  "%s readiness failure (budget exhausted: %s) stays a plain setup failure",
+  async (platform, deadlineExhausted) => {
+    const h = await harness(platform);
+    const failure = new RunnerReadinessError(
+      "automation runner readiness failed: phase=runner-setup",
+      false,
+      deadlineExhausted,
+      "runner-setup",
+      1,
+    );
+    h.setSetup(async () => {
+      throw failure;
+    });
+    const error = await h.starter
+      .start({ device: h.device, deadlineMs: h.timer.now() + 15_000 })
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    expect(error).toBe(failure);
+  },
+);
+
 test("a shorter queued reader uses the live queue while another reader retains setup", async () => {
   const h = await harness("ios");
   h.launchQueue.queued.set(h.device.deviceId, queuedStatus);
@@ -758,7 +867,7 @@ test("cold iOS start survives the first budget and retry joins the same flight",
 });
 
 test.each([undefined, 2000])(
-  "iOS flight ceiling aborts setup with a plain timeout (override: %s)",
+  "iOS flight ceiling aborts setup and reports a typed expired start (override: %s)",
   async (override) => {
     const h = await harness("ios", override);
     let signal: AbortSignal | undefined;
@@ -777,8 +886,10 @@ test.each([undefined, 2000])(
     h.timer.advanceTime((override ?? IOS_SERVICE_START_FLIGHT_CEILING_MS) - 100);
     const error = await failure;
     expect(signal?.aborted).toBe(true);
-    expect(error).not.toBeInstanceOf(RunnerLaunchQueuedError);
-    expect(String(error)).toContain("timed out");
+    // The cancelled start is still a pending-start state for the caller (#15214), never a
+    // lost connection; the cause keeps the timeout.
+    expect(error).toBeInstanceOf(RunnerLaunchQueuedError);
+    expect(String(error instanceof Error ? error.cause : error)).toContain("timed out");
     expect(h.calls()).toBe(1);
   },
 );

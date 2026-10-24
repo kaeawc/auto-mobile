@@ -14,9 +14,9 @@ import {
 } from "../../../src/features/observe/ScreenshotRetention";
 import {
   DEFAULT_SCREENSHOT_RETENTION_LIMITS,
-  effectiveScreenshotCacheBytes,
   type ScreenshotRetentionLimits,
 } from "../../../src/features/observe/screenshotCacheEviction";
+import { BASE_CAP_SCREENSHOT_LIMITS } from "../../helpers/screenshotRetentionLimits";
 import {
   resetObserveCacheStore,
   setObserveCacheStore,
@@ -118,9 +118,8 @@ describe("twelve-device screenshot retention", () => {
               }
             }
           }
-          overBudget ||=
-            files.bytes() >
-            effectiveScreenshotCacheBytes(DEFAULT_SCREENSHOT_RETENTION_LIMITS, recent.size);
+          // Guaranteed frames lift the device scale, but never past the ceiling.
+          overBudget ||= files.bytes() > DEFAULT_SCREENSHOT_RETENTION_LIMITS.ceilingBytes;
         }
         timer.advanceTime(10_000);
       }
@@ -237,11 +236,30 @@ describe("device fairness under pressure", () => {
     expect(files.unlinked).toEqual([quiet]);
   });
 
-  test("capacity stays fixed during pressure and shrinks on the next admission", async () => {
+  test("guaranteed frames lift capacity above the device scale and its drop reclaims them", async () => {
     protection = new BoundedScreenshotPathProtection(timer, undefined, undefined, {
       baseBytes: 3_000,
       perDeviceBytes: 2_000,
       ceilingBytes: 10_000,
+      keepPerDevice: 0,
+    });
+    await capture("a", 0, 1_000);
+    await capture("b", 0, 3_000);
+    await capture("c", 0, 2_000);
+    await capture("c", 1, 3_000);
+    expect(files.unlinked).toEqual([]);
+    expect(files.bytes()).toBe(9_000);
+    timer.advanceTime(SCREENSHOT_PATH_MIN_LIFETIME_MS);
+    const next = await capture("c", 2, 1_000);
+    expect(files.bytes()).toBe(1_000);
+    expect([...files.entries.keys()]).toEqual([next]);
+  });
+
+  test("past the ceiling the cap holds for the whole pass and evicts the least recently touched", async () => {
+    protection = new BoundedScreenshotPathProtection(timer, undefined, undefined, {
+      baseBytes: 3_000,
+      perDeviceBytes: 2_000,
+      ceilingBytes: 6_000,
       keepPerDevice: 0,
     });
     const a = await capture("a", 0, 1_000);
@@ -249,12 +267,8 @@ describe("device fairness under pressure", () => {
     const c = await capture("c", 0, 2_000);
     const incoming = await capture("c", 1, 3_000);
     expect(files.unlinked).toEqual([a, b]);
-    expect(files.bytes()).toBe(5_000);
     expect([...files.entries.keys()]).toEqual([c, incoming]);
-    const next = await capture("c", 2, 1_000);
-    expect(files.unlinked).toEqual([a, b, c, incoming]);
-    expect(files.bytes()).toBe(1_000);
-    expect([...files.entries.keys()]).toEqual([next]);
+    expect(files.bytes()).toBe(5_000);
   });
 
   test("a newest frame mid-removal leaves K slots for the device's remaining frames", async () => {
@@ -299,8 +313,13 @@ describe("device fairness under pressure", () => {
     }
   });
 
-  test("two devices retain the base byte cap", async () => {
-    protection = new BoundedScreenshotPathProtection(timer);
+  test("two devices retain the base byte cap when the ceiling is the base", async () => {
+    protection = new BoundedScreenshotPathProtection(
+      timer,
+      undefined,
+      undefined,
+      BASE_CAP_SCREENSHOT_LIMITS,
+    );
     const half = DEFAULT_SCREENSHOT_RETENTION_LIMITS.baseBytes / 2;
     await capture("a", 0, half);
     await capture("b", 0, half);
@@ -317,10 +336,11 @@ describe("device fairness under pressure", () => {
     }
     expect(files.bytes()).toBe(384 * 1024 * 1024);
     expect(files.unlinked).toEqual([]);
-    for (let index = 6; index < 20; index++) {
+    const { ceilingBytes } = DEFAULT_SCREENSHOT_RETENTION_LIMITS;
+    for (let index = 6; index < 40; index++) {
       await capture(String(index), 0, perDevice);
     }
-    expect(files.bytes()).toBe(DEFAULT_SCREENSHOT_RETENTION_LIMITS.ceilingBytes);
-    expect(files.entries.size).toBe(16);
+    expect(files.bytes()).toBe(ceilingBytes);
+    expect(files.entries.size).toBe(ceilingBytes / perDevice);
   });
 });

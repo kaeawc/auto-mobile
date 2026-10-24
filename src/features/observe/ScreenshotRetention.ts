@@ -12,6 +12,7 @@ import { getScreenshotStateStore } from "./screenshot/ScreenshotStateRegistry";
 import {
   DEFAULT_SCREENSHOT_RETENTION_LIMITS,
   effectiveScreenshotCacheBytes,
+  guaranteedScreenshotCacheBytes,
   newestScreenshotPathKeys,
   type ScreenshotRetentionLimits,
   screenshotPathKey,
@@ -222,9 +223,12 @@ export class BoundedScreenshotPathProtection implements ScreenshotPathProtection
     incoming: number,
     path: string,
   ): Promise<void> {
+    const { cap, scaled, hard } = this.capacity(state, path, incoming);
+    // Guaranteed frames lift the cap above the device scale; reconcile near the ceiling then,
+    // not on every admission between the scale and the ceiling.
+    const reconcileAt = cap > scaled ? hard : scaled;
     const nearCap =
-      state.bytes + incoming >=
-        this.effectiveCap(state, path) * SCREENSHOT_INVENTORY_RECONCILE_RATIO ||
+      state.bytes + incoming >= reconcileAt * SCREENSHOT_INVENTORY_RECONCILE_RATIO ||
       (state.files?.size ?? 0) + 1 >= this.countCap * SCREENSHOT_INVENTORY_RECONCILE_RATIO;
     if (!state.files || state.inventoryFailed || state.reconcileNeeded || nearCap) {
       await this.cleanup(directory, state);
@@ -414,11 +418,28 @@ export class BoundedScreenshotPathProtection implements ScreenshotPathProtection
       state.recovered?.has(key) ? this.startedAt : 0,
     );
   }
-  private effectiveCap(state: DirectoryRetention, incomingPath?: string): number {
+  private effectiveCap(state: DirectoryRetention, incomingPath?: string, incoming = 0): number {
+    return this.capacity(state, incomingPath, incoming).cap;
+  }
+  /**
+   * `scaled` follows the devices with a frame inside its guarantee; `cap` also covers every byte
+   * still inside its guarantee (plus the incoming frame) up to `hard`, so pressure eviction
+   * only reaches into the guarantee past the ceiling (#15182).
+   */
+  private capacity(
+    state: DirectoryRetention,
+    incomingPath?: string,
+    incoming = 0,
+  ): { cap: number; scaled: number; hard: number } {
     const devices = new Set<string>();
+    let guaranteedBytes = incoming;
     for (const file of state.files?.values() ?? []) {
+      if (this.expiry(file, state) <= this.timer.now()) {
+        continue;
+      }
+      guaranteedBytes += file.size;
       const device = screenshotFileDeviceToken(nodePath.basename(file.path));
-      if (device && this.expiry(file, state) > this.timer.now()) {
+      if (device) {
         devices.add(device);
       }
     }
@@ -427,7 +448,11 @@ export class BoundedScreenshotPathProtection implements ScreenshotPathProtection
     if (incomingDevice) {
       devices.add(incomingDevice);
     }
-    return effectiveScreenshotCacheBytes(this.limits, devices.size);
+    return {
+      cap: guaranteedScreenshotCacheBytes(this.limits, devices.size, guaranteedBytes),
+      scaled: effectiveScreenshotCacheBytes(this.limits, devices.size),
+      hard: Math.max(this.limits.ceilingBytes, this.limits.baseBytes),
+    };
   }
   /**
    * Make room for an incoming frame by evicting least-recently-touched files, even inside their
@@ -445,7 +470,7 @@ export class BoundedScreenshotPathProtection implements ScreenshotPathProtection
     incoming: number,
     path: string,
   ): Promise<void> {
-    const cap = this.effectiveCap(state, path);
+    const cap = this.effectiveCap(state, path, incoming);
     const fits = () =>
       state.bytes + incoming <= cap && (state.files?.size ?? 0) + 1 <= this.countCap;
     if (fits()) {
@@ -456,14 +481,15 @@ export class BoundedScreenshotPathProtection implements ScreenshotPathProtection
     let evicted = 0;
     let sparedEvicted = 0;
     let newestEvicted = 0;
-    for (const { file, spared, deviceNewest } of candidates) {
+    for (const { file, spared, deviceNewest, guaranteed } of candidates) {
       if (fits()) {
         break;
       }
       if (await this.evict(file.path, state)) {
-        evicted += 1;
-        sparedEvicted += spared ? 1 : 0;
-        newestEvicted += deviceNewest ? 1 : 0;
+        // Frames whose guarantee already lapsed are ordinary cleanup, not an early eviction.
+        evicted += guaranteed ? 1 : 0;
+        sparedEvicted += guaranteed && spared ? 1 : 0;
+        newestEvicted += guaranteed && deviceNewest ? 1 : 0;
       }
     }
     if (evicted > 0) {
@@ -494,7 +520,10 @@ export class BoundedScreenshotPathProtection implements ScreenshotPathProtection
         const touched = this.lastTouched(file, state);
         const spared = touched > newest || references.has(this.key(file.path));
         const deviceNewest = latest.has(this.key(file.path));
-        return { file, touched, spared, deviceNewest, tier: deviceNewest ? 2 : Number(spared) };
+        const guaranteed = this.expiry(file, state) > this.timer.now();
+        // Lapsed frames go before anything still inside its guarantee.
+        const tier = deviceNewest ? 3 : spared ? 2 : Number(guaranteed);
+        return { file, touched, spared, deviceNewest, guaranteed, tier };
       })
       .sort((a, b) => a.tier - b.tier || a.touched - b.touched);
   }

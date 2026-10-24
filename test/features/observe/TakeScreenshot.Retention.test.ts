@@ -1,4 +1,5 @@
 import { buildObserveResult } from "../../helpers/observeFixture";
+import { BASE_CAP_SCREENSHOT_LIMITS } from "../../helpers/screenshotRetentionLimits";
 import { SCREENSHOT_PATH_MIN_LIFETIME_MS } from "../../../src/features/observe/ScreenshotRetention";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { logger } from "../../../src/utils/logger";
@@ -72,7 +73,12 @@ async function sweep() {
 beforeEach(() => {
   timer = new FakeTimer();
   files = new RetentionFiles();
-  protection = new BoundedScreenshotPathProtection(timer, undefined);
+  protection = new BoundedScreenshotPathProtection(
+    timer,
+    undefined,
+    undefined,
+    BASE_CAP_SCREENSHOT_LIMITS,
+  );
   files.setDirectory("/screenshots");
   setObserveCacheStore(new FakeObserveCacheStore(timer));
   states = new InMemoryScreenshotStateStore(timer);
@@ -127,7 +133,12 @@ test("a fresh protection sweeps the same cache directory once again", async () =
     });
 
   create(protection);
-  const freshProtection = new BoundedScreenshotPathProtection(timer, undefined);
+  const freshProtection = new BoundedScreenshotPathProtection(
+    timer,
+    undefined,
+    undefined,
+    BASE_CAP_SCREENSHOT_LIMITS,
+  );
   const freshSweep = spyOn(freshProtection, "sweep").mockResolvedValue(undefined);
   create(freshProtection);
   await Promise.resolve();
@@ -402,7 +413,12 @@ test("a newly added equivalent reference prevents deleting the next stale file",
 
 test("restart gives old files a full process-start grace, then age sweeps them", async () => {
   timer.advanceTime(2_000_000);
-  protection = new BoundedScreenshotPathProtection(timer, undefined);
+  protection = new BoundedScreenshotPathProtection(
+    timer,
+    undefined,
+    undefined,
+    BASE_CAP_SCREENSHOT_LIMITS,
+  );
   const old = files.add("snapshot-of-restart.png", 1, 0);
   await sweep();
   timer.advanceTime(SCREENSHOT_PATH_MIN_LIFETIME_MS - 1);
@@ -415,7 +431,12 @@ test("restart gives old files a full process-start grace, then age sweeps them",
 
 test("restart grace never shortens a newer file's mtime floor", async () => {
   timer.advanceTime(2_000_000);
-  protection = new BoundedScreenshotPathProtection(timer, undefined);
+  protection = new BoundedScreenshotPathProtection(
+    timer,
+    undefined,
+    undefined,
+    BASE_CAP_SCREENSHOT_LIMITS,
+  );
   const recent = files.add("snapshot-of-newer.png", 1, timer.now() + 100);
   await sweep();
   timer.advanceTime(SCREENSHOT_PATH_MIN_LIFETIME_MS);
@@ -473,7 +494,12 @@ test("count capacity evicts the oldest file instead of refusing a new one", asyn
   // A small injected cap exercises the same admission path as the production 4096 without
   // building and sweeping 4096 fake files (~10 ms, the slowest test in this file).
   const countCap = 16;
-  protection = new BoundedScreenshotPathProtection(timer, undefined, countCap);
+  protection = new BoundedScreenshotPathProtection(
+    timer,
+    undefined,
+    countCap,
+    BASE_CAP_SCREENSHOT_LIMITS,
+  );
   for (let i = 0; i < countCap; i++) {
     files.add(`crop-count-${i}.png`, 1, i);
   }

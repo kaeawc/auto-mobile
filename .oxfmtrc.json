@@ -20,6 +20,7 @@
     "test/fixtures/android-focus-multidisplay/*.txt",
     "test/fixtures/android-am-start/*.txt",
     "test/fixtures/android-install/*.txt",
+    "test/fixtures/android-protoviewer/*",
     "test/fixtures/ios-sdk-network/*.json",
     "test/fixtures/ios-lock-state/**",
     "test/fixtures/ios-notification-center/*.json",

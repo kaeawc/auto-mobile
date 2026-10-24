@@ -70,6 +70,7 @@ portable test/utils/ios-cmdline-tools/iosDeviceType.test.ts              # devic
 portable test/utils/ios-cmdline-tools/iosDeviceType.property.test.ts     # Android serials are never classified as iOS
 
 portable test/ctrlProxy/ios/IosRunnerLaunchGate.test.ts                  # FIFO admission and env parsing use no platform commands
+portable test/ctrlProxy/ios/IosRunnerLaunchFailure.test.ts               # pure output classification and PID failure ledger
 portable test/ctrlProxy/ios/IosRunnerLaunchProgress.test.ts              # pure ps parsing and an injected fake host executor
 
 # --- macos: no iOS token in the path, but the test exercises only iOS code -------

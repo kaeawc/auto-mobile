@@ -25,15 +25,20 @@ export function parseProcessCpuTimeMs(value: string): number | null {
   return Number.isSafeInteger(Math.round(result)) ? Math.round(result) : null;
 }
 
+/**
+ * Sums CPU over the runner tree from a `ps -axo pid=,ppid=,time=` table (no command
+ * column, so the output stays small on a busy host). `deviceRootPids` are this device's
+ * CtrlProxy host processes found separately by {@link ctrlProxyPidsFromArgsRows}.
+ */
 export function sumRunnerLaunchCpuMs(
   stdout: string,
   rootPid: number,
-  deviceId: string,
+  deviceRootPids: readonly number[] = [],
 ): number | null {
-  const processes = new Map<number, { parent: number; cpu: number; command: string }>();
+  const cpuByPid = new Map<number, number>();
   const children = new Map<number, number[]>();
   for (const line of stdout.split("\n")) {
-    const match = /^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.+)$/.exec(line);
+    const match = /^\s*(\d+)\s+(\d+)\s+(\S+)\s*$/.exec(line);
     if (!match) {
       continue;
     }
@@ -43,21 +48,34 @@ export function sumRunnerLaunchCpuMs(
     }
     const pid = Number(match[1]);
     const parent = Number(match[2]);
-    processes.set(pid, { parent, cpu, command: match[4] });
+    cpuByPid.set(pid, cpu);
     const siblings = children.get(parent) ?? [];
     siblings.push(pid);
     children.set(parent, siblings);
   }
-  if (!processes.has(rootPid)) {
+  if (!cpuByPid.has(rootPid)) {
     return null;
   }
-  const roots = launchRootPids(processes, rootPid, deviceId);
-  const included = descendantPids(children, roots);
+  const included = descendantPids(children, [rootPid, ...deviceRootPids]);
   let total = 0;
   for (const pid of included) {
-    total += processes.get(pid)?.cpu ?? 0;
+    total += cpuByPid.get(pid) ?? 0;
   }
   return total;
+}
+
+/**
+ * The runner app lives under the device's data container, so its command line carries
+ * both the udid and the CtrlProxy bundle name. The device's launchd_sim (udid only) is
+ * deliberately excluded: an idle booted simulator burns CPU all the time and would make a
+ * frozen runner look like it is progressing. `stdout` is `ps -o pid= -o args=` rows for the
+ * processes whose command line already matched the udid.
+ */
+export function ctrlProxyPidsFromArgsRows(stdout: string): number[] {
+  return stdout.split("\n").flatMap((line) => {
+    const match = /^\s*(\d+)\s+(.+)$/.exec(line);
+    return match && match[2].includes("CtrlProxy") ? [Number(match[1])] : [];
+  });
 }
 
 function descendantPids(children: Map<number, number[]>, rootPids: number[]): Set<number> {
@@ -72,25 +90,4 @@ function descendantPids(children: Map<number, number[]>, rootPids: number[]): Se
     queue.push(...(children.get(pid) ?? []));
   }
   return included;
-}
-
-// The runner app lives under the device's data container, so its command line
-// carries both the udid and the CtrlProxy bundle name. The device's launchd_sim
-// (udid only) is deliberately excluded: an idle booted simulator burns CPU all
-// the time and would make a frozen runner look like it is progressing.
-function launchRootPids(
-  processes: Map<number, { command: string }>,
-  rootPid: number,
-  deviceId: string,
-): number[] {
-  const roots = [rootPid];
-  if (deviceId.length === 0) {
-    return roots;
-  }
-  for (const [pid, row] of processes) {
-    if (row.command.includes(deviceId) && row.command.includes("CtrlProxy")) {
-      roots.push(pid);
-    }
-  }
-  return roots;
 }

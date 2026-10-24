@@ -1,3 +1,4 @@
+import { classifyRunnerLaunchOutput } from "./IosRunnerLaunchFailure";
 import type { IosCtrlProxyRuntime } from "./IosCtrlProxyRuntime";
 import type { RunnerLaunchProvenance } from "./IosCtrlProxyLifecycleSteps";
 import { runnerQueryTimeoutEnv } from "./runnerQueryTimeoutEnv";
@@ -52,6 +53,7 @@ export class IosCtrlProxyLaunch {
   constructor(
     private readonly state: Pick<
       IosCtrlProxyRuntime,
+      | "runnerLaunchFailures"
       | "servicePort"
       | "remoteRunnerAvailability"
       | "remoteRunner"
@@ -521,6 +523,9 @@ export class IosCtrlProxyLaunch {
 
   /** Publish a runner this launch started or adopted, opening a new runner generation. */
   private trackLaunchedRunner(pid: number | null, child: ChildProcess | null): void {
+    if (pid !== null) {
+      this.state.runnerLaunchFailures.clear(pid);
+    }
     this.runnerLaunchGeneration++;
     this.state.xcTestProcessId = pid;
     this.state.xcTestProcess = child;
@@ -530,9 +535,17 @@ export class IosCtrlProxyLaunch {
    * Capture process output for debugging
    */
   private captureProcessOutput(child: ChildProcess): void {
+    // Stream boundaries are arbitrary; retain only a bounded overlap per child/stream.
+    let stdoutTail = "";
+    let stderrTail = "";
+    const tailLength = 256;
     if (child.stdout) {
       child.stdout.on("data", (data: Buffer | string) => {
-        const output = data.toString().trim();
+        const chunk = data.toString();
+        const combined = stdoutTail + chunk;
+        this.recordLaunchOutputFailure(child, combined);
+        stdoutTail = combined.slice(-tailLength);
+        const output = chunk.trim();
         if (output && this.shouldPromoteCtrlProxyOutput(output)) {
           logger.info(`[CtrlProxy stdout] ${output.slice(0, 500)}`);
         }
@@ -541,7 +554,11 @@ export class IosCtrlProxyLaunch {
 
     if (child.stderr) {
       child.stderr.on("data", (data: Buffer | string) => {
-        const output = data.toString().trim();
+        const chunk = data.toString();
+        const combined = stderrTail + chunk;
+        this.recordLaunchOutputFailure(child, combined);
+        stderrTail = combined.slice(-tailLength);
+        const output = chunk.trim();
         if (output && !output.includes("Build Succeeded")) {
           if (this.shouldPromoteCtrlProxyOutput(output)) {
             logger.warn(`[CtrlProxy stderr] ${output.slice(0, 500)}`);
@@ -550,6 +567,21 @@ export class IosCtrlProxyLaunch {
           }
         }
       });
+    }
+  }
+
+  private recordLaunchOutputFailure(child: ChildProcess, output: string): void {
+    const failure = classifyRunnerLaunchOutput(output);
+    if (
+      failure &&
+      child.pid !== undefined &&
+      this.state.xcTestProcess === child &&
+      !this.state.runnerLaunchFailures.get(child.pid)
+    ) {
+      this.state.runnerLaunchFailures.record(child.pid, failure);
+      logger.warn(
+        `[IOSCtrlProxy] Runner launch failure ${failure.reason} (PID ${child.pid}): ${failure.detail}`,
+      );
     }
   }
 
@@ -613,6 +645,9 @@ export class IosCtrlProxyLaunch {
       return isHealthy;
     }
     if (isHealthy) {
+      if (this.state.xcTestProcessId !== null) {
+        this.state.runnerLaunchFailures.clear(this.state.xcTestProcessId);
+      }
       this.resetHealthMissStreak();
       return true;
     }
@@ -667,6 +702,12 @@ export class IosCtrlProxyLaunch {
     );
     // The supervisor's onExit would otherwise untrack this still-alive runner, and
     // the restart it schedules would then launch a second one beside it (#10234).
+    if (this.state.xcTestProcessId !== null) {
+      this.state.runnerLaunchFailures.record(this.state.xcTestProcessId, {
+        reason: "supervisor-unhealthy",
+        detail: `Missed ${this.healthMissThreshold} consecutive health probes`,
+      });
+    }
     this.state.retainRunnerTrackingOnSupervisorExit = true;
     return false;
   }

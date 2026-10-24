@@ -19,7 +19,9 @@
  *
  * CLI (all read/write repo-relative POSIX paths):
  *   list                         every macOS-only test file under test/
- *   write-bunfig <out>           bunfig.toml copy that also ignores them
+ *   write-bunfig <out> [--ignore <glob>]...
+ *                                bunfig.toml copy that also ignores them, plus any
+ *                                lane patterns passed as --ignore (see below)
  *   report [--markdown]          count line on stderr; step-summary markdown on stdout
  */
 import { readFileSync, writeFileSync } from "node:fs";
@@ -239,6 +241,19 @@ export function renderReportMarkdown(report: SkipReport, hostLabel: string): str
   ].join("\n");
 }
 
+/** `--ignore <glob>` pairs, or null when the flags are malformed. */
+export function parseIgnoreFlags(flags: readonly string[]): string[] | null {
+  const patterns: string[] = [];
+  for (let index = 0; index < flags.length; index += 2) {
+    const pattern = flags[index + 1];
+    if (flags[index] !== "--ignore" || pattern === undefined || pattern === "") {
+      return null;
+    }
+    patterns.push(pattern);
+  }
+  return patterns;
+}
+
 function main(argv: readonly string[]): number {
   const repoRoot = path.resolve(import.meta.dir, "../..");
   const [command, ...rest] = argv;
@@ -253,13 +268,14 @@ function main(argv: readonly string[]): number {
       );
       return 0;
     case "write-bunfig": {
-      const [output] = rest;
-      if (!output) {
-        console.error("Usage: macOsOnlyTests.ts write-bunfig <output>");
+      const [output, ...flags] = rest;
+      const laneIgnores = parseIgnoreFlags(flags);
+      if (!output || laneIgnores === null) {
+        console.error("Usage: macOsOnlyTests.ts write-bunfig <output> [--ignore <glob>]...");
         return 2;
       }
       const bunfig = readFileSync(path.join(repoRoot, "bunfig.toml"), "utf8");
-      writeFileSync(output, renderSkipBunfig(bunfig, skippedAll()));
+      writeFileSync(output, renderSkipBunfig(bunfig, [...laneIgnores, ...skippedAll()]));
       return 0;
     }
     case "report": {
@@ -271,7 +287,9 @@ function main(argv: readonly string[]): number {
       return 0;
     }
     default:
-      console.error("Usage: macOsOnlyTests.ts {list|write-bunfig <out>|report [--markdown]}");
+      console.error(
+        "Usage: macOsOnlyTests.ts {list|write-bunfig <out> [--ignore <glob>]...|report [--markdown]}",
+      );
       return 2;
   }
 }

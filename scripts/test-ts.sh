@@ -138,6 +138,12 @@ macos_only_filter() {
 # pattern beats an explicit file argument, and a config file has no argv length cap.
 # The path is relative to the repo root (the lane's cwd) unless the scratch dir is
 # overridden, so Git Bash never rewrites it. $1 is the argument array to extend.
+#
+# Bun REPLACES the config's pathIgnorePatterns with any --path-ignore-patterns flag
+# (#15237: the Windows unit lane carried the lane's two flags, so the macOS-only
+# list in the config was dropped and ~300 iOS files ran). So the unit lane's own
+# flags move into the config here, and every other lane that adds such a flag
+# appends macos_only_integration_ignore_args to it.
 add_macos_only_bun_config() {
   [[ "$skip_macos_only" -eq 1 ]] || return 0
   local config="scratch/bunfig.macos-only.toml"
@@ -145,11 +151,35 @@ add_macos_only_bun_config() {
     config="$AUTOMOBILE_TEST_TS_SCRATCH_DIR/bunfig.macos-only.toml"
   fi
   mkdir -p "$(dirname "$config")"
-  bun "$macos_only_tool" write-bunfig "$config"
+  local lane_ignores=() kept_args=() index=0
+  if [[ "$1" == unit ]]; then
+    while ((index < ${#unit_args[@]})); do
+      if [[ "${unit_args[index]}" == --path-ignore-patterns ]]; then
+        lane_ignores+=(--ignore "${unit_args[index + 1]}")
+        index=$((index + 2))
+      else
+        kept_args+=("${unit_args[index]}")
+        index=$((index + 1))
+      fi
+    done
+    unit_args=("${kept_args[@]}")
+  fi
+  bun "$macos_only_tool" write-bunfig "$config" ${lane_ignores[@]+"${lane_ignores[@]}"}
   case "$1" in
     unit) unit_args+=("--config=$config") ;;
     integration) integration_args+=("--config=$config") ;;
   esac
+}
+
+# --path-ignore-patterns flags for the macOS-only integration files, for lanes
+# that already pass their own such flags (which would replace the config's list).
+# Only a handful of integration files are macOS-only, so argv length is no concern.
+macos_only_integration_ignore_args() {
+  [[ "$skip_macos_only" -eq 1 ]] || return 0
+  local file
+  while IFS= read -r file; do
+    printf '%s\n' --path-ignore-patterns "$file"
+  done < <(grep -F '.integration.test.ts' "$macos_only_skip_file" || true)
 }
 
 # shellcheck source=scripts/lib/host-slots.sh
@@ -1132,6 +1162,9 @@ run_windows_integration_shards() {
       ignore_args+=(--path-ignore-patterns "$path")
     fi
   done < <(integration_tier_paths "$tier_file" unsafe | macos_only_filter)
+  while IFS= read -r path; do
+    ignore_args+=("$path")
+  done < <(macos_only_integration_ignore_args)
   if [[ "${TEST_TS_PRINT_CMD:-}" != 1 ]]; then
     rm -rf "$shard_root"
     mkdir_spotlight_excluded_within "$ROOT" "$shard_root"
@@ -1627,7 +1660,11 @@ case "$mode" in
         fi
         main_status=0
         if [[ "$has_test_targets" -eq 0 ]]; then
-          main_targets=(--path-ignore-patterns "**/proxyServerTransportFailure.integration.test.ts" ".integration.test.ts")
+          main_targets=(--path-ignore-patterns "**/proxyServerTransportFailure.integration.test.ts")
+          while IFS= read -r macos_only_ignore; do
+            main_targets+=("$macos_only_ignore")
+          done < <(macos_only_integration_ignore_args)
+          main_targets+=(".integration.test.ts")
         else
           main_targets=("${integration_main_paths[@]+"${integration_main_paths[@]}"}")
         fi

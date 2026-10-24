@@ -125,7 +125,7 @@ export function bindActiveDeviceResult(
       getActiveDeviceSelectionFromResult(result)?.sessionUuid ?? plan.routingSessionUuid,
     )
   ) {
-    ToolRegistry.notifyToolListChanged();
+    ToolRegistry.notifyToolSelectionChanged();
   }
 }
 
@@ -190,7 +190,7 @@ export async function bindNamedSession(
     return;
   }
   if (sessionToolBinding.bind(sessionId, providedSessionUuid)) {
-    ToolRegistry.notifyToolListChanged();
+    ToolRegistry.notifyToolSelectionChanged();
   }
   if (tool.requiresDevice && !readOnlyCall && daemonSessionManager) {
     await attachToPool(providedSessionUuid, implicitAutolockMcpSessionId);

@@ -28,7 +28,7 @@ export function createReleaseSubscribedBindingStore(): SessionToolBindingStore {
         unsubscribe();
       };
     },
-    onBindingChanged: () => ToolRegistry.notifyToolListChanged(),
+    onBindingChanged: () => ToolRegistry.notifyToolSelectionChanged(),
   });
 }
 

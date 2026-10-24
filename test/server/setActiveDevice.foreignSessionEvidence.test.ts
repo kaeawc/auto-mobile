@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, spyOn } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
@@ -16,6 +16,7 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { RealToolCallPath } from "../helpers/realToolCallPath";
+import { warmedTests } from "../helpers/warmedTests";
 
 /**
  * A control call that names a session another connected client owns is refused with
@@ -35,8 +36,8 @@ describe("setActiveDevice naming a session another connection owns", () => {
 
   let manager: SessionManager;
   let pool: DevicePool;
-  let tools: RealToolCallPath;
-  let spies: Array<ReturnType<typeof spyOn>>;
+  let tools: RealToolCallPath | undefined;
+  let spies: Array<ReturnType<typeof spyOn>> = [];
   let previousAutolock: string | undefined;
 
   const refusal = (run: () => unknown) =>
@@ -82,7 +83,28 @@ describe("setActiveDevice naming a session another connection owns", () => {
     });
   }
 
-  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function teardownHarness(): void {
+    if (!tools) {
+      return;
+    }
+    tools.uninstall();
+    tools = undefined;
+    DaemonState.getInstance().reset();
+    manager.stopCleanupTimer();
+    for (const spy of spies) {
+      spy.mockRestore();
+    }
+    spies = [];
+    if (previousAutolock === undefined) {
+      delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+    } else {
+      process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = previousAutolock;
+    }
+  }
+
+  // First-use costs (module graph, the setActiveDevice handler, the refusal) are paid in beforeAll.
+  // The DevicePool harness is still built inside each test, so its cost is paid in the test body.
+  const test = warmedTests(teardownHarness);
   function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
     test(
       name,
@@ -93,20 +115,6 @@ describe("setActiveDevice naming a session another connection owns", () => {
       timeout,
     );
   }
-
-  afterEach(() => {
-    tools.uninstall();
-    DaemonState.getInstance().reset();
-    manager.stopCleanupTimer();
-    for (const spy of spies) {
-      spy.mockRestore();
-    }
-    if (previousAutolock === undefined) {
-      delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
-    } else {
-      process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = previousAutolock;
-    }
-  });
 
   arranged("the refusal carries the same evidence every other tool's refusal carries", async () => {
     const reference = await refusal(() =>
@@ -119,7 +127,7 @@ describe("setActiveDevice naming a session another connection owns", () => {
     });
 
     const error = await refusal(() =>
-      tools.call("setActiveDevice", {
+      tools!.call("setActiveDevice", {
         deviceId: free.deviceId,
         sessionUuid: SESSION,
         __mcpSessionId: OTHER,
@@ -143,7 +151,7 @@ describe("setActiveDevice naming a session another connection owns", () => {
       expect(autolocked).toBeDefined();
 
       const error = await refusal(() =>
-        tools.call("setActiveDevice", { deviceId: free.deviceId, sessionUuid: autolocked }),
+        tools!.call("setActiveDevice", { deviceId: free.deviceId, sessionUuid: autolocked }),
       );
 
       expect(error?.code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);

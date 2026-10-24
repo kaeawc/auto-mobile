@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
 import { DEVICE_ASSIGNED_TO_BINDING_CODE } from "../../src/daemon/sessionBroker/provisioning/refusal";
@@ -20,16 +20,27 @@ import {
 } from "../helpers/transportAliasHarness";
 
 const cleanups: Array<() => void> = [];
-afterEach(() => {
+function runCleanups(): void {
   for (const cleanup of cleanups.splice(0).reverse()) {
     cleanup();
   }
-});
+}
+afterEach(runCleanups);
 async function harness(options: HarnessOptions) {
   return transportAliasHarness(options, cleanups);
 }
 
 const phone = () => harness({ pooledRows: [booted(USB), booted(WIRELESS)], held: USB });
+
+// The first harness loads and compiles the daemon pool, session and tool-call graph; build one
+// here, outside the 100 ms test budget, rather than inside whichever test runs first.
+beforeAll(async () => {
+  try {
+    await phone();
+  } finally {
+    runCleanups();
+  }
+});
 
 describe("a tool call naming a held handset by either transport id (#11618)", () => {
   test("the pool holds the handset once, under its USB serial", async () => {

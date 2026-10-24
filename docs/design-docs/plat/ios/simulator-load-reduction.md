@@ -130,6 +130,31 @@ drift, which was not measured. `liveActivities` was only measured as part of `ca
   with `cpu-plus`) and an erase about 359 (270); a clone takes about 3 seconds to create. The template is a one-off
   cost: a plain first boot (815 CPU-seconds) plus about 250 to 340 seconds of sampling until quiet plus 120 seconds.
 
+## Pre-boot lean profile
+
+After creating a simulator and before its first boot, AutoMobile can merge catalog labels into
+`/private/var/tmp/com.apple.CoreSimulator.SimDevice.<UDID>/disabled.plist` as a binary plist mapping
+labels to `true`. New directories use mode 0700; existing directories and foreign plist keys are
+preserved. Writes use a temporary file and atomic rename.
+
+`AUTOMOBILE_IOS_PREBOOT_LEAN_PROFILE` selects the profile lazily at creation time. The default is
+`none`; unknown values warn and fall back to `none`.
+
+| Profile       | Catalog resources                                                                                   | Labels |
+| ------------- | --------------------------------------------------------------------------------------------------- | ------ |
+| `none`        | none                                                                                                | 0      |
+| `minimal`     | wallpaperRendering, widgets, liveActivities                                                         | 3      |
+| `catalog-cpu` | minimal plus healthServices, photoAnalysis, assistantSuggestions, appleIntelligence, searchIndexing | 23     |
+
+Explicit disabled resources add their catalog labels; explicit enabled resources remove their labels
+from the selected profile. An empty label set performs no host I/O. The write is best effort: errors
+warn and provisioning continues. Explicit resource requests still run through the existing post-boot
+verification, which remains `current_boot`.
+
+The database survives reboot and erase and is specific to the UDID; clones do not inherit it.
+After successful simulator deletion, AutoMobile removes that UDID's host directory on a best-effort
+basis. Orphan directories belonging to simulators already deleted are not swept.
+
 ## Risks
 
 - Disabling the entire resource catalog plus the extra candidates (104 labels, applied post-boot, 85 seconds) made

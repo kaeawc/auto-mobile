@@ -149,3 +149,23 @@ test("surfaces plist write process failures", async () => {
     new PlistClient(process, { timer: new FakeTimer() }).writeXmlFromJson("/tmp/Info.plist", {}),
   ).rejects.toThrow("write denied");
 });
+
+test("writes binary plist JSON through literal argv and stdin", async () => {
+  const value = { "com.example.label": true };
+  const process: PlistProcess = async (request) => {
+    expect(request.args).toEqual([
+      "-convert",
+      "binary1",
+      "-o",
+      "/tmp/a;literal/disabled.plist",
+      "--",
+      "-",
+    ]);
+    expect(JSON.parse(request.input!.toString("utf8"))).toEqual(value);
+    return { stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) };
+  };
+  await new PlistClient(process, { timer: new FakeTimer() }).writeBinaryFromJson(
+    "/tmp/a;literal/disabled.plist",
+    value,
+  );
+});

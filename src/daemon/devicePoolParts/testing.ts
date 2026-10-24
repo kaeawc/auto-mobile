@@ -19,6 +19,7 @@ type TestingState = Pick<
   | "startedDeviceProcessOutput"
   | "rehydrationReservations"
   | "intentionalShutdowns"
+  | "shutdownReservationCoordinator"
   | "deviceReservations"
   | "foreignDeviceOwnership"
   | "timer"
@@ -119,6 +120,7 @@ export class DevicePoolTesting {
       ),
       rehydrationReservations: this.state.rehydrationReservations,
       intentionalShutdowns: this.state.intentionalShutdowns,
+      shutdownReservationCoordinator: this.state.shutdownReservationCoordinator,
       isReservedForShutdown: (device: PooledDevice) => this.callbacks.isReservedForShutdown(device),
       reserveShutdownSessionIdentity: (deviceId: string) =>
         this.callbacks.reserveShutdownSessionIdentity(deviceId),

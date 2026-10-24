@@ -9,6 +9,8 @@ import type { CtrlProxyPackages } from "./CtrlProxyPackages";
 import type { CtrlProxyPrototypes } from "./CtrlProxyPrototypes";
 import type { CtrlProxyHighlights } from "./CtrlProxyHighlights";
 import type { CachedHierarchy } from "./types";
+import type { AndroidInboundMessageRouter } from "./AndroidInboundMessageRouter";
+import type { DelegateContext } from "../shared/types";
 
 /**
  * The one typed view of `AndroidCtrlProxyClient` internals that unit tests need
@@ -27,7 +29,8 @@ export interface AndroidCtrlProxyClientTestHooks {
   prototypes(): CtrlProxyPrototypes;
   highlights(): CtrlProxyHighlights;
   /** Own-property handler table keyed by wire message type. */
-  webSocketMessageHandlers(): object;
+  webSocketMessageHandlers(): AndroidInboundMessageRouter["webSocketMessageHandlers"];
+  createDelegateContext(): DelegateContext;
   cachedHierarchy(): CachedHierarchy | null;
   handleWebSocketMessage(data: string): Promise<void>;
   getWebSocketUrl(): string;

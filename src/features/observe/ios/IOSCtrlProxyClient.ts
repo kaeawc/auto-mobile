@@ -134,6 +134,7 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
       scheduleReconnect: () => this.scheduleReconnect(),
       onConnectionClosed: () => this.onConnectionClosed(),
       processMessage: (message: WebSocketMessage) => this.processMessage(message),
+      createDelegateContext: () => this.createDelegateContext(),
       messageEffects: this.messageEffects,
       requestManager: this.requestManager,
       screenGeometry: this.screenGeometry,

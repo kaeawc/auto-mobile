@@ -16,6 +16,7 @@ import {
   type DeviceConditionKey,
 } from "./DeviceConditionTypes";
 import {
+  adbCommand,
   rejectValue,
   resolveAppUserWith,
   shell,
@@ -148,12 +149,12 @@ export function createTrimMemoryInjector(
       if (!(await isRunning(adb, packageName, userId, signal))) {
         unsupported(`${packageName} is not running, so there is no process to trim`);
       }
-      const out = await shell(
+      // `am` reports a refused request with a zero exit, on stdout or stderr, so read both.
+      const out = await adbCommand(
         adb,
-        ["am", "send-trim-memory", "--user", String(userId), packageName, level],
+        ["shell", "am", "send-trim-memory", "--user", String(userId), packageName, level],
         signal,
       );
-      // `am` reports a refused request on stdout with a zero exit.
       if (/\b(error|exception|unknown)\b/i.test(out)) {
         unsupported(`am send-trim-memory ${packageName} ${level} failed: ${out}`);
       }

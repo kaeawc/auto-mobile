@@ -42,8 +42,10 @@ interface ProcessDeviceOptions {
   foreground?: boolean;
   /** `am force-stop` reports success but the processes survive. */
   survivesForceStop?: boolean;
-  /** What `am send-trim-memory` prints. */
+  /** What `am send-trim-memory` prints on stdout. */
   trimOutput?: string;
+  /** What `am send-trim-memory` prints on stderr. */
+  trimStderr?: string;
 }
 
 const main = (userId = 0): FakeProcess => ({ name: APP, userId });
@@ -78,11 +80,13 @@ function processDevice(options: ProcessDeviceOptions): ProcessDevice {
     } else if (command.startsWith("shell am force-stop ") && options.survivesForceStop !== true) {
       removeUser(userId);
     }
-    return Promise.resolve(
-      execResult(
-        command.startsWith("shell am send-trim-memory ") ? (options.trimOutput ?? "") : "",
-      ),
-    );
+    if (command.startsWith("shell am send-trim-memory ")) {
+      return Promise.resolve({
+        ...execResult(options.trimOutput ?? ""),
+        stderr: options.trimStderr ?? "",
+      });
+    }
+    return Promise.resolve(execResult(""));
   };
   adb.executeCommand = (command) => adb.execute(command.split(" "));
   return {
@@ -242,6 +246,14 @@ describe("faults.trimMemory (#14068)", () => {
     const injector = createTrimMemoryInjector(device.adb, resolveUser());
     await expect(injector.apply("apply", undefined, trimTarget("COMPLETE"))).rejects.toThrow(
       /send-trim-memory.*failed/,
+    );
+  });
+
+  test("a refusal am prints only on stderr is unsupported too", async () => {
+    const device = processDevice({ processes: [main()], trimStderr: "Error: Unknown process" });
+    const injector = createTrimMemoryInjector(device.adb, resolveUser());
+    await expect(injector.apply("apply", undefined, trimTarget("COMPLETE"))).rejects.toThrow(
+      /send-trim-memory.*failed.*Unknown process/,
     );
   });
 

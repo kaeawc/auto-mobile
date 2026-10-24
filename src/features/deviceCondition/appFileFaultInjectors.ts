@@ -66,6 +66,8 @@ interface Target {
 interface Owned extends Target {
   /** Checksum of the original, which reset must reproduce. */
   checksum: string;
+  /** Whether the backup copy was read back and matched the original; only then may it be restored. */
+  backupVerified: boolean;
 }
 
 const targetKey = (target: Target): string =>
@@ -173,7 +175,9 @@ export function createCorruptAppFileInjector(
   const restore = async (entry: Owned, signal?: AbortSignal): Promise<void> => {
     await forceStop(adb, entry, signal);
     const backup = backupPath(entry);
-    if (await exists(adb, entry, backup, signal)) {
+    // An unverified backup may be partial, so it is never copied over the file; the file is still
+    // the original then, and the checksum below proves it.
+    if (entry.backupVerified) {
       await runAs(adb, entry, ["cp", backup, entry.path], signal);
     }
     if ((await checksumOf(adb, entry, entry.path, signal)) !== entry.checksum) {
@@ -227,15 +231,21 @@ export function createCorruptAppFileInjector(
     mode: (typeof CORRUPT_MODES)[number],
     signal?: AbortSignal,
   ): Promise<DeviceConditionApplyOutcome> => {
+    // Stop the app first, so the checksum and the backup describe the same quiescent file.
+    await forceStop(adb, target, signal);
     const entry: Owned = {
       ...target,
       checksum: await checksumOf(adb, target, target.path, signal),
+      backupVerified: false,
     };
     // Own the file before the first write, so a failure after it is still undone.
     owned.set(targetKey(entry), entry);
     try {
-      await forceStop(adb, target, signal);
       await runAs(adb, target, ["cp", target.path, backupPath(target)], signal);
+      if ((await checksumOf(adb, target, backupPath(target), signal)) !== entry.checksum) {
+        unsupported(`the backup of ${target.path} does not match the original`);
+      }
+      entry.backupVerified = true;
       await damage(adb, target, mode, signal);
       if ((await checksumOf(adb, target, target.path, signal)) === entry.checksum) {
         unsupported(`${mode} did not change ${target.path} of ${target.packageName}`);

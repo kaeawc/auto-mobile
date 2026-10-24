@@ -39,6 +39,12 @@ interface AppDevice {
   failOn(match: string, nth: number): void;
   /** Make the next `cp` succeed without copying anything. */
   ignoreNextCopy(): void;
+  /** The next `cp` writes half the file to its destination, then fails (the storage filled up). */
+  interruptNextCopy(): void;
+  /** The next `cp` writes half the file to its destination and reports success. */
+  shortNextCopy(): void;
+  /** Run `change` as the app is force-stopped: it flushes its last write on the way down. */
+  onForceStop(change: (files: Map<string, string>) => void): void;
 }
 
 interface AppDeviceOptions {
@@ -53,6 +59,8 @@ function appDevice(options: AppDeviceOptions): AppDevice {
   const log: string[] = [];
   const files = new Map(Object.entries(options.files));
   let ignoreCopy = false;
+  let copyFault: "interrupt" | "short" | undefined;
+  let forceStopHook: ((files: Map<string, string>) => void) | undefined;
   const scheduled: { match: string; skip: number }[] = [];
 
   const runAs = (args: string[]): string => {
@@ -65,13 +73,22 @@ function appDevice(options: AppDeviceOptions): AppDevice {
         return `${md5(files.get(rest[0] ?? "") ?? "")}  ${rest[0]}`;
       case "stat":
         return String((files.get(path) ?? "").length);
-      case "cp":
+      case "cp": {
+        const source = files.get(rest[0] ?? "") ?? "";
         if (ignoreCopy) {
           ignoreCopy = false;
+        } else if (copyFault !== undefined) {
+          const fault = copyFault;
+          copyFault = undefined;
+          files.set(rest[1] ?? "", source.slice(0, Math.floor(source.length / 2)));
+          if (fault === "interrupt") {
+            throw new Error("cp: write error: No space left on device");
+          }
         } else {
-          files.set(rest[1] ?? "", files.get(rest[0] ?? "") ?? "");
+          files.set(rest[1] ?? "", source);
         }
         return "";
+      }
       case "dd": {
         const target = (rest.find((a) => a.startsWith("of=")) ?? "").slice(3);
         const content = files.get(target) ?? "";
@@ -92,6 +109,9 @@ function appDevice(options: AppDeviceOptions): AppDevice {
   adb.execute = (args) => {
     const command = args.join(" ");
     log.push(command);
+    if (command.startsWith("shell am force-stop ")) {
+      forceStopHook?.(files);
+    }
     for (const entry of [...scheduled]) {
       if (command.includes(entry.match)) {
         if (entry.skip > 0) {
@@ -124,6 +144,15 @@ function appDevice(options: AppDeviceOptions): AppDevice {
     },
     ignoreNextCopy: () => {
       ignoreCopy = true;
+    },
+    interruptNextCopy: () => {
+      copyFault = "interrupt";
+    },
+    shortNextCopy: () => {
+      copyFault = "short";
+    },
+    onForceStop: (change) => {
+      forceStopHook = change;
     },
   };
 }
@@ -206,8 +235,9 @@ describe("faults.corruptAppFile (#14066)", () => {
 
   test("a failed apply whose rollback also fails hands the reset to the controller", async () => {
     const device = appDevice({ files: { [DB]: SQLITE } });
-    // The damage takes effect, the read-back after it fails, and so does the rollback's copy.
-    device.failOn("md5sum", 2);
+    // The damage takes effect, the read-back after it fails, and so does the rollback's copy. The
+    // third checksum is that read-back (after the original's and the backup's).
+    device.failOn("md5sum", 3);
     const injector = createCorruptAppFileInjector(device.adb, userOf());
     device.failOn("cp databases/app.db.automobile-backup", 1);
     const failure = await injector
@@ -218,6 +248,42 @@ describe("faults.corruptAppFile (#14066)", () => {
     await (failure as OwedResetError).owedReset();
     expect(device.files.get(DB)).toBe(SQLITE);
     expect(device.files.has(BACKUP)).toBe(false);
+  });
+
+  test("an interrupted backup never overwrites the intact original", async () => {
+    const device = appDevice({ files: { [DB]: SQLITE } });
+    device.interruptNextCopy();
+    const injector = createCorruptAppFileInjector(device.adb, userOf());
+    await expect(injector.apply("apply", undefined, target(DB, "overwrite"))).rejects.toThrow(
+      /No space left/,
+    );
+    expect(device.files.get(DB)).toBe(SQLITE);
+    expect(device.files.has(BACKUP)).toBe(false);
+    expect(await injector.isClean()).toBe(true);
+  });
+
+  test("a short backup that reports success is caught before the file is touched", async () => {
+    const device = appDevice({ files: { [DB]: SQLITE } });
+    device.shortNextCopy();
+    const injector = createCorruptAppFileInjector(device.adb, userOf());
+    await expect(injector.apply("apply", undefined, target(DB, "overwrite"))).rejects.toThrow(
+      /backup of .* does not match/,
+    );
+    expect(device.files.get(DB)).toBe(SQLITE);
+    expect(device.files.has(BACKUP)).toBe(false);
+    expect(device.commands().some((c) => c.includes(" dd "))).toBe(false);
+  });
+
+  test("a write the app flushes as it is stopped is part of the original that reset restores", async () => {
+    const device = appDevice({ files: { [DB]: SQLITE } });
+    const flushed = `${SQLITE}-flushed`;
+    device.onForceStop((files) => files.set(DB, flushed));
+    const injector = createCorruptAppFileInjector(device.adb, userOf());
+    const outcome = await injector.apply("apply", undefined, target(DB, "overwrite"));
+    await outcome.reset?.();
+    expect(device.files.get(DB)).toBe(flushed);
+    expect(device.files.has(BACKUP)).toBe(false);
+    expect(await injector.isClean()).toBe(true);
   });
 
   test("a restore that does not reproduce the original throws and stays owed", async () => {

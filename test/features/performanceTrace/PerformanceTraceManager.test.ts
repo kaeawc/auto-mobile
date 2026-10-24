@@ -17,6 +17,7 @@ class FakeRecorder implements PerformanceTraceRecorder {
   readonly stops: string[] = [];
   stopError?: Error;
   summaryGate?: Promise<void>;
+  summarizeStarted?: () => void;
 
   async start(request: StartPerformanceTraceRequest): Promise<RecordingPerformanceTrace> {
     this.started.push(request);
@@ -30,6 +31,7 @@ class FakeRecorder implements PerformanceTraceRecorder {
         }
       },
       summarize: async () => {
+        this.summarizeStarted?.();
         await this.summaryGate;
         return { summary: { durationMs: 1_500 }, warnings: ["summary warning"] };
       },
@@ -140,9 +142,11 @@ describe("PerformanceTraceManager (#14102)", () => {
     const started = await traces.start(pixel, { ...hitches, ownerSessionUuid: "s1" });
     expect(traces.lookup(started.traceId)?.result.state).toBe("recording");
 
+    const summarizing = new Promise<void>((resolve) => {
+      recorder.summarizeStarted = resolve;
+    });
     const stopping = traces.stop(started.traceId);
-    await Promise.resolve();
-    await Promise.resolve();
+    await summarizing;
 
     const during = traces.lookup(started.traceId);
     expect(during?.ownerSessionUuid).toBe("s1");

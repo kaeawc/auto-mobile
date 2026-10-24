@@ -61,6 +61,7 @@ function safeDecode(value: string): string {
   try {
     return decodeURIComponent(value);
   } catch (error) {
+    // Safe: the raw segment then fails the session binding or TRACE_ID_PATTERN check.
     logger.debug(`[PerformanceTraceResources] undecodable segment ${value}: ${error}`);
     return value;
   }

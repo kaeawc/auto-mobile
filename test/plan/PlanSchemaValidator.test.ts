@@ -71,6 +71,8 @@ ${condition}
       "        faults:\n          revokePermission:\n            package: com.example.app\n            permission: android.permission.CAMERA",
       "        faults:\n          revokePermission: unset",
       "        faults:\n          disablePackage:\n            package: com.example.app\n          clearPackageData: unset",
+      "        faults:\n          killApp:\n            package: com.example.app\n            mode: forceStop\n          trimMemory:\n            package: com.example.app\n            level: RUNNING_CRITICAL",
+      "        faults:\n          killApp: unset\n          trimMemory: unset",
     ]) {
       const result = validator.validateYaml(plan(accepts));
       expect(result.errors ?? []).toEqual([]);
@@ -85,6 +87,9 @@ ${condition}
       "        faults:\n          gravity: low",
       "        faults:\n          revokePermission: on",
       "        faults:\n          disablePackage: on",
+      "        faults:\n          killApp:\n            package: com.example.app\n            mode: terminate",
+      "        faults:\n          trimMemory:\n            package: com.example.app\n            level: LOW",
+      "        faults:\n          trimMemory:\n            package: com.example.app",
       "        faults:\n          clearPackageData:\n            package: nodots",
       "        faults:\n          revokePermission:\n            package: com.example.app",
       "        faults:\n          revokePermission:\n            package: nodots\n            permission: CAMERA",

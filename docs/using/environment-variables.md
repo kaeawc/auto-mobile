@@ -506,7 +506,9 @@ while its runner launch is queued or already running. It returns `ok: true`, no 
 `freshness` with `isFresh: false` and `unavailableReason: "runner_launch_queued"`.
 The detail names its queue position when queued, or says the runner is still
 starting in the background. Any captured screenshot is kept. The start continues
-for up to 60 seconds, and a retry joins that same start. Retry the observe shortly.
+for up to 60 seconds from the moment its launch leaves the queue (waiting in the
+queue is bounded separately, at 5 minutes), and a retry joins that same start.
+Retry the observe shortly.
 
 ## iOS builds and signing
 

@@ -1,4 +1,5 @@
 import type { BootedDevice } from "../models";
+import type { AdjustableDeadline } from "../utils/AdjustableDeadline";
 import type { PerformanceTracker } from "../utils/PerformanceTracker";
 import type { RunnerReadinessError } from "./RunnerReadinessError";
 
@@ -31,6 +32,12 @@ export interface RunnerReadinessRequest {
   operationName?: string;
   /** Absolute deadline shared with device boot. */
   totalDeadlineMs: number;
+  /**
+   * Optional movable form of `totalDeadlineMs` for a caller that owns a synthetic ceiling (the
+   * observe start flight). When set it wins over `totalDeadlineMs`, and setup phases that are
+   * already running follow it when it moves (#15227). Callers with a real deadline omit it.
+   */
+  deadline?: AdjustableDeadline;
   /** Maximum time allocated to runner readiness within the total deadline. */
   readinessTimeoutMs: number;
   skipCtrlProxyDownload?: boolean;

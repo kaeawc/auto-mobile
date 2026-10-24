@@ -9,6 +9,7 @@ import type {
   DeviceConditionApplyOutcome,
   DeviceConditionInjector,
 } from "./DeviceConditionController";
+import { readAndroidPackageProcesses } from "../../utils/android-cmdline-tools/androidProcessState";
 import {
   ANDROID_PACKAGE_NAME_PATTERN,
   DEVICE_CONDITION_APPLY,
@@ -65,13 +66,18 @@ const trimSchema = z
   })
   .strict();
 
-/** `pidof` exits nonzero when no process matches, which the adb client rejects, so end in `; true`. */
+/**
+ * Whether the app has a process for this user, counting package-owned secondary processes
+ * (`com.example:worker`). The process table is read with the helper the other lifecycle tools use,
+ * which also filters by user, so a copy of the app running for another user does not count.
+ */
 async function isRunning(
   adb: AdbExecutor,
   packageName: string,
+  userId: number,
   signal?: AbortSignal,
 ): Promise<boolean> {
-  return (await shell(adb, ["pidof", packageName, "2>/dev/null;", "true"], signal)) !== "";
+  return (await readAndroidPackageProcesses(adb, packageName, { userId, signal })).isRunning;
 }
 
 const noReset = (): Promise<boolean> => Promise.resolve(true);
@@ -94,13 +100,13 @@ export function createKillAppInjector(
         ]);
       }
       const { package: packageName, mode } = parsed.data;
-      if (!(await isRunning(adb, packageName, signal))) {
+      const userId = await resolveUser(packageName, signal);
+      if (!(await isRunning(adb, packageName, userId, signal))) {
         return { status: "unchanged", detail: `${packageName} is not running` };
       }
-      const userId = String(await resolveUser(packageName, signal));
       const command = mode === "forceStop" ? "force-stop" : "kill";
-      await shell(adb, ["am", command, "--user", userId, packageName], signal);
-      if (await isRunning(adb, packageName, signal)) {
+      await shell(adb, ["am", command, "--user", String(userId), packageName], signal);
+      if (await isRunning(adb, packageName, userId, signal)) {
         return mode === "background"
           ? {
               status: "unchanged",
@@ -138,13 +144,13 @@ export function createTrimMemoryInjector(
         ]);
       }
       const { package: packageName, level } = parsed.data;
-      if (!(await isRunning(adb, packageName, signal))) {
+      const userId = await resolveUser(packageName, signal);
+      if (!(await isRunning(adb, packageName, userId, signal))) {
         unsupported(`${packageName} is not running, so there is no process to trim`);
       }
-      const userId = String(await resolveUser(packageName, signal));
       const out = await shell(
         adb,
-        ["am", "send-trim-memory", "--user", userId, packageName, level],
+        ["am", "send-trim-memory", "--user", String(userId), packageName, level],
         signal,
       );
       // `am` reports a refused request on stdout with a zero exit.

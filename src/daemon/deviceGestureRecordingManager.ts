@@ -479,6 +479,8 @@ interface RecorderStopOutcome {
   steps: PlanStep[];
   touchTrackFailure?: TouchTrackFailure;
   geometryWarnings?: string[];
+  /** Recorded input left out of the plan because replay cannot reproduce it. */
+  exportWarnings?: string[];
   /** Why the recorder's stop did not finish, when the captured steps were returned anyway. */
   salvagedAfter?: string;
 }
@@ -512,17 +514,24 @@ async function stopRecorder(
   }
 }
 
+/** The warning for recorded input the plan could not represent, logged when there is one. */
+function describeExportWarnings(exportWarnings: string[] | undefined): string | undefined {
+  if (!exportWarnings?.length) {
+    return undefined;
+  }
+  const message = `Some recorded input was left out of the plan: ${exportWarnings.join("; ")}.`;
+  logger.warn(`[DeviceGestureRecording] ${message}`);
+  return message;
+}
+
 async function stopAndBuildResult(
   session: RecordingSession,
   planName: string | undefined,
   timer: Timer,
   options: { hostOnly?: boolean },
 ): Promise<DeviceGestureRecordingStopResult> {
-  const { steps, touchTrackFailure, geometryWarnings, salvagedAfter } = await stopRecorder(
-    session,
-    timer,
-    options,
-  );
+  const { steps, touchTrackFailure, geometryWarnings, exportWarnings, salvagedAfter } =
+    await stopRecorder(session, timer, options);
 
   const touchTrackMessage = touchTrackFailure
     ? `Touch track (getevent) stopped ${touchTrackFailure.failedAt - session.startedAt} ms after recording start: ${touchTrackFailure.error.message}. Later taps may be missing.`
@@ -546,13 +555,14 @@ async function stopAndBuildResult(
   if (geometryMessage) {
     logger.warn(`[DeviceGestureRecording] ${geometryMessage}`);
   }
+  const exportMessage = describeExportWarnings(exportWarnings);
   const salvageMessage = salvagedAfter
     ? `Stopping the recorder did not finish (${salvagedAfter}); the steps captured so far are returned without confirming display rotation/size, so tapAt and swipeOn steps recorded after a display change may be at the wrong coordinates or direction.`
     : undefined;
   if (salvageMessage) {
     logger.warn(`[DeviceGestureRecording] ${salvageMessage}`);
   }
-  const warningMessage = [touchTrackMessage, geometryMessage, salvageMessage]
+  const warningMessage = [touchTrackMessage, geometryMessage, exportMessage, salvageMessage]
     .filter(Boolean)
     .join(" ");
 

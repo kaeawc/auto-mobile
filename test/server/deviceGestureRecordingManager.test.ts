@@ -816,3 +816,43 @@ describe("deviceGestureRecordingManager display geometry (#10174)", () => {
     expect(result.planContent).not.toContain("label");
   });
 });
+
+describe("deviceGestureRecordingManager stylus export (#13084)", () => {
+  async function recordPenGestures(planName: string, events: GestureEvent[]) {
+    const timer = new FakeTimer();
+    timer.advanceTime(10_000);
+    const gestures = new RecordingGestures();
+    await startDeviceGestureRecording(
+      device,
+      timer,
+      new CountingIdGenerator(planName),
+      () => new DualTrackRecorder(device, gestures, new RecordingA11y(), timer),
+    );
+    for (const event of events) {
+      gestures.onGesture?.({ ...event, arrivedAt: timer.now() });
+    }
+    return stopDeviceGestureRecording(undefined, planName, timer);
+  }
+
+  test("a stylus tap reaches the plan with its pointer and no warning", async () => {
+    const result = await recordPenGestures("pen-tap", [
+      { type: "tap", arrivedAt: 0, screenX: 40, screenY: 80, toolType: "stylus" },
+    ]);
+
+    expect(result.stepCount).toBe(1);
+    expect(result.planContent).toContain("tool: tapAt");
+    expect(result.planContent).toMatch(/pointer:\s+toolType: stylus/);
+    expect(result.error).toBeUndefined();
+  });
+
+  test("an eraser gesture is left out and the result says so", async () => {
+    const result = await recordPenGestures("pen-eraser", [
+      { type: "tap", arrivedAt: 0, screenX: 40, screenY: 80, toolType: "stylus" },
+      { type: "tap", arrivedAt: 0, screenX: 90, screenY: 99, toolType: "eraser" },
+    ]);
+
+    expect(result.stepCount).toBe(1);
+    expect(result.error).toStartWith("Warning:");
+    expect(result.error).toContain("eraser");
+  });
+});

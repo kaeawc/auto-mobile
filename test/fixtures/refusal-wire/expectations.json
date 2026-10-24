@@ -637,6 +637,14 @@
         "retryable": false,
         "acquireNewSession": false
       }
+    },
+    "unsafe_device_resource_combination": {
+      "expected": "fail",
+      "fields": {
+        "code": "unsafe_device_resource_combination",
+        "retryable": false,
+        "acquireNewSession": false
+      }
     }
   }
 }

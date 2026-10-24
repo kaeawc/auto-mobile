@@ -1,3 +1,4 @@
+import { UnsafeDeviceResourceCombinationError } from "../models/UnsafeDeviceResourceCombinationError";
 import { DeviceServiceDisabledError } from "../models/DeviceServiceDisabledError";
 import { SdkCapabilityQueryError } from "../features/observe/ios/SdkCapabilityQueryError";
 import { AdbDeviceTransportUnavailableError } from "../utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
@@ -170,6 +171,7 @@ function hasSelfDescribedRefusalPayload(
   | AdbDeviceTransportUnavailableError
   | AndroidAvdIdentityUnresolvedError
   | AndroidDeviceIdentityUnresolvedError
+  | UnsafeDeviceResourceCombinationError
   | DeviceServiceDisabledError
   | DeviceUnhealthyError
   | PlanExecutionInProgressError
@@ -192,6 +194,7 @@ function hasSelfDescribedRefusalPayload(
     AdbDeviceTransportUnavailableError,
     AndroidAvdIdentityUnresolvedError,
     AndroidDeviceIdentityUnresolvedError,
+    UnsafeDeviceResourceCombinationError,
     DeviceServiceDisabledError,
     DeviceUnhealthyError,
     PlanExecutionInProgressError,

@@ -33,6 +33,7 @@ portable test/features/observe/ios/ctrlProxyWireScan.test.ts             # repo 
 portable test/features/prototype/prototypeIosSpecContract.test.ts        # generator output equals the embedded Swift contract file
 portable test/features/prototype/prototypeIosIconSymbols.test.ts         # schema table equals generated Swift symbols
 
+portable test/utils/iosDeviceResourceHazards.test.ts                    # pure hazard matching, no iOS host
 portable test/utils/iosDeviceResourceImpact.test.ts                     # pure catalog metadata and documentation parity, no iOS host
 
 # Fakes are shared by platform-neutral suites; their self-tests guard that drift.

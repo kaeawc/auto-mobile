@@ -1,3 +1,5 @@
+import { setDeviceResourcesResultSchema } from "../../src/server/deviceResourceToolOutputSchemas";
+import { fakeIosDeviceResourceHazards as hazards } from "../helpers/fakeIosDeviceResourceHazards";
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import definitions from "../../schemas/tool-definitions.json";
@@ -21,7 +23,9 @@ test("every disjoint catalog group has one shared verified driving claim and inf
     const impact = getIosDeviceResourceImpact(key)!;
     expect(impact.automobileImpact[0]).toBe(coreDrivingImpact);
     expect(impact.appImpact.length).toBeGreaterThan(0);
-    for (const item of [...impact.automobileImpact.slice(1), ...impact.appImpact]) {
+    for (const item of [...impact.automobileImpact.slice(1), ...impact.appImpact].filter(
+      (item) => item.confidence !== "verified",
+    )) {
       expect(item.confidence).toBe("inferred");
       expect(item.description.length).toBeGreaterThan(0);
       expect(item.evidence).toBeUndefined();
@@ -113,6 +117,66 @@ test("documented impact table matches every resource, label and impact", () => {
     expect(row[3]).toBe(
       iosDeviceResourceImpact[key].appImpact.map((item) => item.description).join(" "),
     );
-    expect(row[4]).toBe("Core driving: verified (#15097); feature impacts: inferred");
+    expect(row[4]).toBe(
+      key === "calendarServices"
+        ? "Core driving: verified (#15097); bootout CPU hazard: verified (#15218); feature impacts: inferred"
+        : "Core driving: verified (#15097); feature impacts: inferred",
+    );
   }
+});
+
+test("unsafeWith is derived per resource and omitted for unrelated groups", () => {
+  const unsafeWith = [
+    {
+      hazardId: "fake-spin",
+      appliesTo: ["post_boot", "preboot"] as const,
+      withResources: ["reminderServices"] as const,
+      reason: "Fake CPU spin",
+      evidence: "Injected test evidence",
+    },
+  ];
+  expect(getIosDeviceResourceImpact("calendarServices", hazards)?.unsafeWith).toEqual(unsafeWith);
+  expect(getIosDeviceResourceImpact("widgets", hazards)).not.toHaveProperty("unsafeWith");
+  expect(
+    describeDisabledDeviceResources({ calendarServices: { state: "disabled" } }, hazards)[0]
+      ?.unsafeWith,
+  ).toEqual(unsafeWith);
+  expect(
+    getIosDeviceResourceImpact("reminderServices", hazards)?.unsafeWith?.[0]?.withResources,
+  ).toEqual(["calendarServices"]);
+});
+
+test("optional unsafeWith survives the output schema alongside legacy reports", () => {
+  const report = {
+    success: true,
+    device: { deviceId: "SIM", platform: "ios" },
+    requested: {},
+    resources: {},
+    changed: [],
+    verification: "current_boot",
+    disabledResources: describeDisabledDeviceResources(
+      { calendarServices: { state: "disabled" } },
+      hazards,
+    ),
+  };
+  expect(JSON.stringify(setDeviceResourcesResultSchema.parse(report).disabledResources)).toBe(
+    JSON.stringify(report.disabledResources),
+  );
+  const legacy = {
+    ...report,
+    disabledResources: describeDisabledDeviceResources({ widgets: { state: "disabled" } }, []),
+  };
+  expect(setDeviceResourcesResultSchema.parse(legacy).disabledResources?.[0]).not.toHaveProperty(
+    "unsafeWith",
+  );
+});
+
+test("real hazards have verified measured impacts and single-resource metadata", () => {
+  const impact = getIosDeviceResourceImpact("calendarServices")!;
+  expect(impact.unsafeWith?.[0]).toMatchObject({ withResources: [], appliesTo: ["post_boot"] });
+  expect(
+    impact.automobileImpact.some(
+      (item) => item.confidence === "verified" && item.evidence?.startsWith("#15218:"),
+    ),
+  ).toBe(true);
 });

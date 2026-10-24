@@ -62,6 +62,7 @@ describe("ProvisionDeviceError retryability", () => {
       unsupported: false,
       platform_command_failed: false,
       resource_profile_unproven: false,
+      unsafe_device_resource_combination: false,
       runtime_incompatible: false,
       requires_real_device: false,
     });

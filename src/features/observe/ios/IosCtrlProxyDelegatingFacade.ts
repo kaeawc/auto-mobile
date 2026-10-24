@@ -144,7 +144,7 @@ export abstract class IosCtrlProxyDelegatingFacade extends IosCtrlProxyDiagnosti
     };
   }
 
-  private createHierarchyDelegateContext(): HierarchyDelegateContext {
+  protected createHierarchyDelegateContext(): HierarchyDelegateContext {
     return {
       ...this.createDelegateContext(),
       getLastConnectFailure: () => this.lastConnectFailure,

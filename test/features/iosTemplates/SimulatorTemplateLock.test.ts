@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { expect, test } from "bun:test";
 import { FileSimulatorTemplateLock } from "../../../src/features/iosTemplates/SimulatorTemplateLock";
 import { templateKeyHash } from "../../../src/utils/ios-cmdline-tools/SimulatorTemplateKey";
@@ -23,7 +24,7 @@ function rig() {
     idGenerator: new FakeIdGenerator(),
     now: () => timer.now(),
   });
-  return { lock, fs, path: `/templates/${templateKeyHash(key)}.lock` };
+  return { lock, fs, path: join("/templates", `${templateKeyHash(key)}.lock`) };
 }
 test("stale holder is reclaimed and released", async () => {
   const { lock, fs, path } = rig();

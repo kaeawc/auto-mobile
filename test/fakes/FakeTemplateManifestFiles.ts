@@ -14,7 +14,7 @@ export class FakeTemplateManifestFiles implements TemplateManifestFiles {
   }
   list(directory: string): string[] {
     return [...this.files.keys()]
-      .filter((path) => dirname(path) === directory)
+      .filter((path) => dirname(path).replaceAll("\\", "/") === directory.replaceAll("\\", "/"))
       .map((path) => basename(path));
   }
 }

@@ -36,6 +36,10 @@ describe("pseudo-locale spec", () => {
         },
         { type: "select", stateKey: "s", options: [{ value: "a", label: "Alpha" }] },
         { type: "iconButton", icon: "close", contentDescription: "Close" },
+        { type: "listItem", headline: "Name", supporting: "Description" },
+        { type: "tabBar", items: [{ label: "Home" }] },
+        { type: "row", repeat: { items: [{ label: "Raw" }], key: "label" } },
+        { type: "box", onTap: [{ type: "emit", name: "e", payload: { title: "stable-id" } }] },
       ],
     },
   };
@@ -53,5 +57,13 @@ describe("pseudo-locale spec", () => {
     expect(select.options[0]).toEqual({ value: "a", label: expect.stringContaining("Áļþĥá") });
     expect(icon.contentDescription).toBe("Close");
     expect(out.state).toEqual({ label: "keep" });
+    const [, , , , , listItem, tabBar, repeated, emitting] = out.root.children as Record<
+      string,
+      any
+    >[];
+    expect(listItem.supporting).toContain("Ďéšçŕ");
+    expect(tabBar.items[0].label).toContain("Ĥóɱé");
+    expect(repeated.repeat).toEqual({ items: [{ label: "Raw" }], key: "label" });
+    expect(emitting.onTap[0].payload).toEqual({ title: "stable-id" });
   });
 });

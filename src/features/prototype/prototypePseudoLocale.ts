@@ -14,6 +14,7 @@ const DISPLAY_TEXT_FIELDS = new Set([
   "headline",
   "title",
   "supportingText",
+  "supporting",
   "trailingText",
 ]);
 /** Subtrees that hold data, bindings or styling, never authored copy. */
@@ -26,7 +27,8 @@ const OPAQUE_FIELDS = new Set([
   "storage",
   "checks",
   "value",
-  "items",
+  "repeat",
+  "payload",
   "body",
   "headers",
   "query",

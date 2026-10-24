@@ -1,6 +1,7 @@
 import { DeviceLossState } from "../../src/daemon/deviceLossState";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
+import { DaemonRuntimeState } from "../../src/daemon/daemonRuntimeState";
 import type { DisconnectMonitorPool } from "../../src/daemon/daemonCore/DaemonDisconnect";
 import { PLAN_DEVICE_LOSS_CONFIRMATION_WINDOW_MS } from "../../src/daemon/deviceDisconnectHandler";
 import type { PooledDevice } from "../../src/daemon/devicePool";
@@ -95,9 +96,8 @@ function harness() {
   const daemon: Daemon = Object.create(Daemon.prototype);
   Object.assign(daemon, {
     timer,
-    deviceDisconnectMonitor: null,
+    runtime: new DaemonRuntimeState(),
     deviceLoss: new DeviceLossState({ forceDisconnectedIds: new Set([device.id]) }),
-    deferredSessionRecoverySweeps: new Set(),
     devicePool: {
       retryDueDeferredSessionRecoveries: async () => {},
       mapAndroidDiscovery: transportAliases.mapDiscovery.bind(transportAliases),
@@ -183,7 +183,7 @@ function harness() {
     },
     async tick() {
       timer.advanceTime(5_000);
-      await daemon["deviceDisconnectMonitor"]!.run();
+      await daemon["runtime"].deviceDisconnectMonitor!.run();
       expect(timer.getSleepHistory()).toEqual([]);
     },
   };

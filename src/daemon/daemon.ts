@@ -13,13 +13,10 @@ import { type DaemonSocketServer, daemonSocketServerDouble } from "./daemonSocke
 import { SessionManager } from "./sessionManager";
 import { type HealthFailureKind } from "./daemonHealthCheck";
 import { PassiveWorkPolicy, parsePassiveWorkSettings } from "./PassiveWorkPolicy";
-import { SingleFlightInterval } from "./SingleFlightInterval";
 import { DevicePool } from "./devicePool";
 import { createForeignCtrlProxyForwardEvidence } from "../features/observe/android/foreignCtrlProxyForwardEvidence";
 import { type SqliteBindingRegistry } from "./sessionBroker/registry/sqliteBindingRegistry";
 import { ENV, readEnvRaw } from "../config/env";
-import { ManagedExecutionReowner } from "./sessionBroker/provisioning/executionReowner";
-import { type DaemonBrokerDeviceAcquisitionHandle } from "./sessionBroker/provisioning/daemonDeviceAcquisition";
 import { DeviceSessionRegistry } from "./deviceSessionRegistry";
 import { DEFAULT_DAEMON_PORT } from "./wire/constants";
 import { DaemonOptions } from "./types";
@@ -49,7 +46,6 @@ import { getDeviceDataStreamServer } from "./deviceDataStreamSocketServer";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import { NavigationGraphStreamBridge } from "./daemonStreamRouting";
 import { InstalledAppsRepository, type InstalledAppsStore } from "../db/installedAppsRepository";
-import { BackgroundBindingRegistryUpgrade } from "./sessionBroker/registry/BackgroundBindingRegistryUpgrade";
 import { DeviceReadiness } from "./readiness/DeviceReadiness";
 import { type AppearanceSyncTarget } from "./AppearanceSyncScheduler";
 import { Timer } from "../utils/SystemTimer";
@@ -148,8 +144,6 @@ export class Daemon {
     coreDeviceProbe: createProductionCoreDeviceProbe(),
   });
 
-  private socketServer: DaemonSocketServer | null = null;
-
   private exitRecordFileSystem: DaemonExitRecordFileSystem = defaultDaemonExitRecordFileSystem;
 
   private startHost!: DaemonStartHost;
@@ -188,10 +182,6 @@ export class Daemon {
 
   private readonly listen: DaemonListenConfig;
 
-  protected deviceDisconnectMonitor: SingleFlightInterval | null = null;
-
-  private deferredSessionRecoverySweeps: Set<Promise<void>> = new Set();
-
   // Preserves a live incumbent daemon's PID record across our own early-owner
   // overwrite so the lock-less bind guard can (a) still see the live sibling on
   // an inconclusive probe and (b) restore its record if we refuse (issue #6232).
@@ -215,15 +205,9 @@ export class Daemon {
 
   private timer: Timer;
 
-  private bindingRegistry: Promise<SqliteBindingRegistry> | undefined;
-
   private sessionBrokerConfigPath = readEnvRaw(ENV.SESSION_BROKER_CONFIG)
     ? resolve(readEnvRaw(ENV.SESSION_BROKER_CONFIG)!)
     : undefined;
-
-  protected brokerDeviceAcquisition: DaemonBrokerDeviceAcquisitionHandle | undefined;
-
-  private managedExecutionReowner: ManagedExecutionReowner | undefined;
 
   private readonly processIdentity: DaemonProcessIdentity;
 
@@ -235,16 +219,12 @@ export class Daemon {
 
   private observationStreamHealth: ObservationStreamHealth;
 
-  protected deviceDataStreamServer: ReturnType<typeof getDeviceDataStreamServer> = null;
-
   protected readonly navigationGraphBridge = new NavigationGraphStreamBridge({
-    server: () => this.deviceDataStreamServer,
+    server: () => this.runtime.deviceDataStreamServer,
     sessionIds: () => this.sessionManager.getAllSessions().map((session) => session.sessionId),
     defaultManager: () => NavigationGraphManager.getInstance(),
     managerForSession: (sessionId) => NavigationGraphManager.getInstanceForSession(sessionId),
   });
-
-  protected unsubscribeAdbMissingDevice: (() => void) | null = null;
 
   private readonly deviceStateChangeNotifier: DeviceStateChangeNotifier;
 
@@ -254,9 +234,6 @@ export class Daemon {
 
   private readonly shutdownState = new DaemonShutdownState();
   protected readonly runtime = new DaemonRuntimeState();
-
-  /** Redrives retained startup recorder descriptors when a device incarnation is assigned. */
-  private recorderDeviceIncarnationListener?: (deviceId: string) => void;
 
   private readonly daemonState: DaemonStateWrites;
 
@@ -403,7 +380,6 @@ export class Daemon {
     this.applyToolOutputOptions(options);
   }
 
-  private backgroundRegistryUpgrade: BackgroundBindingRegistryUpgrade | undefined;
   private openBindingRegistry(...args: Parameters<DaemonBroker["openBindingRegistry"]>) {
     return this.broker.openBindingRegistry(...args);
   }
@@ -529,7 +505,7 @@ export class Daemon {
 
       /** Installs (or clears) a socket server double whose members the shutdown path calls. */
       setSocketServer: (server: Partial<DaemonSocketServer> | null): void => {
-        this.socketServer = server && daemonSocketServerDouble(server);
+        this.runtime.socketServer = server && daemonSocketServerDouble(server);
       },
       /** Registers an in-flight HTTP request double that shutdown must close. */
       registerTransport: (
@@ -562,7 +538,7 @@ export class Daemon {
         this.devicePool = pool;
       },
       recordAndTryRecoverCapturedDisconnect: this.recordAndTryRecoverCapturedDisconnect.bind(this),
-      deferredSessionRecoverySweeps: this.deferredSessionRecoverySweeps,
+      deferredSessionRecoverySweeps: this.runtime.deferredSessionRecoverySweeps,
       replaceObserverSessionRegistry: (registry: ObserverSessionRegistry): void => {
         this.observerSessionRegistry = registry;
       },
@@ -642,12 +618,12 @@ export class Daemon {
       services,
       identity,
       lifecycle,
-      bindingRegistry: () => daemon.bindingRegistry,
+      bindingRegistry: () => daemon.runtime.bindingRegistry,
       setBindingRegistry: (value) => {
-        daemon.bindingRegistry = value;
+        daemon.runtime.bindingRegistry = value;
       },
-      brokerDeviceAcquisition: () => daemon.brokerDeviceAcquisition,
-      setBrokerDeviceAcquisition: (value) => (daemon.brokerDeviceAcquisition = value),
+      brokerDeviceAcquisition: () => daemon.runtime.brokerDeviceAcquisition,
+      setBrokerDeviceAcquisition: (value) => (daemon.runtime.brokerDeviceAcquisition = value),
       openBindingRegistry: (...args) => this.openBindingRegistry(...args),
       cancelAndReleaseSession: (...args) => this.cancelAndReleaseSession(...args),
     });
@@ -917,8 +893,8 @@ export class Daemon {
   private createDaemonLifecycleState(): DaemonLifecycleState {
     const daemon = this;
     return {
-      socketServer: () => daemon.socketServer,
-      setSocketServer: (value) => (daemon.socketServer = value),
+      socketServer: () => daemon.runtime.socketServer,
+      setSocketServer: (value) => (daemon.runtime.socketServer = value),
       selfExitRecorder: () => daemon.selfExitRecorder,
       startupCompletion: () => daemon.startupCompletion.promise,
       heartbeatMonitor: () => daemon.runtime.heartbeatMonitor,
@@ -929,31 +905,32 @@ export class Daemon {
       setForwardLeaseIdleReleaser: (value) => (daemon.runtime.forwardLeaseIdleReleaser = value),
       orphanWatchdog: () => daemon.runtime.orphanWatchdog,
       setOrphanWatchdog: (value) => (daemon.runtime.orphanWatchdog = value),
-      deviceDisconnectMonitor: () => daemon.deviceDisconnectMonitor,
-      setDeviceDisconnectMonitor: (value) => (daemon.deviceDisconnectMonitor = value),
-      deferredSessionRecoverySweeps: () => daemon.deferredSessionRecoverySweeps,
+      deviceDisconnectMonitor: () => daemon.runtime.deviceDisconnectMonitor,
+      setDeviceDisconnectMonitor: (value) => (daemon.runtime.deviceDisconnectMonitor = value),
+      deferredSessionRecoverySweeps: () => daemon.runtime.deferredSessionRecoverySweeps,
       deviceDisconnectMisses: () => daemon.deviceLoss.misses,
       sessionBrokerConfigPath: () => daemon.sessionBrokerConfigPath,
-      managedExecutionReowner: () => daemon.managedExecutionReowner,
-      setManagedExecutionReowner: (value) => (daemon.managedExecutionReowner = value),
-      deviceDataStreamServer: () => daemon.deviceDataStreamServer,
-      setDeviceDataStreamServer: (value) => (daemon.deviceDataStreamServer = value),
+      managedExecutionReowner: () => daemon.runtime.managedExecutionReowner,
+      setManagedExecutionReowner: (value) => (daemon.runtime.managedExecutionReowner = value),
+      deviceDataStreamServer: () => daemon.runtime.deviceDataStreamServer,
+      setDeviceDataStreamServer: (value) => (daemon.runtime.deviceDataStreamServer = value),
       navigationGraphBridge: () => daemon.navigationGraphBridge,
-      unsubscribeAdbMissingDevice: () => daemon.unsubscribeAdbMissingDevice,
-      setUnsubscribeAdbMissingDevice: (value) => (daemon.unsubscribeAdbMissingDevice = value),
+      unsubscribeAdbMissingDevice: () => daemon.runtime.unsubscribeAdbMissingDevice,
+      setUnsubscribeAdbMissingDevice: (value) =>
+        (daemon.runtime.unsubscribeAdbMissingDevice = value),
       shutdownInProgress: () => daemon.shutdownState.inProgress,
       setShutdownInProgress: (value) => (daemon.shutdownState.inProgress = value),
-      recorderDeviceIncarnationListener: () => daemon.recorderDeviceIncarnationListener,
+      recorderDeviceIncarnationListener: () => daemon.runtime.recorderDeviceIncarnationListener,
       setRecorderDeviceIncarnationListener: (value) =>
-        (daemon.recorderDeviceIncarnationListener = value),
+        (daemon.runtime.recorderDeviceIncarnationListener = value),
       shutdownReleaseNotifications: () => daemon.shutdownState.releaseNotifications,
       setShutdownReleaseNotifications: (value) =>
         (daemon.shutdownState.releaseNotifications = value),
       shutdownFallbackReleaseNotifications: () => daemon.shutdownState.fallbackReleaseNotifications,
       setShutdownFallbackReleaseNotifications: (value) =>
         (daemon.shutdownState.fallbackReleaseNotifications = value),
-      backgroundRegistryUpgrade: () => daemon.backgroundRegistryUpgrade,
-      setBackgroundRegistryUpgrade: (value) => (daemon.backgroundRegistryUpgrade = value),
+      backgroundRegistryUpgrade: () => daemon.runtime.backgroundRegistryUpgrade,
+      setBackgroundRegistryUpgrade: (value) => (daemon.runtime.backgroundRegistryUpgrade = value),
     };
   }
   private enterDaemonProcess(...args: Parameters<DaemonStartup["enterDaemonProcess"]>) {

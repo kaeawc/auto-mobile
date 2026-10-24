@@ -35,7 +35,7 @@ class FakeStreamServer extends DeviceDataStreamSocketServer {
 /** A real `Daemon` whose data-stream server and observation callback wiring a test drives. */
 class ObservationDaemon extends Daemon {
   useStreamServer(stream: DeviceDataStreamSocketServer): void {
-    this.deviceDataStreamServer = stream;
+    this.runtime.deviceDataStreamServer = stream;
   }
 
   wireObservationCallback(): void {

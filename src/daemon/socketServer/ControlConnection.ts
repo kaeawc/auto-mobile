@@ -2,9 +2,9 @@ import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { Timer } from "../../utils/SystemTimer";
 import { DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS } from "../../utils/deviceTimeouts";
-import { DAEMON_RPC_SOCKET_PEER_END_FLUSH_GRACE_MS } from "../constants";
+import { DAEMON_RPC_SOCKET_PEER_END_FLUSH_GRACE_MS } from "../wire/constants";
 import { OutboundWriteGuard } from "../outboundWriteGuard";
-import { LineFramer } from "./LineFramer";
+import { LineFramer } from "../wire/LineFramer";
 
 const EXPECTED_PEER_CLOSE_CODES = new Set([
   "EPIPE",

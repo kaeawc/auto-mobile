@@ -5,7 +5,7 @@ import {
   type AppearanceDeviceSource,
   type AppearanceSocketServerDependencies,
 } from "../../src/daemon/appearanceSocketServer";
-import type { AppearanceSocketRequest } from "../../src/daemon/appearanceSocketTypes";
+import type { AppearanceSocketRequest } from "../../src/daemon/wire/appearanceSocketTypes";
 import type { AppearanceConfig, BootedDevice } from "../../src/models";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";

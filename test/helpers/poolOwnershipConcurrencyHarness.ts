@@ -1,5 +1,5 @@
 import { commitAcquisition, type AcquisitionReceipt } from "../../src/daemon/acquisitionReceipt";
-import { CLI_SESSION_LIVENESS_POLICY } from "../../src/daemon/constants";
+import { CLI_SESSION_LIVENESS_POLICY } from "../../src/daemon/wire/constants";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { holderOf } from "../../src/daemon/deviceBinding";
 import {
@@ -23,7 +23,7 @@ import {
   DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,
   DEFAULT_SESSION_IDLE_TIMEOUT_MS,
   PROXY_HEARTBEAT_INTERVAL_MS,
-} from "../../src/daemon/sessionLivenessWindows";
+} from "../../src/daemon/wire/sessionLivenessWindows";
 import {
   PLAN_AUTO_RELEASE_REASON,
   SessionManager,

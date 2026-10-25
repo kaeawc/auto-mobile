@@ -9,7 +9,7 @@ import {
   DAEMON_REGISTER_SESSION_METHOD,
   DAEMON_RELEASE_SESSION_METHOD,
   DAEMON_VERSION,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import type { SessionConfig } from "../../src/devices/sessionConfig";
 import type { SessionBrokerResult } from "../../src/devices/sessionBrokerResult";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/daemon/sessionReleaseBroadcast";

@@ -7,7 +7,7 @@ import { tmpdir, platform } from "node:os";
 import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
 import { DeviceControlTransportError } from "../../src/daemon/deviceControlTransportFailure";
 import { DaemonDisconnectError } from "../../src/daemon/DaemonDisconnectError";
-import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
+import { McpTimeoutError } from "../../src/daemon/wire/McpTimeoutError";
 
 const isWindows = platform() === "win32";
 

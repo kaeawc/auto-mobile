@@ -20,7 +20,7 @@ import {
   type DaemonMcpProxyConfig,
 } from "../daemon/daemonMcpProxy";
 import { daemonRestartDeferredPayload } from "../daemon/daemonRestartAdmission";
-import { McpOverloadError, McpTimeoutError } from "../daemon/McpTimeoutError";
+import { McpOverloadError, McpTimeoutError } from "../daemon/wire/McpTimeoutError";
 import { DaemonDisconnectError } from "../daemon/DaemonDisconnectError";
 import { ActionableError, toActionableError } from "../models";
 import { daemonShuttingDownMcpOutcome } from "../daemon/daemonShutdownOutcome";

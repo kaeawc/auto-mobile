@@ -11,7 +11,7 @@ import {
   DAEMON_HEARTBEAT_METHOD,
   DAEMON_TOKEN_OWNED_SESSIONS_METHOD,
   DAEMON_VERSION,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import {
   DAEMON_RESTART_RESUMED_CODE,
   type LivenessHandover,

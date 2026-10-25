@@ -15,12 +15,12 @@ import {
   DAEMON_RESTART_HANDOFF_DELAY_MS,
   DAEMON_VERSION_RESTART_COOLDOWN_MS,
   DEFAULT_DAEMON_PORT,
-} from "../constants";
+} from "../wire/constants";
 import {
   buildIdentitiesMatch,
   buildIdentityFromStatus,
   type BuildIdentity,
-} from "../buildIdentity";
+} from "../wire/buildIdentity";
 import { compareStrictNumericVersions } from "../../utils/deviceMatcher";
 import { releaseVersion, withoutDirtyStamp } from "../../utils/mcpVersion";
 import { daemonProcessOptions } from "../daemonOptionScopes";

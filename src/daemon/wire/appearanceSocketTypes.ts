@@ -1,4 +1,4 @@
-import type { AppearanceConfig, AppearanceMode, AppearanceSyncMode } from "../models";
+import type { AppearanceConfig, AppearanceMode, AppearanceSyncMode } from "../../models";
 
 export type AppearanceSocketCommand =
   | "set_appearance_sync"

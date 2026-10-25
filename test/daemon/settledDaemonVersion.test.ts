@@ -1,11 +1,11 @@
 import { expect, spyOn, test } from "bun:test";
 import * as versions from "../../src/utils/mcpVersion";
-import * as constants from "../../src/daemon/constants";
+import * as constants from "../../src/daemon/wire/constants";
 import { DaemonClient } from "../../src/daemon/client";
 import * as net from "node:net";
 import { DaemonMcpProxy, DaemonVersionMismatchError } from "../../src/daemon/daemonMcpProxy";
 import { SocketServerRuntime } from "../../src/daemon/socketServerParts/SocketServerRuntime";
-import { evaluateClientHandshake } from "../../src/daemon/daemonHandshake";
+import { evaluateClientHandshake } from "../../src/daemon/wire/daemonHandshake";
 import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";

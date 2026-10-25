@@ -5,7 +5,7 @@ import {
   DAEMON_CONNECT_ATTEMPT_TIMEOUT_MS,
   DAEMON_SHUTDOWN_TIMEOUT_MS,
   DAEMON_VERSION,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import { DaemonConnectAttemptStalledError } from "../../src/daemon/proxy/DaemonConnectAttemptStalledError";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { DAEMON_SHUTDOWN_TIMEOUT_MS } from "../../../src/daemon/constants";
+import { DAEMON_SHUTDOWN_TIMEOUT_MS } from "../../../src/daemon/wire/constants";
 import {
   DaemonShutdownBarrier,
   type DaemonShutdownBarrierPort,

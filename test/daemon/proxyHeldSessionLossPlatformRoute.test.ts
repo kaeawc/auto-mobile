@@ -8,7 +8,7 @@ import {
   DAEMON_BOUND_SESSION_REPLAY_TTL_MS,
   DAEMON_TOKEN_OWNED_SESSIONS_METHOD,
   DAEMON_VERSION,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../src/daemon/types";
 import type { LivenessHandover } from "../../src/daemon/proxyLivenessRecovery";
 import { sessionOwnershipLostPayload } from "../../src/daemon/deviceSessionResult";

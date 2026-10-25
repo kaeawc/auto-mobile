@@ -1,5 +1,5 @@
 {
-  "description": "Shared daemon state-path vectors (#10906). Generated from src/daemon/constants.ts resolveDaemonStatePath; the TypeScript, JUnit runner, desktop and XCTestRunner resolvers are all tested against it. uid is the user id the paths are computed for; posixOnly vectors resolve relative paths and hold on POSIX hosts only.",
+  "description": "Shared daemon state-path vectors (#10906). Generated from src/daemon/wire/constants.ts resolveDaemonStatePath; the TypeScript, JUnit runner, desktop and XCTestRunner resolvers are all tested against it. uid is the user id the paths are computed for; posixOnly vectors resolve relative paths and hold on POSIX hosts only.",
   "uid": "501",
   "windowsCases": [
     {

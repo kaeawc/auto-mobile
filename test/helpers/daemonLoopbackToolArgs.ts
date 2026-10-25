@@ -1,7 +1,7 @@
 import {
   DAEMON_OWNED_SESSIONS_PARAM,
   DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 
 /** Mirror socketServer's ownership-metadata removal in adapters that bypass its loopback hop. */
 export function daemonLoopbackToolArgs(params: Record<string, unknown>): Record<string, unknown> {

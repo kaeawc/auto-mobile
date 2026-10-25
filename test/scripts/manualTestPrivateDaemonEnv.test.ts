@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { join, resolve } from "node:path";
-import { DEFAULT_DAEMON_PORT } from "../../src/daemon/constants";
+import { DEFAULT_DAEMON_PORT } from "../../src/daemon/wire/constants";
 import {
   derivePrivateDaemonBatch,
   privateDaemonBatchRefusal,

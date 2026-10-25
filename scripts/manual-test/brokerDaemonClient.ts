@@ -5,7 +5,7 @@ import type {
 } from "../../src/devices/sessionBrokerResult";
 import { z } from "zod";
 import { toActionableError } from "../../src/models/ActionableError";
-import { DAEMON_ONESHOT_CLIENT_MAX_FRAME_BYTES } from "../../src/daemon/socketServer/LineFramer";
+import { DAEMON_ONESHOT_CLIENT_MAX_FRAME_BYTES } from "../../src/daemon/wire/LineFramer";
 import { defaultIdGenerator, type IdGenerator } from "../../src/utils/IdGenerator";
 import { defaultTimer, type Timer } from "../../src/utils/SystemTimer";
 import { raceWithDeadline } from "../../src/utils/raceWithDeadline";

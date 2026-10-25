@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { errorMessage } from "../utils/describeUnknownError";
-import { logger } from "../utils/logger";
+import { errorMessage } from "../../utils/describeUnknownError";
+import { logger } from "../../utils/logger";
 import { DAEMON_VERSION } from "./constants";
 
 /**

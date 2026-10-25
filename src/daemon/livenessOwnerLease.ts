@@ -9,7 +9,7 @@
 
 import type { SessionLivenessClock } from "./sessionClocks";
 import type { Session, SessionLivenessPolicy } from "./sessionManager";
-import { SUSPECT_GRACE_MS } from "./sessionLivenessWindows";
+import { SUSPECT_GRACE_MS } from "./wire/sessionLivenessWindows";
 import { holdsOwnerHeartbeatLease } from "./sessionBroker/provisioning/executionLiveness";
 import { leaseRunningAt } from "./stallForgiveness";
 import type { LivenessLeasePhase } from "../models/managedExecutionLiveness";
@@ -19,7 +19,7 @@ export type { LivenessLeasePhase };
 /**
  * How long a session whose owner missed its lease is held, device still reserved
  * for the owner token, before it is released (#10051). Defined with the other
- * release windows in `./sessionLivenessWindows`.
+ * release windows in `./wire/sessionLivenessWindows`.
  */
 export { SUSPECT_GRACE_MS };
 

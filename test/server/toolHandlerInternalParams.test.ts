@@ -7,7 +7,7 @@ import {
   INTERNAL_MCP_SESSION_PARAM,
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
   INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import {
   parseProvisionDeviceArgs,
   resetDeviceToolsDependencies,

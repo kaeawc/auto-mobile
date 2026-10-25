@@ -1,6 +1,6 @@
 import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { DEFAULT_SESSION_IDLE_TIMEOUT_MS } from "../../src/daemon/sessionLivenessWindows";
+import { DEFAULT_SESSION_IDLE_TIMEOUT_MS } from "../../src/daemon/wire/sessionLivenessWindows";
 import { describe, expect, test } from "bun:test";
 import { SessionManager, type KeepScreenAwakeRestorer } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";

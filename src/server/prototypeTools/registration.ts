@@ -1,6 +1,6 @@
 import { PROTOTYPE_TOOL_NAME } from "./schemas";
 import { z } from "zod/v4";
-import { deleteInternalToolParams } from "../../daemon/constants";
+import { deleteInternalToolParams } from "../../daemon/wire/constants";
 import { defaultDaemonContext } from "../../daemon/daemonContext";
 import { SessionReleaseBroadcaster } from "../../daemon/sessionReleaseBroadcast";
 import { getDaemonStreamDeviceLifecycleEmitter } from "../../daemon/streamDeviceLifecycleEvents";

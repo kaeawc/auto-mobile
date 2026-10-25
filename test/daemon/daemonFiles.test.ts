@@ -23,7 +23,7 @@ import {
 import { FakeLockFileSystem } from "../fakes/FakeLockFileSystem";
 import { statFileIdentity } from "../../src/daemon/socketFileIdentity";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
-import { DEFAULT_PID_FILE_PATH } from "../../src/daemon/constants";
+import { DEFAULT_PID_FILE_PATH } from "../../src/daemon/wire/constants";
 import { logger } from "../../src/utils/logger";
 import * as loggerModule from "../../src/utils/logger";
 import type { PidFileData } from "../../src/daemon/types";

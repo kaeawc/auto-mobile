@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
-import { INTERNAL_TOOL_PARAM_NAMES } from "../../src/daemon/constants";
+import { INTERNAL_TOOL_PARAM_NAMES } from "../../src/daemon/wire/constants";
 import { Plan } from "../../src/models/Plan";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";

@@ -1,7 +1,7 @@
 import { describe, expect, spyOn, test, afterEach, mock, beforeEach } from "bun:test";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient } from "../../src/daemon/client";
-import { DAEMON_ONE_SHOT_CLI_PARAM, DAEMON_VERSION } from "../../src/daemon/constants";
+import { DAEMON_ONE_SHOT_CLI_PARAM, DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeTimer } from "../fakes/FakeTimer";

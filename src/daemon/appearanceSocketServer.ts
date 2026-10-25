@@ -6,7 +6,7 @@ import {
   AppearanceSocketRequest,
   AppearanceSocketResponse,
   AppearanceSocketCommand,
-} from "./appearanceSocketTypes";
+} from "./wire/appearanceSocketTypes";
 import {
   getAppearanceConfig,
   resolveAppearanceMode,

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import {
   INTERNAL_EXECUTION_ID_PARAM,
   INTERNAL_EXECUTION_START_TIME_PARAM,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import { isDebugModeEnabled, setDebugModeEnabled } from "../../src/utils/debug";
 import { matchRunningReadTarget } from "../../src/devices/runningReadTarget";
 import { afterAll, afterEach, beforeAll, expect, mock, spyOn, test } from "bun:test";

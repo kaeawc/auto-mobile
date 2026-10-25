@@ -9,7 +9,7 @@ import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecovery
 import { BootCapacityExhaustedError } from "../../src/models/BootCapacityExhaustedError";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonDisconnectError } from "../../src/daemon/DaemonDisconnectError";
-import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
+import { McpTimeoutError } from "../../src/daemon/wire/McpTimeoutError";
 import { SessionHeldByRecoveryError, SessionSuspectError } from "../../src/daemon/sessionManager";
 import { isTypedToolRefusal, shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import {

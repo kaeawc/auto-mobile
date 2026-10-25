@@ -5,7 +5,7 @@ import { holderReleaseRemainingMs } from "../../src/daemon/holderReleaseRemainin
 import {
   DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS,
   NO_HEARTBEAT_RELEASE_BUDGET_MS,
-} from "../../src/daemon/sessionLivenessWindows";
+} from "../../src/daemon/wire/sessionLivenessWindows";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";

@@ -4,7 +4,7 @@ import {
   encodeNonFinite,
   reviveNonFiniteArguments,
 } from "../../src/utils/nonFiniteJson";
-import { DAEMON_NON_FINITE_ENCODED_PARAM } from "../../src/daemon/constants";
+import { DAEMON_NON_FINITE_ENCODED_PARAM } from "../../src/daemon/wire/constants";
 
 // Issue #5854 §2: JSON has no representation for non-finite numbers, so a
 // tool-call argument that is Infinity/-Infinity/NaN is flattened to `null` before

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import path from "node:path";
-import { SOCKET_PATH } from "../../src/daemon/constants";
+import { SOCKET_PATH } from "../../src/daemon/wire/constants";
 import { getDaemonSocketPathsByName } from "../../src/daemon/socketPaths";
 import {
   AUXILIARY_SOCKET_CONFIGS_BY_NAME,

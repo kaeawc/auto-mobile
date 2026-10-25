@@ -4,7 +4,7 @@ import {
   type DaemonStateAccess,
 } from "../../src/daemon/daemonRequestHandlers";
 import { handleHttpHeartbeat, parseHttpHeartbeatBody } from "../../src/daemon/httpHeartbeat";
-import { DAEMON_HEARTBEAT_METHOD } from "../../src/daemon/constants";
+import { DAEMON_HEARTBEAT_METHOD } from "../../src/daemon/wire/constants";
 
 /**
  * #11819: the socket heartbeat and `POST /heartbeat` share one rule for sessions the daemon no

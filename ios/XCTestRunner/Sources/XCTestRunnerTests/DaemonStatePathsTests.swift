@@ -2,7 +2,7 @@ import XCTest
 @testable import XCTestRunner
 
 /// #10906: the runner must resolve the same control socket, PID and token files as the daemon it launches
-/// (`resolveDaemonStatePath` in `src/daemon/constants.ts`). All are tested against the shared
+/// (`resolveDaemonStatePath` in `src/daemon/wire/constants.ts`). All are tested against the shared
 /// vectors in `test/fixtures/daemon-isolation-paths.json`, as are the JUnit runner and desktop ports.
 final class DaemonStatePathsTests: XCTestCase {
     private struct Vectors: Decodable {

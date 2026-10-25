@@ -12,9 +12,12 @@ import {
 import { DaemonState } from "../../src/daemon/daemonState";
 import { releasingSessionHarness } from "../helpers/releasingSessionHarness";
 import { StreamDeviceLifecycleEmitter } from "../../src/daemon/streamDeviceLifecycleEvents";
-import { assertMayControl, ViewerReadOnlyError } from "../../src/daemon/streamSubscriptionPolicy";
+import {
+  assertMayControl,
+  ViewerReadOnlyError,
+} from "../../src/daemon/wire/streamSubscriptionPolicy";
 import { encodeSubscriptionNotice } from "../../src/daemon/videoStreamFraming";
-import type { VideoStreamSocketResponse } from "../../src/daemon/videoStreamSocketTypes";
+import type { VideoStreamSocketResponse } from "../../src/daemon/wire/videoStreamSocketTypes";
 import type { H264CaptureSource } from "../../src/features/webrtc/H264CaptureSource";
 import type { BootedDevice } from "../../src/models";
 import { FakeSocket } from "../fakes/FakeNetServer";

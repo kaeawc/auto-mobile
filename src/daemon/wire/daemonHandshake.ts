@@ -1,4 +1,4 @@
-import { releaseVersion, withoutDirtyStamp } from "../utils/mcpVersion";
+import { releaseVersion, withoutDirtyStamp } from "../../utils/mcpVersion";
 import { z } from "zod";
 import { type BuildIdentity, buildIdentitiesMatch, describeBuildIdentity } from "./buildIdentity";
 

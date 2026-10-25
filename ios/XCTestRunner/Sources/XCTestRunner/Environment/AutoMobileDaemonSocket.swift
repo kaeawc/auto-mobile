@@ -3,7 +3,7 @@ import Darwin
 import Foundation
 
 /// The daemon's per-uid control socket. Frozen wire contract shared with the TypeScript daemon
-/// (`src/daemon/constants.ts`): `/tmp/auto-mobile-daemon-<uid><suffix>.sock`, where the suffix
+/// (`src/daemon/wire/constants.ts`): `/tmp/auto-mobile-daemon-<uid><suffix>.sock`, where the suffix
 /// isolates an `AUTOMOBILE_AUX_SOCKET_DIR` daemon and an explicit `AUTOMOBILE_DAEMON_SOCKET_PATH`
 /// wins over both.
 enum AutoMobileDaemonSocket {
@@ -35,7 +35,7 @@ enum DaemonStateFile: Sendable {
     }
 }
 
-/// Port of `resolveDaemonStatePath` (`src/daemon/constants.ts`): an explicit
+/// Port of `resolveDaemonStatePath` (`src/daemon/wire/constants.ts`): an explicit
 /// `AUTOMOBILE_DAEMON_*_PATH` override (resolved against the daemon launch directory) first, then
 /// `/tmp/auto-mobile-daemon-<uid><suffix>.<ext>`. The runner launches the daemon with its own
 /// environment, so it must resolve the same paths that daemon uses (#10906). Tested against the

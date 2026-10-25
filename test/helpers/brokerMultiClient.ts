@@ -1,6 +1,6 @@
 import { expect } from "bun:test";
 import { renderClientRequest } from "../../scripts/manual-test/brokerBatch";
-import { DAEMON_REGISTER_SESSION_METHOD } from "../../src/daemon/constants";
+import { DAEMON_REGISTER_SESSION_METHOD } from "../../src/daemon/wire/constants";
 import { handleDaemonRequest } from "../../src/daemon/daemonRequestHandlers";
 import { handleReleaseBrokerSession } from "../../src/daemon/sessionBroker/handlers";
 import { SESSION_OWNER_EXITED_CODE } from "../../src/devices/sessionBrokerResult";

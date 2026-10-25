@@ -7,7 +7,7 @@ import { createMcpServer } from "../../src/server/index";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { InMemoryToolSelectionProfileRegistry } from "../../src/daemon/InMemoryToolSelectionProfileRegistry";
 import { getToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
-import { INTERNAL_ACTIONS_COMPACT_METADATA_PARAM } from "../../src/daemon/constants";
+import { INTERNAL_ACTIONS_COMPACT_METADATA_PARAM } from "../../src/daemon/wire/constants";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { serverConfig } from "../../src/utils/ServerConfig";
 

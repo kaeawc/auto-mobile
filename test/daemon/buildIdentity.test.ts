@@ -6,7 +6,7 @@ import {
   buildIdentityFromStatus,
   describeBuildIdentity,
   type BuildIdentity,
-} from "../../src/daemon/buildIdentity";
+} from "../../src/daemon/wire/buildIdentity";
 import { logger } from "../../src/utils/logger";
 
 describe("buildIdentity", () => {

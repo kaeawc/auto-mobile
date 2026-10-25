@@ -10,7 +10,7 @@ import { join } from "node:path";
 import {
   DAEMON_REGISTER_SESSION_METHOD,
   DAEMON_RELEASE_SESSION_METHOD,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import { handleDaemonRequest } from "../../src/daemon/daemonRequestHandlers";
 import { brokerConnectionControlRefusal } from "../../src/daemon/sessionBroker/connectionScope";
 import { DEVICE_OUTSIDE_BROKER_GRANT_CODE } from "../../src/daemon/sessionBroker/connectionRefusal";

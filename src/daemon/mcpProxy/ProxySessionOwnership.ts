@@ -9,7 +9,7 @@ import {
   DAEMON_TOKEN_OWNED_SESSIONS_METHOD,
   HEARTBEAT_SESSION_LIVENESS_POLICY,
   getCliSessionIdleTimeoutMs,
-} from "../constants";
+} from "../wire/constants";
 import { BoundSessionHeartbeat } from "../proxy/BoundSessionHeartbeat";
 import { HeldSessionHeartbeatOutcomes } from "../proxy/HeldSessionHeartbeatOutcomes";
 import { HeldSessionNotFoundError } from "../proxy/HeldSessionNotFoundError";

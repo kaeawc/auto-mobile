@@ -13,7 +13,7 @@ import { type ObserveScreenshotOptions } from "../features/observe/screenshot/sc
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { SCREENSHOT_HIDE_PROTOTYPE_CAPABILITY } from "../features/observe/android/ctrlProxyProtocol";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
-import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../daemon/constants";
+import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../daemon/wire/constants";
 import { assertAllDisplayObserveSupported } from "../features/observe/DisplaySelection";
 import { type DeviceObservationAccess } from "./deviceObservationAccess";
 import { ActionableError } from "../models/ActionableError";

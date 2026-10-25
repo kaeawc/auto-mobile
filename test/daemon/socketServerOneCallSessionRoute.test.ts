@@ -3,7 +3,7 @@ import {
   type UnixSocketServerHarness,
 } from "./helpers/UnixSocketServerHarness";
 import { afterEach, describe, expect, test } from "bun:test";
-import { DAEMON_BOUND_SESSION_PARAM } from "../../src/daemon/constants";
+import { DAEMON_BOUND_SESSION_PARAM } from "../../src/daemon/wire/constants";
 import { DaemonState } from "../../src/daemon/daemonState";
 import type { DaemonRequest } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";

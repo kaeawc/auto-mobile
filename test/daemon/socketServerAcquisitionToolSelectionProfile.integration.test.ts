@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DAEMON_TOOL_SELECTION_PROFILE_PARAM } from "../../src/daemon/constants";
+import { DAEMON_TOOL_SELECTION_PROFILE_PARAM } from "../../src/daemon/wire/constants";
 import {
   createHarnessServer,
   type UnixSocketServerHarness,

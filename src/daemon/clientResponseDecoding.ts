@@ -1,9 +1,9 @@
 import { z } from "zod";
 import { ActionableError } from "../models";
-import { type BuildIdentity } from "./buildIdentity";
+import { type BuildIdentity } from "./wire/buildIdentity";
 import { type DaemonMethodCallOptions } from "./client";
 import { DaemonBoundSessionLostError } from "./DaemonBoundSessionLostError";
-import { isDaemonHandshakeFailure } from "./daemonHandshake";
+import { isDaemonHandshakeFailure } from "./wire/daemonHandshake";
 import { DaemonHandshakeMismatchError } from "./DaemonHandshakeMismatchError";
 import { isDaemonShuttingDownFailure } from "./daemonShutdownOutcome";
 import { DaemonShuttingDownError } from "./DaemonShuttingDownError";
@@ -12,7 +12,7 @@ import {
   sanitizeDeviceControlTransportFailure,
 } from "./deviceControlTransportFailure";
 import type { LivenessOwnerHold } from "./livenessOwnerLease";
-import { McpOverloadError, sanitizeMcpOverloadFailure } from "./McpTimeoutError";
+import { McpOverloadError, sanitizeMcpOverloadFailure } from "./wire/McpTimeoutError";
 import {
   type TaskRelayFrame,
   type TaskRelayMethod,

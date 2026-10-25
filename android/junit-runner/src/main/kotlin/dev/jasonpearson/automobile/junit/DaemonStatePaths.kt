@@ -22,7 +22,7 @@ internal data class DaemonTokenPlatform(
 )
 
 /**
- * Port of `resolveDaemonStatePath` (`src/daemon/constants.ts`): an explicit
+ * Port of `resolveDaemonStatePath` (`src/daemon/wire/constants.ts`): an explicit
  * `AUTOMOBILE_DAEMON_*_PATH` override (resolved against the daemon launch directory) first, then
  * `/tmp/auto-mobile-daemon-<uid><suffix>.<ext>`, where the suffix isolates an
  * `AUTOMOBILE_AUX_SOCKET_DIR` daemon (#10881). The runner launches `auto-mobile --daemon start`

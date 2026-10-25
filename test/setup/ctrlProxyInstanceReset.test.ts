@@ -1,5 +1,5 @@
 import { createMcpServer } from "../../src/server";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
+import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import { getMcpServerVersion } from "../../src/utils/mcpVersion";
 import { testOverrides } from "../../src/utils/testOverrides";
 import { gitVersionPreloadSpawns } from "./testPreload";

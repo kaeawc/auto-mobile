@@ -1,6 +1,6 @@
 import { isolateEmptyToolRegistry } from "./withTemporaryTool";
 import { expect, spyOn } from "bun:test";
-import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/constants";
+import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/wire/constants";
 import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import { getDbWriteBarrier, resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import { DaemonState } from "../../src/daemon/daemonState";

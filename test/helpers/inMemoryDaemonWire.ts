@@ -12,7 +12,7 @@ import {
   PID_FILE_PATH,
   SOCKET_PATH,
   LOCK_FILE_PATH,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import { type UnixSocketServer, type McpClientFactory } from "../../src/daemon/socketServer";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 import { resolveAutoMobileBaseDir } from "../../src/utils/tempDir";

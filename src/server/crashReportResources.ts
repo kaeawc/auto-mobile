@@ -68,6 +68,10 @@ function parseMaxBytes(raw: string | undefined): number | string {
   return parsed;
 }
 
+function isOwnSession(context: ResourceReadContext, sessionUuid: string): boolean {
+  return context.sessionUuid === sessionUuid || context.ownsSession?.(sessionUuid) === true;
+}
+
 function createCrashReportHandler(deps: CrashReportResourceDependencies) {
   return async (
     params: Record<string, string>,
@@ -79,8 +83,9 @@ function createCrashReportHandler(deps: CrashReportResourceDependencies) {
       getRequestedResourceUri(params) ??
       `automobile:device-session/${rawSessionUuid}/apps/${rawAppId}/crash-reports/${rawReportId}`;
 
-    // Binding first, before any parsing or device access, exactly as for session logs.
-    if (context.sessionUuid !== sessionUuid) {
+    // Binding first, before any parsing or device access. An earlier session this connection
+    // acquired still counts as its own, as for observation resources.
+    if (!isOwnSession(context, sessionUuid)) {
       return jsonError(
         requestedUri,
         "SESSION_NOT_BOUND",

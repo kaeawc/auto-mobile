@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test";
 import {
   AndroidDeviceTraitsReader,
   DEVICE_TRAITS_CACHE_TTL_MS,
+  isAutomotive,
+  isWatch,
   parseAndroidEmulatorFlag,
+  parseTraitFormFactor,
   readAndroidEmulatorFlag,
 } from "../../../src/utils/android-cmdline-tools/deviceTraits";
 import { createExecResult } from "../../../src/utils/execResult";
@@ -64,6 +67,7 @@ describe("AndroidDeviceTraitsReader", () => {
       manufacturer: "samsung",
       brand: "samsung",
       skin: null,
+      formFactor: null,
     });
   });
 
@@ -81,7 +85,7 @@ describe("AndroidDeviceTraitsReader", () => {
       timeoutMs: 750,
     });
 
-    expect(options).toHaveLength(6);
+    expect(options).toHaveLength(7);
     expect(options.every((option) => option?.noRetry === true && option.timeoutMs === 750)).toBe(
       true,
     );
@@ -185,6 +189,64 @@ describe("AndroidDeviceTraitsReader", () => {
       manufacturer: null,
       brand: null,
       skin: null,
+      formFactor: null,
     });
+  });
+
+  test.each([
+    ["emulator,automotive\n", "automotive"],
+    ["watch\n", "watch"],
+    ["nosdcard\n", null],
+    ["\n", null],
+  ] as const)("ro.build.characteristics %j reads as form factor %p", async (raw, expected) => {
+    const adb = samsungAdb();
+    adb.setCommandResponse("getprop ro.build.characteristics", createExecResult(raw, ""));
+
+    const traits = await new AndroidDeviceTraitsReader(new FakeTimer()).read(adb, "emulator-5554");
+
+    expect(traits.formFactor).toBe(expected);
+  });
+
+  test("a failed ro.build.characteristics read leaves the form factor null without failing the read", async () => {
+    const adb = samsungAdb();
+    const runner: AdbCommandRunner = {
+      executeCommand: (command, option) =>
+        command.includes("ro.build.characteristics")
+          ? Promise.reject(new Error("device offline"))
+          : adb.executeCommand(command, option),
+    };
+
+    const traits = await new AndroidDeviceTraitsReader(new FakeTimer()).read(runner, "R5CW123");
+
+    expect(traits).toMatchObject({ isEmulator: false, formFactor: null });
+  });
+});
+
+describe("parseTraitFormFactor", () => {
+  test.each([
+    ["emulator,automotive", "automotive"],
+    ["automotive", "automotive"],
+    [" Watch ", "watch"],
+    ["emulator, watch", "watch"],
+    ["tablet,nosdcard", null],
+    ["tv", null],
+    ["", null],
+    [null, null],
+  ] as const)("%j -> %p", (raw, expected) => {
+    expect(parseTraitFormFactor(raw)).toBe(expected);
+  });
+
+  test("matches whole characteristics, not substrings", () => {
+    expect(parseTraitFormFactor("watchface,automotiveish")).toBeNull();
+  });
+
+  test("the gates are positive-match only", () => {
+    expect(isAutomotive({ formFactor: "automotive" })).toBe(true);
+    expect(isAutomotive({ formFactor: "watch" })).toBe(false);
+    expect(isAutomotive({ formFactor: null })).toBe(false);
+    expect(isAutomotive(undefined)).toBe(false);
+    expect(isWatch({ formFactor: "watch" })).toBe(true);
+    expect(isWatch({})).toBe(false);
+    expect(isWatch(undefined)).toBe(false);
   });
 });

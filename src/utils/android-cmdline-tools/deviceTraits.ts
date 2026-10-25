@@ -15,6 +15,13 @@ export interface DeviceSkin {
   version: string | null;
 }
 
+/**
+ * The non-handheld form factors a booted device announces in `ro.build.characteristics`.
+ * Handhelds (phone, tablet, foldable) are deliberately left null so their behaviour does
+ * not change; TV is left for later.
+ */
+export type TraitFormFactor = "watch" | "automotive";
+
 /** Identifying build props of one Android device. A prop that could not be read is null. */
 export interface AndroidDeviceTraits {
   /**
@@ -37,6 +44,12 @@ export interface AndroidDeviceTraits {
    * (e.g. a MIUI or One UI prop) would mislabel devices.
    */
   skin: DeviceSkin | null;
+  /**
+   * `ro.build.characteristics` containing `watch` or `automotive`. Null for everything else,
+   * including a prop that could not be read: callers gate special behaviour on a positive
+   * match and leave every other device on today's path.
+   */
+  formFactor: TraitFormFactor | null;
 }
 
 export interface DeviceTraitsReadOptions {
@@ -55,6 +68,30 @@ export interface DeviceTraits {
     deviceId: string,
     options?: DeviceTraitsReadOptions,
   ): Promise<AndroidDeviceTraits>;
+}
+
+/** The prop whose comma-separated list names the device class, e.g. `emulator,automotive`. */
+export const BUILD_CHARACTERISTICS_PROP = "ro.build.characteristics";
+
+/** Interpret a raw `ro.build.characteristics` value; see {@link AndroidDeviceTraits.formFactor}. */
+export function parseTraitFormFactor(raw: string | null): TraitFormFactor | null {
+  const characteristics = (raw ?? "")
+    .split(",")
+    .map((characteristic) => characteristic.trim().toLowerCase());
+  if (characteristics.includes("automotive")) {
+    return "automotive";
+  }
+  return characteristics.includes("watch") ? "watch" : null;
+}
+
+/** True only when the device positively announced an automotive build. */
+export function isAutomotive(traits: { formFactor?: TraitFormFactor | null } | undefined): boolean {
+  return traits?.formFactor === "automotive";
+}
+
+/** True only when the device positively announced a watch build. */
+export function isWatch(traits: { formFactor?: TraitFormFactor | null } | undefined): boolean {
+  return traits?.formFactor === "watch";
 }
 
 export type AndroidEmulatorFlagRunner = (prop: string) => Promise<string>;
@@ -164,15 +201,25 @@ export class AndroidDeviceTraitsReader implements DeviceTraits {
         return null;
       }
     };
-    const [isEmulator, model, sdk, abi, manufacturer, brand] = await Promise.all([
+    const [isEmulator, model, sdk, abi, manufacturer, brand, characteristics] = await Promise.all([
       readAndroidEmulatorFlag(getprop),
       optional("ro.product.model"),
       optional("ro.build.version.sdk"),
       optional("ro.product.cpu.abi"),
       optional("ro.product.manufacturer"),
       optional("ro.product.brand"),
+      optional(BUILD_CHARACTERISTICS_PROP),
     ]);
-    return { isEmulator, model, sdk: parseSdk(sdk), abi, manufacturer, brand, skin: null };
+    return {
+      isEmulator,
+      model,
+      sdk: parseSdk(sdk),
+      abi,
+      manufacturer,
+      brand,
+      skin: null,
+      formFactor: parseTraitFormFactor(characteristics),
+    };
   }
 }
 

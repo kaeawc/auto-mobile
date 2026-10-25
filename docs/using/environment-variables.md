@@ -320,7 +320,7 @@ budget-driven fallback reasons.
 | `AUTOMOBILE_IOS_SIM_CAPACITY_GATE`                                                    | iOS-only override of the gate above: exact `0` disables, exact `1` enables.                                                                             | unset (follows the shared switch)                                 |
 | `AUTOMOBILE_ANDROID_MAX_BOOTED`                                                       | Cap on concurrently booted Android emulators; positive integer. Invalid values are ignored with a warning.                                              | derived from host RAM and cores, at least 1                       |
 | `AUTOMOBILE_IOS_SIM_BOOT_CONCURRENCY`                                                 | Concurrent iOS simulator boot bursts; positive integer. Extra boots queue in FIFO order. Invalid values warn and use the derived limit.                 | ceil(host cores / 13), at least 2                                 |
-| `AUTOMOBILE_IOS_SIM_MAX_BOOTED`                                                       | Cap on concurrently booted iOS simulators; positive integer. Invalid values are ignored with a warning.                                                 | derived from host RAM and settled-CPU cost, at least 1            |
+| `AUTOMOBILE_IOS_SIM_MAX_BOOTED`                                                       | Cap on concurrently booted iOS simulators; positive integer. Invalid values are ignored with a warning.                                                 | derived from 60% of host RAM over measured footprint and CPU cost |
 | `AUTOMOBILE_WORK_PROFILE_POLL_INTERVAL_MS`                                            | Android work-profile package polling interval; positive integer milliseconds.                                                                           | `5000` ms                                                         |
 
 </div>
@@ -398,8 +398,11 @@ Not AutoMobile-specific; these configure platform toolchains and the host.
 ### Boot capacity
 
 Emulator and simulator cold boots are checked against host capacity by default.
-Android and iOS each have a limit: the smaller of half the host RAM divided by the
-per-device memory, and half the CPU cores, at least 1. Every booted device of
+Android and iOS each have a limit: the smaller of the host RAM budget divided by the
+per-device memory, and the CPU budget, at least 1. Android budgets half the RAM and
+one emulator per 2 cores; iOS budgets 60% of RAM divided by the measured
+per-simulator memory footprint (not summed RSS) and half the cores at 0.1 core per
+simulator, see [iOS Simulator fleet cost](ios-simulator-fleet-cost.md). Every booted device of
 that platform counts, including ones started outside AutoMobile. A simulator
 inventory that cannot be read refuses the boot with the retryable
 `discovery_incomplete`.

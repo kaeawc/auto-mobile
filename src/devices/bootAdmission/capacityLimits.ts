@@ -27,8 +27,13 @@ export interface PerDeviceMemoryPolicy {
   maxBytes: number;
 }
 
+/**
+ * Per-simulator `phys_footprint` of the whole tree including the runner. Round 6 (#15288)
+ * measured 2.1–2.4 GiB settled; the default covers an unmeasured simulator with that plus
+ * headroom, and `maxBytes` is only a sanity bound on a measured average.
+ */
 export const IOS_SIMULATOR_MEMORY_POLICY: PerDeviceMemoryPolicy = {
-  defaultBytes: 3 * GIB,
+  defaultBytes: 2.5 * GIB,
   minBytes: 1.5 * GIB,
   maxBytes: 6 * GIB,
 };
@@ -43,7 +48,7 @@ export const ANDROID_EMULATOR_MEMORY_POLICY: PerDeviceMemoryPolicy = {
   maxBytes: 8 * GIB,
 };
 
-/** Average measured RSS clamped to the policy's range, or its default when nothing was measured. */
+/** Average measured memory (emulator RSS, simulator footprint) clamped to the policy's range, or its default when nothing was measured. */
 export function estimatePerDeviceBytes(
   measuredRssBytes: readonly number[],
   policy: PerDeviceMemoryPolicy,

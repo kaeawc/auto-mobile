@@ -2,7 +2,6 @@ import {
   estimatePerDeviceBytes,
   estimateSettledPerDeviceBytes,
   IOS_SIMULATOR_MEMORY_POLICY,
-  MEMORY_BUDGET_FRACTION,
   parseOverride,
   type CapacityLimits,
   type InFlightBootMemory,
@@ -15,8 +14,18 @@ export type { CapacityLimits } from "../bootAdmission/capacityLimits";
 /** Env override: positive integer cap on concurrently booted simulators. */
 export const IOS_SIM_MAX_BOOTED_ENV = ENV.IOS_SIM_MAX_BOOTED.name;
 
-/** Settled Apple processes (0.04 core) plus AutoMobile (0.015 core), measured in #15097. */
-export const SETTLED_CPU_CORES_PER_SIMULATOR = 0.04 + 0.015;
+/**
+ * Settled CPU cost of one simulator tree including the AutoMobile runner. #15097 measured 0.055
+ * core in the first minutes; round 6 (#15288) measured 0.07–0.115 at 5–20 minutes, drifting up
+ * with age, with a whole-tree slope of 0.10 core per simulator.
+ */
+export const SETTLED_CPU_CORES_PER_SIMULATOR = 0.1;
+/**
+ * Share of host RAM booted simulators may use. Round 6 ran 32 simulators healthy (normal memory
+ * pressure, no swap) at 75.8 GiB footprint on a 128 GB host, 59% of RAM; host memory pressure
+ * stays the backstop (`hostPressure`).
+ */
+export const IOS_MEMORY_BUDGET_FRACTION = 0.6;
 /** Leave half the cores for the app under test, IDE and runners. */
 export const CPU_BUDGET_FRACTION = 0.5;
 /** First-boot bursts consume about 13 cores for 50–130 seconds (#15097). */
@@ -39,21 +48,25 @@ export interface IosCapacityLimits extends CapacityLimits {
 const HIGH_LOAD_PER_CORE = 1.5;
 
 /**
- * Whole simulator-tree RSS includes the CtrlProxy runner app; no extra runner charge.
- * Average measured settled RSS is clamped to 1.5–6 GiB, falling back to 3 GiB.
- * Settled simulator memory, charging active admissions and external Booting devices conservatively.
+ * Per-simulator memory from the whole simulator tree's summed `phys_footprint`, which includes the
+ * CtrlProxy runner app, so no extra runner charge. Summed RSS is never used: about 220 processes
+ * share the dyld cache, so it reads ~10x the real cost (26.9 GiB against 2.1–2.4 GiB, #15288).
+ * The average is clamped to 1.5–6 GiB (a sanity bound only), falling back to 2.5 GiB when no
+ * footprint was measured. Settled simulator memory, charging active admissions and external
+ * Booting devices conservatively.
  */
 export function estimatePerSimulatorBytes(
   report?: FleetCostReport,
   inFlight: readonly InFlightBootMemory[] = [],
 ): number {
   const simulators = report?.simulators ?? [];
+  // A tree with no footprint read contributes no sample: it is unmeasured, not RSS-sized.
   const measured = simulators.flatMap((sim) =>
-    sim.quality === "measured" && sim.process
-      ? [{ udid: sim.udid, rssBytes: sim.process.rssBytes }]
+    sim.quality === "measured" && sim.process?.footprintBytes !== undefined
+      ? [{ udid: sim.udid, footprintBytes: sim.process.footprintBytes }]
       : [],
   );
-  // Replacement reservations are anonymous charges; the old simulator's RSS stays settled.
+  // Replacement reservations are anonymous charges; the old simulator's footprint stays settled.
   const namedBoots = new Set(
     inFlight.flatMap((boot) => (boot.deviceId && !boot.replacement ? [boot.deviceId] : [])),
   );
@@ -65,19 +78,20 @@ export function estimatePerSimulatorBytes(
   const anonymousBoots = inFlight.filter((boot) => boot.deviceId === undefined || boot.replacement);
   if (namedBoots.size === 0 && anonymousBoots.length === 0) {
     return estimatePerDeviceBytes(
-      measured.map((sim) => sim.rssBytes),
+      measured.map((sim) => sim.footprintBytes),
       IOS_SIMULATOR_MEMORY_POLICY,
     );
   }
-  // Each RSS row is already a whole simulator tree. Use its row index as a sample-local identity
+  // Each row is already a whole simulator tree. Use its row index as a sample-local identity
   // for the shared process matcher; no PID is available (or needed) in SimulatorProcessCost.
+  // The shared matcher names its byte field `rssBytes`; here it carries the tree's footprint.
   const rowIds = new Map(measured.map((sim, index) => [sim.udid, index]));
   const boots: InFlightBootMemory[] = [
     ...anonymousBoots.map(({ handedOff }) => ({ handedOff })),
     ...[...namedBoots].map((udid) => ({ processId: rowIds.get(udid), handedOff: false })),
   ];
   return estimateSettledPerDeviceBytes(
-    measured.map((sim, index) => ({ rssBytes: sim.rssBytes, pid: index })),
+    measured.map((sim, index) => ({ rssBytes: sim.footprintBytes, pid: index })),
     boots,
     IOS_SIMULATOR_MEMORY_POLICY,
   );
@@ -95,7 +109,7 @@ export function resolveCapacityLimits(
   const raw = env[IOS_SIM_MAX_BOOTED_ENV];
   const override = parseOverride(raw);
   const byMemory = Math.floor(
-    (resources.totalMemoryBytes * MEMORY_BUDGET_FRACTION) / perSimulatorBytes,
+    (resources.totalMemoryBytes * IOS_MEMORY_BUDGET_FRACTION) / perSimulatorBytes,
   );
   const bySettledCpu = Math.floor(
     (resources.cpuCount * CPU_BUDGET_FRACTION) / SETTLED_CPU_CORES_PER_SIMULATOR,

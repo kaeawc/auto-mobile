@@ -60,7 +60,9 @@ describe("checkIosSimulatorFleetCost", () => {
     });
     expect(result.status).toBe("pass");
     expect(result.value).toBe(1);
-    expect(result.detail).toContain("RSS");
+    // The synthetic ps fixture carries no footprint: cost shows as unmeasured, never as RSS.
+    expect(result.detail).toContain("memory unmeasured");
+    expect(result.detail).not.toContain("RSS");
   });
 
   test("warns when a new boot would exceed capacity", async () => {

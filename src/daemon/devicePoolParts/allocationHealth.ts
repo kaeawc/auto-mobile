@@ -11,11 +11,13 @@ import {
 import { type DeviceHealthMarker } from "../deviceHealthMarkers";
 import { type Session } from "../sessionManager";
 import { ActionableError } from "../../models";
+import { BootedDeviceDiscoveryIncompleteError } from "../../models/BootedDeviceDiscoveryIncompleteError";
 import { DeviceAllocationCriteria, DeviceAllocationRequest } from "../DeviceCriteriaMatcher";
 import { type DiscoveryCompleteness } from "../../utils/discoverySource";
 import { getAbortSignal } from "../../utils/AbortContext";
 import type { PooledDevice } from "../devicePoolTypes";
 import {
+  IOS_LIVENESS_UNVERIFIED_RETRY_AFTER_MS,
   RollbackAssignment,
   TargetDeviceDiscoverySnapshot,
   TargetDeviceValidationOptions,
@@ -256,9 +258,14 @@ export class DevicePoolAllocationHealth {
       throw new ActionableError(unavailableMessage);
     }
     const noun = this.state.idleDeviceReaper.iosDeviceNoun(device.id);
-    throw new ActionableError(
+    // A failed listing (typically a `simctl list` timeout during a boot burst) says nothing about
+    // the device, and the caller already rolled back: it is transient, so retryable (#15289).
+    throw new BootedDeviceDiscoveryIncompleteError(
+      "ios",
+      undefined,
       `Unable to verify iOS ${noun} '${device.id}' is still booted before assignment.\n` +
-        `iOS ${noun} discovery failed, so AutoMobile did not assign this pooled UDID.`,
+        `iOS ${noun} discovery failed, so AutoMobile did not assign this pooled UDID; retry shortly.`,
+      IOS_LIVENESS_UNVERIFIED_RETRY_AFTER_MS,
     );
   }
 

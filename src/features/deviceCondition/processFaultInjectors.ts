@@ -9,7 +9,10 @@ import type {
   DeviceConditionApplyOutcome,
   DeviceConditionInjector,
 } from "./DeviceConditionController";
-import { readAndroidPackageProcesses } from "../../utils/android-cmdline-tools/androidProcessState";
+import {
+  findAndroidPackageProcessId,
+  readAndroidPackageProcesses,
+} from "../../utils/android-cmdline-tools/androidProcessState";
 import {
   ANDROID_PACKAGE_NAME_PATTERN,
   DEVICE_CONDITION_APPLY,
@@ -146,13 +149,17 @@ export function createTrimMemoryInjector(
       }
       const { package: packageName, level } = parsed.data;
       const userId = await resolveUser(packageName, signal);
-      if (!(await isRunning(adb, packageName, userId, signal))) {
+      const { processes } = await readAndroidPackageProcesses(adb, packageName, { userId, signal });
+      // `am` resolves its process argument by exact name or PID, so a package whose only live
+      // process is a secondary one (`com.example:worker`) is addressed by PID.
+      const pid = findAndroidPackageProcessId(processes, packageName, userId);
+      if (pid === null) {
         unsupported(`${packageName} is not running, so there is no process to trim`);
       }
       // `am` reports a refused request with a zero exit, on stdout or stderr, so read both.
       const out = await adbCommand(
         adb,
-        ["shell", "am", "send-trim-memory", "--user", String(userId), packageName, level],
+        ["shell", "am", "send-trim-memory", "--user", String(userId), String(pid), level],
         signal,
       );
       if (/\b(error|exception|unknown)\b/i.test(out)) {

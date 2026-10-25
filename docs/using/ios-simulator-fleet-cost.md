@@ -106,7 +106,14 @@ Set `AUTOMOBILE_SPOTLIGHT_EXCLUDE=0` to opt out of shell marker creation.
 For other developer directories, add a marker or use System Settings > Spotlight > Search Privacy.
 Doctor only reads indexing status and never changes system settings.
 
-New simulators use the `minimal` lean profile and settled template cloning by default.
+New simulators use the `minimal` lean profile by default; settled template cloning is off by default.
 Set `AUTOMOBILE_IOS_PREBOOT_LEAN_PROFILE=none` to opt out of the profile, or
-`AUTOMOBILE_IOS_TEMPLATE_CLONE=0` (or `false`) to opt out of cloning. Explicit
+`AUTOMOBILE_IOS_TEMPLATE_CLONE=1` (or `true`) to opt in to cloning. Explicit
 resource requests override the profile.
+
+### Known limitation: template clones share Safari and system-app data
+
+Template cloning is off by default for this release because a clone shares Safari and other
+system-app data with its template, so state (tabs, history, cookies, website data) written in one
+clone leaks to the template and to other clones (#15327, tracked under #15216). Enable it only when
+your tests do not depend on isolated system-app state, or reset that state yourself after provisioning.

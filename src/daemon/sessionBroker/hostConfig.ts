@@ -98,7 +98,7 @@ const iosReuse = z.discriminatedUnion("mode", [
     .object({
       mode: z.literal("keep-booted"),
       maxUses: cap.positive().default(DEFAULT_IOS_KEEP_BOOTED_MAX_USES),
-      fallback: z.literal("erase").default("erase"),
+      fallback: z.enum(["erase", "destroy"]).default("erase"),
     })
     .strict(),
 ]);

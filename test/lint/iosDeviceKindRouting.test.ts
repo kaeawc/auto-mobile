@@ -15,6 +15,10 @@ const ALLOW_LIST = new Map<string, string>([
     "device discovery and UDID classification, outside backend routing",
   ],
   [
+    "src/utils/ios-cmdline-tools/SimulatorPrebootProfile.ts",
+    "host-state path safety guard on a UDID the caller just created, not backend routing",
+  ],
+  [
     "src/utils/ios-cmdline-tools/SimCtlSupport.ts",
     "simctl error classification, outside backend routing",
   ],

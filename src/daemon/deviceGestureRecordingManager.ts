@@ -25,9 +25,12 @@ export const DEVICE_GESTURE_RECORDING_USER_INPUT_ONLY_NOTICE: string =
 export class NoUserInputCapturedError extends ActionableError {
   readonly reason = NO_USER_INPUT_CAPTURED_REASON;
 
-  constructor() {
+  /** `omitted` names input that was recorded but could not be exported, so it is not "nothing". */
+  constructor(omitted?: string) {
     super(
-      "No recorded interactions were captured. " + DEVICE_GESTURE_RECORDING_USER_INPUT_ONLY_NOTICE,
+      "No recorded interactions were captured. " +
+        DEVICE_GESTURE_RECORDING_USER_INPUT_ONLY_NOTICE +
+        (omitted ? ` ${omitted}` : ""),
     );
   }
 }
@@ -82,7 +85,7 @@ const STOP_RECORDING_TIMEOUT_MS = 10_000;
 
 type TestRecorder = Pick<DualTrackRecorder, "start" | "stop" | "stepCount"> &
   /** Steps captured so far; lets a stop that failed or timed out still return them. */
-  Partial<Pick<DualTrackRecorder, "capturedSteps">>;
+  Partial<Pick<DualTrackRecorder, "capturedSteps" | "capturedExportWarnings">>;
 type RecorderFactory = (device: BootedDevice) => TestRecorder;
 
 let activeRecording: RecordingSession | null = null;
@@ -270,9 +273,10 @@ const buildPlanFromSteps = (
   session: RecordingSession,
   planName: string,
   stoppedAt: number,
+  omittedInput?: string,
 ): { plan: Plan; stepCount: number } => {
   if (steps.length === 0) {
-    throw new NoUserInputCapturedError();
+    throw new NoUserInputCapturedError(omittedInput);
   }
 
   const startedAt = new Date(session.startedAt);
@@ -479,6 +483,8 @@ interface RecorderStopOutcome {
   steps: PlanStep[];
   touchTrackFailure?: TouchTrackFailure;
   geometryWarnings?: string[];
+  /** Recorded input left out of the plan because replay cannot reproduce it. */
+  exportWarnings?: string[];
   /** Why the recorder's stop did not finish, when the captured steps were returned anyway. */
   salvagedAfter?: string;
 }
@@ -508,8 +514,22 @@ async function stopRecorder(
     if (captured.length === 0) {
       throw toActionableError(error, "Failed to stop device gesture recording");
     }
-    return { steps: [...captured], salvagedAfter: errorMessage(error) };
+    return {
+      steps: [...captured],
+      exportWarnings: [...(session.recorder.capturedExportWarnings ?? [])],
+      salvagedAfter: errorMessage(error),
+    };
   }
+}
+
+/** The warning for recorded input the plan could not represent, logged when there is one. */
+function describeExportWarnings(exportWarnings: string[] | undefined): string | undefined {
+  if (!exportWarnings?.length) {
+    return undefined;
+  }
+  const message = `Some recorded input was left out of the plan: ${exportWarnings.join("; ")}.`;
+  logger.warn(`[DeviceGestureRecording] ${message}`);
+  return message;
 }
 
 async function stopAndBuildResult(
@@ -518,11 +538,8 @@ async function stopAndBuildResult(
   timer: Timer,
   options: { hostOnly?: boolean },
 ): Promise<DeviceGestureRecordingStopResult> {
-  const { steps, touchTrackFailure, geometryWarnings, salvagedAfter } = await stopRecorder(
-    session,
-    timer,
-    options,
-  );
+  const { steps, touchTrackFailure, geometryWarnings, exportWarnings, salvagedAfter } =
+    await stopRecorder(session, timer, options);
 
   const touchTrackMessage = touchTrackFailure
     ? `Touch track (getevent) stopped ${touchTrackFailure.failedAt - session.startedAt} ms after recording start: ${touchTrackFailure.error.message}. Later taps may be missing.`
@@ -546,19 +563,26 @@ async function stopAndBuildResult(
   if (geometryMessage) {
     logger.warn(`[DeviceGestureRecording] ${geometryMessage}`);
   }
+  const exportMessage = describeExportWarnings(exportWarnings);
   const salvageMessage = salvagedAfter
     ? `Stopping the recorder did not finish (${salvagedAfter}); the steps captured so far are returned without confirming display rotation/size, so tapAt and swipeOn steps recorded after a display change may be at the wrong coordinates or direction.`
     : undefined;
   if (salvageMessage) {
     logger.warn(`[DeviceGestureRecording] ${salvageMessage}`);
   }
-  const warningMessage = [touchTrackMessage, geometryMessage, salvageMessage]
+  const warningMessage = [touchTrackMessage, geometryMessage, exportMessage, salvageMessage]
     .filter(Boolean)
     .join(" ");
 
   const stoppedAt = timer.now();
   const resolvedPlanName = formatPlanName(planName);
-  const { plan, stepCount } = buildPlanFromSteps(steps, session, resolvedPlanName, stoppedAt);
+  const { plan, stepCount } = buildPlanFromSteps(
+    steps,
+    session,
+    resolvedPlanName,
+    stoppedAt,
+    exportMessage,
+  );
   const planContent = yaml.dump(plan, {
     indent: 2,
     lineWidth: -1,

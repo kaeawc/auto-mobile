@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { PID_FILE_PATH, SOCKET_PATH } from "../../daemon/constants";
+import { PID_FILE_PATH, SOCKET_PATH } from "../../daemon/wire/constants";
 import { readPidFileDataSync } from "../../daemon/daemonFiles";
 import {
   createDefaultDaemonProcessFinder,

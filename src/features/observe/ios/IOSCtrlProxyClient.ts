@@ -35,7 +35,7 @@ import {
   defaultServiceManagerFactory,
   iosCtrlProxyTestDependencies,
 } from "./IosCtrlProxyClientContracts";
-import { IosCtrlProxyDelegatingFacade } from "./IosCtrlProxyDelegatingFacade";
+import { IosCtrlProxyTestHooksFacade } from "./IosCtrlProxyTestHooksFacade";
 import { iosDiagnosticSocketFactory } from "./iosDiagnosticSocket";
 import type { IosHierarchyMessageEffects } from "./IosHierarchyMessageEffects";
 import {
@@ -122,44 +122,7 @@ import { isSdkAppActivity } from "./sdkAppActivity";
  *
  * Extends DeviceServiceClient for shared connection lifecycle management.
  */
-export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements IosCtrlProxy {
-  /** Typed access to lifecycle and observation state for deterministic tests. */
-  get testHooks() {
-    const client = this;
-    return {
-      getWebSocketUrl: () => this.getWebSocketUrl(),
-      updatePort: (port: number) => this.updatePort(port),
-      connectWebSocket: () => this.connectWebSocket(),
-      onConnectAttemptFailed: () => this.onConnectAttemptFailed(),
-      scheduleReconnect: () => this.scheduleReconnect(),
-      onConnectionClosed: () => this.onConnectionClosed(),
-      processMessage: (message: WebSocketMessage) => this.processMessage(message),
-      messageEffects: this.messageEffects,
-      requestManager: this.requestManager,
-      screenGeometry: this.screenGeometry,
-      pushHierarchyToObservationStream: (
-        ...args: Parameters<CtrlProxyObservationStream["pushHierarchyToObservationStream"]>
-      ) => this.pushHierarchyToObservationStream(...args),
-      pushScreenshotToObservationStream: (options: ScreenshotObservationStreamOptions) =>
-        this.pushScreenshotToObservationStream(options),
-      retainScaleMetadataFrom: (
-        hierarchy: { nativeScale?: number; pixelWidth?: number; pixelHeight?: number } | null,
-      ) => this.retainScaleMetadataFrom(hierarchy),
-      get cachedHierarchy() {
-        return client.cachedHierarchy;
-      },
-      set cachedHierarchy(value: typeof client.cachedHierarchy) {
-        client.cachedHierarchy = value;
-      },
-      get pendingConnectSocket() {
-        return client.pendingConnectAbort?.socket ?? null;
-      },
-      get recoveryPromise() {
-        return client.recoveryPromise;
-      },
-    };
-  }
-
+export class IOSCtrlProxyClient extends IosCtrlProxyTestHooksFacade implements IosCtrlProxy {
   protected get cacheFreshTtlMs(): number {
     return IOSCtrlProxyClient.CACHE_FRESH_TTL_MS;
   }
@@ -168,12 +131,6 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
     return IOSCtrlProxyClient.createForObservationRead(this.device, this);
   }
 
-  public getObservationStreamTestHooks(): Pick<
-    CtrlProxyObservationStream,
-    "suppressedRequestIds" | "suppressHierarchyObservationStreamPush"
-  > {
-    return this.observationStream;
-  }
   private _connection: CtrlProxyConnection | null = null;
   private get connection(): CtrlProxyConnection {
     const client = this;
@@ -226,7 +183,7 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
     return this.connection.connectWithoutSetup(signal);
   }
   private _runnerRecovery: CtrlProxyRunnerRecovery | null = null;
-  private get runnerRecovery(): CtrlProxyRunnerRecovery {
+  protected get runnerRecovery(): CtrlProxyRunnerRecovery {
     const client = this;
     return (this._runnerRecovery ??= new CtrlProxyRunnerRecovery({
       timer: this.timer,
@@ -277,12 +234,6 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
   ): Promise<"recovered" | "not_recovering" | "failed" | "timed_out"> {
     return this.runnerRecovery.awaitRecovery(budgetMs, signal);
   }
-  public getRunnerRecoveryTestHooks(): Pick<
-    CtrlProxyRunnerRecovery,
-    "failPendingRestart" | "restartServiceIfBooted" | "diagnostics" | "resetInFlightForTesting"
-  > {
-    return this.runnerRecovery;
-  }
   private _hierarchyTelemetry: CtrlProxyHierarchyTelemetry | null = null;
   private get hierarchyTelemetry(): CtrlProxyHierarchyTelemetry {
     const client = this;
@@ -310,7 +261,7 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
     this.hierarchyTelemetry.handleHierarchyUpdateForNavigation(hierarchy, perfTiming);
   }
   private _observationStream: CtrlProxyObservationStream | null = null;
-  private get observationStream(): CtrlProxyObservationStream {
+  protected get observationStream(): CtrlProxyObservationStream {
     return (this._observationStream ??= new CtrlProxyObservationStream({
       timer: this.timer,
       deviceId: this.device.deviceId,
@@ -331,7 +282,7 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
   private consumeHierarchyObservationStreamSuppression(requestId: string): boolean {
     return this.observationStream.consumeHierarchyObservationStreamSuppression(requestId);
   }
-  private pushHierarchyToObservationStream(
+  protected pushHierarchyToObservationStream(
     hierarchy: ViewHierarchyResult,
     source: XCTestHierarchy | undefined,
     frameContext?: string,
@@ -347,7 +298,7 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
       captureSequence,
     );
   }
-  private pushScreenshotToObservationStream(options: ScreenshotObservationStreamOptions): void {
+  protected pushScreenshotToObservationStream(options: ScreenshotObservationStreamOptions): void {
     this.observationStream.pushScreenshotToObservationStream(options);
   }
   private startScreenshotBackoff(): void {
@@ -396,11 +347,8 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
       handlePerformanceUpdate: (snapshot) => this.handlePerformanceUpdate(snapshot),
     }));
   }
-  private processMessage(message: WebSocketMessage): void {
+  protected processMessage(message: WebSocketMessage): void {
     this.inbound.processMessage(message);
-  }
-  public getInboundMessageTestHooks(): Pick<CtrlProxyInboundMessages, "processMessage"> {
-    return this.inbound;
   }
   protected readonly sdkCapability = new CtrlProxySdkCapabilities({
     timer: this.timer,
@@ -410,12 +358,6 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
     syncNetworkMockRulesToDevice: () => this.networkSync.syncNetworkMockRulesToDevice(),
     syncNetworkErrorSimulationToDevice: () => this.networkSync.syncNetworkErrorSimulationToDevice(),
   });
-  public getSdkCapabilityTestHooks(): Pick<
-    CtrlProxySdkCapabilities,
-    "ensureSdkCapability" | "sdkCapabilityGate" | "requestSdkCapabilities" | "seedForTesting"
-  > {
-    return this.sdkCapability;
-  }
   private readonly networkSync = new CtrlProxyNetworkSync({
     getDevice: () => this.device,
     requestManager: this.requestManager,
@@ -436,7 +378,7 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
   ): Promise<BaseResult> {
     return this.networkSync.setNetworkErrorSimulation(config, timeoutMs, perf);
   }
-  private readonly sdkScreenIdentity = new CtrlProxySdkScreenIdentity({
+  protected readonly sdkScreenIdentity = new CtrlProxySdkScreenIdentity({
     invalidateBuildContext: (appId) => this.buildContext.invalidateBuildContext(appId),
     invalidateAllBuildContexts: () => this.buildContext.invalidateAll(),
     invalidateSdkCapabilities: () => this.sdkCapability.invalidateSdkCapabilities(),
@@ -447,13 +389,7 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
   public clearSdkScreenIdentity(applicationId?: string): void {
     this.sdkScreenIdentity.clearSdkScreenIdentity(applicationId);
   }
-  public getSdkScreenIdentityTestHooks(): Pick<
-    CtrlProxySdkScreenIdentity,
-    "activateSdkScreenIdentitySession"
-  > {
-    return this.sdkScreenIdentity;
-  }
-  private readonly sdkEvents = new CtrlProxySdkEvents({
+  protected readonly sdkEvents = new CtrlProxySdkEvents({
     timer: this.timer,
     screenIdentity: this.sdkScreenIdentity,
     getSdkEventIngestor: () => this.sdkEventIngestor,
@@ -476,24 +412,7 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
   public pollSdkEvents(): Promise<SdkEventPollResult> {
     return this.sdkEvents.pollSdkEvents();
   }
-  public getSdkEventPollingTestHooks(): {
-    polling: Pick<
-      CtrlProxySdkEvents,
-      | "startSdkEventPolling"
-      | "runSdkEventPollCycle"
-      | "currentSdkEventPollIntervalMs"
-      | "stopSdkEventPolling"
-      | "decodeSdkEventBatches"
-      | "diagnostics"
-    >;
-    receiveMessage: (data: WebSocket.Data) => void;
-  } {
-    return { polling: this.sdkEvents, receiveMessage: (data) => this.handleMessage(data) };
-  }
-  private readonly buildContext: CtrlProxyBuildContext;
-  public getBuildContextDiagnosticsForTesting() {
-    return this.buildContext.diagnostics();
-  }
+  protected readonly buildContext: CtrlProxyBuildContext;
   /** Per-device client instances (#11847); retired-device state stays on IOSCtrlProxyManager. */
   public static readonly registry = new MapDeviceClientRegistry<IOSCtrlProxyClient>();
 
@@ -535,7 +454,7 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
   // SDK-event ingestion (telemetry/failure fan-out + layout telemetry)
   private readonly sdkEventIngestor: IosSdkEventIngestor;
   private readonly logDemandProbe: (deviceId: string) => boolean;
-  private readonly messageEffects: IosHierarchyMessageEffects;
+  protected readonly messageEffects: IosHierarchyMessageEffects;
 
   private constructor(
     device: BootedDevice,
@@ -849,7 +768,7 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
     this.updatePort(manager.getServicePort());
   }
 
-  private updatePort(port: number): void {
+  protected updatePort(port: number): void {
     if (port !== this.port) {
       logger.info(
         `[IOSCtrlProxyClient] CtrlProxy service port changed from ${this.port} to ${port}`,

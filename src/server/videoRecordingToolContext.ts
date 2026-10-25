@@ -10,7 +10,7 @@ import {
 } from "./lifecycleDeviceOwnership";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import { defaultDaemonContext } from "../daemon/daemonContext";
-import { INTERNAL_MCP_SESSION_PARAM } from "../daemon/constants";
+import { INTERNAL_MCP_SESSION_PARAM } from "../daemon/wire/constants";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 

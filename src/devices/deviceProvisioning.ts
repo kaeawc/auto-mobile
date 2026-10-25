@@ -1,3 +1,4 @@
+import type { SimulatorCreator } from "./SimulatorCreator";
 /**
  * Device provisioning — creating a simulator/emulator when none matches.
  *
@@ -10,6 +11,7 @@
  * {@link DeviceCreationGate}'s job, checked by the caller.
  */
 
+import { SimulatorPrebootProfile } from "../utils/ios-cmdline-tools/SimulatorPrebootProfile";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import type { DeviceMatchCriteria } from "../models/DeviceMatchCriteria";
 import type { FormFactor } from "../models/DeviceMatchCriteria";
@@ -520,6 +522,8 @@ export function pickAndroidSystemImage(
 // ---------------------------------------------------------------------------
 
 export interface DefaultDeviceProvisionerDependencies {
+  simulatorCreation?: SimulatorCreator;
+  prebootProfile?: Pick<SimulatorPrebootProfile, "apply">;
   iosCreator: () => IosSimulatorCreator | undefined;
   androidCreator: () => AndroidAvdCreator;
   idGenerator?: IdGenerator;
@@ -597,7 +601,16 @@ export class DefaultDeviceProvisioner implements DeviceProvisioner {
 
     let deviceId: string;
     try {
-      deviceId = await simctl.createSimulator(name, deviceType.identifier, runtime, creationSignal);
+      deviceId = this.dependencies.simulatorCreation
+        ? (
+            await this.dependencies.simulatorCreation.create({
+              name,
+              deviceType: deviceType.identifier,
+              runtime,
+              signal: creationSignal,
+            })
+          ).udid
+        : await simctl.createSimulator(name, deviceType.identifier, runtime, creationSignal);
     } catch (error) {
       throw toActionableError(
         error,
@@ -621,6 +634,7 @@ export class DefaultDeviceProvisioner implements DeviceProvisioner {
         "' when no longer needed.",
     );
     await identityHooks?.bindAfterCreate(provisioned);
+    await this.dependencies.prebootProfile?.apply(deviceId, {}, creationSignal);
 
     return provisioned;
   }
@@ -709,9 +723,12 @@ export function createDefaultAndroidAvdCreator(): AndroidAvdCreator {
 export function createDefaultDeviceProvisioner(
   iosCreator: () => IosSimulatorCreator | undefined = () => new SimCtlClient(null),
   identityHooks?: DeviceProvisioningIdentityHooks,
+  simulatorCreation?: SimulatorCreator,
 ): DeviceProvisioner {
   return new DefaultDeviceProvisioner({
     iosCreator,
+    simulatorCreation,
+    prebootProfile: new SimulatorPrebootProfile(),
     androidCreator: createDefaultAndroidAvdCreator,
     identityHooks,
   });

@@ -1,10 +1,12 @@
 import { deviceToolMutations } from "../../../src/server/deviceMutationAdapters";
+import { readFileSync } from "node:fs";
 import { SETTINGS_TIMEOUT } from "./fixtures/androidResetLoadTimeouts";
 
 import { describe, expect, test } from "bun:test";
 import {
   androidBaselineCleanCovers,
   cleanAndroidBaseline,
+  sessionCreatedSettingMatcher,
 } from "../../../src/daemon/sessionBroker/androidKeepBootedCleanup";
 import type { DeviceMutationInput } from "../../../src/daemon/sessionBroker/mutations/types";
 import { AndroidDeviceMutationResetPort } from "../../../src/daemon/sessionBroker/androidDeviceMutationResetPort";
@@ -24,8 +26,29 @@ const SCOPE = {
   sessionUuid: SESSION.sessionId,
 };
 
-async function rig(users: readonly number[] = [0], fallback?: AndroidResetStrategy) {
+function settingsFixture(name: string): string {
+  return readFileSync(
+    new URL(`../../fixtures/android-settings-list/${name}.txt`, import.meta.url),
+    "utf8",
+  ).trimEnd();
+}
+
+function createdSetting(key: string) {
+  return {
+    kind: "device-setting",
+    key,
+    priorValue: { state: "absent" },
+    toolName: "baseline-diff",
+  } satisfies DeviceMutationInput;
+}
+
+async function rig(
+  users: readonly number[] = [0],
+  fallback?: AndroidResetStrategy,
+  configureBaseline?: (reply: (command: string, stdout: string) => void) => void,
+) {
   const { adb, reply } = androidBaselineRig(users);
+  configureBaseline?.(reply);
   const timer = new FakeTimer();
   const journal = new FakeDeviceMutationJournal(timer);
   const port = new AndroidDeviceMutationResetPort(adb, timer);
@@ -387,7 +410,13 @@ describe("Android unconditional keep-booted cleaning", () => {
   });
 
   test("restores changed and missing settings, deletes added keys, and targets secondary users", async () => {
-    const { adb, reply, reset } = await rig([0, 10]);
+    const { adb, reply, journal, reset } = await rig([0, 10]);
+    await journal.record(SCOPE, {
+      kind: "device-setting",
+      key: "global:new_key",
+      priorValue: { state: "absent" },
+      toolName: "baseline-diff",
+    });
     reply("shell settings --user 0 list global", "animator_duration_scale=0\nnew_key=1");
     reply("shell settings --user 10 list system", "font_scale=2");
     reply("shell settings --user 0 list secure", "enabled_input_methods=\nlocation_mode=0");
@@ -401,12 +430,133 @@ describe("Android unconditional keep-booted cleaning", () => {
   });
 
   test.each([false, true])("persistent setting put failure is non-clean (%s)", async (critical) => {
-    const { adb, reply, reset } = await rig();
+    const { adb, reply, journal, reset } = await rig();
     const key = critical ? "adb_enabled" : "optional_key";
+    await journal.record(SCOPE, {
+      kind: "device-setting",
+      key: `global:${key}`,
+      priorValue: { state: "absent" },
+      toolName: "baseline-diff",
+    });
     reply("shell settings --user 0 list global", `${key}=0`);
     const failedCommand = `shell settings --user 0 delete global ${key}`;
     adb.setCommandResponse(failedCommand, createExecResult("Error: refused", ""));
     await expect(reset()).rejects.toThrow("non-clean");
+  });
+
+  describe("system-maintained settings absent from the baseline (#15178)", () => {
+    const captured = (name: string) => settingsFixture(name);
+    const baselineFromCleanedDevice = (reply: (command: string, stdout: string) => void) => {
+      reply("shell settings --user 0 list system", captured("after-keep-booted-clean.system"));
+      reply("shell settings --user 0 list secure", captured("after-keep-booted-clean.secure"));
+    };
+    const systemKeys = [
+      "alarm_alert",
+      "alarm_alert_set",
+      "notification_sound",
+      "notification_sound_set",
+      "ringtone",
+      "ringtone_set",
+      "systemui.google.opa_enabled",
+    ];
+
+    test("keeps ringtone, alarm and opa settings the session start already had", async () => {
+      const { adb, reply, reset } = await rig([0], undefined, baselineFromCleanedDevice);
+      reply("shell settings --user 0 list system", captured("session-start.system"));
+      reply("shell settings --user 0 list secure", captured("session-start.secure"));
+      expect(await reset()).toMatchObject({ outcome: "clean", mode: "keep-booted" });
+      const commands = adb.getExecutedCommands();
+      expect(commands.filter((command) => command.includes("shell settings"))).toEqual(
+        expect.arrayContaining([
+          "shell settings --user 0 list global",
+          "shell settings --user 0 list system",
+          "shell settings --user 0 list secure",
+        ]),
+      );
+      for (const key of systemKeys) {
+        expect(commands.some((command) => command.endsWith(` ${key}`))).toBe(false);
+      }
+      expect(commands.some((command) => command.startsWith("shell settings --user 0 delete"))).toBe(
+        false,
+      );
+    });
+
+    test("still deletes a key the journal shows the session created, and restores changed keys", async () => {
+      const { adb, reply, journal, reset } = await rig([0], undefined, baselineFromCleanedDevice);
+      await journal.record(SCOPE, createdSetting("system:qa_session_key"));
+      reply(
+        "shell settings --user 0 list system",
+        `${captured("session-start.system").replace(/^font_scale=1\.0$/m, "font_scale=2.0")}\nqa_session_key=1`,
+      );
+      reply("shell settings --user 0 list secure", captured("session-start.secure"));
+      expect(await reset()).toMatchObject({ outcome: "clean", mode: "keep-booted" });
+      const commands = adb.getExecutedCommands();
+      expect(commands).toContain("shell settings --user 0 delete system qa_session_key");
+      expect(commands).toContain("shell settings --user 0 put system font_scale '1.0'");
+      expect([...new Set(commands.filter((command) => command.includes(" delete ")))]).toEqual([
+        "shell settings --user 0 delete system qa_session_key",
+      ]);
+    });
+
+    test("restores a baseline key the system or session removed", async () => {
+      const { adb, reply, reset } = await rig([0], undefined, baselineFromCleanedDevice);
+      reply(
+        "shell settings --user 0 list system",
+        captured("session-start.system")
+          .split("\n")
+          .filter((line) => !line.startsWith("font_scale="))
+          .join("\n"),
+      );
+      reply("shell settings --user 0 list secure", captured("session-start.secure"));
+      await reset();
+      expect(adb.getExecutedCommands()).toContain(
+        "shell settings --user 0 put system font_scale '1.0'",
+      );
+    });
+
+    test("only absent-prior raw settings rows and tool-owned keys count as session-created", () => {
+      const created = sessionCreatedSettingMatcher([
+        { kind: "device-setting", key: "system:a", priorValue: { state: "absent" } },
+        { kind: "device-setting", key: "secure:user:10:b", priorValue: { state: "absent" } },
+        { kind: "device-setting", key: "system:c", priorValue: { state: "present", value: "1" } },
+        { kind: "device-setting", key: "fontScale", priorValue: { state: "absent" } },
+        { kind: "installed-app", key: "system:d", priorValue: { state: "absent" } },
+        { kind: "rotation", key: "device", priorValue: { state: "unobservable" } },
+      ]);
+      expect(["system:a", "secure:user:10:b", "system:user_rotation"].filter(created)).toEqual([
+        "system:a",
+        "secure:user:10:b",
+        "system:user_rotation",
+      ]);
+      expect(
+        [
+          "system:c",
+          "system:d",
+          "fontScale",
+          "system:ringtone",
+          "secure:enabled_accessibility_services",
+        ].filter(created),
+      ).toEqual([]);
+    });
+
+    test("deletes a tool-owned key absent from the baseline once its tool journaled a row", async () => {
+      const { adb, reply, journal, reset } = await rig([0], undefined, baselineFromCleanedDevice);
+      await journal.record(SCOPE, {
+        kind: "keep-awake",
+        key: "device",
+        priorValue: { state: "unobservable" },
+        toolName: "keepScreenAwake",
+      });
+      reply(
+        "shell settings --user 0 list system",
+        `${captured("session-start.system")}\nscreen_off_timeout=1800000`,
+      );
+      reply("shell settings --user 0 list secure", captured("session-start.secure"));
+      await reset();
+      expect([
+        ...new Set(adb.getExecutedCommands().filter((command) => command.includes(" delete "))),
+      ]).toEqual(["shell settings --user 0 delete system screen_off_timeout"]);
+    });
   });
 
   test("removes only added files under inventory roots, preserving baseline contents", async () => {
@@ -562,8 +712,11 @@ describe("cleaning adb under load", () => {
 test.each([false, true])(
   "non-critical setting restore re-read matches baseline (absent: %s)",
   async (absent) => {
-    const { adb, reset } = await rig();
+    const { adb, journal, reset } = await rig();
     const key = absent ? "optional_key" : "animator_duration_scale";
+    if (absent) {
+      await journal.record(SCOPE, createdSetting(`global:${key}`));
+    }
     adb.setCommandResponseSequence("shell settings --user 0 list global", [
       createExecResult(`${key}=0`, ""),
       createExecResult(absent ? "" : `${key}=0.5`, ""),
@@ -585,12 +738,15 @@ test.each([false, true])(
 
 test("persistent non-critical restore failures escalate and name every still-dirty key", async () => {
   let fallbacks = 0;
-  const { adb, reset } = await rig([0], {
+  const { adb, journal, reset } = await rig([0], {
     reset: async () => {
       fallbacks++;
       return { outcome: "clean", mode: "snapshot", phases: {} };
     },
   });
+  for (const key of ["dirty_a", "dirty_b", "now_clean"]) {
+    await journal.record(SCOPE, createdSetting(`global:${key}`));
+  }
   adb.setCommandResponseSequence("shell settings --user 0 list global", [
     createExecResult("dirty_a=1\ndirty_b=2\nnow_clean=3", ""),
     createExecResult("dirty_a=1\ndirty_b=2", ""),

@@ -236,6 +236,7 @@ export async function openSessionBrokerService(
         health: nativeIosResetHealth(options.timer),
         erase: iosReset,
         maxUses: reuse.maxUses,
+        fallback: reuse.fallback,
         budgetMs: readEnvInt(ENV.IOS_RESET_STEP_BUDGET_MS),
         budgetCeilingMs: readEnvInt(ENV.IOS_RESET_STEP_BUDGET_MAX_MS),
       });

@@ -1,3 +1,4 @@
+import { isTemplateSimName } from "../utils/ios-cmdline-tools/SimulatorTemplateKey";
 import type { DeviceInfo } from "../models";
 import { isProductBrokerDevice } from "./sessionBroker/persistedIdentity";
 import type { BindingExclusion } from "./sessionBroker/provisioning/exclusion";
@@ -9,6 +10,7 @@ export function isExcludedFromAutoStart(
 ): boolean {
   return (
     isProductBrokerDevice(image.name) ||
+    isTemplateSimName(image.name) ||
     bindingExclusion?.holderOf({
       platform: image.platform,
       // Names cover iOS creation before its UDID has been recorded (#11174).

@@ -5,7 +5,7 @@ import { constants, openSync, closeSync, fstatSync, readFileSync, writeSync } fr
 import { basename, isAbsolute } from "node:path";
 import { logger } from "../../utils/logger";
 import { ActionableError } from "../../models";
-import { DAEMON_STARTUP_TIMEOUT_MS } from "../constants";
+import { DAEMON_STARTUP_TIMEOUT_MS } from "../wire/constants";
 import { DaemonStatus, DaemonOptions } from "../types";
 import { Timer } from "../../utils/SystemTimer";
 import {

@@ -93,6 +93,7 @@ export async function provisionExactDevice(
             name: args.device.name,
             ...(args.device.deviceId === undefined ? {} : { deviceId: args.device.deviceId }),
             spec: provisionableDeviceSpec(args),
+            ...(args.boot && args.resources ? { resources: args.resources } : {}),
             onBeforeCreate: markDeviceCreationStarted,
             // A device created only to be refused at boot would then be deleted (#11236).
             ...(args.boot

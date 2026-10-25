@@ -18,7 +18,7 @@ import {
   CLI_KEEPER_LIVENESS_OWNER_KIND,
   CLI_SESSION_LIVENESS_POLICY,
   HEARTBEAT_SESSION_LIVENESS_POLICY,
-} from "../constants";
+} from "../wire/constants";
 import { vetoedIdleReleaseAt } from "../sessionHoldDiagnostics";
 import { MANAGED_EXECUTION_LIVENESS_POLICY } from "../../models/managedExecutionLiveness";
 import { holdsOwnerHeartbeatLease } from "../sessionBroker/provisioning/executionLiveness";

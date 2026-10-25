@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { BootedDevice, Platform } from "../../src/models";
 import { enrich, type BootedDeviceTraits } from "../../src/server/bootedDeviceTraits";
+import { isAutomotive, isWatch } from "../../src/utils/android-cmdline-tools/deviceTraits";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeDeviceTraits, androidDeviceTraits } from "../fakes/FakeDeviceTraits";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -48,10 +49,32 @@ describe("bootedDeviceTraits.enrich", () => {
       model: "23090RA98G",
       sdk: 35,
       abi: "arm64-v8a",
+      formFactor: null,
     });
     expect(devices[1].traits).toBeUndefined();
     expect(devices[2].traits).toBeUndefined();
     expect(reader.reads.map((read) => read.deviceId)).toEqual(["emulator-5554"]);
+  });
+
+  test("carries an announced watch or automotive form factor and leaves handhelds null", async () => {
+    const reader = new FakeDeviceTraits(androidDeviceTraits());
+    reader.setTraitsFor("emulator-5554", androidDeviceTraits({ formFactor: "automotive" }));
+    reader.setTraitsFor("emulator-5556", androidDeviceTraits({ formFactor: "watch" }));
+    const devices = [
+      entry("android", "emulator-5554"),
+      entry("android", "emulator-5556"),
+      entry("android", "emulator-5558"),
+    ];
+
+    await enrich(devices, options(reader));
+
+    expect(devices.map((device) => device.traits?.formFactor)).toEqual([
+      "automotive",
+      "watch",
+      null,
+    ]);
+    expect(devices.map((device) => isAutomotive(device.traits))).toEqual([true, false, false]);
+    expect(devices.map((device) => isWatch(device.traits))).toEqual([false, true, false]);
   });
 
   test("a failed read leaves that entry without traits and keeps the others", async () => {

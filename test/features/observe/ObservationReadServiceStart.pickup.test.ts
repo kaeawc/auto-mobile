@@ -1,10 +1,18 @@
 import { expect, spyOn, test } from "bun:test";
 import type { BootedDevice } from "../../../src/models";
 import { ActionableError } from "../../../src/models/ActionableError";
-import { ObservationReadServiceStart } from "../../../src/features/observe/ObservationReadServiceStart";
+import {
+  ObservationReadServiceStart,
+  ServiceStartTransitionDeclinedError,
+  daemonObservationServiceOwnershipGuard,
+} from "../../../src/features/observe/ObservationReadServiceStart";
 import { logger } from "../../../src/utils/logger";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { drainUntil } from "../../helpers/fakeTimerStepping";
+import {
+  acquireDeviceReadinessLock,
+  deviceReadinessLockKey,
+} from "../../../src/utils/deviceReadinessLock";
+import { drainUntil, drainMicrotasks } from "../../helpers/fakeTimerStepping";
 import { observationServiceStartHarness } from "../../helpers/observationServiceStartHarness";
 
 function harness(
@@ -370,4 +378,206 @@ test("guard without a transition hook retains the post-pickup decline", async ()
   expect(h.state.pickupCalls).toBe(1);
   expect(h.state.readinessCalls).toBe(0);
   expect(h.timer.getPendingTimeoutCount()).toBe(0);
+});
+
+function recheckHarness(wait: (signal?: AbortSignal) => Promise<boolean>) {
+  const timer = new FakeTimer();
+  const device: BootedDevice = { deviceId: "recheck", name: "Recheck", platform: "ios" };
+  let allowed = true;
+  let calls = 0;
+  const starter = new ObservationReadServiceStart({
+    timer,
+    ownershipGuard: {
+      canStart: () => allowed,
+      awaitTransition: (_device, signal) => wait(signal),
+    },
+    isServiceConnected: () => false,
+    readiness: {
+      ensureReady: async (request) => {
+        calls++;
+        allowed = false;
+        request.assertCanSetup?.();
+      },
+    },
+  });
+  return {
+    timer,
+    device,
+    starter,
+    calls: () => calls,
+    allow: () => {
+      allowed = true;
+    },
+  };
+}
+
+test("readiness re-check stops after eight assignment waits", async () => {
+  let waits = 0;
+  let settled = false;
+  const h = recheckHarness(async () => {
+    waits++;
+    return true;
+  });
+  const pending = h.starter.start({ device: h.device, deadlineMs: 100 });
+  void pending.then(
+    () => {
+      settled = true;
+    },
+    () => {
+      settled = true;
+    },
+  );
+  await drainUntil(() => settled || waits > 8, { description: "bounded setup retries" });
+  const attempts = waits;
+  // Terminate even a mutated unbounded loop, so a failed assertion cannot hang tests.
+  if (attempts > 8) {
+    h.timer.advanceTime(60_000);
+  }
+  await expect(pending).rejects.toBeInstanceOf(ServiceStartTransitionDeclinedError);
+  expect(attempts).toBe(8);
+  expect(h.calls()).toBe(9);
+  expect(h.timer.getPendingTimeoutCount()).toBe(0);
+});
+
+test("readiness re-check immediately retains decline for a non-transient hold", async () => {
+  let waits = 0;
+  const h = recheckHarness(async () => {
+    waits++;
+    return false;
+  });
+  await expect(h.starter.start({ device: h.device, deadlineMs: 100 })).rejects.toBeInstanceOf(
+    ServiceStartTransitionDeclinedError,
+  );
+  expect(waits).toBe(1);
+  expect(h.calls()).toBe(1);
+});
+
+test("readiness re-check retains decline when its flight deadline expires while parked", async () => {
+  let waits = 0;
+  const h = recheckHarness(async () => {
+    waits++;
+    return new Promise<boolean>(() => {});
+  });
+  const first = h.starter.start({ device: h.device, deadlineMs: 100 });
+  const firstFailure = first.catch((error: unknown) => error);
+  await drainUntil(() => waits === 1, { description: "parked re-check" });
+  h.timer.advanceTime(100);
+  await firstFailure;
+  // Keep a reader beyond the flight's ceiling to see the setup failure directly.
+  h.allow();
+  const later = h.starter.start({ device: h.device, deadlineMs: 70_000 });
+  const failure = later.catch((error: unknown) => error);
+  await drainMicrotasks(40);
+  h.timer.advanceTime(59_900);
+  expect(await failure).toBeInstanceOf(ServiceStartTransitionDeclinedError);
+  expect(h.calls()).toBe(1);
+  expect(waits).toBe(1);
+});
+
+test("request abort cancels the parked readiness re-check without retrying", async () => {
+  let waits = 0;
+  let flightSignal: AbortSignal | undefined;
+  const h = recheckHarness(async (signal) => {
+    waits++;
+    flightSignal = signal;
+    return new Promise<boolean>(() => {});
+  });
+  const controller = new AbortController();
+  const pending = h.starter.start({ device: h.device, deadlineMs: 100, signal: controller.signal });
+  const failure = pending.catch((error: unknown) => error);
+  await drainUntil(() => waits === 1, { description: "parked re-check" });
+  const reason = new Error("caller cancelled transition");
+  controller.abort(reason);
+  expect(await failure).toBe(reason);
+  await drainMicrotasks(40);
+  expect(flightSignal?.aborted).toBe(true);
+  expect(h.calls()).toBe(1);
+  expect(waits).toBe(1);
+  expect(h.timer.getPendingTimeoutCount()).toBe(0);
+});
+
+test("three iOS readiness re-checks survive successive real assignment mutex holders", async () => {
+  const h = await observationServiceStartHarness("ios");
+  const devices = [0, 1, 2].map((index) => ({
+    ...h.device,
+    deviceId: `ios-recheck-${index}`,
+    name: `Recheck ${index}`,
+  }));
+  await h.pool.initializeWithDevices(devices);
+  const unlocks = devices.map(() => Promise.withResolvers<void>());
+  const holders: Promise<void>[] = [];
+  const calls = new Map<string, number>();
+  let admitted = 0;
+  let waits = 0;
+  const starter = new ObservationReadServiceStart({
+    timer: h.timer,
+    ownershipGuard: {
+      canStart: daemonObservationServiceOwnershipGuard.canStart,
+      awaitTransition: async (device, signal) => {
+        waits++;
+        const waited = await daemonObservationServiceOwnershipGuard.awaitTransition!(
+          device,
+          signal,
+        );
+        // Model the next pickup taking the real mutex after unlock but before
+        // the resumed ensureReady admission re-check.
+        if (!h.pool.testHooks.assignmentMutex.isLocked() && holders.length < 3) {
+          const index = holders.length;
+          holders.push(
+            h.pool.testHooks.assignmentMutex.runExclusive(async () => {
+              await unlocks[index]!.promise;
+            }),
+          );
+        }
+        return waited;
+      },
+    },
+    isServiceConnected: () => false,
+    readiness: {
+      ensureReady: async (request) => {
+        const id = request.device.deviceId;
+        calls.set(id, (calls.get(id) ?? 0) + 1);
+        const release = await acquireDeviceReadinessLock(deviceReadinessLockKey("ios", id), {
+          timer: h.timer,
+          signal: request.signal,
+        });
+        try {
+          if (holders.length === 0) {
+            holders.push(
+              h.pool.testHooks.assignmentMutex.runExclusive(async () => {
+                await unlocks[0]!.promise;
+              }),
+            );
+          }
+          request.assertCanSetup?.();
+          admitted++;
+        } finally {
+          release();
+        }
+      },
+    },
+  });
+  try {
+    // All starts pass initial admission before any readiness callback takes the mutex.
+    const starts = devices.map((device) => starter.start({ device, deadlineMs: 15_000 }));
+    for (const pending of starts) {
+      void pending.catch(() => {});
+    }
+    await drainUntil(() => waits === 3, { description: "all three re-checks parked" });
+    expect(admitted).toBe(0);
+    unlocks[0]!.resolve();
+    await drainUntil(() => waits >= 6, { description: "next holder wins assignment gap" });
+    unlocks[1]!.resolve();
+    await drainUntil(() => waits >= 9, { description: "third holder wins assignment gap" });
+    unlocks[2]!.resolve();
+    expect(await Promise.all(starts)).toEqual([true, true, true]);
+    expect(admitted).toBe(3);
+    expect([...calls.values()]).toEqual([4, 4, 4]);
+  } finally {
+    for (const unlock of unlocks) {
+      unlock.resolve();
+    }
+    await Promise.all(holders);
+    h.close();
+  }
 });

@@ -1,7 +1,7 @@
 import type { DaemonMcpProxyConfig } from "../daemonMcpProxy";
 import { defaultIdGenerator } from "../../utils/IdGenerator";
 import { getDefaultSessionHeartbeatTimeoutMs } from "../sessionManager/sessionConstants";
-import { PROXY_HEARTBEAT_INTERVAL_MS } from "../sessionLivenessWindows";
+import { PROXY_HEARTBEAT_INTERVAL_MS } from "../wire/sessionLivenessWindows";
 
 const DAEMON_MCP_HEARTBEAT_INTERVAL_MS = PROXY_HEARTBEAT_INTERVAL_MS;
 

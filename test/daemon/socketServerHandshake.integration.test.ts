@@ -9,7 +9,7 @@ import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { sendRawSocketRequest } from "./helpers/socketRequest";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { DaemonResponse } from "../../src/daemon/types";
-import type { DaemonSelfIdentity } from "../../src/daemon/daemonHandshake";
+import type { DaemonSelfIdentity } from "../../src/daemon/wire/daemonHandshake";
 import { DaemonClient } from "../../src/daemon/client";
 
 function createFakeDaemonState(): DaemonStateAccess {

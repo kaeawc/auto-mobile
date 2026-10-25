@@ -26,7 +26,10 @@ import {
   UnsettledExecutionVeto,
   type SessionExecutionProbeInput,
 } from "./unsettledExecutionVeto";
-import { getSessionHeartbeatCheckIntervalMs, SUSPECT_GRACE_MS } from "./sessionLivenessWindows";
+import {
+  getSessionHeartbeatCheckIntervalMs,
+  SUSPECT_GRACE_MS,
+} from "./wire/sessionLivenessWindows";
 import { ENV } from "../config/env";
 
 /**
@@ -123,7 +126,7 @@ const STALE_REASON_DESCRIPTION: Record<SessionHeartbeatReleaseReason, string> = 
 };
 
 export interface SessionHeartbeatMonitorConfig {
-  /** How often to scan for stale sessions. Default: 2s (see `./sessionLivenessWindows`). */
+  /** How often to scan for stale sessions. Default: 2s (see `./wire/sessionLivenessWindows`). */
   checkIntervalMs?: number;
   /** Grace period before default-heartbeat sessions that never sent a heartbeat are reaped. Default: 5s. */
   preFirstHeartbeatGraceMs?: number;

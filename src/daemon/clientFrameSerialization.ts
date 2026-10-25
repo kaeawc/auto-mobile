@@ -1,5 +1,5 @@
 import type { DaemonRequest } from "./types";
-import { DAEMON_NON_FINITE_ENCODED_PARAM } from "./constants";
+import { DAEMON_NON_FINITE_ENCODED_PARAM } from "./wire/constants";
 import { encodeNonFinite } from "../utils/nonFiniteJson";
 
 /**

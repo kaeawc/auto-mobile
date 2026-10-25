@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Kysely } from "kysely";
-import { DAEMON_REGISTER_SESSION_METHOD } from "../../src/daemon/constants";
+import { DAEMON_REGISTER_SESSION_METHOD } from "../../src/daemon/wire/constants";
 import {
   handleDaemonRequest,
   type DaemonStateAccess,

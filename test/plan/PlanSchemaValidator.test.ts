@@ -67,12 +67,28 @@ ${condition}
     expect(accepted.errors ?? []).toEqual([]);
     expect(accepted.valid).toBe(true);
 
+    for (const accepts of [
+      "        faults:\n          revokePermission:\n            package: com.example.app\n            permission: android.permission.CAMERA",
+      "        faults:\n          revokePermission: unset",
+      "        faults:\n          disablePackage:\n            package: com.example.app\n          clearPackageData: unset",
+    ]) {
+      const result = validator.validateYaml(plan(accepts));
+      expect(result.errors ?? []).toEqual([]);
+      expect(result.valid).toBe(true);
+    }
+
     for (const rejected of [
       "        rootState: god-mode",
       "        faults:\n          battery: explode",
       "        faults:\n          dontKeepActivities: off",
       "        faults:\n          storage: overflowing",
       "        faults:\n          gravity: low",
+      "        faults:\n          revokePermission: on",
+      "        faults:\n          disablePackage: on",
+      "        faults:\n          clearPackageData:\n            package: nodots",
+      "        faults:\n          revokePermission:\n            package: com.example.app",
+      "        faults:\n          revokePermission:\n            package: nodots\n            permission: CAMERA",
+      "        faults:\n          revokePermission:\n            package: com.example.app\n            permission: CAMERA\n            user: 10",
     ]) {
       expect(validator.validateYaml(plan(rejected)).valid).toBe(false);
     }

@@ -12,7 +12,7 @@ import { logger } from "../../utils/logger";
 import { defaultDaemonContext } from "../../daemon/daemonContext";
 import { type Timer } from "../../utils/SystemTimer";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
-import { INTERNAL_MCP_SESSION_PARAM } from "../../daemon/constants";
+import { INTERNAL_MCP_SESSION_PARAM } from "../../daemon/wire/constants";
 import { getToolCallRecorder } from "../../daemon/toolCallRecordingManager";
 import { formatToolResultLog } from "../toolResultLog";
 import { formatStructuredToolError } from "../../utils/formatStructuredToolError";
@@ -32,7 +32,7 @@ import {
 import { getDefaultToolOutputsDir } from "../../utils/toolOutputArtifacts";
 import { getToolSelectionContext } from "../../features/toolSelection/toolSelectionContext";
 import { isClientCancelled } from "../../utils/AbortContext";
-import { deleteInternalToolParams } from "../../daemon/constants";
+import { deleteInternalToolParams } from "../../daemon/wire/constants";
 import type { ToolTraits } from "../toolRegistry";
 import { isRecord } from "./isRecord";
 import { redactToolSecrets } from "../../utils/redactToolSecrets";

@@ -6,6 +6,8 @@ import type { BootedDevice, ViewHierarchyResult } from "../../src/models";
 import { DeviceLostError } from "../../src/models/DeviceLostError";
 import { DeviceOwnedByOtherDaemonError } from "../../src/models/deviceAcquisitionRefusals";
 import { getAbortSignal } from "../../src/utils/AbortContext";
+import { AdjustableDeadline } from "../../src/utils/AdjustableDeadline";
+import { drainMicrotasks, drainUntil } from "../helpers/fakeTimerStepping";
 import {
   RunnerReadinessError,
   RunnerReadinessService,
@@ -1529,6 +1531,78 @@ describe("RunnerReadinessService", () => {
     expect(error).toBeInstanceOf(RunnerReadinessError);
     expect(error).toMatchObject({ deadlineExhausted: true, phase: "runner-setup", attempts: 1 });
     expect(iosManager.setupCalls).toBe(1);
+  });
+
+  // #15227: a running iOS setup phase follows a movable total deadline; without one it keeps the
+  // fixed budget the phase started with.
+  describe("movable total deadline for an iOS runner setup", () => {
+    async function startPendingSetup(movable: boolean) {
+      const timer = new FakeTimer();
+      const iosManager = new FakeIosManager();
+      const iosClient = new FakeReadinessClient();
+      iosClient.connected = false;
+      const release = Promise.withResolvers<void>();
+      iosManager.onSetup = () => release.promise;
+      const { service } = createService({ timer, iosManager, iosClient, autoAdvance: false });
+      const deadline = new AdjustableDeadline(timer, timer.now() + 60_000);
+      const outcome = service
+        .ensureReady({
+          device: iosDevice,
+          requestedIdentity: "platform=ios",
+          totalDeadlineMs: deadline.deadlineMs,
+          deadline: movable ? deadline : undefined,
+          readinessTimeoutMs: 60_000,
+        })
+        .then(
+          () => ({ ok: true as const }),
+          (error: unknown) => ({ ok: false as const, error }),
+        );
+      await drainUntil(() => iosManager.setupCalls === 1, { description: "iOS setup" });
+      return { timer, deadline, release, outcome, iosManager };
+    }
+
+    // The aborted setup never settles, so the phase waits out its abort-settlement grace.
+    async function settleAbortedSetup(timer: FakeTimer) {
+      await drainMicrotasks(20);
+      timer.advanceTime(1_000);
+    }
+
+    test("a deadline moved past the original budget lets the running setup finish", async () => {
+      const run = await startPendingSetup(true);
+      run.timer.advanceTime(55_000);
+      run.deadline.set(run.timer.now() + 60_000);
+      run.timer.advanceTime(10_000);
+      run.release.resolve();
+      expect(await run.outcome).toEqual({ ok: true });
+      expect(run.iosManager.setupCalls).toBe(1);
+    });
+
+    test("the moved deadline still bounds the setup as a deadline failure", async () => {
+      const run = await startPendingSetup(true);
+      run.timer.advanceTime(55_000);
+      run.deadline.set(run.timer.now() + 60_000);
+      run.timer.advanceTime(59_999);
+      await drainMicrotasks(20);
+      run.timer.advanceTime(1);
+      await settleAbortedSetup(run.timer);
+      const outcome = await run.outcome;
+      expect(outcome.ok).toBe(false);
+      expect(outcome).toMatchObject({
+        error: { deadlineExhausted: true, phase: "runner-setup" },
+      });
+    });
+
+    test("without a movable deadline the setup times out at its original budget", async () => {
+      const run = await startPendingSetup(false);
+      run.timer.advanceTime(55_000);
+      run.deadline.set(run.timer.now() + 60_000);
+      run.timer.advanceTime(5_000);
+      await settleAbortedSetup(run.timer);
+      const outcome = await run.outcome;
+      expect(outcome).toMatchObject({
+        error: { deadlineExhausted: true, phase: "runner-setup" },
+      });
+    });
   });
 
   test.each([

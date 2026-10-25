@@ -5,7 +5,7 @@ import {
   stripInternalParams,
 } from "../../../src/features/record/ToolCallRecorder";
 
-import { INTERNAL_TOOL_PARAM_NAMES } from "../../../src/daemon/constants";
+import { INTERNAL_TOOL_PARAM_NAMES } from "../../../src/daemon/wire/constants";
 
 describe("ToolCallRecorder", () => {
   describe("recording lifecycle", () => {

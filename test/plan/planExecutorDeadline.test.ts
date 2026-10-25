@@ -16,7 +16,7 @@ import {
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
   INTERNAL_EXECUTION_START_TIME_PARAM,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 
 describe("plan internal request inheritance", () => {
   afterEach(() => {

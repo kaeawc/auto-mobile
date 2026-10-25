@@ -12,7 +12,7 @@ import {
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
   INTERNAL_EXECUTION_START_TIME_PARAM,
   INTERNAL_LIVE_DEADLINE_KEY_PARAM,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import {
   registerLiveDeadline,
   unregisterLiveDeadline,

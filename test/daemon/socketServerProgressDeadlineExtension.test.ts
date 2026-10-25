@@ -8,7 +8,7 @@ import type { Client } from "@modelcontextprotocol/client";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { getLiveTextRequestState } from "../../src/daemon/liveDeadlineRegistry";
-import { INTERNAL_LIVE_DEADLINE_KEY_PARAM } from "../../src/daemon/constants";
+import { INTERNAL_LIVE_DEADLINE_KEY_PARAM } from "../../src/daemon/wire/constants";
 import { describe, expect, mock, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";

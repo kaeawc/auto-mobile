@@ -1,4 +1,4 @@
-import { ActionableError } from "../models/ActionableError";
+import { ActionableError } from "../../models/ActionableError";
 
 /**
  * Shared relay/WebRTC rule: any live, non-releasing device session or registered observer

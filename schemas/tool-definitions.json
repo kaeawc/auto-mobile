@@ -24152,6 +24152,10 @@
           "description": "show only: true (default) replaces other prototypes; false adds this prototype as another window (max 4 on screen; a fifth is refused listing the ones shown). A same-id show replaces only that prototype when false. Needs an Android device advertising prototype_multi_surface_v1; iOS shows one prototype at a time.",
           "type": "boolean"
         },
+        "pseudoLocale": {
+          "description": "show only: true sends a pseudo-localized copy of the spec: every text, label, placeholder, headline, title and span is accented and padded by about 40%, wrapped in [ ], with {bindings} left intact, so truncation and clipping show without a translation. The authored spec, status and patch base are unchanged; patch ops apply to the device copy. Each show states it afresh.",
+          "type": "boolean"
+        },
         "reset": {
           "description": "show only: when the prototype with spec.id is already shown, start it fresh (pager pages from the spec, display re-resolved) instead of replacing it in place",
           "type": "boolean"
@@ -25403,6 +25407,21 @@
             },
             "diagnosticReporting": {
               "description": "Diagnostic collectors, feedback, location analytics, and call-quality reporting; reduces diagnostic evidence, not call transport.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "siriAndAppIntents": {
+              "description": "iOS Simulator Siri requests, Shortcuts actions, and App Intents; excludes speech services and proactive suggestions.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "speechServices": {
+              "description": "iOS Simulator speech recognition, dictation, and Siri speech synthesis; excludes Siri requests and App Intents orchestration.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "mediaTranscoding": {
+              "description": "iOS Simulator Photos image and video conversion; media imports and photo-picker conversions may fail.",
               "type": "string",
               "enum": ["enabled", "disabled"]
             },
@@ -26881,6 +26900,21 @@
               "type": "string",
               "enum": ["enabled", "disabled"]
             },
+            "siriAndAppIntents": {
+              "description": "iOS Simulator Siri requests, Shortcuts actions, and App Intents; excludes speech services and proactive suggestions.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "speechServices": {
+              "description": "iOS Simulator speech recognition, dictation, and Siri speech synthesis; excludes Siri requests and App Intents orchestration.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "mediaTranscoding": {
+              "description": "iOS Simulator Photos image and video conversion; media imports and photo-picker conversions may fail.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
             "photoAnalysis": {
               "description": "Background Photos analysis; may reduce photo search and recognition. Preserves library access, cloud transfers, and shared media-analysis infrastructure.",
               "type": "string",
@@ -27154,6 +27188,9 @@
         "success": {
           "type": "boolean"
         },
+        "disabledResources": {
+          "$ref": "#/$defs/__schema0"
+        },
         "device": {
           "type": "object",
           "properties": {
@@ -27174,7 +27211,7 @@
           "additionalProperties": {}
         },
         "requested": {
-          "$ref": "#/$defs/__schema0"
+          "$ref": "#/$defs/__schema2"
         },
         "profileFingerprint": {
           "type": "string"
@@ -27182,13 +27219,13 @@
         "drift": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/__schema1"
+            "$ref": "#/$defs/__schema3"
           }
         },
         "remainingDrift": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/__schema1"
+            "$ref": "#/$defs/__schema3"
           }
         },
         "applied": {
@@ -27197,11 +27234,14 @@
             "success": {
               "type": "boolean"
             },
-            "requested": {
+            "disabledResources": {
               "$ref": "#/$defs/__schema0"
             },
+            "requested": {
+              "$ref": "#/$defs/__schema2"
+            },
             "resources": {
-              "$ref": "#/$defs/__schema0"
+              "$ref": "#/$defs/__schema2"
             },
             "changed": {
               "type": "array",
@@ -27230,7 +27270,7 @@
                 "type": "string"
               },
               "additionalProperties": {
-                "$ref": "#/$defs/__schema0"
+                "$ref": "#/$defs/__schema2"
               }
             },
             "restore": {
@@ -27266,13 +27306,93 @@
       "additionalProperties": {},
       "$defs": {
         "__schema0": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "resource": {
+                "type": "string"
+              },
+              "labels": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "automobileImpact": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/__schema1"
+                }
+              },
+              "appImpact": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/__schema1"
+                }
+              },
+              "unsafeWith": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "hazardId": {
+                      "type": "string"
+                    },
+                    "appliesTo": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": ["post_boot", "preboot"]
+                      }
+                    },
+                    "withResources": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "evidence": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["hazardId", "appliesTo", "withResources", "reason", "evidence"],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": ["resource", "labels", "automobileImpact", "appImpact"],
+            "additionalProperties": false
+          }
+        },
+        "__schema1": {
+          "type": "object",
+          "properties": {
+            "description": {
+              "type": "string"
+            },
+            "confidence": {
+              "type": "string",
+              "enum": ["verified", "inferred"]
+            },
+            "evidence": {
+              "type": "string"
+            }
+          },
+          "required": ["description", "confidence"],
+          "additionalProperties": false
+        },
+        "__schema2": {
           "type": "object",
           "propertyNames": {
             "type": "string"
           },
           "additionalProperties": {}
         },
-        "__schema1": {
+        "__schema3": {
           "type": "object",
           "properties": {
             "resource": {
@@ -30975,7 +31095,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Set selected device resources and verify native state. All settings are opt-in; omitted resources stay unchanged. iOS Simulator services and Android optional apps/settings are runtime-dependent. Android changes return a restore receipt for exact restoration during the same boot. Disabling Google infrastructure changes push/auth behavior.",
+    "description": "Set selected device resources and verify native state, including disabled iOS service impacts. All settings are opt-in; omitted resources stay unchanged. iOS Simulator services and Android optional apps/settings are runtime-dependent. Android changes return a restore receipt for exact restoration during the same boot. Disabling Google infrastructure changes push/auth behavior. Disabling calendarServices on a booted simulator is refused with code unsafe_device_resource_combination unless its service is not running. Request it when provisioning a new simulator so it applies before first boot, or leave it enabled. Preboot is unaffected; unsafeWith lists the applicable phases.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -31055,6 +31175,21 @@
             },
             "diagnosticReporting": {
               "description": "Diagnostic collectors, feedback, location analytics, and call-quality reporting; reduces diagnostic evidence, not call transport.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "siriAndAppIntents": {
+              "description": "iOS Simulator Siri requests, Shortcuts actions, and App Intents; excludes speech services and proactive suggestions.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "speechServices": {
+              "description": "iOS Simulator speech recognition, dictation, and Siri speech synthesis; excludes Siri requests and App Intents orchestration.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "mediaTranscoding": {
+              "description": "iOS Simulator Photos image and video conversion; media imports and photo-picker conversions may fail.",
               "type": "string",
               "enum": ["enabled", "disabled"]
             },
@@ -31334,6 +31469,9 @@
                       "mapsSync",
                       "advertising",
                       "diagnosticReporting",
+                      "siriAndAppIntents",
+                      "speechServices",
+                      "mediaTranscoding",
                       "photoAnalysis",
                       "assistantSuggestions",
                       "appleIntelligence",
@@ -31439,6 +31577,69 @@
         "success": {
           "type": "boolean"
         },
+        "disabledResources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "resource": {
+                "type": "string"
+              },
+              "labels": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "automobileImpact": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/__schema0"
+                }
+              },
+              "appImpact": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/__schema0"
+                }
+              },
+              "unsafeWith": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "hazardId": {
+                      "type": "string"
+                    },
+                    "appliesTo": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": ["post_boot", "preboot"]
+                      }
+                    },
+                    "withResources": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "evidence": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["hazardId", "appliesTo", "withResources", "reason", "evidence"],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": ["resource", "labels", "automobileImpact", "appImpact"],
+            "additionalProperties": false
+          }
+        },
         "device": {
           "type": "object",
           "properties": {
@@ -31454,10 +31655,10 @@
           "additionalProperties": {}
         },
         "requested": {
-          "$ref": "#/$defs/__schema0"
+          "$ref": "#/$defs/__schema1"
         },
         "resources": {
-          "$ref": "#/$defs/__schema0"
+          "$ref": "#/$defs/__schema1"
         },
         "changed": {
           "type": "array",
@@ -31486,7 +31687,7 @@
             "type": "string"
           },
           "additionalProperties": {
-            "$ref": "#/$defs/__schema0"
+            "$ref": "#/$defs/__schema1"
           }
         },
         "restore": {
@@ -31499,6 +31700,23 @@
       "additionalProperties": {},
       "$defs": {
         "__schema0": {
+          "type": "object",
+          "properties": {
+            "description": {
+              "type": "string"
+            },
+            "confidence": {
+              "type": "string",
+              "enum": ["verified", "inferred"]
+            },
+            "evidence": {
+              "type": "string"
+            }
+          },
+          "required": ["description", "confidence"],
+          "additionalProperties": false
+        },
+        "__schema1": {
           "type": "object",
           "propertyNames": {
             "type": "string"
@@ -32139,6 +32357,70 @@
                   "type": "string",
                   "enum": ["low", "full", "unset"],
                   "description": "Use up free space on /data with a ballast file (`fallocate`): 'low' leaves about 128 MiB, 'full' about 8 MiB. Reset deletes the ballast. Or unset."
+                },
+                "revokePermission": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "unset"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "package": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$"
+                        },
+                        "permission": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z][A-Za-z0-9_.]*$"
+                        }
+                      },
+                      "required": ["package", "permission"],
+                      "additionalProperties": false
+                    }
+                  ],
+                  "description": "Revoke one runtime permission from an installed app with `pm revoke` ({ package, permission }); reset re-grants it. Revoking kills the app's process, so it also restarts the app. Or unset."
+                },
+                "disablePackage": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "unset"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "package": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$"
+                        }
+                      },
+                      "required": ["package"],
+                      "additionalProperties": false
+                    }
+                  ],
+                  "description": "Disable an installed app for the current user with `pm disable-user` ({ package }); reset runs `pm enable`. Or unset."
+                },
+                "clearPackageData": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "unset"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "package": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$"
+                        }
+                      },
+                      "required": ["package"],
+                      "additionalProperties": false
+                    }
+                  ],
+                  "description": "Clear an installed app's data with `pm clear` ({ package }). One-shot: it kills the app's process and cannot be undone, so there is nothing to reset. 'unset' is a no-op."
                 }
               },
               "additionalProperties": false,

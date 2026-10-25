@@ -6,7 +6,7 @@ import {
   type StreamSubscriptionIdentity,
   type StreamSubscriptionKind,
   type StreamSubscriptionLifecycleEndReason,
-} from "./streamSubscriptionPolicy";
+} from "./wire/streamSubscriptionPolicy";
 import { WebRtcSubscriptionEndedError } from "./WebRtcSubscriptionEndedError";
 import {
   H264AnnexBParser,

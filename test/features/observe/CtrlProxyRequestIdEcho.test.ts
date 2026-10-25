@@ -244,19 +244,21 @@ describe("Android request ID echo", () => {
         : ["node_selector_actions", "set_hierarchy_interval"];
       await h.advertise(commands);
       const visibleTypes = [...KNOWN_REQUEST_TYPES, ...ANDROID_CAPABILITY_FLAGS, "future_command"];
-      const before = visibleTypes.map((type) => h.client["isCommandSupported"](type));
+      const before = visibleTypes.map((type) => h.client.testHooks.isCommandSupported(type));
       const rawBefore = await h.client.getSupportedCommands();
       const supportsBefore = await Promise.all(
         visibleTypes.map((type) => h.client.supportsCommand(type)),
       );
       await h.advertise([...commands, echoCapability]);
-      expect(visibleTypes.map((type) => h.client["isCommandSupported"](type))).toEqual(before);
+      expect(visibleTypes.map((type) => h.client.testHooks.isCommandSupported(type))).toEqual(
+        before,
+      );
       expect(await Promise.all(visibleTypes.map((type) => h.client.supportsCommand(type)))).toEqual(
         supportsBefore,
       );
       expect(await h.client.getSupportedCommands()).toEqual([...rawBefore!, echoCapability].sort());
       expect(await h.client.supportsCommand(echoCapability)).toBe(true);
-      expect(h.client["isCommandSupported"](echoCapability)).toBe(true);
+      expect(h.client.testHooks.isCommandSupported(echoCapability)).toBe(true);
       expect(ANDROID_CAPABILITY_GATED_COMMANDS.has(echoCapability)).toBe(false);
       expect(ANDROID_CAPABILITY_FLAGS).not.toContain(echoCapability);
     });

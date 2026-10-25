@@ -722,7 +722,12 @@ describe("IosBaselineReset", () => {
     const history = new InMemoryBootDurationHistory();
     const gate = new FakeSimulatorCapacityGate(timer, {
       outcome: "allow",
-      limits: { maxBooted: 1, source: "derived" },
+      limits: {
+        maxBooted: 1,
+        source: "derived",
+        bootConcurrency: 1,
+        bootConcurrencySource: "derived",
+      },
       bootedCount: 0,
     });
     const h = harness({
@@ -783,7 +788,12 @@ describe("IosBaselineReset", () => {
       const history = new InMemoryBootDurationHistory();
       const gate = new FakeSimulatorCapacityGate(timer, {
         outcome: "allow",
-        limits: { maxBooted: 1, source: "derived" },
+        limits: {
+          maxBooted: 1,
+          source: "derived",
+          bootConcurrency: 1,
+          bootConcurrencySource: "derived",
+        },
         bootedCount: 0,
       });
       const controller = new AbortController();

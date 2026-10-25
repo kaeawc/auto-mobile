@@ -6,7 +6,7 @@ import {
 import {
   DAEMON_REGISTER_SESSION_METHOD,
   SESSION_RELEASE_DRAIN_TIMEOUT_MS,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import {
   SESSION_RELEASE_PERSIST_TIMEOUT_MS,
   SessionManager,

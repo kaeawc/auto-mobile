@@ -290,7 +290,7 @@ identity ends (`session_ended`), the viewer disconnects, or the device goes away
 (`device_removed`, `device_restored`, `identity_quarantined`, `daemon_shutdown`), each
 delivered as a typed reason, and the shared capture (including the shared iOS capture)
 keeps running for the remaining subscribers. Recordings are a separate concern and stop
-on release. Policy lives in `src/daemon/streamSubscriptionPolicy.ts`; tests in
+on release. Policy lives in `src/daemon/wire/streamSubscriptionPolicy.ts`; tests in
 `test/daemon/*StreamSocketServer.viewerSubscription.test.ts`.
 
 Observer scope and cooperative ownership (owner decisions 2026-10-09, #10982):
@@ -337,7 +337,7 @@ devices. The native ledger also charges orphaned inventory and unresolved journa
 User-facing statement of the release model (lease and grace, exact idle release,
 `idleReleaseAt` wall clock, one-shot CLI anonymity, terminal-session refusals,
 offline budget, restart recovery): `docs/using/device-ownership.md`. Change it in
-the same PR as any constant in `src/daemon/sessionLivenessWindows.ts` or
+the same PR as any constant in `src/daemon/wire/sessionLivenessWindows.ts` or
 `OFFLINE_DEVICE_DISCONNECT_BUDGET_MS`.
 
 One function answers "when does this session idle-expire": `sessionIdleDeadline`

@@ -2241,8 +2241,8 @@ describe("display gesture dispatch boundary race", () => {
                   : new PinchOn(android, executor, deps);
         action.observeScreen = observe;
         const client = AndroidCtrlProxyClient.getExistingInstance(android.deviceId)!;
-        const previousGestures = client["_gestures"];
-        client["_gestures"] = new CtrlProxyGestures({
+        const previousGestures = client.testHooks.installedGestures;
+        client.testHooks.installedGestures = new CtrlProxyGestures({
           getWebSocket: () => socket,
           ensureConnected: () => {
             reachedDispatch.resolve();
@@ -2329,7 +2329,7 @@ describe("display gesture dispatch boundary race", () => {
             expect(outcome.result?.success).toBe(true);
           }
         } finally {
-          client["_gestures"] = previousGestures;
+          client.testHooks.installedGestures = previousGestures;
           capability.mockRestore();
           manager.mockRestore();
           displayTransitions.reset(android.deviceId);

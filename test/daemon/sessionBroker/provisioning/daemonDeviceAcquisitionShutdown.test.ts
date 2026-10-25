@@ -27,11 +27,11 @@ class NoSessions implements BrokerDeviceAcquisitionSessions {
 /** A real `Daemon` whose binding acquisition handle a test installs and reads back. */
 class AcquisitionShutdownDaemon extends Daemon {
   installAcquisition(handle: DaemonBrokerDeviceAcquisitionHandle): void {
-    this.brokerDeviceAcquisition = handle;
+    this.runtime.brokerDeviceAcquisition = handle;
   }
 
   hasAcquisition(): boolean {
-    return this.brokerDeviceAcquisition !== undefined;
+    return this.runtime.brokerDeviceAcquisition !== undefined;
   }
 }
 

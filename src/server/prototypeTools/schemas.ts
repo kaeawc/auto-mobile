@@ -2,7 +2,7 @@ import { z as specZ, type ZodTypeAny } from "zod";
 import { PROTOVIEWER_DEFAULT_TIMEOUT_MS } from "../../features/prototype/protoViewer/AndroidProtoViewer";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { z } from "zod/v4";
-import { deleteInternalToolParams } from "../../daemon/constants";
+import { deleteInternalToolParams } from "../../daemon/wire/constants";
 import {
   PROTOTYPE_EVENT_KINDS,
   SAVED_PROTOTYPE_ERROR_CODES,
@@ -304,6 +304,12 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .describe(
           "show only: true (default) replaces other prototypes; false adds this prototype as another window (max 4 on screen; a fifth is refused listing the ones shown). A same-id show replaces only that prototype when false. Needs an Android device advertising prototype_multi_surface_v1; iOS shows one prototype at a time.",
         ),
+      pseudoLocale: z
+        .boolean()
+        .optional()
+        .describe(
+          "show only: true sends a pseudo-localized copy of the spec: every text, label, placeholder, headline, title and span is accented and padded by about 40%, wrapped in [ ], with {bindings} left intact, so truncation and clipping show without a translation. The authored spec, status and patch base are unchanged; patch ops apply to the device copy. Each show states it afresh.",
+        ),
       reset: z
         .boolean()
         .optional()
@@ -397,6 +403,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     "display",
     "reset",
     "replaceOthers",
+    "pseudoLocale",
     "appearance",
     "eventName",
     "kind",
@@ -411,7 +418,16 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     "removeIcon",
   ] as const;
   const allowed: Record<typeof value.action, readonly string[]> = {
-    show: ["spec", "specPath", "display", "reset", "appearance", "assets", "replaceOthers"],
+    show: [
+      "spec",
+      "specPath",
+      "display",
+      "reset",
+      "appearance",
+      "assets",
+      "replaceOthers",
+      "pseudoLocale",
+    ],
     patch: ["id", "ops", "baseRevision"],
     save: ["spec", "assets", "label", "icon", "pin", "autoConfirm"],
     listSaved: [],

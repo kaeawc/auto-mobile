@@ -10,10 +10,36 @@ const deviceSchema = z
 
 const resourceMapSchema = z.record(z.string(), z.unknown());
 
+const impactItemSchema = z.object({
+  description: z.string(),
+  confidence: z.enum(["verified", "inferred"]),
+  evidence: z.string().optional(),
+});
+const disabledResourcesSchema = z.array(
+  z.object({
+    resource: z.string(),
+    labels: z.array(z.string()),
+    automobileImpact: z.array(impactItemSchema),
+    appImpact: z.array(impactItemSchema),
+    unsafeWith: z
+      .array(
+        z.object({
+          hazardId: z.string(),
+          appliesTo: z.array(z.enum(["post_boot", "preboot"])),
+          withResources: z.array(z.string()),
+          reason: z.string(),
+          evidence: z.string(),
+        }),
+      )
+      .optional(),
+  }),
+);
+
 /** `setDeviceResources`: a failed verification is `success: false` with `isError`. */
 export const setDeviceResourcesResultSchema = z
   .object({
     success: z.boolean(),
+    disabledResources: disabledResourcesSchema.optional(),
     device: deviceSchema,
     requested: resourceMapSchema,
     resources: resourceMapSchema,
@@ -39,6 +65,7 @@ const driftSchema = z
 export const reconcileDeviceResourcesResultSchema = z
   .object({
     success: z.boolean(),
+    disabledResources: disabledResourcesSchema.optional(),
     device: deviceSchema,
     identity: z.object({}).passthrough(),
     requested: resourceMapSchema,

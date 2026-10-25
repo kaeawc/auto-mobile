@@ -1,3 +1,5 @@
+import { UnsafeDeviceResourceCombinationError } from "../models/UnsafeDeviceResourceCombinationError";
+import { DeviceServiceDisabledError } from "../models/DeviceServiceDisabledError";
 import { SdkCapabilityQueryError } from "../features/observe/ios/SdkCapabilityQueryError";
 import { AdbDeviceTransportUnavailableError } from "../utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import { PrototypeHiddenError } from "../features/prototype/prototypeHidden";
@@ -17,7 +19,7 @@ import {
   McpTimeoutError,
   isMcpQueueTimeoutError,
   MCP_QUEUE_TIMEOUT_ERROR_CODE,
-} from "./McpTimeoutError";
+} from "./wire/McpTimeoutError";
 import { SessionRecoveryAssignmentError } from "../models/SessionRecoveryAssignmentError";
 import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../models/deviceSessionRecovery";
 import { BootCapacityExhaustedError } from "../models/BootCapacityExhaustedError";
@@ -169,6 +171,8 @@ function hasSelfDescribedRefusalPayload(
   | AdbDeviceTransportUnavailableError
   | AndroidAvdIdentityUnresolvedError
   | AndroidDeviceIdentityUnresolvedError
+  | UnsafeDeviceResourceCombinationError
+  | DeviceServiceDisabledError
   | DeviceUnhealthyError
   | PlanExecutionInProgressError
   | AmbiguousDeviceTargetError
@@ -190,6 +194,8 @@ function hasSelfDescribedRefusalPayload(
     AdbDeviceTransportUnavailableError,
     AndroidAvdIdentityUnresolvedError,
     AndroidDeviceIdentityUnresolvedError,
+    UnsafeDeviceResourceCombinationError,
+    DeviceServiceDisabledError,
     DeviceUnhealthyError,
     PlanExecutionInProgressError,
     AmbiguousDeviceTargetError,

@@ -29,7 +29,7 @@ import {
 } from "./androidMutationBaseline";
 import { genericBaselineRevert, type BaselineChange } from "./mutations/baseline";
 import type { DeviceMutationResetContext } from "./mutations/reset";
-import type { DeviceBaseline, DeviceMutationInput } from "./mutations/types";
+import type { DeviceBaseline, DeviceMutationEntry, DeviceMutationInput } from "./mutations/types";
 import {
   SCREEN_STATE_MUTATION_KEY,
   isRestorableScreenState,
@@ -137,12 +137,14 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
   async cleanBaseline(
     baseline: DeviceBaseline,
     context: DeviceMutationResetContext,
+    journalEntries: readonly DeviceMutationEntry[] = [],
   ): Promise<void> {
     await cleanAndroidBaseline(
       baseline,
       context,
       (command, timeoutMs) => this.execute(command, context, timeoutMs),
       (mutation) => this.revert(mutation, context),
+      journalEntries,
     );
     const output = await this.execute("shell cmd clipboard clear", context, undefined, true);
     if (this.unsupportedClipboard(output)) {

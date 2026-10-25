@@ -5,7 +5,7 @@ import { logger } from "../../utils/logger";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import type { Timer } from "../../utils/SystemTimer";
 
-import { INTERNAL_MCP_REQUEST_TIMEOUT_PARAM } from "../constants";
+import { INTERNAL_MCP_REQUEST_TIMEOUT_PARAM } from "../wire/constants";
 import type { GestureFrameKind, InputRouteEntry, InputRouteHandler } from "../inputRoutes";
 import type { DaemonRequest } from "../types";
 

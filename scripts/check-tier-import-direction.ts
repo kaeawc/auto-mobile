@@ -20,6 +20,8 @@ interface TierRule {
   readonly forbiddenModules?: readonly string[];
   /** Exact modules under a `forbiddenModules` prefix that stay importable (type/constant leaves). */
   readonly allowedModules?: readonly string[];
+  /** Module path prefixes under a `forbiddenModules` prefix that stay importable (own sub-package). */
+  readonly allowedPrefixes?: readonly string[];
   /** Pre-existing edges live in `baselinePath(tier)`; absent means hard-fail. */
   readonly baselined?: boolean;
 }
@@ -47,6 +49,8 @@ export const TIER_RULES: readonly TierRule[] = [
   { tier: "daemon", forbidden: ["server"], baselined: true },
   // The client side of the daemon (stdio proxy) talks to sessions over the wire, never through
   // the daemon's session, pool or socket-server runtime (#11790).
+  // The wire contract imports nothing else from the daemon, so every process can depend on it (#11790).
+  { tier: "daemon/wire", forbiddenModules: ["src/daemon/"], allowedPrefixes: ["src/daemon/wire/"] },
   ...["daemon/proxy", "daemon/mcpProxy"].map((tier) => ({
     tier,
     forbiddenModules: DAEMON_RUNTIME_MODULES,
@@ -63,6 +67,7 @@ export function isViolation(rule: TierRule, target: string): boolean {
   if (rule.forbiddenModules) {
     return (
       !(rule.allowedModules ?? []).includes(posixTarget) &&
+      !(rule.allowedPrefixes ?? []).some((prefix) => posixTarget.startsWith(prefix)) &&
       rule.forbiddenModules.some((prefix) => posixTarget.startsWith(prefix))
     );
   }

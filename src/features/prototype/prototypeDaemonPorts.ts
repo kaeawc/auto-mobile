@@ -2,7 +2,7 @@ import {
   DAEMON_PORT_RANGE_END,
   DAEMON_PORT_RANGE_START,
   DEFAULT_DAEMON_PORT,
-} from "../../daemon/constants";
+} from "../../daemon/wire/constants";
 import { PortManager } from "../../utils/PortManager";
 
 /** Live set so coordinators created before daemon startup also see its configured HTTP port. */

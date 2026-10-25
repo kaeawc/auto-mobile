@@ -26,16 +26,42 @@ error). Missing data is never reported as zero.
 
 ## Capacity policy
 
-The limit on concurrently booted simulators is the smaller of a memory budget
-(half of host RAM divided by the per-simulator RSS, measured when available,
-clamped to 1.5-6 GiB, default 3 GiB) and a core budget (cores / 2), at least 1.
-Set `AUTOMOBILE_IOS_SIM_MAX_BOOTED` to override.
+The count limit is the smaller of two budgets, at least 1:
 
-Simulator boots go through this gate by default; a boot that finds the
-platform at its limit fails at once with the retryable `capacity_exhausted` error
-(it is not queued). See
-[Boot capacity](environment-variables.md#boot-capacity) for the opt-out and the
-shared Android gate.
+- Memory: half of host RAM divided by per-simulator settled process-tree RSS.
+  The tree includes the CtrlProxy runner app, so no extra runner overhead is added.
+  Measured RSS is averaged and clamped to 1.5–6 GiB; without measurements the
+  default is 3 GiB. Boots in flight retain conservative memory charges until ready.
+- Settled CPU: half of host cores divided by 0.055 core per simulator (0.04 for
+  Apple processes plus 0.015 for AutoMobile, measured in #15097). The other half
+  stays available for the app under test, IDE and runners.
+
+Set `AUTOMOBILE_IOS_SIM_MAX_BOOTED` to override the count limit. Only count-limit
+overflow fails immediately with the retryable `capacity_exhausted` error.
+
+First boot has a separate concurrency limit: `ceil(host cores / 13)`, at least 2
+(or 1 when host resources cannot be read). The floor of 2 matches the runner launch
+limit: boots share the host's CPU-seconds, so serializing them gains little, while
+a queue of one makes later callers wait out two full bursts. Measurements in #15097 show a burst
+of about 13 cores for 50–130 seconds: about 790 CPU-seconds, or 222 CPU-seconds
+with clone + lean preparation. Set `AUTOMOBILE_IOS_SIM_BOOT_CONCURRENCY` to
+override this limit. Both overrides accept positive integers; invalid values
+warn and use their derived limits.
+
+Boots beyond the concurrency limit queue in FIFO order while retaining their
+count slots, so queued boots count as in flight. Queue wait is outside the boot's
+own time budget, but the caller's AbortSignal and outer deadline still apply.
+Cancellation while queued releases the count slot. Because queued boots keep their
+count slots, a caller can see `capacity_exhausted` while fewer simulators are actually
+booted than the limit. The boot-concurrency limit applies only while the capacity gate
+is enabled; `AUTOMOBILE_BOOT_CAPACITY_GATE=0` also removes boot staggering.
+
+The boot permit covers boot-to-ready and is released before runner launch.
+The separate runner launch limit (`AUTOMOBILE_IOS_RUNNER_LAUNCH_CONCURRENCY`,
+default 2 per daemon) paces expensive runner launches after the simulator is
+Booted. These limits guard different resources and are never held nested.
+See [Boot capacity](environment-variables.md#boot-capacity) for the opt-out and
+the shared Android gate.
 
 A broker reset that re-boots a simulator it already holds booted keeps that
 simulator's own slot and is never refused because other simulators fill the cap.

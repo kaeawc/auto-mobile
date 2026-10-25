@@ -9,6 +9,7 @@ import { AndroidTransportAliases } from "../../src/utils/androidSerial";
 import { createExecResult } from "../../src/utils/execResult";
 import type { BootedDevice } from "../../src/models";
 import { Daemon } from "../../src/daemon/daemon";
+import { DaemonRuntimeState } from "../../src/daemon/daemonRuntimeState";
 import type { DisconnectMonitorPool } from "../../src/daemon/daemonCore/DaemonDisconnect";
 import type { SingleFlightInterval } from "../../src/daemon/SingleFlightInterval";
 import { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
@@ -186,9 +187,8 @@ function monitorHarness(
   };
   const daemon = Object.assign(Object.create(Daemon.prototype), {
     timer,
-    deviceDisconnectMonitor: null,
+    runtime: new DaemonRuntimeState(),
     deviceLoss: new DeviceLossState({ missIncarnations: new Map([[device.id, 1]]) }),
-    deferredSessionRecoverySweeps: new Set(),
     devicePool: {
       retryDueDeferredSessionRecoveries: async () => {},
       reconcileDiscoveryObservation: async () => {},
@@ -207,7 +207,11 @@ function monitorHarness(
     },
   });
   daemon.startDeviceDisconnectMonitor(manager, async () => []);
-  return { daemon, device, monitor: daemon.deviceDisconnectMonitor as SingleFlightInterval };
+  return {
+    daemon,
+    device,
+    monitor: daemon.runtime.deviceDisconnectMonitor as SingleFlightInterval,
+  };
 }
 
 test("monitor dispatches only in-session offline targets", async () => {

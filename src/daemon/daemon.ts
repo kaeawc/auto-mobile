@@ -3,11 +3,9 @@ import { daemonToolRegistry } from "./toolRegistryPort";
 import {} from "./networkStateSessionCleanup";
 import {} from "./recordingSessionCleanup";
 import {} from "./observationRequestBatch";
-import { type BindingExclusion } from "./sessionBroker/provisioning/exclusion";
 import { installDefaultProvisionedDeviceTransportFence } from "../db/createDefaultProvisionedDeviceTransportFence";
 import { ObserverSessionRegistry } from "./observerSessionRegistry";
 import { NodeStreamableHTTPServerTransport as StreamableHTTPServerTransport } from "@modelcontextprotocol/node";
-import { type HttpListener } from "./daemonHttpIngress";
 import { createProductionCoreDeviceProbe } from "../utils/ios-cmdline-tools/CoreDeviceProbeHolder";
 import { createIosDoctorDependencies } from "../doctor/checks/ios";
 import { logger } from "../utils/logger";
@@ -15,18 +13,12 @@ import { type DaemonSocketServer, daemonSocketServerDouble } from "./daemonSocke
 import { SessionManager } from "./sessionManager";
 import { type HealthFailureKind } from "./daemonHealthCheck";
 import { PassiveWorkPolicy, parsePassiveWorkSettings } from "./PassiveWorkPolicy";
-import { SingleFlightInterval } from "./SingleFlightInterval";
 import { DevicePool } from "./devicePool";
-import {
-  createForeignCtrlProxyForwardEvidence,
-  type ForeignCtrlProxyForwardEvidence,
-} from "../features/observe/android/foreignCtrlProxyForwardEvidence";
+import { createForeignCtrlProxyForwardEvidence } from "../features/observe/android/foreignCtrlProxyForwardEvidence";
 import { type SqliteBindingRegistry } from "./sessionBroker/registry/sqliteBindingRegistry";
 import { ENV, readEnvRaw } from "../config/env";
-import { ManagedExecutionReowner } from "./sessionBroker/provisioning/executionReowner";
-import { type DaemonBrokerDeviceAcquisitionHandle } from "./sessionBroker/provisioning/daemonDeviceAcquisition";
 import { DeviceSessionRegistry } from "./deviceSessionRegistry";
-import { DEFAULT_DAEMON_PORT } from "./constants";
+import { DEFAULT_DAEMON_PORT } from "./wire/constants";
 import { DaemonOptions } from "./types";
 import {
   DaemonSelfExitRecorder,
@@ -35,8 +27,7 @@ import {
 } from "./daemonExitRecord";
 import { daemonProcessOptions } from "./daemonOptionScopes";
 import { resolve } from "node:path";
-import { getCurrentBuildIdentity } from "./buildIdentity";
-import { type LiveDaemonSessionIdProvider } from "./daemonFiles";
+import { getCurrentBuildIdentity } from "./wire/buildIdentity";
 import { IncumbentOwnerGuard } from "./incumbentOwnerGuard";
 import {
   DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV,
@@ -55,12 +46,10 @@ import { getDeviceDataStreamServer } from "./deviceDataStreamSocketServer";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import { NavigationGraphStreamBridge } from "./daemonStreamRouting";
 import { InstalledAppsRepository, type InstalledAppsStore } from "../db/installedAppsRepository";
-import { BackgroundBindingRegistryUpgrade } from "./sessionBroker/registry/BackgroundBindingRegistryUpgrade";
 import { DeviceReadiness } from "./readiness/DeviceReadiness";
 import { type AppearanceSyncTarget } from "./AppearanceSyncScheduler";
 import { Timer } from "../utils/SystemTimer";
 import { IdGenerator } from "../utils/IdGenerator";
-import type { AvdManager } from "../utils/android-cmdline-tools/interfaces/AvdManager";
 import { DeviceLossState } from "./deviceLossState";
 import { DaemonShutdownState } from "./daemonShutdownState";
 import { DaemonRuntimeState } from "./daemonRuntimeState";
@@ -70,10 +59,16 @@ import {
   resolveDaemonDependencies,
   type DaemonDependencies,
   type DaemonDeviceSessionStore,
-  type ManagedAdbServerShutdown,
 } from "./daemonDependencies";
 import { DaemonHttpTokenLifecycle } from "./daemonCore/DaemonHttpTokenLifecycle";
-import type { DaemonDatabaseServices, DaemonProcessIdentity } from "./daemonCore/daemonFieldGroups";
+import {
+  createStartupCompletion,
+  type DaemonDatabaseServices,
+  type DaemonInjectedServices,
+  type DaemonListenConfig,
+  type DaemonProcessIdentity,
+  type DaemonStartupCompletion,
+} from "./daemonCore/daemonFieldGroups";
 import type { DaemonStateWrites } from "./daemonContext";
 import { DaemonBroker } from "./daemonCore/DaemonBroker";
 import { DaemonSessions } from "./daemonCore/DaemonSessions";
@@ -139,26 +134,15 @@ export class Daemon {
   }
   private readonly shutdown: DaemonShutdown;
 
-  private readonly httpServerFactory: () => HttpListener;
-
-  private readonly liveDaemonSessionIdProvider: LiveDaemonSessionIdProvider;
-
-  private readonly avdManagerFactory: () => Pick<AvdManager, "listDeviceImages">;
+  /** Replaceable seams resolved from `DaemonDependencies`; fixed at construction. */
+  private readonly injected: DaemonInjectedServices;
 
   private readonly deviceReadiness: DeviceReadiness;
-
-  private readonly iosDeviceVerifier: () => Pick<DeviceReadiness, "verifyIosDevice">;
-
-  private readonly bindingExclusionFactory: (timer: Timer) => BindingExclusion;
-
-  private readonly foreignCtrlProxyForwardEvidence?: ForeignCtrlProxyForwardEvidence;
 
   // One probe lifetime shared by all MCP connections and daemon doctor calls.
   private readonly iosDoctorDependencies = createIosDoctorDependencies({
     coreDeviceProbe: createProductionCoreDeviceProbe(),
   });
-
-  private socketServer: DaemonSocketServer | null = null;
 
   private exitRecordFileSystem: DaemonExitRecordFileSystem = defaultDaemonExitRecordFileSystem;
 
@@ -168,30 +152,26 @@ export class Daemon {
     write: (record) => this.startHost.writeExitRecord(record),
     now: () => this.timer.now(),
     buildId: () => getCurrentBuildIdentity().buildId,
-    options: () => ({ ...daemonProcessOptions(this.options), port: this.port }),
+    options: () => ({ ...daemonProcessOptions(this.options), port: this.listen.port }),
     canRecord: () =>
       this.runtime.enteredDaemonProcess &&
       (this.runtime.socketBindCommitted || !this.incumbentOwnerGuard.hasLiveForeignOwner()),
   });
 
-  private readonly startupCompletion: Promise<void>;
-
-  private resolveStartupCompletion!: () => void;
-
-  private rejectStartupCompletion!: (reason: unknown) => void;
+  private readonly startupCompletion: DaemonStartupCompletion = createStartupCompletion();
 
   private readonly mcpServices = new DaemonMcpServices({
     deviceReadiness: () => this.deviceReadiness,
     httpToken: () => this.httpToken,
     iosDoctorDependencies: this.iosDoctorDependencies,
-    debug: () => this.debug,
+    debug: () => this.listen.debug,
     acceptanceDiscoveryCapability: () => this.acceptanceDiscoveryCapability,
-    httpServerFactory: () => this.httpServerFactory(),
+    httpServerFactory: () => this.injected.httpServerFactory(),
     timer: () => this.timer,
     idGenerator: () => this.idGenerator,
-    address: () => ({ host: this.host, port: this.port }),
-    strictPort: () => this.strictPort,
-    startupCompletion: () => this.startupCompletion,
+    address: () => ({ host: this.listen.host, port: this.listen.port }),
+    strictPort: () => this.listen.strictPort,
+    startupCompletion: () => this.startupCompletion.promise,
     sessionManager: () => this.sessionManager,
     observerSessionRegistry: () => this.observerSessionRegistry,
     isShutdownInProgress: () => this.shutdownState.inProgress,
@@ -200,17 +180,7 @@ export class Daemon {
   private readonly httpIngress = this.mcpServices.httpIngress;
   private readonly mcpDispatcher = this.mcpServices.mcpDispatcher;
 
-  private port: number;
-
-  private host: string;
-
-  private readonly strictPort: boolean;
-
-  private debug: boolean;
-
-  protected deviceDisconnectMonitor: SingleFlightInterval | null = null;
-
-  private deferredSessionRecoverySweeps: Set<Promise<void>> = new Set();
+  private readonly listen: DaemonListenConfig;
 
   // Preserves a live incumbent daemon's PID record across our own early-owner
   // overwrite so the lock-less bind guard can (a) still see the live sibling on
@@ -235,15 +205,9 @@ export class Daemon {
 
   private timer: Timer;
 
-  private bindingRegistry: Promise<SqliteBindingRegistry> | undefined;
-
   private sessionBrokerConfigPath = readEnvRaw(ENV.SESSION_BROKER_CONFIG)
     ? resolve(readEnvRaw(ENV.SESSION_BROKER_CONFIG)!)
     : undefined;
-
-  protected brokerDeviceAcquisition: DaemonBrokerDeviceAcquisitionHandle | undefined;
-
-  private managedExecutionReowner: ManagedExecutionReowner | undefined;
 
   private readonly processIdentity: DaemonProcessIdentity;
 
@@ -253,20 +217,14 @@ export class Daemon {
 
   private readonly database: DaemonDatabaseServices;
 
-  private readonly stopManagedAdbServer: ManagedAdbServerShutdown;
-
   private observationStreamHealth: ObservationStreamHealth;
 
-  protected deviceDataStreamServer: ReturnType<typeof getDeviceDataStreamServer> = null;
-
   protected readonly navigationGraphBridge = new NavigationGraphStreamBridge({
-    server: () => this.deviceDataStreamServer,
+    server: () => this.runtime.deviceDataStreamServer,
     sessionIds: () => this.sessionManager.getAllSessions().map((session) => session.sessionId),
     defaultManager: () => NavigationGraphManager.getInstance(),
     managerForSession: (sessionId) => NavigationGraphManager.getInstanceForSession(sessionId),
   });
-
-  protected unsubscribeAdbMissingDevice: (() => void) | null = null;
 
   private readonly deviceStateChangeNotifier: DeviceStateChangeNotifier;
 
@@ -276,9 +234,6 @@ export class Daemon {
 
   private readonly shutdownState = new DaemonShutdownState();
   protected readonly runtime = new DaemonRuntimeState();
-
-  /** Redrives retained startup recorder descriptors when a device incarnation is assigned. */
-  private recorderDeviceIncarnationListener?: (deviceId: string) => void;
 
   private readonly daemonState: DaemonStateWrites;
 
@@ -312,24 +267,23 @@ export class Daemon {
     } = resolveDaemonDependencies(dependencies);
     this.deviceReadiness = retained.deviceReadiness;
     this.daemonState = retained.daemonState;
-    this.httpServerFactory = retained.httpServerFactory;
     this.httpToken = new DaemonHttpTokenLifecycle(
       retained.httpTokenStore,
       dependencies.idGenerator,
       retained.httpToken,
     );
-    this.liveDaemonSessionIdProvider = retained.liveDaemonSessionIdProvider;
-    this.avdManagerFactory = retained.avdManagerFactory;
-    this.iosDeviceVerifier = retained.iosDeviceVerifier;
-    this.bindingExclusionFactory = retained.bindingExclusionFactory;
-    this.foreignCtrlProxyForwardEvidence = retained.foreignCtrlProxyForwardEvidence;
+    this.injected = {
+      httpServerFactory: retained.httpServerFactory,
+      liveDaemonSessionIdProvider: retained.liveDaemonSessionIdProvider,
+      avdManagerFactory: retained.avdManagerFactory,
+      iosDeviceVerifier: retained.iosDeviceVerifier,
+      bindingExclusionFactory: retained.bindingExclusionFactory,
+      foreignCtrlProxyForwardEvidence: retained.foreignCtrlProxyForwardEvidence,
+      stopManagedAdbServer: managedAdbServerShutdown,
+    };
     installDefaultProvisionedDeviceTransportFence();
-    this.startupCompletion = new Promise<void>((resolve, reject) => {
-      this.resolveStartupCompletion = resolve;
-      this.rejectStartupCompletion = reject;
-    });
     // Startup can fail before the socket server exists or any request awaits it.
-    void this.startupCompletion.then(
+    void this.startupCompletion.promise.then(
       () => {
         this.httpIngress.markStartupCompleted();
       },
@@ -338,13 +292,15 @@ export class Daemon {
       },
     );
     this.options = { ...options };
-    this.port = options.port || DEFAULT_DAEMON_PORT;
-    registerPrototypeDaemonPort(this.port);
     // Prefer IPv4 loopback: Bun's fetch and Node's listen can disagree on "localhost" (::1 vs 127.0.0.1),
     // which surfaces as ConnectionRefused on the Unix-socket → Streamable HTTP MCP hop (common in Linux CI).
-    this.host = options.host || "127.0.0.1";
-    this.strictPort = options.strictPort ?? false;
-    this.debug = options.debug || false;
+    this.listen = {
+      port: options.port || DEFAULT_DAEMON_PORT,
+      host: options.host || "127.0.0.1",
+      strictPort: options.strictPort ?? false,
+      debug: options.debug || false,
+    };
+    registerPrototypeDaemonPort(this.listen.port);
     this.idGenerator = idGenerator;
     this.daemonSessionId = this.idGenerator.next();
     this.timer = timer;
@@ -380,7 +336,6 @@ export class Daemon {
           getDaemonFileCleanupOptions: () => this.identity.getDaemonFileCleanupOptions(),
         }),
     };
-    this.stopManagedAdbServer = managedAdbServerShutdown;
     this.observationStreamHealth = createObservationStreamHealth({
       timer: () => this.timer,
       startAuxiliarySocket: (...args) => this.identity.startAuxiliarySocket(...args),
@@ -394,7 +349,7 @@ export class Daemon {
     // it is still live: its rows and its terminal-release journal are not a dead daemon's (#11355).
     this.sessionManager.attachLiveDaemonSessionIds(() =>
       this.incumbentOwnerGuard.withLiveIncumbent(
-        this.liveDaemonSessionIdProvider.collectLiveDaemonSessionIds(),
+        this.injected.liveDaemonSessionIdProvider.collectLiveDaemonSessionIds(),
       ),
     );
     this.observerSessionRegistry = createDaemonObserverSessionRegistry(this.timer);
@@ -425,7 +380,6 @@ export class Daemon {
     this.applyToolOutputOptions(options);
   }
 
-  private backgroundRegistryUpgrade: BackgroundBindingRegistryUpgrade | undefined;
   private openBindingRegistry(...args: Parameters<DaemonBroker["openBindingRegistry"]>) {
     return this.broker.openBindingRegistry(...args);
   }
@@ -551,7 +505,7 @@ export class Daemon {
 
       /** Installs (or clears) a socket server double whose members the shutdown path calls. */
       setSocketServer: (server: Partial<DaemonSocketServer> | null): void => {
-        this.socketServer = server && daemonSocketServerDouble(server);
+        this.runtime.socketServer = server && daemonSocketServerDouble(server);
       },
       /** Registers an in-flight HTTP request double that shutdown must close. */
       registerTransport: (
@@ -584,7 +538,7 @@ export class Daemon {
         this.devicePool = pool;
       },
       recordAndTryRecoverCapturedDisconnect: this.recordAndTryRecoverCapturedDisconnect.bind(this),
-      deferredSessionRecoverySweeps: this.deferredSessionRecoverySweeps,
+      deferredSessionRecoverySweeps: this.runtime.deferredSessionRecoverySweeps,
       replaceObserverSessionRegistry: (registry: ObserverSessionRegistry): void => {
         this.observerSessionRegistry = registry;
       },
@@ -664,12 +618,12 @@ export class Daemon {
       services,
       identity,
       lifecycle,
-      bindingRegistry: () => daemon.bindingRegistry,
+      bindingRegistry: () => daemon.runtime.bindingRegistry,
       setBindingRegistry: (value) => {
-        daemon.bindingRegistry = value;
+        daemon.runtime.bindingRegistry = value;
       },
-      brokerDeviceAcquisition: () => daemon.brokerDeviceAcquisition,
-      setBrokerDeviceAcquisition: (value) => (daemon.brokerDeviceAcquisition = value),
+      brokerDeviceAcquisition: () => daemon.runtime.brokerDeviceAcquisition,
+      setBrokerDeviceAcquisition: (value) => (daemon.runtime.brokerDeviceAcquisition = value),
       openBindingRegistry: (...args) => this.openBindingRegistry(...args),
       cancelAndReleaseSession: (...args) => this.cancelAndReleaseSession(...args),
     });
@@ -684,8 +638,8 @@ export class Daemon {
       services,
       identity,
       lifecycle,
-      bindingExclusionFactory: () => daemon.bindingExclusionFactory,
-      foreignCtrlProxyForwardEvidence: () => daemon.foreignCtrlProxyForwardEvidence,
+      bindingExclusionFactory: () => daemon.injected.bindingExclusionFactory,
+      foreignCtrlProxyForwardEvidence: () => daemon.injected.foreignCtrlProxyForwardEvidence,
       deviceStateChangeNotifier: () => daemon.deviceStateChangeNotifier,
       observerSessionRegistry: () => daemon.observerSessionRegistry,
       cancelAndReleaseSession: (...args) => this.cancelAndReleaseSession(...args),
@@ -727,17 +681,17 @@ export class Daemon {
       setStartHost: (value) => (daemon.startHost = value),
       enteredDaemonProcess: () => daemon.runtime.enteredDaemonProcess,
       setEnteredDaemonProcess: (value) => (daemon.runtime.enteredDaemonProcess = value),
-      resolveStartupCompletion: () => daemon.resolveStartupCompletion,
-      rejectStartupCompletion: () => daemon.rejectStartupCompletion,
+      resolveStartupCompletion: () => daemon.startupCompletion.resolve,
+      rejectStartupCompletion: () => daemon.startupCompletion.reject,
       exitRecordFileSystem: () => daemon.exitRecordFileSystem,
-      strictPort: () => daemon.strictPort,
-      host: () => daemon.host,
+      strictPort: () => daemon.listen.strictPort,
+      host: () => daemon.listen.host,
       startupFailureTracker: () => daemon.database.startupFailureTracker,
-      avdManagerFactory: () => daemon.avdManagerFactory,
+      avdManagerFactory: () => daemon.injected.avdManagerFactory,
       databaseInitializer: () => daemon.database.databaseInitializer,
       toolSelectionProfileProvenanceLoader: () =>
         daemon.database.toolSelectionProfileProvenanceLoader,
-      liveDaemonSessionIdProvider: () => daemon.liveDaemonSessionIdProvider,
+      liveDaemonSessionIdProvider: () => daemon.injected.liveDaemonSessionIdProvider,
       startOn: (...args) => this.startOn(...args),
       startThroughSocketBind: (...args) => this.startThroughSocketBind(...args),
       startAfterSocketBind: (...args) => this.startAfterSocketBind(...args),
@@ -887,7 +841,7 @@ export class Daemon {
     return new DaemonShutdown({
       services,
       lifecycle,
-      stopManagedAdbServer: () => daemon.stopManagedAdbServer,
+      stopManagedAdbServer: () => daemon.injected.stopManagedAdbServer,
       removeHttpToken: () => this.httpToken.remove(),
       stop: (...args) => this.stop(...args),
       getDaemonFileCleanupOptions: (...args) => this.identity.getDaemonFileCleanupOptions(...args),
@@ -902,7 +856,7 @@ export class Daemon {
     const daemon = this;
     return {
       deviceReadiness: () => daemon.deviceReadiness,
-      iosDeviceVerifier: () => daemon.iosDeviceVerifier,
+      iosDeviceVerifier: () => daemon.injected.iosDeviceVerifier,
       httpIngress: () => daemon.httpIngress,
       mcpDispatcher: () => daemon.mcpDispatcher,
       sessionManager: () => daemon.sessionManager,
@@ -921,8 +875,8 @@ export class Daemon {
   private createDaemonIdentityState(): DaemonIdentityState {
     const daemon = this;
     return {
-      port: () => daemon.port,
-      setPort: (value) => (daemon.port = value),
+      port: () => daemon.listen.port,
+      setPort: (value) => (daemon.listen.port = value),
       completeIdentityPublished: () => daemon.runtime.completeIdentityPublished,
       setCompleteIdentityPublished: (value) => (daemon.runtime.completeIdentityPublished = value),
       socketBindCommitted: () => daemon.runtime.socketBindCommitted,
@@ -939,10 +893,10 @@ export class Daemon {
   private createDaemonLifecycleState(): DaemonLifecycleState {
     const daemon = this;
     return {
-      socketServer: () => daemon.socketServer,
-      setSocketServer: (value) => (daemon.socketServer = value),
+      socketServer: () => daemon.runtime.socketServer,
+      setSocketServer: (value) => (daemon.runtime.socketServer = value),
       selfExitRecorder: () => daemon.selfExitRecorder,
-      startupCompletion: () => daemon.startupCompletion,
+      startupCompletion: () => daemon.startupCompletion.promise,
       heartbeatMonitor: () => daemon.runtime.heartbeatMonitor,
       setHeartbeatMonitor: (value) => (daemon.runtime.heartbeatMonitor = value),
       navigationRetentionMonitor: () => daemon.runtime.navigationRetentionMonitor,
@@ -951,31 +905,32 @@ export class Daemon {
       setForwardLeaseIdleReleaser: (value) => (daemon.runtime.forwardLeaseIdleReleaser = value),
       orphanWatchdog: () => daemon.runtime.orphanWatchdog,
       setOrphanWatchdog: (value) => (daemon.runtime.orphanWatchdog = value),
-      deviceDisconnectMonitor: () => daemon.deviceDisconnectMonitor,
-      setDeviceDisconnectMonitor: (value) => (daemon.deviceDisconnectMonitor = value),
-      deferredSessionRecoverySweeps: () => daemon.deferredSessionRecoverySweeps,
+      deviceDisconnectMonitor: () => daemon.runtime.deviceDisconnectMonitor,
+      setDeviceDisconnectMonitor: (value) => (daemon.runtime.deviceDisconnectMonitor = value),
+      deferredSessionRecoverySweeps: () => daemon.runtime.deferredSessionRecoverySweeps,
       deviceDisconnectMisses: () => daemon.deviceLoss.misses,
       sessionBrokerConfigPath: () => daemon.sessionBrokerConfigPath,
-      managedExecutionReowner: () => daemon.managedExecutionReowner,
-      setManagedExecutionReowner: (value) => (daemon.managedExecutionReowner = value),
-      deviceDataStreamServer: () => daemon.deviceDataStreamServer,
-      setDeviceDataStreamServer: (value) => (daemon.deviceDataStreamServer = value),
+      managedExecutionReowner: () => daemon.runtime.managedExecutionReowner,
+      setManagedExecutionReowner: (value) => (daemon.runtime.managedExecutionReowner = value),
+      deviceDataStreamServer: () => daemon.runtime.deviceDataStreamServer,
+      setDeviceDataStreamServer: (value) => (daemon.runtime.deviceDataStreamServer = value),
       navigationGraphBridge: () => daemon.navigationGraphBridge,
-      unsubscribeAdbMissingDevice: () => daemon.unsubscribeAdbMissingDevice,
-      setUnsubscribeAdbMissingDevice: (value) => (daemon.unsubscribeAdbMissingDevice = value),
+      unsubscribeAdbMissingDevice: () => daemon.runtime.unsubscribeAdbMissingDevice,
+      setUnsubscribeAdbMissingDevice: (value) =>
+        (daemon.runtime.unsubscribeAdbMissingDevice = value),
       shutdownInProgress: () => daemon.shutdownState.inProgress,
       setShutdownInProgress: (value) => (daemon.shutdownState.inProgress = value),
-      recorderDeviceIncarnationListener: () => daemon.recorderDeviceIncarnationListener,
+      recorderDeviceIncarnationListener: () => daemon.runtime.recorderDeviceIncarnationListener,
       setRecorderDeviceIncarnationListener: (value) =>
-        (daemon.recorderDeviceIncarnationListener = value),
+        (daemon.runtime.recorderDeviceIncarnationListener = value),
       shutdownReleaseNotifications: () => daemon.shutdownState.releaseNotifications,
       setShutdownReleaseNotifications: (value) =>
         (daemon.shutdownState.releaseNotifications = value),
       shutdownFallbackReleaseNotifications: () => daemon.shutdownState.fallbackReleaseNotifications,
       setShutdownFallbackReleaseNotifications: (value) =>
         (daemon.shutdownState.fallbackReleaseNotifications = value),
-      backgroundRegistryUpgrade: () => daemon.backgroundRegistryUpgrade,
-      setBackgroundRegistryUpgrade: (value) => (daemon.backgroundRegistryUpgrade = value),
+      backgroundRegistryUpgrade: () => daemon.runtime.backgroundRegistryUpgrade,
+      setBackgroundRegistryUpgrade: (value) => (daemon.runtime.backgroundRegistryUpgrade = value),
     };
   }
   private enterDaemonProcess(...args: Parameters<DaemonStartup["enterDaemonProcess"]>) {

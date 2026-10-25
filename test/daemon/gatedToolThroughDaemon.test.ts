@@ -9,7 +9,7 @@ import { Duplex } from "node:stream";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import toolDefinitionsJson from "../../schemas/tool-definitions.json";
 import { DaemonClient } from "../../src/daemon/client";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
+import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import { DaemonMcpProxy, DaemonToolUnavailableError } from "../../src/daemon/daemonMcpProxy";
 import { DAEMON_TOOL_UNAVAILABLE_CODE } from "../../src/daemon/types";
 import { ToolUnavailableError } from "../../src/daemon/toolUnavailableError";

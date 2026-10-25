@@ -17,7 +17,7 @@ import {
   MIN_BINDING_IDLE_TIMEOUT_MS,
   BindingConfigError,
 } from "./provisionRequest";
-import { DEFAULT_SESSION_IDLE_TIMEOUT_MS } from "../../sessionLivenessWindows";
+import { DEFAULT_SESSION_IDLE_TIMEOUT_MS } from "../../wire/sessionLivenessWindows";
 import { MANAGED_EXECUTION_LIVENESS_POLICY } from "../../../models/managedExecutionLiveness";
 
 /**

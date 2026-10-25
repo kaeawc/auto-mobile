@@ -1,3 +1,6 @@
+import { fakeIosDeviceResourceHazards as hazards } from "../helpers/fakeIosDeviceResourceHazards";
+import { ActionableError } from "../../src/models/ActionableError";
+import { UnsafeDeviceResourceCombinationError } from "../../src/models/UnsafeDeviceResourceCombinationError";
 import { beforeEach, describe, expect, test } from "bun:test";
 import {
   DefaultDeviceResourceController,
@@ -35,6 +38,76 @@ describe("device resource control", () => {
       resources: { wallpaperRendering: "disabled" },
       deadlineMs: 10_000,
     };
+  });
+
+  test("refuses unsafe iOS combinations before any mutation", async () => {
+    controller = new DefaultDeviceResourceController(
+      simctl,
+      plist,
+      timer,
+      (path) => plist.readDirectory(path),
+      undefined,
+      { hazards },
+    );
+    request.resources = { calendarServices: "disabled", reminderServices: "disabled" };
+    await expect(controller.setResources(request)).rejects.toBeInstanceOf(
+      UnsafeDeviceResourceCombinationError,
+    );
+    expect(simctl.mutations()).toEqual([]);
+    simctl.calls = [];
+    request.device.platform = "android";
+    await expect(controller.setResources(request)).resolves.toMatchObject({ success: false });
+    expect(simctl.calls).toEqual([]);
+  });
+
+  test("real calaccessd hazard refuses before unrelated mutations but allows already disabled", async () => {
+    request.resources = { wallpaperRendering: "disabled", calendarServices: "disabled" };
+    await expect(controller.setResources(request)).rejects.toBeInstanceOf(
+      UnsafeDeviceResourceCombinationError,
+    );
+    expect(simctl.mutations()).toEqual([]);
+    const calendar = simctl.state("com.apple.calaccessd");
+    calendar.disabled = true;
+    calendar.loaded = false;
+    await expect(controller.setResources(request)).resolves.toMatchObject({ success: true });
+    expect(simctl.mutations().some((args) => args[4] === "system/com.apple.calaccessd")).toBe(
+      false,
+    );
+  });
+
+  test("absent hazardous service definitions do not refuse", async () => {
+    plist.missing.add("com.apple.calaccessd");
+    simctl.state("com.apple.calaccessd").loaded = false;
+    request.resources = { calendarServices: "disabled" };
+    await expect(controller.setResources(request)).resolves.toMatchObject({ success: false });
+    expect(simctl.mutations()).toEqual([]);
+  });
+
+  test("an enabled but unloaded hazard service is only disabled, never booted out", async () => {
+    simctl.state("com.apple.calaccessd").loaded = false;
+    request.resources = { calendarServices: "disabled" };
+    await expect(controller.setResources(request)).resolves.toMatchObject({ success: true });
+    expect(simctl.mutations()).toEqual([
+      ["spawn", udid, "launchctl", "disable", "system/com.apple.calaccessd"],
+    ]);
+  });
+
+  test("enabling the hazardous calendar service is never refused", async () => {
+    const calendar = simctl.state("com.apple.calaccessd");
+    calendar.disabled = true;
+    calendar.loaded = false;
+    request.resources = { calendarServices: "enabled" };
+    await expect(controller.setResources(request)).resolves.toMatchObject({ success: true });
+    expect(simctl.mutations().map((args) => args[3])).toEqual(["enable", "bootstrap"]);
+  });
+
+  test("an unreadable hazard service state is a retryable read failure, not an unsafe verdict", async () => {
+    simctl.failVerb = "print-disabled";
+    request.resources = { calendarServices: "disabled" };
+    const outcome = await controller.setResources(request).catch((error: unknown) => error);
+    expect(outcome).toBeInstanceOf(ActionableError);
+    expect(outcome).not.toBeInstanceOf(UnsafeDeviceResourceCombinationError);
+    expect(simctl.mutations()).toEqual([]);
   });
 
   test("disables only the wallpaper renderer and verifies that the job is absent", async () => {
@@ -257,29 +330,30 @@ describe("device resource control", () => {
     expect(simctl.calls.filter((args) => args[0] === "list")).toHaveLength(2);
   });
 
-  test.each(Object.keys(iosDeviceResourceCatalog) as (keyof typeof iosDeviceResourceCatalog)[])(
-    "%s disables and restores exactly its installed allowlist",
-    async (resource) => {
-      request.resources = { [resource]: "disabled" };
-      const disabled = await controller.setResources(request);
-      expect(disabled.success).toBe(true);
-      expect(
-        simctl
-          .mutations()
-          .filter((args) => args[3] === "disable")
-          .map((args) => args[4]!.slice(7)),
-      ).toEqual([...iosDeviceResourceCatalog[resource]]);
-      simctl.calls = [];
-      request.resources = { [resource]: "enabled" };
-      expect((await controller.setResources(request)).success).toBe(true);
-      expect(
-        simctl
-          .mutations()
-          .filter((args) => args[3] === "bootstrap")
-          .map((args) => basename(args[5]!, ".plist")),
-      ).toEqual([...iosDeviceResourceCatalog[resource]]);
-    },
-  );
+  test.each(
+    (Object.keys(iosDeviceResourceCatalog) as (keyof typeof iosDeviceResourceCatalog)[]).filter(
+      (resource) => resource !== "calendarServices",
+    ),
+  )("%s disables and restores exactly its installed allowlist", async (resource) => {
+    request.resources = { [resource]: "disabled" };
+    const disabled = await controller.setResources(request);
+    expect(disabled.success).toBe(true);
+    expect(
+      simctl
+        .mutations()
+        .filter((args) => args[3] === "disable")
+        .map((args) => args[4]!.slice(7)),
+    ).toEqual([...iosDeviceResourceCatalog[resource]]);
+    simctl.calls = [];
+    request.resources = { [resource]: "enabled" };
+    expect((await controller.setResources(request)).success).toBe(true);
+    expect(
+      simctl
+        .mutations()
+        .filter((args) => args[3] === "bootstrap")
+        .map((args) => basename(args[5]!, ".plist")),
+    ).toEqual([...iosDeviceResourceCatalog[resource]]);
+  });
 
   test("catalog groups never overlap or include shared app infrastructure", () => {
     const labels = Object.values(iosDeviceResourceCatalog).flat();
@@ -302,8 +376,6 @@ describe("device resource control", () => {
       "contactsd",
       "telephonyutilities.callservicesd",
       "identityservicesd",
-      "corespeechd",
-      "assistantd",
       "voiced",
       "voicebankingd",
       "naturallanguaged",

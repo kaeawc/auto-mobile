@@ -1,6 +1,6 @@
 import { cancellationHandlers, warmedTests } from "../helpers/interactionCancellation";
 import { expect, spyOn } from "bun:test";
-import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../../src/daemon/constants";
+import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../../src/daemon/wire/constants";
 import { WakeAndUnlock } from "../../src/features/action/WakeAndUnlock";
 import type { BootedDevice } from "../../src/models";
 import {

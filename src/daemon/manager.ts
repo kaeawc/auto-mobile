@@ -5,7 +5,7 @@ import type { DaemonManagerSeams, DaemonManagerTestInternals } from "./managerTe
 import { fileSystemExtractionCleaner, type ExtractionCleaner } from "./extractionCleaner";
 import { errorMessage } from "../utils/describeUnknownError";
 import { defaultDaemonExitRecordFileSystem } from "./daemonExitRecord";
-import { getCurrentBuildIdentity } from "./buildIdentity";
+import { getCurrentBuildIdentity } from "./wire/buildIdentity";
 import { existsSync, openSync, closeSync } from "node:fs";
 import { logger, resolveAutomobileLogSink } from "../utils/logger";
 import {
@@ -13,7 +13,7 @@ import {
   SOCKET_PATH,
   LOCK_FILE_PATH,
   DAEMON_SHUTDOWN_TIMEOUT_MS,
-} from "./constants";
+} from "./wire/constants";
 import { DaemonStatus, DaemonOptions } from "./types";
 import {
   DaemonClient,

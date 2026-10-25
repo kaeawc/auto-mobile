@@ -6,7 +6,7 @@ import { DaemonLaunch, type DaemonLaunchHost } from "../../../src/daemon/manager
 import { DaemonLauncher, type DaemonLaunchRequest } from "../../../src/daemon/DaemonLauncher";
 import { FakeDaemonProcess } from "../../fakes/FakeDaemonProcess";
 import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
-import { DAEMON_LAUNCH_NONCE_ENV } from "../../../src/daemon/constants";
+import { DAEMON_LAUNCH_NONCE_ENV } from "../../../src/daemon/wire/constants";
 import { describe, expect, test } from "bun:test";
 import {
   DaemonReadiness,

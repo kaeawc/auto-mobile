@@ -17,7 +17,7 @@ import {
   DEFAULT_PID_FILE_PATH,
   DEFAULT_SOCKET_PATH,
   READINESS_PROBE_MAX_ATTEMPTS,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import type { DaemonClientLike } from "../../src/daemon/client";
 import type {
   DaemonSocketReachabilityLike,

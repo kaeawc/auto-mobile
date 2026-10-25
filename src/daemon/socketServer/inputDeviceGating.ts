@@ -23,7 +23,7 @@ import {
   parseInputRequesterSessionUuid,
 } from "../inputDeviceOwnership";
 import { DISPATCH_HELD_INPUT_METHODS, type InputRouteMethod } from "../inputRoutes";
-import { MCP_QUEUE_TIMEOUT_ERROR_CODE, McpTimeoutError } from "../McpTimeoutError";
+import { MCP_QUEUE_TIMEOUT_ERROR_CODE, McpTimeoutError } from "../wire/McpTimeoutError";
 import {
   brokerConnectionControlRefusal,
   brokerConnectionHostMutationRefusal,

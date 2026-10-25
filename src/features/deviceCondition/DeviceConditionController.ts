@@ -28,7 +28,11 @@ export interface DeviceConditionInjector {
    * release/expiry/reset, or null when the value was a no-op (already in that
    * state). Throwing surfaces as an `unsupported` change with the error text.
    */
-  apply(value: string, signal?: AbortSignal): Promise<DeviceConditionApplyOutcome>;
+  apply(
+    value: string,
+    signal?: AbortSignal,
+    params?: Record<string, unknown>,
+  ): Promise<DeviceConditionApplyOutcome>;
   /** Read whether the key is back to its clean baseline; used to verify restore. */
   isClean(signal?: AbortSignal): Promise<boolean>;
 }
@@ -119,7 +123,7 @@ export class DeviceConditionController {
       };
     }
     try {
-      const outcome = await injector.apply(change.value, signal);
+      const outcome = await injector.apply(change.value, signal, change.params);
       if (outcome.reset) {
         this.resets.push({
           key: change.key,

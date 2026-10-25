@@ -64,6 +64,42 @@ describe("listDevices reports ownership allocation enforces", () => {
     expect(free.runtime.heldBy).toBeUndefined();
   });
 
+  test("a broker-bound device the pool does not list is still reported held (#15233)", async () => {
+    const registry = new FakeBindingRegistry(timer);
+    await assignBindingDevice(registry, "ios", "SIM-SLOT");
+    // The erase reset shut SIM-SLOT down, so the pool dropped it; the platform lists it booted again.
+    const pool = await makePool([ios("SIM-FREE")], {
+      bindingExclusion: new RegistryBindingExclusion(async () => registry, timer),
+    });
+    await pool.bindingStableIds("ios");
+
+    const [unpooled, free] = listDevicePayloads(
+      [ios("SIM-SLOT"), ios("SIM-FREE")],
+      pool,
+      new Map(),
+    );
+
+    expect(unpooled.runtime.heldBy).toBe("session_broker");
+    expect(free.runtime.heldBy).toBeUndefined();
+  });
+
+  test("a pooled entry that fails runtime identity lends no binding to the device on its id", async () => {
+    const registry = new FakeBindingRegistry(timer);
+    await assignBindingDevice(registry, "ios", "SIM-SLOT");
+    const pool = await makePool([ios("SIM-SLOT")], {
+      bindingExclusion: new RegistryBindingExclusion(async () => registry, timer),
+    });
+    await pool.bindingStableIds("ios");
+    // The id is still pooled, but the runtime now answering on it is not the pooled incarnation.
+    const stale = Object.assign(Object.create(pool) as DevicePool, {
+      describesPooledRuntime: () => false,
+    });
+
+    const [replacement] = listDevicePayloads([ios("SIM-SLOT")], stale, new Map());
+
+    expect(replacement.runtime.heldBy).toBeUndefined();
+  });
+
   test("a device another daemon drives is assigned/held", async () => {
     const ownership: ForeignDeviceOwnership = {
       async refresh() {},

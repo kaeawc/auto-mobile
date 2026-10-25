@@ -72,10 +72,15 @@ enum PrototypeBundleCapabilities {
                     .contains(where: { node[$0] != nil }) { need("pager_options") }
                 if node["indicator"] != nil { need("carousel") }
             }
+            let transitionType = node["transition"]?.objectFields?["type"]?.stringValue
+                ?? node["transition"]?.stringValue ?? ""
             if node["animate"] != nil || (type == "image" && node["zoomable"] != nil) ||
-                ["slideStart", "slideEnd", "scale"].contains(node["transition"]?.stringValue ?? "")
+                ["slideStart", "slideEnd", "scale"].contains(transitionType)
             {
                 names.insert("prototype_motion_v2")
+            }
+            if node["stagger"] != nil || node["transition"]?.objectFields != nil || transitionType == "blurReplace" {
+                names.insert("prototype_choreography_v1")
             }
             scanSlots(.object(node), names: &names)
             if case let .array(children) = node["children"] { pending += children }

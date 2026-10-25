@@ -879,7 +879,7 @@ final class PrototypeNode: Decodable {
         style = try container.decodeIfPresent(Style.self, forKey: .style)
         styleWhen = try container.decodeIfPresent([StyleWhen].self, forKey: .styleWhen)
         visibleWhen = try container.decodeIfPresent(Condition.self, forKey: .visibleWhen)
-        transition = try container.decodeIfPresent(String.self, forKey: .transition)
+        transition = try container.decodeIfPresent(PrototypeTransitionForm.self, forKey: .transition)?.type
         safeAreaPadding = try container.decodeIfPresent(SafeAreaPadding.self, forKey: .safeAreaPadding)
         anchor = try container.decodeIfPresent(PrototypeAnchor.self, forKey: .anchor)
         children = try container.decodeIfPresent([PrototypeNode].self, forKey: .children)

@@ -82,6 +82,13 @@ sealed class PrototypeCornerRadius {
   }
 }
 
+/**
+ * A node's `transition` (#15247): its [type] alone, or `{type, delayMs?}` where [delayMs] (0..600)
+ * is the wait before the enter starts.
+ */
+@Serializable(with = PrototypeTransitionSerializer::class)
+data class PrototypeTransition(val type: String, val delayMs: Int? = null)
+
 @Serializable(with = PrototypeDetentSerializer::class)
 sealed class PrototypeDetent {
   data object Half : PrototypeDetent()
@@ -200,6 +207,27 @@ object PrototypeModeValueSerializer :
           put("dark", value.dark)
         }
     }
+}
+
+object PrototypeTransitionSerializer :
+  PrototypeJsonValueSerializer<PrototypeTransition>("PrototypeTransition") {
+  override fun fromJson(value: JsonElement): PrototypeTransition {
+    if (value is JsonPrimitive && value.isString) return PrototypeTransition(value.content)
+    val data = value as? JsonObject ?: throw SerializationException("Expected transition")
+    val type =
+      (data["type"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+        ?: throw SerializationException("Expected transition type")
+    val delay = (data["delayMs"] as? JsonPrimitive)?.intOrNull
+    return PrototypeTransition(type, delay)
+  }
+
+  override fun toJson(value: PrototypeTransition): JsonElement =
+    if (value.delayMs == null) JsonPrimitive(value.type)
+    else
+      buildJsonObject {
+        put("type", value.type)
+        put("delayMs", value.delayMs)
+      }
 }
 
 /**

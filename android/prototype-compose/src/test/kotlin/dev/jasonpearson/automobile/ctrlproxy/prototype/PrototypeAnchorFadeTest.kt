@@ -24,7 +24,7 @@ class PrototypeAnchorFadeTest {
   private fun exitingParent(transition: String?): PrototypeNode =
     PrototypeBoxNode(
       testTag = "parent",
-      transition = transition,
+      transition = transition?.let(::PrototypeTransition),
       visibleWhen = PrototypeCondition("show", PrototypeScalar.BooleanValue(true)),
       children =
         listOf(

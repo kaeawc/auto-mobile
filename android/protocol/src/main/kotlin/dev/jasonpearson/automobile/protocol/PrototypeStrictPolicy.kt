@@ -289,6 +289,7 @@ internal object PrototypeStrictPolicy {
     private fun fieldFeatures(key: String, child: JsonElement, field: String) {
       fieldFeatures[key]?.let(::need)
       if (usesMotion(key, child)) result.add("prototype_motion_v2")
+      if (usesChoreography(key, child)) need("choreography")
       if (key == "data" && child is JsonPrimitive && child.isString) need("data_model")
       if (key in listOf("light", "dark") && field.isNotEmpty()) need("theme_modes")
     }
@@ -299,9 +300,16 @@ internal object PrototypeStrictPolicy {
         "scale",
         "rotation",
         "zoomable" -> true
-        "transition" ->
-          (child as? JsonPrimitive)?.content in listOf("slideStart", "slideEnd", "scale")
+        "transition" -> transitionType(child) in listOf("slideStart", "slideEnd", "scale")
         else -> false
       }
+
+    /** Transition delays, `blurReplace` and container `stagger` (#15247). */
+    private fun usesChoreography(key: String, child: JsonElement): Boolean =
+      key == "stagger" ||
+        (key == "transition" && (child is JsonObject || transitionType(child) == "blurReplace"))
+
+    private fun transitionType(child: JsonElement): String? =
+      ((child as? JsonObject)?.get("type") ?: child).let { (it as? JsonPrimitive)?.content }
   }
 }

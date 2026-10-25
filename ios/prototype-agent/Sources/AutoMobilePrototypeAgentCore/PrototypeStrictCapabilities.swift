@@ -91,11 +91,17 @@ enum PrototypeStrictCapabilities {
                 if key == "refresh" { need("refresh") }
                 if key == "linkify" { need("linkify") }
                 if key == "empty" || key == "shimmer" { need("loading_states") }
+                let transitionType = child.objectFields?["type"]?.stringValue ?? child.stringValue ?? ""
                 if ["animate", "scale", "rotation", "zoomable"]
                     .contains(key) ||
-                    (key == "transition" && ["slideStart", "slideEnd", "scale"].contains(child.stringValue ?? ""))
+                    (key == "transition" && ["slideStart", "slideEnd", "scale"].contains(transitionType))
                 {
                     result.insert("prototype_motion_v2")
+                }
+                if key == "stagger" ||
+                    (key == "transition" && (child.objectFields != nil || transitionType == "blurReplace"))
+                {
+                    need("choreography")
                 }
                 if key == "data", child.stringValue != nil { need("data_model") }
                 if key == "light" || key == "dark", !field.isEmpty { need("theme_modes") }

@@ -86,7 +86,7 @@ private fun collectRetentionEntries(
 
 private fun retentionCandidate(node: PrototypeRenderNode, parent: PrototypeRenderNode?): Boolean =
   node.source?.visibleWhen != null &&
-    node.source.transition in RETENTION_TRANSITIONS &&
+    node.source.transition?.type in RETENTION_TRANSITIONS &&
     retentionNeutralParent(parent) &&
     node.style.source.weight == null &&
     !isLayeredPrototypeAnchor(node)

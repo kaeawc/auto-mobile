@@ -21,6 +21,37 @@ enum PrototypeStrictSemantics {
         }
     }
 
+    /// No child of a staggered container waits longer than this in all (#15247).
+    static let maxChoreographyDelayMs = 600.0
+
+    /// How many steps after the first the child at [index] of [count] waits, by stagger [order].
+    static func staggerRank(_ index: Int, of count: Int, order: String?) -> Int {
+        switch order {
+        case "reverse": count - 1 - index
+        case "center": abs(2 * index - (count - 1)) / 2
+        default: index
+        }
+    }
+
+    /// The longest wait of a container's `visibleWhen` children: stagger rank times `ms` plus the
+    /// child's own `transition.delayMs`. A literal `repeat` multiplies the children; a data-bound
+    /// one has no static count, so the device clamps it instead.
+    static func longestStaggerDelayMs(_ fields: [String: JSONValue], stagger: [String: JSONValue]) -> Double {
+        guard case let .array(all)? = fields["children"] else { return 0 }
+        let children = all.filter { $0.objectFields?["visibleWhen"] != nil }
+        guard !children.isEmpty else { return 0 }
+        let instances: Int
+        if case let .array(items)? = fields["repeat"]?.objectFields?["items"] { instances = items.count } else { instances = 1 }
+        let count = children.count * instances
+        let ms = stagger["ms"]?.numberValue ?? 0
+        let order = stagger["order"]?.stringValue
+        return (0 ..< count).map { index -> Double in
+            let own = children[index % children.count].objectFields?["transition"]?.objectFields?["delayMs"]?
+                .numberValue ?? 0
+            return Double(staggerRank(index, of: count, order: order)) * ms + own
+        }.max() ?? 0
+    }
+
     static func storage(_ fields: [String: JSONValue]) throws {
         guard let storage = fields["storage"]?.objectFields else { return }
         var pointers: [String] = []
@@ -73,6 +104,14 @@ enum PrototypeStrictSemantics {
             if type == "image", fields["zoomable"] != nil,
                fields["onDoubleTap"] !=
                nil { throw PrototypeContractValidator.invalid("\(path).zoomable", "Zoomable claims double tap") }
+            if let stagger = fields["stagger"]?.objectFields,
+               longestStaggerDelayMs(fields, stagger: stagger) > maxChoreographyDelayMs
+            {
+                throw PrototypeContractValidator.invalid(
+                    "\(path).stagger",
+                    "Stagger and transition delays add up to more than \(Int(maxChoreographyDelayMs)) ms"
+                )
+            }
             if type == "chart" { try chart(fields, path: path, data: data) }
             if type == "scroll", fields["axis"] == .string("horizontal"),
                let key = ["reverse", "stickToEnd", "atEndKey", "onStartReached"].first(where: { fields[$0] != nil })

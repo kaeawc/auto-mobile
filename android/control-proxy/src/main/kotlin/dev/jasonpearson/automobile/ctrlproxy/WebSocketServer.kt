@@ -348,6 +348,8 @@ class WebSocketServer(
     add("prototype_loading_states_v1")
     // Node animate, style scale/rotation, slideStart/slideEnd/scale transitions, zoomable images.
     add("prototype_motion_v2")
+    // Transition delayMs, container stagger and the blurReplace transition (#15247).
+    add("prototype_choreography_v1")
     // Line, area, bar and ring charts over /data arrays (#14209).
     add("prototype_chart_v1")
     // Text nodes linkify mentions, hashtags and URLs into links running linkify.onTap (#14233).

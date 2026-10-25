@@ -1,5 +1,22 @@
 import Foundation
 
+/// A node's `transition` as authored: its type alone, or `{type, delayMs?}` (#15247). The agent
+/// keeps the type; delays, `stagger` and `blurReplace` need `prototype_choreography_v1`, which iOS
+/// does not advertise yet, so the host refuses them before they arrive.
+struct PrototypeTransitionForm: Decodable {
+    let type: String
+
+    private enum CodingKeys: String, CodingKey { case type }
+
+    init(from decoder: Decoder) throws {
+        if let name = try? decoder.singleValueContainer().decode(String.self) {
+            type = name
+        } else {
+            type = try decoder.container(keyedBy: CodingKeys.self).decode(String.self, forKey: .type)
+        }
+    }
+}
+
 /// How a `visibleWhen` node enters and leaves, after the spec's `motion`, the node's `transition`
 /// and the system's reduce-motion setting are applied.
 enum PrototypeVisibilityTransition: Equatable {

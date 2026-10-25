@@ -58,7 +58,8 @@ async function harness() {
     streamPushes.push(data.hierarchy?.text ?? "");
   };
   client["startScreenshotBackoff"] = () => {};
-  const receive = (message: object) => client["handleWebSocketMessage"](JSON.stringify(message));
+  const receive = (message: object) =>
+    client.testHooks.handleWebSocketMessage(JSON.stringify(message));
   const advertise = (commands: string[]) =>
     receive({ type: "connected", supportedCommands: commands });
   const waitForHierarchy = (requestId: string) =>
@@ -137,7 +138,7 @@ describe("Android request ID echo", () => {
     await h.pushHierarchy("unsolicited");
     h.timer.advanceTime(50);
     await Promise.resolve();
-    expect(h.client["cachedHierarchy"]?.hierarchy.hierarchy.text).toBe("unsolicited");
+    expect(h.client.testHooks.cachedHierarchy()?.hierarchy.hierarchy.text).toBe("unsolicited");
     expect(h.streamPushes).toEqual(["unsolicited"]);
     expect(h.client["hierarchy"]["pendingHierarchyRejectors"].has("requested")).toBe(true);
     expect(settled).toBe(false);
@@ -230,7 +231,7 @@ describe("Android request ID echo", () => {
     const idLess = [...ANDROID_ID_LESS_MESSAGE_TYPES];
     expect(correlated.filter((type) => ANDROID_ID_LESS_MESSAGE_TYPES.has(type))).toEqual([]);
     expect([...correlated, ...idLess].sort()).toEqual(
-      Object.keys(h.client["webSocketMessageHandlers"]).sort(),
+      Object.keys(h.client.testHooks.webSocketMessageHandlers()).sort(),
     );
     expect(ANDROID_ID_LESS_MESSAGE_TYPES.has("hierarchy_update")).toBe(true);
     expect(ANDROID_ID_LESS_MESSAGE_TYPES.has("error")).toBe(true);

@@ -11,7 +11,7 @@ import type {
 } from "./types";
 import { GESTURE_THRESHOLDS } from "./types";
 import { formsDoubleTap, hasUnknownAxes } from "./gesturePairing";
-import { exportLossWarning } from "./penExportWarnings";
+import { noteExportLoss } from "./penExportWarnings";
 import { AndroidCtrlProxyClient, type AndroidCtrlProxy } from "../../observe/android";
 import { defaultAdbClientFactory } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import { discoverInputNodes } from "./InputNodeDiscovery";
@@ -339,6 +339,11 @@ export class DualTrackRecorder {
       return;
     }
 
+    if (gesture.type === "hover") {
+      noteExportLoss(this.exportWarnings, gesture, null);
+      return;
+    }
+
     if (gesture.type === "pressButton") {
       this.enqueueStep({ resolved: true, step: buildPressButtonStep(gesture) });
       return;
@@ -386,7 +391,7 @@ export class DualTrackRecorder {
     const step = priorTap?.step;
     if (step && ["tapOn", "tapAt"].includes(step.tool) && step.params.action === "tap") {
       step.params.action = "doubleTap";
-      this.noteExportLoss(gesture, step);
+      noteExportLoss(this.exportWarnings, gesture, step);
       return true;
     }
     if (priorTap && !priorTap.resolved) {
@@ -404,14 +409,6 @@ export class DualTrackRecorder {
       return true;
     }
     return false;
-  }
-
-  /** Record, for the stop result, a pen gesture the plan cannot reproduce. */
-  private noteExportLoss(gesture: GestureEvent, step: PlanStep | null | undefined): void {
-    const warning = exportLossWarning(gesture, step);
-    if (warning) {
-      this.exportWarnings.add(warning);
-    }
   }
 
   private enqueueStep(entry: OrderedStep): void {
@@ -482,7 +479,7 @@ export class DualTrackRecorder {
 
     const event = this.selectInteraction(pending, interaction);
     const step = buildMergedStep(pending.gesture, event);
-    this.noteExportLoss(pending.gesture, step);
+    noteExportLoss(this.exportWarnings, pending.gesture, step);
     pending.step = step ?? undefined;
     this.trackGeometrySpan(pending.gesture, step);
     this.flushResolvedSteps();

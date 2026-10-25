@@ -5,6 +5,7 @@ import type {
   PointerToolType,
   StylusButton,
 } from "./types";
+import { PenHoverTracker } from "./PenHoverTracker";
 
 // Mapping from Linux key codes to AutoMobile button names
 const KEY_TO_BUTTON: Record<string, GestureEvent["button"]> = {
@@ -46,8 +47,21 @@ export class TouchFrameReconstructor {
   /** Pen tool in range (BTN_TOOL_PEN / BTN_TOOL_RUBBER); node-wide, applied to active slots. */
   private nodeTool: PointerToolType | undefined;
   private readonly heldButtons = new Set<StylusButton>();
+  private readonly hover = new PenHoverTracker();
 
-  constructor(private readonly options: { singleTouch?: boolean } = {}) {}
+  constructor(
+    private readonly options: {
+      singleTouch?: boolean;
+      /** Receives a `hover` event for each pen episode that never touched down. */
+      onHover?: (event: GestureEvent) => void;
+    } = {},
+  ) {}
+
+  private emitHover(event: GestureEvent | null): void {
+    if (event) {
+      this.options.onHover?.(event);
+    }
+  }
 
   /**
    * Feed one text line from `getevent -lt` stdout.
@@ -78,7 +92,7 @@ export class TouchFrameReconstructor {
       if (button) {
         return { type: "pressButton", arrivedAt, button };
       }
-      this.handleKeyEvent(evCode, evValue === "DOWN" || evValue === "REPEAT");
+      this.handleKeyEvent(evCode, evValue === "DOWN" || evValue === "REPEAT", arrivedAt);
     }
 
     return null;
@@ -94,12 +108,7 @@ export class TouchFrameReconstructor {
 
       case "ABS_MT_TRACKING_ID":
         if (evValue === "ffffffff") {
-          // Finger lifted — mark slot as released
-          const slot = this.slots.get(this.currentSlot);
-          if (slot && slot.trackingId >= 0) {
-            this.releasedSlots.add(slot.slotId);
-            slot.trackingId = -1;
-          }
+          this.releaseCurrentSlot(arrivedAt);
         } else {
           const slot = this.getOrCreateSlot();
           if (slot.trackingId >= 0 && slot.trackingId !== value) {
@@ -107,6 +116,8 @@ export class TouchFrameReconstructor {
             // intermediate -1 (#13129). The old contact ended: report it released now,
             // before the slot is reused, so the new id starts a fresh contact.
             const ended = this.endedByReplacement(slot, arrivedAt);
+            // The old id's episode ends like a release, so a hover that never touched is reported.
+            this.emitHover(this.hover.slotReleased(slot.slotId, slot.toolType, arrivedAt));
             slot.trackingId = value;
             return ended;
           }
@@ -136,6 +147,31 @@ export class TouchFrameReconstructor {
         break;
     }
     return null;
+  }
+
+  /** The contact in the current slot ended (tracking id -1); a pen that only hovered is reported. */
+  private releaseCurrentSlot(arrivedAt: number): void {
+    const slot = this.slots.get(this.currentSlot);
+    if (!slot) {
+      return;
+    }
+    if (slot.trackingId >= 0) {
+      this.releasedSlots.add(slot.slotId);
+      slot.trackingId = -1;
+    }
+    this.emitHover(this.hover.slotReleased(slot.slotId, slot.toolType, arrivedAt));
+  }
+
+  /** Tells the hover tracker whether a tracked multitouch pen slot is hovering or touching. */
+  private observePenSlot(slot: TouchSlot): void {
+    if (this.options.singleTouch || slot.toolType === undefined || slot.trackingId < 0) {
+      return;
+    }
+    if (this.isMtPenHovering(slot)) {
+      this.hover.slotHovering(slot.slotId);
+    } else {
+      this.hover.slotTouching(slot.slotId);
+    }
   }
 
   /** Synthetic frame ending `replaced` while every other active slot stays down. */
@@ -200,13 +236,13 @@ export class TouchFrameReconstructor {
     }
   }
 
-  private handleKeyEvent(evCode: string, pressed: boolean): void {
+  private handleKeyEvent(evCode: string, pressed: boolean, arrivedAt: number): void {
     switch (evCode) {
       case "BTN_TOOL_PEN":
-        this.setNodeTool("stylus", pressed);
+        this.setNodeTool("stylus", pressed, arrivedAt);
         break;
       case "BTN_TOOL_RUBBER":
-        this.setNodeTool("eraser", pressed);
+        this.setNodeTool("eraser", pressed, arrivedAt);
         break;
       case "BTN_STYLUS":
         this.setButton("stylusPrimary", pressed);
@@ -217,6 +253,9 @@ export class TouchFrameReconstructor {
       case "BTN_TOUCH":
         if (this.options.singleTouch) {
           this.handleSingleTouchContact(pressed);
+          if (pressed) {
+            this.hover.penTouched();
+          }
         }
         break;
       default:
@@ -224,16 +263,23 @@ export class TouchFrameReconstructor {
     }
   }
 
-  private setNodeTool(tool: PointerToolType, pressed: boolean): void {
+  private setNodeTool(tool: PointerToolType, pressed: boolean, arrivedAt: number): void {
     if (pressed) {
       this.nodeTool = tool;
-    } else if (this.nodeTool === tool || this.nodeTool === undefined) {
-      // undefined: the tool key went down before recording started and was never replayed.
-      this.nodeTool = undefined;
-      // A pen leaving range ends its contact even if the driver sent no BTN_TOUCH UP.
       if (this.options.singleTouch) {
-        this.handleSingleTouchContact(false);
+        this.hover.penEntered();
       }
+      return;
+    }
+    if (this.nodeTool !== tool && this.nodeTool !== undefined) {
+      return;
+    }
+    // undefined: the tool key went down before recording started and was never replayed.
+    this.nodeTool = undefined;
+    // A pen leaving range ends its contact even if the driver sent no BTN_TOUCH UP.
+    if (this.options.singleTouch) {
+      this.handleSingleTouchContact(false);
+      this.emitHover(this.hover.penLeft(tool, arrivedAt));
     }
   }
 
@@ -276,6 +322,7 @@ export class TouchFrameReconstructor {
 
     const touching = new Set<number>();
     for (const [, slot] of this.slots) {
+      this.observePenSlot(slot);
       if (slot.trackingId >= 0 && !this.isMtPenHovering(slot)) {
         touching.add(slot.slotId);
         activeSlots.push(this.withPenState({ ...slot }));

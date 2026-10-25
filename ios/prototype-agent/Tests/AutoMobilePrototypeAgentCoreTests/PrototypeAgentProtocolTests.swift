@@ -8,6 +8,44 @@ private func line(_ object: [String: Any]) throws -> Data {
     try JSONSerialization.data(withJSONObject: object)
 }
 
+private struct FakeOSVersion: OSVersionProvider {
+    let majorVersion: Int
+}
+
+final class PrototypeCapabilityMinimumOSTests: XCTestCase {
+    private let table = [
+        PrototypeAgentProtocol.chartCapability: 18,
+        PrototypeAgentProtocol.storageCapability: 26,
+    ]
+
+    private func advertised(_ major: Int) -> Set<String> {
+        Set(PrototypeAgentProtocol.advertisedCapabilities(os: FakeOSVersion(majorVersion: major), minimumOS: table))
+    }
+
+    func testEachOSTierAdvertisesExactlyItsCapabilities() {
+        let all = Set(PrototypeAgentProtocol.capabilities)
+        let chart = PrototypeAgentProtocol.chartCapability
+        let storage = PrototypeAgentProtocol.storageCapability
+        XCTAssertEqual(advertised(17), all.subtracting([chart, storage]))
+        XCTAssertEqual(advertised(18), all.subtracting([storage]))
+        XCTAssertEqual(advertised(26), all)
+    }
+
+    func testPreservesTheDeclaredOrder() {
+        let list = PrototypeAgentProtocol.advertisedCapabilities(os: FakeOSVersion(majorVersion: 17), minimumOS: table)
+        XCTAssertEqual(list, PrototypeAgentProtocol.capabilities.filter { table[$0] == nil })
+    }
+
+    func testRealTableOnlyNamesAdvertisedCapabilitiesAndTheFloorAdvertisesEverythingElse() {
+        for name in PrototypeCapabilityMinimumOS.table.keys {
+            XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains(name), name)
+        }
+        let floor = PrototypeAgentProtocol.advertisedCapabilities(os: FakeOSVersion(majorVersion: 17))
+        let gated = PrototypeCapabilityMinimumOS.table.filter { $0.value > 17 }.keys
+        XCTAssertEqual(Set(floor), Set(PrototypeAgentProtocol.capabilities).subtracting(gated))
+    }
+}
+
 final class PrototypeAgentConfigurationTests: XCTestCase {
     func testRichTextCapabilityIsAdvertised() {
         XCTAssertEqual(PrototypeAgentProtocol.richTextCapability, "prototype_rich_text_v1")

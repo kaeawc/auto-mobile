@@ -179,7 +179,7 @@ actor PrototypeTransport {
 
     init(
         token: String,
-        capabilities: [String] = PrototypeAgentProtocol.capabilities,
+        capabilities: [String] = PrototypeAgentProtocol.advertisedCapabilities(),
         maxAuthenticatedClients: Int? = nil,
         sleep: @escaping Sleep = { seconds in try await Task.sleep(for: .seconds(seconds)) }
     ) {

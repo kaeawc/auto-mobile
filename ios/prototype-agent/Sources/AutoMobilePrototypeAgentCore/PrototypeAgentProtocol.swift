@@ -280,7 +280,7 @@ struct PrototypeConnectionGate {
     private let capabilities: [String]
     private(set) var state: State = .awaitingHello
 
-    init(token: String, capabilities: [String] = PrototypeAgentProtocol.capabilities) {
+    init(token: String, capabilities: [String] = PrototypeAgentProtocol.advertisedCapabilities()) {
         self.token = token
         self.capabilities = capabilities
     }

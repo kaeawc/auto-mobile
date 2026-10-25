@@ -34,6 +34,8 @@ export interface DeviceServiceClientConnectionTestHooks extends DeviceServiceCli
   readonly requestManager: RequestManager;
   /** Feed one inbound frame through the client's own message handler, as the socket would. */
   deliverMessage(data: WebSocket.Data): void | Promise<void>;
+  /** Polls until the handshake completes or its budget (or `signal`) ends. */
+  waitForHandshake(timeoutMs?: number, signal?: AbortSignal): Promise<void>;
 }
 
 /** Builds the hooks over a client's socket slot and handlers; `socket` reads and writes live state. */
@@ -42,6 +44,7 @@ export function createConnectionTestHooks(client: {
   setSocket(socket: CtrlSocket | null): void;
   requestManager: RequestManager;
   deliverMessage(data: WebSocket.Data): void | Promise<void>;
+  waitForHandshake(timeoutMs?: number, signal?: AbortSignal): Promise<void>;
   readState(): DeviceServiceClientConnectionState;
   writeState(patch: Partial<WritableConnectionState>): void;
 }): DeviceServiceClientConnectionTestHooks {
@@ -54,6 +57,7 @@ export function createConnectionTestHooks(client: {
     },
     requestManager: client.requestManager,
     deliverMessage: (data) => client.deliverMessage(data),
+    waitForHandshake: (timeoutMs, signal) => client.waitForHandshake(timeoutMs, signal),
     get autoReconnectEnabled() {
       return client.readState().autoReconnectEnabled;
     },

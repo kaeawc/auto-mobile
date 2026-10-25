@@ -17,6 +17,7 @@ export function androidDeviceTraits(
     manufacturer: "Google",
     brand: "google",
     skin: null,
+    formFactor: null,
     ...overrides,
   };
 }

@@ -76,6 +76,28 @@ final class PrototypeMotionTests: XCTestCase {
         XCTAssertEqual(decoded.root.transition, "slide")
     }
 
+    func testTransitionDecodesFromEitherForm() throws {
+        func transition(_ authored: String) throws -> String? {
+            try spec("""
+            {"id":"a","window":{"placement":{"type":"fullscreen"}},
+             "root":{"type":"text","text":"x","transition":\(authored)}}
+            """).root.transition
+        }
+        XCTAssertEqual(try transition(#""fade""#), "fade")
+        XCTAssertEqual(try transition(#"{"type":"blurReplace","delayMs":90}"#), "blurReplace")
+        XCTAssertEqual(try transition(#"{"type":"scale"}"#), "scale")
+    }
+
+    func testStaggerRanksFollowTheOrder() {
+        func ranks(_ order: String?, _ count: Int) -> [Int] {
+            (0 ..< count).map { PrototypeStrictSemantics.staggerRank($0, of: count, order: order) }
+        }
+        XCTAssertEqual(ranks(nil, 4), [0, 1, 2, 3])
+        XCTAssertEqual(ranks("reverse", 4), [3, 2, 1, 0])
+        XCTAssertEqual(ranks("center", 4), [1, 0, 0, 1])
+        XCTAssertEqual(ranks("center", 5), [2, 1, 0, 1, 2])
+    }
+
     // MARK: Snackbar timeout
 
     private func snackbar(durationMs: Int?, open: Bool = true) throws -> (PrototypeSession, PrototypeNode) {

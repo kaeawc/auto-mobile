@@ -58,6 +58,7 @@ class CommandAdvertisementTest {
       "prototype_rich_text_v1",
       "prototype_loading_states_v1",
       "prototype_motion_v2",
+      "prototype_choreography_v1",
       "prototype_chart_v1",
       "prototype_linkify_v1",
       "prototype_chat_scroll_v1",

@@ -453,7 +453,7 @@ private fun RenderPrototypeNode(
   }
   if (
     node.source?.visibleWhen != null &&
-      (node.source.transition == "fade" || node.source.transition == "none")
+      (node.source.transition?.type == "fade" || node.source.transition?.type == "none")
   ) {
     RenderPrototypeVisibility(node, interact, parentModifier, weightAxis, windowRoot)
     return
@@ -464,11 +464,21 @@ private fun RenderPrototypeNode(
     AnimatedVisibility(
       visible = node.visible,
       modifier = parentModifier,
-      enter = prototypeEnterTransition(node.source.transition, prototypeRtl()),
-      exit = prototypeExitTransition(node.source.transition, prototypeRtl()),
+      enter =
+        prototypeEnterTransition(node.source.transition?.type, prototypeRtl(), node.enterDelayMs),
+      exit = prototypeExitTransition(node.source.transition?.type, prototypeRtl()),
     ) {
-      ProvideAnchorFade(none = node.source.transition == "none") {
-        RenderPrototypeNodeContent(node, interact, weightAxis = weightAxis, windowRoot = windowRoot)
+      ProvideAnchorFade(
+        none = node.source.transition?.type == "none",
+        enterDelayMs = node.enterDelayMs,
+      ) {
+        RenderPrototypeNodeContent(
+          node,
+          interact,
+          prototypeBlurReplace(node.source.transition?.type, node.enterDelayMs),
+          weightAxis,
+          windowRoot,
+        )
       }
     }
   } else if (node.visible) {
@@ -499,7 +509,7 @@ private fun RenderPrototypeVisibility(
   if (node.identity in LocalPrototypeRetainedSubtrees.current) {
     PrototypeRetainedVisibility(
       node.visible,
-      fade = LocalPrototypeMotion.current && node.source?.transition == "fade",
+      fade = LocalPrototypeMotion.current && node.source?.transition?.type == "fade",
       history = history,
       modifier = parentModifier,
     ) {
@@ -515,11 +525,24 @@ private fun RenderPrototypeVisibility(
       AnimatedVisibility(
         visible = node.visible,
         modifier = parentModifier,
-        enter = prototypeEnterTransition(node.source?.transition, prototypeRtl()),
-        exit = prototypeExitTransition(node.source?.transition, prototypeRtl()),
+        enter =
+          prototypeEnterTransition(
+            node.source?.transition?.type,
+            prototypeRtl(),
+            node.enterDelayMs,
+          ),
+        exit = prototypeExitTransition(node.source?.transition?.type, prototypeRtl()),
       ) {
-        ProvideAnchorFade(none = node.source?.transition == "none") {
-          content(node, Modifier, weightAxis, windowRoot)
+        ProvideAnchorFade(
+          none = node.source?.transition?.type == "none",
+          enterDelayMs = node.enterDelayMs,
+        ) {
+          content(
+            node,
+            prototypeBlurReplace(node.source?.transition?.type, node.enterDelayMs),
+            weightAxis,
+            windowRoot,
+          )
         }
       }
     } else if (node.visible) {

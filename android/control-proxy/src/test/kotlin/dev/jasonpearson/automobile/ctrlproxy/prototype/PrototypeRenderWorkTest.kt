@@ -366,7 +366,7 @@ class PrototypeRenderWorkTest {
             PrototypeColumnNode(
               id = "X",
               visibleWhen = shownCondition,
-              transition = transition,
+              transition = transition?.let(::PrototypeTransition),
               children = List(size) { PrototypeTextNode(text = "child $it", testTag = "child$it") },
             ),
           ),
@@ -591,7 +591,7 @@ class PrototypeRenderWorkTest {
           listOf(
             PrototypeBoxNode(
               visibleWhen = shownCondition,
-              transition = transition,
+              transition = PrototypeTransition(transition),
               children =
                 listOf(
                   PrototypeScrollNode(
@@ -756,7 +756,7 @@ class PrototypeRenderWorkTest {
               listOf(
                 PrototypeBoxNode(
                   visibleWhen = shownCondition,
-                  transition = "none",
+                  transition = PrototypeTransition("none"),
                   children = listOf(scroll),
                 ),
               ),
@@ -802,7 +802,7 @@ class PrototypeRenderWorkTest {
               listOf(
                 PrototypeBoxNode(
                   visibleWhen = shownCondition,
-                  transition = "none",
+                  transition = PrototypeTransition("none"),
                   children =
                     listOf(
                       PrototypeColumnNode(

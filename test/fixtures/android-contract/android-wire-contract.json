@@ -4694,6 +4694,7 @@
     "PrototypePagerPageSize": [],
     "PrototypeRepeat": [],
     "PrototypeScalar": [],
+    "PrototypeTransition": [],
     "PrototypeValidityKeys": [],
     "appendData": [
       {
@@ -4754,7 +4755,7 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
         "nullable": true,
         "hasDefault": true
       },
@@ -4834,7 +4835,7 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
         "nullable": true,
         "hasDefault": true
       },
@@ -4926,7 +4927,7 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
         "nullable": true,
         "hasDefault": true
       },
@@ -5068,7 +5069,7 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
         "nullable": true,
         "hasDefault": true
       },
@@ -5105,6 +5106,12 @@
       {
         "name": "repeat",
         "type": "object:PrototypeRepeat",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "stagger",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeStagger",
         "nullable": true,
         "hasDefault": true
       }
@@ -5154,7 +5161,7 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
         "nullable": true,
         "hasDefault": true
       },
@@ -5264,7 +5271,7 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
         "nullable": true,
         "hasDefault": true
       },
@@ -5350,7 +5357,7 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
         "nullable": true,
         "hasDefault": true
       },
@@ -5454,7 +5461,7 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
         "nullable": true,
         "hasDefault": true
       },
@@ -5558,7 +5565,7 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
         "nullable": true,
         "hasDefault": true
       },
@@ -5662,7 +5669,7 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
         "nullable": true,
         "hasDefault": true
       },
@@ -5772,7 +5779,7 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
         "nullable": true,
         "hasDefault": true
       },
@@ -5809,6 +5816,12 @@
       {
         "name": "repeat",
         "type": "object:PrototypeRepeat",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "stagger",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeStagger",
         "nullable": true,
         "hasDefault": true
       }
@@ -5858,7 +5871,7 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
         "nullable": true,
         "hasDefault": true
       },
@@ -7631,6 +7644,20 @@
         "hasDefault": true
       }
     ],
+    "dev.jasonpearson.automobile.protocol.PrototypeStagger": [
+      {
+        "name": "ms",
+        "type": "int",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "order",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
     "dev.jasonpearson.automobile.protocol.PrototypeStatusEntry": [
       {
         "name": "id",
@@ -8412,7 +8439,7 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
         "nullable": true,
         "hasDefault": true
       },
@@ -8528,7 +8555,7 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
         "nullable": true,
         "hasDefault": true
       },
@@ -8654,7 +8681,7 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
         "nullable": true,
         "hasDefault": true
       },
@@ -8766,7 +8793,7 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
         "nullable": true,
         "hasDefault": true
       },
@@ -8866,7 +8893,7 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
         "nullable": true,
         "hasDefault": true
       },
@@ -8970,7 +8997,7 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
         "nullable": true,
         "hasDefault": true
       },
@@ -9056,7 +9083,7 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
         "nullable": true,
         "hasDefault": true
       },
@@ -9160,7 +9187,7 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
         "nullable": true,
         "hasDefault": true
       },
@@ -9280,7 +9307,7 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
         "nullable": true,
         "hasDefault": true
       },
@@ -9390,7 +9417,7 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
         "nullable": true,
         "hasDefault": true
       },
@@ -9476,7 +9503,7 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
         "nullable": true,
         "hasDefault": true
       },
@@ -9646,7 +9673,7 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
         "nullable": true,
         "hasDefault": true
       },
@@ -9760,7 +9787,7 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
         "nullable": true,
         "hasDefault": true
       },
@@ -9966,7 +9993,7 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
         "nullable": true,
         "hasDefault": true
       },
@@ -10003,6 +10030,12 @@
       {
         "name": "repeat",
         "type": "object:PrototypeRepeat",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "stagger",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeStagger",
         "nullable": true,
         "hasDefault": true
       },
@@ -10058,7 +10091,7 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
         "nullable": true,
         "hasDefault": true
       },
@@ -10194,7 +10227,7 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
         "nullable": true,
         "hasDefault": true
       },
@@ -10316,7 +10349,7 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
         "nullable": true,
         "hasDefault": true
       },
@@ -10402,7 +10435,7 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
         "nullable": true,
         "hasDefault": true
       },
@@ -10550,7 +10583,7 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
         "nullable": true,
         "hasDefault": true
       },
@@ -10672,7 +10705,7 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
         "nullable": true,
         "hasDefault": true
       },
@@ -10770,7 +10803,7 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
         "nullable": true,
         "hasDefault": true
       },
@@ -10844,7 +10877,7 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
         "nullable": true,
         "hasDefault": true
       },
@@ -10938,7 +10971,7 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
         "nullable": true,
         "hasDefault": true
       },
@@ -11048,7 +11081,7 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
         "nullable": true,
         "hasDefault": true
       },
@@ -11140,7 +11173,7 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
         "nullable": true,
         "hasDefault": true
       },
@@ -11322,7 +11355,7 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
         "nullable": true,
         "hasDefault": true
       },
@@ -11440,7 +11473,7 @@
       },
       {
         "name": "transition",
-        "type": "string",
+        "type": "object:PrototypeTransition",
         "nullable": true,
         "hasDefault": true
       },

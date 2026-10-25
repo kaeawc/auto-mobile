@@ -60,6 +60,7 @@ const fixtures: Record<string, Node> = {
   },
   prototype_loading_states_v1: { type: "box", style: { shimmer: true }, children: [label] },
   prototype_motion_v2: { ...label, animate: { durationMs: 300 } },
+  prototype_choreography_v1: { ...label, transition: { type: "fade", delayMs: 100 } },
   prototype_chart_v1: {
     type: "chart",
     variant: "line",

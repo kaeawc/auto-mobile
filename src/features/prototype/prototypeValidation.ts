@@ -10,6 +10,7 @@ import { isPrototypeDataPointer, PrototypeRepeatData } from "./prototypeData";
 import { prototypeDataActionsError } from "./prototypeDataActions";
 import { prototypeStorageError } from "./prototypeStorage";
 import { prototypeLoadingStatesError } from "./prototypeLoadingStates";
+import { prototypeChoreographyError } from "./prototypeChoreography";
 import { prototypeMotionV2Error } from "./prototypeMotionV2";
 import { prototypeChartError } from "./prototypeChart";
 import { prototypeRequestsError } from "./prototypeRequest";
@@ -783,6 +784,7 @@ function behaviourErrors(
     prototypeRequestsError(context.actions) ??
     prototypeLoadingStatesError(context.nodes) ??
     prototypeMotionV2Error(context.nodes) ??
+    prototypeChoreographyError(context.nodes) ??
     prototypePlatformError(value, context.actions, platformArgumentError) ??
     prototypeChartError(context.nodes, data.data) ??
     prototypeLinkifyError(value) ??

@@ -14,8 +14,15 @@ final class PrototypeSizeBoundsTests: XCTestCase {
         ) as? [String: Any]
         let definitions = try XCTUnwrap(contract?["definitions"] as? [String: [String: Any]])
         for (group, ranges) in PrototypeSizeBounds.ranges {
-            var definition = try XCTUnwrap(definitions[group == "sheet" ? "placement" : group])
-            if group == "sheet" {
+            var definition = try XCTUnwrap(
+                definitions[group == "sheet" ? "placement" : (group == "transition" ? "node" : group)]
+            )
+            if group == "transition" {
+                let variants = try XCTUnwrap(definition["variants"] as? [String: [String: Any]])
+                let rule = try XCTUnwrap(variants["box"]?["fields"] as? [String: [String: Any]])["transition"]?["rule"]
+                let options = try XCTUnwrap((rule as? [String: Any])?["options"] as? [[String: Any]])
+                definition = options[1]
+            } else if group == "sheet" {
                 let variants = try XCTUnwrap(definition["variants"] as? [String: [String: Any]])
                 definition = try XCTUnwrap(variants["sheet"])
             } else if ["dimension", "detent", "cornerRadius"].contains(group) {

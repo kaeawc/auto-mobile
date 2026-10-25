@@ -240,8 +240,8 @@ are sampler catch-up rows, not real; the burst length is reported as seconds wit
 
 | condition                                                | runs | CPU-s in 600 s | vs baseline | time-to-quiet s | peak footprint MB | breakage      |
 | -------------------------------------------------------- | ---- | -------------- | ----------- | --------------- | ----------------- | ------------- |
-| baseline: create and boot                                | 3    | 775 (745-800)  | 0%          | 253 (225-270)   | 3170              | ok (1 check)  |
-| clone of a settled plain template                        | 2    | 415 (396-433)  | -46%        | 120 (110-130)   | 2620              | not run       |
+| baseline: create and boot                                | 3    | 775 (745-800)  | 0%          | 253 (225-270)   | 3170              | ok (4 checks) |
+| clone of a settled plain template                        | 2    | 415 (396-433)  | -46%        | 120 (110-130)   | 2620              | ok (2 checks) |
 | `PosterBoard` + `chronod`, pre-first-boot                | 2    | 447 (438-456)  | -42%        | 155             | 2033              | ok            |
 | `minimal` (+ `liveactivitiesd`), pre-first-boot          | 4    | 442 (436-448)  | -43%        | 156 (155-160)   | 2012              | ok (4 of 4)   |
 | `minimal` + speech/Siri daemons                          | 2    | 366 (357-376)  | -53%        | 140             | 1903              | 1 of 2 failed |
@@ -252,38 +252,48 @@ are sampler catch-up rows, not real; the burst length is reported as seconds wit
 | `minimal` + `diagnosticd` (ceiling only, not safe)       | 1    | 475            | -39%        | 160             | 1969              | ok            |
 
 One clone + `minimal` run never reached a quiet 60-second window inside 600 seconds because of a `pairedsyncd`
-burst, not boot cost. The breakage failures are the Safari address-bar tap timing out while the runner was busy for
-20 seconds (one 45-minute-aged clone + `minimal` run, one speech/Siri run); the other four aged runs, including a
-replicate clone + `minimal`, and three plain-baseline controls passed all 14 steps, so the failure is not attributable to
-the profile but should be re-checked on the next manual test before the clone default flips.
+burst, not boot cost. Two of 23 breakage checks failed, with the same signature: the Safari address-bar tap timed
+out while the runner was busy for 20 seconds, then the typing steps cascaded (one 45-minute-aged clone + `minimal` run,
+one speech/Siri run). The other four aged runs (baseline, two `minimal`, a replicate clone + `minimal`) passed all 14
+steps, and so did the four plain-baseline and two plain-clone checks (the 150-second control runs, shown in the baseline
+and clone rows above as checks). Both failures were on lean-profile runs and none of the six plain checks failed, so the
+failure could not be attributed to the profile, and it could not be cleared of it either; re-check it on the next
+manual test before the clone default flips.
 
 - `liveactivitiesd` costs nothing at first boot: `PosterBoard` + `chronod` alone measure the same as the shipped
-  `minimal`. Posters and widgets together save 43 percent, not the 48 percent the single-family screens added up to.
-- Speech/Siri adds 17 points but removes Siri, dictation and App Intents; it stays opt-in.
-- Unaddressed costs: `STExtractionService` is started by `mobileassetd` and `nsurlsessiond` (the only other client of
-  its framework, `backgroundassets.user`, made no difference), which are required for downloads, so only a clone removes
-  it (0 CPU-seconds). `xpcproxy_sim` is the launch stub for about 300 services, not a service. `diagnosticd` and `logd`
-  cannot be disabled: session logs and `getLogs` use `simctl spawn ... log show`, and disabling `diagnosticd` measured
-  7 percent worse. A set of `amsengagementd`, `nanotimekitcompaniond`, watch connectivity and `passwordbreachd` is safe
-  on the driving surface and saves 13 more points (mostly `amsengagementd`, 21 CPU-seconds); it is a candidate for
-  an opt-in resource, not a default.
+  `minimal`. Posters and widgets together save 42 to 43 percent, not the 48 percent the single-family screens added up to.
+- Speech/Siri takes another 17 percent off the `minimal` figure (442 to 366, 10 points against baseline) but removes
+  Siri, dictation and App Intents; it stays opt-in.
+- Unaddressed costs: the launchd clients of `STExtractionService`'s framework are `mobileassetd`, `nsurlsessiond` and
+  `backgroundassets.user`. The first two are required for downloads and were not disabled; disabling the third made no
+  difference, so whether the first two start the service was not tested, and only a clone removes it (0 CPU-seconds).
+  `xpcproxy_sim` is the launch stub for about 300 services, not a service. `diagnosticd` should stay: session logs and
+  `getLogs` use `simctl spawn ... log show`, and disabling `diagnosticd` made the first boot 7 percent worse (one run;
+  the breakage check does not call `getLogs`, so the dependency itself was not exercised). A set of
+  `backgroundassets.user`, `amsengagementd`, `nanotimekitcompaniond`, watch connectivity and `passwordbreachd` passed
+  the driving surface and takes another 13 percent off the `minimal` figure (8 points against baseline): 59 CPU-seconds
+  saved, of which `amsengagementd` is 21 and the unnamed "other" bucket about 30. It is a candidate for an opt-in
+  resource, not a default.
 
 ### Idle drift
 
 Seven 45-minute runs (two each for baseline, `minimal` and clone + `minimal`, one for a plain clone), mean CPU per
-five-minute bin. After the first five to ten minutes every condition idles at 4 to 6 percent of
-one core, with isolated five-minute bins of 8 to 10 percent at any point (different services run to run:
-`pairedsyncd` 10 to 38 CPU-seconds, `StreamingUnzipService`, `proactiveeventtrackerd`, `AuthenticationServicesAgent`).
-The mean from minute 15 to 45 was 6.8 and 6.1 (baseline), 6.7 (clone), 6.6 and 3.8 (`minimal`), 4.0 and 6.5 (clone +
-`minimal`). No condition drifts upward and `minimal` neither helps nor hurts idle. `pairedsyncd` has no launchd plist in
-the runtime and cannot be disabled by label. The first clone + `minimal` run looked flat at 4 percent while the others
-bumped after minute 30; the replicate bumped too, so the flat run was luck. The capacity model's 0.055 core per settled
-simulator sits inside this range.
+five-minute bin. After the first five to ten minutes the quiet bins sit at 3 to 7 percent of one core. In five of the
+seven runs the mean over minutes 30 to 45 is higher than over minutes 5 to 30: bins of 8 to 15 percent appear from
+minute 30 on, often two or three in a row, driven by different services run to run (`pairedsyncd` 10 to 38
+CPU-seconds, `StreamingUnzipService`, `proactiveeventtrackerd`, `AuthenticationServicesAgent`). The mean from minute 15
+to 45 was 6.8 and 6.1 (baseline), 6.7 (clone), 6.6 and 3.8 (`minimal`), 4.0 and 6.5 (clone + `minimal`). One `minimal`
+run (3.6 percent over minutes 30 to 45) and one clone + `minimal` run (4.0) stayed flat, the other five did not, so
+two runs per condition cannot show that `minimal` helps or hurts idle. What the data does show is that nothing
+climbs steadily inside 45 minutes; whether it does over hours was not measured. `pairedsyncd` has no launchd plist in
+the runtime and cannot be disabled by label. The capacity model's 0.055 core per settled simulator sits inside the
+3.8 to 6.8 percent range of the 15 to 45 minute means.
 
 ### Concurrent first boots
 
-All simulators started at the same instant, boot admission bypassed in the harness. CPU-seconds scale with the
-number of simulators, so the per-simulator saving survives concurrency:
+All simulators started at the same instant, boot admission bypassed in the harness. CPU-seconds grow slightly faster than the
+number of simulators (per simulator 775 single, 812 at four for baseline; 273 single, 286 at two and 312 at four for
+clone + `minimal`), so the saving survives concurrency:
 
 | condition         | sims | runs | total CPU-s      | per sim | seconds with >= 8 cores | all sims quiet (s) | last bootstatus (s) |
 | ----------------- | ---- | ---- | ---------------- | ------- | ----------------------- | ------------------ | ------------------- |
@@ -310,25 +320,31 @@ other device protected) provisioned simulators through `provisionDevice` with th
 
 `launchctl print-disabled` inside each booted simulator listed all three `minimal` labels, none loaded, so the
 preboot database was honored. The product `minimal` run matches the harness (445 against 442); the product control
-(710) ran 8 percent below the harness baseline (775) for an unexplained reason, so the product-path saving (-37 percent
-for `minimal`, -65 percent for clone + `minimal`) is the more conservative figure for `minimal`. The runner adds about 80
+(710) ran 8 percent below the harness baseline (775) for an unexplained reason, so the product figure of -37 percent for
+`minimal` is the conservative one; clone + `minimal` is -65 percent in both. The product control also settled 85
+seconds sooner than the harness baseline (168 against 253), so `minimal` saved only 10 seconds of time-to-quiet there,
+and the last-120-second mean was 7.3 percent for product `minimal` against 3.8 for the product defaults (two runs
+each, a `pairedsyncd`-style burst is the likely cause but was not isolated). The runner adds about 80
 CPU-seconds. Two concurrent `provisionDevice` calls from one ready template both cloned in 2.7 seconds, booted
 together and cost 504 CPU-seconds in total, quiet after 140 seconds.
 
 The template was built with `auto-mobile --ios-templates build`. From boot to shutdown it took 762 seconds (461
 CPU-seconds in the first 600): the 120-second window below 5 percent of a core restarts after every periodic burst,
-so the real build is about 13 minutes, not the 4.5 minutes of the first-quiet-window estimate, and it holds a boot slot
-for that time.
+so the real build is about 13 minutes, not the roughly 4.7 minutes implied by a 160-second time-to-quiet plus the 120-second
+window, and it holds a boot slot for that time.
 
 ## Follow-up recommendation
 
-- Default `AUTOMOBILE_IOS_PREBOOT_LEAN_PROFILE` to `minimal`: minus 43 percent CPU-seconds and 100 seconds off the
-  time-to-quiet with no measured idle or breakage cost. `catalog-cpu` bought about 7 more points in #15097 while
-  removing Health, Apple Intelligence and search, and stays opt-in with speech/Siri.
-- Default `AUTOMOBILE_IOS_TEMPLATE_CLONE` on: minus 46 percent alone and minus 65 percent with `minimal`, in the
-  harness, in the product path and with two and four simultaneous boots (minus 62 to 63 percent), at about 3 seconds
-  per clone. Costs: the first creation per runtime, device type and profile is a normal one, a background template
-  build of about 13 minutes occupies a boot slot, and each template needs a disk copy. Re-check the aged-clone Safari
-  tap on the next manual test first.
+- Default `AUTOMOBILE_IOS_PREBOOT_LEAN_PROFILE` to `minimal`: minus 43 percent CPU-seconds in the harness (minus 37
+  percent in the product path) and 100 seconds off the time-to-quiet in the harness (10 seconds in the product path),
+  with no breakage cost attributable to it. Idle was not shown to differ (two drift runs per condition; the product
+  last-120-second mean was higher with `minimal`, 7.3 against 3.8 percent, unexplained). `catalog-cpu` bought about
+  7 more points in #15097 (minus 50 against a 789 baseline; not re-measured here) while removing Health, Apple
+  Intelligence and search, and stays opt-in with speech/Siri.
+- Default `AUTOMOBILE_IOS_TEMPLATE_CLONE` on: a clone alone is minus 46 percent (harness only); clone + `minimal`
+  is minus 65 percent in the harness and the product path, and minus 62 to 63 percent with two and four simultaneous
+  boots, at about 3 seconds per clone. Costs: the first creation per runtime, device type and profile is a normal one,
+  a background template build of about 13 minutes occupies a boot slot, and each template needs a disk copy. Re-check
+  the aged-clone Safari tap on the next manual test first.
 - Size boot concurrency by CPU-seconds: a first boot is about 775 CPU-seconds, 442 with `minimal`, 273 as a clone
-  with `minimal`, and k simultaneous boots cost k times that.
+  with `minimal`, and k simultaneous boots cost slightly more than k times that.

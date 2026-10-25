@@ -84,7 +84,9 @@ test("abort cleanup runs outside the cancelled ambient request", async () => {
 test("profile application failure cannot publish a lean template", async () => {
   const fake = new SimulatorTemplateBuildHarness();
   const deps = fake.dependencies();
-  deps.profile = () => ({ apply: async () => ({ applied: false, labels: [], reason: "denied" }) });
+  deps.profile = () => ({
+    apply: async () => ({ applied: false, resources: [], labels: [], reason: "denied" }),
+  });
   expect(await new SimulatorTemplateBuilder(deps).build({ ...key, profile: "minimal" })).toBe(
     "failed",
   );

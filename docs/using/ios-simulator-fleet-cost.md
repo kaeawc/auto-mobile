@@ -94,3 +94,8 @@ Generated scratch, build, and bootstrapped worktree roots receive `.metadata_nev
 Set `AUTOMOBILE_SPOTLIGHT_EXCLUDE=0` to opt out of shell marker creation.
 For other developer directories, add a marker or use System Settings > Spotlight > Search Privacy.
 Doctor only reads indexing status and never changes system settings.
+
+New simulators use the `minimal` lean profile and settled template cloning by default.
+Set `AUTOMOBILE_IOS_PREBOOT_LEAN_PROFILE=none` to opt out of the profile, or
+`AUTOMOBILE_IOS_TEMPLATE_CLONE=0` (or `false`) to opt out of cloning. Explicit
+resource requests override the profile.

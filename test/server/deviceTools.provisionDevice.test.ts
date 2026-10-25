@@ -1488,6 +1488,46 @@ describe("provisionDevice handler", () => {
     expect(JSON.parse(response.content[0].text).resources.disabledResources).toBeUndefined();
   });
 
+  test.each([true, false])(
+    "preboot report follows creation ownership with boot=%s",
+    async (boot) => {
+      const { buildProvisionDeviceResult } =
+        await import("../../src/server/provisioning/provisioningReadiness");
+      const { createPerformanceTracker } = await import("../../src/utils/PerformanceTracker");
+      const args = { ...provisionTestArgs("ios"), boot, readiness: "none" as const };
+      const provisioned = {
+        ...provisionedTestDevice("ios", true),
+        prebootDisabledResources: ["widgets" as const],
+      };
+      for (const created of [true, false]) {
+        const result = buildProvisionDeviceResult(
+          args,
+          provisioned,
+          created,
+          createPerformanceTracker(false),
+          boot
+            ? {
+                device: { name: "phone", platform: "ios", deviceId: "UDID" },
+                sessionId: "session",
+              }
+            : undefined,
+        );
+        if (created) {
+          expect(result.disabledResources).toEqual([
+            expect.objectContaining({
+              resource: "widgets",
+              labels: expect.any(Array),
+              automobileImpact: expect.any(Array),
+              appImpact: expect.any(Array),
+            }),
+          ]);
+        } else {
+          expect(result.disabledResources).toBeUndefined();
+        }
+      }
+    },
+  );
+
   test("accepts omitted boot and readiness with their documented defaults", () => {
     expect(
       provisionDeviceSchema.parse({

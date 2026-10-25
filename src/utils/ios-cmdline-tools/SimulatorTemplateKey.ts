@@ -7,7 +7,7 @@ export interface SimulatorTemplateKey {
   deviceType: string;
   profile: PrebootLeanProfileName;
 }
-export const TEMPLATE_CLONE_DEFAULT_ENABLED = false;
+export const TEMPLATE_CLONE_DEFAULT_ENABLED = true;
 export function resolveTemplateCloneEnabled(env: NodeJS.ProcessEnv): boolean {
   const value = env.AUTOMOBILE_IOS_TEMPLATE_CLONE?.trim().toLowerCase();
   if (value === "1" || value === "true") {

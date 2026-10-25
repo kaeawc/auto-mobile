@@ -7,6 +7,32 @@ import {
   type ConfigurableDeviceResource,
 } from "../models/deviceResourceDescriptions";
 
+const impactItemSchema = z.object({
+  description: z.string(),
+  confidence: z.enum(["verified", "inferred"]),
+  evidence: z.string().optional(),
+});
+/** Resources reported disabled, with what that breaks for AutoMobile and for apps. */
+export const disabledResourcesSchema = z.array(
+  z.object({
+    resource: z.string(),
+    labels: z.array(z.string()),
+    automobileImpact: z.array(impactItemSchema),
+    appImpact: z.array(impactItemSchema),
+    unsafeWith: z
+      .array(
+        z.object({
+          hazardId: z.string(),
+          appliesTo: z.array(z.enum(["post_boot", "preboot"])),
+          withResources: z.array(z.string()),
+          reason: z.string(),
+          evidence: z.string(),
+        }),
+      )
+      .optional(),
+  }),
+);
+
 const requestedState = z.enum(["enabled", "disabled"]).optional();
 // Object.fromEntries loses literal keys; every key is supplied by the typed catalog.
 const resourceShape = Object.fromEntries(

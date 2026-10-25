@@ -38,7 +38,12 @@ export function knownProvisionDeviceError(error: unknown): ProvisionDeviceError 
     return new ProvisionDeviceError("identity_conflict", error.message);
   }
   if (error instanceof BootedDeviceDiscoveryIncompleteError) {
-    return new ProvisionDeviceError("discovery_incomplete", error.message, true);
+    return new ProvisionDeviceError(
+      "discovery_incomplete",
+      error.message,
+      true,
+      error.retryAfterMs !== undefined ? { retryAfterMs: error.retryAfterMs } : {},
+    );
   }
   return undefined;
 }

@@ -214,6 +214,16 @@ function hasSelfDescribedRefusalPayload(
   ].some((Refusal) => error instanceof Refusal);
 }
 
+function discoveryIncompletePayload(
+  error: BootedDeviceDiscoveryIncompleteError,
+): Record<string, unknown> {
+  return {
+    code: error.code,
+    retryable: error.retryable,
+    ...(error.retryAfterMs !== undefined ? { retryAfterMs: error.retryAfterMs } : {}),
+  };
+}
+
 /** The typed fields of a device or session refusal, after `success` and `error`. */
 function typedRefusalPayload(error: unknown): Record<string, unknown> | undefined {
   if (hasSelfDescribedRefusalPayload(error)) {
@@ -225,7 +235,7 @@ function typedRefusalPayload(error: unknown): Record<string, unknown> | undefine
   // Incomplete booted-device discovery is typed and retryable on every tool that throws it, not
   // a generic `Error:` string (#11493).
   if (error instanceof BootedDeviceDiscoveryIncompleteError) {
-    return { code: error.code, retryable: error.retryable };
+    return discoveryIncompletePayload(error);
   }
   // A device boot or shutdown that ran out of budget is the typed retryable `timeout` on every
   // tool that throws it, like `provisionDevice`'s (#11548).

@@ -169,6 +169,17 @@ export interface ShutdownIdentityReservation {
 
 export const ALLOCATION_SNAPSHOT_STALE_RETRIES = 3;
 
+/**
+ * Re-listings an exact-device iOS bind makes when the `simctl list` that proves the target
+ * is still booted fails (a 15 s timeout during a boot burst above ~24 simulators, #15289).
+ * Each wait is a cancellable backoff delay and each re-listing runs under the caller's own
+ * deadline and signal, so the retries can never outlive the request.
+ */
+export const IOS_LIVENESS_REDISCOVERY_DELAYS_MS: readonly number[] = [1_000, 2_000, 4_000];
+
+/** Wait hint on the typed retryable error once the re-listings are exhausted. */
+export const IOS_LIVENESS_UNVERIFIED_RETRY_AFTER_MS = 5_000;
+
 /** Bound on the adb state read that decides a recovery reservation's lift (#10074). */
 export const ANDROID_OFFLINE_PROBE_TIMEOUT_MS = 10000;
 

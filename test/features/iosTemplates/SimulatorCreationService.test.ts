@@ -22,13 +22,17 @@ test("ready shutdown template clones with a new UDID", async () => {
   expect(await fake.service().create(fake.request)).toEqual({ udid: "cloned", source: "clone" });
   expect(fake.events).toEqual(["clone:11111111-1111-1111-1111-111111111111:work"]);
 });
-test("clone failure invalidates and creates", async () => {
+test("second consecutive clone failure invalidates and creates", async () => {
   const fake = new SimulatorTemplatesHarness();
   fake.ready();
   fake.cloneFails = true;
-  expect((await fake.service().create(fake.request)).source).toBe("create");
+  const service = fake.service();
+  expect((await service.create(fake.request)).source).toBe("create");
+  expect(fake.manifest?.state).toBe("ready");
+  expect((await service.create(fake.request)).source).toBe("create");
   expect(fake.manifest?.state).toBe("stale");
   expect(fake.events).toContain("create:work");
+  fake.finishBuild();
 });
 test("concurrent misses request one background build per key", async () => {
   const fake = new SimulatorTemplatesHarness();
@@ -80,10 +84,13 @@ test("runtime build change preserves the old template in the foreground", async 
 test("ready template that is no longer shutdown is never cloned", async () => {
   const fake = new SimulatorTemplatesHarness();
   fake.ready();
-  fake.client.listSimulators = async () => ({ devices: {} });
+  const rows = await fake.client.listSimulators();
+  Object.values(rows.devices).flat()[0]!.state = "Booted";
+  fake.rows = rows;
   expect((await fake.service().create(fake.request)).source).toBe("create");
-  expect(fake.manifest?.state).toBe("stale");
-  fake.finishBuild();
+  expect(fake.manifest?.state).toBe("ready");
+  expect(fake.events).toEqual(["create:work"]);
+  expect(fake.builds).toBe(0);
 });
 
 test("retry starts a background build once the deadline has passed", async () => {
@@ -183,4 +190,100 @@ test("failed partial-clone deletion refuses duplicate fallback creation", async 
   };
   await expect(fake.service().create(fake.request)).rejects.toThrow("partial simulator clone");
   expect(fake.events).not.toContain("create:work");
+});
+
+test("successful clone resets consecutive failures", async () => {
+  const fake = new SimulatorTemplatesHarness();
+  fake.ready();
+  const service = fake.service();
+  fake.cloneFails = true;
+  await service.create(fake.request);
+  expect(fake.manifest?.state).toBe("ready");
+  fake.cloneFails = false;
+  expect((await service.create(fake.request)).source).toBe("clone");
+  fake.cloneFails = true;
+  await service.create(fake.request);
+  expect(fake.manifest?.state).toBe("ready");
+  await service.create(fake.request);
+  expect(fake.manifest?.state).toBe("stale");
+  fake.finishBuild();
+});
+for (const condition of ["missing", "renamed", "Booted"]) {
+  test(`template ${condition} after clone failure preserves only an in-use template`, async () => {
+    const fake = new SimulatorTemplatesHarness();
+    fake.ready();
+    const rows = await fake.client.listSimulators();
+    fake.client.cloneSimulator = async () => {
+      if (condition === "missing") {
+        fake.rows = { devices: {} };
+      } else {
+        const row = Object.values(rows.devices).flat()[0]!;
+        if (condition === "renamed") {
+          row.name = "foreign";
+        } else {
+          row.state = condition;
+        }
+        fake.rows = rows;
+      }
+      throw new Error("clone failed");
+    };
+    expect((await fake.service().create(fake.request)).source).toBe("create");
+    expect(fake.manifest?.state).toBe(condition === "Booted" ? "ready" : "stale");
+    fake.finishBuild();
+  });
+}
+
+test("aborted clone cleans its partial simulator and preserves a healthy template", async () => {
+  const fake = new SimulatorTemplatesHarness();
+  fake.ready();
+  const rows = await fake.client.listSimulators();
+  fake.rows = rows;
+  const abort = new AbortController();
+  fake.client.cloneSimulator = async () => {
+    rows.devices.ios?.push({ udid: "partial", name: "work", state: "Shutdown", isAvailable: true });
+    abort.abort();
+    abort.signal.throwIfAborted();
+    return "unreachable";
+  };
+  await expect(fake.service().create({ ...fake.request, signal: abort.signal })).rejects.toThrow();
+  expect(fake.events).toEqual(["delete:partial"]);
+  expect(fake.manifest?.state).toBe("ready");
+});
+
+test("two consecutive aborted clones do not consume the failure budget", async () => {
+  const fake = new SimulatorTemplatesHarness();
+  fake.ready();
+  const service = fake.service();
+  const clone = fake.client.cloneSimulator;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const abort = new AbortController();
+    fake.client.cloneSimulator = async () => {
+      abort.abort();
+      abort.signal.throwIfAborted();
+      return "unreachable";
+    };
+    await expect(service.create({ ...fake.request, signal: abort.signal })).rejects.toThrow();
+    expect(fake.manifest?.state).toBe("ready");
+  }
+  fake.client.cloneSimulator = clone;
+  fake.cloneFails = true;
+  await service.create(fake.request);
+  expect(fake.manifest?.state).toBe("ready");
+  expect(fake.events.some((event) => event.startsWith("delete:"))).toBe(false);
+});
+
+test("marking a template stale clears its previous clone failures", async () => {
+  const fake = new SimulatorTemplatesHarness();
+  fake.ready();
+  const service = fake.service();
+  fake.cloneFails = true;
+  await service.create(fake.request);
+  fake.rows = { devices: {} };
+  await service.create(fake.request);
+  expect(fake.manifest?.state).toBe("stale");
+  fake.rows = undefined;
+  fake.ready();
+  await service.create(fake.request);
+  expect(fake.manifest?.state).toBe("ready");
+  fake.finishBuild();
 });

@@ -5,7 +5,7 @@ import { readFileSync, rmSync } from "node:fs";
 import { sortedReaddirSync } from "../../utils/io";
 import { join } from "node:path";
 import { writeJsonFileAtomicSync } from "../../daemon/atomicJsonFile";
-import { ensureSecureDirectorySync, getSharedAutoMobileDir } from "../../utils/tempDir";
+import { ensureSecureDirectorySync, getHostGlobalAutoMobileDir } from "../../utils/tempDir";
 import {
   templateKeyHash,
   type SimulatorTemplateKey,
@@ -43,7 +43,7 @@ export class FileSimulatorTemplateManifestStore implements SimulatorTemplateMani
   constructor(
     private readonly files: TemplateManifestFiles = nodeFiles,
     private readonly directory: () => string = () =>
-      ensureSecureDirectorySync(getSharedAutoMobileDir("ios-sim-templates")),
+      ensureSecureDirectorySync(getHostGlobalAutoMobileDir("ios-sim-templates")),
   ) {}
   private path(key: SimulatorTemplateKey): string {
     return join(this.directory(), `${templateKeyHash(key)}.json`);

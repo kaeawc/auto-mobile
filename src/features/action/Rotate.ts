@@ -11,7 +11,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { ProgressCallback } from "./BaseVisualChange";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
-import { IOSCtrlProxyClient } from "../observe/ios";
+import { IOSCtrlProxyClient, type IosCtrlProxy } from "../observe/ios";
 import { readWindowManagerRotation } from "../../utils/android-cmdline-tools/readWindowManagerRotation";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { observedIosOrientation, verifyIosRotation } from "./iosRotateVerification";
@@ -352,7 +352,7 @@ export class Rotate extends BaseVisualChange {
   ): Promise<RotateResult> {
     throwIfAborted(signal);
     let previousObservation: ObserveResult | undefined;
-    let runner: IOSCtrlProxyClient | undefined;
+    let runner: Pick<IosCtrlProxy, "requestRotate"> | undefined;
     const result: RotateResult = await this.observedInteraction(
       async (observation) => {
         previousObservation = observation;
@@ -422,7 +422,7 @@ export class Rotate extends BaseVisualChange {
    */
   private async restoreIosOrientationAfterFailure(
     failed: RotateResult,
-    client: Pick<IOSCtrlProxyClient, "requestRotate"> | undefined,
+    client: Pick<IosCtrlProxy, "requestRotate"> | undefined,
     previousObservation: ObserveResult | undefined,
     perf: ReturnType<typeof createGlobalPerformanceTracker>,
     signal?: AbortSignal,

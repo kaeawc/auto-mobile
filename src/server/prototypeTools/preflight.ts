@@ -163,7 +163,8 @@ export async function specCapabilityRefusal(
     signal?.throwIfAborted();
     if (!supported) {
       const platform = target.android ? "android" : "ios";
-      const note = platform === "ios" ? prototypeIosMinimumOsNote(gate.capability, iosMinimumOs) : "";
+      const note =
+        platform === "ios" ? prototypeIosMinimumOsNote(gate.capability, iosMinimumOs) : "";
       const message = gate.unsupportedMessage(gate.fields, platform) + note;
       return { success: false, error: new ActionableError(message).message };
     }

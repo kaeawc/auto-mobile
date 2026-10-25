@@ -73,6 +73,8 @@ ${condition}
       "        faults:\n          disablePackage:\n            package: com.example.app\n          clearPackageData: unset",
       "        faults:\n          killApp:\n            package: com.example.app\n            mode: forceStop\n          trimMemory:\n            package: com.example.app\n            level: RUNNING_CRITICAL",
       "        faults:\n          killApp: unset\n          trimMemory: unset",
+      "        faults:\n          corruptAppFile:\n            package: com.example.app\n            path: databases/app.db\n            mode: overwrite",
+      "        faults:\n          corruptAppFile: unset",
     ]) {
       const result = validator.validateYaml(plan(accepts));
       expect(result.errors ?? []).toEqual([]);
@@ -87,6 +89,8 @@ ${condition}
       "        faults:\n          gravity: low",
       "        faults:\n          revokePermission: on",
       "        faults:\n          disablePackage: on",
+      "        faults:\n          corruptAppFile:\n            package: com.example.app\n            path: ../other/app.db\n            mode: overwrite",
+      "        faults:\n          corruptAppFile:\n            package: com.example.app\n            path: databases/app.db\n            mode: shred",
       "        faults:\n          killApp:\n            package: com.example.app\n            mode: terminate",
       "        faults:\n          trimMemory:\n            package: com.example.app\n            level: LOW",
       "        faults:\n          trimMemory:\n            package: com.example.app",

@@ -8,6 +8,7 @@ import {
 } from "./DeviceConditionController";
 import { resolveIosRefusalInjector } from "./iosRefusalInjector";
 import { resolveLifecycleFaultInjector } from "./lifecycleFaultInjectors";
+import { resolveAppFileFaultInjector } from "./appFileFaultInjectors";
 import { resolvePackageFaultInjector } from "./packageFaultInjectors";
 import { resolvePermissionFaultInjector } from "./permissionFaultInjectors";
 import { resolvePowerFaultInjector } from "./powerFaultInjectors";
@@ -213,7 +214,7 @@ export class DeviceConditionRegistry {
  * Default resolver: the root fixture (#14060), power-domain fault injectors
  * (#14063), process-lifecycle fault injectors (#14068) and storage fault injectors
  * (#14066), permission and package-state fault injectors (#14069) and process fault injectors
- * (#14068) on an Android device, and the
+ * (#14068) and app-file corruption (#14066) on an Android device, and the
  * iOS refusals (#14073). The integrity injector (#14062) adds its key here as it lands.
  * Returns undefined for a key with no injector, which the controller reports as
  * `unsupported` rather than silently dropping.
@@ -227,7 +228,8 @@ const defaultInjectorResolver: DeviceConditionInjectorResolver = (owner, key) =>
       resolveStorageFaultInjector(owner.device, key) ??
       resolvePermissionFaultInjector(owner.device, key) ??
       resolvePackageFaultInjector(owner.device, key) ??
-      resolveProcessFaultInjector(owner.device, key))
+      resolveProcessFaultInjector(owner.device, key) ??
+      resolveAppFileFaultInjector(owner.device, key))
     : undefined;
 
 /**

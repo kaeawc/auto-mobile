@@ -11,7 +11,8 @@ import { CtrlProxySdkEvents } from "./CtrlProxySdkEvents";
 import { CtrlProxySdkScreenIdentity } from "./CtrlProxySdkScreenIdentity";
 import { IosCtrlProxyDelegatingFacade } from "./IosCtrlProxyDelegatingFacade";
 import type { IosHierarchyMessageEffects } from "./IosHierarchyMessageEffects";
-import type { WebSocketMessage } from "./types";
+import type { ScreenshotCaptureResult } from "../ScreenshotBackoffScheduler";
+import type { CtrlProxyPerformanceSnapshot, WebSocketMessage } from "./types";
 
 /**
  * The typed test seams of the iOS client, kept out of {@link IOSCtrlProxyClient} so the client
@@ -35,6 +36,12 @@ export abstract class IosCtrlProxyTestHooksFacade extends IosCtrlProxyDelegating
     options: ScreenshotObservationStreamOptions,
   ): void;
   protected abstract handleMessage(data: WebSocket.Data): void;
+  protected abstract handlePerformanceUpdate(snapshot: CtrlProxyPerformanceSnapshot): void;
+  protected abstract startScreenshotBackoff(): void;
+  protected abstract captureScreenshotForBackoff(): Promise<ScreenshotCaptureResult>;
+  protected abstract supportedFeatures: Set<string> | null;
+  protected abstract lastForegroundBundleId: string | null;
+  protected abstract allocatedPort: number | null;
 
   /** Typed access to lifecycle and observation state for deterministic tests. */
   get testHooks() {
@@ -48,6 +55,68 @@ export abstract class IosCtrlProxyTestHooksFacade extends IosCtrlProxyDelegating
       onConnectionClosed: () => this.onConnectionClosed(),
       processMessage: (message: WebSocketMessage) => this.processMessage(message),
       createDelegateContext: () => this.createDelegateContext(),
+      handlePerformanceUpdate: (snapshot: CtrlProxyPerformanceSnapshot) =>
+        this.handlePerformanceUpdate(snapshot),
+      captureScreenshotForBackoff: () => this.captureScreenshotForBackoff(),
+      onConnectionEstablished: () => this.onConnectionEstablished(),
+      screenshot: () => this.screenshot,
+      timer: this.timer,
+      /** The lazily built delegates; each getter must return the same instance on every read. */
+      delegates: () => ({
+        gestures: this.gestures,
+        text: this.text,
+        hierarchy: this.hierarchy,
+        screenshot: this.screenshot,
+        navigation: this.navigation,
+        clipboard: this.clipboard,
+        voiceOver: this.voiceOver,
+        storage: this.storage,
+        keyboard: this.keyboard,
+        highlights: this.highlights,
+        database: this.database,
+        permissions: this.permissions,
+      }),
+      sdkCapability: this.sdkCapability,
+      /** Replaces the screenshot-backoff starter, as a test double for the observation stream. */
+      overrideStartScreenshotBackoff: (start: () => void): void => {
+        this.startScreenshotBackoff = start;
+      },
+      get cachedHierarchyDisplayRevision() {
+        return client.cachedHierarchyDisplayRevision;
+      },
+      set cachedHierarchyDisplayRevision(value: number) {
+        client.cachedHierarchyDisplayRevision = value;
+      },
+      get screenshotBackoffScheduler() {
+        return client.screenshotBackoffScheduler;
+      },
+      set screenshotBackoffScheduler(value: typeof client.screenshotBackoffScheduler) {
+        client.screenshotBackoffScheduler = value;
+      },
+      get consecutiveConnectionFailures() {
+        return client.consecutiveConnectionFailures;
+      },
+      get lifecycleSocket() {
+        return client.lifecycleSocket;
+      },
+      get supportedFeatures() {
+        return client.supportedFeatures;
+      },
+      set supportedFeatures(value: typeof client.supportedFeatures) {
+        client.supportedFeatures = value;
+      },
+      get lastForegroundBundleId() {
+        return client.lastForegroundBundleId;
+      },
+      set lastForegroundBundleId(value: string | null) {
+        client.lastForegroundBundleId = value;
+      },
+      get allocatedPort() {
+        return client.allocatedPort;
+      },
+      set allocatedPort(value: number | null) {
+        client.allocatedPort = value;
+      },
       createHierarchyDelegateContext: () => this.createHierarchyDelegateContext(),
       hierarchy: () => this.hierarchy,
       readForDiagnostics: this.readForDiagnostics.bind(this),

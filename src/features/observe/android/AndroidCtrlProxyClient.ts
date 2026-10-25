@@ -534,6 +534,8 @@ export class AndroidCtrlProxyClient
       highlights: () => client.highlights,
       webSocketMessageHandlers: () => client.webSocketMessageHandlers,
       createDelegateContext: () => client.createDelegateContext(),
+      createHierarchyDelegateContext: () => client.createHierarchyDelegateContext(),
+      hierarchy: () => client.hierarchy,
       isCommandSupported: (messageType) => client.isCommandSupported(messageType),
       get installedGestures() {
         return client._gestures;
@@ -547,6 +549,8 @@ export class AndroidCtrlProxyClient
         loggerInstance: client.loggerInstance,
         transientObserver: client.transientObserver,
         timer: client.timer,
+        device: client.device,
+        adb: client.adb,
         webSocketFactory: client.webSocketFactory,
         certificateFileSystem: client.certificateFileSystem,
         serviceManagerFactory: client.serviceManagerFactory,

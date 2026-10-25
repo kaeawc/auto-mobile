@@ -251,7 +251,7 @@ export class IOSCtrlProxyClient extends IosCtrlProxyTestHooksFacade implements I
       getHierarchyNavigationDetector: () => this.getHierarchyNavigationDetector(),
     }));
   }
-  private handlePerformanceUpdate(snapshot: CtrlProxyPerformanceSnapshot): void {
+  protected handlePerformanceUpdate(snapshot: CtrlProxyPerformanceSnapshot): void {
     this.hierarchyTelemetry.handlePerformanceUpdate(snapshot);
   }
   private handleHierarchyUpdateForNavigation(
@@ -301,10 +301,10 @@ export class IOSCtrlProxyClient extends IosCtrlProxyTestHooksFacade implements I
   protected pushScreenshotToObservationStream(options: ScreenshotObservationStreamOptions): void {
     this.observationStream.pushScreenshotToObservationStream(options);
   }
-  private startScreenshotBackoff(): void {
+  protected startScreenshotBackoff(): void {
     return this.observationStream.startScreenshotBackoff();
   }
-  private async captureScreenshotForBackoff(): Promise<ScreenshotCaptureResult> {
+  protected async captureScreenshotForBackoff(): Promise<ScreenshotCaptureResult> {
     return this.observationStream.captureScreenshotForBackoff();
   }
   private _inbound: CtrlProxyInboundMessages | null = null;
@@ -433,7 +433,7 @@ export class IOSCtrlProxyClient extends IosCtrlProxyTestHooksFacade implements I
   protected supportedFeatures: Set<string> | null = null;
 
   // Track last foreground bundle for performance monitoring
-  private lastForegroundBundleId: string | null = null;
+  protected lastForegroundBundleId: string | null = null;
 
   // Platform-specific dependencies
   private port: number;
@@ -442,7 +442,7 @@ export class IOSCtrlProxyClient extends IosCtrlProxyTestHooksFacade implements I
   protected readonly logTag = "IOSCtrlProxyClient";
   private static readonly CONNECTION_RESET_MS = 2000;
   /** Port acquired by this registered client, if it still uses that allocation. */
-  private allocatedPort: number | null = null;
+  protected allocatedPort: number | null = null;
 
   // Auto-setup on connection failure
   private readonly serviceManagerFactory: ServiceManagerFactory;

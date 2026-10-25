@@ -110,7 +110,7 @@ export abstract class DeviceServiceClient extends DeviceServiceClientDelegates {
     });
   }
   /** Socket owning the current handshake/open lifecycle, used to reject delayed stale events. */
-  private lifecycleSocket: CtrlSocket | null = null;
+  protected lifecycleSocket: CtrlSocket | null = null;
   protected isConnecting: boolean = false;
   protected connectionAttempts: number = 0;
   protected lastConnectionAttempt: number = 0;

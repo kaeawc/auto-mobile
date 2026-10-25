@@ -89,6 +89,7 @@ export abstract class DeviceServiceClient extends DeviceServiceClientDelegates {
       },
       requestManager: this.requestManager,
       deliverMessage: (data) => this.handleMessage(data),
+      waitForHandshake: (timeoutMs, signal) => this.waitForHandshake(timeoutMs, signal),
       readState: () => ({
         autoReconnectEnabled: this.autoReconnectEnabled,
         supportedCommands: this.supportedCommands,

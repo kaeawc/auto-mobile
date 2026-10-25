@@ -409,7 +409,7 @@ export class HomeScreen extends BaseVisualChange {
   }
 
   private async pressRunnerHomeThenVerify(
-    client: IOSCtrlProxyClient,
+    client: IosCtrlProxy,
     perf: PerformanceTracker | undefined,
     signal?: AbortSignal,
     onDispatch?: () => void,
@@ -435,7 +435,7 @@ export class HomeScreen extends BaseVisualChange {
   }
 
   /** The device's runner client, resolved at each use so a retired client is never reused. */
-  private iosClient(): IOSCtrlProxyClient {
+  private iosClient(): IosCtrlProxy {
     return IOSCtrlProxyClient.getInstance(this.device);
   }
 

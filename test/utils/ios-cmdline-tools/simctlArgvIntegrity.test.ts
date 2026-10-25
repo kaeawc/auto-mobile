@@ -1,3 +1,7 @@
+import {
+  simulatorOwnership,
+  simulatorDataContainer,
+} from "../../helpers/simulatorContainerFixture";
 import { buildSimctlArgs } from "../../../src/utils/ios-cmdline-tools/simctlArgs";
 import {
   CORESIMULATOR_DEVICE_SET_PATH_ENV,
@@ -131,11 +135,14 @@ describe("simctl argv integrity (#4196)", () => {
     for (const { label, value } of TRICKY_VALUES) {
       test(`bundle id survives ${label}`, async () => {
         const simctl = new FakeSimctl();
-        simctl.setCommandArgsResult(["get_app_container", UDID, value, "data"], "/tmp/container\n");
+        simctl.setCommandArgsResult(
+          ["get_app_container", UDID, value, "data"],
+          `${simulatorDataContainer(UDID)}\n`,
+        );
 
-        const result = await getAppDataContainerPath(simctl, UDID, value);
+        const result = await getAppDataContainerPath(simctl, UDID, value, simulatorOwnership);
 
-        expect(result).toBe("/tmp/container");
+        expect(result).toBe(simulatorDataContainer(UDID));
         expect(simctl.getMethodCalls("executeCommandArgs")[0].args).toEqual([
           "get_app_container",
           UDID,

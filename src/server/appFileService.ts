@@ -1,3 +1,4 @@
+import type { SimulatorContainerOwnershipOptions } from "../utils/ios-cmdline-tools/simulatorOwnContainer";
 import {
   DefaultDeviceServicePreflight,
   type DeviceServicePreflight,
@@ -174,6 +175,7 @@ export interface ForegroundAppLookup {
 export type AppFileSimCtl = Pick<SimCtlClient, "executeCommand" | "executeCommandArgs">;
 
 export interface AppFileServiceDependencies {
+  containerOwnership?: SimulatorContainerOwnershipOptions;
   servicePreflight?: DeviceServicePreflight;
   timer?: Timer;
   foregroundAppLookup?: ForegroundAppLookup;
@@ -239,6 +241,7 @@ function createDefaultProviders(
     Pick<AppFileServiceDependencies, "timer">,
   options: Pick<
     AppFileServiceDependencies,
+    | "containerOwnership"
     | "servicePreflight"
     | "idGenerator"
     | "sharedStorageService"
@@ -256,10 +259,18 @@ function createDefaultProviders(
     }),
     new AndroidUserFilesProvider(options.sharedStorageService),
     new AndroidMediaLibraryProvider(options.sharedStorageService),
-    new IosSimulatorAppFileProvider(deps.simctlFactory, deps.fileSystem),
+    new IosSimulatorAppFileProvider(
+      deps.simctlFactory,
+      deps.fileSystem,
+      options.containerOwnership,
+    ),
     new IosSimulatorUserFilesProvider(
       options.iosFilesFixtureContainer ??
-        new SimctlIosFilesFixtureContainer(deps.simctlFactory, deps.fileSystem),
+        new SimctlIosFilesFixtureContainer(
+          deps.simctlFactory,
+          deps.fileSystem,
+          options.containerOwnership,
+        ),
       options.documentPickerVisibilityVerifier,
     ),
     new IosSimulatorMediaLibraryProvider(

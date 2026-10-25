@@ -1,3 +1,9 @@
+import {
+  resolveOwnAppDataContainer,
+  SimulatorContainerOwnershipError,
+  SimulatorContainerUnresolvedError,
+  type SimulatorContainerOwnershipOptions,
+} from "../../utils/ios-cmdline-tools/simulatorOwnContainer";
 import { type IosPreferenceType } from "./IosPreferenceTypes";
 import { parseIosUserDefaultsPlist } from "./IosUserDefaultsPlist";
 import { join } from "node:path";
@@ -87,6 +93,7 @@ export {
 } from "./preferenceValues";
 
 export class AppPreferences {
+  private readonly containerOwnership: SimulatorContainerOwnershipOptions;
   private readonly adbFactory: AdbClientFactory;
   private readonly simctl: IosSimulatorPreferenceClient | null | undefined;
   private readonly timer: Timer;
@@ -99,6 +106,7 @@ export class AppPreferences {
   ) {
     this.adbFactory = dependencies.adbFactory ?? defaultAdbClientFactory;
     this.simctl = dependencies.simctl;
+    this.containerOwnership = dependencies.containerOwnership ?? {};
     this.timer = dependencies.timer ?? defaultTimer;
     this.iosKeyValueClientProvider =
       dependencies.iosKeyValueClientProvider ??
@@ -455,12 +463,15 @@ export class AppPreferences {
     }
     let container: string;
     try {
-      container = (await this.lookupIosDataContainer(input.appId!, deadlineMs)).trim();
-      if (!container) {
-        throw new ActionableError("simctl returned an empty data container path.");
-      }
+      container = await this.lookupIosDataContainer(input.appId!, deadlineMs);
     } catch (error) {
-      const detail = errorMessage(error);
+      if (error instanceof SimulatorContainerOwnershipError) {
+        throw error;
+      }
+      const detail =
+        error instanceof SimulatorContainerUnresolvedError
+          ? "simctl returned an empty data container path"
+          : errorMessage(error);
       if (isMissingIosAppError(detail)) {
         throw new ActionableError(
           `App '${input.appId}' is not installed on this simulator: ${detail}. Install the app and retry.`,
@@ -489,19 +500,22 @@ export class AppPreferences {
     appId: string,
     deadlineMs: number | undefined,
   ): Promise<string> {
-    const lookup = async () =>
-      (
-        await this.iosPreferenceCommand(
-          (timeoutMs) =>
-            this.getSimctl().executeCommandArgs(
-              ["get_app_container", this.device.deviceId, appId, "data"],
-              timeoutMs,
-            ),
-          deadlineMs,
-          IOS_DEFAULTS_COMMAND_TIMEOUT_MS,
-          "get_app_container",
-        )
-      ).stdout;
+    return resolveOwnAppDataContainer({
+      ...this.containerOwnership,
+      deviceId: this.device.deviceId,
+      bundleId: appId,
+      run: (args) => this.lookupIosDataContainerCommand(args, deadlineMs),
+    });
+  }
+
+  private async lookupIosDataContainerCommand(args: string[], deadlineMs: number | undefined) {
+    const lookup = () =>
+      this.iosPreferenceCommand(
+        (timeoutMs) => this.getSimctl().executeCommandArgs(args, timeoutMs),
+        deadlineMs,
+        IOS_DEFAULTS_COMMAND_TIMEOUT_MS,
+        args[0]!,
+      );
     for (let attempt = 1; attempt < PREFERENCE_READ_ATTEMPTS; attempt += 1) {
       try {
         return await lookup();
@@ -512,7 +526,7 @@ export class AppPreferences {
           throw error;
         }
         logger.warn(
-          `Retrying get_app_container after transient failure: ${errorMessage(error)}`,
+          `Retrying app container lookup after transient failure: ${errorMessage(error)}`,
           error,
         );
       }

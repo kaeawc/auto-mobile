@@ -1,3 +1,4 @@
+import type { SimulatorContainerOwnershipOptions } from "../utils/ios-cmdline-tools/simulatorOwnContainer";
 import { ActionableError, type BootedDevice, type ExecResult, type Platform } from "../models";
 import type { AdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { HostCommandExecutor } from "../utils/HostCommandExecutor";
@@ -90,6 +91,7 @@ export interface SessionLogProvider {
 }
 
 export interface SessionLogServiceDependencies {
+  containerOwnership?: SimulatorContainerOwnershipOptions;
   adbFactory?: AdbClientFactory;
   simctlFactory?: (device: BootedDevice) => SessionLogSimctl;
   fileSystem?: AppFileFileSystem;

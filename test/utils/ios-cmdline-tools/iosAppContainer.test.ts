@@ -1,4 +1,9 @@
-import { describe, expect, test } from "bun:test";
+import { logger } from "../../../src/utils/logger";
+import {
+  simulatorOwnership,
+  simulatorDataContainer,
+} from "../../helpers/simulatorContainerFixture";
+import { describe, expect, spyOn, test } from "bun:test";
 import {
   IOS_APP_DATA_FOLDERS,
   getAppDataContainerPath,
@@ -58,13 +63,31 @@ describe("getAppDataContainerPath", () => {
 
   test("returns the trimmed container path and issues the exact argv", async () => {
     const { simctl, calls } = containerClient(
-      createExecResult("/Users/test/data/Containers/Data/Application/ABC\n", ""),
+      createExecResult(`${simulatorDataContainer(deviceId)}\n`, ""),
     );
 
-    const result = await getAppDataContainerPath(simctl, deviceId, bundleId);
+    const result = await getAppDataContainerPath(simctl, deviceId, bundleId, simulatorOwnership);
 
-    expect(result).toBe("/Users/test/data/Containers/Data/Application/ABC");
+    expect(result).toBe(simulatorDataContainer(deviceId));
     expect(calls).toEqual([["get_app_container", deviceId, bundleId, "data"]]);
+  });
+
+  test("empty output warns about the missing path without claiming an ownership refusal", async () => {
+    const { simctl } = containerClient(createExecResult(" \n", ""));
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      expect(
+        await getAppDataContainerPath(simctl, deviceId, bundleId, simulatorOwnership),
+      ).toBeNull();
+      expect(warn).toHaveBeenCalledWith(
+        `[iOS] No data container path for ${bundleId} on ${deviceId}`,
+      );
+      expect(
+        warn.mock.calls.some(([message]) => String(message).includes("ownership refused")),
+      ).toBe(false);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   const nullRows: ReadonlyArray<{ label: string; result: ExecResult | Error }> = [
@@ -79,7 +102,9 @@ describe("getAppDataContainerPath", () => {
   for (const { label, result } of nullRows) {
     test(`returns null when ${label}`, async () => {
       const { simctl } = containerClient(result);
-      expect(await getAppDataContainerPath(simctl, deviceId, bundleId)).toBeNull();
+      expect(
+        await getAppDataContainerPath(simctl, deviceId, bundleId, simulatorOwnership),
+      ).toBeNull();
     });
   }
 });

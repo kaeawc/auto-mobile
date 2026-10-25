@@ -18,7 +18,7 @@ export class SimulatorIosClearDataBackend implements IosClearDataBackend {
 
   constructor(
     private readonly deviceId: string,
-    private readonly deps: Pick<IosClearDataBackendDeps, "simctl" | "rm">,
+    private readonly deps: Pick<IosClearDataBackendDeps, "simctl" | "rm" | "containerOwnership">,
   ) {}
 
   async clearAppData(bundleId: string): Promise<ClearAppDataResult> {
@@ -27,7 +27,12 @@ export class SimulatorIosClearDataBackend implements IosClearDataBackend {
     // The container can't be safely wiped while the app holds open file handles.
     await resolveIosLenientTerminateBackend(this.deviceId, this.deps).terminateApp(bundleId);
 
-    const containerPath = await getAppDataContainerPath(this.deps.simctl, this.deviceId, bundleId);
+    const containerPath = await getAppDataContainerPath(
+      this.deps.simctl,
+      this.deviceId,
+      bundleId,
+      this.deps.containerOwnership,
+    );
     if (!containerPath) {
       // Only a successful listing that lacks the bundle proves "not installed"; any other
       // container miss (or an unreadable listing) stays a retryable failure.

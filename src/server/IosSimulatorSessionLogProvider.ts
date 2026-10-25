@@ -1,3 +1,10 @@
+import {
+  resolveOwnAppDataContainer,
+  resolveOwnAppGroupContainer,
+  SimulatorContainerUnresolvedError,
+  type SimulatorContainerOwnershipOptions,
+  type SimulatorContainerChoice,
+} from "../utils/ios-cmdline-tools/simulatorOwnContainer";
 import { dirname, join, posix } from "node:path";
 import { ActionableError, type BootedDevice } from "../models";
 import { resolveIosDeviceKind } from "../utils/ios-cmdline-tools/IosDeviceKind";
@@ -63,6 +70,7 @@ export class IosSimulatorSessionLogProvider implements SessionLogProvider {
     private readonly fileSystem: AppFileFileSystem,
     private readonly timer: Timer,
     private readonly unifiedLogTimeoutMs: number,
+    private readonly ownership: SimulatorContainerOwnershipOptions = {},
   ) {}
 
   async readAppLogs(
@@ -71,7 +79,9 @@ export class IosSimulatorSessionLogProvider implements SessionLogProvider {
     request: SessionLogFilesRequest,
     maxBytes: number,
   ): Promise<SessionLogFilesResult> {
-    const root = await this.resolveContainerRoot(device, appId, request.container, "read", "data");
+    const root = await this.resolveContainerRoot(device, appId, request.container, "read", {
+      container: "data",
+    });
     const containerRoot = join(
       root,
       iosContainerRelativePath(request.container, "read", appId, device.platform),
@@ -85,7 +95,9 @@ export class IosSimulatorSessionLogProvider implements SessionLogProvider {
 
   async resetAppLogs(request: ResetAppLogsRequest): Promise<ResetAppLogsPathOutcome[]> {
     const { device, appId, container } = request;
-    const root = await this.resolveContainerRoot(device, appId, container, "reset", "data");
+    const root = await this.resolveContainerRoot(device, appId, container, "reset", {
+      container: "data",
+    });
     const containerRoot = join(
       root,
       iosContainerRelativePath(container, "reset", appId, device.platform),
@@ -107,13 +119,10 @@ export class IosSimulatorSessionLogProvider implements SessionLogProvider {
     request: SessionLogAppGroupRequest,
     maxBytes: number,
   ): Promise<SessionLogAppGroupResult> {
-    const root = await this.resolveContainerRoot(
-      device,
-      appId,
-      request.groupId,
-      "read",
-      request.groupId,
-    );
+    const root = await this.resolveContainerRoot(device, appId, request.groupId, "read", {
+      container: "group",
+      groupId: request.groupId,
+    });
     const files: LocalFileListEntry[] = await listLocalFiles(root, this.fileSystem);
     const entries: SessionLogFileOutcome[] = [];
     for (const path of request.paths) {
@@ -188,20 +197,34 @@ export class IosSimulatorSessionLogProvider implements SessionLogProvider {
     appId: string,
     containerLabel: string,
     operation: string,
-    simctlContainer: string,
+    choice: SimulatorContainerChoice,
   ): Promise<string> {
     this.requireSimulator(device, `${operation} ${containerLabel} logs for ${appId}`);
-    const result = await executeIosAppContainerCommand(
-      this.simctlFactory(device),
-      `get_app_container ${shellQuote(device.deviceId)} ${shellQuote(appId)} ${shellQuote(simctlContainer)}`,
-      { device, appId, container: containerLabel, operation },
-    );
-    const root = result.stdout.trim();
-    if (!root) {
-      throw new ActionableError(
-        `Unable to resolve the ${containerLabel} container for ${appId} on ${device.deviceId}. ` +
-          "Confirm the simulator is booted, the app is installed, and the app declares the container.",
-      );
+    let root: string;
+    try {
+      const options = {
+        ...this.ownership,
+        deviceId: device.deviceId,
+        bundleId: appId,
+        run: (args: string[]) =>
+          executeIosAppContainerCommand(
+            this.simctlFactory(device),
+            args.map(shellQuote).join(" "),
+            { device, appId, container: containerLabel, operation },
+          ),
+      };
+      root =
+        choice.container === "data"
+          ? await resolveOwnAppDataContainer(options)
+          : await resolveOwnAppGroupContainer({ ...options, groupId: choice.groupId });
+    } catch (error) {
+      if (error instanceof SimulatorContainerUnresolvedError) {
+        throw new ActionableError(
+          `Unable to resolve the ${containerLabel} container for ${appId} on ${device.deviceId}. ` +
+            "Confirm the simulator is booted, the app is installed, and the app declares the container.",
+        );
+      }
+      throw error;
     }
     return root;
   }

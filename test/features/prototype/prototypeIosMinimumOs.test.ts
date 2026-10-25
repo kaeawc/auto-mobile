@@ -41,12 +41,9 @@ describe("prototype iOS minimum OS (#15242)", () => {
 
   test("Android refusals never carry an iOS version note", async () => {
     const android = { supportsCommand: async () => false };
-    const refusal = await specCapabilityRefusal(
-      { android: android as never },
-      chartSpec,
-      undefined,
-      { [PROTOTYPE_CHART_CAPABILITY]: 18 },
-    );
+    const refusal = await specCapabilityRefusal({ android }, chartSpec, undefined, {
+      [PROTOTYPE_CHART_CAPABILITY]: 18,
+    });
 
     expect(refusal?.error).not.toContain("It needs iOS");
   });

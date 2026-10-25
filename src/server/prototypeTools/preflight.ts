@@ -150,7 +150,10 @@ export function appLayerGrant(
 
 /** Refuses spec-introduced features before a show or patch reaches the device. */
 export async function specCapabilityRefusal(
-  target: Pick<PrototypeTarget, "android" | "ios">,
+  target: {
+    android?: Pick<NonNullable<PrototypeTarget["android"]>, "supportsCommand">;
+    ios?: Pick<NonNullable<PrototypeTarget["ios"]>, "supportsCapability">;
+  },
   spec: unknown,
   signal: AbortSignal | undefined,
   iosMinimumOs: Readonly<Record<string, number>> = PROTOTYPE_IOS_MINIMUM_OS,

@@ -8,19 +8,6 @@ import { drainMicrotasks, drainUntil } from "../helpers/fakeTimerStepping";
 // ffmpeg for minutes. Device-disconnect cleanup must not hold the device release that long.
 const DISCONNECT_STOP_WAIT_MS = 60_000;
 
-interface DisconnectRecordingStopSurface {
-  stoppingRecordings: Set<string>;
-  stopRecordingAfterDeviceDisconnect(recordingId: string, deviceId: string): Promise<boolean>;
-}
-
-function disconnectRecordingStopHarness(timer: FakeTimer): DisconnectRecordingStopSurface {
-  const daemon: Daemon = Object.create(Daemon.prototype);
-  return Object.assign(daemon, {
-    timer,
-    stoppingRecordings: new Set<string>(),
-  }) as DisconnectRecordingStopSurface;
-}
-
 describe("recording stop after a device disconnect (#10217)", () => {
   // Installed per test and restored after: a describe-time spy that is only mockReset leaves
   // the real module export replaced by an undefined-returning stub for every later file.
@@ -35,7 +22,7 @@ describe("recording stop after a device disconnect (#10217)", () => {
   });
 
   test("returns once a quick stop finishes", async () => {
-    const daemon = disconnectRecordingStopHarness(new FakeTimer());
+    const daemon = new Daemon({}, { timer: new FakeTimer() }).testHooks;
     stop.mockResolvedValue({} as Awaited<ReturnType<typeof stop>>);
 
     expect(await daemon.stopRecordingAfterDeviceDisconnect("rec-1", "device-1")).toBe(true);
@@ -46,7 +33,7 @@ describe("recording stop after a device disconnect (#10217)", () => {
 
   test("releases the device at the wait bound while a long post-process keeps running", async () => {
     const timer = new FakeTimer();
-    const daemon = disconnectRecordingStopHarness(timer);
+    const daemon = new Daemon({}, { timer }).testHooks;
     let finishStop: (() => void) | undefined;
     stop.mockImplementation(
       () =>

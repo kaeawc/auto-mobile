@@ -2465,6 +2465,8 @@ describe("killDevice handler", () => {
         clearInstalledAppsForDevice: async () => {},
         timer,
       });
+      // Built first: the Daemon constructor initializes the shared DaemonState, which the pool below then replaces.
+      const monitor = new Daemon({}, { timer }).testHooks;
       sessionManager = new SessionManager(timer, deviceSessionRepository);
       placeholderManager.setDeviceImages("android", [image]);
       const pool = makePool(sessionManager, "daemon-session", {
@@ -2505,24 +2507,8 @@ describe("killDevice handler", () => {
         }
       };
       // Exercise the real daemon monitor tick without its socket/DB services.
-      const monitor = Object.assign(Object.create(Daemon.prototype), {
-        timer,
-        devicePool: pool,
-        sessionManager,
-        runtime: new DaemonRuntimeState(),
-        deviceLoss: new DeviceLossState(),
-      }) as {
-        runtime: { deviceDisconnectMonitor: SingleFlightInterval };
-        startDeviceDisconnectMonitor(
-          manager: Pick<
-            MultiPlatformDeviceManager,
-            | "getBootedDevicesDetailed"
-            | "getAndroidOfflineDeviceIds"
-            | "recoverAndroidOfflineDevices"
-          >,
-          listRecordings: () => Promise<[]>,
-        ): void;
-      };
+      monitor.replaceDevicePool(pool);
+      monitor.replaceSessionManager(sessionManager);
       const reserve = pool.reserveDeviceForShutdown.bind(pool);
       if (source !== "kill-discovery") {
         runtimeAvdNames.set(image.deviceId!, image.name);
@@ -2530,6 +2516,7 @@ describe("killDevice handler", () => {
           {
             getBootedDevicesDetailed: (platform, options) =>
               placeholderManager.getBootedDevicesDetailed(platform, options),
+            getAndroidListedDeviceStates: async () => new Map(),
             getAndroidOfflineDeviceIds: async () => new Set(),
             recoverAndroidOfflineDevices: async () => {},
           },
@@ -2544,7 +2531,7 @@ describe("killDevice handler", () => {
               deviceId: image.deviceId!,
             },
           ]);
-          await monitor.runtime.deviceDisconnectMonitor.run();
+          await monitor.runtime.deviceDisconnectMonitor!.run();
           expect(pool.getDevice(image.deviceId!)?.identityUnresolved).toBe(true);
           expect(cancelledSessions).toEqual([]);
           expect(initiatingKill.abortController.signal.aborted).toBe(false);
@@ -2632,7 +2619,7 @@ describe("killDevice handler", () => {
         executionTracker.endExecution(competingExecution.id);
         executionTracker.endExecution(sessionlessExecution.id);
         if (source !== "kill-discovery") {
-          await monitor.runtime.deviceDisconnectMonitor.stop();
+          await monitor.runtime.deviceDisconnectMonitor!.stop();
         }
       }
     },

@@ -539,6 +539,25 @@ export class Daemon {
         this.devicePool = pool;
       },
       recordAndTryRecoverCapturedDisconnect: this.recordAndTryRecoverCapturedDisconnect.bind(this),
+      deviceLoss: this.deviceLoss,
+      stoppingRecordings: this.stoppingRecordings,
+      stopRecordingAfterDeviceDisconnect: this.stopRecordingAfterDeviceDisconnect.bind(this),
+      runtime: this.runtime,
+      startDeviceDisconnectMonitor: this.startDeviceDisconnectMonitor.bind(this),
+      createPlanDeviceLossCheck: this.createPlanDeviceLossCheck.bind(this),
+      /** Replaces the staleness and retirement checks the captured-disconnect recovery consults. */
+      overrideCapturedDisconnectChecks: (checks: {
+        shouldSkipStaleDisconnectCleanup: DaemonDisconnect["shouldSkipStaleDisconnectCleanup"];
+        isCapturedDisconnectTargetCurrent: DaemonDisconnect["isCapturedDisconnectTargetCurrent"];
+        retireAdbServerResetDisconnectState: DaemonDisconnect["retireAdbServerResetDisconnectState"];
+      }): void => {
+        Object.assign(this, checks);
+      },
+      overrideCleanupDisconnectedDevice: (
+        cleanup: DaemonDisconnect["cleanupDisconnectedDevice"],
+      ) => {
+        this.cleanupDisconnectedDevice = cleanup;
+      },
       deferredSessionRecoverySweeps: this.runtime.deferredSessionRecoverySweeps,
       replaceObserverSessionRegistry: (registry: ObserverSessionRegistry): void => {
         this.observerSessionRegistry = registry;

@@ -11,6 +11,8 @@ import type { CtrlProxyHighlights } from "./CtrlProxyHighlights";
 import type { CachedHierarchy } from "./types";
 import type { AndroidInboundMessageRouter } from "./AndroidInboundMessageRouter";
 import type { DelegateContext } from "../shared/types";
+import type { CtrlProxyHierarchy } from "./CtrlProxyHierarchy";
+import type { HierarchyDelegateContext } from "./types";
 
 /** Constructor-injected collaborators and flags a test may read back to prove wiring. */
 export type AndroidCtrlProxyInjectedState = Readonly<
@@ -20,6 +22,8 @@ export type AndroidCtrlProxyInjectedState = Readonly<
     | "loggerInstance"
     | "transientObserver"
     | "timer"
+    | "device"
+    | "adb"
     | "webSocketFactory"
     | "certificateFileSystem"
     | "serviceManagerFactory"
@@ -49,6 +53,8 @@ export interface AndroidCtrlProxyClientTestHooks {
   /** Own-property handler table keyed by wire message type. */
   webSocketMessageHandlers(): AndroidInboundMessageRouter["webSocketMessageHandlers"];
   createDelegateContext(): DelegateContext;
+  createHierarchyDelegateContext(): HierarchyDelegateContext;
+  hierarchy(): CtrlProxyHierarchy;
   injected(): AndroidCtrlProxyInjectedState;
   isCommandSupported(messageType: string): boolean;
   /** The memoised gestures delegate; assign a prebuilt one to drive it with a custom context. */

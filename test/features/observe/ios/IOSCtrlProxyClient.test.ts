@@ -74,7 +74,7 @@ describe("IOSCtrlProxyClient", function () {
     const push = spyOn(server, "pushPerformanceUpdate").mockImplementation(() => {});
     installDeviceDataStreamSocketServerForTesting(server);
     try {
-      ctrlProxyClient["handlePerformanceUpdate"]({
+      ctrlProxyClient.testHooks.handlePerformanceUpdate({
         timestamp: fakeTimer.now(),
         fps: 12,
         frameTimeMs: 83,
@@ -120,7 +120,7 @@ describe("IOSCtrlProxyClient", function () {
   });
 
   test("client installs the iOS serializer and rounds hierarchy polling intervals", () => {
-    const context = ctrlProxyClient["createDelegateContext"]();
+    const context = ctrlProxyClient.testHooks.createDelegateContext();
     expect(context.serializeRequest?.({ type: "request_tap_coordinates", duration: 0.4 })).toBe(
       '{"type":"request_tap_coordinates","duration":1}',
     );
@@ -140,7 +140,10 @@ describe("IOSCtrlProxyClient", function () {
       panels: [{ key: "primary", role: "unknown", sizePx: { width: 1179, height: 2556 } }],
       postures: ["unknown"],
     };
-    const runner = spyOn(ctrlProxyClient["screenshot"], "requestScreenshot").mockResolvedValue({
+    const runner = spyOn(
+      ctrlProxyClient.testHooks.screenshot(),
+      "requestScreenshot",
+    ).mockResolvedValue({
       success: true,
       data: "runner",
     });
@@ -174,11 +177,14 @@ describe("IOSCtrlProxyClient", function () {
       receivedAt: 0,
       fresh: true,
     };
-    ctrlProxyClient["cachedHierarchyDisplayRevision"] = displayTransitions.revision(
+    ctrlProxyClient.testHooks.cachedHierarchyDisplayRevision = displayTransitions.revision(
       testDevice.deviceId,
     );
     displayTransitions.notifyTransition(testDevice.deviceId, "hinge changed");
-    const runner = spyOn(ctrlProxyClient["screenshot"], "requestScreenshot").mockResolvedValue({
+    const runner = spyOn(
+      ctrlProxyClient.testHooks.screenshot(),
+      "requestScreenshot",
+    ).mockResolvedValue({
       success: true,
       data: "runner",
     });
@@ -442,7 +448,7 @@ describe("IOSCtrlProxyClient", function () {
       const capture = spyOn(ctrlProxyClient, "requestScreenshot").mockRejectedValue(error);
       const warning = spyOn(logger, "warn").mockImplementation(() => {});
       try {
-        expect(await ctrlProxyClient["captureScreenshotForBackoff"]()).toEqual({
+        expect(await ctrlProxyClient.testHooks.captureScreenshotForBackoff()).toEqual({
           success: false,
           error: String(error),
         });
@@ -675,7 +681,7 @@ describe("IOSCtrlProxyClient", function () {
     test("cancels screenshot backoff when the connection closes", function () {
       const scheduler = new FakeScreenshotBackoffScheduler();
 
-      ctrlProxyClient["screenshotBackoffScheduler"] = scheduler;
+      ctrlProxyClient.testHooks.screenshotBackoffScheduler = scheduler;
       ctrlProxyClient.testHooks.onConnectionClosed();
 
       expect(scheduler.cancelPendingCapturesCalls).toBe(1);
@@ -684,7 +690,7 @@ describe("IOSCtrlProxyClient", function () {
     test("refreshes screenshot cadence by rescheduling keepalive", function () {
       const scheduler = new FakeScreenshotBackoffScheduler();
 
-      ctrlProxyClient["screenshotBackoffScheduler"] = scheduler;
+      ctrlProxyClient.testHooks.screenshotBackoffScheduler = scheduler;
       ctrlProxyClient.refreshObservationStreamScreenshotCadence();
 
       expect(scheduler.rescheduleKeepAliveCalls).toBe(1);
@@ -785,15 +791,15 @@ describe("IOSCtrlProxyClient", function () {
       // transient reconnect on a static screen must restart it or the live view
       // freezes forever. startScreenshotBackoff() is itself subscriber-gated.
       let backoffStarts = 0;
-      ctrlProxyClient["startScreenshotBackoff"] = () => {
+      ctrlProxyClient.testHooks.overrideStartScreenshotBackoff(() => {
         backoffStarts++;
-      };
+      });
       // Isolate from SDK polling side effects for this unit.
       ctrlProxyClient.getSdkEventPollingTestHooks().polling.startSdkEventPolling = () => {
         /* no-op */
       };
 
-      ctrlProxyClient["onConnectionEstablished"]();
+      ctrlProxyClient.testHooks.onConnectionEstablished();
 
       expect(backoffStarts).toBe(1);
     });
@@ -3511,7 +3517,7 @@ describe("IOSCtrlProxyClient", function () {
         restartToken: client.getRunnerRecoveryTestHooks().diagnostics().pendingRestartToken,
         restartTimer: client.getRunnerRecoveryTestHooks().diagnostics().restartRearmTimeout,
         commands: client.connectionTestHooks.supportedCommands,
-        features: client["supportedFeatures"],
+        features: client.testHooks.supportedFeatures,
         lostConnections,
         budget: manager.getForcedRestartBudget().snapshot(),
       });
@@ -3690,7 +3696,7 @@ describe("IOSCtrlProxyClient", function () {
         expect(h.state()).toEqual(before);
         // Even a previous live-session cache cannot make a closed runner pass.
         h.client.connectionTestHooks.supportedCommands = new Set(["old_command"]);
-        h.client["supportedFeatures"] = new Set(["old_feature"]);
+        h.client.testHooks.supportedFeatures = new Set(["old_feature"]);
         const cachedState = h.state();
         h.modes.push("instant", "instant");
         expect(await h.client.getSupportedCommandsForDiagnostics()).toBeNull();
@@ -3867,7 +3873,7 @@ describe("IOSCtrlProxyClient", function () {
       const h = diagnosticResident();
       // Seed bookkeeping directly: no real port binding or listener in this test.
       PortManager["allocatedPorts"].set(testDevice.deviceId, serverPort);
-      h.client["allocatedPort"] = serverPort;
+      h.client.testHooks.allocatedPort = serverPort;
       const allocate = spyOn(PortManager, "allocate");
       const release = spyOn(PortManager, "releaseIfAllocated");
       try {
@@ -3875,7 +3881,7 @@ describe("IOSCtrlProxyClient", function () {
         expect(allocate).not.toHaveBeenCalled();
         expect(release).not.toHaveBeenCalled();
         expect(PortManager.getPort(testDevice.deviceId)).toBe(serverPort);
-        expect(h.client["allocatedPort"]).toBe(serverPort);
+        expect(h.client.testHooks.allocatedPort).toBe(serverPort);
       } finally {
         allocate.mockRestore();
         release.mockRestore();
@@ -4328,7 +4334,7 @@ describe("IOSCtrlProxyClient", function () {
           client.testHooks.updatePort(serverPort + 1);
 
           expect(client.connectionTestHooks.socket).toBeNull();
-          expect(client["lifecycleSocket"]).toBeNull();
+          expect(client.testHooks.lifecycleSocket).toBeNull();
           expect(socket.listenerCount("close")).toBe(0);
           expect(socket.listenerCount("message")).toBe(0);
         } finally {
@@ -4371,7 +4377,7 @@ describe("IOSCtrlProxyClient", function () {
           client.testHooks.updatePort(serverPort + 1);
 
           expect(client.connectionTestHooks.reconnectTimeoutId).toBeNull();
-          expect(client["consecutiveConnectionFailures"]).toBe(0);
+          expect(client.testHooks.consecutiveConnectionFailures).toBe(0);
           expect(client.connectionTestHooks.autoReconnectEnabled).toBe(true);
         } finally {
           await client.close();
@@ -5534,13 +5540,13 @@ describe("IOSCtrlProxyClient", function () {
           },
         });
         testClient.getSdkCapabilityTestHooks().seedForTesting("com.example.ios", []);
-        testClient["lastForegroundBundleId"] = "com.example.ios";
+        testClient.testHooks.lastForegroundBundleId = "com.example.ios";
         expect(await testClient.refreshSdkScreenIdentity("com.example.ios", 4241)).toEqual(
           identity,
         );
         expect(polls).toBe(2);
         // A capability snapshot for a different foreground app cannot enable the fast path.
-        testClient["lastForegroundBundleId"] = "com.example.other";
+        testClient.testHooks.lastForegroundBundleId = "com.example.other";
         const before = fakeTimer.now();
         await testClient.refreshSdkScreenIdentity("com.example.ios", 4242);
         expect(fakeTimer.now() - before).toBe(100);
@@ -6446,7 +6452,7 @@ describe("IOSCtrlProxyClient", function () {
         rememberedApplicationIds: new Set<string>(),
       });
       const refresh = spyOn(
-        testClient["sdkCapability"],
+        testClient.testHooks.sdkCapability,
         "refreshSdkCapabilitiesAndSync",
       ).mockResolvedValue(undefined);
       const { polling, receiveMessage } = testClient.getSdkEventPollingTestHooks();
@@ -6840,9 +6846,9 @@ describe("IOSCtrlProxyClient", function () {
 
     test("binds an explicitly forwarded initial hierarchy for later static-screen screenshots", function () {
       let backoffStarts = 0;
-      ctrlProxyClient["startScreenshotBackoff"] = () => {
+      ctrlProxyClient.testHooks.overrideStartScreenshotBackoff(() => {
         backoffStarts++;
-      };
+      });
 
       ctrlProxyClient.recordInitialObservationStreamHierarchy(
         {

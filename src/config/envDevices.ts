@@ -164,8 +164,8 @@ export const DEVICES_ENV = {
   IOS_TEMPLATE_CLONE: {
     name: "AUTOMOBILE_IOS_TEMPLATE_CLONE",
     kind: "string",
-    default: "true",
-    doc: "Provision iOS simulators from settled templates by default: 1/true enables; 0/false opts out.",
+    default: "false",
+    doc: "Provision iOS simulators from settled templates; off by default (clones share Safari and system-app data, #15327): 1/true opts in.",
   },
   IOS_PREBOOT_LEAN_PROFILE: {
     name: "AUTOMOBILE_IOS_PREBOOT_LEAN_PROFILE",

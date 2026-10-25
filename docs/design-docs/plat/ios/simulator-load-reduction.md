@@ -157,7 +157,7 @@ basis. Orphan directories belonging to simulators already deleted are not swept.
 
 ## Settled template creation
 
-`AUTOMOBILE_IOS_TEMPLATE_CLONE` defaults to enabled; `0`/`false` opts out. Both creation seams use the same creation
+`AUTOMOBILE_IOS_TEMPLATE_CLONE` defaults to disabled (owner decision 2026-10-25, see "Known limitation" below); `1`/`true` opts in. Both creation seams use the same creation
 service when wired for production; preboot application stays after identity binding and before any
 workload boot. The disabled path resolves no template storage, locks or host version probes.
 
@@ -350,10 +350,21 @@ window, and it holds a boot slot for that time.
   last-120-second mean was higher with `minimal`, 7.3 against 3.8 percent, unexplained). `catalog-cpu` bought about
   7 more points in #15097 (minus 50 against a 789 baseline; not re-measured here) while removing Health, Apple
   Intelligence and search, and stays opt-in with speech/Siri.
-- `AUTOMOBILE_IOS_TEMPLATE_CLONE` defaults on: a clone alone is minus 46 percent (harness only); clone + `minimal`
+- `AUTOMOBILE_IOS_TEMPLATE_CLONE` was made default on and then flipped back to off for this release (owner decision
+  2026-10-25, see "Known limitation"); opt in with `1`/`true`. Measurements: a clone alone is minus 46 percent (harness only); clone + `minimal`
   is minus 65 percent in the harness and the product path, and minus 62 to 63 percent with two and four simultaneous
   boots, at about 3 seconds per clone. Costs: the first creation per runtime, device type and profile is a normal one,
   a background template build of about 13 minutes occupies a boot slot, and each template needs a disk copy. Re-check
   the aged-clone Safari tap on the next manual test first.
 - Size boot concurrency by CPU-seconds: a first boot is about 775 CPU-seconds, 442 with `minimal`, 273 as a clone
   with `minimal`, and k simultaneous boots cost slightly more than k times that.
+
+## Known limitation: template clones share Safari and system-app data
+
+Owner decision 2026-10-25: `AUTOMOBILE_IOS_TEMPLATE_CLONE` defaults back to off for this release (introduced by
+#15236, flipped on by #15287); `AUTOMOBILE_IOS_PREBOOT_LEAN_PROFILE` stays `minimal`. Round 9 of the manual test
+found that a clone shares Safari and other system-app data with its template, so state written in one clone
+(tabs, history, cookies, website data) leaks to the template and to the other clones (#15327, a sub-issue of
+#15216). With the flag off the clone path resolves no template storage and starts no background template build,
+so the cost of a first creation is the normal one. Opt in with `AUTOMOBILE_IOS_TEMPLATE_CLONE=1` only when tests do
+not depend on isolated system-app state. Flip the default back on once clones get their own system-app data.

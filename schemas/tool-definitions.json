@@ -32381,6 +32381,46 @@
                     }
                   ],
                   "description": "Revoke one runtime permission from an installed app with `pm revoke` ({ package, permission }); reset re-grants it. Revoking kills the app's process, so it also restarts the app. Or unset."
+                },
+                "disablePackage": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "unset"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "package": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$"
+                        }
+                      },
+                      "required": ["package"],
+                      "additionalProperties": false
+                    }
+                  ],
+                  "description": "Disable an installed app for the current user with `pm disable-user` ({ package }); reset runs `pm enable`. Or unset."
+                },
+                "clearPackageData": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "unset"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "package": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$"
+                        }
+                      },
+                      "required": ["package"],
+                      "additionalProperties": false
+                    }
+                  ],
+                  "description": "Clear an installed app's data with `pm clear` ({ package }). One-shot: it kills the app's process and cannot be undone, so there is nothing to reset. 'unset' is a no-op."
                 }
               },
               "additionalProperties": false,

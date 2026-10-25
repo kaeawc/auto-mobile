@@ -9,7 +9,6 @@ import { DUMPSYS_MAX_BUFFER } from "../../utils/android-cmdline-tools/dumpsysLim
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
-import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { normalizeAndroidPermissionName } from "../action/GrantAndroidPermissions";
 import { parseAndroidRuntimePermissions } from "../action/parseAndroidRuntimePermissions";
 import type {
@@ -23,7 +22,14 @@ import {
   type DeviceConditionKey,
 } from "./DeviceConditionTypes";
 import { OwedResetError } from "./OwedResetError";
-import { createSerializer, rejectValue, shell, unsupported } from "./injectorSupport";
+import {
+  createSerializer,
+  rejectValue,
+  resolveAppUserWith,
+  shell,
+  unsupported,
+  type ResolveAppUser,
+} from "./injectorSupport";
 
 /**
  * `faults.revokePermission` (#14069): revoke one runtime permission from an installed app with
@@ -56,9 +62,6 @@ interface Target extends RequestedTarget {
 
 const targetKey = (target: Target): string =>
   `${target.userId}|${target.packageName}|${target.permission}`;
-
-/** Which Android user to act on for an app; production asks the same resolver the permission tool uses. */
-export type ResolvePermissionUser = (packageName: string, signal?: AbortSignal) => Promise<number>;
 
 const pmArgs = (action: "grant" | "revoke", target: Target): string[] => [
   "pm",
@@ -145,10 +148,7 @@ function parseTarget(params: Record<string, unknown> | undefined): RequestedTarg
  */
 export function createPermissionFaultInjector(
   adb: AdbExecutor,
-  resolveUser: ResolvePermissionUser = (packageName, signal) =>
-    new AndroidUserTargetResolver(adb)
-      .resolve({ packageName, installedOnly: true, signal })
-      .then((resolved) => resolved.userId),
+  resolveUser: ResolveAppUser = resolveAppUserWith(adb),
 ): DeviceConditionInjector {
   /** Pairs this injector revoked and has not yet re-granted, in revoke order. */
   const owned = new Map<string, Target>();

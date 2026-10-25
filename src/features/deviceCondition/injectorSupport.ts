@@ -1,4 +1,5 @@
 import { ActionableError } from "../../models/ActionableError";
+import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { DeviceConditionKey } from "./DeviceConditionTypes";
 
@@ -55,3 +56,18 @@ export function createSerializer(): <T>(task: () => Promise<T>) => Promise<T> {
     return run;
   };
 }
+
+/** Which Android user to act on for an app; tests inject a stub. */
+export type ResolveAppUser = (packageName: string, signal?: AbortSignal) => Promise<number>;
+
+/**
+ * The user the app under test runs in, from the resolver the permission tool uses. The `pm`
+ * subcommands default to user 0 (or to all users when listing), so a fault on a device switched to
+ * another user would otherwise change and read back the wrong user's copy of the app.
+ */
+export const resolveAppUserWith =
+  (adb: AdbExecutor): ResolveAppUser =>
+  (packageName, signal) =>
+    new AndroidUserTargetResolver(adb)
+      .resolve({ packageName, installedOnly: true, signal })
+      .then((resolved) => resolved.userId);

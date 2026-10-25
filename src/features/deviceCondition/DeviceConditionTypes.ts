@@ -32,6 +32,11 @@ export const ANDROID_PACKAGE_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A
 /** A full permission name, or a bare platform constant such as `CAMERA`. */
 export const ANDROID_PERMISSION_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_.]*$/;
 
+/** The app a package-state fault targets. */
+export interface DeviceConditionPackageTarget {
+  package: string;
+}
+
 /** The app and runtime permission a `revokePermission` fault targets. */
 export interface DeviceConditionPermissionTarget {
   package: string;
@@ -65,10 +70,17 @@ export interface DeviceConditionInput {
     storage?: "low" | "full" | typeof DEVICE_CONDITION_UNSET;
     /** Permission revocation (#14069); the one fault so far that takes an object. */
     revokePermission?: DeviceConditionPermissionTarget | typeof DEVICE_CONDITION_UNSET;
+    /** Package state (#14069): disable an app until reset, or clear its data once. */
+    disablePackage?: DeviceConditionPackageTarget | typeof DEVICE_CONDITION_UNSET;
+    clearPackageData?: DeviceConditionPackageTarget | typeof DEVICE_CONDITION_UNSET;
   };
   expiresInSeconds?: number;
   reset?: true;
 }
+
+/** A fresh schema per field: sharing one instance makes the JSON schema emit a dangling `$ref` for the second use. */
+const packageTargetSchema = () =>
+  z.object({ package: z.string().regex(ANDROID_PACKAGE_NAME_PATTERN) }).strict();
 
 export const deviceConditionInputSchema: z.ZodType<DeviceConditionInput> = z
   .object({
@@ -131,6 +143,18 @@ export const deviceConditionInputSchema: z.ZodType<DeviceConditionInput> = z
           .optional()
           .describe(
             "Revoke one runtime permission from an installed app with `pm revoke` ({ package, permission }); reset re-grants it. Revoking kills the app's process, so it also restarts the app. Or unset.",
+          ),
+        disablePackage: z
+          .union([z.literal(DEVICE_CONDITION_UNSET), packageTargetSchema()])
+          .optional()
+          .describe(
+            "Disable an installed app for the current user with `pm disable-user` ({ package }); reset runs `pm enable`. Or unset.",
+          ),
+        clearPackageData: z
+          .union([z.literal(DEVICE_CONDITION_UNSET), packageTargetSchema()])
+          .optional()
+          .describe(
+            "Clear an installed app's data with `pm clear` ({ package }). One-shot: it kills the app's process and cannot be undone, so there is nothing to reset. 'unset' is a no-op.",
           ),
       })
       .strict()

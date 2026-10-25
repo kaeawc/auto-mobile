@@ -23,14 +23,15 @@ export class PenHoverTracker {
   private nodeEpisode: Episode | undefined;
   private readonly slotEpisodes = new Map<number, Episode>();
 
+  /** An episode already open (a touch reported first, or a tool switch) is kept, not restarted. */
   penEntered(): void {
-    this.nodeEpisode = { touched: false };
+    this.nodeEpisode ??= { touched: false };
   }
 
+  /** Drivers differ on whether the touch or the tool key comes first within one frame. */
   penTouched(): void {
-    if (this.nodeEpisode) {
-      this.nodeEpisode.touched = true;
-    }
+    this.nodeEpisode ??= { touched: false };
+    this.nodeEpisode.touched = true;
   }
 
   penLeft(toolType: PointerToolType, arrivedAt: number): GestureEvent | null {

@@ -64,6 +64,20 @@ describe("a single-touch pen that hovers without ever touching (#13084)", () => 
     expect(hoverEvents(tap, { singleTouch: true })).toEqual([]);
   });
 
+  test("a touch reported before the tool key in the same frame is still a contact", () => {
+    const tap = [
+      "[  1.0] EV_KEY    BTN_TOUCH            DOWN",
+      "[  1.0] EV_KEY    BTN_TOOL_PEN         DOWN",
+      "[  1.0] EV_ABS    ABS_X                00000438",
+      SYN,
+      "[  1.1] EV_KEY    BTN_TOUCH            UP",
+      "[  1.1] EV_KEY    BTN_TOOL_PEN         UP",
+      SYN,
+    ];
+
+    expect(hoverEvents(tap, { singleTouch: true })).toEqual([]);
+  });
+
   test("a tool key that went down before recording started is not guessed at", () => {
     const lines = ["[  1.2] EV_KEY    BTN_TOOL_PEN         UP", SYN];
 

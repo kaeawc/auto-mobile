@@ -1,7 +1,6 @@
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { shutdownDevice } from "../../src/server/deviceToolsShutdown";
 import { getDeviceToolsDependencies } from "../../src/features/deviceLifecycle/deviceLifecycleCore";
-import { DeviceLossState } from "../../src/daemon/deviceLossState";
 import { makePool } from "../helpers/makePool";
 import { concreteCtrlProxyClient } from "../helpers/concreteCtrlProxyClient";
 import { readFileSync } from "node:fs";
@@ -28,8 +27,6 @@ import { EventEmitter } from "node:events";
 import { z } from "zod/v4";
 import type { ChildProcess } from "node:child_process";
 import { Daemon } from "../../src/daemon/daemon";
-import { DaemonRuntimeState } from "../../src/daemon/daemonRuntimeState";
-import type { SingleFlightInterval } from "../../src/daemon/SingleFlightInterval";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { InMemoryEmulatorLossIncidentStore } from "../../src/daemon/emulatorLossIncident";
@@ -76,7 +73,6 @@ import { AndroidCtrlProxyClient } from "../../src/features/observe/android/Andro
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios/IOSCtrlProxyClient";
 import type {
   PlatformDeviceManager,
-  MultiPlatformDeviceManager,
   BootedDeviceDiscovery,
   BootedDeviceDiscoveryOptions,
   DeviceShutdownOptions,

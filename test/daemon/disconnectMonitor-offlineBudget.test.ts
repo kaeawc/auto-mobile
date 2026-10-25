@@ -5,7 +5,7 @@ import {
   OFFLINE_DEVICE_DISCONNECT_BUDGET_MS,
   type OfflineEpisode,
 } from "../../src/daemon/disconnectMonitor";
-import type { BootedDevice, ExecResult, Platform } from "../../src/models";
+import type { ExecResult, Platform } from "../../src/models";
 import { AdbClient, resetAdbClientCaches } from "../../src/utils/android-cmdline-tools/AdbClient";
 import { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { createExecResult } from "../../src/utils/execResult";

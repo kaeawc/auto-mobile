@@ -8,7 +8,6 @@ import {
 } from "../../src/daemon/disconnectMonitor";
 import { InMemoryEmulatorLossIncidentStore } from "../../src/daemon/emulatorLossIncident";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import type { SingleFlightInterval } from "../../src/daemon/SingleFlightInterval";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import type { TransitionalSimulatorState } from "../../src/models/TransitionalSimulator";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";

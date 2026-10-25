@@ -205,7 +205,7 @@ test("monitor dispatches only in-session offline targets", async () => {
       received.push([...ids]);
     }
   }
-  const { daemon, device, monitor, spies } = monitorHarness(new OfflineManager());
+  const { device, monitor, spies } = monitorHarness(new OfflineManager());
   const second = { ...device, id: "emulator-5558" };
   spies.getAllDevices.mockImplementation(() => [device, second]);
   spies.getAssignedDevices.mockImplementation(() => new Set([device.id, second.id]));

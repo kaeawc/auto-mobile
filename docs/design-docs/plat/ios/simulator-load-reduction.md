@@ -1,6 +1,7 @@
 # iOS simulator first-boot load: settled clones and a lean service profile
 
-Measurements from #15097 inform the optional template-clone and preboot lean profile paths.
+Measurements from #15097 inform the optional template-clone and preboot lean profile paths; #15219 measured the
+shipped defaults, concurrent first boots, idle drift and the product path (see the follow-up section).
 All numbers are from one host (16 cores, macOS 26, Xcode 27) and iOS 27.0 / iPhone 18 Pro.
 
 ## Question
@@ -229,5 +230,105 @@ Do both, clone first:
    60 second window), so boot gating stays, at roughly a third of the CPU cost and about 60 to 65 percent of
    the quiet time.
 
-The implementation issues should include measuring the minimal default (wallpaper rendering, widgets, live
-activities) on top of a clone. Follow-up implementation issues are linked from #15097.
+## Follow-up measurements (#15219)
+
+Same method and harness as above, run on the code that landed from #15229 (preboot profile), #15236 (template clone),
+#15230 (capacity gate) and #15228 (impact metadata). 65 sampled boots. Non-simulator host load during the windows
+averaged 3.0 cores (1.5 to 6.8, higher than in #15097 because a CI runner and other lanes were building), so
+absolute peaks are host-capped and the ratios between conditions are the result. A few 5-second peaks above 16 cores
+are sampler catch-up rows, not real; the burst length is reported as seconds with at least 8 cores busy instead.
+
+| condition                                                | runs | CPU-s in 600 s | vs baseline | time-to-quiet s | peak footprint MB | breakage      |
+| -------------------------------------------------------- | ---- | -------------- | ----------- | --------------- | ----------------- | ------------- |
+| baseline: create and boot                                | 3    | 775 (745-800)  | 0%          | 253 (225-270)   | 3170              | ok (1 check)  |
+| clone of a settled plain template                        | 2    | 415 (396-433)  | -46%        | 120 (110-130)   | 2620              | not run       |
+| `PosterBoard` + `chronod`, pre-first-boot                | 2    | 447 (438-456)  | -42%        | 155             | 2033              | ok            |
+| `minimal` (+ `liveactivitiesd`), pre-first-boot          | 4    | 442 (436-448)  | -43%        | 156 (155-160)   | 2012              | ok (4 of 4)   |
+| `minimal` + speech/Siri daemons                          | 2    | 366 (357-376)  | -53%        | 140             | 1903              | 1 of 2 failed |
+| clone + `PosterBoard` + `chronod`                        | 1    | 270            | -65%        | 105             | 1684              | ok            |
+| clone + `minimal`                                        | 4    | 273 (258-283)  | -65%        | 127 (110-155)   | 1751              | 1 of 4 failed |
+| `minimal` + `backgroundassets.user`                      | 2    | 429 (426-432)  | -45%        | 150             | 1998              | ok            |
+| `minimal` + app-store, companion, watch, password-breach | 2    | 383 (372-393)  | -51%        | 148 (145-150)   | 1910              | ok            |
+| `minimal` + `diagnosticd` (ceiling only, not safe)       | 1    | 475            | -39%        | 160             | 1969              | ok            |
+
+One clone + `minimal` run never reached a quiet 60-second window inside 600 seconds because of a `pairedsyncd`
+burst, not boot cost. The breakage failures are the Safari address-bar tap timing out while the runner was busy for
+20 seconds (one 45-minute-aged clone + `minimal` run, one speech/Siri run); the other four aged runs, including a
+replicate clone + `minimal`, and three plain-baseline controls passed all 14 steps, so the failure is not attributable to
+the profile but should be re-checked on the next manual test before the clone default flips.
+
+- `liveactivitiesd` costs nothing at first boot: `PosterBoard` + `chronod` alone measure the same as the shipped
+  `minimal`. Posters and widgets together save 43 percent, not the 48 percent the single-family screens added up to.
+- Speech/Siri adds 17 points but removes Siri, dictation and App Intents; it stays opt-in.
+- Unaddressed costs: `STExtractionService` is started by `mobileassetd` and `nsurlsessiond` (the only other client of
+  its framework, `backgroundassets.user`, made no difference), which are required for downloads, so only a clone removes
+  it (0 CPU-seconds). `xpcproxy_sim` is the launch stub for about 300 services, not a service. `diagnosticd` and `logd`
+  cannot be disabled: session logs and `getLogs` use `simctl spawn ... log show`, and disabling `diagnosticd` measured
+  7 percent worse. A set of `amsengagementd`, `nanotimekitcompaniond`, watch connectivity and `passwordbreachd` is safe
+  on the driving surface and saves 13 more points (mostly `amsengagementd`, 21 CPU-seconds); it is a candidate for
+  an opt-in resource, not a default.
+
+### Idle drift
+
+Seven 45-minute runs (two each for baseline, `minimal` and clone + `minimal`, one for a plain clone), mean CPU per
+five-minute bin. After the first five to ten minutes every condition idles at 4 to 6 percent of
+one core, with isolated five-minute bins of 8 to 10 percent at any point (different services run to run:
+`pairedsyncd` 10 to 38 CPU-seconds, `StreamingUnzipService`, `proactiveeventtrackerd`, `AuthenticationServicesAgent`).
+The mean from minute 15 to 45 was 6.8 and 6.1 (baseline), 6.7 (clone), 6.6 and 3.8 (`minimal`), 4.0 and 6.5 (clone +
+`minimal`). No condition drifts upward and `minimal` neither helps nor hurts idle. `pairedsyncd` has no launchd plist in
+the runtime and cannot be disabled by label. The first clone + `minimal` run looked flat at 4 percent while the others
+bumped after minute 30; the replicate bumped too, so the flat run was luck. The capacity model's 0.055 core per settled
+simulator sits inside this range.
+
+### Concurrent first boots
+
+All simulators started at the same instant, boot admission bypassed in the harness. CPU-seconds scale with the
+number of simulators, so the per-simulator saving survives concurrency:
+
+| condition         | sims | runs | total CPU-s      | per sim | seconds with >= 8 cores | all sims quiet (s) | last bootstatus (s) |
+| ----------------- | ---- | ---- | ---------------- | ------- | ----------------------- | ------------------ | ------------------- |
+| baseline          | 2    | 2    | 1551 (1550-1552) | 775     | 92                      | 380                | 27                  |
+| clone + `minimal` | 2    | 2    | 572 (554-590)    | 286     | 22                      | 242 (155-330)      | 3.4                 |
+| baseline          | 4    | 2    | 3250 (3205-3294) | 812     | 175                     | 515 (one never)    | 48.5                |
+| clone + `minimal` | 4    | 2    | 1249 (1224-1274) | 312     | 50                      | 272 (245-300)      | 13.9                |
+
+The peak stays at the host ceiling (about 14 cores) in every group; what changes is how long it lasts and how soon the
+host is quiet again. Four simultaneous baseline boots did not settle inside 600 seconds in one of two runs. The
+k=4 groups held four device slots, deliberately above the host-wide limit of two, while no other lane ran.
+
+### Product path
+
+A private daemon per configuration (own data, log, database, coordination and aux directories, explicit port, every
+other device protected) provisioned simulators through `provisionDevice` with the two environment variables:
+
+| configuration                                  | runs | CPU-s in 600 s | time-to-quiet s | `provisionDevice` call s |
+| ---------------------------------------------- | ---- | -------------- | --------------- | ------------------------ |
+| defaults (no profile, no clone)                | 2    | 710 (688-731)  | 168 (165-170)   | 21.1                     |
+| `AUTOMOBILE_IOS_PREBOOT_LEAN_PROFILE=minimal`  | 2    | 445 (441-448)  | 158 (155-160)   | 19.1                     |
+| `minimal` with `readiness=automation` (runner) | 1    | 524            | not reached     | 30.7                     |
+| `AUTOMOBILE_IOS_TEMPLATE_CLONE=1` + `minimal`  | 2    | 247 (232-262)  | 125             | 11.6                     |
+
+`launchctl print-disabled` inside each booted simulator listed all three `minimal` labels, none loaded, so the
+preboot database was honored. The product `minimal` run matches the harness (445 against 442); the product control
+(710) ran 8 percent below the harness baseline (775) for an unexplained reason, so the product-path saving (-37 percent
+for `minimal`, -65 percent for clone + `minimal`) is the more conservative figure for `minimal`. The runner adds about 80
+CPU-seconds. Two concurrent `provisionDevice` calls from one ready template both cloned in 2.7 seconds, booted
+together and cost 504 CPU-seconds in total, quiet after 140 seconds.
+
+The template was built with `auto-mobile --ios-templates build`. From boot to shutdown it took 762 seconds (461
+CPU-seconds in the first 600): the 120-second window below 5 percent of a core restarts after every periodic burst,
+so the real build is about 13 minutes, not the 4.5 minutes of the first-quiet-window estimate, and it holds a boot slot
+for that time.
+
+## Follow-up recommendation
+
+- Default `AUTOMOBILE_IOS_PREBOOT_LEAN_PROFILE` to `minimal`: minus 43 percent CPU-seconds and 100 seconds off the
+  time-to-quiet with no measured idle or breakage cost. `catalog-cpu` bought about 7 more points in #15097 while
+  removing Health, Apple Intelligence and search, and stays opt-in with speech/Siri.
+- Default `AUTOMOBILE_IOS_TEMPLATE_CLONE` on: minus 46 percent alone and minus 65 percent with `minimal`, in the
+  harness, in the product path and with two and four simultaneous boots (minus 62 to 63 percent), at about 3 seconds
+  per clone. Costs: the first creation per runtime, device type and profile is a normal one, a background template
+  build of about 13 minutes occupies a boot slot, and each template needs a disk copy. Re-check the aged-clone Safari
+  tap on the next manual test first.
+- Size boot concurrency by CPU-seconds: a first boot is about 775 CPU-seconds, 442 with `minimal`, 273 as a clone
+  with `minimal`, and k simultaneous boots cost k times that.

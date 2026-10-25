@@ -183,8 +183,7 @@ accessibility zoom actions; it cannot also have \`onDoubleTap\`. Everything snap
 
 (needs \`prototype_choreography_v1\`) \`transition\` also takes \`{type, delayMs?}\` (\`delayMs\` 0-600 ms, the wait
 before the enter starts) besides the plain names, and \`blurReplace\`: a blur-and-fade enter and exit
-(iOS \`.blurReplace\`; Android 12 and later blur, Android 11 and earlier fade only, noted in
-\`platformNotes\`). A \`box\`, \`row\` or \`column\` takes \`stagger: {ms, order?}\` (\`ms\` 0-100 per child;
+(iOS \`.blurReplace\`; Android 12 and later blur, Android 11 and earlier fade only). A \`box\`, \`row\` or \`column\` takes \`stagger: {ms, order?}\` (\`ms\` 0-100 per child;
 \`order\` \`forward\` (default), \`reverse\` or \`center\`): its direct children with \`visibleWhen\`
 enter one after another in layout order, each \`ms\` apart, including the children a \`repeat\` makes.
 A child's own \`transition.delayMs\` adds to its stagger wait, and no child may wait more than 600 ms

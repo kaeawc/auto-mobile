@@ -343,7 +343,7 @@
     "choreography-delay-over-max.json",
     "choreography-stagger-ms-over-max.json",
     "choreography-stagger-unknown-order.json",
-    "choreography-total-delay-over-max.json",
+    "choreography-total-delay-too-long.json",
     "choreography-transition-unknown-type.json",
     "color-pair-bad-hex.json",
     "color-pair-bad-role.json",

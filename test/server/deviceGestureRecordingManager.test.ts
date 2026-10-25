@@ -41,6 +41,7 @@ class FakeRecorder {
   steps: PlanStep[] = [];
   /** What the recorder can still hand over after a failed stop. */
   capturedSteps: PlanStep[] | undefined;
+  capturedExportWarnings: string[] | undefined;
   lastStopOptions?: { hostOnly?: boolean };
 
   get stepCount(): number {
@@ -524,6 +525,23 @@ describe("deviceGestureRecordingManager stopping reservation", () => {
     expect(getDeviceGestureRecordingStatus(timer)).toBeNull();
   });
 
+  test("a salvaged stop still reports input that was left out of the plan", async () => {
+    const timer = new FakeTimer();
+    const hung = new FakeRecorder();
+    hung.stopGate = new Deferred<{ steps: PlanStep[]; stepCount: number }>();
+    hung.capturedSteps = [capturedStep];
+    hung.capturedExportWarnings = ["an eraser gesture was not exported"];
+    const { result: started } = await start(timer, hung);
+
+    const stopping = stopDeviceGestureRecording(started.recordingId, undefined, timer);
+    await Promise.resolve();
+    timer.advanceTime(10_000);
+    const result = await stopping;
+
+    expect(result.error).toContain("Stopping the recorder did not finish");
+    expect(result.error).toContain("an eraser gesture was not exported");
+  });
+
   test("a stop that fails with nothing captured still rejects", async () => {
     const timer = new FakeTimer();
     const failed = new FakeRecorder();
@@ -814,5 +832,54 @@ describe("deviceGestureRecordingManager display geometry (#10174)", () => {
 
     expect(result.error).toBeUndefined();
     expect(result.planContent).not.toContain("label");
+  });
+});
+
+describe("deviceGestureRecordingManager stylus export (#13084)", () => {
+  async function recordPenGestures(planName: string, events: GestureEvent[]) {
+    const timer = new FakeTimer();
+    timer.advanceTime(10_000);
+    const gestures = new RecordingGestures();
+    await startDeviceGestureRecording(
+      device,
+      timer,
+      new CountingIdGenerator(planName),
+      () => new DualTrackRecorder(device, gestures, new RecordingA11y(), timer),
+    );
+    for (const event of events) {
+      gestures.onGesture?.({ ...event, arrivedAt: timer.now() });
+    }
+    return stopDeviceGestureRecording(undefined, planName, timer);
+  }
+
+  test("a stylus tap reaches the plan with its pointer and no warning", async () => {
+    const result = await recordPenGestures("pen-tap", [
+      { type: "tap", arrivedAt: 0, screenX: 40, screenY: 80, toolType: "stylus" },
+    ]);
+
+    expect(result.stepCount).toBe(1);
+    expect(result.planContent).toContain("tool: tapAt");
+    expect(result.planContent).toMatch(/pointer:\s+toolType: stylus/);
+    expect(result.error).toBeUndefined();
+  });
+
+  test("a recording where every pen gesture was skipped says why instead of reporting nothing", async () => {
+    const attempt = recordPenGestures("pen-eraser-only", [
+      { type: "tap", arrivedAt: 0, screenX: 90, screenY: 99, toolType: "eraser" },
+    ]);
+
+    await expect(attempt).rejects.toBeInstanceOf(NoUserInputCapturedError);
+    await expect(attempt).rejects.toThrow("eraser");
+  });
+
+  test("an eraser gesture is left out and the result says so", async () => {
+    const result = await recordPenGestures("pen-eraser", [
+      { type: "tap", arrivedAt: 0, screenX: 40, screenY: 80, toolType: "stylus" },
+      { type: "tap", arrivedAt: 0, screenX: 90, screenY: 99, toolType: "eraser" },
+    ]);
+
+    expect(result.stepCount).toBe(1);
+    expect(result.error).toStartWith("Warning:");
+    expect(result.error).toContain("eraser");
   });
 });

@@ -475,7 +475,7 @@ private fun RenderPrototypeNode(
         RenderPrototypeNodeContent(
           node,
           interact,
-          prototypeBlurReplace(node.source.transition?.type, node.enterDelayMs),
+          Modifier.prototypeBlurReplace(this, node.source.transition?.type, node.enterDelayMs),
           weightAxis,
           windowRoot,
         )
@@ -539,7 +539,7 @@ private fun RenderPrototypeVisibility(
         ) {
           content(
             node,
-            prototypeBlurReplace(node.source?.transition?.type, node.enterDelayMs),
+            Modifier.prototypeBlurReplace(this, node.source?.transition?.type, node.enterDelayMs),
             weightAxis,
             windowRoot,
           )

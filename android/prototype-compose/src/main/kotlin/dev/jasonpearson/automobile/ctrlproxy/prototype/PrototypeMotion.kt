@@ -143,10 +143,14 @@ private val BLUR_REPLACE_RADIUS = 12.dp
  * blur until the delayed fade starts.
  */
 @Composable
-internal fun AnimatedVisibilityScope.prototypeBlurReplace(type: String?, delayMs: Int): Modifier {
-  if (type != "blurReplace") return Modifier
+internal fun Modifier.prototypeBlurReplace(
+  scope: AnimatedVisibilityScope,
+  type: String?,
+  delayMs: Int,
+): Modifier {
+  if (type != "blurReplace") return this
   val radius by
-    transition.animateDp(
+    scope.transition.animateDp(
       transitionSpec = {
         tween(
           DELAYED_ENTER_MS,
@@ -157,7 +161,7 @@ internal fun AnimatedVisibilityScope.prototypeBlurReplace(type: String?, delayMs
     ) { state ->
       if (state == EnterExitState.Visible) 0.dp else BLUR_REPLACE_RADIUS
     }
-  return Modifier.blur(radius)
+  return blur(radius)
 }
 
 /** The `visibleWhen` enter transition for a node's `transition`; absent keeps fade + expand. */

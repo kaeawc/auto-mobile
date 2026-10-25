@@ -67,6 +67,8 @@ export interface SimCtlBootContext {
     signal?: AbortSignal,
   ): Promise<AppleDevice | undefined>;
   observationSequence: DiscoveryObservationSequence;
+  /** Drop the cached simulator listing; a boot changes the state it recorded. */
+  invalidateDeviceListCache(): void;
 }
 export class SimCtlBoot {
   constructor(private readonly context: SimCtlBootContext) {}
@@ -479,6 +481,12 @@ export class SimCtlBoot {
         bootstatusReportedAlreadyBooted = true;
       }
 
+      // The boot moved the simulator out of the state any cached listing recorded. Without
+      // this, a fast boot (~1.5 s) finishes inside the 5 s listing cache window and the next
+      // cached reader still sees the new simulator Shutdown (#15295). Creation and shutdown
+      // already invalidate; the raw state read below never reads or writes the cache.
+      this.context.invalidateDeviceListCache();
+
       // A failed or absent state read is not evidence of a failed boot — it
       // means discovery itself is unreliable right now. Retry the read (bounded
       // by the deadline) rather than treating "unknown" the same as "not
@@ -486,6 +494,9 @@ export class SimCtlBoot {
       const target = await this.readSimulatorTargetRetrying(udid, deadlineMs);
       const state = target?.state;
       if (target?.state === "Booted") {
+        // A listing taken between the first invalidation and this confirmation may have cached
+        // a Booting row; drop it too so the bind that follows reads the Booted state.
+        this.context.invalidateDeviceListCache();
         return target;
       }
 

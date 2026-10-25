@@ -72,7 +72,10 @@ export class GetEventReader implements GestureEmitter {
     onGesture: (event: GestureEvent) => void,
     onError?: (err: Error) => void,
   ): Promise<void> {
-    const reconstructor = new TouchFrameReconstructor({ singleTouch: node.kind === "pen" });
+    const reconstructor = new TouchFrameReconstructor({
+      singleTouch: node.kind === "pen",
+      onHover: onGesture,
+    });
     const classifier = new GestureClassifier(scaler, this.opts.density, pressureRangeOf(node));
 
     const args = ["shell", "getevent", "-lt", node.path];

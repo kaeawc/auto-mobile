@@ -37,6 +37,25 @@ export interface DeviceConditionPackageTarget {
   package: string;
 }
 
+/** The app a `killApp` fault ends, and how. */
+export interface DeviceConditionKillTarget {
+  package: string;
+  mode: "background" | "forceStop";
+}
+
+/** The app a `trimMemory` fault signals, and the `onTrimMemory` level it sends. */
+export interface DeviceConditionTrimTarget {
+  package: string;
+  level:
+    | "HIDDEN"
+    | "RUNNING_MODERATE"
+    | "BACKGROUND"
+    | "RUNNING_LOW"
+    | "MODERATE"
+    | "RUNNING_CRITICAL"
+    | "COMPLETE";
+}
+
 /** The app and runtime permission a `revokePermission` fault targets. */
 export interface DeviceConditionPermissionTarget {
   package: string;
@@ -72,6 +91,9 @@ export interface DeviceConditionInput {
     revokePermission?: DeviceConditionPermissionTarget | typeof DEVICE_CONDITION_UNSET;
     /** Package state (#14069): disable an app until reset, or clear its data once. */
     disablePackage?: DeviceConditionPackageTarget | typeof DEVICE_CONDITION_UNSET;
+    /** Process faults (#14068): end an app's process, or send it a trim-memory level, once. */
+    killApp?: DeviceConditionKillTarget | typeof DEVICE_CONDITION_UNSET;
+    trimMemory?: DeviceConditionTrimTarget | typeof DEVICE_CONDITION_UNSET;
     clearPackageData?: DeviceConditionPackageTarget | typeof DEVICE_CONDITION_UNSET;
   };
   expiresInSeconds?: number;
@@ -81,6 +103,30 @@ export interface DeviceConditionInput {
 /** A fresh schema per field: sharing one instance makes the JSON schema emit a dangling `$ref` for the second use. */
 const packageTargetSchema = () =>
   z.object({ package: z.string().regex(ANDROID_PACKAGE_NAME_PATTERN) }).strict();
+
+const killTargetSchema = () =>
+  z
+    .object({
+      package: z.string().regex(ANDROID_PACKAGE_NAME_PATTERN),
+      mode: z.enum(["background", "forceStop"]),
+    })
+    .strict();
+
+const trimTargetSchema = () =>
+  z
+    .object({
+      package: z.string().regex(ANDROID_PACKAGE_NAME_PATTERN),
+      level: z.enum([
+        "HIDDEN",
+        "RUNNING_MODERATE",
+        "BACKGROUND",
+        "RUNNING_LOW",
+        "MODERATE",
+        "RUNNING_CRITICAL",
+        "COMPLETE",
+      ]),
+    })
+    .strict();
 
 export const deviceConditionInputSchema: z.ZodType<DeviceConditionInput> = z
   .object({
@@ -149,6 +195,18 @@ export const deviceConditionInputSchema: z.ZodType<DeviceConditionInput> = z
           .optional()
           .describe(
             "Disable an installed app for the current user with `pm disable-user` ({ package }); reset runs `pm enable`. Or unset.",
+          ),
+        killApp: z
+          .union([z.literal(DEVICE_CONDITION_UNSET), killTargetSchema()])
+          .optional()
+          .describe(
+            "End an app's process once ({ package, mode }): 'background' is `am kill`, which only ends a process the system could reclaim and leaves the foreground app running; 'forceStop' is `am force-stop`, the user's Force stop. Nothing to reset; 'unset' is a no-op.",
+          ),
+        trimMemory: z
+          .union([z.literal(DEVICE_CONDITION_UNSET), trimTargetSchema()])
+          .optional()
+          .describe(
+            "Send a running app an onTrimMemory level once ({ package, level }) with `am send-trim-memory`. The app must be running. Nothing to reset; 'unset' is a no-op.",
           ),
         clearPackageData: z
           .union([z.literal(DEVICE_CONDITION_UNSET), packageTargetSchema()])

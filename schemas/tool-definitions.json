@@ -32482,6 +32482,62 @@
                   ],
                   "description": "Disable an installed app for the current user with `pm disable-user` ({ package }); reset runs `pm enable`. Or unset."
                 },
+                "killApp": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "unset"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "package": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$"
+                        },
+                        "mode": {
+                          "type": "string",
+                          "enum": ["background", "forceStop"]
+                        }
+                      },
+                      "required": ["package", "mode"],
+                      "additionalProperties": false
+                    }
+                  ],
+                  "description": "End an app's process once ({ package, mode }): 'background' is `am kill`, which only ends a process the system could reclaim and leaves the foreground app running; 'forceStop' is `am force-stop`, the user's Force stop. Nothing to reset; 'unset' is a no-op."
+                },
+                "trimMemory": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "unset"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "package": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$"
+                        },
+                        "level": {
+                          "type": "string",
+                          "enum": [
+                            "HIDDEN",
+                            "RUNNING_MODERATE",
+                            "BACKGROUND",
+                            "RUNNING_LOW",
+                            "MODERATE",
+                            "RUNNING_CRITICAL",
+                            "COMPLETE"
+                          ]
+                        }
+                      },
+                      "required": ["package", "level"],
+                      "additionalProperties": false
+                    }
+                  ],
+                  "description": "Send a running app an onTrimMemory level once ({ package, level }) with `am send-trim-memory`. The app must be running. Nothing to reset; 'unset' is a no-op."
+                },
                 "clearPackageData": {
                   "anyOf": [
                     {

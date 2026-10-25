@@ -1942,6 +1942,34 @@
                     }
                   ]
                 },
+                "killApp": {
+                  "oneOf": [
+                    { "type": "string", "const": "unset" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "package": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$" },
+                        "mode": { "type": "string", "enum": ["background", "forceStop"] }
+                      },
+                      "required": ["package", "mode"],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "trimMemory": {
+                  "oneOf": [
+                    { "type": "string", "const": "unset" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "package": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$" },
+                        "level": { "type": "string", "enum": ["HIDDEN", "RUNNING_MODERATE", "BACKGROUND", "RUNNING_LOW", "MODERATE", "RUNNING_CRITICAL", "COMPLETE"] }
+                      },
+                      "required": ["package", "level"],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
                 "clearPackageData": {
                   "oneOf": [
                     { "type": "string", "const": "unset" },

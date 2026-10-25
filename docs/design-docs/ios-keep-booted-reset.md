@@ -105,7 +105,11 @@ Each release that is not due for maxUses erase runs:
    gains them (#15017). Added Documents/Safari files are removed and changed or added
    defaults are restored or deleted. Added or missing photos, missing files, a baseline
    without these inventories, and residue that survives the revert are a cleaning
-   failure and fall back to erase.
+   failure and fall back to erase. On a template-cloned simulator `simctl get_app_container`
+   reports Safari's container under the template's device directory; the reader never
+   touches that path and instead uses the clone's own container with the same UUID, only
+   after its `MCMMetadataIdentifier` proves it is `com.apple.mobilesafari` (#15314).
+   Any other path, or a missing or mismatched identifier, is refused and falls back to erase.
 7. Check fresh exact-UDID Booted/type/runtime/OS inventory and the existing
    device-identified automation health endpoint. Only then report clean.
 

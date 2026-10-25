@@ -250,8 +250,9 @@ in error stays `error`. `idle + assigned + error` equals the total.
 
 Cold boots are admitted against host capacity. Each platform has its own limit on
 booted devices: for Android, the smaller of half the host RAM divided by the
-measured per-device memory and half the CPU cores; for iOS, the smaller of that
-memory budget and a settled-CPU budget (about 0.055 core per simulator, half the
+measured per-device memory and half the CPU cores; for iOS, the smaller of
+60% of host RAM divided by the measured per-simulator memory footprint (about 2.4 GiB;
+2.5 GiB when unmeasured) and a settled-CPU budget (about 0.1 core per simulator, half the
 cores), at least 1. Every booted emulator or
 simulator counts, including ones started outside AutoMobile. A boot over the
 count limit is not queued: it fails at once with the retryable `capacity_exhausted`,

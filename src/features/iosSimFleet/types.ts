@@ -26,6 +26,11 @@ export interface HostSnapshot {
    * because it was not measured, not because nothing is running (#11389).
    */
   processesError?: string;
+  /**
+   * Set when the footprint read (`top`) failed: `processes` carry RSS only, so memory cost is
+   * unmeasured rather than approximated from RSS.
+   */
+  footprintError?: string;
 }
 
 /** Simulator facts from `simctl list devices -j`, including its own data-dir size. */
@@ -77,6 +82,8 @@ export interface FleetCostTotals {
   bootedCount: number;
   measuredCount: number;
   rssBytes: number;
+  /** Sum of measured simulators' footprints; absent when none was read. */
+  footprintBytes?: number;
   cpuPercent: number;
   diskBytes: number;
 }

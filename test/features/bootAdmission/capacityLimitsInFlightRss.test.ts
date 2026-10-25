@@ -1,13 +1,19 @@
 import { expect, test } from "bun:test";
 import {
   estimateSettledPerDeviceBytes,
-  IOS_SIMULATOR_MEMORY_POLICY,
+  type PerDeviceMemoryPolicy,
   resolveBootCapacityLimits,
   type EmulatorMemoryRow,
   type InFlightBootMemory,
 } from "../../../src/features/bootAdmission/capacityLimits";
 
 const GIB = 1024 ** 3;
+// The matcher is policy-generic; a fixed policy keeps these cases independent of per-platform defaults.
+const POLICY: PerDeviceMemoryPolicy = {
+  defaultBytes: 3 * GIB,
+  minBytes: 1.5 * GIB,
+  maxBytes: 6 * GIB,
+};
 const settled = { pid: 100, rssBytes: 1.5 * GIB };
 const boot = { processId: 200, handedOff: true };
 
@@ -15,7 +21,7 @@ test("a 6 GiB in-flight boot beside a settled 1.5 GiB device keeps the limit at 
   const bytes = estimateSettledPerDeviceBytes(
     [settled, { pid: 200, rssBytes: 6 * GIB }],
     [boot],
-    IOS_SIMULATOR_MEMORY_POLICY,
+    POLICY,
   );
   expect(bytes).toBe(3.75 * GIB);
   expect(
@@ -95,7 +101,5 @@ const cases: {
 ];
 
 test.each(cases)("$name", ({ rows, boots, expectedGiB }) => {
-  expect(estimateSettledPerDeviceBytes(rows, boots, IOS_SIMULATOR_MEMORY_POLICY)).toBe(
-    expectedGiB * GIB,
-  );
+  expect(estimateSettledPerDeviceBytes(rows, boots, POLICY)).toBe(expectedGiB * GIB);
 });

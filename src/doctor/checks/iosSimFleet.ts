@@ -14,7 +14,11 @@ import {
   isPressured,
   resolveCapacityLimits,
 } from "../../features/iosSimFleet/capacityPolicy";
-import { formatBytes, formatFleetReport } from "../../features/iosSimFleet/fleetReport";
+import {
+  describeFootprint,
+  formatBytes,
+  formatFleetReport,
+} from "../../features/iosSimFleet/fleetReport";
 import type { CheckResult, DoctorProbeOptions } from "../types";
 import { remainingDoctorProbe } from "../deadline";
 
@@ -75,7 +79,7 @@ export async function checkIosSimulatorFleetCost(
     return {
       name: CHECK_NAME,
       status: degraded ? "warn" : "pass",
-      message: `${booted}/${limits.maxBooted} booted simulators (limit ${limits.source}), ${formatBytes(report.totals.rssBytes)} RSS, ${formatBytes(report.totals.diskBytes)} device data${atCapacity ? "; a new boot would exceed capacity" : ""}${pressured ? "; host under pressure" : ""}`,
+      message: `${booted}/${limits.maxBooted} booted simulators (limit ${limits.source}), ${describeFootprint(report.totals.footprintBytes)}, ${formatBytes(report.totals.diskBytes)} device data${atCapacity ? "; a new boot would exceed capacity" : ""}${pressured ? "; host under pressure" : ""}`,
       value: booted,
       detail: formatFleetReport(report).join("\n"),
       recommendation: atCapacity

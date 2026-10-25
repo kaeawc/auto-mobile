@@ -201,14 +201,10 @@ const repeatSchema = z
   })
   .strict();
 const repeatShape = { repeat: repeatSchema.optional() };
+// `box`, `row` and `column` also stagger their `visibleWhen` children (#15247).
+const containerShape = { ...repeatShape, ...prototypeStaggerShape };
 const boxBaseSchema = z
-  .object({
-    ...commonNodeShape,
-    ...gestureNodeShape,
-    ...repeatShape,
-    ...prototypeStaggerShape,
-    type: z.enum(["box"]),
-  })
+  .object({ ...commonNodeShape, ...gestureNodeShape, ...containerShape, type: z.enum(["box"]) })
   .strict();
 const swipeActionSchema = z
   .object({
@@ -233,19 +229,12 @@ const rowBaseSchema = z
     ...commonNodeShape,
     ...gestureNodeShape,
     ...swipeActionsShape,
-    ...repeatShape,
-    ...prototypeStaggerShape,
+    ...containerShape,
     type: z.enum(["row"]),
   })
   .strict();
 const columnBaseSchema = z
-  .object({
-    ...commonNodeShape,
-    ...gestureNodeShape,
-    ...repeatShape,
-    ...prototypeStaggerShape,
-    type: z.enum(["column"]),
-  })
+  .object({ ...commonNodeShape, ...gestureNodeShape, ...containerShape, type: z.enum(["column"]) })
   .strict();
 const flowBaseSchema = z
   .object({

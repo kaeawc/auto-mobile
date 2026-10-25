@@ -26,6 +26,15 @@ import { IosKeepBootedReset } from "../../../src/daemon/sessionBroker/iosKeepBoo
 import { FakeDeviceMutationJournal } from "../../fakes/FakeDeviceMutationJournal";
 import { FakeIosResidueInspector } from "../../fakes/FakeIosResidueInspector";
 
+import {
+  SimulatorResidueReader,
+  type IosResidueInspector,
+} from "../../../src/utils/ios-cmdline-tools/SimulatorResidueReader";
+import {
+  hasResidueBaseline,
+  IOS_RESIDUE_KINDS,
+} from "../../../src/daemon/sessionBroker/mutations/iosResidue";
+
 const GLOBALS = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -48,7 +57,7 @@ function result(stdout: string): ExecResult {
 
 const RESIDUE_KINDS = ["media", "shared-file", "keyboard", "accessibility"];
 
-function harness() {
+function harness(residueOverride?: IosResidueInspector) {
   const timer = new FakeTimer();
   const residue = new FakeIosResidueInspector();
   const state = {
@@ -177,7 +186,7 @@ function harness() {
           return rows;
         },
       },
-      residue,
+      residue: residueOverride ?? residue,
       trustStore: {
         readUserTrustedCertificates: async (deviceId, signal) => {
           state.trustStoreReads.push({ deviceId, signal });
@@ -1604,3 +1613,58 @@ test.each(["present", "absent", "unobservable"] as const)(
     }
   },
 );
+
+describe("clone residue reader reset composition", () => {
+  test("captures clone residue baseline, cleans clone Safari files and still requires erase for added photos", async () => {
+    const root = "/Users/jason/Library/Developer/CoreSimulator/Devices";
+    const template = readFileSync(
+      new URL("../../fixtures/ios-simctl/residue-safari-clone-container.txt", import.meta.url),
+      "utf8",
+    ).trim();
+    const own = `${root}/${UDID}/data/Containers/Data/Application/877F3F94-D9DE-4772-A0BA-38F2F5794968`;
+    const safari: string[] = [];
+    const photos: string[] = [];
+    const removed: string[] = [];
+    const listed: string[] = [];
+    const reader = new SimulatorResidueReader({
+      deviceSetRoot: root,
+      simctl: {
+        executeCommandArgs: async (args) =>
+          result(
+            args[0] === "get_app_container" ? template : '<plist version="1.0"><dict/></plist>',
+          ),
+      },
+      files: {
+        containerIdentifier: async (directory) =>
+          directory === own ? "com.apple.mobilesafari" : null,
+        listFiles: async (directory) => {
+          listed.push(directory);
+          return photos;
+        },
+        listEntries: async (directory) => {
+          listed.push(directory);
+          return directory === `${own}/Documents` ? safari : [];
+        },
+        remove: async (path) => {
+          removed.push(path);
+          safari.splice(safari.indexOf("new.txt"), 1);
+        },
+      },
+    });
+    const rig = harness(reader);
+    rig.context.baseline = await rig.port.capture(rig.context);
+    expect(hasResidueBaseline(rig.context.baseline)).toBe(true);
+    expect(rig.context.baseline.completeKinds).toEqual(
+      expect.arrayContaining([...IOS_RESIDUE_KINDS]),
+    );
+    safari.push("new.txt");
+    await rig.port.sanitize(rig.context);
+    expect(removed).toEqual([`${own}/Documents/new.txt`]);
+    expect((await reader.read(UDID, rig.context.signal)).safariDocuments).toEqual([]);
+    expect(listed.some((path) => path.startsWith(template))).toBe(false);
+    photos.push("100APPLE/new.JPG");
+    await expect(rig.port.sanitize(rig.context)).rejects.toThrow(
+      "cannot revert 1 added photo(s); erase required",
+    );
+  });
+});

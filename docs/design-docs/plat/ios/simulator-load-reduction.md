@@ -163,9 +163,9 @@ workload boot. The disabled path resolves no template storage, locks or host ver
 
 Templates are keyed by runtime identifier and build, Xcode build, device type and resolved default preboot
 profile. Xcode build discovery is cached once per process with a five-second timeout; an unknown
-build disables cloning for that process. Runtime discovery uses the cached catalog. Manifests and per-key locks live in the shared coordination directory under
-`ios-sim-templates`. A ready template must still be shut down and match the current Xcode and
-runtime builds. Clone failures mark it stale and fall back to fresh creation. Deletion and manifest mutation take the build lock; successful clones only read template state.
+build disables cloning for that process. Runtime discovery uses the cached catalog. Manifests and per-key locks live in the host-global
+`~/.auto-mobile/ios-sim-templates`, independent of `AUTOMOBILE_COORDINATION_DIR`. A ready template must still be shut down and match the current Xcode and
+runtime builds. Clone failures fall back to fresh creation. Deletion and manifest mutation take the build lock; successful clones only read template state.
 Changed build inputs select a new key without deleting other Xcode installations' templates in
 the foreground. Builds replace inconsistent manifests only under their own key lock.
 
@@ -191,10 +191,16 @@ use SIGINT cancellation. Manifest UDIDs are validated, and cloning requires a fr
 the exact key-derived name and Shutdown state. Manifest-owned deletion also requires a fresh name
 check. Clone failure deletes only newly appeared matching work simulators before fresh creation.
 
-Daemons with different `AUTOMOBILE_COORDINATION_DIR` values do not share template locks, even
-though CoreSimulator inventory is host-wide. Manifest-owned deletions use both UDID and name;
-name-only crash cleanup requires this daemon's lock. This mitigates accidental deletion but does
-not coordinate builds across distinct coordination roots.
+Template storage follows `os.userInfo().homedir` (HOME under Bun), like the shared coordination
+directory default. Daemons started with different HOME values do not share template manifests
+or locks. Templates built by older versions under a custom coordination directory are not migrated
+and are rebuilt. The build path never deletes untracked name matches; explicit cleanup can remove
+them. Manifest-owned ready or stale templates that may be in use defer rebuilding and keep their
+current manifest state. With the host-global key lock held, building or failed templates whose UDID
+and exact name match are shut down best effort, deleted, and rebuilt. A failed clone keeps a still-present, exactly named Shutdown template ready on its first
+failure; two consecutive failures for that UDID mark it stale, and a successful clone resets the
+count. Cancelled requests do not count as clone failures. Missing or renamed templates are stale
+immediately; present, exactly named non-Shutdown templates stay ready and use plain creation.
 
 ## Risks
 

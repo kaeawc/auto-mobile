@@ -26,6 +26,10 @@ import {
   prototypeAppearanceUnsupportedMessage,
 } from "../../features/prototype/prototypeAppearance";
 import { prototypeRequiredCapabilities } from "../../features/prototype/prototypeCapabilityGates";
+import {
+  PROTOTYPE_IOS_MINIMUM_OS,
+  prototypeIosMinimumOsNote,
+} from "../../features/prototype/prototypeIosMinimumOs";
 import { resolvePrototypeDisplayId } from "../../features/prototype/prototypeDisplay";
 import { type PrototypeSpec } from "../../features/prototype/prototypeSpec";
 import {
@@ -146,9 +150,10 @@ export function appLayerGrant(
 
 /** Refuses spec-introduced features before a show or patch reaches the device. */
 export async function specCapabilityRefusal(
-  target: PrototypeTarget,
+  target: Pick<PrototypeTarget, "android" | "ios">,
   spec: unknown,
   signal: AbortSignal | undefined,
+  iosMinimumOs: Readonly<Record<string, number>> = PROTOTYPE_IOS_MINIMUM_OS,
 ): Promise<PrototypeResult | undefined> {
   for (const gate of prototypeRequiredCapabilities(spec)) {
     const supported = target.android
@@ -157,7 +162,9 @@ export async function specCapabilityRefusal(
     // A capability lookup may wait for the connection and handshake.
     signal?.throwIfAborted();
     if (!supported) {
-      const message = gate.unsupportedMessage(gate.fields, target.android ? "android" : "ios");
+      const platform = target.android ? "android" : "ios";
+      const note = platform === "ios" ? prototypeIosMinimumOsNote(gate.capability, iosMinimumOs) : "";
+      const message = gate.unsupportedMessage(gate.fields, platform) + note;
       return { success: false, error: new ActionableError(message).message };
     }
   }

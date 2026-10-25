@@ -1,5 +1,8 @@
 import type { SimulatorCreator } from "./SimulatorCreator";
-import type { DeviceResourceConfiguration } from "../models/DeviceResourceConfiguration";
+import type {
+  ConfigurableDeviceResource,
+  DeviceResourceConfiguration,
+} from "../models/DeviceResourceConfiguration";
 import { SimulatorPrebootProfile } from "../utils/ios-cmdline-tools/SimulatorPrebootProfile";
 export {
   DEFAULT_PROVISION_DEVICE_RETRYABILITY,
@@ -101,6 +104,7 @@ export interface ExactDeviceProvisionRequest {
 }
 
 export interface ExactProvisionedDevice {
+  prebootDisabledResources?: readonly ConfigurableDeviceResource[];
   device: DeviceInfo;
   created: boolean;
   resolvedSpec: ResolvedExactDeviceSpecification;
@@ -577,12 +581,15 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
           spec.runtime,
           request.signal,
         );
-    await this.dependencies.prebootProfile?.apply(
+    const preboot = await this.dependencies.prebootProfile?.apply(
       deviceId,
       { resources: request.resources },
       request.signal,
     );
     return {
+      ...(preboot?.applied && preboot.resources.length
+        ? { prebootDisabledResources: preboot.resources }
+        : {}),
       created: true,
       device: {
         name: request.name,

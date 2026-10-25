@@ -38,7 +38,7 @@ test("production factories with disabled service resolve no template dependencie
       iosRuntimeCatalog: undefined,
       timer: new FakeTimer(),
       lifecycleCoordinator: new FakeVirtualDeviceLifecycleCoordinator(),
-      prebootProfile: { apply: async () => ({ applied: true, labels: [] }) },
+      prebootProfile: { apply: async () => ({ applied: true, resources: [], labels: [] }) },
     },
   );
   await exact.provision({

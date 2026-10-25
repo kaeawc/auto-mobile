@@ -1,7 +1,7 @@
 # iOS simulator first-boot load: settled clones and a lean service profile
 
-Measurements from #15097 inform the optional template-clone and preboot lean profile paths; #15219 measured the
-shipped defaults, concurrent first boots, idle drift and the product path (see the follow-up section).
+Measurements from #15097 inform the template-clone and preboot lean profile paths; #15219 measured concurrent first boots, idle drift
+and the product path, and its results set the defaults (see the Defaults section).
 All numbers are from one host (16 cores, macOS 26, Xcode 27) and iOS 27.0 / iPhone 18 Pro.
 
 ## Question
@@ -138,7 +138,7 @@ labels to `true`. New directories use mode 0700; existing directories and foreig
 preserved. Writes use a temporary file and atomic rename.
 
 `AUTOMOBILE_IOS_PREBOOT_LEAN_PROFILE` selects the profile lazily at creation time. The default is
-`none`; unknown values warn and fall back to `none`.
+`minimal`; `none` opts out, and unknown values warn and fall back to `minimal`.
 
 | Profile       | Catalog resources                                                                                   | Labels |
 | ------------- | --------------------------------------------------------------------------------------------------- | ------ |
@@ -157,7 +157,7 @@ basis. Orphan directories belonging to simulators already deleted are not swept.
 
 ## Settled template creation
 
-`AUTOMOBILE_IOS_TEMPLATE_CLONE` defaults to disabled. Both creation seams use the same creation
+`AUTOMOBILE_IOS_TEMPLATE_CLONE` defaults to enabled; `0`/`false` opts out. Both creation seams use the same creation
 service when wired for production; preboot application stays after identity binding and before any
 workload boot. The disabled path resolves no template storage, locks or host version probes.
 
@@ -336,15 +336,15 @@ CPU-seconds in the first 600): the 120-second window below 5 percent of a core r
 so the real build is about 13 minutes, not the roughly 4.7 minutes implied by a 160-second time-to-quiet plus the 120-second
 window, and it holds a boot slot for that time.
 
-## Follow-up recommendation
+## Defaults (owner decision 2026-10-24)
 
-- Default `AUTOMOBILE_IOS_PREBOOT_LEAN_PROFILE` to `minimal`: minus 43 percent CPU-seconds in the harness (minus 37
+- `AUTOMOBILE_IOS_PREBOOT_LEAN_PROFILE` defaults to `minimal`: minus 43 percent CPU-seconds in the harness (minus 37
   percent in the product path) and 100 seconds off the time-to-quiet in the harness (10 seconds in the product path),
   with no breakage cost attributable to it. Idle was not shown to differ (two drift runs per condition; the product
   last-120-second mean was higher with `minimal`, 7.3 against 3.8 percent, unexplained). `catalog-cpu` bought about
   7 more points in #15097 (minus 50 against a 789 baseline; not re-measured here) while removing Health, Apple
   Intelligence and search, and stays opt-in with speech/Siri.
-- Default `AUTOMOBILE_IOS_TEMPLATE_CLONE` on: a clone alone is minus 46 percent (harness only); clone + `minimal`
+- `AUTOMOBILE_IOS_TEMPLATE_CLONE` defaults on: a clone alone is minus 46 percent (harness only); clone + `minimal`
   is minus 65 percent in the harness and the product path, and minus 62 to 63 percent with two and four simultaneous
   boots, at about 3 seconds per clone. Costs: the first creation per runtime, device type and profile is a normal one,
   a background template build of about 13 minutes occupies a boot slot, and each template needs a disk copy. Re-check

@@ -71,7 +71,7 @@ export class SimulatorTemplateBuildHarness {
       profile: () => ({
         apply: async () => {
           this.events.push("apply");
-          return { applied: true, labels: [] };
+          return { applied: true, resources: [], labels: [] };
         },
       }),
       instrumentation: {

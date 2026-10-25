@@ -26452,6 +26452,69 @@
           ],
           "additionalProperties": false
         },
+        "disabledResources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "resource": {
+                "type": "string"
+              },
+              "labels": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "automobileImpact": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/__schema2"
+                }
+              },
+              "appImpact": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/__schema2"
+                }
+              },
+              "unsafeWith": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "hazardId": {
+                      "type": "string"
+                    },
+                    "appliesTo": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": ["post_boot", "preboot"]
+                      }
+                    },
+                    "withResources": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "evidence": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["hazardId", "appliesTo", "withResources", "reason", "evidence"],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": ["resource", "labels", "automobileImpact", "appImpact"],
+            "additionalProperties": false
+          }
+        },
         "requestedSpec": {},
         "resolvedSpec": {},
         "displayCutout": {},
@@ -26513,6 +26576,23 @@
               "type": "null"
             }
           ]
+        },
+        "__schema2": {
+          "type": "object",
+          "properties": {
+            "description": {
+              "type": "string"
+            },
+            "confidence": {
+              "type": "string",
+              "enum": ["verified", "inferred"]
+            },
+            "evidence": {
+              "type": "string"
+            }
+          },
+          "required": ["description", "confidence"],
+          "additionalProperties": false
         }
       }
     }

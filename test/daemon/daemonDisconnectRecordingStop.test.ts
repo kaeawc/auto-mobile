@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
+import { DaemonState } from "../../src/daemon/daemonState";
 import * as videoRecordingManager from "../../src/daemon/videoRecordingManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainMicrotasks, drainUntil } from "../helpers/fakeTimerStepping";
@@ -18,6 +19,7 @@ describe("recording stop after a device disconnect (#10217)", () => {
   });
 
   afterEach(() => {
+    DaemonState.getInstance().reset();
     stop.mockRestore();
   });
 

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
+import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { SingleFlightInterval } from "../../src/daemon/SingleFlightInterval";
@@ -31,6 +32,7 @@ const ROWS: Record<string, string> = {
 
 const timers: FakeTimer[] = [];
 afterEach(() => {
+  DaemonState.getInstance().reset();
   timers.splice(0).forEach((timer) => timer.reset());
   resetAdbDeviceListCache();
 });

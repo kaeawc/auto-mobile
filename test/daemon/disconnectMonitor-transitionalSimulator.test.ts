@@ -1,7 +1,8 @@
 import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { makePool } from "../helpers/makePool";
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
+import { DaemonState } from "../../src/daemon/daemonState";
 import {
   OFFLINE_DEVICE_DISCONNECT_BUDGET_MS,
   MISSING_SIMULATOR_DISCONNECT_BUDGET_MS,
@@ -268,4 +269,8 @@ describe("disconnect monitor: held simulator in a transitional simctl state (#11
       expect(h.held()).toBe(true);
     });
   });
+});
+
+afterEach(() => {
+  DaemonState.getInstance().reset();
 });

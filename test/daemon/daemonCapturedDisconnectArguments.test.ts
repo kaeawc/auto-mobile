@@ -1,4 +1,5 @@
-import { expect, mock, test } from "bun:test";
+import { afterEach, expect, mock, test } from "bun:test";
+import { DaemonState } from "../../src/daemon/daemonState";
 import { Daemon } from "../../src/daemon/daemon";
 import type { DaemonDisconnect } from "../../src/daemon/daemonCore/DaemonDisconnect";
 import { DevicePool, type PooledDevice } from "../../src/daemon/devicePool";
@@ -183,3 +184,7 @@ test.each([
     }
   },
 );
+
+afterEach(() => {
+  DaemonState.getInstance().reset();
+});

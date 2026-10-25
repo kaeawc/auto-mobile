@@ -18,7 +18,8 @@ import {
   heldAndroidDevice,
   heldSession,
 } from "../helpers/disconnectMonitorDaemon";
-import { describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { DaemonState } from "../../src/daemon/daemonState";
 import {
   pruneStaleOfflineRecoveryAttempts,
   selectOfflineRecoveryCandidates,
@@ -492,4 +493,8 @@ test("concurrent refresh and disconnect monitor do not probe twice or fail disco
     await monitor.stop();
     timer.reset();
   }
+});
+
+afterEach(() => {
+  DaemonState.getInstance().reset();
 });

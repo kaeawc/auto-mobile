@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
+import { DaemonState } from "../../src/daemon/daemonState";
 import type { SingleFlightInterval } from "../../src/daemon/SingleFlightInterval";
 import {
   evaluateDeviceDisconnects,
@@ -287,4 +288,8 @@ describe("evaluateDeviceDisconnects offline episodes", () => {
     const result = evaluate(misses, episodes, OFFLINE_DEVICE_DISCONNECT_BUDGET_MS, true);
     expect(result.disconnected).toEqual([EMULATOR]);
   });
+});
+
+afterEach(() => {
+  DaemonState.getInstance().reset();
 });

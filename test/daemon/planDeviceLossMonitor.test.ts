@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
+import { DaemonState } from "../../src/daemon/daemonState";
 import { PLAN_DEVICE_LOSS_CONFIRMATION_WINDOW_MS } from "../../src/daemon/deviceDisconnectHandler";
 import type { PooledDevice } from "../../src/daemon/devicePool";
 import type { BootedDeviceDiscoveryOptions } from "../../src/devices/deviceUtils";
@@ -26,6 +27,7 @@ import { InMemoryAdbTransportRestartRegistry } from "../../src/utils/android-cmd
 const executionIds: string[] = [];
 const previousPlanActive = serverConfig.isPlanExecutionActive();
 afterEach(() => {
+  DaemonState.getInstance().reset();
   for (const id of executionIds.splice(0)) {
     executionTracker.endExecution(id);
   }

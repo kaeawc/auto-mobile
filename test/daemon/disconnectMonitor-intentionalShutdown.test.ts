@@ -1,7 +1,8 @@
 import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { makePool } from "../helpers/makePool";
-import { expect, spyOn, test } from "bun:test";
+import { afterEach, expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
+import { DaemonState } from "../../src/daemon/daemonState";
 import { InMemoryEmulatorLossIncidentStore } from "../../src/daemon/emulatorLossIncident";
 import { MISSING_DEVICE_MISS_THRESHOLD } from "../../src/daemon/missingDeviceLiveness";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -536,4 +537,8 @@ test("kill replacement cancels the retired serial's work and stale retirement pr
       reservation?.releaseRecoveryRouteLease();
     }
   });
+});
+
+afterEach(() => {
+  DaemonState.getInstance().reset();
 });

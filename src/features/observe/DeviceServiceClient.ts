@@ -428,7 +428,7 @@ export abstract class DeviceServiceClient extends DeviceServiceClientDelegates {
    * Finish a lost connection exactly once, even when replacement beats its close event.
    * Socket identity is the connection token; late events cannot clean up a replacement.
    */
-  private finishEstablishedConnection(socket: CtrlSocket): void {
+  protected finishEstablishedConnection(socket: CtrlSocket): void {
     if (this.ws !== socket) {
       return;
     }

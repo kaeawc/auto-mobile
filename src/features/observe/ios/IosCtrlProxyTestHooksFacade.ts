@@ -1,5 +1,6 @@
 import type WebSocket from "ws";
 import { CtrlProxyBuildContext } from "./CtrlProxyBuildContext";
+import type { CtrlProxyHierarchyTelemetry } from "./CtrlProxyHierarchyTelemetry";
 import { CtrlProxyInboundMessages } from "./CtrlProxyInboundMessages";
 import type {
   CtrlProxyObservationStream,
@@ -37,6 +38,9 @@ export abstract class IosCtrlProxyTestHooksFacade extends IosCtrlProxyDelegating
   ): void;
   protected abstract handleMessage(data: WebSocket.Data): void;
   protected abstract handlePerformanceUpdate(snapshot: CtrlProxyPerformanceSnapshot): void;
+  protected abstract handleHierarchyUpdateForNavigation(
+    ...args: Parameters<CtrlProxyHierarchyTelemetry["handleHierarchyUpdateForNavigation"]>
+  ): void;
   protected abstract startScreenshotBackoff(): void;
   protected abstract captureScreenshotForBackoff(): Promise<ScreenshotCaptureResult>;
   protected abstract supportedFeatures: Set<string> | null;
@@ -59,6 +63,15 @@ export abstract class IosCtrlProxyTestHooksFacade extends IosCtrlProxyDelegating
         this.handlePerformanceUpdate(snapshot),
       captureScreenshotForBackoff: () => this.captureScreenshotForBackoff(),
       onConnectionEstablished: () => this.onConnectionEstablished(),
+      handleHierarchyUpdateForNavigation: (
+        ...args: Parameters<CtrlProxyHierarchyTelemetry["handleHierarchyUpdateForNavigation"]>
+      ) => this.handleHierarchyUpdateForNavigation(...args),
+      get boundSessionId() {
+        return client.boundSessionId;
+      },
+      set boundSessionId(value: string | null) {
+        client.boundSessionId = value;
+      },
       screenshot: () => this.screenshot,
       timer: this.timer,
       /** The lazily built delegates; each getter must return the same instance on every read. */

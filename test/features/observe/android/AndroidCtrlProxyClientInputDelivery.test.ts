@@ -29,9 +29,9 @@ describe("AndroidCtrlProxyClient input delivery", () => {
     client.connectionTestHooks.socket = socket;
     client.connectionTestHooks.autoReconnectEnabled = false;
     socket.on("message", (data: string) => {
-      void client["handleMessage"](data);
+      void client.testHooks.handleMessage(data);
     });
-    socket.on("close", () => client["finishEstablishedConnection"](socket));
+    socket.on("close", () => client.testHooks.finishEstablishedConnection(socket));
     connectionSpy = spyOn(client, "connectWebSocket").mockResolvedValue(true);
   });
 

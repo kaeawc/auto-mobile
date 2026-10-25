@@ -254,7 +254,7 @@ export class IOSCtrlProxyClient extends IosCtrlProxyTestHooksFacade implements I
   protected handlePerformanceUpdate(snapshot: CtrlProxyPerformanceSnapshot): void {
     this.hierarchyTelemetry.handlePerformanceUpdate(snapshot);
   }
-  private handleHierarchyUpdateForNavigation(
+  protected handleHierarchyUpdateForNavigation(
     hierarchy: XCTestHierarchy,
     perfTiming?: CtrlProxyPerfTiming | CtrlProxyPerfTiming[],
   ): void {

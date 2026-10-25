@@ -168,18 +168,18 @@ test("Android replacement before async close clears cached hierarchy and resends
     fresh: true,
   };
   // Inspect the existing connection-scoped cache without invoking observation/ADB.
-  client["cachedHierarchy"] = oldCache;
-  expect(client["cachedHierarchy"]).not.toBeNull();
+  client.testHooks.setCachedHierarchy(oldCache);
+  expect(client.testHooks.cachedHierarchy()).not.toBeNull();
   client.terminateStaleConnection();
   expect(await client.ensureConnected()).toBe(true);
-  expect(client["cachedHierarchy"]).toBeNull();
+  expect(client.testHooks.cachedHierarchy()).toBeNull();
   // A queued old frame must not repopulate the replacement's cache.
   sockets[0]!.emit(
     "message",
     JSON.stringify({ type: "hierarchy_update", data: oldCache.hierarchy }),
   );
   await flush();
-  expect(client["cachedHierarchy"]).toBeNull();
+  expect(client.testHooks.cachedHierarchy()).toBeNull();
   await client.setRecompositionTrackingEnabled(true);
   expect(sent[1]!.filter((message) => message.includes("set_recomposition_tracking"))).toHaveLength(
     1,

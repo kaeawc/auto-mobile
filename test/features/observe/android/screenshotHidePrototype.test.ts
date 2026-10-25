@@ -77,7 +77,9 @@ describe("request_screenshot hidePrototypes (#9305)", () => {
 
   test("a device advertising the capability receives the flag", async () => {
     const { client, sent } = clientWithCapturedFrames(fullAdvertisement);
-    await client["getScreenshotRequester"]().dispatchScreenshotRequest("s-1", undefined, 2, true);
+    await client.testHooks
+      .getScreenshotRequester()
+      .dispatchScreenshotRequest("s-1", undefined, 2, true);
     expect(sent.frames).toEqual([
       { type: "request_screenshot", requestId: "s-1", displayId: 2, hidePrototypes: true },
     ]);
@@ -92,18 +94,15 @@ describe("request_screenshot hidePrototypes (#9305)", () => {
     ["no handshake yet", undefined],
   ])("%s never receives the flag", async (_, advertisement) => {
     const { client, sent } = clientWithCapturedFrames(advertisement);
-    await client["getScreenshotRequester"]().dispatchScreenshotRequest(
-      "s-1",
-      undefined,
-      undefined,
-      true,
-    );
+    await client.testHooks
+      .getScreenshotRequester()
+      .dispatchScreenshotRequest("s-1", undefined, undefined, true);
     expect(sent.frames).toEqual([{ type: "request_screenshot", requestId: "s-1" }]);
   });
 
   test("a capture without hiding never sends the flag", async () => {
     const { client, sent } = clientWithCapturedFrames(fullAdvertisement);
-    await client["getScreenshotRequester"]().dispatchScreenshotRequest("s-1");
+    await client.testHooks.getScreenshotRequester().dispatchScreenshotRequest("s-1");
     expect(sent.frames).toEqual([{ type: "request_screenshot", requestId: "s-1" }]);
   });
 
@@ -119,8 +118,8 @@ describe("request_screenshot hidePrototypes (#9305)", () => {
       1000,
       () => ({ success: false, error: "timeout" }),
     );
-    client["screenshotObservationStreamSuppressions"].add("s-1");
-    client["webSocketMessageHandlers"].screenshot({
+    client.testHooks.screenshotObservationStreamSuppressions.add("s-1");
+    client.testHooks.webSocketMessageHandlers().screenshot({
       type: "screenshot",
       requestId: "s-1",
       data: "jpeg-base64",

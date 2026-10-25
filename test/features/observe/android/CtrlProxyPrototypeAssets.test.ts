@@ -38,7 +38,7 @@ async function harness(commands: string[] | null = ASSET_COMMANDS) {
   await Promise.resolve();
   client.connectionTestHooks.socket = socket;
   spyOn(client, "ensureConnected").mockResolvedValue(true);
-  const receive = (frame: object) => client["handleWebSocketMessage"](JSON.stringify(frame));
+  const receive = (frame: object) => client.testHooks.handleWebSocketMessage(JSON.stringify(frame));
   if (commands !== null) {
     await receive({ type: "connected", supportedCommands: commands });
   }

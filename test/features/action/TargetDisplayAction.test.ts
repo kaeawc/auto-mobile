@@ -2436,7 +2436,7 @@ describe("post-action screenshot resolved display", () => {
           timer: wireTimer,
         });
         client.connectionTestHooks.socket = socket;
-        client["connectWebSocket"] = async () => true;
+        client.testHooks.overrideConnectWebSocket(async () => true);
         client["screenshotBackoffScheduler"] = new FakeScreenshotBackoffScheduler();
         socket.send = (data: string) => {
           const message = JSON.parse(data) as {

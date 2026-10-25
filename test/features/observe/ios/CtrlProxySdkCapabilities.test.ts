@@ -746,7 +746,7 @@ describe("SDK capability caller budgets", () => {
         totalTimeMs: 0,
       });
       const refresh = spyOn(
-        client["sdkCapability"],
+        client.testHooks.sdkCapability,
         "refreshSdkCapabilitiesAndSync",
       ).mockImplementation((options) => h.probe.refreshSdkCapabilitiesAndSync(options));
       const controller = new AbortController();
@@ -882,7 +882,7 @@ describe("best-effort SDK refresh diagnostics", () => {
       );
       const failure = new Error("socket transport failed");
       const superseded = new SdkCapabilityProbeSupersededError("hierarchy", 0, 1);
-      const refresh = spyOn(client["sdkCapability"], "refreshSdkCapabilitiesAndSync");
+      const refresh = spyOn(client.testHooks.sdkCapability, "refreshSdkCapabilitiesAndSync");
       const launch = spyOn(CtrlProxyNavigation.prototype, "requestLaunchApp").mockResolvedValue({
         success: true,
         totalTimeMs: 0,
@@ -909,7 +909,7 @@ describe("best-effort SDK refresh diagnostics", () => {
             new CtrlProxyHierarchyTelemetry({
               timer,
               deviceId: "refresh-log-test",
-              sdkCapability: client["sdkCapability"],
+              sdkCapability: client.testHooks.sdkCapability,
               buildContext: { ensureBuildContext: () => {} },
               lastForegroundBundleId: null,
               getHierarchyNavigationDetector: () => detector,

@@ -51,8 +51,8 @@ async function harness() {
   const ids = new CountingIdGenerator("wire");
   manager.generateId = (prefix) => `${prefix}_${ids.next()}`;
   client.ensureConnected = async () => true;
-  client["connectWebSocket"] = async () => true;
-  client["cancelScreenshotBackoff"] = () => {};
+  client.testHooks.overrideConnectWebSocket(async () => true);
+  client.testHooks.overrideCancelScreenshotBackoff(() => {});
   return { client, timer, socket, manager };
 }
 type Harness = Awaited<ReturnType<typeof harness>>;
@@ -196,10 +196,10 @@ for (const method of methods) {
     test("preserves literal builder bytes and bypasses the generic command gate", async () => {
       const h = await harness();
       const frame = JSON.parse(method.literal);
-      h.client["rejectedCommands"].add(frame.type);
+      h.client.testHooks.rejectedCommands.add(frame.type);
       // Link activation retains its explicit capability check.
       if (method.name === "requestActivateAccessibilityLink") {
-        h.client["rejectedCommands"].delete(frame.type);
+        h.client.testHooks.rejectedCommands.delete(frame.type);
       }
       let dispatches = 0;
       const pending = method.invoke(h, undefined, () => {

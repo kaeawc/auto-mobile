@@ -262,6 +262,30 @@ describe("recorded stylus gestures keep their pointer (#13084)", () => {
     ]);
   });
 
+  test("a hover is not exported, and the stop result says it was dropped", async () => {
+    await recorder.start();
+    gestures.emit({ type: "hover", arrivedAt: timer.now(), toolType: "stylus" });
+
+    const result = await recorder.stop();
+
+    expect(result.steps).toEqual([]);
+    expect(result.exportWarnings).toEqual([expect.stringContaining("hover")]);
+  });
+
+  test("hovers next to a tap warn once and leave the tap exported", async () => {
+    await recorder.start();
+    gestures.emit({ type: "hover", arrivedAt: timer.now(), toolType: "stylus" });
+    gestures.emit({ type: "tap", arrivedAt: timer.now(), screenX: 5, screenY: 6, ...STYLUS });
+    gestures.emit({ type: "hover", arrivedAt: timer.now(), toolType: "stylus" });
+
+    const result = await recorder.stop();
+
+    expect(result.steps).toEqual([
+      { tool: "tapAt", params: { x: 5, y: 6, action: "tap", pointer: STYLUS } },
+    ]);
+    expect(result.exportWarnings).toEqual([expect.stringContaining("hover")]);
+  });
+
   test("finger gestures export exactly as before", async () => {
     await recorder.start();
     a11y.emit({ type: "tap", timestamp: timer.now(), element: BUTTON });

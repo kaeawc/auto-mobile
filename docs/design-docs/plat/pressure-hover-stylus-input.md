@@ -102,7 +102,11 @@ also reads pen data (**Source**):
 - **Pen state.** `TouchFrameReconstructor.ts` tracks `ABS_MT_TOOL_TYPE`, `BTN_TOOL_PEN`/
   `BTN_TOOL_RUBBER`, `BTN_TOUCH`, `BTN_STYLUS`/`BTN_STYLUS2`, `ABS_TILT_X`/`ABS_TILT_Y` and
   `ABS_DISTANCE`/`ABS_MT_DISTANCE`. A pen in range without contact is hover and never
-  becomes a tap or swipe.
+  becomes a tap or swipe. A pen that comes into range and leaves again without ever touching
+  (a single-touch pen's tool key down then up, or a multitouch pen reporting a hover
+  distance until its tracking id ends) is reported once as a `hover` event, which the
+  recorder turns into a stop-result warning. Hover around a contact is not reported, and a
+  digitizer that reports no hover distance cannot be told from contact.
 - **Pressure axes.** A touch node reports `ABS_MT_PRESSURE`; a single-touch pen node
   reports the non-multitouch `ABS_PRESSURE` instead. Discovery reads each node's axis range
   from `getevent -p`, and the raw values are scaled to 0-1 against it; without a usable
@@ -115,8 +119,9 @@ also reads pen data (**Source**):
   refuses anything else. A pen gesture with no replayable form (an eraser, which replay cannot
   inject, or one with no known position or path) is left out with a warning on the stop
   result, which a salvaged stop keeps. A stylus double tap is exported with a warning because
-  replay refuses it. A stylus tap and a finger tap never merge into one double tap. Finger gestures export unchanged. Hover events, stroke paths and
-  pressure series are not exported.
+  replay refuses it. A stylus tap and a finger tap never merge into one double tap. Finger
+  gestures export unchanged. Hover is not exported (it only warns), nor are stroke paths or
+  pressure series.
 
 One structural limit remains, and extending the axes alone does not remove it
 (**Source**):

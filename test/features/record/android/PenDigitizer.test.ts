@@ -650,6 +650,25 @@ describe("GetEventReader with touch and pen nodes", () => {
     reader.stop();
   });
 
+  test("a pen that only hovers reaches the recorder as a hover event", async () => {
+    const { penProc, reader, onGesture } = penReader();
+    reader.start(onGesture);
+    await Promise.resolve();
+    await Promise.resolve();
+    emitLines(penProc, [
+      "[  1.0] EV_KEY    BTN_TOOL_PEN         DOWN",
+      "[  1.0] EV_ABS    ABS_X                00000438",
+      "[  1.0] EV_ABS    ABS_Y                000005dc",
+      "[  1.0] EV_SYN    SYN_REPORT           00000000",
+      "[  1.1] EV_KEY    BTN_TOOL_PEN         UP",
+      "[  1.1] EV_SYN    SYN_REPORT           00000000",
+    ]);
+
+    expect(onGesture).toHaveBeenCalledTimes(1);
+    expect(onGesture.mock.calls[0][0]).toMatchObject({ type: "hover", toolType: "stylus" });
+    reader.stop();
+  });
+
   test("a pen process failure is logged and the touch process keeps recording", async () => {
     const { touchProc, penProc, reader, onGesture, onError } = penReader();
     reader.start(onGesture, onError);

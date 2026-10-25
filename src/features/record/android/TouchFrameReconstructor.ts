@@ -108,6 +108,7 @@ export class TouchFrameReconstructor {
             // intermediate -1 (#13129). The old contact ended: report it released now,
             // before the slot is reused, so the new id starts a fresh contact.
             const ended = this.endedByReplacement(slot, arrivedAt);
+            this.hover.slotReplaced(slot.slotId);
             slot.trackingId = value;
             return ended;
           }

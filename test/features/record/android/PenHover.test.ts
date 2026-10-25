@@ -152,6 +152,24 @@ describe("a multitouch pen that hovers without ever touching (#13084)", () => {
     expect(hoverEvents(finger)).toEqual([]);
   });
 
+  test("a tracking id replaced without a release starts a fresh episode", () => {
+    const lines = [
+      "[  1.0] EV_ABS    ABS_MT_TRACKING_ID   00000001",
+      "[  1.0] EV_ABS    ABS_MT_TOOL_TYPE     00000001",
+      "[  1.0] EV_ABS    ABS_MT_DISTANCE      00000000",
+      "[  1.0] EV_ABS    ABS_MT_POSITION_X    000001a4",
+      "[  1.0] EV_ABS    ABS_MT_POSITION_Y    000002b0",
+      SYN,
+      "[  1.1] EV_ABS    ABS_MT_TRACKING_ID   00000002",
+      "[  1.1] EV_ABS    ABS_MT_DISTANCE      00000005",
+      SYN,
+      "[  1.2] EV_ABS    ABS_MT_TRACKING_ID   ffffffff",
+      SYN,
+    ];
+
+    expect(hoverEvents(lines)).toMatchObject([{ type: "hover", toolType: "stylus" }]);
+  });
+
   test("a pen with no distance axis is not mistaken for a hover", () => {
     const lines = HOVER_ONLY.filter((line) => !line.includes("ABS_MT_DISTANCE"));
 

@@ -50,6 +50,11 @@ export class PenHoverTracker {
     this.slotEpisodes.set(slotId, { touched: true });
   }
 
+  /** The kernel gave the slot a new tracking id without a release, so a new episode begins. */
+  slotReplaced(slotId: number): void {
+    this.slotEpisodes.delete(slotId);
+  }
+
   slotReleased(
     slotId: number,
     toolType: PointerToolType | undefined,

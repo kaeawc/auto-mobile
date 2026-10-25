@@ -147,6 +147,15 @@ takes erase, without resetting the counter. Only erase reserves a ResetBootQueue
 slot. Keep-booted runs outside that queue. Readiness admission and wakeups retain
 their existing ownership, wait bounds and committed-idle-state requirements.
 
+### Container ownership
+
+All app-data and App Group consumers share `resolveOwnAppContainer`: normalized own-device
+paths are accepted, while foreign registrations require matching clone metadata (the bundle
+ID for data containers, the group ID for App Groups). Ownership refusals fail before file
+access. The TypeScript AST boundary guard prevents raw data-container lookups outside the
+resolver; read-only app-bundle lookups and the separately confined groups listing are exempt.
+The device-set root must match simctl's reported path literally; `CORESIMULATOR_DEVICE_SET_PATH` or `HOME` symlink and case differences are refused fail-closed.
+
 ## Limits
 
 - Photos, Contacts and Calendar additions are **not removed**. Unsupported

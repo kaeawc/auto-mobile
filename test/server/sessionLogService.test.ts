@@ -1,6 +1,11 @@
+import { join } from "node:path";
+import { IosSimulatorSessionLogProvider } from "../../src/server/IosSimulatorSessionLogProvider";
+import { SimulatorContainerOwnershipError } from "../../src/utils/ios-cmdline-tools/simulatorOwnContainer";
+import { cloneContainerFixture } from "../helpers/simulatorContainerFixture";
+import { simulatorOwnership, simulatorDataContainer } from "../helpers/simulatorContainerFixture";
 import { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { drainUntil, drainUntilQuiescent } from "../helpers/fakeTimerStepping";
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice, ExecResult } from "../../src/models";
 import type { AppFileFileSystem, AppFileStats } from "../../src/server/appFileService";
 import { createSessionLogService, type SessionLogSimctl } from "../../src/server/sessionLogService";
@@ -160,27 +165,31 @@ class MemoryFileSystem implements AppFileFileSystem {
 
   async rm(rawPath: string): Promise<void> {
     const path = this.normalize(rawPath);
-    this.removed.push(path);
+    this.removed.push(rawPath);
     this.files.delete(path);
   }
 }
 
-const DATA_ROOT = "/sim/data/com.example.app";
-const GROUP_ROOT = "/sim/groups/group.com.example.shared";
+const DATA_ROOT = simulatorDataContainer(simulator.deviceId);
+const GROUP_ROOT = simulatorDataContainer(simulator.deviceId).replace(
+  "Data/Application",
+  "Shared/AppGroup",
+);
 
 function iosHarness(options: { timeoutMs?: number } = {}) {
   const simctl = new RecordingSimctl();
   simctl.onCommand(
-    `get_app_container '${simulator.deviceId}' 'com.example.app' 'data'`,
+    `'get_app_container' '${simulator.deviceId}' 'com.example.app' 'data'`,
     execResult(`${DATA_ROOT}\n`),
   );
   simctl.onCommand(
-    `get_app_container '${simulator.deviceId}' 'com.example.app' 'group.com.example.shared'`,
+    `'get_app_container' '${simulator.deviceId}' 'com.example.app' 'group.com.example.shared'`,
     execResult(`${GROUP_ROOT}\n`),
   );
   const fileSystem = new MemoryFileSystem();
   const timer = new FakeTimer();
   const service = createSessionLogService({
+    containerOwnership: simulatorOwnership,
     adbFactory: {
       create: () => {
         throw new Error("adb must not be used for iOS");
@@ -210,7 +219,10 @@ describe("SessionLogService (#7006)", () => {
         "shell run-as 'com.example.app' sh -c 'if [ -f '\\''files/logs/denied.log'\\'' ]; then wc -c < '\\''files/logs/denied.log'\\''; head -c 8 '\\''files/logs/denied.log'\\'' | base64; else echo __AUTOMOBILE_MISSING__; fi'",
         new Error("run-as: package not debuggable: com.example.app"),
       );
-      const service = createSessionLogService({ adbFactory: new FakeAdbClientFactory(adb) });
+      const service = createSessionLogService({
+        containerOwnership: simulatorOwnership,
+        adbFactory: new FakeAdbClientFactory(adb),
+      });
 
       const result = await service.collect({
         sessionUuid: "session-1",
@@ -252,7 +264,10 @@ describe("SessionLogService (#7006)", () => {
       const adb = new FakeAdbExecutor();
       adb.setDefaultResponse(execResult(base64Read("ok")));
       adb.setCommandResponse("shell pidof 'com.example.app'", execResult("\n"));
-      const service = createSessionLogService({ adbFactory: new FakeAdbClientFactory(adb) });
+      const service = createSessionLogService({
+        containerOwnership: simulatorOwnership,
+        adbFactory: new FakeAdbClientFactory(adb),
+      });
 
       const result = await service.collect({
         sessionUuid: "session-1",
@@ -285,7 +300,10 @@ describe("SessionLogService (#7006)", () => {
       const adb = new FakeAdbExecutor();
       adb.setCommandResponse("shell pidof 'com.example.app'", execResult("4321\n"));
       adb.setDefaultResponse(execResult("one\ntwo\nthree\n"));
-      const service = createSessionLogService({ adbFactory: new FakeAdbClientFactory(adb) });
+      const service = createSessionLogService({
+        containerOwnership: simulatorOwnership,
+        adbFactory: new FakeAdbClientFactory(adb),
+      });
 
       const result = await service.collect({
         sessionUuid: "s",
@@ -317,7 +335,10 @@ describe("SessionLogService (#7006)", () => {
       const adb = new FakeAdbExecutor();
       adb.setCommandResponse("shell pidof 'com.example.app'", execResult("4321\n"));
       adb.setDefaultResponse(execResult(`${"line\n".repeat(1000)}`));
-      const service = createSessionLogService({ adbFactory: new FakeAdbClientFactory(adb) });
+      const service = createSessionLogService({
+        containerOwnership: simulatorOwnership,
+        adbFactory: new FakeAdbClientFactory(adb),
+      });
 
       const result = await service.collect({
         sessionUuid: "s",
@@ -343,7 +364,10 @@ describe("SessionLogService (#7006)", () => {
       const adb = new FakeAdbExecutor();
       adb.setCommandResponse("shell pidof 'com.example.app'", execResult("4321\n"));
       adb.setCommandError("logcat -d", new Error("logcat: permission denied"));
-      const service = createSessionLogService({ adbFactory: new FakeAdbClientFactory(adb) });
+      const service = createSessionLogService({
+        containerOwnership: simulatorOwnership,
+        adbFactory: new FakeAdbClientFactory(adb),
+      });
 
       const result = await service.collect({
         sessionUuid: "s",
@@ -367,7 +391,10 @@ describe("SessionLogService (#7006)", () => {
       adb.setCommandResponse(resetScript("files/logs/app.log"), execResult("reset\n"));
       adb.setCommandResponse(resetScript("files/logs/gone.log"), execResult("missing\n"));
       adb.setCommandError(resetScript("files/logs/denied.log"), new Error("Permission denied"));
-      const service = createSessionLogService({ adbFactory: new FakeAdbClientFactory(adb) });
+      const service = createSessionLogService({
+        containerOwnership: simulatorOwnership,
+        adbFactory: new FakeAdbClientFactory(adb),
+      });
 
       const result = await service.resetAppLogs({
         device: androidDevice,
@@ -399,7 +426,10 @@ describe("SessionLogService (#7006)", () => {
     test("uses plain shell, not run-as, for the externalFiles container", async () => {
       const adb = new FakeAdbExecutor();
       adb.setDefaultResponse(execResult("reset\n"));
-      const service = createSessionLogService({ adbFactory: new FakeAdbClientFactory(adb) });
+      const service = createSessionLogService({
+        containerOwnership: simulatorOwnership,
+        adbFactory: new FakeAdbClientFactory(adb),
+      });
 
       await service.resetAppLogs({
         device: androidDevice,
@@ -416,7 +446,10 @@ describe("SessionLogService (#7006)", () => {
 
     test("reports the unsupported library container per path instead of throwing", async () => {
       const adb = new FakeAdbExecutor();
-      const service = createSessionLogService({ adbFactory: new FakeAdbClientFactory(adb) });
+      const service = createSessionLogService({
+        containerOwnership: simulatorOwnership,
+        adbFactory: new FakeAdbClientFactory(adb),
+      });
 
       const result = await service.collect({
         sessionUuid: "s",
@@ -554,6 +587,7 @@ describe("SessionLogService (#7006)", () => {
         { timer },
       );
       const service = createSessionLogService({
+        containerOwnership: simulatorOwnership,
         adbFactory: {
           create: () => {
             throw new Error("ADB must not be used");
@@ -616,7 +650,7 @@ describe("SessionLogService (#7006)", () => {
       const { simctl, fileSystem, service } = iosHarness();
       fileSystem.files.set(`${DATA_ROOT}/Documents/app.log`, Buffer.from("fine"));
       simctl.onCommand(
-        `get_app_container '${simulator.deviceId}' 'com.example.app' 'group.com.example.shared'`,
+        `'get_app_container' '${simulator.deviceId}' 'com.example.app' 'group.com.example.shared'`,
         new Error("No such file or directory"),
       );
       simctl.onArgs(new Error("log: simulator not booted"));
@@ -666,9 +700,9 @@ describe("SessionLogService (#7006)", () => {
         { path: "nodir/x.log", status: "missing" },
       ]);
       expect(fileSystem.removed.sort()).toEqual([
-        `${DATA_ROOT}/Documents/logs/app.log`,
-        `${DATA_ROOT}/Documents/logs/app.log.1`,
-        `${DATA_ROOT}/Documents/logs/app.log.2`,
+        join(DATA_ROOT, "Documents", "logs", "app.log"),
+        join(DATA_ROOT, "Documents", "logs", "app.log.1"),
+        join(DATA_ROOT, "Documents", "logs", "app.log.2"),
       ]);
       expect(fileSystem.files.has(`${DATA_ROOT}/Documents/logs/app.log.bak`)).toBe(true);
       expect(fileSystem.files.has(`${DATA_ROOT}/Documents/logs/other.log`)).toBe(true);
@@ -701,3 +735,90 @@ describe("SessionLogService (#7006)", () => {
     });
   });
 });
+
+for (const proven of [true, false]) {
+  test(`session log data and App Group clone ownership: ${proven}`, async () => {
+    for (const kind of ["data", "group.com.example.shared"]) {
+      const clone = cloneContainerFixture(
+        simulator.deviceId,
+        proven ? (kind === "data" ? "com.example.app" : kind) : null,
+      );
+      const reported =
+        kind === "data"
+          ? clone.reported
+          : clone.reported.replace("Data/Application", "Shared/AppGroup");
+      const own =
+        kind === "data" ? clone.own : clone.own.replace("Data/Application", "Shared/AppGroup");
+      const simctl = new RecordingSimctl();
+      simctl.onCommand(
+        `'get_app_container' '${simulator.deviceId}' 'com.example.app' '${kind}'`,
+        execResult(reported),
+      );
+      if (!proven) {
+        simctl.onCommand(
+          `'get_app_container' '${simulator.deviceId}' 'com.example.app' 'data'`,
+          execResult(clone.reported),
+        );
+      }
+      const fs = new MemoryFileSystem();
+      const read = spyOn(fs, "readFileBuffer");
+      const stat = spyOn(fs, "lstat");
+      const provider = new IosSimulatorSessionLogProvider(
+        () => simctl,
+        fs,
+        new FakeTimer(),
+        5_000,
+        clone.ownership,
+      );
+      fs.files.set(
+        `${own}/${kind === "data" ? "Documents/" : ""}log.txt`,
+        Buffer.from("clone log"),
+      );
+      const pending =
+        kind === "data"
+          ? provider.readAppLogs(
+              simulator,
+              "com.example.app",
+              { container: "documents", paths: ["log.txt"] },
+              100,
+            )
+          : provider.readAppGroup(
+              simulator,
+              "com.example.app",
+              { groupId: kind, paths: ["log.txt"] },
+              100,
+            );
+      if (!proven) {
+        await expect(pending).rejects.toBeInstanceOf(SimulatorContainerOwnershipError);
+        await expect(
+          provider.resetAppLogs({
+            device: simulator,
+            appId: "com.example.app",
+            container: "documents",
+            paths: ["log.txt"],
+          }),
+        ).rejects.toBeInstanceOf(SimulatorContainerOwnershipError);
+        expect(read).not.toHaveBeenCalled();
+        expect(stat).not.toHaveBeenCalled();
+        expect(fs.removed).toEqual([]);
+        continue;
+      }
+      expect(await pending).toMatchObject({ entries: [{ status: "read", text: "clone log" }] });
+      expect(read).toHaveBeenCalled();
+      expect(read.mock.calls.map(([path]) => path)).toEqual([
+        join(own, ...(kind === "data" ? ["Documents"] : []), "log.txt"),
+      ]);
+      if (kind === "data") {
+        await provider.resetAppLogs({
+          device: simulator,
+          appId: "com.example.app",
+          container: "documents",
+          paths: ["log.txt"],
+        });
+        expect(fs.removed).toEqual([join(own, "Documents", "log.txt")]);
+      }
+      expect(stat).toHaveBeenCalled();
+      expect(stat.mock.calls.every(([path]) => path.startsWith(join(own, "")))).toBe(true);
+    }
+  });
+}

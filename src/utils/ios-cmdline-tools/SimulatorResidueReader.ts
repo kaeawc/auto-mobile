@@ -6,7 +6,7 @@ import { sortedReaddir, sortedReaddirEntries } from "../io";
 import { logger } from "../logger";
 import { PlistClient, type PlistReader } from "./PlistClient";
 import { IOS_SIMULATOR_UUID_PATTERN } from "./iosDeviceType";
-import { parseSimulatorContainerPath } from "./simulatorContainerPath";
+import { resolveOwnAppDataContainer } from "./simulatorOwnContainer";
 import type { SimCtl } from "./SimCtlClient";
 import { parsePlist } from "./XctestrunPlist";
 
@@ -263,37 +263,28 @@ export class SimulatorResidueReader implements IosResidueInspector {
 
   /** Safari's data container `Documents` path, or null when Safari has no container yet. */
   private async safariDocumentsRoot(deviceId: string, signal: AbortSignal): Promise<string | null> {
-    const dataRoot = this.dataRoot(deviceId);
-    let stdout: string;
     try {
-      stdout = (
-        await this.dependencies.simctl.executeCommandArgs(
-          ["get_app_container", deviceId, SAFARI_BUNDLE_ID, "data"],
-          this.dependencies.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-          signal,
-        )
-      ).stdout.trim();
+      const root = await resolveOwnAppDataContainer({
+        deviceId,
+        bundleId: SAFARI_BUNDLE_ID,
+        deviceSetRoot: this.dependencies.deviceSetRoot,
+        identity: this.dependencies.files,
+        run: (args) =>
+          this.dependencies.simctl.executeCommandArgs(
+            args,
+            this.dependencies.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+            signal,
+          ),
+      });
+      return posix.join(root, "Documents");
     } catch (error) {
       if (isMissingContainer(error)) {
-        // simctl reports a container Safari never created as ENOENT: nothing to leave behind.
+        // Safari has never created a container, so there is nothing to leave behind.
+        logger.debug(`Safari container is missing: ${errorMessage(error)}`);
         return null;
       }
       throw error;
     }
-    const containers = posix.join(dataRoot, "Containers", "Data", "Application");
-    if (stdout.startsWith(`${containers}/`) && posix.normalize(stdout) === stdout) {
-      return posix.join(stdout, "Documents");
-    }
-    const parsed = parseSimulatorContainerPath(stdout, this.dependencies.deviceSetRoot);
-    if (parsed && parsed.udid.toLowerCase() !== deviceId.toLowerCase()) {
-      // Clones retain their template's registration path. Only inspect the clone's metadata,
-      // never the template container: its contents are shared across pool sessions.
-      const ownCandidate = posix.join(containers, parsed.containerUuid);
-      if ((await this.dependencies.files.containerIdentifier(ownCandidate)) === SAFARI_BUNDLE_ID) {
-        return posix.join(ownCandidate, "Documents");
-      }
-    }
-    throw new ActionableError("iOS residue cleanup refused an unproven file path");
   }
 
   private async readDefaults(

@@ -1,5 +1,8 @@
+import { SimulatorContainerOwnershipError } from "../../src/utils/ios-cmdline-tools/simulatorOwnContainer";
+import { cloneContainerFixture } from "../helpers/simulatorContainerFixture";
+import { simulatorOwnership, simulatorDataContainer } from "../helpers/simulatorContainerFixture";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { dirname, join, resolve, sep } from "node:path";
+import { dirname, join, sep } from "node:path";
 import * as appFiles from "../../src/server/appFileService";
 import {
   IOS_FILES_FIXTURE_BUNDLE_ID,
@@ -25,7 +28,7 @@ const device: BootedDevice = {
   platform: "ios",
 };
 const physical: BootedDevice = { ...device, deviceId: "00008110-000A1B2C3D4E5F60" };
-const root = resolve("/runtime/fixture data");
+const root = simulatorDataContainer(device.deviceId);
 const namespaceRoot = join(root, "Documents/automobile/run-42");
 const source = "/host/input.txt";
 
@@ -158,7 +161,7 @@ function harness() {
   // Only single-path stdout is trimmed; there is no simctl-output parser fixture.
   simctl.setCommandArgsResult(args, ` ${root}\n`);
   const factory = () => simctl;
-  const container = new SimctlIosFilesFixtureContainer(factory, fs);
+  const container = new SimctlIosFilesFixtureContainer(factory, fs, simulatorOwnership);
   const provider = new IosSimulatorUserFilesProvider(container);
   return { fs, simctl, args, factory, container, provider };
 }
@@ -183,6 +186,7 @@ describe("iOS Simulator user_files", () => {
     const fs = new MemoryFileSystem();
     let simctlCalls = 0;
     const service = appFiles.createAppFileServiceForTesting({
+      containerOwnership: simulatorOwnership,
       fileSystem: fs,
       simctlFactory: () => {
         simctlCalls++;
@@ -258,9 +262,7 @@ describe("iOS Simulator user_files", () => {
   test("rejects relative container stdout without a fallback or filesystem access", async () => {
     const { provider, fs, simctl, args } = harness();
     simctl.setCommandArgsResult(args, "relative/container");
-    await expect(provider.putFile(request())).rejects.toThrow(
-      "Install the managed iOS Files fixture app",
-    );
+    await expect(provider.putFile(request())).rejects.toThrow("outside-device-set");
     expect(fs.calls).toEqual([]);
   });
   test("validates later batch paths before any reset or copy", async () => {
@@ -360,6 +362,7 @@ describe("iOS Simulator user_files", () => {
   test("default registry routes iOS user_files batch and resets once", async () => {
     const { fs, simctl, factory } = harness();
     const service = appFiles.createAppFileServiceForTesting({
+      containerOwnership: simulatorOwnership,
       fileSystem: fs,
       simctlFactory: factory,
     });
@@ -475,6 +478,7 @@ describe("iOS Simulator user_files", () => {
     const container = new FakeFixtureContainer();
     const verifier = new FakePickerVerifier();
     const service = appFiles.createAppFileServiceForTesting({
+      containerOwnership: simulatorOwnership,
       fileSystem: fs,
       iosFilesFixtureContainer: container,
       documentPickerVisibilityVerifier: verifier,
@@ -494,3 +498,38 @@ describe("iOS Simulator user_files", () => {
     expect(verifier.requests).toHaveLength(2);
   });
 });
+
+for (const proven of [true, false]) {
+  test(`Files fixture clone ownership: ${proven}`, async () => {
+    const clone = cloneContainerFixture(
+      device.deviceId,
+      proven ? IOS_FILES_FIXTURE_BUNDLE_ID : null,
+    );
+    const fs = new MemoryFileSystem();
+    const simctl = new FakeSimctl();
+    simctl.setCommandArgsResult(
+      ["get_app_container", device.deviceId, IOS_FILES_FIXTURE_BUNDLE_ID, "data"],
+      clone.reported,
+    );
+    const container = new SimctlIosFilesFixtureContainer(() => simctl, fs, clone.ownership);
+    const write = container.stageFiles([
+      request({ target: { domain: "user_files", namespace: "run-42", reset: true } }),
+    ]);
+    if (!proven) {
+      await expect(write).rejects.toBeInstanceOf(SimulatorContainerOwnershipError);
+      await expect(
+        container.readNamespaceFile(device, "run-42", "nested/input.txt"),
+      ).rejects.toBeInstanceOf(SimulatorContainerOwnershipError);
+      expect(fs.calls).toEqual([]);
+      return;
+    }
+    await write;
+    expect(await container.readNamespaceFile(device, "run-42", "nested/input.txt")).toEqual(
+      Buffer.from("fixture"),
+    );
+    expect(removed(fs)).toContain(join(clone.own, "Documents", "automobile", "run-42"));
+    expect(
+      fs.calls.flatMap((call) => call.paths).some((path) => path.startsWith(clone.reported)),
+    ).toBe(false);
+  });
+}

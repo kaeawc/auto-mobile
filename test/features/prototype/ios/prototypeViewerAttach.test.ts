@@ -1,3 +1,9 @@
+import { SimulatorContainerOwnershipError } from "../../../../src/utils/ios-cmdline-tools/simulatorOwnContainer";
+import { cloneContainerFixture } from "../../../helpers/simulatorContainerFixture";
+import {
+  simulatorOwnership,
+  simulatorDataContainer,
+} from "../../../helpers/simulatorContainerFixture";
 import { expect, test } from "bun:test";
 import {
   CompositePrototypeAgentConnections,
@@ -29,7 +35,7 @@ const DEVICE: BootedDevice = {
 };
 const BUNDLE = "com.example.viewer";
 const TOKEN = "viewer-secret-token";
-const PATH = "/container/Library/AutoMobile/prototype-endpoint.json";
+const PATH = `${simulatorDataContainer(DEVICE.deviceId)}/Library/AutoMobile/prototype-endpoint.json`;
 const HANDSHAKE = {
   agentVersion: "viewer",
   protocolVersion: 1,
@@ -41,12 +47,12 @@ function harness(connect?: PrototypeAgentConnect) {
   const files = new FakeFileSystem();
   files.setFile(PATH, JSON.stringify({ port: 1234, token: TOKEN }));
   const simctl = new FakeSimctl();
-  simctl.setContainerPath(BUNDLE, " /container\n");
+  simctl.setContainerPath(BUNDLE, ` ${simulatorDataContainer(DEVICE.deviceId)}\n`);
   const client = new FakePrototypeAgentClient(HANDSHAKE);
   const calls: number[] = [];
   const reads: string[] = [];
   const attacher = new PrototypeViewerAttacher({
-    containers: { dataContainer: async () => "/container" },
+    containers: { dataContainer: async () => simulatorDataContainer(DEVICE.deviceId) },
     files: {
       readText: async (path) => {
         reads.push(path);
@@ -89,13 +95,16 @@ test("production factory uses the argv simctl seam and rejects an empty containe
   const h = harness();
   h.simctl.setContainerPath(BUNDLE, " \n");
   const attacher = createPrototypeViewerAttacher({
+    containerOwnership: simulatorOwnership,
     simctl: h.simctl,
     files: h.files,
     connections: h.connections,
     connector: new FakePrototypeAgentConnector(),
     timer: new FakeTimer(),
   });
-  await expect(attacher.attach(DEVICE, BUNDLE)).rejects.toThrow(ActionableError);
+  await expect(attacher.attach(DEVICE, BUNDLE)).rejects.toThrow(
+    "No data container for the prototype viewer",
+  );
   expect(h.simctl.getMethodCalls("executeCommandArgs")).toEqual([
     { args: ["get_app_container", DEVICE.deviceId, BUNDLE, "data"], timeoutMs: undefined },
   ]);
@@ -248,6 +257,7 @@ test("production buffers replay coalesced with hello_result and partial frames",
   const connector = new FakePrototypeAgentConnector();
   const timer = new FakeTimer();
   const attacher = createPrototypeViewerAttacher({
+    containerOwnership: simulatorOwnership,
     simctl: h.simctl,
     files: h.files,
     connector,
@@ -319,6 +329,7 @@ test("production missing endpoint does not attempt a connection", async () => {
   h.files.clear();
   const connector = new FakePrototypeAgentConnector();
   const attacher = createPrototypeViewerAttacher({
+    containerOwnership: simulatorOwnership,
     simctl: h.simctl,
     files: h.files,
     connector,
@@ -334,6 +345,7 @@ test("production handshake refusal is actionable and closes the socket", async (
   const connector = new FakePrototypeAgentConnector();
   const timer = new FakeTimer();
   const attacher = createPrototypeViewerAttacher({
+    containerOwnership: simulatorOwnership,
     simctl: h.simctl,
     files: h.files,
     connector,
@@ -356,6 +368,7 @@ test("production close after hello before registration cannot leave a stale view
   const h = harness();
   const connector = new FakePrototypeAgentConnector();
   const attacher = createPrototypeViewerAttacher({
+    containerOwnership: simulatorOwnership,
     simctl: h.simctl,
     files: h.files,
     connector,
@@ -371,3 +384,42 @@ test("production close after hello before registration cannot leave a stale view
   await expect(pending).rejects.toThrow(ActionableError);
   expect(h.connections.get(DEVICE.deviceId)).toBeUndefined();
 });
+
+for (const proven of [true, false]) {
+  test(`prototype viewer attach clone ownership: ${proven}`, async () => {
+    const clone = cloneContainerFixture(DEVICE.deviceId, proven ? BUNDLE : null);
+    const h = harness();
+    h.simctl.setContainerPath(BUNDLE, clone.reported);
+    const reads: string[] = [];
+    const connector = new FakePrototypeAgentConnector();
+    const attacher = createPrototypeViewerAttacher({
+      containerOwnership: clone.ownership,
+      simctl: h.simctl,
+      files: {
+        existsSync: (path) => {
+          reads.push(String(path));
+          return true;
+        },
+        readFile: async () => JSON.stringify({ port: 1234, token: TOKEN }),
+      },
+      connector,
+      timer: new FakeTimer(),
+      connections: h.connections,
+    });
+    if (!proven) {
+      await expect(attacher.attach(DEVICE, BUNDLE)).rejects.toBeInstanceOf(
+        SimulatorContainerOwnershipError,
+      );
+      expect(reads).toEqual([]);
+    } else {
+      const pending = attacher.attach(DEVICE, BUNDLE);
+      for (let turn = 0; turn < 30 && connector.socket.written.length === 0; turn++) {
+        await Promise.resolve();
+      }
+      connector.socket.push({ type: "hello_result", ...HANDSHAKE });
+      const client = await pending;
+      client.close();
+      expect(reads).toEqual([`${clone.own}/Library/AutoMobile/prototype-endpoint.json`]);
+    }
+  });
+}

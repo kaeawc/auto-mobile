@@ -215,6 +215,16 @@ macOsOnlyDescribe("clone Safari ownership", () => {
     expect(rig.state.listed.some((path) => path.startsWith(TEMPLATE_DATA))).toBe(false);
   });
 
+  test("rebuilds a same-UDID path with the requested device casing", async () => {
+    const rig = cloneHarness();
+    rig.state.safari = CLONE_DATA.replace(CLONE, CLONE.toLowerCase());
+    await rig.reader.removeEntries(CLONE, "safari-documents", ["download.txt"], rig.signal);
+    expect(rig.state.removed).toEqual([`${CLONE_DATA}/Documents/download.txt`]);
+    expect((await rig.reader.read(CLONE, rig.signal)).safariDocuments).toEqual(["download.txt"]);
+    expect(rig.state.listed).toContain(`${CLONE_DATA}/Documents`);
+    expect(rig.state.identified).toEqual([]);
+  });
+
   test("removes only clone Safari entries, never template entries", async () => {
     const rig = cloneHarness();
     await rig.reader.removeEntries(CLONE, "safari-documents", ["download.txt"], rig.signal);
@@ -243,11 +253,6 @@ macOsOnlyDescribe("clone Safari ownership", () => {
       TEMPLATE_DATA.replace("4C4FD11F-2766-4332-9DFF-56073DFEB085", "template"),
       "com.apple.mobilesafari",
     ],
-    [
-      "same UDID outside own directory",
-      TEMPLATE_DATA.replace("4C4FD11F-2766-4332-9DFF-56073DFEB085", CLONE.toLowerCase()),
-      "com.apple.mobilesafari",
-    ],
     ["trailing slash", `${TEMPLATE_DATA}/`, "com.apple.mobilesafari"],
   ] as const)("refuses unproven clone path: %s", async (_name, path, identifier) => {
     const rig = cloneHarness();
@@ -259,12 +264,10 @@ macOsOnlyDescribe("clone Safari ownership", () => {
     }
     await expect(
       rig.reader.removeEntries(CLONE, "safari-documents", ["download.txt"], rig.signal),
-    ).rejects.toThrow("iOS residue cleanup refused an unproven file path");
+    ).rejects.toThrow("unproven file path");
     expect(rig.state.listed).toEqual([]);
     expect(rig.state.removed).toEqual([]);
-    await expect(rig.reader.read(CLONE, rig.signal)).rejects.toThrow(
-      "iOS residue cleanup refused an unproven file path",
-    );
+    await expect(rig.reader.read(CLONE, rig.signal)).rejects.toThrow("unproven file path");
     expect(rig.state.listed).toEqual([]);
     expect(rig.state.identified.every((entry) => entry === CLONE_DATA)).toBe(true);
   });

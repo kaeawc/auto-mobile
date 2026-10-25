@@ -1,3 +1,7 @@
+import {
+  simulatorOwnership,
+  simulatorDataContainer,
+} from "../../helpers/simulatorContainerFixture";
 import { beforeEach, afterEach, describe, expect, spyOn, test } from "bun:test";
 import { ClearAppData } from "../../../src/features/action/ClearAppData";
 import { InstallApp } from "../../../src/features/action/InstallApp";
@@ -200,13 +204,14 @@ describe("app restart cache generation", () => {
       for (const fails of [false, true]) {
         const events: string[] = [];
         const simctl = new FakeSimctl();
-        simctl.setContainerPath(appId, "/fake/container");
+        simctl.setContainerPath(appId, simulatorDataContainer(device.deviceId));
         const { invalidator, store } = clearInvalidationHarness(events);
         const action = new ClearAppData(device, undefined, {
           cacheInvalidator: invalidator,
           backendResolver: (id, deps) =>
             resolveIosClearDataBackend(id, {
               ...deps,
+              containerOwnership: simulatorOwnership,
               simctl,
               rm: async () => {
                 events.push("wipe");

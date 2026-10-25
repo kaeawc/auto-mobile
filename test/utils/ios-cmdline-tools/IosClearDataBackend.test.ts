@@ -1,3 +1,9 @@
+import { SimulatorContainerOwnershipError } from "../../../src/utils/ios-cmdline-tools/simulatorOwnContainer";
+import { cloneContainerFixture } from "../../helpers/simulatorContainerFixture";
+import {
+  simulatorOwnership,
+  simulatorDataContainer,
+} from "../../helpers/simulatorContainerFixture";
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { ClearAppData } from "../../../src/features/action/ClearAppData";
@@ -15,7 +21,7 @@ import { FakeSimctl } from "../../fakes/FakeSimctl";
 const simulatorId = "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE";
 const physicalId = "00008030-001A2B3C0E11002E";
 const bundleId = "com.example.app";
-const containerPath = "/fake/container";
+const containerPath = simulatorDataContainer(simulatorId);
 
 class FakeReinstaller implements IosClearDataReinstaller {
   calls: Array<[string, string]> = [];
@@ -38,6 +44,7 @@ function harness() {
   }> = [];
   let creations = 0;
   const deps: IosClearDataBackendDeps = {
+    containerOwnership: simulatorOwnership,
     simctl,
     createReinstaller: () => {
       creations++;
@@ -222,3 +229,27 @@ describe("iOS clear-data backends", () => {
     expect(h.reinstaller.calls).toEqual([[simulatorId, bundleId]]);
   });
 });
+
+for (const proven of [true, false]) {
+  test(`clear data refuses or resolves cloned registration: ${proven}`, async () => {
+    const clone = cloneContainerFixture(simulatorId, proven ? bundleId : null);
+    const h = harness();
+    h.simctl.setContainerPath(bundleId, clone.reported);
+    const backend = resolveIosClearDataBackend(simulatorId, {
+      ...h.deps,
+      containerOwnership: clone.ownership,
+    });
+    if (!proven) {
+      await expect(backend.clearAppData(bundleId)).rejects.toBeInstanceOf(
+        SimulatorContainerOwnershipError,
+      );
+      expect(h.removals).toEqual([]);
+      expect(h.simctl.getMethodCalls("listAppsOrThrow")).toEqual([]);
+      return;
+    }
+    expect(await backend.clearAppData(bundleId)).toMatchObject({ success: true });
+    expect(h.removals.map((entry) => entry.path)).toEqual(
+      IOS_APP_DATA_FOLDERS.map((folder) => join(clone.own, folder)),
+    );
+  });
+}

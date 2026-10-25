@@ -1,3 +1,4 @@
+import type { SimulatorContainerOwnershipOptions } from "../../utils/ios-cmdline-tools/simulatorOwnContainer";
 import type {
   RestoreSnapshotArgs,
   RestoreSnapshotResult,
@@ -114,6 +115,7 @@ function getAndroidRestoreDetails(
 }
 
 export interface RestoreSnapshotOptions {
+  containerOwnership?: SimulatorContainerOwnershipOptions;
   adbFactory?: AdbClientFactory;
   emulator?: AndroidEmulatorClient;
   timer?: Timer;
@@ -160,6 +162,7 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
     this.timer = timer;
     this.iosSnapshotBackend = resolveIosSnapshotBackend(device.deviceId, {
       simctl: simctl || new SimCtlClient(device),
+      containerOwnership: options.containerOwnership,
     });
     this.iosRestoreOperations = iosRestoreOperations ?? {
       pathExists,

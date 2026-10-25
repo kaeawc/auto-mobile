@@ -15,7 +15,7 @@ import {
   DAEMON_PORT_RANGE_END,
   DAEMON_PORT_RANGE_START,
   DEFAULT_DAEMON_PORT,
-} from "../../../src/daemon/constants";
+} from "../../../src/daemon/wire/constants";
 import { PortManager } from "../../../src/utils/PortManager";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { prototypeResponseMessageSchema } from "../../../src/features/prototype/prototypeRequestProtocol";

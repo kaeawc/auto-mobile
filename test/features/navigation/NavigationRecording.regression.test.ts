@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "
 import { readFileSync } from "node:fs";
 import { NavigationRepository } from "../../../src/db/navigationRepository";
 import { TestCoverageRepository } from "../../../src/db/testCoverageRepository";
-import { INTERNAL_TOOL_PARAM_NAMES } from "../../../src/daemon/constants";
+import { INTERNAL_TOOL_PARAM_NAMES } from "../../../src/daemon/wire/constants";
 import { stripNavigationToolParams } from "../../../src/models/navigationToolParams";
 import { NavigationGraphManager } from "../../../src/features/navigation/NavigationGraphManager";
 import { edgeReplayKey } from "../../../src/db/edgeReplayKey";

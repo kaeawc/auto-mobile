@@ -12,7 +12,7 @@ import type { IdGenerator } from "../utils/IdGenerator";
 import { executionTracker } from "./executionTracker";
 import { forgetDaemonSessionBindingScope } from "./daemonSessionBindingScopes";
 import type { ObserverSessionRegistry } from "./observerSessionRegistry";
-import { HEARTBEAT_PATH, MCP_STREAMABLE_PATH } from "./constants";
+import { HEARTBEAT_PATH, MCP_STREAMABLE_PATH } from "./wire/constants";
 import {
   DAEMON_HANDOFF_INTERRUPTED_MESSAGE,
   DaemonHandoffInterruptionError,

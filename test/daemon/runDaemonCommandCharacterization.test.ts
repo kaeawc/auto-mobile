@@ -6,7 +6,7 @@ import {
   runDaemonCommand,
   daemonBuildIdentityStatusLines,
 } from "../../src/daemon/cli/runDaemonCommand";
-import { getCurrentBuildIdentity } from "../../src/daemon/buildIdentity";
+import { getCurrentBuildIdentity } from "../../src/daemon/wire/buildIdentity";
 import type { DaemonStateLike } from "../../src/daemon/daemonState";
 import { DAEMON_LIVENESS_OWNER_IS_PROXY_CODE, type DaemonStatus } from "../../src/daemon/types";
 import * as debugTools from "../../src/daemon/debugTools";

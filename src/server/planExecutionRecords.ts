@@ -1,4 +1,4 @@
-import { DAEMON_SHUTTING_DOWN_ERROR_CODE } from "../daemon/constants";
+import { DAEMON_SHUTTING_DOWN_ERROR_CODE } from "../daemon/wire/constants";
 import { defaultDaemonContext, type PlanEndDaemonContext } from "../daemon/daemonContext";
 import { idleReleaseField } from "../daemon/releaseReasons";
 import { SESSION_OWNERSHIP_LOST_CODE } from "../daemon/sessionReleasedDuringCall";

@@ -4,7 +4,7 @@ import {
   DAEMON_RELEASED_SESSION_HEADER,
   DAEMON_SESSION_TOOL_BINDING_HEADER,
   DAEMON_TOOL_SELECTION_PROFILE_HEADER,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import {
   buildMcpRequestContext,
   type McpForwardRequestContext,

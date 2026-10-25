@@ -5,7 +5,7 @@ import {
   DAEMON_FORCED_STOP_TIMEOUT_MS,
   DAEMON_RESTART_HANDOFF_DELAY_MS,
   DAEMON_SHUTDOWN_TIMEOUT_MS,
-} from "./constants";
+} from "./wire/constants";
 import type { DaemonClientFactoryOptions, DaemonClientLike } from "./client";
 import { daemonProcessOptions } from "./daemonOptionScopes";
 import {

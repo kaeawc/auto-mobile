@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { LineFramer } from "../../../src/daemon/socketServer/LineFramer";
+import { LineFramer } from "../../../src/daemon/wire/LineFramer";
 
 function makeFramer(maxFrameBytes: number): {
   framer: LineFramer;

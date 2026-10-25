@@ -7,7 +7,7 @@ import {
   LOCK_FILE_PATH,
   PID_FILE_PATH,
   SOCKET_PATH,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import { DefaultDeviceSettingsAccess } from "../../src/features/utility/DeviceSettingDefaults";
 import type { BootedDevice } from "../../src/models";
 import { resolveAppearanceMode } from "../../src/daemon/appearanceManager";

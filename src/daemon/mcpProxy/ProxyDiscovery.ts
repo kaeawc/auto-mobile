@@ -2,10 +2,10 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { DaemonUnavailableError, type DaemonClientLike } from "../client";
-import { DAEMON_BOUND_SESSION_PARAM, DAEMON_RELEASED_SESSION_PARAM } from "../constants";
+import { DAEMON_BOUND_SESSION_PARAM, DAEMON_RELEASED_SESSION_PARAM } from "../wire/constants";
 import { DeviceControlTransportError } from "../deviceControlTransportFailure";
 import { type ListChangedKind } from "../listChangedBroadcast";
-import { McpOverloadError } from "../McpTimeoutError";
+import { McpOverloadError } from "../wire/McpTimeoutError";
 import { isToolOutputResourceUri } from "../proxy/BoundSessionFenceGate";
 import {
   DaemonBoundSessionExpiredError,

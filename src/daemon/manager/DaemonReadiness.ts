@@ -9,7 +9,7 @@ import {
   DEFAULT_SOCKET_PATH,
   READINESS_PROBE_MAX_ATTEMPTS,
   READINESS_PROBE_BACKOFF_MS,
-} from "../constants";
+} from "../wire/constants";
 import { DaemonStatus } from "../types";
 import { type DaemonClientFactoryOptions, type DaemonClientLike } from "../client";
 import { type DaemonSocketReachabilityLike } from "../daemonSocketReachability";

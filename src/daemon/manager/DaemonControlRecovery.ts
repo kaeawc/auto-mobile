@@ -2,7 +2,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { readFile } from "node:fs/promises";
 import { logger } from "../../utils/logger";
 import { ActionableError } from "../../models";
-import { DAEMON_RESTART_HANDOFF_DELAY_MS } from "../constants";
+import { DAEMON_RESTART_HANDOFF_DELAY_MS } from "../wire/constants";
 import { DaemonStatus, PidFileData, DaemonOptions } from "../types";
 import {
   mergeRestartOptions,

@@ -1,5 +1,6 @@
 import { logger } from "../../../utils/logger";
 import type { BootedDevice, PlanStep, Element } from "../../../models";
+import type { PointerOption } from "../../../models/PointerOption";
 import type {
   GestureEmitter,
   GestureEvent,
@@ -9,6 +10,8 @@ import type {
   TouchTrackFailure,
 } from "./types";
 import { GESTURE_THRESHOLDS } from "./types";
+import { formsDoubleTap, hasUnknownAxes } from "./gesturePairing";
+import { noteExportLoss } from "./penExportWarnings";
 import { AndroidCtrlProxyClient, type AndroidCtrlProxy } from "../../observe/android";
 import { defaultAdbClientFactory } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import { discoverInputNodes } from "./InputNodeDiscovery";
@@ -92,6 +95,8 @@ export class DualTrackRecorder {
   private orderedSteps: OrderedStep[] = [];
   private latestEntry: OrderedStep | null = null;
   private pendingGestures: PendingGesture[] = [];
+  /** Recorded input that the exported plan cannot represent, so it was left out (#13084). */
+  private readonly exportWarnings = new Set<string>();
   private bufferedInteractions: BufferedInteraction[] = [];
   private lastInputText: { elementKey: string; entry: OrderedStep } | null = null;
   private activeEmitter: GestureEmitter | null = null;
@@ -118,6 +123,11 @@ export class DualTrackRecorder {
   /** The steps captured so far; complete once `stop()` has been called, labels aside. */
   get capturedSteps(): readonly PlanStep[] {
     return this.steps;
+  }
+
+  /** Warnings for input left out of the plan so far, for a stop that failed or timed out. */
+  get capturedExportWarnings(): readonly string[] {
+    return [...this.exportWarnings];
   }
 
   constructor(
@@ -181,6 +191,8 @@ export class DualTrackRecorder {
     touchTrackFailure?: TouchTrackFailure;
     /** Rotation/size problems that may have mis-recorded tapAt/swipeOn steps (#10174). */
     geometryWarnings?: string[];
+    /** Recorded input left out of the plan because replay cannot reproduce it (#13084). */
+    exportWarnings?: string[];
   }> {
     if (options.hostOnly) {
       this.geometry?.dispose();
@@ -236,6 +248,7 @@ export class DualTrackRecorder {
       stepCount: this.steps.length,
       ...(this.touchTrackFailure ? { touchTrackFailure: this.touchTrackFailure } : {}),
       ...(geometryWarnings.length > 0 ? { geometryWarnings } : {}),
+      ...(this.exportWarnings.size > 0 ? { exportWarnings: [...this.exportWarnings] } : {}),
     };
   }
 
@@ -326,6 +339,11 @@ export class DualTrackRecorder {
       return;
     }
 
+    if (gesture.type === "hover") {
+      noteExportLoss(this.exportWarnings, gesture, null);
+      return;
+    }
+
     if (gesture.type === "pressButton") {
       this.enqueueStep({ resolved: true, step: buildPressButtonStep(gesture) });
       return;
@@ -367,36 +385,13 @@ export class DualTrackRecorder {
     if (gesture.type !== "doubleTap" || hasUnknownAxes(gesture)) {
       return false;
     }
-    const priorTap = [...this.pendingGestures].reverse().find((pending) => {
-      const prior = pending.gesture;
-      if (
-        prior.type !== "tap" ||
-        hasUnknownAxes(prior) ||
-        prior.screenX === undefined ||
-        prior.screenY === undefined
-      ) {
-        return false;
-      }
-      const elapsed = gesture.arrivedAt - prior.arrivedAt;
-      if (gesture.firstTapArrivedAt !== undefined) {
-        return (
-          prior.arrivedAt === gesture.firstTapArrivedAt &&
-          elapsed >= 0 &&
-          elapsed <= GESTURE_THRESHOLDS.DOUBLE_TAP_MS
-        );
-      }
-      // Direct emitter events lack the classifier's correlation time.
-      const dx = (gesture.screenX ?? Infinity) - prior.screenX;
-      const dy = (gesture.screenY ?? Infinity) - prior.screenY;
-      return (
-        elapsed >= 0 &&
-        elapsed <= GESTURE_THRESHOLDS.DOUBLE_TAP_MS &&
-        Math.hypot(dx, dy) <= GESTURE_THRESHOLDS.DOUBLE_TAP_SLOP_DP
-      );
-    });
+    const priorTap = [...this.pendingGestures]
+      .reverse()
+      .find((pending) => formsDoubleTap(pending.gesture, gesture));
     const step = priorTap?.step;
     if (step && ["tapOn", "tapAt"].includes(step.tool) && step.params.action === "tap") {
       step.params.action = "doubleTap";
+      noteExportLoss(this.exportWarnings, gesture, step);
       return true;
     }
     if (priorTap && !priorTap.resolved) {
@@ -484,6 +479,7 @@ export class DualTrackRecorder {
 
     const event = this.selectInteraction(pending, interaction);
     const step = buildMergedStep(pending.gesture, event);
+    noteExportLoss(this.exportWarnings, pending.gesture, step);
     pending.step = step ?? undefined;
     this.trackGeometrySpan(pending.gesture, step);
     this.flushResolvedSteps();
@@ -878,6 +874,9 @@ function buildMergedStep(
   gesture: GestureEvent,
   event: ReceivedInteraction = { type: "", timestamp: 0 },
 ): PlanStep | null {
+  if (gesture.toolType !== undefined) {
+    return buildPenStep(gesture);
+  }
   const selector = buildSelector(event.element);
 
   switch (gesture.type) {
@@ -952,7 +951,27 @@ function buildSwipeAtStep(gesture: GestureEvent, endpoints: SwipeEndpoints): Pla
   if (gesture.speed === "fast") {
     params.speed = "fast";
   }
+  const pointer = pointerOf(gesture);
+  if (pointer) {
+    params.pointer = pointer;
+  }
   return { tool: "swipeAt", params };
+}
+
+/**
+ * A pen contact replays only as a coordinate step that carries its pointer: an element tap or a
+ * swipe direction cannot say "stylus", so either would replay as a finger. A swipe keeps only its
+ * endpoints. Only a stylus can be injected, so any other tool (an eraser) has no step.
+ */
+function buildPenStep(gesture: GestureEvent): PlanStep | null {
+  if (gesture.toolType !== "stylus") {
+    return null;
+  }
+  if (gesture.type === "swipe") {
+    const endpoints = swipeEndpoints(gesture);
+    return endpoints ? buildSwipeAtStep(gesture, endpoints) : null;
+  }
+  return buildCoordinateTapStep(gesture);
 }
 
 function buildSwipeStep(gesture: GestureEvent, event: ReceivedInteraction): PlanStep | null {
@@ -980,8 +999,12 @@ function buildSwipeStep(gesture: GestureEvent, event: ReceivedInteraction): Plan
   return { tool: "swipeOn", params };
 }
 
-function hasUnknownAxes(gesture: GestureEvent): boolean {
-  return Boolean(gesture.unknownAxes?.length);
+/**
+ * The replayable pointer for a recorded pen gesture. Only "stylus" can be injected, so an eraser
+ * has none (the recorder skips those gestures instead of replaying them as another tool).
+ */
+function pointerOf(gesture: GestureEvent): PointerOption | undefined {
+  return gesture.toolType === "stylus" ? { toolType: "stylus" } : undefined;
 }
 
 function buildCoordinateTapStep(gesture: GestureEvent): PlanStep | null {
@@ -1001,6 +1024,10 @@ function buildCoordinateTapStep(gesture: GestureEvent): PlanStep | null {
       LONG_PRESS_MAX_MS,
       Math.max(LONG_PRESS_MIN_MS, gesture.durationMs),
     );
+  }
+  const pointer = pointerOf(gesture);
+  if (pointer) {
+    params.pointer = pointer;
   }
   return {
     tool: "tapAt",

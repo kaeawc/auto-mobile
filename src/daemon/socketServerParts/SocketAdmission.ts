@@ -12,7 +12,7 @@ import {
   McpOverloadError,
   McpTimeoutError,
   MCP_QUEUE_TIMEOUT_ERROR_CODE,
-} from "../McpTimeoutError";
+} from "../wire/McpTimeoutError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import {
@@ -28,7 +28,7 @@ import {
   DAEMON_CANCEL_REQUEST_METHOD,
   DAEMON_HEARTBEAT_METHOD,
   DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
-} from "../constants";
+} from "../wire/constants";
 import { resolveSocketAdmissionLane } from "../socketRequestAdmission";
 import {
   daemonShuttingDownFailure,

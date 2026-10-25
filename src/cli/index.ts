@@ -33,7 +33,7 @@ import { serverConfig } from "../utils/ServerConfig";
 import { cliStderr, cliStdout, renderCliToolOutput, type CliByteSink } from "./toolOutput";
 import type { CliTerminationRequest } from "./termination";
 import { cliDeviceOwnershipHint } from "./deviceOwnershipHint";
-import { DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS } from "../daemon/constants";
+import { DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS } from "../daemon/wire/constants";
 import {
   ensureCliToolSelectionProfileStoreWritable,
   loadPersistedCliToolSelectionProfile,

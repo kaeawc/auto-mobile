@@ -7,8 +7,8 @@ import { DEFAULT_MCP_REQUEST_TIMEOUT_MS, ProgressExtendableDeadline } from "../m
 import {
   DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM,
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
-} from "../constants";
-import { McpTimeoutError } from "../McpTimeoutError";
+} from "../wire/constants";
+import { McpTimeoutError } from "../wire/McpTimeoutError";
 import { isHostInventoryCall, nextSocketRequestOrder } from "../socketRequestAdmission";
 import type { McpForwardContext } from "../socketServerParts/socketServerContracts";
 

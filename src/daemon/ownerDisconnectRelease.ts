@@ -6,7 +6,7 @@ import { logger } from "../utils/logger";
 import { ownerLeaseHeartbeat, SUSPECT_GRACE_MS } from "./livenessOwnerLease";
 import { holdsOwnerHeartbeatLease } from "./sessionBroker/provisioning/executionLiveness";
 import type { Session } from "./sessionManager";
-import { DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS } from "./sessionLivenessWindows";
+import { DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS } from "./wire/sessionLivenessWindows";
 import { type OwnerDisconnectReleaseDeferral } from "./OwnerDisconnectExecutionVeto";
 
 /** The release reason recorded for a session whose owning connection closed. */

@@ -1,4 +1,4 @@
-import { SOCKET_PATH } from "./constants";
+import { SOCKET_PATH } from "./wire/constants";
 import { getAppearanceSocketPath } from "./appearanceSocketServer";
 import { getDeviceDataStreamSocketPath } from "./deviceDataStreamSocketServer";
 import { getDeviceSnapshotSocketPath } from "./deviceSnapshotSocketServer";

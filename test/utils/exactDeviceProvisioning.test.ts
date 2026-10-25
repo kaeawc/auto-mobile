@@ -62,6 +62,7 @@ describe("ProvisionDeviceError retryability", () => {
       unsupported: false,
       platform_command_failed: false,
       resource_profile_unproven: false,
+      unsafe_device_resource_combination: false,
       runtime_incompatible: false,
       requires_real_device: false,
     });
@@ -1059,7 +1060,12 @@ test.each([false, true])(
           expect(options.resources).toEqual({ widgets: "disabled" });
           expect(calls).toEqual(["create"]);
           calls.push("apply");
-          return { applied: !failure, labels: [], ...(failure ? { reason: "denied" } : {}) };
+          return {
+            applied: !failure,
+            resources: failure ? [] : ["widgets" as const],
+            labels: [],
+            ...(failure ? { reason: "denied" } : {}),
+          };
         },
       },
     });
@@ -1070,6 +1076,7 @@ test.each([false, true])(
       resources: { widgets: "disabled" },
     });
     expect(result.created).toBe(true);
+    expect(result.prebootDisabledResources).toEqual(failure ? undefined : ["widgets"]);
     expect(calls).toEqual(["create", "apply"]);
   },
 );

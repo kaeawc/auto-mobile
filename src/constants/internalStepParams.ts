@@ -1,4 +1,4 @@
-import { INTERNAL_TOOL_PARAM_NAMES } from "../daemon/constants";
+import { INTERNAL_TOOL_PARAM_NAMES } from "../daemon/wire/constants";
 
 const internalToolParams: ReadonlySet<string> = new Set(INTERNAL_TOOL_PARAM_NAMES);
 

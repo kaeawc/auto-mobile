@@ -13,13 +13,13 @@ import {
   DAEMON_SHUTTING_DOWN_ERROR_CODE,
   DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
   DAEMON_VERSION,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import {
   DeviceControlTransportError,
   type DeviceControlTransportFailure,
 } from "../../src/daemon/deviceControlTransportFailure";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
-import { McpOverloadError, McpTimeoutError } from "../../src/daemon/McpTimeoutError";
+import { McpOverloadError, McpTimeoutError } from "../../src/daemon/wire/McpTimeoutError";
 import { DaemonDisconnectError } from "../../src/daemon/DaemonDisconnectError";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";

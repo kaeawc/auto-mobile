@@ -17,7 +17,7 @@ import {
   DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,
   NO_HEARTBEAT_RELEASE_BUDGET_MS,
   SUSPECT_GRACE_MS,
-} from "../../src/daemon/sessionLivenessWindows";
+} from "../../src/daemon/wire/sessionLivenessWindows";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";

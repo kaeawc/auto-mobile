@@ -15,7 +15,7 @@ import {
   type SessionReleaseSnapshot,
 } from "../../src/daemon/sessionManager";
 import { ObserverSessionRegistry } from "../../src/daemon/observerSessionRegistry";
-import { CLI_SESSION_LIVENESS_POLICY } from "../../src/daemon/constants";
+import { CLI_SESSION_LIVENESS_POLICY } from "../../src/daemon/wire/constants";
 import { DAEMON_SESSION_NOT_FOUND_CODE, type DaemonRequest } from "../../src/daemon/types";
 import type { SessionReleaseReason } from "../../src/models/releaseReasons";
 import { FakeTimer } from "../fakes/FakeTimer";

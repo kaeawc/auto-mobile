@@ -2,7 +2,7 @@
 # Live idle-release check (#10671).
 #
 # Drives a private AutoMobile daemon against one emulator and checks both sides
-# of the device-session release windows (src/daemon/sessionLivenessWindows.ts):
+# of the device-session release windows (src/daemon/wire/sessionLivenessWindows.ts):
 #
 #   active        A stdio proxy that heartbeats AND makes control calls keeps the
 #                 device past the idle window.
@@ -67,7 +67,7 @@ SLEEP_CMD="${AUTOMOBILE_IDLE_CHECK_SLEEP:-sleep}"
 NOW_CMD="${AUTOMOBILE_IDLE_CHECK_NOW:-}"
 NC="${AUTOMOBILE_IDLE_CHECK_NC:-nc}"
 
-# Mirrors src/daemon/sessionLivenessWindows.ts: idle release lands exactly one
+# Mirrors src/daemon/wire/sessionLivenessWindows.ts: idle release lands exactly one
 # idle window after the last control call (#11107), so the only slack after it is
 # one 2 s monitor scan. The 4 s owner lease and 4 s suspect grace judge the
 # owner's heartbeat, not the idle window, and no longer widen this bound.

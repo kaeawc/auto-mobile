@@ -13,7 +13,7 @@ import { defaultLocationRouteRegistry } from "../../features/utility/LocationRou
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { SessionHeartbeatMonitor } from "../SessionHeartbeatMonitor";
 import { SingleFlightInterval } from "../SingleFlightInterval";
-import { SESSION_RELEASE_DRAIN_TIMEOUT_MS } from "../constants";
+import { SESSION_RELEASE_DRAIN_TIMEOUT_MS } from "../wire/constants";
 import { DeviceForwardLeaseIdleReleaser } from "../deviceForwardLeaseIdleReleaser";
 import { cleanupDaemonFilesSync } from "../daemonFiles";
 import { SessionReleaseBroadcaster } from "../sessionReleaseBroadcast";

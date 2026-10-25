@@ -1,4 +1,4 @@
-import { LineFramer } from "../../../daemon/socketServer/LineFramer";
+import { LineFramer } from "../../../daemon/wire/LineFramer";
 import { ActionableError } from "../../../models/ActionableError";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";

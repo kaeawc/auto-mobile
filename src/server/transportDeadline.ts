@@ -2,7 +2,7 @@ import {
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
   INTERNAL_EXECUTION_START_TIME_PARAM,
-} from "../daemon/constants";
+} from "../daemon/wire/constants";
 
 /**
  * Recover the ABSOLUTE deadline of the current MCP request from the internal

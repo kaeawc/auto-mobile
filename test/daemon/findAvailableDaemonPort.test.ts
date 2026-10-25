@@ -4,7 +4,7 @@ import {
   DAEMON_PORT_RANGE_END,
   DAEMON_PORT_RANGE_START,
   DEFAULT_DAEMON_PORT,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 
 function probe(free: readonly number[]) {
   const probed: number[] = [];

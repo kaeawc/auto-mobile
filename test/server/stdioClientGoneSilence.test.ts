@@ -7,7 +7,7 @@ import { OutputGatedTransport } from "../../src/server/outputGatedTransport";
 import { createStdioServerTransport } from "../../src/server/stdioServerTransport";
 import { ProcessLifecycleHandlers, type ShutdownSignal } from "../../src/processLifecycle";
 import { DaemonUnavailableError } from "../../src/daemon/client";
-import { DAEMON_RELEASE_SESSION_METHOD, DAEMON_VERSION } from "../../src/daemon/constants";
+import { DAEMON_RELEASE_SESSION_METHOD, DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";

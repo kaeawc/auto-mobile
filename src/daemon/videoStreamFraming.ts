@@ -1,4 +1,4 @@
-import type { StreamSubscriptionEndReason } from "./streamSubscriptionPolicy";
+import type { StreamSubscriptionEndReason } from "./wire/streamSubscriptionPolicy";
 
 /**
  * Encoders for the `VideoStreamProtocol` framing, mirroring

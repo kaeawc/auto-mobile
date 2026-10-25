@@ -15,7 +15,7 @@ import { MAX_CREDIBLE_DAEMON_STALL_MS } from "../../src/daemon/timerLateness";
 import {
   DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS as SCAN_MS,
   SUSPECT_GRACE_MS,
-} from "../../src/daemon/sessionLivenessWindows";
+} from "../../src/daemon/wire/sessionLivenessWindows";
 import { logger } from "../../src/utils/logger";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";

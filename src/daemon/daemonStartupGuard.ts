@@ -9,7 +9,7 @@ import {
   INCOMPLETE_EXTRACTION_EXIT_CODE,
   isIncompleteExtractionError,
 } from "../db/migrationDependencyIntegrity";
-import { DAEMON_STARTUP_TIMEOUT_MS } from "./constants";
+import { DAEMON_STARTUP_TIMEOUT_MS } from "./wire/constants";
 import { StartupFailureTracker, DefaultStartupFailureTracker } from "./DaemonStartupFailureTracker";
 
 /**

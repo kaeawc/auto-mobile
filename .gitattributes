@@ -227,3 +227,4 @@ ios/prototype-agent/Fixtures/EmbedConsumer/Sources/EmbedConsumer/EmbeddingSample
 
 test/fixtures/ios-runner-progress/*.txt text eol=lf
 test/fixtures/ios-runner-launch-failure/*.txt text eol=lf
+test/fixtures/ios-sim-fleet/*.txt text eol=lf

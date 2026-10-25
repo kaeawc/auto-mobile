@@ -26452,6 +26452,69 @@
           ],
           "additionalProperties": false
         },
+        "disabledResources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "resource": {
+                "type": "string"
+              },
+              "labels": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "automobileImpact": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/__schema2"
+                }
+              },
+              "appImpact": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/__schema2"
+                }
+              },
+              "unsafeWith": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "hazardId": {
+                      "type": "string"
+                    },
+                    "appliesTo": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": ["post_boot", "preboot"]
+                      }
+                    },
+                    "withResources": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "evidence": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["hazardId", "appliesTo", "withResources", "reason", "evidence"],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": ["resource", "labels", "automobileImpact", "appImpact"],
+            "additionalProperties": false
+          }
+        },
         "requestedSpec": {},
         "resolvedSpec": {},
         "displayCutout": {},
@@ -26513,6 +26576,23 @@
               "type": "null"
             }
           ]
+        },
+        "__schema2": {
+          "type": "object",
+          "properties": {
+            "description": {
+              "type": "string"
+            },
+            "confidence": {
+              "type": "string",
+              "enum": ["verified", "inferred"]
+            },
+            "evidence": {
+              "type": "string"
+            }
+          },
+          "required": ["description", "confidence"],
+          "additionalProperties": false
         }
       }
     }
@@ -27329,6 +27409,38 @@
                 "type": "array",
                 "items": {
                   "$ref": "#/$defs/__schema1"
+                }
+              },
+              "unsafeWith": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "hazardId": {
+                      "type": "string"
+                    },
+                    "appliesTo": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": ["post_boot", "preboot"]
+                      }
+                    },
+                    "withResources": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "evidence": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["hazardId", "appliesTo", "withResources", "reason", "evidence"],
+                  "additionalProperties": false
                 }
               }
             },
@@ -31063,7 +31175,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Set selected device resources and verify native state, including disabled iOS service impacts. All settings are opt-in; omitted resources stay unchanged. iOS Simulator services and Android optional apps/settings are runtime-dependent. Android changes return a restore receipt for exact restoration during the same boot. Disabling Google infrastructure changes push/auth behavior.",
+    "description": "Set selected device resources and verify native state, including disabled iOS service impacts. All settings are opt-in; omitted resources stay unchanged. iOS Simulator services and Android optional apps/settings are runtime-dependent. Android changes return a restore receipt for exact restoration during the same boot. Disabling Google infrastructure changes push/auth behavior. Disabling calendarServices on a booted simulator is refused with code unsafe_device_resource_combination unless its service is not running. Request it when provisioning a new simulator so it applies before first boot, or leave it enabled. Preboot is unaffected; unsafeWith lists the applicable phases.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -31569,6 +31681,38 @@
                 "type": "array",
                 "items": {
                   "$ref": "#/$defs/__schema0"
+                }
+              },
+              "unsafeWith": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "hazardId": {
+                      "type": "string"
+                    },
+                    "appliesTo": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": ["post_boot", "preboot"]
+                      }
+                    },
+                    "withResources": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "evidence": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["hazardId", "appliesTo", "withResources", "reason", "evidence"],
+                  "additionalProperties": false
                 }
               }
             },

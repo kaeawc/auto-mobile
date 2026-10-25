@@ -24,7 +24,7 @@ import {
   DEFAULT_PID_FILE_PATH,
   DAEMON_SHUTDOWN_TIMEOUT_MS,
   DAEMON_FORCED_STOP_TIMEOUT_MS,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import type { DaemonStatus, PidFileData } from "../../src/daemon/types";
 import { ActionableError } from "../../src/models";
 import { darwinProcessGenerationToken } from "../../src/daemon/processGeneration";

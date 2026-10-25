@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../../src/daemon/SessionHeartbeatMonitor";
-import { SUSPECT_GRACE_MS } from "../../../src/daemon/sessionLivenessWindows";
+import { SUSPECT_GRACE_MS } from "../../../src/daemon/wire/sessionLivenessWindows";
 import { SessionManager } from "../../../src/daemon/sessionManager";
 import {
   HeartbeatTaskLeaseKeepalive,

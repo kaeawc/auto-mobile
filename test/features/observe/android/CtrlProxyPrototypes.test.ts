@@ -78,16 +78,14 @@ async function harness(
     },
   );
   clients.push(client);
-  const extraContext = client["extraDelegateContextFields"].bind(client);
-  client["extraDelegateContextFields"] = () => ({
-    ...extraContext(),
+  client.testHooks.extendDelegateContextFields(() => ({
     savedPrototypeMirror: mirror ? { serial: "prototype-test", mirror } : undefined,
     prototypeAssetCache: cache ? { serial: "prototype-test", cache } : undefined,
-  });
+  }));
   await Promise.resolve();
   client.connectionTestHooks.socket = socket;
   spyOn(client, "ensureConnected").mockResolvedValue(true);
-  const receive = (frame: object) => client["handleWebSocketMessage"](JSON.stringify(frame));
+  const receive = (frame: object) => client.testHooks.handleWebSocketMessage(JSON.stringify(frame));
   if (commands !== null) {
     await receive({ type: "connected", supportedCommands: commands });
   }
@@ -126,7 +124,7 @@ describe("saved prototype host recorder", () => {
       mirror,
       cache,
     );
-    const delegate = new CtrlProxyPrototypes(client["createDelegateContext"]());
+    const delegate = new CtrlProxyPrototypes(client.testHooks.createDelegateContext());
     let reply: PrototypeResult = { success: true, error: null };
     const send = spyOn(socket, "send").mockImplementation((data) => {
       const message: { requestId: string } = JSON.parse(String(data));
@@ -189,7 +187,7 @@ describe("saved prototype host recorder", () => {
   test("throwing cache root still records explicit assets as missing", async () => {
     const mirror = new FakeSavedPrototypeMirror();
     const { client, send, reply } = await recorder(mirror);
-    const context = client["createDelegateContext"]();
+    const context = client.testHooks.createDelegateContext();
     const error = new Error("root unavailable");
     context.prototypeAssetCache = {
       serial: "prototype-test",
@@ -323,7 +321,7 @@ describe("saved prototype host recorder", () => {
   test("absent cache records all explicit references as missing after upload", async () => {
     const mirror = new FakeSavedPrototypeMirror();
     const { delegate, client, send } = await recorder(mirror);
-    const context = client["createDelegateContext"]();
+    const context = client.testHooks.createDelegateContext();
     delete context.prototypeAssetCache;
     const withoutCache = new CtrlProxyPrototypes(context);
     const warn = spyOn(logger, "warn").mockImplementation(() => {});

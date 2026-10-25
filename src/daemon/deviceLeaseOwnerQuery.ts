@@ -4,11 +4,11 @@ import { z } from "zod";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { errorMessage } from "../utils/describeUnknownError";
-import { DAEMON_ONESHOT_CLIENT_MAX_FRAME_BYTES, LineFramer } from "./socketServer/LineFramer";
+import { DAEMON_ONESHOT_CLIENT_MAX_FRAME_BYTES, LineFramer } from "./wire/LineFramer";
 import {
   DAEMON_DEVICE_LEASE_STATUS_METHOD,
   DAEMON_RELINQUISH_DEVICE_LEASE_METHOD,
-} from "./constants";
+} from "./wire/constants";
 import type {
   ForwardLeaseOwnerProbe,
   ForwardLeaseOwnerReport,

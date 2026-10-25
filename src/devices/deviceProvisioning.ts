@@ -1,3 +1,4 @@
+import type { ConfigurableDeviceResource } from "../models/DeviceResourceConfiguration";
 import type { SimulatorCreator } from "./SimulatorCreator";
 /**
  * Device provisioning — creating a simulator/emulator when none matches.
@@ -34,6 +35,7 @@ import { compareStrictNumericVersions } from "../utils/deviceMatcher";
 
 /** What was created, for logging and for handing straight to the boot path. */
 export interface ProvisionedDevice {
+  prebootDisabledResources?: readonly ConfigurableDeviceResource[];
   platform: "android" | "ios";
   /** Device name (iOS simulator name / AVD name). */
   name: string;
@@ -634,9 +636,21 @@ export class DefaultDeviceProvisioner implements DeviceProvisioner {
         "' when no longer needed.",
     );
     await identityHooks?.bindAfterCreate(provisioned);
-    await this.dependencies.prebootProfile?.apply(deviceId, {}, creationSignal);
+    return this.applyPrebootProfile(deviceId, provisioned, creationSignal);
+  }
 
-    return provisioned;
+  private async applyPrebootProfile(
+    deviceId: string,
+    provisioned: ProvisionedDevice,
+    signal?: AbortSignal,
+  ): Promise<ProvisionedDevice> {
+    const preboot = await this.dependencies.prebootProfile?.apply(deviceId, {}, signal);
+    return {
+      ...provisioned,
+      ...(preboot?.applied && preboot.resources.length
+        ? { prebootDisabledResources: preboot.resources }
+        : {}),
+    };
   }
 
   private async provisionAndroid(

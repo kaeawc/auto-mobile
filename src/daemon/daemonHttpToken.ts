@@ -24,7 +24,7 @@ import { ENV, readEnvTrimmed } from "../config/env";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { exponentialBackoff } from "../utils/Backoff";
 import { logger } from "../utils/logger";
-import { HEARTBEAT_PATH, MCP_STREAMABLE_PATH, resolveDaemonStatePath } from "./constants";
+import { HEARTBEAT_PATH, MCP_STREAMABLE_PATH, resolveDaemonStatePath } from "./wire/constants";
 import { readPidFileDataSync } from "./daemonFiles";
 import type { PidFileData } from "./types";
 

@@ -52,7 +52,7 @@ async function harness(commands: string[]) {
   await Promise.resolve();
   client.connectionTestHooks.socket = socket;
   spyOn(client, "ensureConnected").mockResolvedValue(true);
-  const receive = (frame: object) => client["handleWebSocketMessage"](JSON.stringify(frame));
+  const receive = (frame: object) => client.testHooks.handleWebSocketMessage(JSON.stringify(frame));
   await receive({ type: "connected", supportedCommands: commands });
   const sent: Record<string, unknown>[] = [];
   spyOn(socket, "send").mockImplementation((data) => {

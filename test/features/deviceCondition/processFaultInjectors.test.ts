@@ -218,7 +218,7 @@ describe("faults.trimMemory (#14068)", () => {
     const outcome = await injector.apply("apply", undefined, trimTarget("RUNNING_CRITICAL"));
     expect(outcome.status).toBe("applied");
     expect(outcome.reset).toBeUndefined();
-    expect(device.writes()).toEqual([`shell am send-trim-memory --user 0 ${APP} RUNNING_CRITICAL`]);
+    expect(device.writes()).toEqual([`shell am send-trim-memory --user 0 4000 RUNNING_CRITICAL`]);
     expect(device.running()).toBe(true);
     expect(await injector.isClean()).toBe(true);
   });
@@ -228,7 +228,7 @@ describe("faults.trimMemory (#14068)", () => {
       const device = processDevice({ processes: [main()] });
       const injector = createTrimMemoryInjector(device.adb, resolveUser());
       await injector.apply("apply", undefined, trimTarget(level));
-      expect(device.writes()).toEqual([`shell am send-trim-memory --user 0 ${APP} ${level}`]);
+      expect(device.writes()).toEqual([`shell am send-trim-memory --user 0 4000 ${level}`]);
     }
   });
 
@@ -261,7 +261,21 @@ describe("faults.trimMemory (#14068)", () => {
     const device = processDevice({ processes: [main(10)] });
     const injector = createTrimMemoryInjector(device.adb, resolveUser(10));
     await injector.apply("apply", undefined, trimTarget("MODERATE"));
-    expect(device.writes()).toEqual([`shell am send-trim-memory --user 10 ${APP} MODERATE`]);
+    expect(device.writes()).toEqual([`shell am send-trim-memory --user 10 4000 MODERATE`]);
+  });
+
+  test("an app alive only as a secondary process is trimmed by that process's PID", async () => {
+    const device = processDevice({ processes: [{ name: `${APP}:worker`, userId: 0 }] });
+    const injector = createTrimMemoryInjector(device.adb, resolveUser());
+    await injector.apply("apply", undefined, trimTarget("COMPLETE"));
+    expect(device.writes()).toEqual(["shell am send-trim-memory --user 0 4000 COMPLETE"]);
+  });
+
+  test("prefers the main process over a secondary one", async () => {
+    const device = processDevice({ processes: [{ name: `${APP}:worker`, userId: 0 }, main()] });
+    const injector = createTrimMemoryInjector(device.adb, resolveUser());
+    await injector.apply("apply", undefined, trimTarget("COMPLETE"));
+    expect(device.writes()).toEqual(["shell am send-trim-memory --user 0 4001 COMPLETE"]);
   });
 
   test("rejects an unknown level or a malformed request", async () => {

@@ -2,23 +2,29 @@
 
 AutoMobile measures what booted iOS Simulators cost the host and tells callers
 whether one more boot fits. Everything is read-only: it runs `ps`,
-`sysctl -n kern.memorystatus_vm_pressure_level` and `xcrun simctl list devices -j`,
-and never boots, shuts down or reconfigures a simulator.
+`sysctl -n kern.memorystatus_vm_pressure_level`,
+`top -l 1 -stats pid,mem` and `xcrun simctl list devices -j`, and never boots, shuts down or
+reconfigures a simulator.
 
 ## What is measured
 
 One host snapshot is taken per batch and shared by every simulator.
 
-| Measurement                  | Source                                                                          |
-| ---------------------------- | ------------------------------------------------------------------------------- |
-| Process memory (RSS) and CPU | `ps` process tree rooted at the process whose command names the device data dir |
-| Device data on disk          | `dataPathSize` from `simctl list devices -j` (no filesystem walk)               |
-| Host memory, cores, load     | `os` totals, 1-minute load average, macOS memory pressure level                 |
-| Boot-to-ready duration       | Recorded boot durations, keyed by simulator and profile                         |
+| Measurement                  | Source                                                                            |
+| ---------------------------- | --------------------------------------------------------------------------------- |
+| Process memory footprint     | `top` `MEM` (`phys_footprint`) summed over the `ps` process tree of the simulator |
+| Process memory (RSS) and CPU | `ps` process tree rooted at the process whose command names the device data dir   |
+| Device data on disk          | `dataPathSize` from `simctl list devices -j` (no filesystem walk)                 |
+| Host memory, cores, load     | `os` totals, 1-minute load average, macOS memory pressure level                   |
+| Boot-to-ready duration       | Recorded boot durations, keyed by simulator and profile                           |
 
-RSS counts shared pages once per process, so it over-states the true footprint
-slightly; `%CPU` is `ps`'s decayed ratio, not an instantaneous sample. A process
-claimed by two simulators is attributed to neither.
+RSS counts shared pages (the dyld cache and system frameworks) once per process, and a
+simulator tree has about 220 processes, so its summed RSS reads roughly ten times the real
+cost: 26.9 GiB for one idle simulator whose `phys_footprint` is 2.1–2.4 GiB (#15288). Memory
+cost is therefore the summed footprint, and RSS is only shown for reference. If the `top` read
+fails, footprint is reported as unmeasured (with a `memory footprint:` error), never replaced by
+RSS. `%CPU` is `ps`'s decayed ratio, not an instantaneous sample. A process claimed by two
+simulators is attributed to neither.
 
 Each simulator carries a `quality`: `measured`, `no-processes` (Booted but no
 process visible), `not-running`, or `unavailable` (host snapshot failed, with the
@@ -28,13 +34,18 @@ error). Missing data is never reported as zero.
 
 The count limit is the smaller of two budgets, at least 1:
 
-- Memory: half of host RAM divided by per-simulator settled process-tree RSS.
+- Memory: 60% of host RAM divided by per-simulator settled process-tree footprint.
   The tree includes the CtrlProxy runner app, so no extra runner overhead is added.
-  Measured RSS is averaged and clamped to 1.5–6 GiB; without measurements the
-  default is 3 GiB. Boots in flight retain conservative memory charges until ready.
-- Settled CPU: half of host cores divided by 0.055 core per simulator (0.04 for
-  Apple processes plus 0.015 for AutoMobile, measured in #15097). The other half
-  stays available for the app under test, IDE and runners.
+  Measured footprints are averaged and clamped to 1.5–6 GiB (the upper bound is only a
+  sanity check); without measurements the default is 2.5 GiB. Boots in flight retain
+  conservative memory charges until ready. Round 6 ran 32 simulators healthy (normal memory
+  pressure, no swap) at 75.8 GiB, 59% of a 128 GB host, so a 128 GB / 16-core host derives 32
+  at the measured 2.4 GiB. Host memory pressure remains the backstop: it is reported as
+  `hostPressure` rather than silently raising the limit.
+- Settled CPU: half of host cores divided by 0.1 core per simulator (#15288 measured
+  0.07–0.115 at 5–20 minutes, drifting up with age; #15097 measured 0.055 in the first
+  minutes). The other half stays available for the app under test, IDE and runners. This
+  does not bind below about 80 simulators on 16 cores.
 
 Set `AUTOMOBILE_IOS_SIM_MAX_BOOTED` to override the count limit. Only count-limit
 overflow fails immediately with the retryable `capacity_exhausted` error.
@@ -94,3 +105,8 @@ Generated scratch, build, and bootstrapped worktree roots receive `.metadata_nev
 Set `AUTOMOBILE_SPOTLIGHT_EXCLUDE=0` to opt out of shell marker creation.
 For other developer directories, add a marker or use System Settings > Spotlight > Search Privacy.
 Doctor only reads indexing status and never changes system settings.
+
+New simulators use the `minimal` lean profile and settled template cloning by default.
+Set `AUTOMOBILE_IOS_PREBOOT_LEAN_PROFILE=none` to opt out of the profile, or
+`AUTOMOBILE_IOS_TEMPLATE_CLONE=0` (or `false`) to opt out of cloning. Explicit
+resource requests override the profile.

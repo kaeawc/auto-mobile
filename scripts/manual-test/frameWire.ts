@@ -1,4 +1,4 @@
-import { LineFramer } from "../../src/daemon/socketServer/LineFramer";
+import { LineFramer } from "../../src/daemon/wire/LineFramer";
 import type { DaemonRequest } from "../../src/daemon/types";
 
 export function encodeJsonLine(value: unknown): string {

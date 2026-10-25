@@ -16,7 +16,7 @@ import {
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
+import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import {
   DAEMON_STALL_RESUMED_CODE,
   DAEMON_RESTART_RESUMED_CODE,
@@ -31,7 +31,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { drainUntilQuiescent, settleByFakeEvents } from "../helpers/fakeTimerStepping";
 import { logger } from "../../src/utils/logger";
 import type { Timer } from "../../src/utils/SystemTimer";
-import { SUSPECT_GRACE_MS } from "../../src/daemon/sessionLivenessWindows";
+import { SUSPECT_GRACE_MS } from "../../src/daemon/wire/sessionLivenessWindows";
 
 // #10989: a daemon frozen for longer than the lease (SIGSTOP) that then resumes by itself
 // (SIGCONT), still the same process holding the same sessions. The proxy, the daemon's real

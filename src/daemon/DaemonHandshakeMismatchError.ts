@@ -1,5 +1,5 @@
 import { ActionableError } from "../models/ActionableError";
-import type { DaemonHandshakeFailure } from "./daemonHandshake";
+import type { DaemonHandshakeFailure } from "./wire/daemonHandshake";
 
 /** The server rejected this request before dispatch; retry cannot duplicate work. */
 export class DaemonHandshakeMismatchError extends ActionableError {

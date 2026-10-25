@@ -1,3 +1,4 @@
+import { UnsafeDeviceResourceCombinationError } from "../../src/models/UnsafeDeviceResourceCombinationError";
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DefaultDeviceResourceController } from "../../src/utils/deviceResourceController";
 import { DefaultDeviceResourceObserver } from "../../src/utils/deviceResourceObserver";
@@ -42,7 +43,7 @@ describe("simulator workload profile reconciliation (#6694)", () => {
       timer,
       readDirectory,
       undefined,
-      store,
+      { applications: store },
     );
     reconciler = new DefaultDeviceResourceReconciler({
       controller,
@@ -68,6 +69,25 @@ describe("simulator workload profile reconciliation (#6694)", () => {
     simctl.disabled = false;
     simctl.loaded = true;
   }
+
+  test("refuses an unsafe profile through the controller before mutations (#15218)", async () => {
+    await expect(
+      reconciler.reconcile({
+        ...request,
+        repair: true,
+        profile: { resources: { calendarServices: "disabled" } },
+      }),
+    ).rejects.toBeInstanceOf(UnsafeDeviceResourceCombinationError);
+    expect(simctl.mutations()).toEqual([]);
+    expect(store.writes).toBe(0);
+    // Diagnosis stays possible: a report-only run on the same unsafe profile does not throw.
+    const report = await reconciler.reconcile({
+      ...request,
+      profile: { resources: { calendarServices: "disabled" } },
+    });
+    expect(report.applied).toBeUndefined();
+    expect(simctl.mutations()).toEqual([]);
+  });
 
   test("report-only reconciliation returns typed drift without writes", async () => {
     disableManually(widgetsLabel);

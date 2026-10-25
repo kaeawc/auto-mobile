@@ -1,6 +1,7 @@
 import { DeviceLossState } from "../../src/daemon/deviceLossState";
 import { describe, expect, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
+import { DaemonRuntimeState } from "../../src/daemon/daemonRuntimeState";
 import type { DisconnectMonitorPool } from "../../src/daemon/daemonCore/DaemonDisconnect";
 import type { SingleFlightInterval } from "../../src/daemon/SingleFlightInterval";
 import {
@@ -94,9 +95,8 @@ function offlineMonitorHarness(deviceId = EMULATOR, initialRow = ROWS.device) {
   const cleanedUp: string[] = [];
   const daemon = Object.assign(Object.create(Daemon.prototype), {
     timer,
-    deviceDisconnectMonitor: null,
+    runtime: new DaemonRuntimeState(),
     deviceLoss: new DeviceLossState({ missIncarnations: new Map([[device.id, 1]]) }),
-    deferredSessionRecoverySweeps: new Set(),
     devicePool: {
       retryDueDeferredSessionRecoveries: async () => {},
       reconcileDiscoveryObservation: async () => {},
@@ -119,7 +119,7 @@ function offlineMonitorHarness(deviceId = EMULATOR, initialRow = ROWS.device) {
     },
   });
   daemon.startDeviceDisconnectMonitor(new ListingManager(), async () => []);
-  const monitor = daemon.deviceDisconnectMonitor as SingleFlightInterval;
+  const monitor = daemon.runtime.deviceDisconnectMonitor as SingleFlightInterval;
   const sweepFor = async (ms: number) => {
     for (let elapsed = 0; elapsed < ms; elapsed += POLL_MS) {
       await monitor.run();

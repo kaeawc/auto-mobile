@@ -1,4 +1,5 @@
 import { z } from "zod/v4";
+import { disabledResourcesSchema } from "../utils/deviceResourceSchemas";
 
 /** The booted device the result describes, as every device surface reports it. */
 const deviceSchema = z
@@ -9,20 +10,6 @@ const deviceSchema = z
   .passthrough();
 
 const resourceMapSchema = z.record(z.string(), z.unknown());
-
-const impactItemSchema = z.object({
-  description: z.string(),
-  confidence: z.enum(["verified", "inferred"]),
-  evidence: z.string().optional(),
-});
-const disabledResourcesSchema = z.array(
-  z.object({
-    resource: z.string(),
-    labels: z.array(z.string()),
-    automobileImpact: z.array(impactItemSchema),
-    appImpact: z.array(impactItemSchema),
-  }),
-);
 
 /** `setDeviceResources`: a failed verification is `success: false` with `isError`. */
 export const setDeviceResourcesResultSchema = z

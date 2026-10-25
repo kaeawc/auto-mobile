@@ -3,7 +3,7 @@ import { fakeBindLock, unreachableMcpDispatcher } from "../helpers/createTestUni
 import type { DaemonRequest } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { resolveSocketAdmissionLane } from "../../src/daemon/socketRequestAdmission";
-import { DAEMON_TOOL_SELECTION_PROFILE_PARAM } from "../../src/daemon/constants";
+import { DAEMON_TOOL_SELECTION_PROFILE_PARAM } from "../../src/daemon/wire/constants";
 import { createFakeSession } from "./helpers/inputSocketHarness";
 import { createFakeDaemonState } from "./helpers/inputSocketHarness";
 import { UnixSocketServerHarness } from "./helpers/UnixSocketServerHarness";

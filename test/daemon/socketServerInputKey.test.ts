@@ -6,7 +6,7 @@ import type { DaemonRequest } from "../../src/daemon/types";
 import { InputKey } from "../../src/features/action/InputKey";
 import { ActionableError, type BootedDevice, type ExecResult } from "../../src/models";
 import { defaultAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
-import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
+import { McpTimeoutError } from "../../src/daemon/wire/McpTimeoutError";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";

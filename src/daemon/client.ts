@@ -10,7 +10,7 @@ import { type IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
 import { logger } from "../utils/logger";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { type Timer, defaultTimer, MAX_SETTIMEOUT_DELAY_MS } from "../utils/SystemTimer";
-import { type BuildIdentity, liveDaemonIdentity } from "./buildIdentity";
+import { type BuildIdentity, liveDaemonIdentity } from "./wire/buildIdentity";
 import { serializeRequestFrame } from "./clientFrameSerialization";
 import { handleInboundLine } from "./clientInboundFrames";
 import { overflowingResponseId } from "./clientInboundOverflow";
@@ -35,7 +35,7 @@ import {
   resolveDaemonVersion,
   syncSettledDaemonVersion,
   SOCKET_PATH,
-} from "./constants";
+} from "./wire/constants";
 import { DaemonDisconnectError } from "./DaemonDisconnectError";
 import { DaemonRequestNotDeliveredError } from "./DaemonRequestNotDeliveredError";
 import { ProgressExtendableDeadline, clampCallerMcpRequestTimeoutMs } from "./mcpRequestTimeout";
@@ -43,9 +43,9 @@ import {
   resolveClientMcpRequestTimeoutMs,
   resolveExplicitToolTimeoutOverrideMs,
 } from "./clientMcpRequestTimeout";
-import { McpTimeoutError } from "./McpTimeoutError";
+import { McpTimeoutError } from "./wire/McpTimeoutError";
 import { DaemonFrameTooLargeError } from "./socketServer/DaemonFrameTooLargeError";
-import { DAEMON_CLIENT_MAX_FRAME_BYTES, LineFramer } from "./socketServer/LineFramer";
+import { DAEMON_CLIENT_MAX_FRAME_BYTES, LineFramer } from "./wire/LineFramer";
 import { type TaskRelayFrame, type TaskRelayMethod } from "./tasks/taskRelay";
 import type { DaemonStatus } from "./types";
 import { DaemonNotification, DaemonRequest, DaemonResponse } from "./types";

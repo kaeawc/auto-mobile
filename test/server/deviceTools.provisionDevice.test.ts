@@ -1,3 +1,5 @@
+import { fakeIosDeviceResourceHazards as hazards } from "../helpers/fakeIosDeviceResourceHazards";
+import { UnsafeDeviceResourceCombinationError } from "../../src/models/UnsafeDeviceResourceCombinationError";
 import { runAsBindingReconciler } from "../../src/daemon/sessionBroker/provisioning/exclusion";
 import {
   BindingReconciler,
@@ -11,8 +13,8 @@ import {
   FakeInventory,
   FakeMatcher,
 } from "../daemon/sessionBroker/registry/fixtures/reconcilerFakes";
-import * as buildIdentity from "../../src/daemon/buildIdentity";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
+import * as buildIdentity from "../../src/daemon/wire/buildIdentity";
+import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -476,6 +478,27 @@ describe("provisionDevice handler", () => {
       provisionDeviceSchema.safeParse({ ...args, resources: { "com.apple.apsd": "disabled" } })
         .success,
     ).toBe(false);
+  });
+
+  test("provisionDevice relays the controller's typed unsafe-resource refusal and binds no session", async () => {
+    const resources = new FakeDeviceResourceController();
+    resources.onRequest = async () => {
+      throw new UnsafeDeviceResourceCombinationError(hazards);
+    };
+    const harness = setupSimulator(false, resources);
+    const response = toolResponseSchema.parse(
+      await ToolRegistry.getTool("provisionDevice")!.handler({
+        ...provisionTestArgs("ios"),
+        resources: { calendarServices: "disabled" },
+      }),
+    );
+    const payload = JSON.parse(response.content[0].text);
+    expect(response.isError).toBe(true);
+    expect(payload.sessionId).toBeUndefined();
+    expect(payload.error).toMatchObject({ code: "unsafe_device_resource_combination" });
+    expect(resources.requests).toHaveLength(1);
+    expect(harness.readinessCalls()).toBe(0);
+    await expectDeviceFree(harness.coordinator);
   });
 
   test.each(["ios", "android"] as const)(
@@ -1464,6 +1487,46 @@ describe("provisionDevice handler", () => {
     expect(response.isError).not.toBe(true);
     expect(JSON.parse(response.content[0].text).resources.disabledResources).toBeUndefined();
   });
+
+  test.each([true, false])(
+    "preboot report follows creation ownership with boot=%s",
+    async (boot) => {
+      const { buildProvisionDeviceResult } =
+        await import("../../src/server/provisioning/provisioningReadiness");
+      const { createPerformanceTracker } = await import("../../src/utils/PerformanceTracker");
+      const args = { ...provisionTestArgs("ios"), boot, readiness: "none" as const };
+      const provisioned = {
+        ...provisionedTestDevice("ios", true),
+        prebootDisabledResources: ["widgets" as const],
+      };
+      for (const created of [true, false]) {
+        const result = buildProvisionDeviceResult(
+          args,
+          provisioned,
+          created,
+          createPerformanceTracker(false),
+          boot
+            ? {
+                device: { name: "phone", platform: "ios", deviceId: "UDID" },
+                sessionId: "session",
+              }
+            : undefined,
+        );
+        if (created) {
+          expect(result.disabledResources).toEqual([
+            expect.objectContaining({
+              resource: "widgets",
+              labels: expect.any(Array),
+              automobileImpact: expect.any(Array),
+              appImpact: expect.any(Array),
+            }),
+          ]);
+        } else {
+          expect(result.disabledResources).toBeUndefined();
+        }
+      }
+    },
+  );
 
   test("accepts omitted boot and readiness with their documented defaults", () => {
     expect(

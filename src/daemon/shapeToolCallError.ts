@@ -1,3 +1,4 @@
+import { UnsafeDeviceResourceCombinationError } from "../models/UnsafeDeviceResourceCombinationError";
 import { DeviceServiceDisabledError } from "../models/DeviceServiceDisabledError";
 import { SdkCapabilityQueryError } from "../features/observe/ios/SdkCapabilityQueryError";
 import { AdbDeviceTransportUnavailableError } from "../utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
@@ -18,7 +19,7 @@ import {
   McpTimeoutError,
   isMcpQueueTimeoutError,
   MCP_QUEUE_TIMEOUT_ERROR_CODE,
-} from "./McpTimeoutError";
+} from "./wire/McpTimeoutError";
 import { SessionRecoveryAssignmentError } from "../models/SessionRecoveryAssignmentError";
 import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../models/deviceSessionRecovery";
 import { BootCapacityExhaustedError } from "../models/BootCapacityExhaustedError";
@@ -170,6 +171,7 @@ function hasSelfDescribedRefusalPayload(
   | AdbDeviceTransportUnavailableError
   | AndroidAvdIdentityUnresolvedError
   | AndroidDeviceIdentityUnresolvedError
+  | UnsafeDeviceResourceCombinationError
   | DeviceServiceDisabledError
   | DeviceUnhealthyError
   | PlanExecutionInProgressError
@@ -192,6 +194,7 @@ function hasSelfDescribedRefusalPayload(
     AdbDeviceTransportUnavailableError,
     AndroidAvdIdentityUnresolvedError,
     AndroidDeviceIdentityUnresolvedError,
+    UnsafeDeviceResourceCombinationError,
     DeviceServiceDisabledError,
     DeviceUnhealthyError,
     PlanExecutionInProgressError,
@@ -211,6 +214,16 @@ function hasSelfDescribedRefusalPayload(
   ].some((Refusal) => error instanceof Refusal);
 }
 
+function discoveryIncompletePayload(
+  error: BootedDeviceDiscoveryIncompleteError,
+): Record<string, unknown> {
+  return {
+    code: error.code,
+    retryable: error.retryable,
+    ...(error.retryAfterMs !== undefined ? { retryAfterMs: error.retryAfterMs } : {}),
+  };
+}
+
 /** The typed fields of a device or session refusal, after `success` and `error`. */
 function typedRefusalPayload(error: unknown): Record<string, unknown> | undefined {
   if (hasSelfDescribedRefusalPayload(error)) {
@@ -222,7 +235,7 @@ function typedRefusalPayload(error: unknown): Record<string, unknown> | undefine
   // Incomplete booted-device discovery is typed and retryable on every tool that throws it, not
   // a generic `Error:` string (#11493).
   if (error instanceof BootedDeviceDiscoveryIncompleteError) {
-    return { code: error.code, retryable: error.retryable };
+    return discoveryIncompletePayload(error);
   }
   // A device boot or shutdown that ran out of budget is the typed retryable `timeout` on every
   // tool that throws it, like `provisionDevice`'s (#11548).

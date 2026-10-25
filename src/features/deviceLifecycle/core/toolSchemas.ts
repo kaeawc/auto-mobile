@@ -1,3 +1,4 @@
+import { disabledResourcesSchema } from "../../../utils/deviceResourceSchemas";
 import { z } from "zod/v4";
 import {
   listDevicesEntrySchema,
@@ -102,6 +103,7 @@ export const listDevicesOutputSchema = z.object({
 export const provisionDeviceOutputSchema = z
   .object({
     device: provisionedDeviceSchema,
+    disabledResources: disabledResourcesSchema.optional(),
     requestedSpec: z.unknown(),
     resolvedSpec: z.unknown(),
     displayCutout: z.unknown(),

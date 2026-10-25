@@ -11,7 +11,10 @@ import {
 import { DaemonRequest, releasedSessionNotFoundFields } from "../types";
 import { type SessionReleaseSnapshot } from "../sessionManager";
 import { sessionForIngress } from "../sessionForIngress";
-import { DAEMON_REGISTER_SESSION_METHOD, SESSION_RELEASE_DRAIN_TIMEOUT_MS } from "../constants";
+import {
+  DAEMON_REGISTER_SESSION_METHOD,
+  SESSION_RELEASE_DRAIN_TIMEOUT_MS,
+} from "../wire/constants";
 import { SESSION_OWNERSHIP_LOST_CODE } from "../sessionReleasedDuringCall";
 import {
   idleReleaseField,

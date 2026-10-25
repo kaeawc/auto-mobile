@@ -96,9 +96,14 @@ function sumByOwner(
       continue;
     }
     const current = totals.get(udid) ?? { processCount: 0, rssBytes: 0, cpuPercent: 0 };
+    const footprintBytes =
+      row.footprintBytes === undefined
+        ? current.footprintBytes
+        : (current.footprintBytes ?? 0) + row.footprintBytes;
     totals.set(udid, {
       processCount: current.processCount + 1,
       rssBytes: current.rssBytes + row.rssBytes,
+      ...(footprintBytes === undefined ? {} : { footprintBytes }),
       cpuPercent: current.cpuPercent + row.cpuPercent,
     });
   }

@@ -3097,6 +3097,47 @@ describe("startDevice handler", () => {
     );
   });
 
+  it.each(["created-ios", "adopted-ios", "created-android"] as const)(
+    "reports preboot disabled resources only for created iOS (%s)",
+    async (kind) => {
+      const platform = kind === "created-android" ? "android" : "ios";
+      const device = platform === "ios" ? iosDevice : androidDevice;
+      const adopted = kind === "adopted-ios";
+      fakeMatcher.setBootedResult(adopted ? device : null);
+      fakeMatcher.setImageResult(null);
+      fakeDeviceUtils.setBootedDevices(platform, adopted ? [device] : []);
+      setDeviceToolsDependencies({
+        deviceCreationGateFactory: () => ({
+          isCreationAllowed: () => true,
+          describeSource: () => "test",
+        }),
+        deviceProvisionerFactory: () =>
+          new FakeDeviceProvisioner({
+            platform,
+            name: device.name,
+            deviceId: device.deviceId,
+            prebootDisabledResources: ["widgets"],
+          }),
+      });
+      const tool = ToolRegistry.getTool("startDevice")!;
+      const response = await tool.handler({ platform, createIfMissing: true });
+      const result = toolJson(response);
+      if (kind === "created-ios") {
+        expect(result.disabledResources).toEqual([
+          expect.objectContaining({
+            resource: "widgets",
+            labels: expect.any(Array),
+            automobileImpact: expect.any(Array),
+            appImpact: expect.any(Array),
+          }),
+        ]);
+        expect(tool.outputSchema!.safeParse(result).success).toBe(true);
+      } else {
+        expect(result.disabledResources).toBeUndefined();
+      }
+    },
+  );
+
   it("passes timeout to the cold boot start operation", async () => {
     fakeDeviceUtils.setBootedDevices("ios", []);
     fakeDeviceUtils.setDeviceImages("ios", [

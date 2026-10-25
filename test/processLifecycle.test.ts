@@ -5,7 +5,7 @@ import {
   type StdioWriteErrorSource,
 } from "../src/processLifecycle";
 import { FakeTimer } from "./fakes/FakeTimer";
-import { DAEMON_SHUTDOWN_TIMEOUT_MS } from "../src/daemon/constants";
+import { DAEMON_SHUTDOWN_TIMEOUT_MS } from "../src/daemon/wire/constants";
 import { FakeProcess } from "./fakes/FakeProcess";
 
 type StdinEventMap = {

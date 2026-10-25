@@ -20,7 +20,7 @@ export { runDaemonProcessCommand } from "../utils/daemonProcessCommand";
 import { logger } from "../utils/logger";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
-import { DAEMON_SHUTDOWN_TIMEOUT_MS, DAEMON_VERSION } from "./constants";
+import { DAEMON_SHUTDOWN_TIMEOUT_MS, DAEMON_VERSION } from "./wire/constants";
 
 export interface DaemonLaunchCommand {
   command: string;

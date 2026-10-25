@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import * as constants from "../../../src/daemon/constants";
-import type { BuildIdentity } from "../../../src/daemon/buildIdentity";
+import * as constants from "../../../src/daemon/wire/constants";
+import type { BuildIdentity } from "../../../src/daemon/wire/buildIdentity";
 import {
   DaemonLifecycleReconciler,
   type DaemonLifecycleReconcilerDeps,

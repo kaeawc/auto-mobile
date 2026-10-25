@@ -3,7 +3,7 @@ import {
   DAEMON_RESTART_HANDOFF_TIMEOUT_MS,
   DAEMON_SHUTDOWN_TIMEOUT_MS,
   DAEMON_STARTUP_TIMEOUT_MS,
-} from "../constants";
+} from "../wire/constants";
 import { logger } from "../../utils/logger";
 import type { Timer } from "../../utils/SystemTimer";
 

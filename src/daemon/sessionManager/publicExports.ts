@@ -125,4 +125,4 @@ export { SUPERSEDED_ROW_REASSERT_RETRY_ATTEMPTS } from "../supersededRowReassert
  * (issue #6870 review). Re-exported here for the daemon-side callers and tests
  * that have always read it from this module.
  */
-export { DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS, getCliSessionIdleTimeoutMs } from "../constants";
+export { DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS, getCliSessionIdleTimeoutMs } from "../wire/constants";

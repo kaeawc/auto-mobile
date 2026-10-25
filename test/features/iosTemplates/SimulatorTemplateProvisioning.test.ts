@@ -46,7 +46,7 @@ test("matcher creation binds clone before applying its profile and returning", a
     prebootProfile: {
       apply: async (udid) => {
         events.push(`apply:${udid}`);
-        return { applied: true, labels: [] };
+        return { applied: true, resources: [], labels: [] };
       },
     },
   });
@@ -71,7 +71,7 @@ test("exact creation reapplies explicit resources to clone UDID before return", 
       apply: async (udid, options) => {
         expect(options.resources).toEqual({ widgets: "disabled" });
         events.push(`apply:${udid}`);
-        return { applied: true, labels: [] };
+        return { applied: true, resources: [], labels: [] };
       },
     },
   });

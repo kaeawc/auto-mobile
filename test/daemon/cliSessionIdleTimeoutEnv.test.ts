@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import {
   DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS,
   getCliSessionIdleTimeoutMs,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 
 const KEYS = ["AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS", "AUTO_MOBILE_CLI_SESSION_IDLE_TIMEOUT_MS"];
 const saved = KEYS.map((key) => [key, process.env[key]] as const);

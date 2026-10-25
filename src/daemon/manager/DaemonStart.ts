@@ -21,7 +21,7 @@ import {
   resolveDaemonVersion,
   syncSettledDaemonVersion,
   DAEMON_VERSION_RESTART_COOLDOWN_MS,
-} from "../constants";
+} from "../wire/constants";
 import { DaemonStatus, DaemonOptions } from "../types";
 import {
   DaemonRestartDeferredError,

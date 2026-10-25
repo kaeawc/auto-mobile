@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { holderReleaseRemainingMs } from "../../src/daemon/holderReleaseRemaining";
-import { DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS } from "../../src/daemon/sessionLivenessWindows";
+import { DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS } from "../../src/daemon/wire/sessionLivenessWindows";
 import {
   heldDeviceBindRefusal,
   DEVICE_PREPARED_FOR_OTHER_REQUEST_RETRY_AFTER_MS,

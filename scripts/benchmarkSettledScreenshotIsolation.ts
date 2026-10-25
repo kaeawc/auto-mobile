@@ -11,7 +11,7 @@ import {
   LOCK_FILE_PATH,
   SOCKET_PATH,
   PID_FILE_PATH,
-} from "../src/daemon/constants";
+} from "../src/daemon/wire/constants";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../src/utils/workingDirectory";
 import { toActionableError } from "../src/models/ActionableError";
 import { defaultTimer, type Timer } from "../src/utils/SystemTimer";

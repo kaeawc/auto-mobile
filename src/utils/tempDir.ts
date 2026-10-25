@@ -163,6 +163,25 @@ export function getSharedAutoMobileDir(
 }
 
 /**
+ * Resolve state describing host-global resources (CoreSimulator devices) that
+ * every daemon of this OS user must share regardless of coordination root.
+ * Deliberately ignores AUTOMOBILE_COORDINATION_DIR. Like getSharedAutoMobileDir,
+ * follows os.userInfo().homedir (HOME under Bun), so daemons started with
+ * different HOME values do not share this directory.
+ */
+export function getHostGlobalAutoMobileDir(
+  subdirectory: string,
+  homeDir: string = os.userInfo().homedir,
+): string {
+  if (homeDir.length === 0) {
+    throw new Error(
+      "Unable to resolve a host-global AutoMobile directory without an OS account home directory.",
+    );
+  }
+  return path.join(path.resolve(homeDir), ".auto-mobile", subdirectory);
+}
+
+/**
  * Resolve a coordination directory scoped to one ADB server rather than to
  * `AUTOMOBILE_COORDINATION_DIR` (#10708). Daemons that share an ADB server share
  * its devices even when they use different coordination directories, so state

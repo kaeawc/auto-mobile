@@ -7,6 +7,7 @@ import type { Timer } from "../../utils/SystemTimer";
 import { SimCtlClient, type SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { readHostProcessTable } from "../../devices/bootAdmission/readHostProcessTable";
 import { SIMCTL_LIST_DEVICES_ARGS, parseSimctlInventory } from "./simctlInventory";
+import { readHostFootprints, withFootprints } from "./footprintSnapshot";
 import type {
   HostProcessRow,
   HostResources,
@@ -86,13 +87,24 @@ export class CommandFleetHostSource implements FleetHostSource {
 
   private async readProcesses(
     options: FleetReadOptions,
-  ): Promise<{ processes: HostProcessRow[]; processesError?: string }> {
-    try {
-      return { processes: await readHostProcessTable(this.executor, options) };
-    } catch (error) {
-      logger.warn(`host process table read failed: ${errorMessage(error)}`, error);
-      return { processes: [], processesError: errorMessage(error) };
+  ): Promise<{ processes: HostProcessRow[]; processesError?: string; footprintError?: string }> {
+    const [table, footprints] = await Promise.allSettled([
+      readHostProcessTable(this.executor, options),
+      readHostFootprints(this.executor, options),
+    ]);
+    if (table.status === "rejected") {
+      logger.warn(`host process table read failed: ${errorMessage(table.reason)}`, table.reason);
+      return { processes: [], processesError: errorMessage(table.reason) };
     }
+    if (footprints.status === "rejected") {
+      // Without footprints memory cost stays unmeasured: summed RSS over-states it ~10x (#15288).
+      logger.warn(
+        `host footprint read failed: ${errorMessage(footprints.reason)}`,
+        footprints.reason,
+      );
+      return { processes: table.value, footprintError: errorMessage(footprints.reason) };
+    }
+    return { processes: withFootprints(table.value, footprints.value) };
   }
 
   private async readResources(options: FleetReadOptions): Promise<HostResources> {

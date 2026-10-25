@@ -4,14 +4,14 @@ import type { GestureEvent } from "../../../../src/features/record/android/types
 
 /** The hover events the reconstructor reports for a stream of `getevent -lt` lines. */
 function hoverEvents(lines: string[], options: { singleTouch?: boolean } = {}): GestureEvent[] {
-  const reconstructor = new TouchFrameReconstructor(options);
   const events: GestureEvent[] = [];
+  const reconstructor = new TouchFrameReconstructor({
+    ...options,
+    onHover: (event) => events.push(event),
+  });
   let t = 1000;
   for (const line of lines) {
-    const result = reconstructor.feedLine(line, (t += 10));
-    if (result && "type" in result && result.type === "hover") {
-      events.push(result);
-    }
+    reconstructor.feedLine(line, (t += 10));
   }
   return events;
 }
@@ -162,6 +162,24 @@ describe("a multitouch pen that hovers without ever touching (#13084)", () => {
       SYN,
       "[  1.1] EV_ABS    ABS_MT_TRACKING_ID   00000002",
       "[  1.1] EV_ABS    ABS_MT_DISTANCE      00000005",
+      SYN,
+      "[  1.2] EV_ABS    ABS_MT_TRACKING_ID   ffffffff",
+      SYN,
+    ];
+
+    expect(hoverEvents(lines)).toMatchObject([{ type: "hover", toolType: "stylus" }]);
+  });
+
+  test("a hover replaced directly by a contact id is still reported", () => {
+    const lines = [
+      "[  1.0] EV_ABS    ABS_MT_TRACKING_ID   00000001",
+      "[  1.0] EV_ABS    ABS_MT_TOOL_TYPE     00000001",
+      "[  1.0] EV_ABS    ABS_MT_DISTANCE      00000005",
+      "[  1.0] EV_ABS    ABS_MT_POSITION_X    000001a4",
+      "[  1.0] EV_ABS    ABS_MT_POSITION_Y    000002b0",
+      SYN,
+      "[  1.1] EV_ABS    ABS_MT_TRACKING_ID   00000002",
+      "[  1.1] EV_ABS    ABS_MT_DISTANCE      00000000",
       SYN,
       "[  1.2] EV_ABS    ABS_MT_TRACKING_ID   ffffffff",
       SYN,

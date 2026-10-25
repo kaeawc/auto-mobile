@@ -5,7 +5,7 @@ import { chmodSync, existsSync, readFileSync, statSync, writeFileSync } from "no
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { ACCEPTANCE_DISCOVERY_CAPABILITY_ENV } from "../../src/daemon/constants";
+import { ACCEPTANCE_DISCOVERY_CAPABILITY_ENV } from "../../src/daemon/wire/constants";
 import { DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV } from "../../src/daemon/liveAcceptanceCapability";
 import { AmbiguousDeviceTargetError } from "../../src/daemon/ambiguousDeviceTargetRefusal";
 import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";

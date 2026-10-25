@@ -9,7 +9,7 @@ import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { registerMcpTools } from "../../src/server";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { createToolCatalogResourceHandler } from "../../src/server/toolCatalogResource";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
+import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { TOOL_ANNOTATIONS } from "../../src/server/toolAnnotations";
 

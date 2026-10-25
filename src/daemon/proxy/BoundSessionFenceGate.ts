@@ -9,7 +9,7 @@ import type { PendingHeldSessionLoss } from "./HeldSessionLosses";
 import type { ReleaseEpochLedger } from "./ReleaseEpochLedger";
 import type { Timer } from "../../utils/SystemTimer";
 import type { SessionReleaseSnapshot } from "../sessionManager/releaseTypes";
-import { DAEMON_BOUND_SESSION_PARAM } from "../constants";
+import { DAEMON_BOUND_SESSION_PARAM } from "../wire/constants";
 import { SET_TOOL_ENABLED_TOOL_NAME } from "../../features/toolSelection/toolSelectionControl";
 import {
   DAEMON_STALLED_CODE,

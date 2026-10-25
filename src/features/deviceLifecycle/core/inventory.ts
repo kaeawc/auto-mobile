@@ -27,7 +27,7 @@ import { logger } from "../../../utils/logger";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { ANDROID_INVENTORY_RETRY_AFTER_MS } from "../../../constants/deviceResourceUris";
 import { type DeviceMatchCriteria } from "../../../models/DeviceMatchCriteria";
-import { INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM } from "../../../daemon/constants";
+import { INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM } from "../../../daemon/wire/constants";
 import { type AvdInfo } from "../../../utils/android-cmdline-tools/avdmanager";
 
 export function androidSourceImageWithBootedMetadata(
@@ -99,6 +99,16 @@ export function initializedDeviceSessionUuid(deviceId: string): string | undefin
   return defaultDaemonContext.deviceSessionRegistry()?.getByDeviceId(deviceId)?.deviceSessionUuid;
 }
 
+/**
+ * The pool's hold on a device. A pooled entry answers for its own device. An id the pool does not
+ * list at all can still be broker-bound: a simulator an erase reset shut down leaves the pool while
+ * the broker keeps its binding (#15233). An entry that exists but fails runtime identity (a serial
+ * another AVD now answers on) lends no ownership to the device on that serial.
+ */
+function holdFor(devicePool: DevicePoolReads | undefined, deviceId: string, pooled: boolean) {
+  return pooled || !devicePool?.getDevice(deviceId) ? poolHoldFor(devicePool, deviceId) : undefined;
+}
+
 export function listDevicePayloads(
   booted: BootedDevice[],
   devicePool: DevicePoolReads | undefined,
@@ -128,7 +138,7 @@ export function listDevicePayloads(
       configuredImages,
       sessionsById: sessions,
       deviceSessionUuid: pooled ? initializedDeviceSessionUuid(device.deviceId) : undefined,
-      hold: pooled ? poolHoldFor(devicePool, device.deviceId) : undefined,
+      hold: holdFor(devicePool, device.deviceId, pooled !== undefined),
       poolStatus: pooled ? devicePool?.poolBucket(device.deviceId) : undefined,
       ...transitionalHoldInputs(transitionalHolds.get(device.deviceId)),
       transportAvdName: transportAvdNameForDevice(device.deviceId),

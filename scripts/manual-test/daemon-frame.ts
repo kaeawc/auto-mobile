@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import "./harnessLogSink";
-import { DAEMON_CLIENT_MAX_FRAME_BYTES } from "../../src/daemon/socketServer/LineFramer";
-import * as daemonConstants from "../../src/daemon/constants";
+import { DAEMON_CLIENT_MAX_FRAME_BYTES } from "../../src/daemon/wire/LineFramer";
+import * as daemonConstants from "../../src/daemon/wire/constants";
 import { DAEMON_FRAME_COMMANDS, DAEMON_FRAME_FLAGS, daemonFrameHelp } from "./daemonFrameHelp";
 import { substituteFramePlaceholders, type BrokerFrameIdentity } from "./daemonFramePlaceholders";
 import { existsSync, readFileSync } from "node:fs";
@@ -24,7 +24,7 @@ import {
   CLI_KEEPER_LIVENESS_OWNER_KIND,
   DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS,
   HEARTBEAT_SESSION_LIVENESS_POLICY,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import {
   acquireSessionThroughDaemon,
   DAEMON_RELEASE_BROKER_SESSION_METHOD,
@@ -41,7 +41,7 @@ import {
 import {
   DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,
   PROXY_HEARTBEAT_INTERVAL_MS,
-} from "../../src/daemon/sessionLivenessWindows";
+} from "../../src/daemon/wire/sessionLivenessWindows";
 import { parseSessionConfig, type SessionConfig } from "../../src/devices/sessionConfig";
 import { defaultTimer, MAX_SETTIMEOUT_DELAY_MS, type Timer } from "../../src/utils/SystemTimer";
 import { defaultIdGenerator, type IdGenerator } from "../../src/utils/IdGenerator";

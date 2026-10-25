@@ -6,7 +6,7 @@ import { execSync } from "node:child_process";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
-import { DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS } from "./constants";
+import { DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS } from "./wire/constants";
 import { isDaemonEntryScriptPath } from "./DaemonLauncher";
 import { isProcessRunning as isDaemonProcessRunning } from "./daemonFiles";
 import {

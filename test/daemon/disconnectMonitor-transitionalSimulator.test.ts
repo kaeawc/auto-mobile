@@ -3,6 +3,7 @@ import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { makePool } from "../helpers/makePool";
 import { describe, expect, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
+import { DaemonRuntimeState } from "../../src/daemon/daemonRuntimeState";
 import {
   OFFLINE_DEVICE_DISCONNECT_BUDGET_MS,
   MISSING_SIMULATOR_DISCONNECT_BUDGET_MS,
@@ -53,7 +54,7 @@ class SimulatorListingManager extends FakeDeviceManager {
 }
 
 interface MonitorSurface {
-  deviceDisconnectMonitor: SingleFlightInterval;
+  runtime: { deviceDisconnectMonitor: SingleFlightInterval };
   deviceLoss: DeviceLossState;
   startDeviceDisconnectMonitor(
     manager: SimulatorListingManager,
@@ -100,9 +101,8 @@ async function simulatorMonitor() {
     timer,
     devicePool: pool,
     sessionManager: sessions,
-    deviceDisconnectMonitor: null,
+    runtime: new DaemonRuntimeState(),
     deviceLoss: new DeviceLossState(),
-    deferredSessionRecoverySweeps: new Set(),
   }) as MonitorSurface;
   daemon.startDeviceDisconnectMonitor(manager, async () => []);
 
@@ -113,7 +113,7 @@ async function simulatorMonitor() {
         await deliverDaemonHeartbeat(sessions, SESSION);
       }
       timer.advanceTime(POLL_MS);
-      await daemon.deviceDisconnectMonitor.run();
+      await daemon.runtime.deviceDisconnectMonitor.run();
     }
   };
   return {
@@ -128,7 +128,7 @@ async function simulatorMonitor() {
     },
     held: () => pool.getDevice(HELD.deviceId)?.sessionId === SESSION,
     releaseReason: () => sessions.getReleasedSessionReason(SESSION),
-    stop: () => daemon.deviceDisconnectMonitor.stop(),
+    stop: () => daemon.runtime.deviceDisconnectMonitor.stop(),
   };
 }
 

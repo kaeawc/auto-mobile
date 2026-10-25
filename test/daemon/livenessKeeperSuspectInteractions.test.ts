@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
-import { CLI_KEEPER_LIVENESS_OWNER_KIND } from "../../src/daemon/constants";
+import { CLI_KEEPER_LIVENESS_OWNER_KIND } from "../../src/daemon/wire/constants";
 import {
   handleDaemonRequest,
   type DaemonStateAccess,

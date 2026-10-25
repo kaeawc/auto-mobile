@@ -5,7 +5,10 @@ import {
   mcpRequestFailureDetails,
   requestFailureCause,
 } from "../../src/daemon/socketServer/errorFrames";
-import { McpTimeoutError, MCP_QUEUE_TIMEOUT_ERROR_CODE } from "../../src/daemon/McpTimeoutError";
+import {
+  McpTimeoutError,
+  MCP_QUEUE_TIMEOUT_ERROR_CODE,
+} from "../../src/daemon/wire/McpTimeoutError";
 
 /** #11815 slice 1: the failure-frame functions live in their own module, free of server state. */
 describe("socket server error frames", () => {

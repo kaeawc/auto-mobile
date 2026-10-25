@@ -18,7 +18,7 @@ import {
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
   INTERNAL_TOOL_PARAM_NAMES,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 
 const interactionDeps: InteractionToolDependencies = {};
 describe("setPosture hinge angle contract", () => {

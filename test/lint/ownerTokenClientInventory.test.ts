@@ -3,7 +3,7 @@ import { readGuardFile } from "./astGuard";
 import { expect, test } from "bun:test";
 
 import { join } from "node:path";
-import { DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM } from "../../src/daemon/constants";
+import { DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM } from "../../src/daemon/wire/constants";
 
 const root = join(import.meta.dir, "../..");
 const clients = [

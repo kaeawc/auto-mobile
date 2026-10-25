@@ -8,7 +8,7 @@ import {
   unlinkSync,
 } from "node:fs";
 import { z } from "zod";
-import { DAEMON_VERSION } from "./constants";
+import { DAEMON_VERSION } from "./wire/constants";
 import { writePrivateJsonFileAtomicSync } from "./atomicJsonFile";
 import { PsDaemonProcessFinder, type DaemonProcessLivenessChecker } from "./processTable";
 import {

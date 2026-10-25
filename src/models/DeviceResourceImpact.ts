@@ -11,6 +11,13 @@ export interface ImpactItem {
 
 /** What disabling one iOS Simulator service group costs AutoMobile and apps. */
 export interface IosDeviceResourceImpact {
+  unsafeWith?: readonly {
+    hazardId: string;
+    appliesTo: readonly ("post_boot" | "preboot")[];
+    withResources: readonly ConfigurableDeviceResource[];
+    reason: string;
+    evidence: string;
+  }[];
   automobileImpact: readonly ImpactItem[];
   appImpact: readonly ImpactItem[];
 }

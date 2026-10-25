@@ -1,5 +1,5 @@
 import { z } from "zod/v4";
-import type { AppearanceSocketResponse } from "../../src/daemon/appearanceSocketTypes";
+import type { AppearanceSocketResponse } from "../../src/daemon/wire/appearanceSocketTypes";
 import type { DaemonRequest } from "../../src/daemon/types";
 import { daemonNotificationSchema, daemonResponseSchema } from "../../src/daemon/types";
 import { webRtcStreamSocketResponseSchema } from "../../src/daemon/webrtcStreamSocketTypes";

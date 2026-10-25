@@ -11,7 +11,7 @@ import {
 import {
   DAEMON_RESTART_HANDOFF_DELAY_MS,
   DAEMON_SHUTDOWN_TIMEOUT_MS,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import {
   DaemonRestartDeferredError,
   type DaemonRestartPreparation,

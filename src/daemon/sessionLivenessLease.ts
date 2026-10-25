@@ -8,7 +8,7 @@ import {
   getCliSessionIdleTimeoutMs as resolveCliSessionIdleTimeoutMs,
   MAX_CLI_SESSION_IDLE_TIMEOUT_MS,
   sanitizeCliSessionIdleTimeoutMs as sanitizeRequestedCliIdleTimeoutMs,
-} from "./constants";
+} from "./wire/constants";
 import {
   decideLivenessClaim,
   mayAdoptUnownedLiveness,

@@ -26,7 +26,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import {
   DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS,
   NO_HEARTBEAT_RELEASE_BUDGET_MS,
-} from "../../src/daemon/sessionLivenessWindows";
+} from "../../src/daemon/wire/sessionLivenessWindows";
 
 // #10051: after lease expiry a session is held as suspect for a short grace window
 // with its device reserved for the owner token, and the daemon never reaps on the

@@ -16,7 +16,7 @@ import {
   DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM,
   DAEMON_OWNED_SESSIONS_PARAM,
   DAEMON_RELEASED_SESSION_PARAM,
-} from "../constants";
+} from "../wire/constants";
 
 import {
   toolSelectionProfileUuidFromResponse,

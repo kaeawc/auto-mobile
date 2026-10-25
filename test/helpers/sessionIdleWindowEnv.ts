@@ -1,5 +1,5 @@
 import { afterAll, beforeAll } from "bun:test";
-import { SESSION_IDLE_TIMEOUT_ENV } from "../../src/daemon/sessionLivenessWindows";
+import { SESSION_IDLE_TIMEOUT_ENV } from "../../src/daemon/wire/sessionLivenessWindows";
 
 /**
  * The device-restart recovery window (three minutes) is capped by the session's idle deadline,

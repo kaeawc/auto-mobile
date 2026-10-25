@@ -11,7 +11,7 @@ import type {
   FailuresStreamSocketResponse,
 } from "./failuresStreamSocketTypes";
 import { FAILURES_STREAM_SOCKET_CONFIG } from "./daemonFiles";
-import { FAILURES_STREAM_MAX_FRAME_BYTES } from "./socketServer/LineFramer";
+import { FAILURES_STREAM_MAX_FRAME_BYTES } from "./wire/LineFramer";
 import {
   getDateRangeDurationMs as getDateRangeDuration,
   normalizeAggregation,

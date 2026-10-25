@@ -14,7 +14,7 @@ import {
   DaemonConnectionSessionReleasedError,
   DaemonRestartDeferredError,
 } from "../../src/daemon/daemonMcpProxy";
-import { McpOverloadError } from "../../src/daemon/McpTimeoutError";
+import { McpOverloadError } from "../../src/daemon/wire/McpTimeoutError";
 import { DeviceControlTransportError } from "../../src/daemon/deviceControlTransportFailure";
 
 function createProxy() {

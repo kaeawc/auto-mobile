@@ -1,6 +1,7 @@
 import { DeviceLossState } from "../../src/daemon/deviceLossState";
 import { afterEach, describe, expect, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
+import { DaemonRuntimeState } from "../../src/daemon/daemonRuntimeState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { SingleFlightInterval } from "../../src/daemon/SingleFlightInterval";
@@ -77,9 +78,8 @@ async function harness(initial: string[], manager = new PhoneManager()) {
   const cleanups: string[] = [];
   const daemon = Object.assign(Object.create(Daemon.prototype), {
     timer,
-    deviceDisconnectMonitor: null,
+    runtime: new DaemonRuntimeState(),
     deviceLoss: new DeviceLossState(),
-    deferredSessionRecoverySweeps: new Set(),
     devicePool: pool,
     sessionManager: {
       getAssignedDevices: () => [canonical],
@@ -98,7 +98,7 @@ async function harness(initial: string[], manager = new PhoneManager()) {
     canonical,
     cleanups,
     daemon,
-    monitor: daemon.deviceDisconnectMonitor as SingleFlightInterval,
+    monitor: daemon.runtime.deviceDisconnectMonitor as SingleFlightInterval,
   };
 }
 

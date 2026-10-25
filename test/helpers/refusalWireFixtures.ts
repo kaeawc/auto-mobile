@@ -1,3 +1,5 @@
+import { UnsafeDeviceResourceCombinationError } from "../../src/models/UnsafeDeviceResourceCombinationError";
+import { fakeIosDeviceResourceHazards } from "./fakeIosDeviceResourceHazards";
 import { DeviceServiceDisabledError } from "../../src/models/DeviceServiceDisabledError";
 import { DaemonRestartOptionsUnknownError } from "../../src/daemon/proxy/DaemonRestartOptionsUnknownError";
 import { BindingConfigError } from "../../src/daemon/sessionBroker/provisioning/provisionRequest";
@@ -48,7 +50,7 @@ import {
   MCP_QUEUE_TIMEOUT_ERROR_CODE,
   McpTimeoutError,
   McpOverloadError,
-} from "../../src/daemon/McpTimeoutError";
+} from "../../src/daemon/wire/McpTimeoutError";
 import { DaemonRestartDeferredError } from "../../src/daemon/daemonRestartAdmission";
 import {
   DaemonRestartPendingError,
@@ -61,7 +63,7 @@ import { daemonResponseError, DaemonUnavailableError } from "../../src/daemon/cl
 import { DeviceControlTransportError } from "../../src/daemon/deviceControlTransportFailure";
 import { ToolUnavailableError, UnknownToolError } from "../../src/daemon/toolUnavailableError";
 import type { DaemonResponse } from "../../src/daemon/types";
-import { ViewerReadOnlyError } from "../../src/daemon/streamSubscriptionPolicy";
+import { ViewerReadOnlyError } from "../../src/daemon/wire/streamSubscriptionPolicy";
 import {
   AndroidAvdIdentityUnresolvedError,
   AndroidDeviceIdentityUnresolvedError,
@@ -507,6 +509,11 @@ const BUILDERS: readonly FixtureEntry[] = [
     "device_owned_by_other_daemon",
     "DeviceOwnedByOtherDaemonError via shapeToolCallError",
     () => shaped(new DeviceOwnedByOtherDaemonError(DEVICE, 4242)),
+  ],
+  [
+    "unsafe_device_resource_combination",
+    "UnsafeDeviceResourceCombinationError via shapeToolCallError",
+    () => shaped(new UnsafeDeviceResourceCombinationError(fakeIosDeviceResourceHazards)),
   ],
   [
     "device_service_disabled",

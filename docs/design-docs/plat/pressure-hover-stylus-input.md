@@ -109,8 +109,14 @@ also reads pen data (**Source**):
   range the raw values are kept and `pressure.normalized` is false.
 - **Gesture fields.** `GestureEvent` carries optional `toolType` (`stylus`/`eraser`),
   `pressure` (min, max and mean, normalized when the axis range is known) and `buttons`.
-  Exported plan steps are unchanged, so a recorded stylus stroke still replays as a finger
-  gesture; hover events, stroke paths and replay are #13102.
+  A pen gesture exports as a coordinate step carrying `pointer: { toolType: "stylus" }`: a
+  tap or long press as `tapAt`, a swipe as `swipeAt`, never `tapOn` or `swipeOn`, which cannot
+  say "stylus". Recorded pressure is not exported, because replay injects the fixed 1.0 and
+  refuses anything else. A pen gesture with no replayable form (an eraser, which replay cannot
+  inject, or one with no known position or path) is left out with a warning on the stop
+  result, which a salvaged stop keeps. A stylus double tap is exported with a warning because
+  replay refuses it. A stylus tap and a finger tap never merge into one double tap. Finger gestures export unchanged. Hover events, stroke paths and
+  pressure series are not exported.
 
 One structural limit remains, and extending the axes alone does not remove it
 (**Source**):
@@ -203,9 +209,9 @@ specified and reviewed when the work is picked up.
   source of `adb shell input`, at a fixed pressure of `1.0`. The first slice is that,
   for `tapAt` and a straight `swipeAt`; pressure curves, tilt, eraser, hover and
   `dragPath` wait for the experiments below.
-- **Recording follows the tools.** The recorder gaps under
-  [What the recorder sees](#what-the-recorder-sees) are #13084's work. A stylus step is
-  never silently exported or replayed as a finger step.
+- **Recording follows the tools.** A stylus step is never silently exported or replayed as a
+  finger step; hover, stroke path and pressure series are the recorder gaps under
+  [What the recorder sees](#what-the-recorder-sees).
 
 ## Verification plan
 

@@ -9,6 +9,7 @@ import {
   checkConnectedDevices,
   checkAvdMemory,
   checkEmulator,
+  checkEmulatorRendering,
   runPostRepairAndroidChecks,
 } from "../../src/doctor/checks/android";
 import type { DoctorProbeOptions } from "../../src/doctor/types";
@@ -1232,5 +1233,67 @@ describe("checkConnectedDevices", () => {
         message: "All applicable modern Play-image AVDs meet the 2048 MB memory minimum.",
       },
     ]);
+  });
+});
+
+describe("checkEmulatorRendering", () => {
+  const base = {
+    platform: "darwin" as const,
+    listAvds: async () => [{ name: "Pixel" }],
+    readEmulatorVersion: async () => "Android emulator version 37.2.11.0 (build_id 1)",
+    emulatorArgsRaw: undefined,
+  };
+
+  test("warns on macOS when auto GPU mode would use software rendering", async () => {
+    const result = await checkEmulatorRendering(
+      {},
+      { ...base, readAvdConfig: { readConfig: async () => ({}) } },
+    );
+    expect(result.status).toBe("warn");
+    expect(result.message).toContain("Pixel");
+    expect(result.message).toContain("37.2.11");
+    expect(result.recommendation).toContain("hw.gpu.mode=host");
+  });
+
+  test("passes when the AVD selects host rendering", async () => {
+    const result = await checkEmulatorRendering(
+      {},
+      { ...base, readAvdConfig: { readConfig: async () => ({ gpuMode: "host" }) } },
+    );
+    expect(result.status).toBe("pass");
+  });
+
+  test("passes when AUTOMOBILE_EMULATOR_ARGS forces -gpu host", async () => {
+    const result = await checkEmulatorRendering(
+      {},
+      {
+        ...base,
+        emulatorArgsRaw: '["-gpu","host"]',
+        readAvdConfig: { readConfig: async () => ({}) },
+      },
+    );
+    expect(result.status).toBe("pass");
+  });
+
+  test("skips off macOS", async () => {
+    const result = await checkEmulatorRendering(
+      {},
+      { ...base, platform: "linux", readAvdConfig: { readConfig: async () => ({}) } },
+    );
+    expect(result.status).toBe("skip");
+  });
+
+  test("skips when the emulator version cannot be read", async () => {
+    const result = await checkEmulatorRendering(
+      {},
+      {
+        ...base,
+        readEmulatorVersion: async () => {
+          throw new Error("emulator not found");
+        },
+        readAvdConfig: { readConfig: async () => ({}) },
+      },
+    );
+    expect(result.status).toBe("skip");
   });
 });

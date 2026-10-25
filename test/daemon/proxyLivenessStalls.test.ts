@@ -12,7 +12,7 @@ import {
 } from "../../src/daemon/daemonRequestHandlers";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
-import { DAEMON_RESTART_HANDOFF_TIMEOUT_MS, DAEMON_VERSION } from "../../src/daemon/constants";
+import { DAEMON_RESTART_HANDOFF_TIMEOUT_MS, DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import { getStaticToolDefinitions } from "../../src/daemon/staticToolDefinitions";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 import {

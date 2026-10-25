@@ -7,7 +7,7 @@ import {
   type DaemonIdentityHost,
 } from "../../src/daemon/daemonCore/DaemonIdentity";
 import { cleanupDaemonFilesSync } from "../../src/daemon/daemonFiles";
-import { SOCKET_PATH } from "../../src/daemon/constants";
+import { SOCKET_PATH } from "../../src/daemon/wire/constants";
 import { getDaemonSocketPathsByName } from "../../src/daemon/socketPaths";
 import type { AuxiliaryDaemonSocketName } from "../../src/daemon/types";
 import { testOverrides } from "../../src/utils/testOverrides";

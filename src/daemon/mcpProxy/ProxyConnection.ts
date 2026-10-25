@@ -4,14 +4,14 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { DaemonRequestNotDeliveredError } from "../DaemonRequestNotDeliveredError";
-import { type BuildIdentity } from "../buildIdentity";
+import { type BuildIdentity } from "../wire/buildIdentity";
 import { DaemonUnavailableError, type DaemonClientLike } from "../client";
 import {
   DAEMON_CONNECT_ATTEMPT_TIMEOUT_MS,
   DAEMON_RELEASE_SESSION_METHOD,
   DAEMON_STARTUP_TIMEOUT_MS,
   SOCKET_PATH,
-} from "../constants";
+} from "../wire/constants";
 import { DeviceControlTransportError } from "../deviceControlTransportFailure";
 import { type ListChangedKind } from "../listChangedBroadcast";
 import { type DaemonRestartResult } from "../manager";

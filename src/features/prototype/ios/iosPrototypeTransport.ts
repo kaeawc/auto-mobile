@@ -13,8 +13,9 @@ import {
  * The agent speaks the CtrlProxy prototype message names, so requests and `prototype_event` pushes
  * map one to one. It has no `update_prototype` (#10550): a same-id `show` replaces the prototype.
  * It has no display targeting. `reset` is forwarded to start a same-id show fresh, and `appearance`
- * to pin the system setting (an agent advertising `prototype_appearance_v1` only). Transport per-call `timeoutMs` is not forwarded. Status uses a short client deadline to detect
- * a suspended app; other requests use the agent client's default request timeout.
+ * to pin the system setting (an agent advertising `prototype_appearance_v1` only). A per-call
+ * `timeoutMs` is forwarded on show, patch, dismiss and clearStorage; without one they use the agent
+ * client's default request timeout. Status uses a short client deadline to detect a suspended app.
  */
 import { ActionableError } from "../../../models/ActionableError";
 import { errorMessage } from "../../../utils/describeUnknownError";
@@ -252,24 +253,43 @@ export class IosPrototypeTransport implements PrototypeTransport {
       throw new ActionableError(prototypeAppearanceUnsupportedMessage(appearance, "ios"));
     }
     return toPrototypeResult(
-      await this.agent.request("show_prototype", {
-        spec,
-        ...(options.reset === true ? { reset: true } : {}),
-        ...(appearance === undefined ? {} : { appearance }),
-      }),
+      await this.request(
+        "show_prototype",
+        {
+          spec,
+          ...(options.reset === true ? { reset: true } : {}),
+          ...(appearance === undefined ? {} : { appearance }),
+        },
+        options.timeoutMs,
+      ),
     );
   }
 
-  async patch(patch: PrototypePatchRequest): Promise<PrototypePatchReply> {
+  /** The per-call deadline when the caller gave one; otherwise the agent client's default. */
+  private request(
+    type: PrototypeAgentRequestType,
+    body: PrototypeAgentMessage,
+    timeoutMs?: number,
+  ): Promise<PrototypeAgentResult> {
+    return timeoutMs === undefined
+      ? this.agent.request(type, body)
+      : this.agent.request(type, body, { timeoutMs });
+  }
+
+  async patch(patch: PrototypePatchRequest, timeoutMs?: number): Promise<PrototypePatchReply> {
     if (!this.supportsCapability(PROTOTYPE_PATCH_CAPABILITY)) {
       return { success: false, delivery: "unsent", error: prototypePatchUnsupportedMessage("ios") };
     }
     try {
-      const reply = await this.agent.request("patch_prototype", {
-        id: patch.id,
-        ...(patch.baseRevision === undefined ? {} : { baseRevision: patch.baseRevision }),
-        ops: patch.ops,
-      });
+      const reply = await this.request(
+        "patch_prototype",
+        {
+          id: patch.id,
+          ...(patch.baseRevision === undefined ? {} : { baseRevision: patch.baseRevision }),
+          ops: patch.ops,
+        },
+        timeoutMs,
+      );
       return {
         ...toPrototypeResult(reply),
         ...prototypePatchReplyFields(reply),
@@ -281,17 +301,17 @@ export class IosPrototypeTransport implements PrototypeTransport {
     }
   }
 
-  async dismiss(target: PrototypeDismiss): Promise<PrototypeResult> {
+  async dismiss(target: PrototypeDismiss, timeoutMs?: number): Promise<PrototypeResult> {
     const body: PrototypeAgentMessage = target.all ? { all: true } : { id: target.id };
-    return toPrototypeResult(await this.agent.request("dismiss_prototype", body));
+    return toPrototypeResult(await this.request("dismiss_prototype", body, timeoutMs));
   }
 
   /** Wipes the values the agent stored for `id` (#12522); refused unless it advertises prototype_storage_v1. */
-  async clearStorage(id: string): Promise<PrototypeResult> {
+  async clearStorage(id: string, timeoutMs?: number): Promise<PrototypeResult> {
     if (!this.supportsCapability(PROTOTYPE_STORAGE_CAPABILITY)) {
       throw new ActionableError(prototypeClearStorageUnsupportedMessage("ios"));
     }
-    return toPrototypeResult(await this.agent.request("clear_prototype_storage", { id }));
+    return toPrototypeResult(await this.request("clear_prototype_storage", { id }, timeoutMs));
   }
 
   async putAsset(

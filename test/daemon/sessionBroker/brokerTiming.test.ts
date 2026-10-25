@@ -276,6 +276,88 @@ describe("durable broker timing", () => {
     expect(erases).toBe(1);
   });
 
+  test("keep-booted destroy fallback retires the simulator without an erase and the next acquisition gets a new resource (#15232)", async () => {
+    const journal = new FakeDeviceMutationJournal(harness.timer);
+    const mutations = new FakeDeviceMutationResetPort({
+      completeKinds: [...DEVICE_MUTATION_KINDS],
+      observations: [],
+      unobservable: [],
+    });
+    let erases = 0;
+    harness.options.devices.reset = async (resource) => {
+      await harness.devices.reset(resource);
+      const profile = nativeProfile(resource);
+      if (profile.platform !== "ios") {
+        throw new Error("Expected iOS");
+      }
+      const scope = {
+        deviceId: "device",
+        incarnation: "generation-1",
+        sessionUuid: resource.requestId!,
+      };
+      await journal.captureBaseline(scope, mutations.snapshot);
+      const reset = new IosKeepBootedReset({
+        journal,
+        mutations: Object.assign(mutations, {
+          sanitize: async () => {},
+          sanitizeCovers: () => false,
+          assertSettled: async () => {},
+        }),
+        timer: harness.timer,
+        maxUses: 2,
+        fallback: "destroy",
+        health: { probe: async () => true },
+        simctl: {
+          readSimulatorTarget: async () => ({
+            udid: scope.deviceId,
+            name: "phone",
+            state: "Booted",
+            isAvailable: true,
+            deviceTypeIdentifier: profile.simulatorDeviceTypeIdentifier,
+            runtime: profile.runtimeId,
+            os_version: profile.osVersion,
+          }),
+        },
+        erase: {
+          resetWithTiming: async () => {
+            erases++;
+            return { outcome: "clean", mode: "erase", phases: { erase: 1, boot: 2 } };
+          },
+        },
+      });
+      return reset.resetWithTiming(
+        { deviceId: scope.deviceId, platform: "ios", name: "phone" },
+        profile,
+        async () => {},
+        scope,
+        resource.reuseCount ?? 0,
+      );
+    };
+    const resourceIds: string[] = [];
+    const states: string[] = [];
+    for (const use of [1, 2, 3]) {
+      const ready = await broker.prepare(exportConfig(`use-${use}`), "token");
+      const released = await broker.release(ready.sessionUuid!);
+      const request = await harness.store.getRequest(`use-${use}`);
+      const resource = await harness.registry
+        .sessionBrokerStore(harness.scopeKey)
+        .getResource(request!.resourceId!);
+      resourceIds.push(request!.resourceId!);
+      states.push(resource!.state);
+      if (use === 2) {
+        expect(released.timing?.reset).toMatchObject({
+          mode: "keep-booted",
+          outcome: "destroyed",
+          fallbackReason: "maxUses reached",
+        });
+      }
+    }
+    expect(erases).toBe(0);
+    expect(states).toEqual(["idle", "destroyed", "idle"]);
+    expect(resourceIds[1]).toBe(resourceIds[0]);
+    expect(resourceIds[2]).not.toBe(resourceIds[1]);
+  });
+
   test("reset fallback retains its mode, phases and reason", async () => {
     resetResult = {
       outcome: "fallback:erase",

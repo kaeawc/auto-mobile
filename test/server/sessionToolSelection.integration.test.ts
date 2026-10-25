@@ -2,7 +2,7 @@ import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, describe, expect, test, beforeAll, afterAll } from "bun:test";
 import { z } from "zod/v4";
-import { INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM } from "../../src/daemon/constants";
+import { INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM } from "../../src/daemon/wire/constants";
 import type { SessionToolSelectionService } from "../../src/features/toolSelection/SessionToolSelectionService";
 import { buildToolSelectionCandidateRoutes } from "../../src/features/toolSelection/toolSelectionPolicy";
 import {

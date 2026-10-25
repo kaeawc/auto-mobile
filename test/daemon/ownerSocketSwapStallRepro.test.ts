@@ -9,7 +9,7 @@ import { SessionManager, type Session } from "../../src/daemon/sessionManager";
 import {
   DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS,
   DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,
-} from "../../src/daemon/sessionLivenessWindows";
+} from "../../src/daemon/wire/sessionLivenessWindows";
 import { handleHeartbeat } from "../../src/daemon/daemonRequestHandlersParts/heartbeat";
 import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../src/daemon/types";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";

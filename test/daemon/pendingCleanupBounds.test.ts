@@ -1,6 +1,6 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
 import * as releaseBudgets from "../../src/daemon/sessionManager";
-import { SESSION_RELEASE_DRAIN_TIMEOUT_MS } from "../../src/daemon/constants";
+import { SESSION_RELEASE_DRAIN_TIMEOUT_MS } from "../../src/daemon/wire/constants";
 import { SCREEN_READER_RESTORE_TIMEOUT_MS } from "../../src/features/accessibility/ScreenReaderRestore";
 import { defaultDeviceClockRestoreRegistry } from "../../src/features/utility/DeviceClock";
 import {
@@ -38,7 +38,7 @@ import {
 import {
   DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS,
   getSessionHeartbeatCheckIntervalMs,
-} from "../../src/daemon/sessionLivenessWindows";
+} from "../../src/daemon/wire/sessionLivenessWindows";
 import { forceStuckSessionRelease } from "../../src/daemon/releaseSessionAndDevice";
 import { ExecutionTracker } from "../../src/daemon/executionTracker";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";

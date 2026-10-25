@@ -7,7 +7,7 @@ import {
   type BuildIdentity,
   buildIdentitiesMatch,
   buildIdentityFromStatus,
-} from "../buildIdentity";
+} from "../wire/buildIdentity";
 import { type DaemonClientLike } from "../client";
 import {
   DAEMON_BOUND_SESSION_PARAM,
@@ -20,7 +20,7 @@ import {
   INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM,
   INTERNAL_ACTIONS_COMPACT_METADATA_PARAM,
   INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM,
-} from "../constants";
+} from "../wire/constants";
 import {
   type DeviceSessionSuspectRefusal,
   declaresDeviceSessionSuspect,

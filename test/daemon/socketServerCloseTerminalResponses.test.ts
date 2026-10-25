@@ -7,7 +7,7 @@ import {
   daemonShuttingDownFailureFromToolResult,
   daemonShuttingDownMcpOutcome,
 } from "../../src/daemon/daemonShutdownOutcome";
-import { DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD } from "../../src/daemon/constants";
+import { DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD } from "../../src/daemon/wire/constants";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 // Match the private shutdown bounds without exposing production-only constants.

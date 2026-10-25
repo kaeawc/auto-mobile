@@ -5,7 +5,10 @@ import { join } from "node:path";
 import { DaemonMcpProxy, DaemonVersionMismatchError } from "../../../src/daemon/daemonMcpProxy";
 import { DaemonClient } from "../../../src/daemon/client";
 import { DaemonManager, type DaemonManagerLike } from "../../../src/daemon/manager";
-import { DAEMON_VERSION, DAEMON_VERSION_RESTART_COOLDOWN_MS } from "../../../src/daemon/constants";
+import {
+  DAEMON_VERSION,
+  DAEMON_VERSION_RESTART_COOLDOWN_MS,
+} from "../../../src/daemon/wire/constants";
 import type {
   DaemonOptions,
   DaemonSocketPaths,

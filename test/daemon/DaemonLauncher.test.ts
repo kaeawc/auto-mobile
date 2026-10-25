@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, win32 } from "node:path";
 import { DaemonLauncher, isDaemonEntryScriptPath } from "../../src/daemon/DaemonLauncher";
-import { DAEMON_SHUTDOWN_TIMEOUT_MS } from "../../src/daemon/constants";
+import { DAEMON_SHUTDOWN_TIMEOUT_MS } from "../../src/daemon/wire/constants";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainUntil } from "../helpers/fakeTimerStepping";
 

@@ -3,8 +3,8 @@ import { DaemonShuttingDownError } from "../../src/daemon/DaemonShuttingDownErro
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { afterEach, describe, expect, test, spyOn } from "bun:test";
 import { DaemonClient } from "../../src/daemon/client";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
-import { McpOverloadError } from "../../src/daemon/McpTimeoutError";
+import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
+import { McpOverloadError } from "../../src/daemon/wire/McpTimeoutError";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";

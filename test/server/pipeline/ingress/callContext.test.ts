@@ -10,7 +10,7 @@ import {
   INTERNAL_MCP_SESSION_PARAM,
   INTERNAL_ONE_SHOT_CLI_PARAM,
   INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM,
-} from "../../../../src/daemon/constants";
+} from "../../../../src/daemon/wire/constants";
 
 const forwarded = {
   [INTERNAL_MCP_SESSION_PARAM]: "mcp-1",

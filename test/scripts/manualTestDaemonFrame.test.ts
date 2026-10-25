@@ -9,7 +9,7 @@ import {
 } from "../../scripts/manual-test/daemon-frame";
 import { derivePrivateDaemonBatch } from "../../scripts/manual-test/privateDaemonEnv";
 import type { FrameConnection } from "../../scripts/manual-test/frameWire";
-import { resolveDaemonStatePath } from "../../src/daemon/constants";
+import { resolveDaemonStatePath } from "../../src/daemon/wire/constants";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { drainUntilQuiescent } from "../helpers/fakeTimerStepping";

@@ -14,7 +14,7 @@ import {
   DAEMON_OWNED_SESSIONS_PARAM,
   DAEMON_TOKEN_OWNED_SESSIONS_METHOD,
   DAEMON_VERSION,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/daemon/sessionReleaseBroadcast";
 import { withRoutedSessionMeta } from "../../src/daemon/routedSessionMeta";
 import { getStaticToolDefinitions } from "../../src/daemon/staticToolDefinitions";

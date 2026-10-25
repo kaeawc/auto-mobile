@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { DAEMON_RECONNECT_OUTAGE_BUDGET_MS } from "../../src/daemon/constants";
+import { DAEMON_RECONNECT_OUTAGE_BUDGET_MS } from "../../src/daemon/wire/constants";
 import { DaemonUnavailableError } from "../../src/daemon/DaemonUnavailableError";
 import { DaemonVersionMismatchError } from "../../src/daemon/proxy/DaemonVersionMismatchError";
 import { SESSION_BROKER_RETRY_AFTER_MS } from "../../src/daemon/sessionBroker/timing";

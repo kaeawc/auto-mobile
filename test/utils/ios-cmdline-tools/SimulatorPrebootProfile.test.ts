@@ -1,3 +1,4 @@
+import { fakeIosDeviceResourceHazards as hazards } from "../../helpers/fakeIosDeviceResourceHazards";
 import { NodeSimulatorHostState } from "../../../src/utils/ios-cmdline-tools/NodeSimulatorHostState";
 import { expect, test, spyOn } from "bun:test";
 import {
@@ -305,3 +306,42 @@ test.each(["symlink", "foreign owner", "file", "ok"])(
     }
   },
 );
+
+test("unsafe preboot overrides warn without host access", async () => {
+  const host = new FakeSimulatorHostState();
+  const service = new SimulatorPrebootProfile(host, () => "minimal", hazards);
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  try {
+    expect(
+      await service.apply(UDID, {
+        resources: { calendarServices: "disabled", reminderServices: "disabled" },
+      }),
+    ).toMatchObject({ applied: false, labels: [], unsafe: hazards });
+    expect(host.calls).toEqual([]);
+    expect(warn).toHaveBeenCalled();
+  } finally {
+    warn.mockRestore();
+  }
+});
+test("preboot hazards include profile keys and honor enabled overrides", async () => {
+  const host = new FakeSimulatorHostState();
+  const profileHazards = [{ ...hazards[0]!, resources: ["widgets", "calendarServices"] as const }];
+  const service = new SimulatorPrebootProfile(host, () => "minimal", profileHazards);
+  expect(
+    (await service.apply(UDID, { resources: { calendarServices: "disabled" } })).unsafe,
+  ).toEqual(profileHazards);
+  expect(host.calls).toEqual([]);
+  expect(
+    (await service.apply(UDID, { resources: { calendarServices: "disabled", widgets: "enabled" } }))
+      .applied,
+  ).toBe(true);
+});
+
+test("real post-boot calendar hazard allows preboot disable", async () => {
+  const host = new FakeSimulatorHostState();
+  const service = new SimulatorPrebootProfile(host, () => "minimal");
+  const result = await service.apply(UDID, { resources: { calendarServices: "disabled" } });
+  expect(result.applied).toBe(true);
+  expect(result.labels).toContain("com.apple.calaccessd");
+  expect(result.unsafe).toBeUndefined();
+});

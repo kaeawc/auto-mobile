@@ -1,3 +1,4 @@
+import { UnsafeDeviceResourceCombinationError } from "../../../models/UnsafeDeviceResourceCombinationError";
 import { ProvisionDeviceError } from "../../../devices/exactDeviceProvisioning";
 import {
   AndroidAvdIdentityConflictError,
@@ -7,7 +8,7 @@ import {
 import { Platform, BootedDevice, DeviceInfo } from "../../../models";
 import { type ProvisionDeviceLifecycleOutcome } from "../../../devices/provisionDeviceLifecycle";
 import { serverConfig } from "../../../utils/ServerConfig";
-import { deleteInternalToolParams } from "../../../daemon/constants";
+import { deleteInternalToolParams } from "../../../daemon/wire/constants";
 import { type Timer } from "../../../utils/SystemTimer";
 import {
   DEFAULT_PROVISION_DEVICE_TIMEOUT_MS,
@@ -26,6 +27,12 @@ import { provisionDeviceSchema } from "../core/schemas";
 export function knownProvisionDeviceError(error: unknown): ProvisionDeviceError | undefined {
   if (error instanceof ProvisionDeviceError) {
     return error;
+  }
+  if (error instanceof UnsafeDeviceResourceCombinationError) {
+    return new ProvisionDeviceError(error.code, error.message, error.retryable, {
+      hazards: error.hazards,
+      howToProceed: error.howToProceed,
+    });
   }
   if (error instanceof AndroidAvdIdentityConflictError) {
     return new ProvisionDeviceError("identity_conflict", error.message);

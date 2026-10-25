@@ -34,7 +34,7 @@ import {
   DAEMON_LIST_DEVICE_SESSIONS_METHOD,
   DAEMON_DEVICE_LEASE_STATUS_METHOD,
   DAEMON_RELINQUISH_DEVICE_LEASE_METHOD,
-} from "./constants";
+} from "./wire/constants";
 import { executionTracker } from "./executionTracker";
 import { sessionHoldDiagnostics } from "./sessionHoldDiagnostics";
 import { readDeviceLeaseActivity, type DeviceLeaseActivitySources } from "./deviceLeaseActivity";

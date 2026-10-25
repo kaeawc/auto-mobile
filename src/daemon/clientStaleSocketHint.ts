@@ -1,4 +1,4 @@
-import { PID_FILE_PATH } from "./constants";
+import { PID_FILE_PATH } from "./wire/constants";
 import { DaemonUnavailableError } from "./DaemonUnavailableError";
 import { isProcessRunning, readPidFileDataSync } from "./daemonFiles";
 import { logger } from "../utils/logger";

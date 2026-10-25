@@ -46,7 +46,7 @@ export async function performPrototypeClearStorage(
     }
     const reply: PrototypeResult = target.android
       ? await target.android.clearStorage(id, args.timeoutMs)
-      : await target.ios!.clearStorage(id);
+      : await target.ios!.clearStorage(id, args.timeoutMs);
     if (!reply.success) {
       return { success: false, error: reply.error ?? "clearStorage failed" };
     }

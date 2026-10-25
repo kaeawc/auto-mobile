@@ -12,7 +12,7 @@ import {
   McpOverloadError,
   McpTimeoutError,
   MCP_QUEUE_TIMEOUT_ERROR_CODE,
-} from "../McpTimeoutError";
+} from "../wire/McpTimeoutError";
 import { idleReleaseField } from "../releaseReasons";
 import { SESSION_OWNERSHIP_LOST_CODE } from "../sessionReleasedDuringCall";
 import {

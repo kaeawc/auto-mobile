@@ -4,7 +4,7 @@ import type { Kysely } from "kysely";
 import {
   DAEMON_REGISTER_SESSION_METHOD,
   SESSION_RELEASE_DRAIN_TIMEOUT_MS,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import {
   handleDaemonRequest,
   type DaemonMethodResult,

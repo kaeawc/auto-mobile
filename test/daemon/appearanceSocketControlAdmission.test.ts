@@ -4,7 +4,7 @@ import {
   type AppearanceDeviceSource,
   type AppearanceSocketServerDependencies,
 } from "../../src/daemon/appearanceSocketServer";
-import type { AppearanceSocketResponse } from "../../src/daemon/appearanceSocketTypes";
+import type { AppearanceSocketResponse } from "../../src/daemon/wire/appearanceSocketTypes";
 import {
   handleDaemonRequest,
   type DaemonStateAccess,

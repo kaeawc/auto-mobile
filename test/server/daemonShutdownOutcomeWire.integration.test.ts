@@ -5,7 +5,7 @@ import { z } from "zod/v4";
 import {
   DAEMON_SHUTTING_DOWN_ERROR_CODE,
   DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import { isDaemonShuttingDownToolResult } from "../../src/daemon/daemonShutdownOutcome";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { ToolRegistry } from "../../src/server/toolRegistry";

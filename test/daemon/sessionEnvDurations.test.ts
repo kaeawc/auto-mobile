@@ -3,7 +3,7 @@ import { getDevicePoolTimeoutMs } from "../../src/daemon/poolConfig";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { getSessionIdleTimeoutMs } from "../../src/daemon/sessionLivenessWindows";
+import { getSessionIdleTimeoutMs } from "../../src/daemon/wire/sessionLivenessWindows";
 import {
   getDefaultPreFirstHeartbeatGraceMs,
   getDefaultSessionHeartbeatTimeoutMs,

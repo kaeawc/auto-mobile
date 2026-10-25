@@ -69,6 +69,12 @@ export interface IosKeepBootedResetDependencies {
     ): Promise<ResetOutcome>;
   };
   maxUses: number;
+  /**
+   * What a non-clean release does: "erase" (default) erases and reboots the simulator;
+   * "destroy" never erases, so the broker deletes the simulator and the next acquisition
+   * creates a fresh one.
+   */
+  fallback?: "erase" | "destroy";
   budgetMs?: number;
   budgetCeilingMs?: number;
   hostLoad?: HostLoadReader;
@@ -176,11 +182,30 @@ export class IosKeepBootedReset {
     }
     await owned();
     await this.assertSettled(scope, owned, signal);
-    return this.eraseFallback(
+    return this.nonCleanOutcome(
       { device, profile, scope, assertOwned: owned, phases, signal },
       fallbackReason,
       runResetBoot,
     );
+  }
+
+  private nonCleanOutcome(
+    attempt: IosResetAttempt,
+    fallbackReason: string,
+    runResetBoot?: ResetBootRunner,
+  ): Promise<ResetOutcome> {
+    return this.dependencies.fallback === "destroy"
+      ? Promise.resolve(this.destroyFallback(attempt.phases, fallbackReason))
+      : this.eraseFallback(attempt, fallbackReason, runResetBoot);
+  }
+
+  /**
+   * A non-clean outcome sends the release down the broker's destroy path; the simulator is
+   * never erased. A recorded cleaning failure stays recorded, so a redrive repeats this
+   * outcome instead of cleaning a half-cleaned simulator again.
+   */
+  private destroyFallback(phases: Record<string, number>, fallbackReason: string): ResetOutcome {
+    return { outcome: "pending", mode: "keep-booted", phases, fallbackReason };
   }
 
   private async eraseFallback(

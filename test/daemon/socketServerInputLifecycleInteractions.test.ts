@@ -1,6 +1,6 @@
 import { fakeBindLock, unreachableMcpDispatcher } from "../helpers/createTestUnixSocketServer";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD } from "../../src/daemon/constants";
+import { DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD } from "../../src/daemon/wire/constants";
 import { mcpRequestFailureDetails, type UnixSocketServer } from "../../src/daemon/socketServer";
 import type { DaemonRequest } from "../../src/daemon/types";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";

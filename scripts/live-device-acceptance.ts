@@ -21,13 +21,13 @@ import { chmod, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
-import { computeBuildIdentity, type BuildIdentity } from "../src/daemon/buildIdentity";
+import { computeBuildIdentity, type BuildIdentity } from "../src/daemon/wire/buildIdentity";
 import { DaemonClient } from "../src/daemon/client";
 import {
   ACCEPTANCE_DISCOVERY_CAPABILITY_ENV,
   DAEMON_VERSION,
   SOCKET_PATH,
-} from "../src/daemon/constants";
+} from "../src/daemon/wire/constants";
 import { type AcceptanceSessionRestartScope } from "../src/daemon/daemonRestartAdmission";
 import {
   daemonLiveAcceptanceStartupSecret,

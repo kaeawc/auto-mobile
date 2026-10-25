@@ -199,9 +199,12 @@ not coordinate builds across distinct coordination roots.
 
 - Disabling the entire resource catalog plus the extra candidates (104 labels, applied post-boot, 85 seconds) made
   the simulator spin at about 145 percent of a core for the rest of the 10 minute window (MobileCal 520
-  CPU-seconds and `diagnosticd` 270), 56 percent more CPU than baseline. The trigger was not isolated; the
-  calendar-related labels in that set are `calaccessd`, `dataaccessd` and `remindd`, and the `diagnosticd` load may
-  simply follow MobileCal's logging. A broad preset must not be shipped.
+  CPU-seconds and `diagnosticd` 270), 56 percent more CPU than baseline. #15218 bisected it to one label:
+  booting out `com.apple.calaccessd` (`calendarServices`) after boot, while the Calendar app is connected, makes
+  MobileCal retry its invalidated EventKit connection in a tight loop and `diagnosticd` log it. The same label
+  disabled before first boot (every resource, 104 labels, ran at 206 CPU-seconds) or one second after boot did not
+  spin. The controller now refuses `calendarServices: "disabled"` on a running simulator
+  (`unsafe_device_resource_combination`); see `device-resources.md`.
 - The breakage check passed on every checked run, including the disable-everything run, but it covers only the
   driving surface. Siri, Health, wallpaper and widget behavior, push and App Intents are removed or degraded by
   design when their families are disabled and were not exercised.

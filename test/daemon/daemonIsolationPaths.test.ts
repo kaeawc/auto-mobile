@@ -3,7 +3,7 @@ import {
   resolveDaemonIsolationSuffix,
   resolveDaemonStatePath,
   resolveIsolatedDaemonStatePath,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import vectors from "../fixtures/daemon-isolation-paths.json";
 import { tmpdir } from "node:os";
 import { resolve, win32 } from "node:path";

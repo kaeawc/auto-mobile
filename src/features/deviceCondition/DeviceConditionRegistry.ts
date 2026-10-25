@@ -7,6 +7,7 @@ import {
   type DeviceConditionInjector,
 } from "./DeviceConditionController";
 import { resolveLifecycleFaultInjector } from "./lifecycleFaultInjectors";
+import { resolvePermissionFaultInjector } from "./permissionFaultInjectors";
 import { resolvePowerFaultInjector } from "./powerFaultInjectors";
 import { resolveStorageFaultInjector } from "./storageFaultInjectors";
 import { resolveRootStateInjector } from "./rootStateInjector";
@@ -217,7 +218,8 @@ const defaultInjectorResolver: DeviceConditionInjectorResolver = (owner, key) =>
     ? (resolveRootStateInjector(owner.device, key) ??
       resolvePowerFaultInjector(owner.device, key) ??
       resolveLifecycleFaultInjector(owner.device, key) ??
-      resolveStorageFaultInjector(owner.device, key))
+      resolveStorageFaultInjector(owner.device, key) ??
+      resolvePermissionFaultInjector(owner.device, key))
     : undefined;
 
 /**

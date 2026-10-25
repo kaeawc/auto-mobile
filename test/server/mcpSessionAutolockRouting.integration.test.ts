@@ -13,7 +13,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
-import { INTERNAL_ONE_SHOT_CLI_PARAM } from "../../src/daemon/constants";
+import { INTERNAL_ONE_SHOT_CLI_PARAM } from "../../src/daemon/wire/constants";
 
 const captureSchema = z
   .object({

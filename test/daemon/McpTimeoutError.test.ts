@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
+import { McpTimeoutError } from "../../src/daemon/wire/McpTimeoutError";
 
 describe("McpTimeoutError", () => {
   test("formats message with tool name, timeout, and origin", () => {

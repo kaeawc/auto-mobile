@@ -20,7 +20,7 @@ import {
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
   INTERNAL_LIVE_DEADLINE_KEY_PARAM,
-} from "../constants";
+} from "../wire/constants";
 
 import {
   registerLiveDeadline,
@@ -28,7 +28,7 @@ import {
   getLiveTextRequestState,
 } from "../liveDeadlineRegistry";
 
-import { evaluateClientHandshake, extractClientHandshake } from "../daemonHandshake";
+import { evaluateClientHandshake, extractClientHandshake } from "../wire/daemonHandshake";
 
 import type { FeatureFlagAdmin } from "../../features/featureFlags/FeatureFlagService";
 

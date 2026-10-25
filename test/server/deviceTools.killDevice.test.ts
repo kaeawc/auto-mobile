@@ -28,6 +28,7 @@ import { EventEmitter } from "node:events";
 import { z } from "zod/v4";
 import type { ChildProcess } from "node:child_process";
 import { Daemon } from "../../src/daemon/daemon";
+import { DaemonRuntimeState } from "../../src/daemon/daemonRuntimeState";
 import type { SingleFlightInterval } from "../../src/daemon/SingleFlightInterval";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -2508,11 +2509,10 @@ describe("killDevice handler", () => {
         timer,
         devicePool: pool,
         sessionManager,
-        deviceDisconnectMonitor: null,
+        runtime: new DaemonRuntimeState(),
         deviceLoss: new DeviceLossState(),
-        deferredSessionRecoverySweeps: new Set(),
       }) as {
-        deviceDisconnectMonitor: SingleFlightInterval;
+        runtime: { deviceDisconnectMonitor: SingleFlightInterval };
         startDeviceDisconnectMonitor(
           manager: Pick<
             MultiPlatformDeviceManager,
@@ -2544,7 +2544,7 @@ describe("killDevice handler", () => {
               deviceId: image.deviceId!,
             },
           ]);
-          await monitor.deviceDisconnectMonitor.run();
+          await monitor.runtime.deviceDisconnectMonitor.run();
           expect(pool.getDevice(image.deviceId!)?.identityUnresolved).toBe(true);
           expect(cancelledSessions).toEqual([]);
           expect(initiatingKill.abortController.signal.aborted).toBe(false);
@@ -2632,7 +2632,7 @@ describe("killDevice handler", () => {
         executionTracker.endExecution(competingExecution.id);
         executionTracker.endExecution(sessionlessExecution.id);
         if (source !== "kill-discovery") {
-          await monitor.deviceDisconnectMonitor.stop();
+          await monitor.runtime.deviceDisconnectMonitor.stop();
         }
       }
     },

@@ -20,7 +20,9 @@ describe("daemon startup timeout configuration", () => {
   }
 
   async function importFreshConstants() {
-    return import(`../../src/daemon/constants.ts?startup-timeout=${Date.now()}-${Math.random()}`);
+    return import(
+      `../../src/daemon/wire/constants.ts?startup-timeout=${Date.now()}-${Math.random()}`
+    );
   }
 
   afterEach(restoreEnvironment);

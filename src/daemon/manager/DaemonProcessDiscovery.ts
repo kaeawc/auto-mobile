@@ -9,7 +9,7 @@ import {
   DAEMON_START_PROCESS_TABLE_SCAN_MAX_ATTEMPTS,
   DAEMON_START_PROCESS_TABLE_SCAN_RETRY_DELAYS_MS,
   DEFAULT_DAEMON_PORT,
-} from "../constants";
+} from "../wire/constants";
 import { DaemonStatus, PidFileData, DaemonOptions } from "../types";
 import { sequenceBackoff } from "../../utils/Backoff";
 import { type RetryExecutor } from "../../utils/retry/RetryExecutor";

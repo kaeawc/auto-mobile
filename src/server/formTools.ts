@@ -10,7 +10,7 @@ import {
   elementIdTextFieldsSchema,
   validateElementIdTextSelector,
 } from "../models/elementSelectorSchemas";
-import { INTERNAL_LIVE_DEADLINE_KEY_PARAM } from "../daemon/constants";
+import { INTERNAL_LIVE_DEADLINE_KEY_PARAM } from "../daemon/wire/constants";
 import { resolveTransportDeadlineMs } from "./transportDeadline";
 import { getLiveDeadlineMs, subscribeLiveDeadline } from "../daemon/liveDeadlineRegistry";
 

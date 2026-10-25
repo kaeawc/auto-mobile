@@ -1,5 +1,5 @@
 import { spyOn } from "bun:test";
-import { DAEMON_OWNED_SESSIONS_PARAM } from "../../../src/daemon/constants";
+import { DAEMON_OWNED_SESSIONS_PARAM } from "../../../src/daemon/wire/constants";
 import { DaemonState } from "../../../src/daemon/daemonState";
 import { DevicePool } from "../../../src/daemon/devicePool";
 import { DeviceSessionRegistry } from "../../../src/daemon/deviceSessionRegistry";

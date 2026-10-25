@@ -1,7 +1,7 @@
 import { shellQuote } from "../../utils/shellQuote";
 import { releaseVersion } from "../../utils/mcpVersion";
 import { DaemonUnavailableError } from "../client";
-import { type BuildIdentity, describeBuildIdentity } from "../buildIdentity";
+import { type BuildIdentity, describeBuildIdentity } from "../wire/buildIdentity";
 
 export type VersionMismatchReason =
   | "autoStartDisabled"

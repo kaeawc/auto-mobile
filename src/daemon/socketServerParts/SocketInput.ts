@@ -2,7 +2,7 @@ import { type GestureFrameKind } from "../inputRoutes";
 
 import { resolveMcpRequestTimeoutMsOnce } from "../mcpRequestTimeout";
 
-import { McpTimeoutError } from "../McpTimeoutError";
+import { McpTimeoutError } from "../wire/McpTimeoutError";
 
 import { DaemonRequest } from "../types";
 

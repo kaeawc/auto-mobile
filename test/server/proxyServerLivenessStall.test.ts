@@ -18,7 +18,7 @@ import {
   type LivenessHandover,
 } from "../../src/daemon/proxyLivenessRecovery";
 import { DaemonClient } from "../../src/daemon/client";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
+import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeTimer } from "../fakes/FakeTimer";

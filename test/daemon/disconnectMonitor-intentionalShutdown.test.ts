@@ -3,6 +3,7 @@ import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { makePool } from "../helpers/makePool";
 import { expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
+import { DaemonRuntimeState } from "../../src/daemon/daemonRuntimeState";
 import { InMemoryEmulatorLossIncidentStore } from "../../src/daemon/emulatorLossIncident";
 import { MISSING_DEVICE_MISS_THRESHOLD } from "../../src/daemon/missingDeviceLiveness";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -16,7 +17,7 @@ import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 interface DisconnectMonitorSurface {
-  deviceDisconnectMonitor: SingleFlightInterval;
+  runtime: { deviceDisconnectMonitor: SingleFlightInterval };
   deviceLoss: DeviceLossState;
   startDeviceDisconnectMonitor(
     manager: MissingDeviceManager,
@@ -40,7 +41,7 @@ async function withMonitor(
   try {
     await action(h);
   } finally {
-    await h.daemon.deviceDisconnectMonitor.stop();
+    await h.daemon.runtime.deviceDisconnectMonitor.stop();
     h.tracker.endExecution(h.execution.id);
     h.tracker.endExecution(h.killExecution.id);
     h.tracker.endExecution(h.deviceExecution.id);
@@ -104,9 +105,8 @@ async function monitorHarness(platform: "android" | "ios", initiatingSessionId: 
     timer,
     devicePool: pool,
     sessionManager: sessions,
-    deviceDisconnectMonitor: null,
+    runtime: new DaemonRuntimeState(),
     deviceLoss: new DeviceLossState(),
-    deferredSessionRecoverySweeps: new Set(),
   }) as DisconnectMonitorSurface;
   const deviceExecution = tracker.startExecution("observe");
   tracker.bindDeviceExecution(deviceExecution.id, device.id);
@@ -130,7 +130,7 @@ async function monitorHarness(platform: "android" | "ios", initiatingSessionId: 
       await deliverDaemonHeartbeat(sessions, "kill-session");
     }
     timer.advanceTime(5000);
-    await daemon.deviceDisconnectMonitor.run();
+    await daemon.runtime.deviceDisconnectMonitor.run();
   };
   const reachThreshold = async () => {
     for (let miss = 0; miss < MISSING_DEVICE_MISS_THRESHOLD; miss++) {

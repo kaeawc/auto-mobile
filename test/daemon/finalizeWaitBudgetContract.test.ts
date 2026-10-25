@@ -15,7 +15,7 @@ import {
   getSessionReleaseStuckDeadlineMs,
   SESSION_RELEASE_TEARDOWN_CAP_MS,
 } from "../../src/daemon/sessionManager";
-import { getSessionHeartbeatCheckIntervalMs } from "../../src/daemon/sessionLivenessWindows";
+import { getSessionHeartbeatCheckIntervalMs } from "../../src/daemon/wire/sessionLivenessWindows";
 import { readDeviceCleanupInProgressRefusal } from "../../src/daemon/deviceSessionResult";
 import {
   createOwnerlessRecordingAcquisitionCleanup,

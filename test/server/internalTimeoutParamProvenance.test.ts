@@ -25,7 +25,7 @@ import {
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
   INTERNAL_LIVE_DEADLINE_KEY_PARAM,
   INTERNAL_TOOL_PARAM_NAMES,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 
 const TOOL = "__internal_timeout_provenance_probe_6222__";
 const STRICT_TOOL = "__internal_strip_strict_probe_6917__";

@@ -16,12 +16,12 @@ import {
   SESSION_IDLE_TIMEOUT_ENV,
   SUSPECT_GRACE_MS,
   getSessionIdleTimeoutMs,
-} from "../../src/daemon/sessionLivenessWindows";
+} from "../../src/daemon/wire/sessionLivenessWindows";
 import {
   DAEMON_BOUND_SESSION_REPLAY_TTL_MS,
   DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS,
   CLI_SESSION_LIVENESS_POLICY,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import { ExecutionTracker, sessionExecutionMetadataOf } from "../../src/daemon/executionTracker";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";

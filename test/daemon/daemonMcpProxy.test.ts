@@ -48,7 +48,7 @@ import {
   DAEMON_RESTART_HANDOFF_DELAY_MS,
   DAEMON_RESTART_HANDOFF_TIMEOUT_MS,
   HEARTBEAT_SESSION_LIVENESS_POLICY,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";

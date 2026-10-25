@@ -16,8 +16,8 @@ import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/daemon/sessionRe
 import {
   DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,
   SUSPECT_GRACE_MS,
-} from "../../src/daemon/sessionLivenessWindows";
-import { DAEMON_VERSION, HEARTBEAT_SESSION_LIVENESS_POLICY } from "../../src/daemon/constants";
+} from "../../src/daemon/wire/sessionLivenessWindows";
+import { DAEMON_VERSION, HEARTBEAT_SESSION_LIVENESS_POLICY } from "../../src/daemon/wire/constants";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeTimer } from "../fakes/FakeTimer";

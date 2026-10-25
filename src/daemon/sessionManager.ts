@@ -24,7 +24,7 @@ import type { ReleaseSessionRequest } from "./releaseSessionRequest";
 import { onSessionClock } from "./sessionClockPersistence";
 import { SessionDeviceStateRestore } from "./sessionDeviceStateRestore";
 import { SessionLivenessController } from "./sessionLivenessLease";
-import * as livenessWindows from "./sessionLivenessWindows";
+import * as livenessWindows from "./wire/sessionLivenessWindows";
 import { SessionManagerCleanup } from "./sessionManager/cleanup";
 import { SessionManagerConfiguration } from "./sessionManager/configuration";
 import { SessionManagerConstruction } from "./sessionManager/construction";
@@ -576,7 +576,7 @@ export class SessionManager extends SessionManagerForwarders {
   private readonly deferredAcquisitionCancellations = new Map<string, string | undefined>();
 
   // Idle window (heartbeats, no tool call): 2 minutes from the end of the last
-  // tool call, env-overridable (see `./sessionLivenessWindows`).
+  // tool call, env-overridable (see `./wire/sessionLivenessWindows`).
   private readonly SESSION_TIMEOUT_MS = livenessWindows.getSessionIdleTimeoutMs();
 
   // Cleanup interval: every 5 minutes

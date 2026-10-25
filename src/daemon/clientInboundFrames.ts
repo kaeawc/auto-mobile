@@ -1,6 +1,6 @@
 import type { Timer } from "../utils/SystemTimer";
 import type { ProgressExtendableDeadline } from "./mcpRequestTimeout";
-import type { McpTimeoutError } from "./McpTimeoutError";
+import type { McpTimeoutError } from "./wire/McpTimeoutError";
 import type { DaemonDisconnectError } from "./DaemonDisconnectError";
 import { ActionableError } from "../models";
 import { logger } from "../utils/logger";

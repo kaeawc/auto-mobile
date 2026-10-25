@@ -1,4 +1,4 @@
-import { CONTROL_SOCKET_MAX_FRAME_BYTES } from "./socketServer/LineFramer";
+import { CONTROL_SOCKET_MAX_FRAME_BYTES } from "./wire/LineFramer";
 import { shapeToolCallError } from "./shapeToolCallError";
 
 import { type ListChangedKind } from "./listChangedBroadcast";

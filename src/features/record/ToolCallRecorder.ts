@@ -1,4 +1,4 @@
-import { INTERNAL_TOOL_PARAM_NAMES } from "../../daemon/constants";
+import { INTERNAL_TOOL_PARAM_NAMES } from "../../daemon/wire/constants";
 import { PlanStep } from "../../models/Plan";
 import { logger } from "../../utils/logger";
 import type { SwipeAtRecordingContext } from "../../models/SwipeAtOptions";

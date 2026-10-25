@@ -16,7 +16,7 @@ import {
 import { privateHarnessEnvRefusal } from "../harnessEnv";
 import { deviceStartGuardRefusal } from "../deviceStartGuard";
 import { isProcessRunning } from "../../../src/utils/processLiveness";
-import { DEFAULT_DAEMON_PORT } from "../../../src/daemon/constants";
+import { DEFAULT_DAEMON_PORT } from "../../../src/daemon/wire/constants";
 import { errorMessage } from "../../../src/utils/describeUnknownError";
 
 export interface HarnessGuardDeps {

@@ -2,7 +2,7 @@ import { ActionableError } from "../models/ActionableError";
 import type {
   StreamSubscriptionEndReason,
   StreamSubscriptionKind,
-} from "./streamSubscriptionPolicy";
+} from "./wire/streamSubscriptionPolicy";
 
 /** Dependency-free typed failure for the request/response WebRTC socket boundary. */
 export class WebRtcSubscriptionEndedError extends ActionableError {

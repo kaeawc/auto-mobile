@@ -9,9 +9,12 @@ import { streamAuthRefusalFields } from "./streamSocketAuth";
 import {
   type StreamSubscriptionIdentity,
   type StreamSubscriptionKind,
-} from "./streamSubscriptionPolicy";
+} from "./wire/streamSubscriptionPolicy";
 import type { CaptureHints, CaptureSourceFactory } from "./videoStream/captureTypes";
-import type { VideoStreamSocketRequest, VideoStreamSocketResponse } from "./videoStreamSocketTypes";
+import type {
+  VideoStreamSocketRequest,
+  VideoStreamSocketResponse,
+} from "./wire/videoStreamSocketTypes";
 
 export function tracksConsumers(
   source: H264CaptureSource | null,

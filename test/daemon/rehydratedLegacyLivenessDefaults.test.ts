@@ -7,7 +7,7 @@ import {
 import {
   DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,
   DEFAULT_SESSION_IDLE_TIMEOUT_MS,
-} from "../../src/daemon/sessionLivenessWindows";
+} from "../../src/daemon/wire/sessionLivenessWindows";
 import type { DeviceSessionRecord } from "../../src/db/deviceSessionRepository";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";

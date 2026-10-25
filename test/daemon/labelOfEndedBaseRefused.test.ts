@@ -11,7 +11,7 @@ import {
 import {
   DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,
   SUSPECT_GRACE_MS,
-} from "../../src/daemon/sessionLivenessWindows";
+} from "../../src/daemon/wire/sessionLivenessWindows";
 import { buildDeviceLabelMap } from "../../src/server/deviceLabelMapping";
 import { SessionScopedStreamAuthenticator } from "../../src/daemon/streamSocketAuth";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";

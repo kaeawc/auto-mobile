@@ -1,3 +1,4 @@
+import * as unsafeDeviceResourceCombination from "../../src/models/UnsafeDeviceResourceCombinationError";
 import * as deviceServiceDisabled from "../../src/models/DeviceServiceDisabledError";
 import { fakeServerContext } from "../helpers/fakeServerContext";
 import { Server } from "@modelcontextprotocol/server";
@@ -35,7 +36,7 @@ import * as shutdownTimeout from "../../src/models/DeviceShutdownTimeoutError";
 import * as iosHomeLaunchTimeout from "../../src/models/IosHomeLaunchTimeoutError";
 import * as sdkCapabilityQuery from "../../src/features/observe/ios/SdkCapabilityQueryError";
 import * as recoveryAssignment from "../../src/models/SessionRecoveryAssignmentError";
-import * as streamPolicy from "../../src/daemon/streamSubscriptionPolicy";
+import * as streamPolicy from "../../src/daemon/wire/streamSubscriptionPolicy";
 import * as namespaceGuard from "../../src/daemon/sharedNamespaceGuard";
 import * as restartAdmission from "../../src/daemon/daemonRestartAdmission";
 import * as restartPending from "../../src/daemon/daemonRestartPending";
@@ -87,8 +88,8 @@ import * as planLockRefusal from "../../src/daemon/planExecutionInProgressRefusa
 import * as adbTransportUnavailable from "../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import * as ambiguousTargetRefusal from "../../src/daemon/ambiguousDeviceTargetRefusal";
 import * as daemonTypes from "../../src/daemon/types";
-import * as daemonConstants from "../../src/daemon/constants";
-import * as mcpTimeouts from "../../src/daemon/McpTimeoutError";
+import * as daemonConstants from "../../src/daemon/wire/constants";
+import * as mcpTimeouts from "../../src/daemon/wire/McpTimeoutError";
 import * as sessionReleasedDuringCall from "../../src/daemon/sessionReleasedDuringCall";
 import * as sdkTooOld from "../../src/models/SdkTooOldError";
 import * as appNotRunning from "../../src/models/AppNotRunningError";
@@ -178,7 +179,7 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "models/IosHomeLaunchTimeoutError": iosHomeLaunchTimeout,
   "features/observe/ios/SdkCapabilityQueryError": sdkCapabilityQuery,
   "models/SessionRecoveryAssignmentError": recoveryAssignment,
-  "daemon/streamSubscriptionPolicy": streamPolicy,
+  "daemon/wire/streamSubscriptionPolicy": streamPolicy,
   "daemon/sharedNamespaceGuard": namespaceGuard,
   "daemon/daemonRestartAdmission": restartAdmission,
   "daemon/daemonRestartPending": restartPending,
@@ -219,6 +220,7 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "models/DeviceCleanupInProgressError": deviceCleanupInProgress,
   "models/DeviceUnhealthyError": deviceUnhealthy,
   "models/DeviceServiceDisabledError": deviceServiceDisabled,
+  "models/UnsafeDeviceResourceCombinationError": unsafeDeviceResourceCombination,
   "models/DeviceTransportOfflineError": deviceTransportOffline,
   "models/InputDeviceOwnedError": inputOwnedError,
   "models/DeviceAssignedToBindingError": deviceAssignedToBinding,
@@ -230,7 +232,7 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "daemon/planExecutionInProgressRefusal": planLockRefusal,
   "daemon/ambiguousDeviceTargetRefusal": ambiguousTargetRefusal,
   "utils/android-cmdline-tools/AdbDeviceTransportUnavailableError": adbTransportUnavailable,
-  "daemon/McpTimeoutError": mcpTimeouts,
+  "daemon/wire/McpTimeoutError": mcpTimeouts,
   "daemon/sessionReleasedDuringCall": sessionReleasedDuringCall,
   "models/AppNotRunningError": appNotRunning,
   "models/SdkTooOldError": sdkTooOld,
@@ -886,6 +888,27 @@ describe("refusal wire contract", () => {
     }
     expect(drivenErrorClasses.has(acquisitionRefusals.DeviceUnhealthyError)).toBe(true);
     expect(drivenErrorClasses.has(deviceServiceDisabled.DeviceServiceDisabledError)).toBe(true);
+    expect(
+      drivenErrorClasses.has(unsafeDeviceResourceCombination.UnsafeDeviceResourceCombinationError),
+    ).toBe(true);
+    const unsafe = fixtures.find(
+      (fixture) => fixture.code === "unsafe_device_resource_combination",
+    )!;
+    expect(resultJson(unsafe.result)).toMatchObject({
+      success: false,
+      code: "unsafe_device_resource_combination",
+      retryable: false,
+      hazards: [
+        {
+          id: "fake-spin",
+          appliesTo: ["post_boot", "preboot"],
+          resources: ["calendarServices", "reminderServices"],
+          reason: "Fake CPU spin",
+          evidence: "Injected test evidence",
+        },
+      ],
+      howToProceed: expect.stringContaining("re-enable"),
+    });
     expect(
       isTypedToolRefusal(
         new acquisitionRefusals.DeviceUnhealthyError(

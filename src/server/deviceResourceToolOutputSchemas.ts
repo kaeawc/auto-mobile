@@ -21,6 +21,17 @@ const disabledResourcesSchema = z.array(
     labels: z.array(z.string()),
     automobileImpact: z.array(impactItemSchema),
     appImpact: z.array(impactItemSchema),
+    unsafeWith: z
+      .array(
+        z.object({
+          hazardId: z.string(),
+          appliesTo: z.array(z.enum(["post_boot", "preboot"])),
+          withResources: z.array(z.string()),
+          reason: z.string(),
+          evidence: z.string(),
+        }),
+      )
+      .optional(),
   }),
 );
 

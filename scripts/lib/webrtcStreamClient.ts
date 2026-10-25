@@ -7,7 +7,7 @@ import { ActionableError } from "../../src/models/ActionableError";
 import {
   DAEMON_ONESHOT_CLIENT_MAX_FRAME_BYTES,
   LineFramer,
-} from "../../src/daemon/socketServer/LineFramer";
+} from "../../src/daemon/wire/LineFramer";
 import { DaemonFrameTooLargeError } from "../../src/daemon/socketServer/DaemonFrameTooLargeError";
 import { webRtcStreamSocketResponseSchema } from "../../src/daemon/webrtcStreamSocketTypes";
 import type {

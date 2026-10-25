@@ -1,5 +1,5 @@
 import { ActionableError } from "../models/ActionableError";
-import { resolveDaemonStatePath } from "./constants";
+import { resolveDaemonStatePath } from "./wire/constants";
 import { ENV } from "../config/env";
 
 /** CLI opt-in to act on the shared (resident) daemon despite a private state environment. */

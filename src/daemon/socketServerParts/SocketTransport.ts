@@ -27,7 +27,7 @@ import {
   DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
   DAEMON_CANCEL_REQUEST_METHOD,
   DAEMON_HEARTBEAT_METHOD,
-} from "../constants";
+} from "../wire/constants";
 import { SocketRequestAdmissionQueue } from "../socketRequestAdmission";
 
 import { type ResourceUpdateTargets, type ListChangedKind } from "../listChangedBroadcast";

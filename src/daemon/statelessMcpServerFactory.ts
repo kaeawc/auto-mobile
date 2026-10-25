@@ -5,7 +5,7 @@ import {
   DAEMON_RELEASED_SESSION_HEADER,
   DAEMON_SESSION_TOOL_BINDING_HEADER,
   DAEMON_TOOL_SELECTION_PROFILE_HEADER,
-} from "./constants";
+} from "./wire/constants";
 import type { StatelessMcpRequestScope } from "./statelessMcpHttpEndpoint";
 
 /**

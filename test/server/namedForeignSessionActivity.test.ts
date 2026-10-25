@@ -3,7 +3,7 @@ import {
   INTERNAL_EXECUTION_ID_PARAM,
   INTERNAL_EXECUTION_START_TIME_PARAM,
   INTERNAL_MCP_SESSION_PARAM,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import { handleDaemonRequest } from "../../src/daemon/daemonRequestHandlers";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";

@@ -39,7 +39,7 @@ import {
 } from "../../src/daemon/processGeneration";
 import { DaemonLauncher } from "../../src/daemon/DaemonLauncher";
 import { spyOnPrivate } from "../helpers/spyOnPrivate";
-import type { BuildIdentity } from "../../src/daemon/buildIdentity";
+import type { BuildIdentity } from "../../src/daemon/wire/buildIdentity";
 import type { DaemonOptions, DaemonStatus } from "../../src/daemon/types";
 import type {
   DaemonProcessSpawner,
@@ -82,7 +82,7 @@ import {
   CLI_KEEPER_LIVENESS_OWNER_KIND,
   CLI_SESSION_LIVENESS_POLICY,
   getCliSessionIdleTimeoutMs,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 
 /** `startUnlocked` is private: it requires the caller to already hold the startup lock. */
 const spyOnStartUnlocked = (manager: object) =>

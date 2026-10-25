@@ -11,7 +11,7 @@ import {
   sessionReleaseThatCancelledCall,
 } from "./sessionReleasedDuringCall";
 import { DAEMON_SESSION_SUSPECT_CODE } from "./types";
-import { SUSPECT_GRACE_MS } from "./sessionLivenessWindows";
+import { SUSPECT_GRACE_MS } from "./wire/sessionLivenessWindows";
 import {
   DEVICE_CLEANUP_IN_PROGRESS_CODE,
   DEVICE_SHUTTING_DOWN_CODE,

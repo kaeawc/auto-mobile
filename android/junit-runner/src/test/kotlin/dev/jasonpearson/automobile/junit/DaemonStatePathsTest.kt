@@ -13,7 +13,7 @@ import org.junit.Test
 
 /**
  * #10906: the runner must resolve the same control socket and PID file as the daemon it launches
- * (`resolveDaemonStatePath` in `src/daemon/constants.ts`). Both are tested against the shared
+ * (`resolveDaemonStatePath` in `src/daemon/wire/constants.ts`). Both are tested against the shared
  * vectors in `test/fixtures/daemon-isolation-paths.json`, as are the desktop and XCTestRunner
  * ports.
  */

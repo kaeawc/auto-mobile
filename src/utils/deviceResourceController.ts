@@ -1,3 +1,11 @@
+import {
+  disabledResourcesOf,
+  findUnsafeResourceCombinations,
+  iosDeviceResourceHazards,
+  type IosDeviceResourceHazard,
+} from "./iosDeviceResourceHazards";
+import { toActionableError } from "../models/ActionableError";
+import { UnsafeDeviceResourceCombinationError } from "../models/UnsafeDeviceResourceCombinationError";
 import { IosDeviceResourceReader, type ServiceDefinition } from "./iosDeviceResourceReader";
 import { readdir } from "node:fs/promises";
 import type { BootedDevice } from "../models/DeviceInfo";
@@ -38,6 +46,13 @@ interface ResourceRun {
   inventory?: Promise<Map<string, string>>;
 }
 
+export interface DeviceResourceControllerExtras {
+  /** Records AutoMobile-applied simulator overrides; omitted means no ownership metadata. */
+  applications?: DeviceResourceApplicationStore | null;
+  /** Unsafe iOS resource combinations to refuse; defaults to the shipped table. */
+  hazards?: readonly IosDeviceResourceHazard[];
+}
+
 export class DefaultDeviceResourceController implements DeviceResourceController {
   constructor(
     simctl: Pick<SimCtl, "executeCommandArgs"> = new SimCtlClient(null),
@@ -45,12 +60,15 @@ export class DefaultDeviceResourceController implements DeviceResourceController
     private readonly timer: Pick<Timer, "now" | "sleep"> = defaultTimer,
     readDirectory: (path: string) => Promise<string[]> = readdir,
     private readonly android: DeviceResourceController = new AndroidDeviceResourceController(),
-    /** Records AutoMobile-applied simulator overrides; omitted means no ownership metadata. */
-    private readonly applications: DeviceResourceApplicationStore | null = null,
+    extras: DeviceResourceControllerExtras = {},
   ) {
+    this.applications = extras.applications ?? null;
+    this.hazards = extras.hazards ?? iosDeviceResourceHazards;
     this.reader = new IosDeviceResourceReader({ simctl, plist, timer, readDirectory });
   }
   private readonly reader: IosDeviceResourceReader;
+  private readonly applications: DeviceResourceApplicationStore | null;
+  private readonly hazards: readonly IosDeviceResourceHazard[];
 
   async setResources(request: DeviceResourceRequest): Promise<DeviceResourceConfigurationResult> {
     if (request.device.platform === "android") {
@@ -68,6 +86,7 @@ export class DefaultDeviceResourceController implements DeviceResourceController
       verification: "current_boot",
     };
     const run: ResourceRun = { request, result };
+    await this.assertSafeTransitions(run);
     for (const resource of Object.keys(request.resources) as ConfigurableDeviceResource[]) {
       const desired = request.resources[resource];
       if (desired === undefined) {
@@ -89,6 +108,60 @@ export class DefaultDeviceResourceController implements DeviceResourceController
     }
     await this.recordApplied(run);
     return result;
+  }
+
+  /**
+   * Refuses a hazardous change before any mutation. Only a loaded service is booted out, so a hazard
+   * resource whose services are all unloaded (already disabled, or never started) is safe to set.
+   */
+  private async assertSafeTransitions(run: ResourceRun): Promise<void> {
+    if (resolveIosDeviceKind(run.request.device) !== "simulator") {
+      return;
+    }
+    const candidates = findUnsafeResourceCombinations(
+      disabledResourcesOf(run.request.resources),
+      this.hazards,
+      "post_boot",
+    );
+    const unsafe: IosDeviceResourceHazard[] = [];
+    const bootout = new Map<ConfigurableDeviceResource, boolean>();
+    for (const hazard of candidates) {
+      for (const resource of hazard.resources) {
+        if (!bootout.has(resource)) {
+          bootout.set(resource, await this.wouldBootOut(run, resource));
+        }
+      }
+      if (hazard.resources.some((resource) => bootout.get(resource))) {
+        unsafe.push(hazard);
+      }
+    }
+    if (unsafe.length) {
+      throw new UnsafeDeviceResourceCombinationError(unsafe);
+    }
+  }
+
+  private async wouldBootOut(
+    run: ResourceRun,
+    resource: ConfigurableDeviceResource,
+  ): Promise<boolean> {
+    const catalog: Partial<Record<ConfigurableDeviceResource, readonly string[]>> =
+      iosDeviceResourceCatalog;
+    try {
+      run.inventory ??= this.reader.readRuntimeInventory(run.request);
+      const paths = await run.inventory;
+      // Absent definitions cannot be transitioned by this controller.
+      const labels = (catalog[resource] ?? []).filter((label) => paths.has(label));
+      for (const label of labels) {
+        if ((await this.reader.readService(run.request, label)).loaded) {
+          return true;
+        }
+      }
+      return false;
+    } catch (error) {
+      run.request.signal?.throwIfAborted();
+      // An unproven state is a retryable read failure, not a verdict that the combination is unsafe.
+      throw toActionableError(error, `Cannot verify the state of resource ${resource}`);
+    }
   }
 
   /** Best effort: ownership metadata never changes the verified mutation result. */

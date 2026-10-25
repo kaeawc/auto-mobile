@@ -13,7 +13,7 @@ import type {
 } from "./DeviceConditionController";
 import type { DeviceConditionKey } from "./DeviceConditionTypes";
 import { OwedResetError } from "./OwedResetError";
-import { rejectValue, shell, unsupported } from "./injectorSupport";
+import { createSerializer, rejectValue, shell, unsupported } from "./injectorSupport";
 
 /**
  * Storage fault injectors for `deviceCondition.faults` (#14066). Android only and
@@ -93,12 +93,7 @@ export function createStorageFaultInjector(adb: AdbExecutor): DeviceConditionInj
    * starts; interleaved, the reset would clear `owned` after the apply had allocated and the
    * ballast would outlive every later reset.
    */
-  let tail: Promise<unknown> = Promise.resolve();
-  const serialize = <T>(task: () => Promise<T>): Promise<T> => {
-    const run = tail.then(task, task);
-    tail = run.catch(() => undefined);
-    return run;
-  };
+  const serialize = createSerializer();
 
   const restoreNow = async (signal?: AbortSignal): Promise<void> => {
     if (!owned) {

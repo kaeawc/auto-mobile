@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { DaemonClientLike } from "../../src/daemon/client";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
+import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import {
   DaemonMcpProxy,
   RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS,

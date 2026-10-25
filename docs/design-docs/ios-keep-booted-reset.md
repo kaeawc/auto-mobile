@@ -20,6 +20,19 @@ erases the device instead (#15017). iOS reuse requires defaults.ios. The legacy
 or off. On Android-only hosts the legacy flag is accepted but inert. This does
 not enable Android reuse or accept Android reuse keys.
 
+### Destroy fallback
+
+`keep-booted` also accepts `"fallback": "destroy"`, for operators who cannot accept
+erase (erase shuts the simulator down, drops it from the pool and serializes reboots
+outside acquisition admission). Every path that would erase instead returns a non-clean
+outcome (`pending`, mode `keep-booted`, with the same `fallbackReason`), so the release
+takes the existing destroy path: the simulator is deleted, the receipt ends `destroyed`,
+and the next acquisition creates a fresh simulator through boot admission. The erase port
+is never called, so a redrive after a daemon restart cannot resume as an erase. `maxUses`
+then means "destroy after N uses". A recorded cleaning failure is kept for the resetter
+instance, so a redrive repeats the destroy instead of cleaning again. `erase` mode accepts
+only `"erase"`.
+
 ## Best-effort cleaning, not isolation certification
 
 The owner decision is to run cleaning operations, not require readback evidence

@@ -44,7 +44,7 @@ describe("DAEMON_HANDSHAKE_ENABLED env parsing", () => {
 
   async function importFreshEnabled(): Promise<boolean> {
     const mod = await import(
-      `../../src/daemon/constants.ts?handshake-env=${Date.now()}-${Math.random()}`
+      `../../src/daemon/wire/constants.ts?handshake-env=${Date.now()}-${Math.random()}`
     );
     return mod.DAEMON_HANDSHAKE_ENABLED as boolean;
   }

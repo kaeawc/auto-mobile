@@ -1,6 +1,6 @@
 import { afterEach, beforeAll, beforeEach, expect, spyOn, test } from "bun:test";
 import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
+import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import { DaemonMcpProxy, DaemonToolOutcomeUnknownError } from "../../src/daemon/daemonMcpProxy";
 import { DaemonFrameTooLargeError } from "../../src/daemon/socketServer/DaemonFrameTooLargeError";
 import type { DaemonRequest } from "../../src/daemon/types";

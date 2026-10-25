@@ -6,7 +6,7 @@ import {
   type StreamSubscriptionIdentity,
   type StreamSubscriptionLifecycleEndReason,
   type StreamSubscriptionKind,
-} from "./streamSubscriptionPolicy";
+} from "./wire/streamSubscriptionPolicy";
 import {
   getDaemonStreamDeviceLifecycleEmitter,
   type StreamDeviceLifecycleEvents,

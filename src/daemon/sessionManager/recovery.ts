@@ -10,7 +10,7 @@ import { logger } from "../../utils/logger";
 import {
   MAX_CLI_SESSION_IDLE_TIMEOUT_MS,
   getCliSessionIdleTimeoutMs as resolveCliSessionIdleTimeoutMs,
-} from "../constants";
+} from "../wire/constants";
 import { clampManagedExecutionIdleTimeoutMs } from "../sessionBroker/provisioning/executionLiveness";
 import { TerminalSessionError } from "../sessionErrors";
 import {

@@ -4,7 +4,7 @@ import { promises as fsPromises } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
-import { computeBuildIdentity } from "../../src/daemon/buildIdentity";
+import { computeBuildIdentity } from "../../src/daemon/wire/buildIdentity";
 import { DaemonClient } from "../../src/daemon/client";
 import {
   CLI_SESSION_LIVENESS_POLICY,
@@ -12,7 +12,7 @@ import {
   DAEMON_VERSION,
   DAEMON_HEARTBEAT_METHOD,
   getCliSessionIdleTimeoutMs,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import {
   IOS_RECORDING_FILE_READY_TIMEOUT_MS,
   IOS_RECORDING_STOP_TIMEOUT_MS,

@@ -1,4 +1,4 @@
-import { DAEMON_PORT_RANGE_START, DAEMON_PORT_RANGE_END } from "./constants";
+import { DAEMON_PORT_RANGE_START, DAEMON_PORT_RANGE_END } from "./wire/constants";
 
 /**
  * Pick the daemon's HTTP port: the preferred port first, then each higher port up to

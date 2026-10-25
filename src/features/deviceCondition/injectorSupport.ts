@@ -42,3 +42,16 @@ export async function adbCommand(
   }
   return `${result.stdout}\n${result.stderr}`.replace(/\r\n?/g, "\n").trim();
 }
+
+/**
+ * Runs tasks one at a time, in call order. A task that rejects does not block the next, so a
+ * lease-expiry reset in flight cannot interleave with a new apply on the same injector.
+ */
+export function createSerializer(): <T>(task: () => Promise<T>) => Promise<T> {
+  let tail: Promise<unknown> = Promise.resolve();
+  return <T>(task: () => Promise<T>): Promise<T> => {
+    const run = tail.then(task, task);
+    tail = run.catch(() => undefined);
+    return run;
+  };
+}

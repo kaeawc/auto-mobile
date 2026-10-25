@@ -11,7 +11,7 @@ import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import {
   DAEMON_VERSION,
   DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";

@@ -9,7 +9,7 @@ import { runWithAbortSignal } from "../../utils/AbortContext";
 import { createHash } from "node:crypto";
 import { isDebugModeEnabled } from "../../utils/debug";
 import { DaemonRequest, type DaemonOptions } from "../types";
-import { type DaemonSelfIdentity } from "../daemonHandshake";
+import { type DaemonSelfIdentity } from "../wire/daemonHandshake";
 import type { DaemonStateAccess } from "../daemonRequestHandlers";
 import {
   assertControlNotOnForeignDaemonDevice,

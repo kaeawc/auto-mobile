@@ -62,7 +62,10 @@ test("included Android modules with unit tests have an explicit CI task or reaso
   expect(modules.length).toBeGreaterThanOrEqual(10);
   const tokens = new Set<string>();
   for (const pattern of [".github/workflows/*.yml", ".github/actions/**/action.yml"]) {
-    for (const file of new Bun.Glob(pattern).scanSync({ cwd: root })) {
+    // `.github` is a dot directory: Bun.Glob skips it without `dot: true` on some versions (#15279).
+    const files = [...new Bun.Glob(pattern).scanSync({ cwd: root, dot: true })];
+    expect(files.length, `No files matched ${pattern}`).toBeGreaterThan(0);
+    for (const file of files) {
       collectTasks(load(readGuardFile(join(root, file))), tokens);
     }
   }

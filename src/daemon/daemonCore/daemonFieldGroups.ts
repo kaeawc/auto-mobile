@@ -40,6 +40,7 @@ export interface DaemonInjectedServices {
   readonly bindingExclusionFactory: (timer: Timer) => BindingExclusion;
   readonly foreignCtrlProxyForwardEvidence?: ForeignCtrlProxyForwardEvidence;
   readonly stopManagedAdbServer: ManagedAdbServerShutdown;
+  readonly hostIoStalled?: () => boolean;
 }
 
 /** Where this daemon listens and how it logs; `port` changes when a free port is chosen. */

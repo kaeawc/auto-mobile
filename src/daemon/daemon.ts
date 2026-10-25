@@ -280,6 +280,7 @@ export class Daemon {
       bindingExclusionFactory: retained.bindingExclusionFactory,
       foreignCtrlProxyForwardEvidence: retained.foreignCtrlProxyForwardEvidence,
       stopManagedAdbServer: managedAdbServerShutdown,
+      hostIoStalled: retained.hostIoStalled,
     };
     installDefaultProvisionedDeviceTransportFence();
     // Startup can fail before the socket server exists or any request awaits it.
@@ -776,6 +777,7 @@ export class Daemon {
       lastDatabaseHealthFailure: () => this.runtime.lastDatabaseHealthFailure,
       setLastDatabaseHealthFailure: (value) => (this.runtime.lastDatabaseHealthFailure = value),
       recoverFromDatabaseHealthFailure: () => this.database.recoverFromDatabaseHealthFailure,
+      hostIoStalled: () => this.injected.hostIoStalled,
       attemptRecovery: (...args) => this.attemptRecovery(...args),
       sessionExecutionProbe: (...args) => this.sessions.sessionExecutionProbe(...args),
       cancelAndReleaseSession: (...args) => this.cancelAndReleaseSession(...args),

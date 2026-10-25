@@ -57,6 +57,9 @@ function buildDaemon(
       startupFailureTracker: new FakeStartupFailureTracker(),
       databaseHealthProbe,
       recoverFromDatabaseHealthFailure: exitProcess,
+      // The real answer comes from the process-wide log sink, which a starved event loop in an
+      // unrelated file can flag as stalled and so excuse every timeout this file counts (#15279).
+      hostIoStalled: () => false,
     },
   );
   daemon.testHooks.setObservationStreamHealth({

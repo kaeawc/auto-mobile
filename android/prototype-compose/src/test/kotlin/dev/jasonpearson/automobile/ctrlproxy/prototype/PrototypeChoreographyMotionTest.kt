@@ -1,6 +1,8 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import dev.jasonpearson.automobile.protocol.*
 import org.junit.Assert.*
 import org.junit.Test
@@ -72,6 +74,16 @@ class PrototypeChoreographyMotionTest {
       assertNotEquals(type, now, later)
       assertNotEquals(type, EnterTransition.None, later)
     }
+  }
+
+  @Test
+  fun `the anchored fade waits for a delayed enter and springs otherwise`() {
+    assertEquals(
+      tween<Float>(DELAYED_ENTER_MS, delayMillis = 120),
+      prototypeAnchorFadeSpec(entering = true, enterDelayMs = 120),
+    )
+    assertEquals(spring<Float>(), prototypeAnchorFadeSpec(entering = true, enterDelayMs = 0))
+    assertEquals(spring<Float>(), prototypeAnchorFadeSpec(entering = false, enterDelayMs = 120))
   }
 
   @Test

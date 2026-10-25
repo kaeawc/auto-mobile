@@ -36,6 +36,9 @@ class PrototypeChoreographyTest {
       read("""{"type":"blurReplace","delayMs":120}"""),
     )
     assertEquals(PrototypeTransition("scale"), read("""{"type":"scale"}"""))
+    // Integral tokens in other spellings keep their delay.
+    assertEquals(PrototypeTransition("fade", 100), read("""{"type":"fade","delayMs":100.0}"""))
+    assertEquals(PrototypeTransition("fade", 100), read("""{"type":"fade","delayMs":1e2}"""))
   }
 
   @Test

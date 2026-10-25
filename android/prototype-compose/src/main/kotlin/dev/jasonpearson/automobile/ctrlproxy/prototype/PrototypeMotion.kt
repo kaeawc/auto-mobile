@@ -132,7 +132,7 @@ internal fun prototypeStaggerDelays(
 }
 
 /** Length of the enter animations when a delay is set; unset enters keep Compose's springs. */
-private const val DELAYED_ENTER_MS = 300
+internal const val DELAYED_ENTER_MS = 300
 
 /** How far a `blurReplace` node is blurred while it is entering or leaving. */
 private val BLUR_REPLACE_RADIUS = 12.dp

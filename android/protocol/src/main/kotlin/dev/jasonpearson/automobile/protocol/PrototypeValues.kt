@@ -217,7 +217,9 @@ object PrototypeTransitionSerializer :
     val type =
       (data["type"] as? JsonPrimitive)?.takeIf { it.isString }?.content
         ?: throw SerializationException("Expected transition type")
-    val delay = (data["delayMs"] as? JsonPrimitive)?.intOrNull
+    // The contract accepts integral tokens such as 100.0 and 1e2, which `intOrNull` would drop.
+    val delay =
+      (data["delayMs"] as? JsonPrimitive)?.doubleOrNull?.takeIf { it % 1.0 == 0.0 }?.toInt()
     return PrototypeTransition(type, delay)
   }
 

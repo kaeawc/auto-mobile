@@ -468,7 +468,10 @@ private fun RenderPrototypeNode(
         prototypeEnterTransition(node.source.transition?.type, prototypeRtl(), node.enterDelayMs),
       exit = prototypeExitTransition(node.source.transition?.type, prototypeRtl()),
     ) {
-      ProvideAnchorFade(none = node.source.transition?.type == "none") {
+      ProvideAnchorFade(
+        none = node.source.transition?.type == "none",
+        enterDelayMs = node.enterDelayMs,
+      ) {
         RenderPrototypeNodeContent(
           node,
           interact,
@@ -530,7 +533,10 @@ private fun RenderPrototypeVisibility(
           ),
         exit = prototypeExitTransition(node.source?.transition?.type, prototypeRtl()),
       ) {
-        ProvideAnchorFade(none = node.source?.transition?.type == "none") {
+        ProvideAnchorFade(
+          none = node.source?.transition?.type == "none",
+          enterDelayMs = node.enterDelayMs,
+        ) {
           content(
             node,
             prototypeBlurReplace(node.source?.transition?.type, node.enterDelayMs),

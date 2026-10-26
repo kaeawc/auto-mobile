@@ -48,6 +48,11 @@ and device release invalidate the cache. Observe waits at most 750 ms for a read
 `deviceLockUnknown.reason` is `pending` while the shared 4-second probe continues,
 or `timeout`, `error`, or `unparseable` after a failed read. Unknown readings omit
 `deviceLock`; they never imply an unlocked device. Probe reads never reject.
+An expired known reading is served stale while one background refresh runs
+(120 seconds past expiry for unlocked, 10 seconds for locked; `staleUnlockedMs` /
+`staleLockedMs`), so a burst of observes on a loaded host does not report
+`deviceLockUnknown` just because the TTL lapsed (#15311). Invalidation drops the
+stale reading; only a device with no recent reading can still report `pending`.
 Caller abort detaches cache/budget waits with an unknown `pending` reading and
 message `caller aborted`; the shared read continues and can populate the cache.
 A notifyutil executor abort becomes an unknown `error` reading.

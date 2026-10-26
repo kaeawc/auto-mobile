@@ -247,3 +247,85 @@ test("budgeted abort leaves the shared flight able to fill the cache", async () 
   expect(await view.read("a")).toEqual(known);
   expect(h.calls()).toBe(1);
 });
+
+test("an expired unlocked reading is served stale while one background refresh runs (#15311)", async () => {
+  const h = harness();
+  h.answer(Promise.resolve(unlocked));
+  await h.cache.read("a");
+  h.timer.advanceTime(30_000);
+  const refresh = Promise.withResolvers<IosLockStateReading>();
+  h.answer(refresh.promise);
+  const view = new BudgetedIosLockStateProbe(h.cache, h.timer);
+  const burst = await Promise.all(Array.from({ length: 10 }, () => view.read("a")));
+  expect(burst).toEqual(burst.map(() => unlocked));
+  expect(h.calls()).toBe(2);
+  refresh.resolve(known);
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(await h.cache.read("a")).toEqual(known);
+  expect(h.calls()).toBe(2);
+});
+
+test("a failed refresh keeps serving the last known reading within the stale window", async () => {
+  const h = harness();
+  h.answer(Promise.resolve(unlocked));
+  await h.cache.read("a");
+  h.timer.advanceTime(30_000);
+  h.answer(Promise.resolve({ kind: "unknown", reason: "timeout" }));
+  expect(await h.cache.read("a")).toEqual(unlocked);
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(await h.cache.read("a")).toEqual(unlocked);
+  h.timer.advanceTime(5_000);
+  expect(await h.cache.read("a")).toEqual(unlocked);
+  expect(h.calls()).toBe(3);
+});
+
+test("a stale reading past its window is not served and the caller waits for a fresh one", async () => {
+  const h = harness();
+  h.answer(Promise.resolve(unlocked));
+  await h.cache.read("a");
+  h.timer.advanceTime(30_000 + 120_000);
+  const fresh = Promise.withResolvers<IosLockStateReading>();
+  h.answer(fresh.promise);
+  const pending = h.cache.read("a");
+  fresh.resolve(known);
+  expect(await pending).toEqual(known);
+});
+
+test("a locked reading is stale-served only for its short window", async () => {
+  const h = harness();
+  await h.cache.read("a");
+  h.timer.advanceTime(2_000 + 9_999);
+  h.answer(Promise.resolve(unlocked));
+  expect(await h.cache.read("a")).toEqual(known);
+  await Promise.resolve();
+  await Promise.resolve();
+  // The refresh landed: the fresh unlocked reading replaces the stale locked one.
+  expect(await h.cache.read("a")).toEqual(unlocked);
+  expect(h.calls()).toBe(2);
+});
+
+test("a locked reading older than its stale window is not served", async () => {
+  const h = harness();
+  await h.cache.read("a");
+  h.timer.advanceTime(2_000 + 10_000);
+  const fresh = Promise.withResolvers<IosLockStateReading>();
+  h.answer(fresh.promise);
+  const reading = h.cache.read("a");
+  fresh.resolve(unlocked);
+  expect(await reading).toEqual(unlocked);
+});
+
+test("invalidation drops the stale reading so a transition is never masked", async () => {
+  const h = harness();
+  h.answer(Promise.resolve(unlocked));
+  await h.cache.read("a");
+  h.timer.advanceTime(30_000);
+  h.cache.invalidate("a");
+  const fresh = Promise.withResolvers<IosLockStateReading>();
+  h.answer(fresh.promise);
+  const reading = h.cache.read("a");
+  fresh.resolve(known);
+  expect(await reading).toEqual(known);
+});

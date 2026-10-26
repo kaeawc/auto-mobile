@@ -168,6 +168,12 @@ export const DAEMON_ENV = {
     internal: true,
     doc: "Acceptance harness discovery ordering.",
   },
+  MCP_MODERN_ERA: {
+    name: "AUTOMOBILE_MCP_MODERN_ERA",
+    kind: "bool",
+    default: "off",
+    doc: "Serve MCP 2026-07-28 envelope requests on the daemon HTTP endpoint (1/true/yes/on).",
+  },
   TOOL_RESULTS_NO_STRUCTURED_CONTENT: {
     name: "AUTOMOBILE_TOOL_RESULTS_NO_STRUCTURED_CONTENT",
     kind: "bool",

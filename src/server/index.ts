@@ -25,6 +25,7 @@ export { enrichAcquisitionResult } from "./pipeline/ingress/acquisition";
 import { createListSessionTools } from "./pipeline/ingress/listSessionTools";
 import { createToolCallExecutor } from "./pipeline/ingress/executeToolCall";
 import { daemonTaskManager } from "../daemon/tasks/daemonTaskManager";
+import { TASKS_EXTENSION_ID } from "../daemon/tasks/mcpTasksExtension";
 import { installTasksProtocol } from "./tasks/installTasksProtocol";
 import type { TaskManager } from "../daemon/tasks/TaskManager";
 import type { TaskLeaseKeepalive } from "../daemon/tasks/taskLeaseKeepalive";
@@ -99,6 +100,7 @@ import {
 } from "../daemon/toolSelectionProfileRegistry";
 
 export interface McpServerOptions {
+  era?: "legacy" | "modern";
   deviceReadiness?: DeviceReadiness;
   iosDependencies?: IosDoctorDependencies;
   debug?: boolean;
@@ -387,6 +389,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       resources: { subscribe: true, listChanged: true },
       tools: {},
       prompts: {},
+      ...(options.era === "modern" && { extensions: { [TASKS_EXTENSION_ID]: {} } }),
     },
   );
   startupBenchmark.endPhase("sdkInitialization");

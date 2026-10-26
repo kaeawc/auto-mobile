@@ -1,3 +1,15 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+import {
+  classifyInboundRequest,
+  createMcpHandler,
+  McpServer,
+  type McpServerFactory,
+  type CreateMcpHandlerOptions,
+  type McpHttpHandler,
+} from "@modelcontextprotocol/server";
+import { ENV, readEnvBool } from "../config/env";
+import { ActionableError } from "../models/ActionableError";
+import { rootAsyncScope } from "./inProcessMcpDispatcher";
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from "node:http";
 import { readMcpSessionKey } from "./mcpSessionKey";
 import type { ExecutionCancellationReason } from "./executionTracker";
@@ -5,7 +17,7 @@ import { describeUnknownError, errorMessage } from "../utils/describeUnknownErro
 import type { IdGenerator } from "../utils/IdGenerator";
 import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
-import { INTERNAL_MCP_SESSION_PARAM } from "./wire/constants";
+import { INTERNAL_MCP_SESSION_PARAM, MCP_STREAMABLE_PATH } from "./wire/constants";
 
 /**
  * The daemon's internal MCP HTTP endpoint, stateless (#4678, owner decision 2026-10-17).
@@ -63,6 +75,7 @@ export interface StatelessMcpServer<T> {
 
 /** What a request's one-shot server is built with. */
 export interface StatelessMcpRequestScope {
+  readonly era?: "legacy" | "modern";
   /** Unique per POST: keys the executions this request starts so they cancel on their own. */
   readonly requestScopeId: string;
   /** The caller's session key: the header, else the in-band `__mcpSessionId` argument. */
@@ -89,6 +102,15 @@ export interface StatelessMcpHttpEndpointDeps<
   readonly timer: Pick<Timer, "setInterval" | "clearInterval">;
   readonly idGenerator: IdGenerator;
   readonly keepaliveIntervalMs: number;
+  /** Injectable SDK boundary; disabled requests never classify or construct a handler. */
+  readonly modern?: {
+    enabled(): boolean;
+    classify: typeof classifyInboundRequest;
+    createHandler(
+      factory: McpServerFactory,
+      options: CreateMcpHandlerOptions,
+    ): Pick<McpHttpHandler, "fetch" | "close">;
+  };
   createTransport(): T;
   createServer(req: Req, scope: StatelessMcpRequestScope): StatelessMcpServer<T>;
   /** Cancel the executions keyed on a request scope (`executionTracker.cancelSessionExecutions`). */
@@ -162,6 +184,43 @@ function cancelKey(sessionKey: string, id: JsonRpcId): string {
   return `${sessionKey}${cancelKeySuffix(id)}`;
 }
 
+/** Adapt the already-read node request without reading or serializing its body again. */
+function modernWebRequest(req: McpHttpRequestLike, signal: AbortSignal): Request {
+  const headers = new Headers();
+  for (const [name, value] of Object.entries(req.headers)) {
+    const values = Array.isArray(value) ? value : value === undefined ? [] : [value];
+    for (const part of values) {
+      headers.append(name, part);
+    }
+  }
+  return new Request(new URL(MCP_STREAMABLE_PATH, "http://localhost"), {
+    method: "POST",
+    headers,
+    signal,
+  });
+}
+
+/** Preserve SSE chunks, including UTF-8 characters split across chunks. */
+async function writeModernResponse(response: Response, res: McpHttpResponseLike): Promise<void> {
+  if (res.destroyed || res.writableEnded) {
+    await response.body?.cancel();
+    return;
+  }
+  res.writeHead(response.status, Object.fromEntries(response.headers));
+  const decoder = new TextDecoder();
+  if (response.body) {
+    for await (const chunk of response.body) {
+      if (res.destroyed || res.writableEnded) {
+        break;
+      }
+      res.write(decoder.decode(chunk, { stream: true }));
+    }
+  }
+  if (!res.destroyed && !res.writableEnded) {
+    res.end(decoder.decode());
+  }
+}
+
 export class StatelessMcpHttpEndpoint<
   Req extends McpHttpRequestLike = IncomingMessage,
   Res extends McpHttpResponseLike = ServerResponse,
@@ -172,6 +231,11 @@ export class StatelessMcpHttpEndpoint<
   // Scope ids per cancel key, oldest first: keyless requests may share a JSON-RPC id.
   private readonly byCancelKey = new Map<string, string[]>();
   private accepting = true;
+  private readonly modernScope = new AsyncLocalStorage<{
+    req: Req;
+    scope: StatelessMcpRequestScope;
+  }>();
+  private readonly root = rootAsyncScope("auto-mobile-mcp-http-root");
 
   constructor(private readonly deps: StatelessMcpHttpEndpointDeps<Req, Res, T>) {}
 
@@ -245,6 +309,11 @@ export class StatelessMcpHttpEndpoint<
       requestMcpSessionId: headerSessionKey ?? readInBandMcpSessionId(parsedBody),
     };
 
+    if (this.isModernRequest(req, parsedBody)) {
+      await this.handleModern(req, res, parsedBody, scope, headerSessionKey, sendJsonRpcError);
+      return;
+    }
+
     let server: StatelessMcpServer<T>;
     try {
       server = this.deps.createServer(req, scope);
@@ -280,12 +349,88 @@ export class StatelessMcpHttpEndpoint<
     await this.dispatch(req, res, transport, parsedBody, sendJsonRpcError);
   }
 
+  private isModernRequest(req: Req, parsedBody: unknown): boolean {
+    if (!(this.deps.modern?.enabled() ?? readEnvBool(ENV.MCP_MODERN_ERA))) {
+      return false;
+    }
+    const header = (name: string) => {
+      const value = req.headers[name];
+      return typeof value === "string" ? value : undefined;
+    };
+    return (
+      (this.deps.modern?.classify ?? classifyInboundRequest)({
+        httpMethod: req.method ?? "POST",
+        protocolVersionHeader: header("mcp-protocol-version"),
+        mcpMethodHeader: header("mcp-method"),
+        mcpNameHeader: header("mcp-name"),
+        body: parsedBody,
+      }).kind === "modern"
+    );
+  }
+
+  /** The SDK owns modern protocol serving; this endpoint still owns request lifetime. */
+  private async handleModern(
+    req: Req,
+    res: Res,
+    parsedBody: unknown,
+    scope: StatelessMcpRequestScope,
+    headerSessionKey: string | undefined,
+    sendJsonRpcError: (message: string, error?: unknown) => void,
+  ): Promise<void> {
+    const controller = new AbortController();
+    const handler = (this.deps.modern?.createHandler ?? createMcpHandler)(
+      (ctx) => {
+        const current = this.modernScope.getStore();
+        if (!current) {
+          throw new ActionableError("Modern MCP request scope is missing");
+        }
+        const server = this.deps.createServer(current.req, { ...current.scope, era: ctx.era });
+        if (!(server instanceof McpServer)) {
+          throw new ActionableError("Modern MCP serving requires an SDK McpServer");
+        }
+        return server;
+      },
+      { legacy: "reject", responseMode: "sse", keepAliveMs: 0 },
+    );
+    const request = this.track(scope, headerSessionKey, parsedBody, handler, {
+      close: async () => {
+        controller.abort();
+      },
+    });
+    const socket = req.socket ?? undefined;
+    const close = () => {
+      socket?.off("close", close);
+      request.close().catch((error) => {
+        logger.warn(`Modern MCP request close failed: ${errorMessage(error)}`, error);
+      });
+    };
+    res.once("close", close);
+    res.once("finish", close);
+    socket?.once("close", close);
+    const clearKeepalive = this.startKeepalive(res);
+    try {
+      const response = await this.root.run(() =>
+        this.modernScope.run({ req, scope }, () =>
+          handler.fetch(modernWebRequest(req, controller.signal), { parsedBody }),
+        ),
+      );
+      await writeModernResponse(response, res);
+    } catch (error) {
+      logger.error("Modern MCP HTTP request handling failed:", error);
+      sendJsonRpcError("Server error", error);
+    } finally {
+      clearKeepalive();
+      socket?.off("close", close);
+      await request.close();
+    }
+  }
+
   private track(
     scope: StatelessMcpRequestScope,
     headerSessionKey: string | undefined,
     parsedBody: unknown,
-    server: StatelessMcpServer<T>,
-    transport: T,
+    server: Pick<StatelessMcpServer<T>, "close">,
+    transport: Pick<T, "close">,
   ): InFlightRequest {
     const { requestScopeId } = scope;
     // A `notifications/cancelled` carries no in-band arguments, so the header key indexes
@@ -314,8 +459,8 @@ export class StatelessMcpHttpEndpoint<
 
   private async closeRequest(
     request: InFlightRequest,
-    server: StatelessMcpServer<T>,
-    transport: T,
+    server: Pick<StatelessMcpServer<T>, "close">,
+    transport: Pick<T, "close">,
     reason: ExecutionCancellationReason | undefined,
   ): Promise<void> {
     try {
@@ -421,13 +566,7 @@ export class StatelessMcpHttpEndpoint<
     return matches.length === 1 ? matches[0] : undefined;
   }
 
-  private async dispatch(
-    req: Req,
-    res: Res,
-    transport: T,
-    parsedBody: unknown,
-    sendJsonRpcError: (message: string, error?: unknown) => void,
-  ): Promise<void> {
+  private startKeepalive(res: Res): () => void {
     // SSE keepalive: prevent the fetch() response stream from going idle
     // during long-running tool calls (e.g. executePlan at ~6-10 min).
     // Without traffic the client-side stream silently dies; the server
@@ -447,6 +586,17 @@ export class StatelessMcpHttpEndpoint<
     };
     res.once("close", clearKeepalive);
     res.once("finish", clearKeepalive);
+    return clearKeepalive;
+  }
+
+  private async dispatch(
+    req: Req,
+    res: Res,
+    transport: T,
+    parsedBody: unknown,
+    sendJsonRpcError: (message: string, error?: unknown) => void,
+  ): Promise<void> {
+    const clearKeepalive = this.startKeepalive(res);
     try {
       await transport.handleRequest(req, res, parsedBody);
     } catch (error) {

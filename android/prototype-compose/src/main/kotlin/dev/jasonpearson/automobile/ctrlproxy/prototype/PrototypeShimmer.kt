@@ -36,6 +36,8 @@ internal fun Modifier.prototypeShimmer(enabled: Boolean): Modifier {
   if (!enabled) return this
   val busy = semantics { stateDescription = "Loading" }
   if (!LocalPrototypeMotion.current) return busy
+  // An intentional infinite loop: counted as a loop, never as motion `observe` has to wait out.
+  ReportPrototypeMotion(loop = true) { true }
   val transition = rememberInfiniteTransition(label = "prototypeShimmer")
   val progress by
     transition.animateFloat(

@@ -321,7 +321,11 @@ hoc host signature.
 
 `androidProfileArchetypes` and `iosClassifications` classify installed AVD
 profiles and simulator device types; without them Android acquisition fails with
-`catalog_metadata_invalid`. Android `os` selectors use the release version (`16`),
+`catalog_metadata_invalid`. `capabilities.iosDuo` (default `false`, requires
+`defaults.ios`) lets the host execute iPhone Duo requests. Creating a Duo for a
+`duo` archetype request needs both a Duo `archetypes` entry and a Duo
+`modelTypes` entry; a Duo model-type request needs only the `modelTypes` entry;
+an exact Duo model needs neither. Android `os` selectors use the release version (`16`),
 not the API level (`36`); at equal versions the resolver prefers `google_apis`
 over `google_apis_playstore`.
 

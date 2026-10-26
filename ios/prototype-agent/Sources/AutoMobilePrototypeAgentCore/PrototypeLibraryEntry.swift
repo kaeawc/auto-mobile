@@ -6,8 +6,8 @@ struct PrototypeLibraryFailure: Error, Equatable, LocalizedError {
     var errorDescription: String? { "\(path): \(message)" }
 }
 
-struct PrototypeLibraryEntry: Codable, Hashable, Identifiable {
-    enum Source: String, Codable, Hashable { case mcp, file, share, paste }
+struct PrototypeLibraryEntry: Codable, Hashable, Identifiable, Sendable {
+    enum Source: String, Codable, Hashable, Sendable { case mcp, file, share, paste }
     let libraryId: String
     let label: String
     let importedAt: Int

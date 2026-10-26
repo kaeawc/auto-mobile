@@ -1,7 +1,7 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ProtoViewerTempFile, ProtoViewerTempFiles } from "./AndroidProtoViewer";
+import type { ProtoViewerTempFile, ProtoViewerTempFiles } from "./protoViewerDevice";
 
 /**
  * A private (0700) temp directory per bundle, removed with the file once it has been pushed. The

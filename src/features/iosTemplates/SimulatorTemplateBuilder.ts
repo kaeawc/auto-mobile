@@ -20,6 +20,7 @@ import type { SimulatorTemplateLock } from "./SimulatorTemplateLock";
 import type { TemplateSimulatorClient } from "./SimulatorCreationService";
 import type { XcodeVersionReader } from "./XcodeVersionReader";
 import {
+  TEMPLATE_CPU_MEAN_WINDOW_MS,
   TEMPLATE_CPU_THRESHOLD_PERCENT,
   TEMPLATE_MAX_WAIT_MS,
   TEMPLATE_QUIET_WINDOW_MS,
@@ -201,6 +202,7 @@ export class SimulatorTemplateBuilder {
       await this.deps.settle.waitUntilSettled(manifest.udid, {
         quietWindowMs: TEMPLATE_QUIET_WINDOW_MS,
         cpuThresholdPercent: TEMPLATE_CPU_THRESHOLD_PERCENT,
+        cpuMeanWindowMs: TEMPLATE_CPU_MEAN_WINDOW_MS,
         maxWaitMs: TEMPLATE_MAX_WAIT_MS,
         signal,
       });
@@ -229,13 +231,14 @@ export class SimulatorTemplateBuilder {
       });
       return "ready";
     } catch (error) {
-      return this.recordFailure(manifest, untracked, error);
+      return this.recordFailure(manifest, untracked, error, signal?.aborted === true);
     }
   }
   private async recordFailure(
     manifest: SimulatorTemplateManifest,
     untracked: ReadonlySet<string>,
     error: unknown,
+    interrupted = false,
   ): Promise<TemplateBuildResult> {
     const { store, timer } = this.deps;
     logger.warn(`Template build did not complete: ${errorMessage(error)}`, error);
@@ -243,6 +246,11 @@ export class SimulatorTemplateBuilder {
       this.removePartial(manifest, untracked),
     );
     const refused = error instanceof BootCapacityExhaustedError;
+    if (interrupted) {
+      // The user stopped the build: it is not a failed attempt, so no retry backoff (#15312).
+      await store.write({ ...manifest, udid: retainedUdid, state: "failed", failure: undefined });
+      return "failed";
+    }
     const attempt = (manifest.attempt ?? 0) + (refused ? 0 : 1);
     const delay = refused
       ? 60_000

@@ -10,6 +10,7 @@ setup() {
   jq 'map(.settleMs=0 | if has("durationMs") then .durationMs=0 else . end)' "$ROOT/benchmark/prototype-frame/scenarios.json" > "$SCENARIOS"
   cat > "$PROTOTYPE_BENCH_CLI" <<'STUB'
 #!/usr/bin/env bash
+[[ -z "${CONSUME_STDIN:-}" ]] || cat > /dev/null
 printf 'cli' >> "$CALLS"
 printf ' <%s>' "$@" >> "$CALLS"
 printf '\n' >> "$CALLS"
@@ -22,6 +23,7 @@ if [[ -n "${FAIL_DISMISS:-}" && "${5:-}" == dismiss ]]; then exit 9; fi
 STUB
   cat > "$PROTOTYPE_BENCH_ADB" <<'STUB'
 #!/usr/bin/env bash
+[[ -z "${CONSUME_STDIN:-}" ]] || cat > /dev/null
 printf 'adb' >> "$CALLS"
 printf ' <%s>' "$@" >> "$CALLS"
 printf '\n' >> "$CALLS"
@@ -37,6 +39,10 @@ if [[ -n "${FAIL_CAPTURE:-}" && ! -e "$CALLS.failed" ]]; then
   exit 1
 fi
 if [[ -n "${MISSING_FIELDS:-}" ]]; then echo 'Total frames rendered: 100'; exit 0; fi
+if [[ -n "${ZERO_FRAMES:-}" ]]; then
+  printf 'Total frames rendered: 0\nJanky frames: 0 (0.00%%)\n50th percentile: 4950ms\n90th percentile: 4950ms\n95th percentile: 4950ms\n99th percentile: 4950ms\nNumber Slow UI thread: 0\n'
+  exit 0
+fi
 # Synthetic gfxinfo sample (field layout as in src/features/performance tests); a device capture is owed (#12128).
 cat <<'DUMP'
 Total frames rendered: 100
@@ -210,4 +216,31 @@ STUB
   [ "$status" -eq 0 ]
   [[ "${lines[1]}" == *'gfxinfo dev.jasonpearson.automobile.ctrlproxy reset'* ]]
   [ ! -e "$CALLS" ]
+}
+@test "adb and the CLI that consume stdin do not stop later scenarios (#15319)" {
+  CONSUME_STDIN=1 run "$SCRIPT" --device test-device --show-settle-ms 0 --scenarios "$SCENARIOS"
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | grep -c '^scenario=')" -eq 7 ]
+  [ "$(grep -c '<reset>' "$CALLS")" -eq 7 ]
+  [ "$(grep -c '"text":"Tab 2"' "$CALLS")" -eq 5 ]
+  [ "$(grep -c '<swipeOn>' "$CALLS")" -eq 16 ]
+}
+@test "zero rendered frames report n/a percentiles instead of the gfxinfo sentinel (#15319)" {
+  ZERO_FRAMES=1 run "$SCRIPT" --device test-device --show-settle-ms 0 --scenarios "$SCENARIOS" --scenario idle
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'scenario=idle frames=0 janky_pct=0.00 p50_ms=n/a p90_ms=n/a p95_ms=n/a p99_ms=n/a slow_ui=0'* ]]
+  ZERO_FRAMES=1 run "$SCRIPT" --device test-device --show-settle-ms 0 --scenarios "$SCENARIOS" --scenario idle --markdown
+  [[ "$output" == *'| idle | 0 | 0.00 | n/a | n/a | n/a | n/a | 0 | — |'* ]]
+}
+@test "show uploads the benchmark-image asset the spec references (#15319)" {
+  run "$SCRIPT" --dry-run --show-settle-ms 0 --scenarios "$SCENARIOS" --scenario idle
+  [ "$status" -eq 0 ]
+  [[ "${lines[0]}" == *'prototype --action show --specPath'*'--assets'*'benchmark-image'*'benchmark-image.png'* ]]
+  run "$SCRIPT" --device test-device --show-settle-ms 0 --scenarios "$SCENARIOS" --scenario idle
+  [ "$status" -eq 0 ]
+  show_line=$(grep '<show>' "$CALLS")
+  [[ "$show_line" == *'<--assets>'*'benchmark-image'* ]]
+  asset_path=$(printf '%s' "$show_line" | sed -n 's/.*"path":"\([^"]*\)".*/\1/p')
+  [ -n "$asset_path" ]
+  [ ! -e "$asset_path" ]
 }

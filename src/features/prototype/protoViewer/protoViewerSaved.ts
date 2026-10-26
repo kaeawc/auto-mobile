@@ -15,7 +15,7 @@ import {
   ProtoViewerEntryPointMissingError,
   ProtoViewerStorageError,
   type ProtoViewerDevice,
-} from "./AndroidProtoViewer";
+} from "./protoViewerDevice";
 import {
   PROTOVIEWER_CAPABILITY_PATH,
   PROTOVIEWER_LIBRARY_ID,
@@ -74,7 +74,7 @@ export function protoViewerHandles(args: Pick<ProtoViewerInput, "action" | "pin"
 
 /**
  * Runs `save` or `open` against ProtoViewer. Undefined means "not routed": a save when ProtoViewer
- * is not installed falls back to the CtrlProxy saved path unchanged.
+ * is not installed falls back to the existing platform save path.
  */
 export async function routeToProtoViewer(
   args: ProtoViewerInput,
@@ -87,35 +87,39 @@ export async function routeToProtoViewer(
   if (args.spec === undefined) {
     return undefined;
   }
-  const userId = await probeInstalledUser(deps, signal);
-  return userId === undefined
-    ? undefined
-    : await saveInProtoViewer(args, args.spec, userId, deps, signal);
+  const installed = await probeInstalled(deps, signal);
+  if (!installed) {
+    // The normal case for Android without ProtoViewer and for physical iOS devices.
+    logger.debug(
+      "[protoviewer] ProtoViewer is unavailable for this target. Keeping the platform save path.",
+    );
+    return undefined;
+  }
+  return await saveInProtoViewer(args, args.spec, deps, signal);
 }
 
-/** A probe that cannot answer keeps the CtrlProxy path: it must never fail a save by itself. */
-async function probeInstalledUser(
+/** A probe that cannot answer keeps the platform save path: it must never fail a save by itself. */
+async function probeInstalled(
   deps: ProtoViewerRouteDependencies,
   signal?: AbortSignal,
-): Promise<number | undefined> {
+): Promise<boolean> {
   try {
-    return await deps.device.installedUser(signal);
+    return await deps.device.installed(signal);
   } catch (error) {
     if (signal?.aborted) {
       throw error;
     }
     logger.warn(
-      `[protoviewer] could not check for ProtoViewer, keeping the CtrlProxy path: ${errorMessage(error)}`,
+      `[protoviewer] could not check for ProtoViewer, keeping the platform save path: ${errorMessage(error)}`,
       error,
     );
-    return undefined;
+    return false;
   }
 }
 
 async function saveInProtoViewer(
   args: ProtoViewerInput,
   spec: PrototypeSpec,
-  userId: number,
   deps: ProtoViewerRouteDependencies,
   signal?: AbortSignal,
 ): Promise<ProtoViewerOutput | undefined> {
@@ -136,16 +140,15 @@ async function saveInProtoViewer(
   return await deviceCall(
     () =>
       deps.device.importBundle(
-        userId,
         bundle.bytes,
         label.label,
         args.timeoutMs ?? PROTOVIEWER_DEFAULT_TIMEOUT_MS,
         signal,
       ),
     (error) => {
-      // An older ProtoViewer without the MCP entry point, or one whose shared storage the adb
-      // shell cannot use (#15174): nothing was imported, so keep saving through CtrlProxy.
-      logger.warn(`[protoviewer] ${error.message} Keeping the CtrlProxy path.`);
+      // An absent entry point or unusable app storage means nothing was imported; retain the
+      // platform save path (including Android shell-owned storage, #15174).
+      logger.warn(`[protoviewer] ${error.message} Keeping the platform save path.`);
       return undefined;
     },
   );
@@ -176,14 +179,14 @@ async function openInProtoViewer(
       "open takes a ProtoViewer library id (the viewer.libraryId a save returned).",
     );
   }
-  const userId = await deps.device.installedUser(signal).catch((error: unknown) => {
+  const installed = await deps.device.installed(signal).catch((error: unknown) => {
     if (signal?.aborted) {
       throw error;
     }
     logger.warn(`[protoviewer] could not check for ProtoViewer: ${errorMessage(error)}`, error);
     return undefined;
   });
-  if (userId === undefined) {
+  if (!installed) {
     return failure(
       "unsupported_capability",
       "open needs ProtoViewer installed on the device; install it and save the prototype again.",
@@ -191,8 +194,7 @@ async function openInProtoViewer(
   }
   const libraryId = args.id;
   const opened = await deviceCall(
-    () =>
-      deps.device.open(userId, libraryId, args.timeoutMs ?? PROTOVIEWER_DEFAULT_TIMEOUT_MS, signal),
+    () => deps.device.open(libraryId, args.timeoutMs ?? PROTOVIEWER_DEFAULT_TIMEOUT_MS, signal),
     (error) => failure("unsupported_capability", error.message),
   );
   return opened ?? failure("unsupported_capability", "ProtoViewer could not open the entry.");

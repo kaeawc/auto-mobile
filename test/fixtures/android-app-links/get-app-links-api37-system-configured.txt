@@ -1,0 +1,8 @@
+  com.google.android.calendar:
+    ID: a0986d1b-eab7-4651-a821-020937d57eb2
+    Signatures: [D2:2C:C5:00:29:9F:B2:28:73:A0:1A:01:0D:E1:C8:2F:BE:4D:06:11:19:B9:48:14:DD:30:1D:AB:50:CB:76:78]
+    Domain verification state:
+      www.google.com: system_configured
+      calendar.google.com: system_configured
+      client-side-encryption.google.com: system_configured
+      krahsc.google.com: system_configured

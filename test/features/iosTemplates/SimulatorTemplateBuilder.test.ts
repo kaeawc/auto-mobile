@@ -69,6 +69,19 @@ test("abort after create deletes half template and releases lock", async () => {
   expect(fake.events.at(-1)).toBe("release");
 });
 
+test("an interrupted build leaves no retry backoff behind (#15312)", async () => {
+  const fake = new SimulatorTemplateBuildHarness();
+  const abort = new AbortController();
+  fake.afterCreate = () => abort.abort();
+  const builder = new SimulatorTemplateBuilder(fake.dependencies());
+
+  expect(await builder.build(key, abort.signal)).toBe("failed");
+
+  expect(fake.manifest?.attempt).toBe(0);
+  expect(fake.manifest?.nextAttemptAtMs).toBeUndefined();
+  expect(fake.manifest?.udid).toBe("");
+});
+
 test("abort cleanup runs outside the cancelled ambient request", async () => {
   const fake = new SimulatorTemplateBuildHarness();
   const abort = new AbortController();

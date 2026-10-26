@@ -1,7 +1,11 @@
+import {
+  ProtoViewerEntryPointMissingError,
+  ProtoViewerStorageError,
+} from "../../src/features/prototype/protoViewer/protoViewerDevice";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { PROTOTYPE_SAVED_CAPABILITY } from "../../src/features/observe/android/ctrlProxyProtocol";
 import { InMemoryPrototypeStatusStore } from "../../src/features/prototype/PrototypeStatusStore";
-import type { ProtoViewerDevice } from "../../src/features/prototype/protoViewer/AndroidProtoViewer";
+import type { ProtoViewerDevice } from "../../src/features/prototype/protoViewer/protoViewerDevice";
 import type { ProtoViewerResult } from "../../src/features/prototype/protoViewer/protoViewerContract";
 import { PROTOVIEWER_IMPORTED_WARNING } from "../../src/features/prototype/protoViewer/protoViewerSaved";
 import { prototypeOutputSchema, registerPrototypeTools } from "../../src/server/prototypeTools";
@@ -17,7 +21,11 @@ import { toolStructured } from "../helpers/toolResponse";
 import { preserveToolRegistry } from "../helpers/withTemporaryTool";
 
 const android: BootedDevice = { deviceId: "viewer-android", platform: "android", name: "Fake" };
-const ios: BootedDevice = { deviceId: "viewer-ios", platform: "ios", name: "Fake" };
+const ios: BootedDevice = {
+  deviceId: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
+  platform: "ios",
+  name: "Fake",
+};
 const LIBRARY_ID = "0f8fad5b-d9cb-469f-a165-70867728950e";
 const spec = {
   id: "demo",
@@ -27,21 +35,21 @@ const spec = {
 const viewer = { app: "protoviewer", libraryId: LIBRARY_ID, label: "Demo" } as const;
 
 class FakeViewer implements ProtoViewerDevice {
-  installed = true;
+  present = true;
   readonly calls: string[] = [];
-  async installedUser(): Promise<number | undefined> {
-    this.calls.push("installedUser");
-    return this.installed ? 0 : undefined;
+  failure?: Error;
+  async installed(): Promise<boolean> {
+    this.calls.push("installed");
+    return this.present;
   }
-  async importBundle(
-    _userId: number,
-    _bytes: Uint8Array,
-    label?: string,
-  ): Promise<ProtoViewerResult> {
+  async importBundle(_bytes: Uint8Array, label?: string): Promise<ProtoViewerResult> {
     this.calls.push(`import:${label ?? ""}`);
+    if (this.failure) {
+      throw this.failure;
+    }
     return { status: "imported", request: "r", libraryId: LIBRARY_ID, label: label ?? "Demo" };
   }
-  async open(_userId: number, libraryId: string): Promise<ProtoViewerResult> {
+  async open(libraryId: string): Promise<ProtoViewerResult> {
     this.calls.push(`open:${libraryId}`);
     return { status: "opened", request: "r", libraryId, label: "Demo" };
   }
@@ -52,6 +60,7 @@ describe("prototype save and open through ProtoViewer", () => {
   let fake: FakeViewer;
   let restore: () => void;
   let dispose: () => void;
+  let installs: string[];
   function setup() {
     restore = preserveToolRegistry();
     const timer = new FakeTimer();
@@ -59,14 +68,31 @@ describe("prototype save and open through ProtoViewer", () => {
     proxy.setSupportedCommands([PROTOTYPE_SAVED_CAPABILITY]);
     proxy.setSaveResult({ success: true, saved: { id: "demo", slug: "demo", replaced: false } });
     fake = new FakeViewer();
+    installs = [];
+    const assetReader = new FakePrototypeAssetFileReader();
+    assetReader.addFile(
+      "/logo.png",
+      Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+        "base64",
+      ),
+    );
     dispose = registerPrototypeTools({
       clientFactory: () => proxy,
       adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
       protoViewerFactory: () => fake,
+      iosSavedPrototypeInstaller: {
+        install: async (input) => {
+          installs.push(input.prototypeId);
+          return { bundleId: "dev.jasonpearson.automobile.prototype.demo" };
+        },
+        list: async () => [],
+        delete: async () => {},
+      },
       store: new InMemoryPrototypeStatusStore(timer),
       timer,
       clock: timer,
-      assetFileReader: new FakePrototypeAssetFileReader(),
+      assetFileReader: assetReader,
       cacheInvalidator: new FakeDeviceWindowCacheInvalidator(),
       lifecycle: {
         subscribeSessionRelease: () => () => {},
@@ -101,12 +127,12 @@ describe("prototype save and open through ProtoViewer", () => {
       viewer,
       warning: PROTOVIEWER_IMPORTED_WARNING,
     });
-    expect(fake.calls).toEqual(["installedUser", "import:Demo"]);
+    expect(fake.calls).toEqual(["installed", "import:Demo"]);
     expect(proxy.saveRequests).toEqual([]);
   });
 
   test("without ProtoViewer the save keeps the CtrlProxy path", async () => {
-    fake.installed = false;
+    fake.present = false;
     expect(await call({ action: "save", spec })).toEqual({
       success: true,
       saved: { id: "demo", slug: "demo", replaced: false },
@@ -127,14 +153,76 @@ describe("prototype save and open through ProtoViewer", () => {
       viewer,
       warning: PROTOVIEWER_IMPORTED_WARNING,
     });
-    expect(fake.calls).toEqual(["installedUser", `open:${LIBRARY_ID}`]);
+    expect(fake.calls).toEqual(["installed", `open:${LIBRARY_ID}`]);
   });
 
-  test("open is refused on iOS in this release", async () => {
+  test("iOS save and open use ProtoViewer and return its imported warning", async () => {
+    for (const args of [
+      { action: "save", spec, label: "Demo" },
+      { action: "open", id: LIBRARY_ID },
+    ]) {
+      expect(await call(args, ios)).toEqual({
+        success: true,
+        viewer,
+        warning: PROTOVIEWER_IMPORTED_WARNING,
+      });
+    }
+    expect(installs).toEqual([]);
+  });
+
+  test("iOS save falls back when absent, old, or storage unusable", async () => {
+    for (const failure of [
+      undefined,
+      new ProtoViewerEntryPointMissingError(),
+      new ProtoViewerStorageError("inbox"),
+    ]) {
+      fake.present = failure !== undefined;
+      fake.failure = failure;
+      expect(await call({ action: "save", spec }, ios)).toMatchObject({
+        success: true,
+        saved: { id: "demo" },
+      });
+    }
+    expect(installs).toEqual(["demo", "demo", "demo"]);
+  });
+
+  test("iOS delivery ambiguity fails without installing a second copy", async () => {
+    fake.failure = new Error("ProtoViewer did not answer; it may still have saved the prototype");
+    expect(await call({ action: "save", spec }, ios)).toMatchObject({ success: false });
+    expect(installs).toEqual([]);
+  });
+
+  test("iOS pinned and icon saves keep the template path", async () => {
+    expect(await call({ action: "save", spec, pin: true }, ios)).toMatchObject({ success: true });
+    // icon must name an uploaded asset; schema validation remains in force.
+    expect(
+      await call(
+        {
+          action: "save",
+          spec,
+          icon: "logo",
+          assets: [{ id: "logo", path: "/logo.png" }],
+        },
+        ios,
+      ),
+    ).toMatchObject({ success: true });
+    expect(fake.calls).toEqual([]);
+    expect(installs).toEqual(["demo", "demo"]);
+  });
+
+  test("iOS open without ProtoViewer needs the capability; physical open needs a simulator", async () => {
+    fake.present = false;
     expect(await call({ action: "open", id: LIBRARY_ID }, ios)).toMatchObject({
       success: false,
-      errorCode: "unsupported_platform",
+      errorCode: "unsupported_capability",
     });
+    fake.calls.length = 0;
+    expect(
+      await call(
+        { action: "open", id: LIBRARY_ID },
+        { ...ios, deviceId: "00008110-001234567890001E" },
+      ),
+    ).toMatchObject({ success: false, errorCode: "unsupported_platform" });
     expect(fake.calls).toEqual([]);
   });
 

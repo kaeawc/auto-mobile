@@ -92,6 +92,22 @@ describe("parseAppLinksOutput (#14110)", () => {
     expect(toAppLinkDomainStates(snapshot!)[0]?.approvedForLinks).toBe(false);
   });
 
+  test.each([
+    ["get-app-links-api37-system-configured.txt", "system_configured"],
+    ["get-app-links-api37-after-restore-verified.txt", "verified"],
+  ])("API 37 real capture: %s", (name, state) => {
+    const snapshot = parseAppLinksOutput(fixture(name), "com.google.android.calendar");
+    expect(snapshot).not.toBeNull();
+    expect([...snapshot!.verification]).toEqual([
+      ["www.google.com", state],
+      ["calendar.google.com", state],
+      ["client-side-encryption.google.com", state],
+      ["krahsc.google.com", state],
+    ]);
+    expect(snapshot!.user).toBeUndefined();
+    expect(toAppLinkDomainStates(snapshot!).every((domain) => domain.approvedForLinks)).toBe(true);
+  });
+
   test("CRLF line endings parse the same", () => {
     const crlf = fixture("get-app-links-api31-user0.txt").replace(/\n/g, "\r\n");
     expect(parseAppLinksOutput(crlf, PKG)).toEqual(

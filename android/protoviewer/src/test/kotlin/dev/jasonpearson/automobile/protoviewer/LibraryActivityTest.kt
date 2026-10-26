@@ -66,6 +66,18 @@ class LibraryActivityTest {
   }
 
   @Test
+  fun settingsRowsOpenTheLicensesScreenAndSecurityPolicy() {
+    val activity = launch()
+    compose.onNodeWithTag("open-licenses").performClick()
+    val licenses = shadowOf(activity).nextStartedActivity
+    assertEquals(LicensesActivity::class.java.name, licenses.component?.className)
+    compose.onNodeWithTag("open-security-policy").performClick()
+    val policy = shadowOf(activity).nextStartedActivity
+    assertEquals(Intent.ACTION_VIEW, policy.action)
+    assertEquals(SECURITY_POLICY_URL, policy.dataString)
+  }
+
+  @Test
   fun emptyLibraryShowsEmptyState() {
     launch()
     compose.onNodeWithText("Your prototype library is empty.").assertIsDisplayed()

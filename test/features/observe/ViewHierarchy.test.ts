@@ -13,6 +13,7 @@ import { makeViewHierarchyCtrlProxy } from "../../helpers/androidViewHierarchyCl
 import type { ViewHierarchyAndroidCtrlProxy } from "../../../src/features/observe/android/ViewHierarchyAndroidCtrlProxy";
 import { logger, LogLevel } from "../../../src/utils/logger";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeIosRunnerLaunchGate } from "../../fakes/FakeIosRunnerLaunchGate";
 import { recoverRootlessAccessibilityService } from "../../../src/features/observe/android/ObserveAccessibilityRecovery";
 import {
   spyOnIosClientInstance,
@@ -2200,5 +2201,114 @@ describe("Offscreen Node Filtering", function () {
 
       expect(result.hierarchy.transportFailure).toBeFalsy();
     });
+  });
+});
+
+describe("ViewHierarchy queued runner launch typing (#15291)", () => {
+  const iosDevice: BootedDevice = { deviceId: "launching-ios", name: "Test", platform: "ios" };
+  const adbFactory = () => new FakeAdbClientFactory(new FakeAdbExecutor());
+  const androidClient = () =>
+    makeViewHierarchyCtrlProxy({ getAccessibilityHierarchy: async () => null });
+
+  function observeWith(
+    unavailableReason: string,
+    configure: (gate: FakeIosRunnerLaunchGate) => void,
+    reconnect = false,
+  ) {
+    const gate = new FakeIosRunnerLaunchGate();
+    configure(gate);
+    let recoveryStarts = 0;
+    const spy = spyOnIosClientInstance({
+      convertToViewHierarchyResult: convertIosHierarchy,
+      getLatestHierarchy: async () => ({
+        hierarchy: null,
+        fresh: false,
+        unavailableReason: unavailableReason as "request_timed_out",
+        ...(reconnect
+          ? {
+              reconnectStatus: {
+                state: "cooldown" as const,
+                retryAfterMs: 1000,
+                retryAfterSeconds: 1,
+                connectionAttempts: 3,
+                maxConnectionAttempts: 3,
+              },
+            }
+          : {}),
+      }),
+      ensureRecoveryStarted: () => {
+        recoveryStarts++;
+      },
+      awaitRecovery: async () => "timed_out" as const,
+    });
+    const subject = new ViewHierarchy(
+      iosDevice,
+      adbFactory(),
+      androidClient(),
+      new FakeTimer(),
+      undefined,
+      gate,
+    );
+    return {
+      read: async () => {
+        try {
+          return await subject.getViewHierarchy();
+        } finally {
+          spy.mockRestore();
+        }
+      },
+      recoveryStarts: () => recoveryStarts,
+    };
+  }
+
+  test.each(["request_timed_out", "auto_setup_failed", "service_recovering", "connection_lost"])(
+    "a %s first observe while the launch is queued is typed runner_launch_queued with the position",
+    async (reason) => {
+      const run = observeWith(reason, (gate) =>
+        gate.queued.set(iosDevice.deviceId, { position: 2, ahead: 3, limit: 2 }),
+      );
+      const result = await run.read();
+      expect(result.hierarchy.unavailableReason).toBe("runner_launch_queued");
+      expect(result.hierarchy.iosUnavailableReason).toBe("runner_launch_queued");
+      expect(result.hierarchy.unavailableDetail).toContain("queue position 2");
+      expect(result.hierarchy.error).toContain("runner_launch_queued");
+      expect(run.recoveryStarts()).toBe(0);
+    },
+  );
+
+  test("an admitted launch that is still starting is typed runner_launch_queued without a position", async () => {
+    const run = observeWith(
+      "request_timed_out",
+      (gate) => gate.launching.add(iosDevice.deviceId),
+      true,
+    );
+    const result = await run.read();
+    expect(result.hierarchy.unavailableReason).toBe("runner_launch_queued");
+    expect(result.hierarchy.unavailableDetail).toContain("still starting in the background");
+    expect(result.ctrlProxyReconnect).toBeUndefined();
+    expect(run.recoveryStarts()).toBe(0);
+  });
+
+  test("no launch pending leaves the untyped reason alone", async () => {
+    const run = observeWith("request_timed_out", () => {});
+    const result = await run.read();
+    expect(result.hierarchy.unavailableReason).toBe("request_timed_out");
+    expect(result.hierarchy.unavailableDetail).toBeUndefined();
+  });
+
+  test("a launching device keeps reasons that are not launch symptoms", async () => {
+    const run = observeWith("simulator_not_booted", (gate) =>
+      gate.launching.add(iosDevice.deviceId),
+    );
+    const result = await run.read();
+    expect(result.hierarchy.unavailableReason).toBe("simulator_not_booted");
+  });
+
+  test("another device's queued launch does not type this device", async () => {
+    const run = observeWith("request_timed_out", (gate) =>
+      gate.queued.set("someone-else", { position: 1, ahead: 2, limit: 2 }),
+    );
+    const result = await run.read();
+    expect(result.hierarchy.unavailableReason).toBe("request_timed_out");
   });
 });

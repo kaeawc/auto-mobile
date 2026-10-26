@@ -168,6 +168,44 @@ describe("NativeAndroidSnapshotResetPort", () => {
     },
   );
 
+  test("stop forces the identified broker runtime and proves its process exited", async () => {
+    const { port, step, dependencies, processStopper, quickBootCleared } = nativeRig();
+    processStopper.identities = [
+      {
+        kind: "match",
+        pid: 4242,
+        avdName: ANDROID_RESET_DEVICE.name,
+        port: 5554,
+        command: "qemu-system-aarch64 -avd broker-avd -port 5554",
+      },
+    ];
+    dependencies.emulator.killDevice = async (device, options) => {
+      expect(options?.force).toBe(true);
+      await options?.beforeDispatch?.();
+      return device;
+    };
+    dependencies.inventory = async () => [];
+    await port.stop(ANDROID_RESET_DEVICE, step);
+    expect(quickBootCleared()).toBe(true);
+  });
+
+  test("forced stop refuses success while the identified process stays alive", async () => {
+    const { port, step, timer, processStopper, quickBootCleared } = nativeRig();
+    timer.enableAutoAdvance();
+    processStopper.identity = {
+      kind: "match",
+      pid: 4242,
+      avdName: ANDROID_RESET_DEVICE.name,
+      port: 5554,
+      command: "qemu-system-aarch64 -avd broker-avd -port 5554",
+    };
+    await expect(port.stop(ANDROID_RESET_DEVICE, step)).rejects.toThrow(
+      "did not exit before the deadline",
+    );
+    expect(quickBootCleared()).toBe(false);
+    expect(timer.now()).toBe(step.timeoutMs);
+  });
+
   test("stop waits for the process after adb disappears and removes dirty quick-boot state", async () => {
     const { port, step, timer, processStopper, quickBootCleared } = nativeRig();
     processStopper.identity = {

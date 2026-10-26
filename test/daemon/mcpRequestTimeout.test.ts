@@ -22,7 +22,7 @@ import {
   DEFAULT_PROTOTYPE_EVENT_TIMEOUT_MS,
   MAX_PROTOTYPE_EVENT_TIMEOUT_MS,
 } from "../../src/features/prototype/prototypeEventTimeout";
-import { PROTOVIEWER_DEFAULT_TIMEOUT_MS } from "../../src/features/prototype/protoViewer/AndroidProtoViewer";
+import { PROTOVIEWER_DEFAULT_TIMEOUT_MS } from "../../src/features/prototype/protoViewer/protoViewerDevice";
 import {
   DEFAULT_PROTOTYPE_ASSET_TIMEOUT_MS,
   MAX_PROTOTYPE_ASSET_COUNT,
@@ -36,6 +36,7 @@ import {
   LEGACY_OBSERVE_MCP_TIMEOUT_ENV_VAR,
   LEGACY_OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
   MIN_CRASH_APP_MCP_TIMEOUT_MS,
+  MIN_PERFORMANCE_TRACE_MCP_TIMEOUT_MS,
   MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS,
   MIN_LAUNCH_APP_MCP_TIMEOUT_MS,
   MIN_PREFERENCE_MCP_TIMEOUT_MS,
@@ -301,6 +302,12 @@ describe("resolveMcpRequestTimeoutMs", () => {
       tool: "launchApp",
       timeoutMs: 10_000,
       expected: MIN_LAUNCH_APP_MCP_TIMEOUT_MS,
+    },
+    {
+      name: "raises short performanceTrace to cover the xctrace finalise wait and exports (#15330)",
+      tool: "performanceTrace",
+      timeoutMs: 30_000,
+      expected: MIN_PERFORMANCE_TRACE_MCP_TIMEOUT_MS,
     },
     {
       name: "raises short crashApp to floor",

@@ -1,0 +1,5 @@
+2026-10-25 17:53:09.886 I  MobileSafari[15900:1f08fb4] [com.apple.Accessibility:AXRuntimeNotifications] Attempting to send notification:  (1025) <private>
+2026-10-25 17:53:09.887 I  MobileSafari[15900:1f08fb4] [com.apple.Accessibility:AXRuntimeNotifications] Attempting to send notification:  (1025) <private>
+2026-10-25 17:53:09.887 I  MobileSafari[15900:1f08fb4] [com.apple.Accessibility:AXRuntimeNotifications] Attempting to send notification:  (1025) <private>
+2026-10-25 17:53:09.887 I  MobileSafari[15900:1f08fb4] [com.apple.Accessibility:AXRuntimeNotifications] Attempting to send notification:  (1025) <private>
+2026-10-25 17:53:09.887 I  MobileSafari[15900:1f08fb4] [com.apple.Accessibility:AXRuntimeNotifications] Did post notification. notification:  (1025) error:0 data:<private>

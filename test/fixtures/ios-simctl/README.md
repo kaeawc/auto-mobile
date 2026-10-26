@@ -23,3 +23,12 @@ Captured verbatim from real `xcrun simctl` runs. Nothing here is hand-written.
   Pro) simulator: `-clean` before any contrast change, `-increase-contrast-enabled` after
   `simctl ui <udid> increase_contrast enabled`, and `-increase-contrast-disabled` after
   turning it back off (`DarkenSystemColors` and `PointerIncreasedContrastEnabled` stay at 0).
+- `log-show-compact-mobilesafari-ios27.txt` (#15329): the five newest lines of
+  `simctl spawn <udid> log show --last 30s --style compact --predicate 'subsystem ==
+  "com.apple.mobilesafari" OR … OR process == "MobileSafari"'`, taken from the `getLogs`
+  result of the 0.0.88 all-tools smoke run (2026-10-25, iOS 27.0 iPhone 18 Pro simulator,
+  MCP session output `6b9563fa-0c3f-4466-a559-647de176f8c0`). Unlike the other files here this is
+  reconstructed from the parsed result, not raw stdout: each line is the captured
+  timestamp and message joined by one space (the parser strips the column padding). The
+  120 s / 300 s windows of the same app emitted 3.9 MB / 4.8 MB (26k lines) of this shape,
+  which overflowed the buffered `execFile` stdout; tests replay these lines to that volume.

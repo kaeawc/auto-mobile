@@ -1,8 +1,8 @@
 import { ActionableError } from "../../../models/ActionableError";
 
 /**
- * The bundle never reached ProtoViewer: its shared-storage folders could not be prepared, the push
- * was refused, or the app could not see the pushed file (API 30+ scoped storage, #15174). Nothing
- * was imported, so a save keeps the CtrlProxy path instead of failing.
+ * The bundle never reached ProtoViewer: its data container could not be resolved, its folders
+ * could not be prepared, the copy was refused, or the app could not read the inbox file
+ * (including Android scoped storage, #15174). A save keeps the existing platform path.
  */
 export class ProtoViewerStorageError extends ActionableError {}

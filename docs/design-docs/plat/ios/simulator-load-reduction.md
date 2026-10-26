@@ -171,8 +171,12 @@ the foreground. Builds replace inconsistent manifests only under their own key l
 
 A missing template starts a background build without waiting for it. Builders are single-flight
 per key and use the shared boot admission instrumentation. They apply the selected preboot profile,
-boot, require measured CPU below 5 percent of one core for 120 seconds (up to 900 seconds total),
-then shut down and verify before publishing ready. Missing CPU measurements reset the quiet window.
+boot, require the 60-second trailing mean of measured CPU to stay below 15 percent of one core for
+120 seconds (up to 900 seconds total), then shut down and verify before publishing ready. A steady
+background service holds a booted simulator near 10 percent in a 1-20 percent sawtooth, which an
+instantaneous 5 percent threshold never accepted (#15294). Missing CPU measurements reset the quiet
+window. An interrupted build (SIGINT) removes its partial simulator, releases its lock, records no
+retry delay, and exits 130 (#15312).
 Failures delete partial templates and defer attempts exponentially from 60 seconds up to six
 hours, resetting the attempt count on success. Capacity refusal uses a fixed short delay without
 incrementing attempts or recording failure. Builders skip starting when the read-only capacity
@@ -359,12 +363,30 @@ window, and it holds a boot slot for that time.
 - Size boot concurrency by CPU-seconds: a first boot is about 775 CPU-seconds, 442 with `minimal`, 273 as a clone
   with `minimal`, and k simultaneous boots cost slightly more than k times that.
 
-## Known limitation: template clones share Safari and system-app data
+## Known limitation: template clones shared Safari and system-app data
 
 Owner decision 2026-10-25: `AUTOMOBILE_IOS_TEMPLATE_CLONE` defaults back to off for this release (introduced by
 #15236, flipped on by #15287); `AUTOMOBILE_IOS_PREBOOT_LEAN_PROFILE` stays `minimal`. Round 9 of the manual test
 found that a clone shares Safari and other system-app data with its template, so state written in one clone
 (tabs, history, cookies, website data) leaks to the template and to the other clones (#15327, a sub-issue of
 #15216). With the flag off the clone path resolves no template storage and starts no background template build,
-so the cost of a first creation is the normal one. Opt in with `AUTOMOBILE_IOS_TEMPLATE_CLONE=1` only when tests do
-not depend on isolated system-app state. Flip the default back on once clones get their own system-app data.
+so the cost of a first creation is the normal one.
+
+Cause (#15327): a booted simulator's data directory records absolute paths that contain its own UDID, and
+`simctl clone` copies them verbatim. The LaunchServices store (`var/db/lsd/*.csstore`, about 1090 container URLs on
+iOS 26.5) maps every system app to a data container under the TEMPLATE's directory, so MobileSafari and the
+daemons around it open the template's files, and `simctl get_app_container <clone>` returns the template path.
+About 130 more files (preference plists, MobileAsset locks, Photos and CloudKit databases, Spotlight stores) and ten
+symlinks (`Library/Logs`, `Library/Shortcuts/ToolKit/Tools-active`, the MobileAsset `atomic_instance_latest.locker`
+links) carry the same UDID. A clone of a never-booted simulator has none of this (its containers are created by
+its own first boot), which is why only settled templates leak.
+
+Fix, behind the same opt-in flag: after `simctl clone` and before any boot, `SimulatorCloneRelocator` rewrites the
+template UDID to the clone UDID in place (both are 36 bytes, so file layouts stay intact) in every regular file and
+symlink of the clone's data directory except the unified-log archives under `var/db/diagnostics`. SQLite WAL files
+carry per-frame checksums, so each non-empty WAL is folded into its database first with
+`sqlite3 <db> "PRAGMA wal_checkpoint(TRUNCATE)"`. A relocation failure deletes the clone and falls back to a plain
+create. Measured on iOS 26.5, iPhone 17, a 2 GB template data directory: 3 to 10 s to relocate, and afterwards a
+Safari launch plus `openurl` in a clone left the template's data directory byte-identical (10063 entries, zero diff),
+held no file descriptors under the template, and a second clone showed no residue of the first.
+The default stays off until the next manual test confirms this on the release candidate.

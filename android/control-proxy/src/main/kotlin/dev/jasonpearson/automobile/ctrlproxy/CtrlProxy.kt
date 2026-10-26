@@ -58,6 +58,8 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.PinnedPrototypeShortcuts
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAssetController
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAssetDirectory
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAssetStore
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeBackdropSupport
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeBackdrops
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeBase64Decoder
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeController
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeEventSink
@@ -1921,6 +1923,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                 }
               },
             storage = prototypeStorage,
+            backdropSupport =
+              PrototypeBackdropSupport {
+                // Cross-window blur can be switched off at runtime (battery saver, developer
+                // option).
+                Build.VERSION.SDK_INT >= PrototypeBackdrops.MIN_BLUR_SDK &&
+                  getSystemService(WindowManager::class.java)?.isCrossWindowBlurEnabled == true
+              },
             windowOnScreen =
               PrototypeWindowOnScreen { displayId ->
                 try {

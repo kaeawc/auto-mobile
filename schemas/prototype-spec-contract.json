@@ -13627,6 +13627,13 @@
             "name": "androidNamespace"
           },
           "optional": true
+        },
+        "design": {
+          "rule": {
+            "kind": "enum",
+            "values": ["material", "platform"]
+          },
+          "optional": true
         }
       },
       "atLeastOne": true
@@ -15518,5 +15525,175 @@
     "pattern": ["textField"],
     "min": ["slider", "datePicker", "timePicker"],
     "max": ["slider", "datePicker", "timePicker"]
+  },
+  "designCoverage": {
+    "box": {
+      "ios": "neutral",
+      "android": "neutral"
+    },
+    "row": {
+      "ios": "neutral",
+      "android": "neutral"
+    },
+    "column": {
+      "ios": "neutral",
+      "android": "neutral"
+    },
+    "flow": {
+      "ios": "neutral",
+      "android": "neutral"
+    },
+    "grid": {
+      "ios": "neutral",
+      "android": "neutral"
+    },
+    "carousel": {
+      "ios": "neutral",
+      "android": "neutral"
+    },
+    "text": {
+      "ios": "neutral",
+      "android": "neutral"
+    },
+    "image": {
+      "ios": "neutral",
+      "android": "neutral"
+    },
+    "icon": {
+      "ios": "neutral",
+      "android": "neutral"
+    },
+    "spacer": {
+      "ios": "neutral",
+      "android": "neutral"
+    },
+    "textField": {
+      "ios": "material",
+      "android": "material"
+    },
+    "switch": {
+      "ios": "material",
+      "android": "material"
+    },
+    "checkbox": {
+      "ios": "material",
+      "android": "material"
+    },
+    "button": {
+      "ios": "native",
+      "android": "material"
+    },
+    "radioGroup": {
+      "ios": "material",
+      "android": "material"
+    },
+    "select": {
+      "ios": "material",
+      "android": "material"
+    },
+    "listItem": {
+      "ios": "material",
+      "android": "material"
+    },
+    "slider": {
+      "ios": "native",
+      "android": "material"
+    },
+    "chip": {
+      "ios": "material",
+      "android": "material"
+    },
+    "card": {
+      "ios": "material",
+      "android": "material"
+    },
+    "iconButton": {
+      "ios": "material",
+      "android": "material"
+    },
+    "fab": {
+      "ios": "material",
+      "android": "material"
+    },
+    "segmentedButton": {
+      "ios": "material",
+      "android": "material"
+    },
+    "topAppBar": {
+      "ios": "material",
+      "android": "material"
+    },
+    "divider": {
+      "ios": "neutral",
+      "android": "neutral"
+    },
+    "badge": {
+      "ios": "material",
+      "android": "material"
+    },
+    "progress": {
+      "ios": "material",
+      "android": "material"
+    },
+    "dialog": {
+      "ios": "material",
+      "android": "material"
+    },
+    "menu": {
+      "ios": "material",
+      "android": "material"
+    },
+    "snackbar": {
+      "ios": "material",
+      "android": "material"
+    },
+    "timePicker": {
+      "ios": "native",
+      "android": "material"
+    },
+    "datePicker": {
+      "ios": "native",
+      "android": "material"
+    },
+    "scroll": {
+      "ios": "neutral",
+      "android": "neutral"
+    },
+    "pager": {
+      "ios": "neutral",
+      "android": "neutral"
+    },
+    "tabBar": {
+      "ios": "material",
+      "android": "material"
+    },
+    "bottomNav": {
+      "ios": "material",
+      "android": "material"
+    },
+    "bottomSheet": {
+      "ios": "material",
+      "android": "material"
+    },
+    "searchBar": {
+      "ios": "material",
+      "android": "material"
+    },
+    "stack": {
+      "ios": "neutral",
+      "android": "neutral"
+    },
+    "chart": {
+      "ios": "material",
+      "android": "material"
+    },
+    "tooltip": {
+      "ios": "material",
+      "android": "material"
+    },
+    "drawer": {
+      "ios": "material",
+      "android": "material"
+    }
   }
 }

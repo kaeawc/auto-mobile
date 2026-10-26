@@ -236,6 +236,7 @@ internal object PrototypeStrictPolicy {
       }
       if (spec["data"] != null) need("data_model")
       if (spec["storage"] != null) need("storage")
+      if ((spec["theme"] as? JsonObject)?.text("design") == "platform") need("design_platform")
       val colors = (spec["theme"] as? JsonObject)?.get("colors") as? JsonObject
       if (colors?.get("light") != null || colors?.get("dark") != null) need("theme_modes")
     }

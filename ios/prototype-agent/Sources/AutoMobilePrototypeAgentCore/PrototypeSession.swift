@@ -83,6 +83,7 @@ extension JSONValue {
 /// Device-free prototype transitions, mirroring Android's `PrototypeRuntime` and the sequence ledger in
 /// `PrototypeController`. Each mutation returns the events it produced, already sequenced.
 struct PrototypeSession {
+    var design: PrototypeDesign { spec?.theme?.design ?? .platform }
     private(set) var spec: PrototypeSpec?
     private(set) var state: [String: JSONValue] = [:] {
         didSet { if tracksStateRevisions { noteStateWrites(since: oldValue) } }

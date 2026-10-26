@@ -18,6 +18,7 @@ object AutoMobilePrototype {
       "prototype_choreography_v1",
       "prototype_data_actions_v1",
       "prototype_data_model_v1",
+      "prototype_design_platform_v1",
       "prototype_drawer_v1",
       "prototype_emit_context_v1",
       "prototype_flow_grid_v1",

@@ -8,6 +8,7 @@ enum PrototypeBundleCapabilities {
         guard let spec = value.objectFields else { return [] }
         var names = Set<String>()
         func need(_ feature: String) { names.insert("prototype_\(feature)_v1") }
+        if spec["theme"]?.objectFields?["design"]?.stringValue == "platform" { need("design_platform") }
         if spec["data"] != nil { need("data_model") }
         if spec["theme"] != nil { need("theme_modes") }
         if spec["storage"] != nil { need("storage") }

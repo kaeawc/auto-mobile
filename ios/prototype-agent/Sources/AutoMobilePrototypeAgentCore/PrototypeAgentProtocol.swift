@@ -55,6 +55,7 @@ enum PrototypeAgentProtocol {
         drawerCapability,
         stackCapability,
         stackTransitionsCapability,
+        designPlatformCapability,
         emitContextCapability,
         checksCapability,
         identifierTestTagOnlyCapability,
@@ -72,6 +73,7 @@ enum PrototypeAgentProtocol {
     static let showInPlaceCapability = "prototype_show_in_place_v1"
     /// Stack paths, four navigation actions, screen_changed and left-edge Back (#12068).
     static let stackCapability = "prototype_stack_v1"
+    static let designPlatformCapability = "prototype_design_platform_v1"
     static let stackTransitionsCapability = "prototype_stack_transitions_v1"
     /// Positions `{type: "bounds"}` node anchors (#9316). The host refuses anchors on an agent that
     /// does not advertise it, which would draw the node at its normal position. Same name as the

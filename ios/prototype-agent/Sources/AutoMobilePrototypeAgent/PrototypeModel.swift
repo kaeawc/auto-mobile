@@ -9,6 +9,7 @@
     @Observable
     final class PrototypeModel {
         @ObservationIgnored private(set) var session = PrototypeSession()
+        var design: PrototypeDesign { spec?.theme?.design ?? .platform }
         private(set) var spec: PrototypeSpec?
         /// Ends surviving text drafts even when a replacing show leaves their stored value unchanged.
         private(set) var showRevision = 0

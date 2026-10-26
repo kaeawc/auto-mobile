@@ -40,6 +40,7 @@ const themeShapesSchema = z
 export const themeSchema = z
   .object({
     ...prototypePlatformNamespaceShape,
+    design: z.enum(["material", "platform"]).optional(),
     mode: z.enum(["light", "dark", "system"]).optional(),
     colors: themeColorsSchema.optional(),
     typography: themeTypographySchema.optional(),

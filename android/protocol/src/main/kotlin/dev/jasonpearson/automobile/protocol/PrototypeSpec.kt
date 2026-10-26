@@ -1523,6 +1523,7 @@ data class PrototypeSpecTheme(
   val colors: PrototypeSpecThemeColors? = null,
   val typography: PrototypeSpecThemeTypography? = null,
   val shapes: PrototypeSpecThemeShapes? = null,
+  val design: String? = null,
 )
 
 @Serializable

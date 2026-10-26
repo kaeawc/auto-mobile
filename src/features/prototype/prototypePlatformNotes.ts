@@ -1,3 +1,4 @@
+import { designFallbackPaths } from "./prototypeDesign";
 import { prototypePlatformNamespaceFields } from "./prototypePlatformNamespace";
 import iconSymbols from "../../../schemas/prototype-ios-icon-symbols.json";
 import contract from "../../../schemas/prototype-spec-contract.json";
@@ -12,6 +13,7 @@ import {
 import type { PrototypeSpec } from "./prototypeSpec";
 
 export type PrototypePlatformNoteConstruct =
+  | "design.fallback"
   | "platformNamespace"
   | "rich-text-links"
   | "stack"
@@ -456,5 +458,17 @@ export function prototypePlatformNotes(
           },
         ];
   });
+  const fallbackPaths = designFallbackPaths(spec);
+  if (fallbackPaths.length) {
+    notes.push({
+      platform: "ios",
+      construct: "design.fallback",
+      effect: "substituted",
+      paths: fallbackPaths.slice(0, 20),
+      ...(fallbackPaths.length > 20 ? { total: fallbackPaths.length } : {}),
+      detail:
+        "These nodes have no native iOS coverage yet and keep the Material drawing (see designCoverage).",
+    });
+  }
   return [...notes, ...menus, ...namespaceNotes];
 }

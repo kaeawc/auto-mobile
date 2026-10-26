@@ -46,6 +46,7 @@ class CommandAdvertisementTest {
       "prototype_flow_grid_v1",
       "prototype_pager_options_v1",
       "prototype_data_model_v1",
+      "prototype_design_platform_v1",
       "prototype_data_actions_v1",
       "prototype_network_v1",
       "prototype_network_device_v1",

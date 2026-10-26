@@ -14,6 +14,9 @@ internal object PrototypeBundleCapabilities {
     }
     if ("data" in spec) caps.add("prototype_data_model_v1")
     if ("storage" in spec) caps.add("prototype_storage_v1")
+    if (text((spec["theme"] as? JsonObject)?.get("design")) == "platform") {
+      caps.add("prototype_design_platform_v1")
+    }
     val colors = (spec["theme"] as? JsonObject)?.get("colors") as? JsonObject
     val scrim = (((spec["window"] as? JsonObject)?.get("placement") as? JsonObject)?.get("scrim"))
     if (

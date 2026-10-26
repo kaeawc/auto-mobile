@@ -1,4 +1,6 @@
 import { prototypeEffectFields, prototypeEffectsUnsupportedMessage } from "./prototypeEffects";
+import { record } from "./prototypeTemplate";
+import { PROTOTYPE_DESIGN_PLATFORM_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import {
   prototypeStylePolishV2Fields,
   prototypeStylePolishV2UnsupportedMessage,
@@ -137,6 +139,12 @@ interface PrototypeSpecCapabilityGate {
 
 /** Spec-introduced features must be checked on both show and the complete patch result. */
 export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGate[] = [
+  {
+    capability: PROTOTYPE_DESIGN_PLATFORM_CAPABILITY,
+    fields: (spec) => (record(record(spec)?.theme)?.design === "platform" ? ["theme.design"] : []),
+    unsupportedMessage: (_fields, platform) =>
+      `The connected ${platform} renderer does not advertise ${PROTOTYPE_DESIGN_PLATFORM_CAPABILITY}. Update the renderer or use theme.design: "material". Nothing was shown.`,
+  },
   {
     capability: PROTOTYPE_STYLE_POLISH_V2_CAPABILITY,
     fields: prototypeStylePolishV2Fields,

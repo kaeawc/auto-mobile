@@ -2312,6 +2312,52 @@ sweeps the same band (1.2 s, 35% white, clipped to the node's corner shape) over
 "Loading" to VoiceOver with the updates-frequently trait, draws no band under `motion: "none"` or
 Reduce Motion, and rejects shimmer on other node types at the same path.
 
+## Effects (#15128, `prototype_effects_v1`, contract only)
+
+`style.effects` is an array of 1-4 effects drawn in order. The list is closed and data-only: a
+`source` key, `type: "shader"`, a fifth effect, an unknown type and an out-of-range param are each
+rejected at the offending path, identically in the TS, Kotlin and Swift validators (so the spec's
+opening rule, no code, holds). `schemas/prototype-spec-contract.json` (`definitions.effect`) is the
+source of truth; the shared corpus pins it.
+
+| `type`                | Params (all optional unless marked)                                                | Android floor |
+| --------------------- | ---------------------------------------------------------------------------------- | ------------- |
+| `noise`               | `amount` 0-1, `grain` 0.5-8 dp, `seed` int 0-65535, `monochrome`                   | 33            |
+| `gradientMesh`        | `colors` exactly 4 (required; hex, role or `{light, dark}`), `softness` 0-1        | 33            |
+| `shimmer`             | `color`, `angle` -360..360 degrees, `width` 0.05-1 of the node                     | any           |
+| `glow`                | `color` (required), `radius` 0-48 dp, `intensity` 0-1                              | any           |
+| `vignette`            | `color`, `intensity` 0-1, `radius` 0-1                                             | any           |
+| `blur`                | `radius` 0-25 dp (required); blurs the node's own content                          | 31            |
+| `pixelate`            | `cell` 1-64 dp (required)                                                          | 33            |
+| `chromaticAberration` | `offset` 0-8 dp, `angle` -360..360 degrees                                         | 33            |
+| `wave`                | `amplitude` 0-16 dp, `wavelength` 8-400 dp, `angle` -360..360 degrees              | 33            |
+| `ripple`              | `amplitude` 0-16 dp, `wavelength` 8-400 dp, `center` `{x, y}` each 0-1 of the node | 33            |
+
+Every effect also takes `animate: {periodMs}` (integer 400-20000; a loop, separate from the
+node-level motion-v2 `animate`) and `phase` 0-1.
+
+- **Paint only.** Effects never change layout, hit testing, observe bounds, accessibility
+  semantics, the host dismiss controls or the host accessibility dismiss action, and never draw
+  outside the node's bounds (the authored viewport for the root).
+- **Frozen phase.** Under `motion: "none"`, animator scale 0, Reduce Motion (iOS) and while the
+  prototype is hidden, an animated effect stays at its `phase` so screenshots are deterministic.
+  `noise` is seeded and never uses device randomness.
+- **`styleWhen`** replaces `effects` as a whole when it matches.
+- **Limits.** `MAX_PROTOTYPE_EFFECTS` (64) and `MAX_PROTOTYPE_ANIMATED_EFFECTS` (8) count over the
+  expanded `repeat` tree. Counting is conservative: every declared list counts, `styleWhen` styles
+  included, although only one list applies at a time. A list longer than 4 is reported at
+  `<path>.style.effects` before the count is applied. The node that crosses a limit is reported
+  (`Effect limit exceeded`, `Animated effect limit exceeded`); a template inside a `repeat` is
+  reported at the `repeat` with the `Expanded` forms of those two messages.
+- **Capability.** Any `effects` list needs `prototype_effects_v1`, checked on `show` and on the full
+  patch result. No CtrlProxy or iOS agent advertises it yet: rendering is tracked by the Android
+  (#15129) and iOS (#15130) render issues, so the host refuses these specs today.
+
+Decisions left to the renderers, to settle in those issues: what `phase` means for an effect
+without a natural cycle (`noise`, `blur`, `pixelate`, `vignette`, `glow`, `gradientMesh`; the
+contract accepts it everywhere), and the colour-role and `{light, dark}` resolution inside effects
+(they use the same resolver as `style.color`; advertising the capability implies supporting it).
+
 ## Charts (#14209, not device-verified)
 
 A `chart` node draws a `line`, `area`, `bar` or `ring` chart from 1 to 4 `series`. Each series

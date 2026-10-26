@@ -268,6 +268,7 @@ function usesAtNode(node: Raw, path: string): Set<string> {
   });
   conditionFields(node.enabledWhen, `${path}.enabledWhen`, fields);
   conditionFields(node.visibleWhen, `${path}.visibleWhen`, fields);
+  conditionFields(node.errorWhen, `${path}.errorWhen`, fields);
   if (Array.isArray(node.styleWhen)) {
     node.styleWhen.forEach((entry, index) =>
       conditionFields(record(entry)?.when, `${path}.styleWhen[${index}].when`, fields),

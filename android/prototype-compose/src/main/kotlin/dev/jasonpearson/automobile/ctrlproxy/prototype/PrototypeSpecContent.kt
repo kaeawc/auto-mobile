@@ -53,6 +53,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.semantics.error
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.text.AnnotatedString
@@ -960,7 +961,7 @@ private fun RenderPrototypeTextField(
           onValueChange = onValueChange,
           modifier = fieldModifier,
           enabled = node.enabled,
-          isError = node.errorMessage != null,
+          isError = node.isError,
           interactionSource = presses,
           placeholder = { Text(source.placeholder.orEmpty()) },
           label = label,
@@ -977,7 +978,7 @@ private fun RenderPrototypeTextField(
           onValueChange = onValueChange,
           modifier = fieldModifier,
           enabled = node.enabled,
-          isError = node.errorMessage != null,
+          isError = node.isError,
           interactionSource = presses,
           placeholder = { Text(source.placeholder.orEmpty()) },
           label = label,
@@ -999,7 +1000,7 @@ private fun RenderPrototypeTextField(
           onValueChange = onValueChange,
           modifier = fieldModifier,
           enabled = node.enabled,
-          isError = node.errorMessage != null,
+          isError = node.isError,
           interactionSource = presses,
           placeholder = { Text(source.placeholder.orEmpty()) },
           label = label,
@@ -1016,7 +1017,7 @@ private fun RenderPrototypeTextField(
           onValueChange = onValueChange,
           modifier = fieldModifier,
           enabled = node.enabled,
-          isError = node.errorMessage != null,
+          isError = node.isError,
           interactionSource = presses,
           placeholder = { Text(source.placeholder.orEmpty()) },
           label = label,
@@ -1061,6 +1062,9 @@ internal fun RenderPrototypeEditableField(
     }
   }
   var fieldModifier = modifier.focusRequester(focus)
+  node.errorMessage?.let { message ->
+    fieldModifier = fieldModifier.semantics { error(message) }
+  }
   if (node.enabled && actions.isNotEmpty())
     fieldModifier = fieldModifier.semantics {
       onClick {

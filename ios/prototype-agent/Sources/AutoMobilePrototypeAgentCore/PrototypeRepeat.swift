@@ -96,6 +96,7 @@ enum PrototypeRepeat {
             part("navigationIcon", &fields)
             list("actions", &fields)
         case .string("textField")?:
+            string("errorText", &fields)
             part("trailingIcon", &fields)
         case .string("searchBar")?:
             string("placeholder", &fields)
@@ -355,7 +356,7 @@ struct PrototypeRepeatInstance {
             refresh["onRefresh"] = .array(actions.map(bindAction))
             fields["refresh"] = .object(refresh)
         }
-        for key in ["visibleWhen", "enabledWhen"] {
+        for key in ["visibleWhen", "enabledWhen", "errorWhen"] {
             if let condition = fields[key] { fields[key] = bindCondition(condition) }
         }
         if case let .array(entries)? = fields["styleWhen"] {
@@ -554,7 +555,7 @@ struct PrototypeRepeatInstance {
         } else {
             bindString("valid", in: &fields)
         }
-        for operand in ["equals", "notEquals"] {
+        for operand in ["equals", "notEquals", "contains", "startsWith"] {
             if let value = fields[operand] { fields[operand] = interpolateScalar(value) }
         }
         for group in ["all", "any"] {

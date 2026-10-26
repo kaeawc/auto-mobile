@@ -97,10 +97,24 @@ internal fun prototypeShownError(
   node: PrototypeNode,
   state: Map<String, PrototypeScalar>,
   shown: Set<String>,
-): String? =
-  node.checkedKeys().firstNotNullOfOrNull { key ->
+  validity: Map<String, Boolean> = emptyMap(),
+): String? {
+  val checkMessage = node.checkedKeys().firstNotNullOfOrNull { key ->
     if (key !in shown) null
     else
       PrototypeChecks.evaluate(state[key], node.checks(), prototypeNodeRole(node))
         .firstFailingMessage
   }
+  return if (node is PrototypeTextFieldNode && node.errorWhen?.holds(state, validity) == true)
+    node.errorText ?: checkMessage ?: node.supportingText
+  else checkMessage
+}
+
+internal fun prototypeIsError(
+  node: PrototypeNode,
+  state: Map<String, PrototypeScalar>,
+  shown: Set<String>,
+  validity: Map<String, Boolean> = emptyMap(),
+): Boolean =
+  (node is PrototypeTextFieldNode && node.errorWhen?.holds(state, validity) == true) ||
+    prototypeShownError(node, state, shown, validity) != null

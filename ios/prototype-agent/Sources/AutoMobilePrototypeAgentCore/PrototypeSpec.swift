@@ -590,6 +590,10 @@ struct PrototypeAction: Decodable, Sendable {
 indirect enum Condition: Decodable, Equatable {
     case equals(key: String, value: JSONValue)
     case notEquals(key: String, value: JSONValue)
+    case contains(key: String, value: JSONValue)
+    case startsWith(key: String, value: JSONValue)
+    case lengthGt(key: String, value: Int)
+    case lengthLt(key: String, value: Int)
     case greaterThan(key: String, value: Double)
     case lessThan(key: String, value: Double)
     case all([Condition])
@@ -598,7 +602,7 @@ indirect enum Condition: Decodable, Equatable {
     case valid([String], PrototypeValidityContext)
 
     private enum CodingKeys: String, CodingKey {
-        case key, equals, notEquals, all, any, not, valid
+        case key, equals, notEquals, contains, startsWith, lengthGt, lengthLt, all, any, not, valid
         case greaterThan = "gt"
         case lessThan = "lt"
     }
@@ -625,6 +629,14 @@ indirect enum Condition: Decodable, Equatable {
                 self = .equals(key: key, value: value)
             } else if let value = try container.decodeIfPresent(JSONValue.self, forKey: .notEquals) {
                 self = .notEquals(key: key, value: value)
+            } else if let value = try container.decodeIfPresent(JSONValue.self, forKey: .contains) {
+                self = .contains(key: key, value: value)
+            } else if let value = try container.decodeIfPresent(JSONValue.self, forKey: .startsWith) {
+                self = .startsWith(key: key, value: value)
+            } else if let value = try container.decodeIfPresent(Int.self, forKey: .lengthGt) {
+                self = .lengthGt(key: key, value: value)
+            } else if let value = try container.decodeIfPresent(Int.self, forKey: .lengthLt) {
+                self = .lengthLt(key: key, value: value)
             } else if let value = try container.decodeIfPresent(Double.self, forKey: .greaterThan) {
                 self = .greaterThan(key: key, value: value)
             } else if let value = try container.decodeIfPresent(Double.self, forKey: .lessThan) {
@@ -633,7 +645,7 @@ indirect enum Condition: Decodable, Equatable {
                 throw DecodingError.dataCorruptedError(
                     forKey: .key,
                     in: container,
-                    debugDescription: "Condition needs one of equals, notEquals, gt or lt"
+                    debugDescription: "Exactly one of equals, notEquals, gt, lt, empty, contains, startsWith, lengthGt, lengthLt is required"
                 )
             }
         }
@@ -645,6 +657,19 @@ indirect enum Condition: Decodable, Equatable {
         switch self {
         case let .equals(key, value): state[key] == value
         case let .notEquals(key, value): state[key] != value
+        case let .contains(key, value): state[key]?.stringValue.map { text in
+            guard let value = value.stringValue else { return false }
+            let units = Array(text.utf16)
+            let operand = Array(value.utf16)
+            return operand.isEmpty || (operand.count <= units.count && (0 ... (units.count - operand.count)).contains {
+                units[$0 ..< ($0 + operand.count)].elementsEqual(operand)
+            })
+        } ?? false
+        case let .startsWith(key, value): state[key]?.stringValue.map { text in
+            value.stringValue.map { Array(text.utf16).starts(with: Array($0.utf16)) } ?? false
+        } ?? false
+        case let .lengthGt(key, value): state[key]?.stringValue.map { $0.utf16.count > value } ?? false
+        case let .lengthLt(key, value): state[key]?.stringValue.map { $0.utf16.count < value } ?? false
         case let .greaterThan(key, value): state[key]?.numberValue.map { $0 > value } ?? false
         case let .lessThan(key, value): state[key]?.numberValue.map { $0 < value } ?? false
         case let .all(conditions): conditions.allSatisfy { $0.holds(state) }
@@ -810,6 +835,8 @@ final class PrototypeNode: Decodable {
     let imeAction: String?
     /// Text field input and supporting-line options (#12066); cross-field rules belong to the host.
     let supportingText: String?
+    let errorWhen: Condition?
+    let errorText: String?
     let keyboardType: String?
     let secure: Bool?
     let multiline: Bool?
@@ -838,7 +865,8 @@ final class PrototypeNode: Decodable {
         case onLongPress, onDoubleTap, enabledWhen, checks, validateOn, maxLines, columns, span, start, screens, spans,
              linkify,
              activeKey, trailingActions, onSubmit, pageSpacing, peek, pageSize, indicator, itemWidth, itemSpacing,
-             dismissOnSwipe, supportingText, keyboardType, secure, multiline, minLines, maxLength, trailingIcon,
+             dismissOnSwipe, supportingText, errorWhen, errorText, keyboardType, secure, multiline, minLines, maxLength,
+             trailingIcon,
              imeAction, yRange, xLabels, goal
         case chartSeries = "series"
     }
@@ -927,6 +955,8 @@ final class PrototypeNode: Decodable {
         itemSpacing = try container.decodeIfPresent(Double.self, forKey: .itemSpacing)
         dismissOnSwipe = try container.decodeIfPresent(Bool.self, forKey: .dismissOnSwipe)
         supportingText = try container.decodeIfPresent(String.self, forKey: .supportingText)
+        errorWhen = try container.decodeIfPresent(Condition.self, forKey: .errorWhen)
+        errorText = try container.decodeIfPresent(String.self, forKey: .errorText)
         keyboardType = try container.decodeIfPresent(String.self, forKey: .keyboardType)
         secure = try container.decodeIfPresent(Bool.self, forKey: .secure)
         multiline = try container.decodeIfPresent(Bool.self, forKey: .multiline)

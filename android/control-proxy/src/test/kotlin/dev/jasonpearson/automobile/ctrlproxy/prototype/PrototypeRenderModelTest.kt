@@ -685,4 +685,32 @@ class PrototypeRenderModelTest {
       mapPrototypeSpec(decoded)
     }
   }
+
+  @Test
+  fun `forced text errors map independently of validation and preserve caption precedence`() {
+    val field =
+      PrototypeTextFieldNode(
+        stateKey = "value",
+        errorWhen = PrototypeCondition(key = "value", contains = PrototypeScalar.Text("h")),
+      )
+    val state = mapOf("value" to PrototypeScalar.Text("hello"))
+    fun mapped(node: PrototypeTextFieldNode, shown: Set<String> = emptySet()) =
+      mapPrototypeSpec(spec(node).copy(state = state), shownErrors = shown).root
+    assertTrue(mapped(field).isError)
+    assertNull(mapped(field).errorMessage)
+    assertEquals("Help", mapped(field.copy(supportingText = "Help")).errorMessage)
+    val checked =
+      field.copy(
+        checks = listOf(PrototypeCheck.MinLength(10.0, "Check")),
+        supportingText = "Help",
+      )
+    assertEquals("Check", mapped(checked, setOf("value")).errorMessage)
+    assertEquals("Server", mapped(checked.copy(errorText = "Server"), setOf("value")).errorMessage)
+    val normal =
+      field.copy(
+        errorWhen = PrototypeCondition(key = "value", startsWith = PrototypeScalar.Text("z")),
+      )
+    assertFalse(mapped(normal).isError)
+    assertNull(mapped(normal).errorMessage)
+  }
 }

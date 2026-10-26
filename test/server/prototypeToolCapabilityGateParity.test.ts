@@ -98,6 +98,10 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     activeKey: "active",
     child: label,
   }),
+  prototype_string_conditions_v1: fixture({
+    ...label,
+    visibleWhen: { key: "name", contains: "A" },
+  }),
   prototype_loading_states_v1: fixture({
     type: "box",
     id: "label",

@@ -76,6 +76,7 @@ data class PrototypeRenderNode(
   val spans: List<PrototypeRenderSpan>? = null,
   val enabled: Boolean = true,
   val errorMessage: String? = null,
+  val isError: Boolean = false,
   /** A `chart`'s points and summary read against the current `/data`; null for other roles. */
   val chart: PrototypeChartModel? = null,
   /**
@@ -256,7 +257,8 @@ internal class PrototypeNodeMapping(
         prototypeOpenWhen(node)?.let { state[it.key] == PrototypeScalar.BooleanValue(it.equals) }
           ?: false,
         enabled = node.enabledCondition()?.holds(localState, validity) ?: true,
-        errorMessage = prototypeShownError(node, state, shownErrors),
+        errorMessage = prototypeShownError(node, localState, shownErrors, validity),
+        isError = prototypeIsError(node, localState, shownErrors, validity),
         checked =
           (prototypeToggleKey(node)
               ?: prototypeListItemToggleKey(node)

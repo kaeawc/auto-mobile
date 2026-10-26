@@ -239,7 +239,7 @@
         }
 
         @ViewBuilder private var accessibleInput: some View {
-            let hint = PrototypeTextFieldOptions.accessibilityHint(
+            let hint = model.shownError(node).map { "Error: \($0)" } ?? PrototypeTextFieldOptions.accessibilityHint(
                 supportingText: options.supportingAccessibilityValue,
                 count: options.clip(draft.text).utf16.count,
                 maxLength: options.maxLength
@@ -259,7 +259,10 @@
                     .padding(12)
                     .overlay {
                         RoundedRectangle(cornerRadius: 4)
-                            .stroke(focused ? colors.primary : colors.fieldOutline, lineWidth: focused ? 2 : 1)
+                            .stroke(
+                                model.fieldError(node).isError ? .red : (focused ? colors.primary : colors.fieldOutline),
+                                lineWidth: focused ? 2 : 1
+                            )
                             .accessibilityHidden(true)
                     }
             } else {
@@ -271,7 +274,9 @@
                             .accessibilityHidden(true)
                     }
                     .overlay(alignment: .bottom) {
-                        Rectangle().fill(focused ? colors.primary : colors.fieldOutline)
+                        Rectangle().fill(
+                            model.fieldError(node).isError ? .red : (focused ? colors.primary : colors.fieldOutline)
+                        )
                             .frame(height: 1)
                             .accessibilityHidden(true)
                     }
@@ -288,7 +293,7 @@
                     chromedInput
                     if node.supportingText != nil || options.maxLength != nil {
                         HStack(alignment: .top) {
-                            if let supporting = node.supportingText {
+                            if let supporting = node.supportingText, !model.fieldError(node).isError {
                                 Text(supporting).accessibilityHidden(true)
                             }
                             Spacer(minLength: 8)

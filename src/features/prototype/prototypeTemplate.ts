@@ -210,6 +210,8 @@ function mapCondition(condition: Raw, path: string, visit: FieldVisitor): Raw {
     visit(value, fieldPath, kind, Object.hasOwn(condition, "data"));
   mapField(condition, "equals", path, "operand", operandVisit);
   mapField(condition, "notEquals", path, "operand", operandVisit);
+  mapField(condition, "contains", path, "operand", operandVisit);
+  mapField(condition, "startsWith", path, "operand", operandVisit);
   mapObject(condition, "not", path, (entry, entryPath) => mapCondition(entry, entryPath, visit));
   for (const form of ["all", "any"]) {
     mapList(condition, form, path, (entry, entryPath) => mapCondition(entry, entryPath, visit));
@@ -443,6 +445,8 @@ export function mapBindableFields(node: Raw, path: string, visit: FieldVisitor):
   }
   const component = typeof copy.type === "string" ? COMPONENT_FIELDS[copy.type] : undefined;
   component?.(copy, path, visit);
+  mapField(copy, "errorText", path, "text", visit);
+  mapObject(copy, "errorWhen", path, (entry, entryPath) => mapCondition(entry, entryPath, visit));
   mapObject(copy, "enabledWhen", path, (entry, entryPath) => mapCondition(entry, entryPath, visit));
   mapList(copy, "checks", path, (entry, entryPath) => {
     mapField(entry, "message", entryPath, "text", visit);

@@ -16,6 +16,7 @@ const DISPLAY_TEXT_FIELDS = new Set([
   "headline",
   "title",
   "supportingText",
+  "errorText",
   "supporting",
   "trailingText",
   "message",

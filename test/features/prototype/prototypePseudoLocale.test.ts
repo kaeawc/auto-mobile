@@ -135,3 +135,17 @@ describe("pseudo-locale spec", () => {
     expect(emitting.onTap[0].payload).toEqual({ title: "stable-id" });
   });
 });
+
+test("pseudo-locale translates error captions while preserving condition operands", () => {
+  const field = {
+    type: "textField",
+    stateKey: "value",
+    supportingText: "Help",
+    errorText: "Bad value",
+    errorWhen: { key: "value", contains: "Bad" },
+  };
+  const localized = pseudoLocalizeSpec(field);
+  expect(localized.errorText).toBe(pseudoLocalizeText("Bad value"));
+  expect(localized.supportingText).toBe(pseudoLocalizeText("Help"));
+  expect(localized.errorWhen).toEqual(field.errorWhen);
+});

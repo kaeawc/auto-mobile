@@ -6969,6 +6969,30 @@
         "hasDefault": true
       },
       {
+        "name": "contains",
+        "type": "object:PrototypeScalar",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "startsWith",
+        "type": "object:PrototypeScalar",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "lengthGt",
+        "type": "int",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "lengthLt",
+        "type": "int",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "gt",
         "type": "double",
         "nullable": true,
@@ -11322,6 +11346,18 @@
       },
       {
         "name": "supportingText",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "errorWhen",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "errorText",
         "type": "string",
         "nullable": true,
         "hasDefault": true

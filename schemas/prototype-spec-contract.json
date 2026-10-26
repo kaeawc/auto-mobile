@@ -153,7 +153,18 @@
       "kind": "object",
       "exactlyOne": ["key", "data", "platform", "all", "any", "not", "valid"],
       "dependents": {
-        "key|data|platform": ["equals", "notEquals", "gt", "lt", "empty"]
+        "key|data|platform": [
+          "equals",
+          "notEquals",
+          "gt",
+          "lt",
+          "empty",
+          "contains",
+          "startsWith",
+          "lengthGt",
+          "lengthLt"
+        ],
+        "key": ["contains", "startsWith", "lengthGt", "lengthLt"]
       },
       "fields": {
         "key": {
@@ -255,6 +266,38 @@
         "platform": {
           "rule": {
             "kind": "pointer"
+          },
+          "optional": true
+        },
+        "contains": {
+          "rule": {
+            "kind": "string",
+            "max": 256
+          },
+          "optional": true
+        },
+        "startsWith": {
+          "rule": {
+            "kind": "string",
+            "max": 256
+          },
+          "optional": true
+        },
+        "lengthGt": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 100000
+          },
+          "optional": true
+        },
+        "lengthLt": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 100000
           },
           "optional": true
         }
@@ -4488,7 +4531,24 @@
                 "name": "condition"
               },
               "optional": true
+            },
+            "errorWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "errorText": {
+              "rule": {
+                "kind": "string",
+                "max": 256
+              },
+              "optional": true
             }
+          },
+          "dependents": {
+            "errorWhen": ["errorText"]
           }
         },
         "switch": {

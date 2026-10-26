@@ -249,7 +249,7 @@ enum PrototypeDataResolver {
         guard case var .object(fields) = root else { return root }
         PrototypeRepeat.bindTextFields(&fields) { PrototypeDataText.bind($0, data: data) }
         if let value = fields["repeat"] { fields["repeat"] = resolveRepeat(value, repeats: &repeats) }
-        for key in ["visibleWhen", "enabledWhen"] {
+        for key in ["visibleWhen", "enabledWhen", "errorWhen"] {
             if let value = fields[key] { fields[key] = resolveCondition(value, data: data) }
         }
         if case let .array(styles)? = fields["styleWhen"] {

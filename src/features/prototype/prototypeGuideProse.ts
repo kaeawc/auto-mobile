@@ -115,6 +115,8 @@ All these options require \`prototype_text_field_options_v1\`. A device without 
 is refused before uploads or show; nothing is shown. Update CtrlProxy, or relaunch the iOS
 app with \`launchApp prototype: true\`, or drop the textField options.
 
+\`textField.errorWhen\` accepts any condition and forces error styling immediately, independently of checks/validateOn. Optional nonempty \`errorText\` (max 256 UTF-16 units) requires errorWhen. Caption precedence while forced: errorText, currently shown check message, supportingText, then no caption. Both options require \`prototype_string_conditions_v1\`. They do not affect change-event validity, \`{valid}\` or \`requireValid\`, which remain checks-only. Fields without checks do not track validation blur.
+
 A \`textField\` may also declare \`trailingIcon: {icon, label, onTap?}\` (a built-in icon, its
 nonempty accessible \`label\` and optional 1-32 \`onTap\` actions, for example a clear button that
 \`setState\`s the field's key to an empty string; without \`onTap\` it is decoration),
@@ -150,9 +152,11 @@ are reported in \`platformNotes\`.
 
 ## Loading, empty and error states
 
+State-key \`contains\`/\`startsWith\` compare UTF-16 substrings/prefixes, case-sensitive with no Unicode normalization. Literal operands are nonempty strings up to 256 UTF-16 units; repeat placeholders bind like equality string operands, and an empty substituted operand holds for every string. \`lengthGt\`/\`lengthLt\` compare UTF-16 length strictly against literal integers 0..100000 (\`😀\` has length 2). Missing or non-string state values fail all four. They are valid only with \`key\`, wherever a condition is accepted, and require \`prototype_string_conditions_v1\`.
+
 (needs \`prototype_loading_states_v1\`) \`{data: "/feed", empty: true}\` holds when the value is
 missing, \`[]\`, \`{}\` or \`""\`; \`empty: false\` is its inverse. It replaces the comparison, so
-it cannot be combined with \`equals\`, \`notEquals\`, \`gt\` or \`lt\`, and it applies to data
+it cannot be combined with another comparison, and it applies to data
 conditions only. Style \`shimmer: true\` on a \`box\`, \`row\`, \`column\` or \`card\` sweeps an
 animated highlight over its background and reads "Loading" to accessibility; it is static under
 \`motion: "none"\` or animator scale 0. The canonical trio uses a request's \`statusKey\`:
@@ -348,7 +352,7 @@ Grammar:
   A state key cannot hold a list.
 - Placeholders are bound in a template child's \`text\`, the label/title/text fields of components
   (button, fab, segmentedButton options, topAppBar, dialog, menu item labels/trailingText, select labels/options, snackbar), state condition operands
-  (\`equals\`/\`notEquals\` strings), \`setState.value\` and \`emit.name\`. \`emit.payload\` is not bound.
+  (\`equals\`/\`notEquals\`/\`contains\`/\`startsWith\` strings, including inside \`errorWhen\`) and \`textField.errorText\`, \`setState.value\` and \`emit.name\`. \`emit.payload\` is not bound.
   Anything else, including a \`{key}\` state placeholder and other braces, is left untouched.
 - State keys bind too: \`stateKey\`, \`hourKey\`/\`minuteKey\`, a list item's trailing \`stateKey\`,
   \`openWhen.key\`, condition \`key\`s and the \`key\` of \`setState\`, \`toggle\`, \`increment\` and
@@ -613,10 +617,10 @@ are rejected; a missing text path renders empty.
   placeholders are not charged. Crossing the total fails at that field with \`Substituted text total limit exceeded\`.
   During state interpolation, a replacement that would exceed the per-call substitution limit stays
   as written, and later placeholders may still substitute.
-- A condition uses exactly one of \`key\`, \`data\`, \`all\`, \`any\`, \`not\`. A data condition has exactly
+- A condition uses exactly one of \`key\`, \`data\`, \`platform\`, \`valid\`, \`all\`, \`any\`, \`not\`. A data condition has exactly
   one comparison: \`equals\` (same scalar type and value), \`notEquals\` (its inverse, including missing
-  or non-scalar), \`gt\` or \`lt\` (numbers only, otherwise false). \`equals\`/\`notEquals\` operands are
-  literals; repeat placeholders there are rejected. \`bottomSheet.openWhen\` remains boolean state.
+  or non-scalar), \`gt\` or \`lt\` (numbers only, otherwise false), or \`empty\` (data only). \`equals\`/\`notEquals\` operands are
+  literals; repeat placeholders there are rejected. Key forms also accept \`contains\`, \`startsWith\`, \`lengthGt\` or \`lengthLt\` (see string conditions). \`bottomSheet.openWhen\` remains boolean state.
 
 The host validates data and repeat paths; the device resolves bindings once per show before
 repeat expansion. All data uses require \`prototype_data_model_v1\`; an older device is refused

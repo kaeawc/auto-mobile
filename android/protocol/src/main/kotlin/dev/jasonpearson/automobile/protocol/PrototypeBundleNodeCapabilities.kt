@@ -63,6 +63,7 @@ internal object PrototypeBundleNodeCapabilities {
               ),
             "text_field_actions_v1" to setOf("trailingIcon", "imeAction", "onSubmit"),
             "text_field_leading_icon_v1" to setOf("leadingIcon"),
+            "string_conditions_v1" to setOf("errorWhen", "errorText"),
           )
         "pager" ->
           mapOf(

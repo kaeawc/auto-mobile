@@ -129,8 +129,10 @@ private struct PrototypeSubstitutionGuard {
 
     private mutating func ownFields(_ fields: [String: JSONValue], path: String, scope: Scope?) throws {
         try componentFields(fields, path: path, scope: scope)
-        if let condition = fields["visibleWhen"] {
-            try conditionFields(condition, path: "\(path).visibleWhen", scope: scope)
+        for key in ["visibleWhen", "enabledWhen", "errorWhen"] {
+            if let condition = fields[key] {
+                try conditionFields(condition, path: "\(path).\(key)", scope: scope)
+            }
         }
         if case let .array(styles)? = fields["styleWhen"] {
             for (index, style) in styles.enumerated() {
@@ -262,7 +264,7 @@ private struct PrototypeSubstitutionGuard {
         guard case let .object(fields) = value else { return }
         try field(fields, "key", path: path, scope: scope)
         if fields["data"] == nil {
-            for key in ["equals", "notEquals"] { try field(fields, key, path: path, scope: scope) }
+            for key in ["equals", "notEquals", "contains", "startsWith"] { try field(fields, key, path: path, scope: scope) }
         }
         if let negated = fields["not"] {
             try conditionFields(negated, path: "\(path).not", scope: scope)

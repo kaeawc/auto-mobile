@@ -44,6 +44,7 @@ enum PrototypeAgentProtocol {
         carouselCapability,
         chartCapability,
         loadingStatesCapability,
+        stringConditionsCapability,
         textFieldLeadingIconCapability,
         refreshCapability,
         searchBarCapability,
@@ -135,6 +136,8 @@ enum PrototypeAgentProtocol {
     static let chartCapability = "prototype_chart_v1"
     /// `{data, empty}` conditions and style `shimmer` on box, row, column and card (#14207, #14689).
     static let loadingStatesCapability = "prototype_loading_states_v1"
+    /// State-key string comparisons and textField forced error presentation.
+    static let stringConditionsCapability = "prototype_string_conditions_v1"
     /// Text field `leadingIcon` drawn as an SF Symbol (#12066).
     static let textFieldLeadingIconCapability = "prototype_text_field_leading_icon_v1"
     /// Pull-to-refresh on a vertical scroll bound to a boolean state key (#12065).

@@ -30,6 +30,7 @@ object AutoMobilePrototype {
       "prototype_search_bar_v1",
       "prototype_stack_v1",
       "prototype_storage_v1",
+      "prototype_string_conditions_v1",
       "prototype_swipe_actions_v1",
       "prototype_text_field_actions_v1",
       "prototype_text_field_leading_icon_v1",

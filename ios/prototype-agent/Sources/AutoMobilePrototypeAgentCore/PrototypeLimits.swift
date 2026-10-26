@@ -411,6 +411,7 @@ enum PrototypeLimits {
         for key in [
             "visibleWhen",
             "enabledWhen",
+            "errorWhen",
             "styleWhen",
             "onTap",
             "actions",

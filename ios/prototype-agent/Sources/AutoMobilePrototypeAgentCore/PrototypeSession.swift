@@ -713,15 +713,17 @@ struct PrototypeSession {
     }
 
     func shownError(_ node: PrototypeNode) -> String? {
-        for key in node.checkedKeys where shownErrors.contains(key) {
-            let result = PrototypeChecks.evaluate(state[key], checks: node.checks ?? [], nodeType: node.type)
-            if let message = result.firstFailingMessage { return message }
-        }
-        return nil
+        fieldError(node).message
+    }
+
+    func fieldError(_ node: PrototypeNode) -> PrototypeFieldError {
+        PrototypeFieldError.shown(node, state: state, shown: shownErrors)
     }
 
     mutating func blur(_ node: PrototypeNode) {
-        if (node.validateOn ?? .blur) == .blur { shownErrors.formUnion(node.checkedKeys) }
+        if node.checks?.isEmpty == false, (node.validateOn ?? .blur) == .blur {
+            shownErrors.formUnion(node.checkedKeys)
+        }
     }
 
     private mutating func showChangeErrors(_ keys: [String]) {

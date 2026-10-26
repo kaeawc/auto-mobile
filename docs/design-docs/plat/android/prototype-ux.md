@@ -148,9 +148,9 @@ is missing.
   repeat placeholders, then state interpolation. An inserted data string is plain text: `{item.x}`,
   `{index}` and `{key}` inside it bind afterwards like authored text, it is never rescanned for data
   placeholders, and data values cannot be escaped.
-- A condition uses exactly one of `key`, `data`, `all`, `any`, `not` (see Conditions). A `key` or `data` form
+- A condition uses exactly one of `key`, `data`, `platform`, `valid`, `all`, `any`, `not` (see Conditions). A `key` or `data` form
   takes exactly one comparison: `equals` (same scalar type and value; numbers by value, -0 equals 0),
-  `notEquals` (its inverse, including missing or non-scalar), `gt` or `lt` (numbers only, otherwise false).
+  `notEquals` (its inverse, including missing or non-scalar), `gt` or `lt` (numbers only, otherwise false), or data-only `empty`. State-key forms additionally accept `contains`, `startsWith`, `lengthGt` or `lengthLt`.
   Data `equals`/`notEquals` operands are literals; a repeat placeholder there is rejected (state operands
   still bind). `bottomSheet.openWhen` keeps its boolean `{key, equals}` form. Component props are never
   bound in `repeat.items.path` or a condition's `data`; `repeat.key` passes through expansion unchanged.
@@ -192,8 +192,8 @@ depth precedes array length, then children; the byte check runs last.
 | Referencing template string                                                               | `Unknown repeat field "x"` (non-scalar members count as absent)                                                                                                       |
 | `<node>.repeat.items.path`                                                                | `Bound state key "<k>" is invalid (repeat item <i>)`; literal repeats keep `<node>.repeat.items[i]` without the suffix                                                |
 | `<node>.repeat.key`                                                                       | `Unknown repeat field "<key>"`; `Duplicate repeat key "<text>" (items <i> and <j>)`, first colliding pair                                                             |
-| Condition `.key`                                                                          | `Exactly one of key, data, all, any, not is required`                                                                                                                 |
-| Condition comparison field                                                                | `Requires key or data or platform`; `Exactly one of equals, notEquals, gt, lt, empty is required`                                                                     |
+| Condition `.key`                                                                          | `Exactly one of key, data, platform, all, any, not, valid is required`                                                                                                |
+| Condition comparison field                                                                | `Requires key or data or platform`; `Requires key`; `Exactly one of equals, notEquals, gt, lt, empty, contains, startsWith, lengthGt, lengthLt is required`           |
 | Condition `.equals` / `.notEquals` in bindable visiting order                             | `Repeat placeholder in a data condition operand is not supported`                                                                                                     |
 | `<node>.repeat`                                                                           | Existing expanded node/image limit errors                                                                                                                             |
 
@@ -526,6 +526,8 @@ value cannot exceed it (UTF-16 length).
 All these options require `prototype_text_field_options_v1`. A device without the capability
 is refused before uploads or show; nothing is shown. Update CtrlProxy, or relaunch the iOS
 app with `launchApp prototype: true`, or drop the textField options.
+
+`textField.errorWhen` accepts any condition form and immediately forces error styling when true, independently of `checks` and `validateOn`. Optional `errorText` requires `errorWhen` and is nonempty, at most 256 UTF-16 units. The caption is `errorText`, else the currently shown check message, else `supportingText`; with no caption the error styling still appears. Both fields require `prototype_string_conditions_v1`. Forced errors do not change validity in change events, `{valid}` or `requireValid`; those remain checks-only. A field without checks does not track blur validation.
 
 A `textField` may also declare `trailingIcon: {icon, label, onTap?}` (a built-in icon, its
 nonempty accessible `label` and optional 1-32 `onTap` actions, for example a clear button that
@@ -1286,21 +1288,28 @@ The shared fixtures `test/fixtures/prototype-spec/valid/platform-*.json` and
 A condition is exactly one of these forms. `visibleWhen` takes any of them;
 `bottomSheet.openWhen` keeps the boolean `{key, equals}` form.
 
-| Form                       | Holds when                                                               |
-| -------------------------- | ------------------------------------------------------------------------ |
-| `{key, equals: scalar}`    | The state value is exactly equal (same type). A missing key never holds. |
-| `{key, notEquals: scalar}` | The state value differs, including when the key is missing.              |
-| `{key, gt: number}`        | The state value is a number greater than `gt`. Any other type is false.  |
-| `{key, lt: number}`        | The state value is a number less than `lt`. Any other type is false.     |
-| `{data \| platform, ...}`  | The same comparisons on a `/data` or `/platform` value (see above).      |
-| `{all: [condition, ...]}`  | Every member holds. One to 16 members.                                   |
-| `{any: [condition, ...]}`  | At least one member holds. One to 16 members.                            |
-| `{not: condition}`         | The member does not hold.                                                |
+| Form                        | Holds when                                                                            |
+| --------------------------- | ------------------------------------------------------------------------------------- |
+| `{key, equals: scalar}`     | The state value is exactly equal (same type). A missing key never holds.              |
+| `{key, notEquals: scalar}`  | The state value differs, including when the key is missing.                           |
+| `{key, gt: number}`         | The state value is a number greater than `gt`. Any other type is false.               |
+| `{key, lt: number}`         | The state value is a number less than `lt`. Any other type is false.                  |
+| `{key, contains: string}`   | A string state value contains the operand, case-sensitive UTF-16 units.               |
+| `{key, startsWith: string}` | A string state value starts with the operand, case-sensitive UTF-16 units.            |
+| `{key, lengthGt: integer}`  | A string state value has UTF-16 length strictly greater than the operand.             |
+| `{key, lengthLt: integer}`  | A string state value has UTF-16 length strictly less than the operand.                |
+| `{valid: key or keys}`      | All referenced keys pass their checks.                                                |
+| `{data \| platform, ...}`   | `equals`, `notEquals`, `gt`, `lt` on `/data` or `/platform`; `empty` only on `/data`. |
+| `{all: [condition, ...]}`   | Every member holds. One to 16 members.                                                |
+| `{any: [condition, ...]}`   | At least one member holds. One to 16 members.                                         |
+| `{not: condition}`          | The member does not hold.                                                             |
+
+String comparisons require `prototype_string_conditions_v1` and are key-only. Missing and non-string values fail all four. `contains`/`startsWith` literals are nonempty, at most 256 UTF-16 units; operands bind repeat `{item.x}`/`{index}` placeholders like state equality operands. An empty substituted operand holds for every string. No Unicode normalization is performed. `lengthGt`/`lengthLt` are literal integers in 0..100000; equality to the length fails both, and `😀` has length 2.
 
 Numbers compare by value, so a state of `-0` equals `0` on every platform (#11408).
 
 Conditions nest to a depth of 8 (`MAX_PROTOTYPE_CONDITION_DEPTH` in the shared
-contract). `key` takes exactly one comparison, and comparisons need `key`;
+contract). Every key/data/platform form takes exactly one comparison; string comparisons require `key`;
 errors point at the offending field (for example `root.visibleWhen.gt`).
 `toggle`, `increment` and `decrement` validate their `key` against the declared `state`
 (`root.onTap[0].key`), and are no-ops at runtime if the key's type was changed by
@@ -2309,6 +2318,8 @@ Rendering stays inside the prototype window on both platforms so `observe` and `
 The select field and menu surface carry the node `testTag`. Select option rows use `<testTag>.<value>`; menu item rows use `<testTag>.<index>`, with zero-based positions including dividers. Android adds row tags only when `testTag` is set; iOS falls back to `(testTag ?? id).<value>` or `(testTag ?? id).<index>`.
 
 ## Checks
+
+`textField.errorWhen` controls presentation only; validity and emitted validation results remain checks-only.
 
 Devices advertising `prototype_checks_v1` evaluate declarative checks locally. The host refuses
 show and patch results using this feature on older devices. Inputs `textField`, `slider`,

@@ -28,6 +28,7 @@ enum PrototypeBundleCapabilities {
         }
         while let node = pending.popLast()?.objectFields {
             let type = node["type"]?.stringValue ?? ""
+            if PrototypeStringConditions.uses(node) { need("string_conditions") }
             let featureTypes = [
                 "flow": "flow_grid",
                 "grid": "flow_grid",
@@ -55,6 +56,7 @@ enum PrototypeBundleCapabilities {
                     "label",
                     "variant",
                     "supportingText",
+                "errorText",
                     "keyboardType",
                     "secure",
                     "multiline",
@@ -136,6 +138,7 @@ enum PrototypeBundleCapabilities {
                 "headline",
                 "supporting",
                 "supportingText",
+                "errorText",
                 "trailingText",
                 "message",
                 "url",

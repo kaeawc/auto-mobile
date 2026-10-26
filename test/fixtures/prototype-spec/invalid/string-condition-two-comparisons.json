@@ -1,0 +1,24 @@
+{
+  "spec": {
+    "id": "string-conditions",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "value": "hello"
+    },
+    "root": {
+      "type": "text",
+      "text": "x",
+      "visibleWhen": {
+        "key": "value",
+        "equals": "x",
+        "contains": "x"
+      }
+    }
+  },
+  "expectedPath": "root.visibleWhen.contains",
+  "expectedMessage": "Exactly one of equals, notEquals, gt, lt, empty, contains, startsWith, lengthGt, lengthLt is required"
+}

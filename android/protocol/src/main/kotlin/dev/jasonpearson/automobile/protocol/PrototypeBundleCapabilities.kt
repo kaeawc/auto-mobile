@@ -19,6 +19,7 @@ internal object PrototypeBundleCapabilities {
       caps.add("prototype_theme_modes_v1")
     for (node in PrototypeBundleSpec.nodes(spec)) {
       caps.addAll(PrototypeBundleNodeCapabilities.collect(node))
+      if (PrototypeStringConditions.uses(node)) caps.add("prototype_string_conditions_v1")
       fields(node, caps)
     }
     for (action in refs.context.actions) actions(
@@ -71,7 +72,7 @@ internal object PrototypeBundleCapabilities {
       null
     }
     val conditions =
-      listOfNotNull(node["enabledWhen"], node["visibleWhen"]) +
+      listOfNotNull(node["enabledWhen"], node["visibleWhen"], node["errorWhen"]) +
         (node["styleWhen"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonObject)?.get("when") }
     if (conditions.any { hasField(it, setOf("data"), emptySet()) })
       caps.add("prototype_data_model_v1")

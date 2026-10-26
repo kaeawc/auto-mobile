@@ -154,6 +154,8 @@
     "strict-url-uppercase.json",
     "strict-url-userinfo.json",
     "strict-url-whitespace.json",
+    "string-conditions.json",
+    "string-error-repeat.json",
     "style-polish.json",
     "style-when.json",
     "substituted-text-exact-limit.json",
@@ -162,6 +164,7 @@
     "swipe-actions-row.json",
     "swipe-actions-vertical-pager.json",
     "text-field-actions.json",
+    "text-field-error-when.json",
     "text-field-options.json",
     "text-spans-max.json",
     "text-spans-placeholders.json",
@@ -747,6 +750,7 @@
     "strict-gate-prototype_search_bar_v1.json",
     "strict-gate-prototype_stack_v1.json",
     "strict-gate-prototype_storage_v1.json",
+    "strict-gate-prototype_string_conditions_v1.json",
     "strict-gate-prototype_swipe_actions_v1.json",
     "strict-gate-prototype_text_field_actions_v1.json",
     "strict-gate-prototype_text_field_leading_icon_v1.json",
@@ -943,6 +947,15 @@
     "strict-utf8-overlong.json",
     "strict-utf8-surrogate.json",
     "strict-utf8-truncated.json",
+    "string-condition-data.json",
+    "string-condition-empty-operand.json",
+    "string-condition-fraction-length.json",
+    "string-condition-large-length.json",
+    "string-condition-long-operand.json",
+    "string-condition-negative-length.json",
+    "string-condition-number-operand.json",
+    "string-condition-platform.json",
+    "string-condition-two-comparisons.json",
     "style-when-bad-condition.json",
     "style-when-bad-style-value.json",
     "style-when-empty.json",
@@ -971,6 +984,11 @@
     "swipe-actions-unknown-role.json",
     "switch-missing-state-key.json",
     "switch-state-type.json",
+    "text-error-empty-caption.json",
+    "text-error-invalid-condition.json",
+    "text-error-long-caption.json",
+    "text-error-non-text-field.json",
+    "text-error-without-condition.json",
     "text-field-bad-variant.json",
     "text-field-empty-label.json",
     "text-field-ime-action-unknown.json",
@@ -1307,6 +1325,14 @@
       "prototype_timers_v1"
     ],
     "transition-slide.json": [],
-    "width-dp-at-max.json": []
+    "width-dp-at-max.json": [],
+    "string-conditions.json": ["prototype_checks_v1", "prototype_string_conditions_v1"],
+    "text-field-error-when.json": [
+      "prototype_checks_v1",
+      "prototype_data_model_v1",
+      "prototype_string_conditions_v1",
+      "prototype_text_field_options_v1"
+    ],
+    "string-error-repeat.json": ["prototype_string_conditions_v1"]
   }
 }

@@ -262,7 +262,7 @@ function objectConstraint(
   }
   return undefined;
 }
-/** `exactlyOne` picks one form of a union-like object; `dependents` ties optional fields to a trigger. */
+/** Single-trigger dependents are optional; a pipe-separated trigger group requires exactly one. */
 function formConstraint(
   data: Record<string, unknown>,
   rule: Rule,
@@ -274,13 +274,15 @@ function formConstraint(
       `Exactly one of ${rule.exactlyOne.join(", ")} is required`,
     );
   }
-  for (const [trigger, dependents] of Object.entries(rule.dependents ?? {})) {
+  const dependencies = rule.dependents ?? {};
+  for (const trigger of Object.keys(dependencies).sort()) {
+    const dependents = dependencies[trigger];
     const present = dependents.filter((key) => Object.hasOwn(data, key));
     if (!trigger.split("|").some((key) => Object.hasOwn(data, key))) {
       if (present.length > 0) {
         return fail(keyPath(path, present[0]), `Requires ${trigger.split("|").join(" or ")}`);
       }
-    } else if (present.length !== 1) {
+    } else if (trigger.includes("|") && present.length !== 1) {
       const target = present[1] ?? dependents[0];
       return fail(keyPath(path, target), `Exactly one of ${dependents.join(", ")} is required`);
     }

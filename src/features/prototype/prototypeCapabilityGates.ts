@@ -14,6 +14,7 @@ import {
   PROTOTYPE_REFRESH_CAPABILITY,
   PROTOTYPE_SEARCH_BAR_CAPABILITY,
   PROTOTYPE_LOADING_STATES_CAPABILITY,
+  PROTOTYPE_STRING_CONDITIONS_CAPABILITY,
   PROTOTYPE_MOTION_V2_CAPABILITY,
   PROTOTYPE_CHOREOGRAPHY_CAPABILITY,
   PROTOTYPE_CHART_CAPABILITY,
@@ -105,6 +106,11 @@ import {
   prototypeChecksUnsupportedMessage,
 } from "./prototypeChecksCapability";
 
+import {
+  prototypeStringConditionsFields,
+  prototypeStringConditionsUnsupportedMessage,
+} from "./prototypeStringConditions";
+
 interface PrototypeSpecCapabilityGate {
   readonly capability: string;
   readonly fields: (spec: unknown) => string[];
@@ -113,6 +119,11 @@ interface PrototypeSpecCapabilityGate {
 
 /** Spec-introduced features must be checked on both show and the complete patch result. */
 export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGate[] = [
+  {
+    capability: PROTOTYPE_STRING_CONDITIONS_CAPABILITY,
+    fields: prototypeStringConditionsFields,
+    unsupportedMessage: prototypeStringConditionsUnsupportedMessage,
+  },
   {
     capability: PROTOTYPE_THEME_MODES_CAPABILITY,
     fields: prototypeThemeModeFields,

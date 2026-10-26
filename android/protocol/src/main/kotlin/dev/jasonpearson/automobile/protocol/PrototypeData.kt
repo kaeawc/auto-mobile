@@ -261,7 +261,8 @@ object PrototypeDataResolver {
           when (key) {
             "repeat" -> resolveRepeat(value, repeats)
             "enabledWhen",
-            "visibleWhen" -> resolveCondition(value, data)
+            "visibleWhen",
+            "errorWhen" -> resolveCondition(value, data)
             "styleWhen" -> resolveStyles(value, data)
             else -> value
           }
@@ -406,6 +407,7 @@ object PrototypeDataResolver {
         textBound ||
         conditionBound(node["enabledWhen"]) ||
         conditionBound(node["visibleWhen"]) ||
+        conditionBound(node["errorWhen"]) ||
         stylesBound
     val child = node["child"] as? JsonObject
     val nested =

@@ -359,7 +359,6 @@ class PrototypeSpecModelsTest {
       is JsonArray -> JsonArray(element.map(::canonical))
       is JsonPrimitive ->
         element.takeIf { !it.isString }?.doubleOrNull?.let(::JsonPrimitive) ?: element
-      else -> element
     }
 
   private inline fun <reified T> assertRoundTrip(name: String, expected: T) {

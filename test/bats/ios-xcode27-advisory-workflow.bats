@@ -22,7 +22,8 @@ WORKFLOW=".github/workflows/ios-xcode27-advisory.yml"
 }
 
 @test "the job runs on the self-hosted Macs and only when the pool is enabled" {
-  grep -qF 'runs-on: ["self-hosted", "automobile-mac"]' "${WORKFLOW}"
+  grep -qF '["self-hosted","automobile-mac"]' "${WORKFLOW}"
+  grep -q '^    runs-on: .*fromJSON' "${WORKFLOW}"
   grep -qF "vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true'" "${WORKFLOW}"
 }
 

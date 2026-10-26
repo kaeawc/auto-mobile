@@ -25,7 +25,7 @@ jobs:
   ios-xcode27-build:
     name: "iOS Build (Xcode 27, Advisory)"
     if: vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.repository == 'kaeawc/auto-mobile') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'run-xcode27') && (github.event.action != 'labeled' || github.event.label.name == 'run-xcode27')))
-    runs-on: ["self-hosted", "automobile-mac"]
+    runs-on: ${{ fromJSON('["self-hosted","automobile-mac"]') }}
     timeout-minutes: 40
     continue-on-error: true
     steps:

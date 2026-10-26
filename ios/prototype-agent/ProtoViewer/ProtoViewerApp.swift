@@ -37,6 +37,8 @@ struct ProtoViewerApp: App {
                     libraryLog
                         .warning("Cannot create MCP directories: \(error.localizedDescription, privacy: .private)")
                 }
+                // Drop results and pushed bundles whose host request is long over (#13621).
+                await mcp.sweepOrphans()
             }
             return (store, imports, mcp)
         }

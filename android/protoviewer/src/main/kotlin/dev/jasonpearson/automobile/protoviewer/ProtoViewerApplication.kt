@@ -74,6 +74,8 @@ class ProtoViewerApplication : Application() {
       services.flushScope.launch(services.io) { services.clearStaleExports() }
       // Own the MCP folders before any adb shell can create them (#15174).
       services.flushScope.launch(services.io) { services.mcpInbox?.ensureDirectories() }
+      // Drop results and pushed bundles whose host request is long over (#13621).
+      services.flushScope.launch(services.io) { services.mcpInbox?.sweepOrphans() }
     }
   }
 }

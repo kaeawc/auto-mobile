@@ -1,7 +1,12 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import {
   type ArtifactCapabilities,
+  ADVERTISING_SOURCES,
+  UNIMPLEMENTED_BY_ARTIFACT,
   findGaps,
+  findStaleExemptions,
   formatGaps,
   parseAndroidAdvertised,
   parseIosRunnerAdvertised,
@@ -40,6 +45,19 @@ describe("artifact capability parsers", () => {
     ]);
   });
 
+  test("android: expands SystemGlobalActions flagFor() names into global_action flags", () => {
+    const kotlin = `
+      private fun flagFor(wireName: String) = "global_action_\${wireName}_v1"
+      Spec("back", ID, 1, null),
+      Spec("lock_screen", ID, API_P, flagFor("lock_screen")),
+      Spec("power_dialog", ID, 1, flagFor("power_dialog")),
+    `;
+    expect(parseAndroidAdvertised(kotlin)).toEqual([
+      "global_action_lock_screen_v1",
+      "global_action_power_dialog_v1",
+    ]);
+  });
+
   test("ios runner: reads enum raw values only", () => {
     const swift = `
       case doubleTapV1 = "double_tap_v1"
@@ -55,6 +73,32 @@ describe("artifact capability parsers", () => {
       static let version = "1"
     `;
     expect(parsePrototypeAgentAdvertised(swift)).toEqual(["prototype_inspect_v1"]);
+  });
+
+  test("prototype agent: reads the standalone persistence replay constant", () => {
+    const swift = `static let persistenceReplayCapability = "prototype_persistence_replay_v1"`;
+    expect(parsePrototypeAgentAdvertised(swift)).toEqual(["prototype_persistence_replay_v1"]);
+  });
+
+  test("real advertising sources yield the capabilities the 0.0.88 gaps named (#15347)", () => {
+    const repoRoot = path.resolve(import.meta.dir, "../..");
+    const read = (artifact: keyof typeof ADVERTISING_SOURCES): string =>
+      ADVERTISING_SOURCES[artifact]
+        .map((file) => readFileSync(path.join(repoRoot, file), "utf8"))
+        .join("\n");
+    expect(parseAndroidAdvertised(read("android-ctrlproxy-apk"))).toEqual(
+      expect.arrayContaining([
+        "global_action_dismiss_notification_shade_v1",
+        "global_action_lock_screen_v1",
+        "global_action_power_dialog_v1",
+        "global_action_quick_settings_v1",
+        "global_action_screenshot_v1",
+        "global_action_split_screen_v1",
+      ]),
+    );
+    expect(parsePrototypeAgentAdvertised(read("prototype-agent-dylib"))).toContain(
+      "prototype_persistence_replay_v1",
+    );
   });
 
   test("host: reads versioned literals in code and ignores unversioned strings", () => {
@@ -116,6 +160,54 @@ describe("findGaps", () => {
   test("an artifact's capabilities do not satisfy another artifact's gate", () => {
     const gaps = findGaps(advertised, { ...noGates, "ios-runner": ["tap_double_v1"] });
     expect(gaps).toHaveLength(1);
+  });
+});
+
+describe("exemptions", () => {
+  const exempt = {
+    "android-ctrlproxy-apk": {},
+    "ios-runner": {},
+    "prototype-agent-dylib": { prototype_platform_v1: "no module registry" },
+  };
+
+  test("a deliberately unimplemented gate is not a gap", () => {
+    expect(
+      findGaps(
+        advertised,
+        { ...noGates, "prototype-agent-dylib": ["prototype_platform_v1"] },
+        exempt,
+      ),
+    ).toEqual([]);
+  });
+
+  test("an exemption is scoped to its own artifact", () => {
+    const gaps = findGaps(
+      advertised,
+      { ...noGates, "android-ctrlproxy-apk": ["prototype_platform_v1"] },
+      exempt,
+    );
+    expect(gaps).toEqual([
+      { artifact: "android-ctrlproxy-apk", capability: "prototype_platform_v1" },
+    ]);
+  });
+
+  test("an exemption for a capability the artifact now advertises is stale", () => {
+    const withIt: ArtifactCapabilities = {
+      ...advertised,
+      "prototype-agent-dylib": ["prototype_platform_v1"],
+    };
+    expect(findStaleExemptions(withIt, exempt)).toEqual([
+      { artifact: "prototype-agent-dylib", capability: "prototype_platform_v1" },
+    ]);
+    expect(findStaleExemptions(advertised, exempt)).toEqual([]);
+  });
+
+  test("every checked-in exemption states a reason", () => {
+    for (const reasons of Object.values(UNIMPLEMENTED_BY_ARTIFACT)) {
+      for (const reason of Object.values(reasons)) {
+        expect(reason.length).toBeGreaterThan(10);
+      }
+    }
   });
 });
 

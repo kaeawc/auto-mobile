@@ -80,7 +80,10 @@ class PrototypeWindowMetadataTest {
       PrototypeWindowMetadata("fullscreen", false),
       prototypeWindowMetadata(
         mapPrototypeSpec(
-          spec(PrototypeFullscreenPlacement(scrim = "#FF000000"), background = null),
+          spec(
+            PrototypeFullscreenPlacement(scrim = PrototypeModeValue.Single("#FF000000")),
+            background = null,
+          ),
         ),
       ),
     )
@@ -179,7 +182,7 @@ class PrototypeWindowMetadataTest {
 
   @Test
   fun `an opaque fullscreen scrim still covers what a rounded root leaves open`() {
-    val base = spec(PrototypeFullscreenPlacement(scrim = "#FF000000"))
+    val base = spec(PrototypeFullscreenPlacement(scrim = PrototypeModeValue.Single("#FF000000")))
     val root = base.root as PrototypeBoxNode
     val rounded = checkNotNull(root.style).copy(cornerRadius = PrototypeCornerRadius.Dp(48.0))
     assertEquals(
@@ -224,11 +227,21 @@ class PrototypeWindowMetadataTest {
   fun `a fully opaque fullscreen scrim makes a transparent root opaque, a dimming one does not`() {
     assertEquals(
       PrototypeWindowMetadata("fullscreen", true),
-      metadata(spec(PrototypeFullscreenPlacement(scrim = "#FF000000"), background = null)),
+      metadata(
+        spec(
+          PrototypeFullscreenPlacement(scrim = PrototypeModeValue.Single("#FF000000")),
+          background = null,
+        ),
+      ),
     )
     assertEquals(
       PrototypeWindowMetadata("fullscreen", false),
-      metadata(spec(PrototypeFullscreenPlacement(scrim = "#66000000"), background = null)),
+      metadata(
+        spec(
+          PrototypeFullscreenPlacement(scrim = PrototypeModeValue.Single("#66000000")),
+          background = null,
+        ),
+      ),
     )
   }
 

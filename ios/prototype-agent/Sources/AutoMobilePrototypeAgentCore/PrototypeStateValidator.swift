@@ -274,7 +274,7 @@ enum PrototypeStateValidator {
 
     /// A list item's trailing switch or checkbox binds a boolean, like the standalone controls.
     static func trailingError(_ node: PrototypeNode, _ state: [String: JSONValue]) -> BindingRejection? {
-        guard node.type == "listItem", let key = node.trailing?.stateKey else { return nil }
+        guard node.type == "listItem", let key = node.toggleKey else { return nil }
         return state[key]?.boolValue == nil ? .init(
             field: "trailing.stateKey",
             message: "Toggle control requires a boolean state key"

@@ -41,7 +41,10 @@ export type PrototypeClient = AndroidPrototypeClient;
 export interface PrototypeTarget {
   transport: PrototypeTransport;
   android?: AndroidPrototypeTransport;
-  ios?: Pick<IosPrototypeTransport, "supportsCapability" | "status" | "clearStorage">;
+  ios?: Pick<
+    IosPrototypeTransport,
+    "supportsCapability" | "status" | "clearStorage" | "advanceClock"
+  >;
 }
 export interface PrototypeToolDependencies {
   /** Saved iOS actions use the host installer without an agent connection; created lazily by default. */

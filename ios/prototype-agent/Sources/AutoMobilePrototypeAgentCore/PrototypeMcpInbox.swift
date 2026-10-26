@@ -1,5 +1,9 @@
 import Foundation
 
+/// A pushed bundle or result this old belongs to a request whose host gave up long ago (hosts wait
+/// seconds): a result written after the host's timeout already removed its own copy, or a stray push.
+let prototypeMcpOrphanMaxAge: TimeInterval = 10 * 60
+
 /// Serializes whole MCP attempts. No store crosses executors; closures construct it on this actor.
 actor PrototypeMcpInbox {
     private let root: URL
@@ -7,6 +11,7 @@ actor PrototypeMcpInbox {
     private let importBundle: @Sendable (URL, String?) throws -> PrototypeLibraryEntry
     private let entries: @Sendable () throws -> [PrototypeLibraryEntry]
     private let warning: @Sendable (String) -> Void
+    private let now: @Sendable () -> Date
     private var pending: [String: String] = [:]
 
     init(
@@ -14,17 +19,23 @@ actor PrototypeMcpInbox {
         makeFiles: @Sendable () -> any PrototypeLibraryFileSystem = { PrototypeLibraryDiskFileSystem() },
         importBundle: @escaping @Sendable (URL, String?) throws -> PrototypeLibraryEntry,
         entries: @escaping @Sendable () throws -> [PrototypeLibraryEntry],
+        now: @escaping @Sendable () -> Date = { Date() },
         warning: @escaping @Sendable (String) -> Void
     ) {
         self.root = root
+        self.now = now
         files = makeFiles()
         self.importBundle = importBundle
         self.entries = entries
         self.warning = warning
     }
 
-    init(root: URL, libraryRoot: URL, storageRoot: URL, warning: @escaping @Sendable (String) -> Void) {
+    init(
+        root: URL, libraryRoot: URL, storageRoot: URL, now: @escaping @Sendable () -> Date = { Date() },
+        warning: @escaping @Sendable (String) -> Void
+    ) {
         self.root = root
+        self.now = now
         files = PrototypeLibraryDiskFileSystem()
         importBundle = { url, label in
             let bytes = try PrototypeLibraryFileReader().read(url)
@@ -40,8 +51,29 @@ actor PrototypeMcpInbox {
         try files.createDirectory(root.appendingPathComponent("results", isDirectory: true))
     }
 
+    /// Deletes regular files in `inbox` and `results` not modified for [prototypeMcpOrphanMaxAge].
+    /// Best effort: a failure warns and the rest still goes. Folders, fresh files and files whose
+    /// age is unknown are kept. Returns how many files were removed.
+    @discardableResult
+    func sweepOrphans() -> Int {
+        let cutoff = now().addingTimeInterval(-prototypeMcpOrphanMaxAge)
+        var removed = 0
+        for folder in ["inbox", "results"] {
+            let directory = root.appendingPathComponent(folder, isDirectory: true)
+            guard files.exists(directory), let names = try? files.children(directory) else { continue }
+            for name in names {
+                let url = directory.appendingPathComponent(name)
+                guard let modified = files.modifiedAt(url), modified < cutoff else { continue }
+                do { try files.remove(url); removed += 1 }
+                catch { warning("MCP orphan sweep could not remove a file: \(error.localizedDescription)") }
+            }
+        }
+        return removed
+    }
+
     /// A found open waits for the UI's load callback before reporting success.
     func handle(_ command: PrototypeMcpRequest) -> PrototypeLibraryEntry? {
+        sweepOrphans()
         guard PrototypeMcpRequest.validRequestId(command.request),
               !files.exists(resultURL(command.request)), pending[command.request] == nil
         else { return nil }

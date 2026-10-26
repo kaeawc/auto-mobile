@@ -1,4 +1,5 @@
 import { prototypeDeriveSchema, prototypeRepeatDeriveSchema } from "./prototypeFormatSchema";
+import * as timers from "./prototypeTimerSchema";
 import { z } from "zod";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { PROTOTYPE_STACK_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
@@ -136,6 +137,8 @@ export const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.enum(["setData"]), ...dataActionFields }).strict(),
   z.object({ type: z.enum(["appendData"]), ...dataActionFields }).strict(),
   z.object({ type: z.enum(["removeData"]), path: dataActionPathSchema }).strict(),
+  timers.startTimerActionSchema,
+  timers.cancelTimerActionSchema,
   requestActionSchema,
   platformActionSchema,
   z
@@ -158,6 +161,7 @@ export const actionSchema = z.discriminatedUnion("type", [
     .object({ type: z.enum(["replace"]), stack: z.string().min(1), screen: z.string().min(1) })
     .strict(),
 ]);
+timers.bindPrototypeTimerActions(() => actionSchema);
 bindPrototypeRequestFollowUps(() => actionSchema);
 bindPrototypePlatformFollowUps(() => actionSchema);
 const gestureNodeShape = {
@@ -965,6 +969,8 @@ export const PROTOTYPE_ACTION_TYPES = [
   "request",
   "platform",
   "scrollTo",
+  "startTimer",
+  "cancelTimer",
 ] as const;
 export const PROTOTYPE_PLACEMENT_TYPES = ["fullscreen", "sheet", "floating"] as const;
 

@@ -19,6 +19,7 @@ class McpInboxTest {
   private val imports = mutableListOf<Triple<ByteArray, LibrarySource, String?>>()
   private var importResult: LibraryImportResult =
     LibraryImportResult.Imported(Fixtures.entry().copy(label = "Checkout"))
+  private var nowMillis = 1_000_000_000L
   private val inbox =
     McpInbox(
       root,
@@ -27,6 +28,7 @@ class McpInboxTest {
         importResult
       },
       repository,
+      { nowMillis },
     )
 
   @After
@@ -231,5 +233,48 @@ class McpInboxTest {
     assertTrue(McpCommand.parse(MCP_OPEN_ACTION, "mcp-1", null, null) is McpCommand.Unsupported)
     assertNull(McpCommand.parse(MCP_IMPORT_ACTION, "../mcp-1", null, null))
     assertNull(McpCommand.parse(MCP_IMPORT_ACTION, null, null, null))
+  }
+
+  private fun aged(file: File, ageMs: Long) = file.apply { setLastModified(nowMillis - ageMs) }
+
+  private fun staged(path: String, ageMs: Long) =
+    aged(File(root, path).apply { parentFile.mkdirs() }.apply { writeText("x") }, ageMs)
+
+  @Test
+  fun sweepRemovesOldResultsAndInboxBundlesButKeepsFreshOnes() {
+    val oldResult = staged("results/old.json", MCP_ORPHAN_MAX_AGE_MS + 60_000)
+    val oldTemp = staged("results/.old.json.tmp", MCP_ORPHAN_MAX_AGE_MS + 60_000)
+    val oldBundle = staged("inbox/stray.automobile-proto", MCP_ORPHAN_MAX_AGE_MS + 60_000)
+    val freshResult = staged("results/fresh.json", MCP_ORPHAN_MAX_AGE_MS - 60_000)
+    val freshBundle = staged("inbox/inflight.automobile-proto", 0)
+
+    assertEquals(3, inbox.sweepOrphans())
+
+    assertFalse(oldResult.exists())
+    assertFalse(oldTemp.exists())
+    assertFalse(oldBundle.exists())
+    assertTrue(freshResult.exists())
+    assertTrue(freshBundle.exists())
+  }
+
+  @Test
+  fun sweepKeepsDirectoriesAndIsANoOpBeforeTheFoldersExist() {
+    assertEquals(0, inbox.sweepOrphans())
+    val nested = File(root, "results/nested").apply { mkdirs() }
+    aged(nested, MCP_ORPHAN_MAX_AGE_MS * 2)
+
+    assertEquals(0, inbox.sweepOrphans())
+    assertTrue(nested.isDirectory)
+  }
+
+  @Test
+  fun handlingACommandSweepsOrphansButNotItsOwnFreshBundleOrResult() {
+    val stale = staged("results/gone.json", MCP_ORPHAN_MAX_AGE_MS * 2)
+    bundle("mcp-9")
+
+    inbox.handle(McpCommand.Import("mcp-9", null))
+
+    assertFalse(stale.exists())
+    assertEquals("imported", result("mcp-9").text("status"))
   }
 }

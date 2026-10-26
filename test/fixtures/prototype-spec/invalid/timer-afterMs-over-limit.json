@@ -1,0 +1,28 @@
+{
+  "spec": {
+    "id": "timers",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "button",
+      "label": "Start",
+      "onTap": [
+        {
+          "type": "startTimer",
+          "id": "tick",
+          "afterMs": 3600001,
+          "actions": [
+            {
+              "type": "emit",
+              "name": "tick"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].afterMs"
+}

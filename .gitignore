@@ -81,3 +81,6 @@ __pycache__/
 
 # Spotlight exclusions for generated directories and worktree roots
 .metadata_never_index
+
+# ProtoViewer store listing icon and screenshot renders (generated, routed through LFS)
+/build/store-listing/

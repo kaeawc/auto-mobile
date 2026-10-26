@@ -129,6 +129,12 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     text: "@ana",
     linkify: { kinds: ["mention"], onTap: [{ type: "emit", name: "link" }] },
   }),
+  prototype_timers_v1: fixture({
+    ...label,
+    onTap: [
+      { type: "startTimer", id: "tick", afterMs: 100, actions: [{ type: "emit", name: "tick" }] },
+    ],
+  }),
   prototype_chat_scroll_v1: fixture({
     type: "scroll",
     id: "label",

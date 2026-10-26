@@ -22,6 +22,12 @@ export const CTRL_PROXY_REQUEST_FIELDS: {
     packageName: "required",
     fileName: "required",
   },
+  advance_prototype_clock: {
+    type: "required",
+    requestId: "required",
+    id: "required",
+    advanceTimeMs: "required",
+  },
   clear_prototype_storage: {
     type: "required",
     requestId: "required",

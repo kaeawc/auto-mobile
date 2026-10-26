@@ -270,6 +270,8 @@ private struct PrototypeSubstitutionGuard {
             try field(action, "value", path: path, scope: scope)
         case "emit": try field(action, "name", path: path, scope: scope)
         case "setData", "appendData", "removeData": try field(action, "path", path: path, scope: scope)
+        case "startTimer":
+            try actions(action, path: path, scope: scope, list: "actions")
         case "request":
             try field(action, "url", path: path, text: true, scope: scope)
             try field(action, "statusKey", path: path, scope: scope)

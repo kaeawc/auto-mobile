@@ -22,7 +22,7 @@ internal object PrototypeBundleCapabilities {
       caps.addAll(PrototypeBundleNodeCapabilities.collect(node))
       fields(node, caps)
     }
-    for (action in refs.context.actions.filter { it.path.startsWith("root") }) actions(
+    for (action in refs.context.actions) actions(
       action.value,
       caps,
     )
@@ -39,6 +39,8 @@ internal object PrototypeBundleCapabilities {
       "setData",
       "appendData",
       "removeData" -> caps.add("prototype_data_actions_v1")
+      "startTimer",
+      "cancelTimer" -> caps.add("prototype_timers_v1")
       "scrollTo" -> caps.add("prototype_chat_scroll_v1")
       "emit" -> if ("context" in action) caps.add("prototype_emit_context_v1")
     }

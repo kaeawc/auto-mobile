@@ -35,7 +35,10 @@ export type AndroidPrototypeClient = Pick<
   | "supportsCommand"
 > &
   Partial<
-    Pick<AndroidCtrlProxyClient, "attachPrototypeRequestHost" | "requestClearPrototypeStorage">
+    Pick<
+      AndroidCtrlProxyClient,
+      "attachPrototypeRequestHost" | "requestClearPrototypeStorage" | "requestAdvancePrototypeClock"
+    >
   >;
 
 /**
@@ -88,6 +91,13 @@ export class AndroidPrototypeTransport implements PrototypeTransport {
 
   dismiss(target: PrototypeDismiss, timeoutMs?: number): Promise<PrototypeResult> {
     return this.client.requestDismissPrototype(target, timeoutMs);
+  }
+
+  advanceClock(id: string, advanceTimeMs: number, timeoutMs?: number): Promise<PrototypeResult> {
+    if (!this.client.requestAdvancePrototypeClock) {
+      throw new ActionableError("Update the connected CtrlProxy to simulate prototype timers");
+    }
+    return this.client.requestAdvancePrototypeClock(id, advanceTimeMs, timeoutMs);
   }
 
   /** Wipes the values CtrlProxy stored for `id` (#12522); needs prototype_storage_v1. */

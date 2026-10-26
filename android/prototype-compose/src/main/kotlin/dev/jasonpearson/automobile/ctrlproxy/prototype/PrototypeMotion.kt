@@ -26,7 +26,9 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
 import dev.jasonpearson.automobile.protocol.PrototypeBoxNode
 import dev.jasonpearson.automobile.protocol.PrototypeColumnNode
@@ -135,8 +137,31 @@ private val SIZE_TRANSPARENT_ROLES = setOf("card", "scroll", "pager")
  * spring for text, style or image-load size changes, and do not clip children while motion is on.
  * No size animation or clipping is added when motion is off.
  */
-internal fun Modifier.prototypeAnimateSize(enabled: Boolean): Modifier =
-  if (enabled) animateContentSize() else this
+@Composable
+internal fun Modifier.prototypeAnimateSize(enabled: Boolean): Modifier {
+  if (!enabled) return this
+  val activity = LocalPrototypeMotionActivity.current ?: return animateContentSize()
+  val owner = remember { Any() }
+  DisposableEffect(activity, owner) { onDispose { activity.release(owner) } }
+  // The outer modifier sees the animated size and the inner one the target, so the container is
+  // moving exactly while they differ. Derived, not event-driven: it corrects itself when the
+  // animation node is recreated or interrupted, so the count cannot stay positive.
+  val sizes = remember { arrayOfNulls<IntSize>(2) }
+  val report = {
+    val outer = sizes[0]
+    val inner = sizes[1]
+    activity.report(owner, outer != null && inner != null && outer != inner)
+  }
+  return onSizeChanged {
+    sizes[0] = it
+    report()
+  }
+    .animateContentSize()
+    .onSizeChanged {
+      sizes[1] = it
+      report()
+    }
+}
 
 /**
  * Scales a node to [scale] while [source] reports a press. The scale animates with a spring when
@@ -147,8 +172,9 @@ internal fun Modifier.prototypeAnimateSize(enabled: Boolean): Modifier =
 internal fun Modifier.prototypePressScale(source: InteractionSource, scale: Float): Modifier {
   val pressed by source.collectIsPressedAsState()
   val spec = if (LocalPrototypeMotion.current) spring<Float>() else snap()
-  val current by
-    animateFloatAsState(if (pressed) scale else 1f, spec, label = "prototypePressScale")
+  val target = if (pressed) scale else 1f
+  val current by animateFloatAsState(target, spec, label = "prototypePressScale")
+  ReportPrototypeMotion { current != target }
   return graphicsLayer {
     scaleX = current
     scaleY = current

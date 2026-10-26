@@ -513,6 +513,14 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
   ): Promise<PrototypeResult> {
     return this.prototypes.requestDeleteSavedPrototype(id, timeoutMs, perf);
   }
+  requestAdvancePrototypeClock(
+    id: string,
+    advanceTimeMs: number,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<PrototypeResult> {
+    return this.prototypes.requestAdvancePrototypeClock(id, advanceTimeMs, timeoutMs, perf);
+  }
   requestClearPrototypeStorage(
     id: string,
     timeoutMs?: number,

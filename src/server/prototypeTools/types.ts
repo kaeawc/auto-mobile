@@ -1,3 +1,5 @@
+import type { PrototypeTestSessionStore } from "../../db/prototypeTestSessionRepository";
+import type { IdGenerator } from "../../utils/IdGenerator";
 import type { z } from "zod/v4";
 import type { ProtoViewerDevice } from "../../features/prototype/protoViewer/protoViewerDevice";
 import type { DeviceWindowCacheInvalidator } from "../../features/observe/DeviceWindowCacheInvalidator";
@@ -47,6 +49,8 @@ export interface PrototypeTarget {
   >;
 }
 export interface PrototypeToolDependencies {
+  testSessionStore?: PrototypeTestSessionStore;
+  idGenerator?: IdGenerator;
   /** Saved iOS actions use the host installer without an agent connection; created lazily by default. */
   iosSavedPrototypeInstaller?: IosSavedPrototypeInstaller;
   /** ProtoViewer on Android or an iOS simulator for saved `save`/`open` (#13621). */

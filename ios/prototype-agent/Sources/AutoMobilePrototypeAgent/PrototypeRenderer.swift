@@ -834,6 +834,7 @@
                 .offset(x: style?.offset?.x ?? 0, y: style?.offset?.y ?? 0)
                 .opacity(style?.alpha ?? 1)
                 .modifier(PrototypeMenuBoundsReporter(node: node, model: model))
+                .modifier(PrototypeHandledTapModifier(node: node, model: model))
                 .modifier(TapModifier(
                     actions: handlesOwnTap ? nil : node.onTap,
                     longPress: handlesOwnTap ? nil : node.onLongPress,
@@ -1027,6 +1028,32 @@
         }
     }
 
+    /// Controls consume taps even when their value stays unchanged. Plain content gets no gesture.
+    @MainActor
+    private struct PrototypeHandledTapModifier: ViewModifier {
+        let node: PrototypeNode
+        let model: PrototypeModel
+
+        private var handlesTap: Bool {
+            node.onTap != nil || node.onDoubleTap != nil || [
+                "textField", "searchBar", "switch", "checkbox", "button", "slider", "chip",
+                "radioGroup", "listItem", "iconButton", "fab", "segmentedButton", "timePicker",
+                "datePicker", "tabBar", "bottomNav", "select",
+            ].contains(node.type)
+        }
+
+        @ViewBuilder
+        func body(content: Content) -> some View {
+            if handlesTap {
+                content.simultaneousGesture(TapGesture().onEnded {
+                    if model.isEnabled(node) { model.consumeDeadTap() }
+                })
+            } else {
+                content
+            }
+        }
+    }
+
     @MainActor
     private struct TapModifier: ViewModifier {
         let actions: [PrototypeAction]?
@@ -1096,6 +1123,7 @@
 
         private func resolveTap() {
             guard model.isEnabled(node) else { return }
+            model.consumeDeadTap()
             let now = ProcessInfo.processInfo.systemUptime
             // A busy main actor can deliver the next tap before the expiry task resumes.
             if tapResolver.disambiguator.expire(at: now) {

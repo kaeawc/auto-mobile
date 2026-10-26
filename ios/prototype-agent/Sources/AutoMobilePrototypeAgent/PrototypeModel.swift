@@ -238,6 +238,8 @@
         ) {
             // Keep the touchable rects: SwiftUI re-reports a frame only when it changes, so clearing
             // them on a same-geometry re-show would leave the prototype passing every touch through.
+            deadTapRevision += 1
+            deadTapTracker.cancel()
             var next = session
             // Stored values replace the spec's for the keys it lists before the first draw, and emit
             // nothing (#12526); the session only receives the result.
@@ -297,6 +299,33 @@
             return session.missingAssets(available: Set(assets.keys))
         }
 
+        @ObservationIgnored private var deadTapTracker = PrototypeDeadTapTracker()
+        @ObservationIgnored private(set) var deadTapRevision = 0
+        @ObservationIgnored private var deadTapPoint = CGPoint.zero
+
+        func beginDeadTap(at point: CGPoint, inside: Bool) {
+            deadTapRevision += 1
+            deadTapTracker.cancel()
+            guard inside, spec?.window.deadTaps == true else { return }
+            deadTapPoint = point
+            deadTapTracker.begin(x: Double(point.x), y: Double(point.y))
+        }
+
+        func moveDeadTap(to point: CGPoint) {
+            deadTapPoint = point
+            deadTapTracker.move(x: Double(point.x), y: Double(point.y))
+        }
+
+        func consumeDeadTap() {
+            deadTapTracker.consume()
+        }
+
+        func finishDeadTap(revision: Int) {
+            guard revision == deadTapRevision, deadTapTracker.finish() else { return }
+            let point = deadTapPoint
+            apply { $0.deadTap(x: Double(point.x), y: Double(point.y)) }
+        }
+
         // MARK: Interactions
 
         /// Reading stacks registers the SwiftUI dependency; the pop policy itself stays in core.
@@ -349,6 +378,7 @@
         }
 
         func run(_ actions: [PrototypeAction]) {
+            consumeDeadTap()
             apply { $0.run(actions) }
         }
 
@@ -371,32 +401,39 @@
         }
 
         func toggle(_ key: String, then actions: [PrototypeAction]) {
+            consumeDeadTap()
             apply { $0.toggle(key: key, then: actions) }
         }
 
         func select(index: Int, pager: String?, key: String?, then actions: [PrototypeAction] = []) {
+            consumeDeadTap()
             apply { $0.select(index: index, pager: pager, key: key, then: actions) }
         }
 
         /// A tap on a node's own target or one of its parts; see `PrototypeSession.activate`.
         func activate(_ target: PrototypeTapTarget) {
+            consumeDeadTap()
             apply { $0.activate(target) ?? [] }
         }
 
         func choose(key: String, value: String, then actions: [PrototypeAction]) {
+            consumeDeadTap()
             apply { $0.choose(key: key, value: value, then: actions) }
         }
 
         func slide(key: String, value: Double, then actions: [PrototypeAction]) {
+            consumeDeadTap()
             apply { $0.slide(key: key, value: value, then: actions) }
         }
 
         func setTime(hourKey: String, minuteKey: String, hour: Int, minute: Int, then actions: [PrototypeAction]) {
+            consumeDeadTap()
             apply { $0.setTime(hourKey: hourKey, minuteKey: minuteKey, hour: hour, minute: minute, then: actions) }
         }
 
         /// The dialog scrim: closes the dialog without running any button's actions.
         func closeModal(_ node: PrototypeNode) {
+            consumeDeadTap()
             apply { $0.closeModal(node) }
         }
 
@@ -490,6 +527,7 @@
 
         /// Typing goes through `change`, so every edit both updates state and emits `change`.
         func change(key: String, value: String) {
+            consumeDeadTap()
             apply { $0.change(key: key, value: .string(value)) }
         }
     }

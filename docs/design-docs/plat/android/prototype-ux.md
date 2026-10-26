@@ -2503,3 +2503,26 @@ Cross-field errors point to `.maxRuns` when everyMs is absent and to `.id` on th
 startTimer in contract document order. A cancelTimer id with no declaration produces a host-only
 show/patch warning. This asymmetry is deliberate: Kotlin and Swift accept it without a diagnostic
 and cancellation remains a runtime no-op.
+
+## Dead taps (`window.deadTaps`, `prototype_dead_tap_v1`)
+
+`window.deadTaps: true` enables `emit` events named `prototype_dead_tap`. The
+Android device advertises `prototype_dead_tap_v1`; this window option is a host
+preflight capability, not a strict-spec gate.
+
+A root Final-pass observer reports single-pointer down/up gestures left
+unconsumed by descendants, with movement below touch slop. Scrolling, pager
+drags, multitouch and taps outside the content window do not report. Interactive
+controls and dismissing scrims consume their gestures. Gesture-only nodes with
+nonempty long-press or double-tap actions explicitly mark their down as handled
+without consuming it, preserving ancestor clicks. Passive text, boxes, images
+and spacers remain dead areas. A single tap on a gesture-only node counts as
+handled, even if its hold or double tap action does not fire.
+
+Payloads contain only `stack`, `screen`, `x` and `y`; coordinates are window-local
+dp rounded to one decimal. The deepest stack path supplies its id and top screen;
+equal depths choose the lowest stack id lexicographically. Both ids are null
+without stacks. The event uses normal sequence allocation, state, pages and
+stacks. The payload never includes typed text. Authored emits cannot use the
+reserved `prototype_` prefix. Disabling the option or closing the runtime stops
+reporting.

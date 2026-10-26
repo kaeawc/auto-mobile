@@ -157,6 +157,7 @@
                 }
             }
             .onChange(of: focused) { _, value in
+                if value { model.consumeDeadTap() }
                 if !value {
                     model.blur(node)
                     draft.endEditing(stored: model.state[key]?.displayString ?? "")

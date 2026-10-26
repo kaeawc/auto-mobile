@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 import android.util.Log
 import dev.jasonpearson.automobile.protocol.*
 import java.util.UUID
+import kotlin.math.floor
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -60,6 +61,8 @@ sealed interface PrototypeInteraction {
   data class Tap(val actions: List<PrototypeAction>) : PrototypeInteraction
 
   data class TimerFire(val actions: List<PrototypeAction>) : PrototypeInteraction
+
+  data class DeadTap(val xDp: Float, val yDp: Float) : PrototypeInteraction
 
   data class PagerMotion(val pager: String, val page: Int, val scrolling: Boolean) :
     PrototypeInteraction
@@ -409,6 +412,7 @@ class PrototypeRuntime(
           warn("Refused timer fire: ${error.message}")
         }
       }
+      is PrototypeInteraction.DeadTap -> deadTap(interaction)
       is PrototypeInteraction.PagerMotion ->
         if (!interaction.scrolling) setPage(interaction.pager, interaction.page)
       is PrototypeInteraction.SettledPage -> setPage(interaction.pager, interaction.page)
@@ -643,6 +647,26 @@ class PrototypeRuntime(
     mutableSnapshot.value = current.copy(pages = current.pages + (id to page))
     // Names the pager that moved and its new page, as the iOS agent does (#11409).
     emit(kind = PrototypeEventKind.PAGE_CHANGED, name = id, payload = JsonPrimitive(page))
+  }
+
+  private suspend fun deadTap(tap: PrototypeInteraction.DeadTap) {
+    if (current.spec.window.deadTaps != true) return
+    val top =
+      current.stacks.entries.minWithOrNull(
+        compareByDescending<Map.Entry<String, PrototypeStackSnapshot>> { it.value.path.size }
+          .thenBy { it.key },
+      )
+    emit(
+      kind = PrototypeEventKind.EMIT,
+      name = PrototypeDeadTaps.EVENT_NAME,
+      payload =
+        buildJsonObject {
+          put("stack", top?.key?.let(::JsonPrimitive) ?: JsonNull)
+          put("screen", top?.value?.path?.lastOrNull()?.let(::JsonPrimitive) ?: JsonNull)
+          put("x", roundHalfUp(tap.xDp.toDouble()))
+          put("y", roundHalfUp(tap.yDp.toDouble()))
+        },
+    )
   }
 
   /** Framework-free Back policy; the controller serializes this with other interactions. */
@@ -1375,3 +1399,10 @@ class PrototypeRequestLimiter(
     if (count > 0) count--
   }
 }
+
+/**
+ * One decimal, halves away from zero like Swift's `rounded()`, so both platforms report the same
+ * point.
+ */
+private fun roundHalfUp(value: Double): Double =
+  (if (value < 0) -floor(-value * 10 + 0.5) else floor(value * 10 + 0.5)) / 10

@@ -35,6 +35,7 @@ import {
   PROTOTYPE_PLATFORM_CAPABILITY,
   PROTOTYPE_ANCHOR_CAPABILITY,
   PROTOTYPE_WINDOW_CHROME_CAPABILITY,
+  PROTOTYPE_DEAD_TAP_CAPABILITY,
 } from "../observe/android/ctrlProxyProtocol";
 import { hasPrototypeAnchors } from "./prototypeAnchors";
 import {
@@ -291,7 +292,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /**
  * Capabilities the show preflight checks outside the gate table (#14536): any node anchor needs
  * prototype_anchor_v1, and an explicitly chromeless fullscreen window needs
- * prototype_window_chrome_v1 (the only chrome request the preflight refuses without it).
+ * prototype_window_chrome_v1 (the only chrome request the preflight refuses without it); window.deadTaps
+ * true needs prototype_dead_tap_v1 (#14124).
  */
 function preflightCapabilities(spec: unknown): string[] {
   if (!isRecord(spec)) {
@@ -302,6 +304,7 @@ function preflightCapabilities(spec: unknown): string[] {
   return [
     ...(hasPrototypeAnchors(spec) ? [PROTOTYPE_ANCHOR_CAPABILITY] : []),
     ...(fullscreen && window.chrome === "none" ? [PROTOTYPE_WINDOW_CHROME_CAPABILITY] : []),
+    ...(window.deadTaps === true ? [PROTOTYPE_DEAD_TAP_CAPABILITY] : []),
   ];
 }
 

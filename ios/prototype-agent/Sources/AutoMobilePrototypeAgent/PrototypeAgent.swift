@@ -44,6 +44,64 @@ final class PassthroughWindow: UIWindow {
         return super.hitTest(point, with: event)
     }
 
+    private var activeTouches = Set<UITouch>()
+
+    override func sendEvent(_ event: UIEvent) {
+        guard event.type == .touches, let touches = event.touches(for: self), let model else {
+            super.sendEvent(event)
+            return
+        }
+        for touch in touches where touch.phase == .began {
+            let point = touch.location(in: self)
+            if activeTouches.isEmpty {
+                model.beginDeadTap(at: point, inside: model.hitRects.contains(point))
+            } else {
+                model.consumeDeadTap()
+            }
+            activeTouches.insert(touch)
+        }
+        if activeTouches.count > 1 { model.consumeDeadTap() }
+        for touch in touches {
+            for sample in event.coalescedTouches(for: touch) ?? [touch] {
+                model.moveDeadTap(to: sample.location(in: self))
+            }
+            if touch.phase == .cancelled { model.consumeDeadTap() }
+            consumeNativeControl(touch, model: model)
+        }
+        super.sendEvent(event)
+        for touch in touches {
+            consumeScroll(touch, model: model)
+            if touch.phase == .ended || touch.phase == .cancelled { activeTouches.remove(touch) }
+        }
+        if activeTouches.isEmpty {
+            let revision = model.deadTapRevision
+            // SwiftUI dispatches its gesture/control callbacks while completing this turn.
+            DispatchQueue.main.async { [weak model] in model?.finishDeadTap(revision: revision) }
+        }
+    }
+
+    /// UIKit-backed editing and controls consume even a no-op tap.
+    private func consumeNativeControl(_ touch: UITouch, model: PrototypeModel) {
+        var view = touch.view
+        while let current = view, current !== self {
+            if current is UIControl || current is UITextView { model.consumeDeadTap() }
+            view = current.superview
+        }
+    }
+
+    private func consumeScroll(_ touch: UITouch, model: PrototypeModel) {
+        var view = touch.view
+        while let current = view, current !== self {
+            if let scroll = current as? UIScrollView,
+               scroll.panGestureRecognizer.state != .possible,
+               scroll.panGestureRecognizer.state != .failed
+            {
+                model.consumeDeadTap()
+            }
+            view = current.superview
+        }
+    }
+
     override func layoutSubviews() {
         super.layoutSubviews()
         if model?.safeInsets != safeAreaInsets {

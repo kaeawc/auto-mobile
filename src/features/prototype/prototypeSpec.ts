@@ -814,6 +814,7 @@ const windowSchema = z
       .describe(
         "Fullscreen only: none (default on a device advertising prototype_window_chrome_v1) removes the host dismiss bar; a two-finger long press (about 1 s) reveals a dismiss pill for 5 s. Device persistence defaults to bar. An older device keeps the bar and refuses explicit none; lastResult.chrome reports what it draws",
       ),
+    deadTaps: z.boolean().optional(),
     opacity: z.number().finite().int().min(0).max(100).default(100),
     layer: z
       .enum(["app", "system"])

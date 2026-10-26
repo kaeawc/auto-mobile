@@ -188,7 +188,12 @@ fun PrototypeRuntimeContent(
         val traceSink = PrototypeTrace.sink
         val traceEnabled = traceSink.isEnabled()
         if (traceEnabled) traceSink.begin(PrototypeTrace.COMPOSE)
-        PrototypeSpecContent(runtime.renderModel(snapshot).root, snapshot.spec.theme, send)
+        PrototypeSpecContent(
+          runtime.renderModel(snapshot).root,
+          snapshot.spec.theme,
+          deadTaps = snapshot.spec.window.deadTaps == true,
+          interact = send,
+        )
         if (traceEnabled) traceSink.end()
       }
     }
@@ -201,22 +206,33 @@ fun PrototypeRuntimeContent(
 fun PrototypeSpecContent(
   root: PrototypeRenderNode,
   theme: PrototypeSpecTheme? = null,
+  deadTaps: Boolean = false,
   interact: (PrototypeInteraction) -> Unit = {},
 ) {
   PrototypeTheme(root, theme) {
+    val gestureTaps = remember { PrototypeGestureTaps() }
+    val density = LocalDensity.current.density
+    val currentInteract = rememberUpdatedState(interact)
     val anchorLocals = remember { PrototypeAnchorLocals() }
     val menuLayers = remember { PrototypeMenuLayers() }
     val menuParents = remember(root) { prototypeMenuParents(root) }
     CompositionLocalProvider(
       LocalPrototypeAnchorLocals provides anchorLocals,
-      LocalPrototypeGestureTaps provides remember { PrototypeGestureTaps() },
+      LocalPrototypeGestureTaps provides gestureTaps,
       LocalPrototypeMenuLayers provides menuLayers,
       LocalPrototypeRetainedSubtrees provides remember(root) { prototypeRetainedSubtrees(root) },
       LocalPrototypeHandleVisuals provides remember(root) { prototypeHandleVisuals(root) },
     ) {
       val fillsWindow = LocalPrototypeFillsWindow.current
       Box(
-        Modifier.onGloballyPositioned { menuLayers.windowBounds = it.boundsInRoot() }
+        Modifier.then(
+            if (deadTaps)
+              Modifier.prototypeDeadTapObserver(gestureTaps, density) {
+                currentInteract.value(it)
+              }
+            else Modifier,
+          )
+          .onGloballyPositioned { menuLayers.windowBounds = it.boundsInRoot() }
           .semantics { testTagsAsResourceId = true },
       ) {
         val modals = remember(root) { modalPrototypeSheets(root) }

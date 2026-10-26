@@ -1,3 +1,5 @@
+import { PROTOTYPE_DEAD_TAP_CAPABILITY } from "../../features/observe/android/ctrlProxyProtocol";
+import { prototypeDeadTapsUnsupportedMessage } from "../../features/prototype/prototypeDeadTaps";
 import { z } from "zod/v4";
 import { createDeviceHierarchyCapture } from "../../features/observe/DeviceHierarchyCapture";
 import {
@@ -100,6 +102,11 @@ async function windowOptionsRefusal(
   if (args.action !== "show" || args.spec === undefined) {
     return undefined;
   }
+  // Only a dead-taps show looks anything up: an extra await here shifts the show's tick timing.
+  const deadTaps = wantsDeadTaps(args) ? await deadTapsRefusal(target, args, signal) : undefined;
+  if (deadTaps) {
+    return deadTaps;
+  }
   const options = requestedPrototypeWindowOptions(args.spec as PrototypeSpec);
   if (!options.appLayer && !options.devicePersistence) {
     return undefined;
@@ -118,6 +125,35 @@ async function windowOptionsRefusal(
     };
   }
   return undefined;
+}
+
+function wantsDeadTaps(args: z.infer<typeof prototypeSchema>): boolean {
+  return (
+    args.action === "show" && (args.spec as PrototypeSpec | undefined)?.window.deadTaps === true
+  );
+}
+
+/** Dead taps must never silently disappear on an older connected agent. */
+async function deadTapsRefusal(
+  target: PrototypeTarget,
+  args: z.infer<typeof prototypeSchema>,
+  signal: AbortSignal | undefined,
+): Promise<PrototypeResult | undefined> {
+  if (!wantsDeadTaps(args)) {
+    return undefined;
+  }
+  const supported = target.android
+    ? await target.android.supportsCommand(PROTOTYPE_DEAD_TAP_CAPABILITY)
+    : target.ios?.supportsCapability(PROTOTYPE_DEAD_TAP_CAPABILITY) === true;
+  signal?.throwIfAborted();
+  return supported
+    ? undefined
+    : {
+        success: false,
+        error: new ActionableError(
+          prototypeDeadTapsUnsupportedMessage(target.android ? "android" : "ios"),
+        ).message,
+      };
 }
 
 /**

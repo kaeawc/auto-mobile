@@ -31,6 +31,25 @@ the Viewer/file loader keeps its existing behavior.
 - Element anchors still need host resolution to bounds (three valid fixtures keep that loader
   diagnostic). Validation does not imply the renderer advertises every capability.
 
+## Dead taps (window.deadTaps, prototype_dead_tap_v1)
+
+`window.deadTaps: true` enables ordinary `emit` events named `prototype_dead_tap` in the
+injected agent's passthrough window. The pure session allocates the normal sequence and snapshots;
+the payload contains only window-local `x`/`y` points rounded to one decimal and the deepest
+stack's id and top screen (ties use the lowest stack id). Both ids are null without stacks;
+host reports label that location `(root)`, otherwise `<stack>/<screen>`. No text is collected.
+This is an agent preflight capability, not a shared-corpus capability requirement.
+
+The window observes pointer delivery without cancelling touches. A pure tracker rejects multiple
+pointers, cancellation and movement reaching 10 points, including movement that later returns to
+the origin. Scroll recognizers, control taps (including unchanged values), text focus, actions,
+and menu/dialog scrim handlers mark a touch consumed. Evaluation waits until the next main-queue
+turn so SwiftUI handlers can finish; deferred single/double-tap targets mark consumption immediately.
+Plain text, boxes, images and spacers without handlers remain eligible. Touches outside the
+prototype hit rects pass to the app and are excluded. Native UIKit controls are excluded even
+when their action does not change state. Embedded views without `PassthroughWindow` do not yet
+observe pointer delivery; pure session support alone does not verify that input path.
+
 ## Feature support
 
 | Feature                                                                | iOS simulator                                                                                                                                                      |

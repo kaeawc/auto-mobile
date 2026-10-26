@@ -180,7 +180,8 @@
     "theme-typography-shapes.json",
     "timers.json",
     "transition-slide.json",
-    "width-dp-at-max.json"
+    "width-dp-at-max.json",
+    "window-dead-taps.json"
   ],
   "invalid": [
     "anchor-offset-x-over-max.json",
@@ -1057,6 +1058,7 @@
     "unknown-style.json",
     "weight-over-max.json",
     "width-dp-over-max.json",
+    "window-dead-taps-not-boolean.json",
     "wrong-type.json",
     "zero-aspect-ratio.json",
     "zero-line-height.json",
@@ -1312,6 +1314,7 @@
       "prototype_timers_v1"
     ],
     "transition-slide.json": [],
-    "width-dp-at-max.json": []
+    "width-dp-at-max.json": [],
+    "window-dead-taps.json": []
   }
 }

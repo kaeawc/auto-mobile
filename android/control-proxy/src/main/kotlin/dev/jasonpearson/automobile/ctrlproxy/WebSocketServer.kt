@@ -308,6 +308,7 @@ class WebSocketServer(
     add("prototype_window_options_v1")
     // Fullscreen specs honour window.chrome, with host-owned touch and accessibility escapes.
     add("prototype_window_chrome_v1")
+    add("prototype_dead_tap_v1")
     // Prototype specs honour {light, dark} colour and image pairs, role names in gradient stops and
     // scrims, and theme.colors.light / theme.colors.dark. An older APK cannot decode a pair where
     // it expects a string and fails the whole show, and draws a role-named stop transparent, so

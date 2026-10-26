@@ -1024,3 +1024,29 @@ Inspect reports \`timers:[{id,nextFireInMs,runs}]\`, ordered by remaining time t
 remaining time is nonnegative and frozen while paused. A capable device yields an empty array
 when no timers are live.
 `;
+
+export const GUIDE_TEST_SESSIONS = `## User-testing sessions
+
+Call \`prototype {action:"testSessionBegin", id, goal?, cohort?}\` after showing a prototype.
+The host records accepted events without consuming \`awaitEvent\`. A goal is a screen label
+such as \`checkout/done\`; reaching it marks completion. Cohort is a free label, with no
+cross-session aggregation. \`testSessionEnd {id}\` stops recording and returns JSON plus
+Markdown. Dismissal or session release also ends recording. \`testSessionReport {id}\`
+reads the latest session for this scope, or pass \`testSessionId\` for a stored one.
+Only one session may be active per device and prototype.
+
+Reports include screen visits, time, abandonment, validation failures and pager changes.
+Labels use the deepest stack's top screen as \`stack/screen\` (ties use the lowest stack id),
+or \`(root)\`. Text values, payloads, context and state snapshots are never stored;
+non-secure changes retain only keys, string lengths or value types and validity.
+Secure fields are excluded. Up to 5,000 sanitized events are retained per session; extra
+events are counted as dropped and the report is marked truncated. The newest 50 ended
+sessions are kept per device/prototype.
+
+To record dead taps, show with \`window.deadTaps: true\` on a device advertising
+\`prototype_dead_tap_v1\`; an older agent is refused. Dead taps are single-pointer taps
+inside the prototype window that no interactive node handled, excluding drags, scrolling
+and app taps outside the window. Their payload has only screen ids and coordinates,
+rounded to one decimal in window-local dp (points on iOS). Reports include counts,
+up to 200 points per screen and a 48-unit grid. There is no screenshot overlay yet.
+`;

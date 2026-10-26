@@ -177,16 +177,18 @@ private fun EmbeddedPrototype(
   owner.error?.let { onError(it) }
 }
 
-internal fun prototypeTimerLifecycleObserver(
-  scope: CoroutineScope,
-  interactions: Mutex,
-  runtime: () -> PrototypeRuntime?,
-): LifecycleEventObserver = LifecycleEventObserver { _, event ->
-  if (event == Lifecycle.Event.ON_START || event == Lifecycle.Event.ON_STOP) {
-    scope.launch(NonCancellable, start = CoroutineStart.UNDISPATCHED) {
-      interactions.withLock {
-        if (event == Lifecycle.Event.ON_STOP) runtime()?.pauseTimers()
-        else runtime()?.resumeTimers()
+internal object PrototypeTimerLifecycle {
+  fun observer(
+    scope: CoroutineScope,
+    interactions: Mutex,
+    runtime: () -> PrototypeRuntime?,
+  ): LifecycleEventObserver = LifecycleEventObserver { _, event ->
+    if (event == Lifecycle.Event.ON_START || event == Lifecycle.Event.ON_STOP) {
+      scope.launch(NonCancellable, start = CoroutineStart.UNDISPATCHED) {
+        interactions.withLock {
+          if (event == Lifecycle.Event.ON_STOP) runtime()?.pauseTimers()
+          else runtime()?.resumeTimers()
+        }
       }
     }
   }
@@ -200,7 +202,7 @@ private fun EmbeddedHostLifetime(
 ) {
   DisposableEffect(owner, host, lifecycle) {
     val observer =
-      prototypeTimerLifecycleObserver(host.scope, host.interactions) { owner.session?.runtime }
+      PrototypeTimerLifecycle.observer(host.scope, host.interactions) { owner.session?.runtime }
     lifecycle.addObserver(observer)
     onDispose { lifecycle.removeObserver(observer) }
   }

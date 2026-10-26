@@ -745,6 +745,20 @@ A style `pressScale` (0.5–1) shrinks a tappable node while it is pressed. With
 motion on it animates with a short spring; with `motion: "none"` or animator
 scale 0 it snaps, so a screenshot taken mid-press is still deterministic.
 
+### Motion-active signal (#15114)
+
+Fades and scales change no node, so two identical hierarchy reads do not prove a
+prototype has stopped moving. The prototype window's entry in a hierarchy capture
+carries `prototypeMotion: {active, loops}` next to `prototypePlacement`
+(`prototype_window_metadata_v1`; older APKs omit it and hosts read absence as
+settled). `active` counts the animations that will finish: `visibleWhen` and
+retained-visibility transitions, `animate` style animations, `pressScale`,
+container size changes, swipe-row settles and pager scrolls. `loops` counts
+intentional infinite animations (today only the shimmer) and is ignored by hosts.
+`observe(waitFor: stable)` and the launcher/SystemUI quiet-tree wait do not settle
+while `active` is positive and stay bounded by their usual timeout. The count is
+zero after a single frame under `motion: "none"` or animator scale 0.
+
 ### Motion v2 (#14208, `prototype_motion_v2`, not device-verified)
 
 - **Animated style.** A node's `animate: {durationMs?, easing?}` (0–2000 ms, default 300;

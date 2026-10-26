@@ -54,7 +54,7 @@ class PrototypeTimerLifecycleTest {
         override val lifecycle = LifecycleRegistry.createUnsafe(this)
       }
     val interactions = Mutex()
-    val observer = prototypeTimerLifecycleObserver(backgroundScope, interactions) { runtime }
+    val observer = PrototypeTimerLifecycle.observer(backgroundScope, interactions) { runtime }
     interactions.lock()
     observer.onStateChanged(owner, Lifecycle.Event.ON_STOP)
     assertEquals(0, runtime.advanceClock(1))

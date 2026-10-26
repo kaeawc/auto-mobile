@@ -1,6 +1,31 @@
 // Generated from schemas/prototype-spec-contract.json; do not edit.
 // Regenerate: bun scripts/prototype/generate-prototype-spec-models.ts
 
+struct ShadowOffset: Codable, Equatable, Sendable {
+    let x: Double
+    let y: Double
+}
+
+struct Shadow: Decodable, Equatable, Sendable {
+    let color: PrototypeModeValue
+    let radius: Double
+    let spread: Double?
+    let offset: ShadowOffset?
+    let inner: Bool?
+}
+
+struct FadeEdges: Codable, Equatable, Sendable {
+    let top: Double?
+    let bottom: Double?
+    let start: Double?
+    let end: Double?
+}
+
+struct ImageFilter: Decodable, Equatable, Sendable {
+    let saturation: Double?
+    let tint: PrototypeModeValue?
+}
+
 struct Offset: Codable, Equatable, Sendable {
     let x: Double
     let y: Double
@@ -140,5 +165,6 @@ struct PrototypeGradientStop: Decodable, Equatable {
 
 struct Border: Decodable {
     let width: Double
-    let color: PrototypeModeValue
+    let color: PrototypeModeValue?
+    let gradient: PrototypeGradient?
 }

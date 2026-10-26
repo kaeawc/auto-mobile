@@ -168,6 +168,8 @@ class PrototypeStateLogicTest {
         border = PrototypeBorder(1.0, "primary"),
         elevation = 6.0,
         shadowColor = PrototypeModeValue.Single("#80FF0000"),
+        shadows = listOf(PrototypeShadow(PrototypeModeValue.Single("scrim"), 4.0)),
+        cornerStyle = "continuous",
         gradient =
           PrototypeRadialGradient(
             listOf(PrototypeGradientStop("#000000"), PrototypeGradientStop("#ffffff")),

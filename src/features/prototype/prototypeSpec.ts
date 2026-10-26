@@ -21,6 +21,8 @@ import { prototypeStaggerShape } from "./prototypeChoreographySchema";
 import { prototypeImageShape, prototypeMotionNodeShape } from "./prototypeMotionV2Schema";
 import { prototypeSpecNodeRoots, walkPrototypeNodes } from "./prototypeNodeChildren";
 import {
+  fadeEdgesSchema,
+  imageFilterSchema,
   anchorSchema,
   colorTokenSchema,
   colorValueSchema,
@@ -260,6 +262,7 @@ const textSpanSchema = z
   .object({
     text: z.string().min(1),
     style: styleSchema
+      .innerType()
       .pick({
         color: true,
         fontWeight: true,
@@ -296,7 +299,12 @@ const textBaseSchema = z
   })
   .strict();
 const imageBaseSchema = z
-  .object({ ...commonNodeShape, ...gestureNodeShape, ...prototypeImageShape })
+  .object({
+    ...commonNodeShape,
+    ...gestureNodeShape,
+    ...prototypeImageShape,
+    filter: imageFilterSchema.optional(),
+  })
   .strict();
 const iconBaseSchema = z
   .object({
@@ -591,6 +599,7 @@ const scrollBaseSchema = z
     type: z.enum(["scroll"]),
     axis: z.enum(["vertical", "horizontal"]).default("vertical"),
     refresh: scrollRefreshSchema.optional(),
+    fadeEdges: fadeEdgesSchema.optional(),
     // Chat lists (#14232): anchored at the end, following new rows, reporting the end position.
     reverse: z.boolean().optional(),
     stickToEnd: z.boolean().optional(),

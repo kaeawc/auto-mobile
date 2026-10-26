@@ -256,6 +256,9 @@ internal object PrototypeStrictPolicy {
     }
 
     private fun scanFields(fields: JsonObject, field: String) {
+      if (PrototypeStylePolishV2Rules.themedBorder(fields)) need("theme_modes")
+      if (PrototypeStylePolishV2Rules.required(fields))
+        result.add(PrototypeStylePolishV2Rules.CAPABILITY)
       val type = fields.text("type") ?: ""
       for ((key, child) in fields) {
         if (key == "payload" || (key == "value" && type !in listOf("setData", "appendData")))
@@ -279,6 +282,9 @@ internal object PrototypeStrictPolicy {
           if (usesData(raw, kind)) true else null
         }
       if (binding == true) need("data_model")
+      if (PrototypeStylePolishV2Rules.themedBorder(fields)) need("theme_modes")
+      if (PrototypeStylePolishV2Rules.required(fields))
+        result.add(PrototypeStylePolishV2Rules.CAPABILITY)
       val type = fields.text("type") ?: ""
       typeFeatures[type]?.let(::need)
       for ((feature, keys) in typeFieldFeatures[type].orEmpty()) {

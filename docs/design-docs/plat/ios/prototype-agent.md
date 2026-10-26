@@ -232,7 +232,7 @@ Advertised as `prototype_theme_modes_v1` (#11220). Rules are Core's (`PrototypeM
 device-verified. One mode is resolved per shown prototype ([Appearance](#appearance)).
 
 - **Colours.** Every slot takes a hex, a role name, or `{light, dark}` (each side hex or role):
-  `style.background`, `style.color`, `style.shadowColor`, `style.border.color`, a `styleWhen` style,
+  `style.background`, `style.color`, `style.shadowColor`, `style.shadows[].color`, `style.border.color`, `style.border.gradient` stops, `image.filter.tint`, a `styleWhen` style,
   gradient stops, `window.placement.scrim`, bottomSheet `scrim`. A pair picks its side then resolves
   like a single value (a role comes from the resolved mode's scheme).
 - **Theme role maps.** Scheme order: baseline Material scheme for the mode, seed scheme, flat
@@ -413,6 +413,11 @@ cutout, follows the spec's theme) and the spec is laid out below it, so `safeAre
 inset.
 
 See the [`prototype` tool reference](../../../tools.md#prototype).
+
+Style contract fields `style.shadows`, `style.cornerStyle`, `style.border.gradient`,
+`scroll.fadeEdges` and `image.filter` require `prototype_style_polish_v2`. The strict
+validator accepts these fields; the agent does not advertise this capability until
+its renderers support them.
 
 ## Data model capability
 

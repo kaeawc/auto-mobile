@@ -1,0 +1,53 @@
+AutoMobilePrototypeAgent/AutoMobilePrototypeView.swift: public init(spec: Data, assets: PrototypeAssets = .none, storage: PrototypeStorageOption = .none, network: PrototypeNetworkConfiguration = .default, onEvent: @escaping @MainActor (PrototypeEvent) -> Void = { _ in }, onDismiss: @escaping @MainActor (PrototypeDismissReason) -> Void = { _ in }, onLoadError: @escaping @MainActor (PrototypeLoadError) -> Void = { _ in })
+AutoMobilePrototypeAgent/AutoMobilePrototypeView.swift: public struct AutoMobilePrototypeView: View
+AutoMobilePrototypeAgent/AutoMobilePrototypeView.swift: public var body: some View
+AutoMobilePrototypeAgent/PrototypeAgent.swift: public func amPrototypeAgentStart()
+AutoMobilePrototypeAgent/PrototypeAgent.swift: public func amPrototypeAgentStartStandalone()
+AutoMobilePrototypeAgentCore/AutoMobilePrototypeCapabilities.swift: public enum AutoMobilePrototypeCapabilities
+AutoMobilePrototypeAgentCore/AutoMobilePrototypeCapabilities.swift: public static let supported: [String] = PrototypeAgentProtocol.advertisedCapabilities()
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedEvent.swift: public enum Kind: Equatable, Sendable
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedEvent.swift: public var dismissReason: PrototypeDismissReason?
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedEvent.swift: public var kind: Kind
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedEvent.swift: public var payloadJSON: Data
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedEvent.swift: public var stateJSON: Data
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedEvent.swift: public var wireJSON: Data
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedOptions.swift: public enum PrototypeStorageOption: Sendable, Hashable
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedOptions.swift: public init(deviceClient: Client? = nil, hostHandler: Client? = nil)
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedOptions.swift: public init(images: [String: Data] = [:], fonts: [String: Data] = [:])
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedOptions.swift: public let fonts: [String: Data]
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedOptions.swift: public let images: [String: Data]
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedOptions.swift: public static func pinned(allowsCleartext: Bool = false) -> PrototypeNetworkConfiguration
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedOptions.swift: public static let `default` = PrototypeNetworkConfiguration()
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedOptions.swift: public static let none = PrototypeAssets()
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedOptions.swift: public struct PrototypeAssets: Sendable, Hashable
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedOptions.swift: public struct PrototypeNetworkConfiguration: Sendable
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedOptions.swift: public typealias Client = @Sendable (URLRequest) async throws -> (Data, HTTPURLResponse)
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedSpec.swift: public enum PrototypeLoadError: Error, Equatable, Sendable, LocalizedError
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedSpec.swift: public static func validate(spec: Data) throws
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedSpec.swift: public var errorDescription: String?
+AutoMobilePrototypeAgentCore/PrototypeLibraryNetwork.swift: public enum PrototypeLibraryNetwork
+AutoMobilePrototypeAgentCore/PrototypeLibraryNetwork.swift: public static func configuration(gate: PrototypeLibraryNetworkGate, allowsCleartext: Bool, onLocalNetworkDenied: @escaping @MainActor @Sendable (PrototypeConsentEpoch) -> Void = { _ in }, pinned: @escaping @MainActor @Sendable (Bool, PrototypeConsentEpoch) -> PrototypeNetworkConfiguration)
+AutoMobilePrototypeAgentCore/PrototypeLibraryNetwork.swift: public static func configuration(networkSwitch: PrototypeLibraryNetworkSwitch, allowsCleartext: Bool)
+AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkGate.swift: public final class PrototypeLibraryNetworkGate: @unchecked Sendable
+AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkGate.swift: public func setEnabled(_ value: Bool)
+AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkGate.swift: public init(enabled: Bool = false)
+AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkGate.swift: public typealias PrototypeConsentEpoch = UInt64
+AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkSwitch.swift: public final class PrototypeLibraryNetworkSwitch
+AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkSwitch.swift: public func bool(forKey key: String) -> Bool
+AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkSwitch.swift: public func denyLocalNetwork(epoch: PrototypeConsentEpoch)
+AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkSwitch.swift: public func set(_ value: Bool, forKey key: String)
+AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkSwitch.swift: public init(defaults: UserDefaults = .standard)
+AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkSwitch.swift: public init(store: any PrototypeLibraryNetworkSettingStore = PrototypeLibraryUserDefaultsSettingStore())
+AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkSwitch.swift: public let gate: PrototypeLibraryNetworkGate
+AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkSwitch.swift: public private(set) var localNetworkDenied = false
+AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkSwitch.swift: public protocol PrototypeLibraryNetworkSettingStore
+AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkSwitch.swift: public static let key = "allowImportedPrototypeNetwork"
+AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkSwitch.swift: public struct PrototypeLibraryUserDefaultsSettingStore: PrototypeLibraryNetworkSettingStore
+AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkSwitch.swift: public var enabled: Bool
+AutoMobilePrototypeAgentCore/PrototypeSession.swift: public enum PrototypeDismissReason: String, Sendable
+AutoMobilePrototypeAgentCore/PrototypeSession.swift: public let id: String
+AutoMobilePrototypeAgentCore/PrototypeSession.swift: public let name: String?
+AutoMobilePrototypeAgentCore/PrototypeSession.swift: public let sequence: Int
+AutoMobilePrototypeAgentCore/PrototypeSession.swift: public struct PrototypeEvent: Equatable, Sendable
+AutoMobilePrototypeAgentCore/PrototypeSpecStrictValidator.swift: public enum PrototypeSpecStrictValidator
+AutoMobilePrototypeAgentCore/PrototypeSpecStrictValidator.swift: public static func validate(data: Data, supportedCapabilities: Set<String>? = nil, library: Bool = false) throws

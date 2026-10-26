@@ -40,10 +40,10 @@ internal object PrototypeDataRules {
   val dataActionTypes = setOf("setData", "appendData", "prependData", "removeData")
 
   /**
-   * Static checks for `setData`, `appendData`, `prependData` and `removeData` (#12519) that the contract cannot
-   * express: the `/data/<pointer>` path, a literal value data can hold, and an `appendData` target
-   * the spec's own data already defines as something other than an array. A target under `{index}`
-   * or one only an earlier write creates is the device's to check.
+   * Static checks for `setData`, `appendData`, `prependData` and `removeData` (#12519) that the
+   * contract cannot express: the `/data/<pointer>` path, a literal value data can hold, and an
+   * `appendData` target the spec's own data already defines as something other than an array. A
+   * target under `{index}` or one only an earlier write creates is the device's to check.
    */
   fun dataActionErrors(context: Context, root: JsonElement): PrototypeSpecError? {
     val data = (root as? JsonObject)?.get("data") as? JsonObject

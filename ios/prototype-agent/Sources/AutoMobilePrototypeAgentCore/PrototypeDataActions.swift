@@ -142,8 +142,10 @@ enum PrototypeDataWrite {
             } else { incoming = [value] }
             let combined = operation == .prepend ? incoming + items : items + incoming
             trimmed = maxItems.map { max(0, combined.count - Int($0)) } ?? 0
-            effectiveValue = .array(operation == .prepend
-                ? Array(combined.dropLast(trimmed)) : Array(combined.dropFirst(trimmed)))
+            effectiveValue = .array(
+                operation == .prepend
+                    ? Array(combined.dropLast(trimmed)) : Array(combined.dropFirst(trimmed))
+            )
             effectiveOperation = .set
         }
         guard case let .object(next)? = mutate(
@@ -301,7 +303,8 @@ extension PrototypeDataWrite {
     static func validate(actions: [PrototypeLocatedValue], data: [String: JSONValue]?) throws {
         for action in actions {
             let fields = action.value
-            guard ["setData", "appendData", "prependData", "removeData"].contains(fields["type"]?.stringValue ?? "") else { continue }
+            guard ["setData", "appendData", "prependData", "removeData"].contains(fields["type"]?.stringValue ?? "")
+            else { continue }
             let path = fields["path"]?.stringValue ?? ""
             let bound = path.split(separator: "/", omittingEmptySubsequences: false)
                 .map { $0 == "{index}" ? "0" : String($0) }.joined(separator: "/")

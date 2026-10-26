@@ -49,11 +49,12 @@ final class PrototypeDataActionsTests: XCTestCase {
     }
 
     func testPrependValidationRuntimeAndChangeEvent() throws {
-        let json = #"{"id":"prepend","window":{"placement":{"type":"fullscreen"}},"data":{"items":[2]},"root":{"type":"text","text":"Add","onTap":[{"type":"prependData","path":"/data/items","value":{"value":1}}]}}"#
+        let json =
+            #"{"id":"prepend","window":{"placement":{"type":"fullscreen"}},"data":{"items":[2]},"root":{"type":"text","text":"Add","onTap":[{"type":"prependData","path":"/data/items","value":{"value":1}}]}}"#
         let decoded = try spec(json)
         var session = PrototypeSession()
         session.show(decoded)
-        let events = session.run(try XCTUnwrap(decoded.root.onTap))
+        let events = try session.run(XCTUnwrap(decoded.root.onTap))
         XCTAssertEqual(session.data, try object(#"{"items":[1,2]}"#))
         let event = try XCTUnwrap(events.first)
         let write = try XCTUnwrap(PrototypeDataWriteEvent.decode(
@@ -93,7 +94,7 @@ final class PrototypeDataActionsTests: XCTestCase {
          "root":{"type":"text","text":"Add","onTap":[
            {"type":"prependData","path":"/data/items","value":{"value":\(PrototypeJSONText.string(.string(text)))}}]}}
         """))
-        let events = session.run(try XCTUnwrap(session.spec?.root.onTap))
+        let events = try session.run(XCTUnwrap(session.spec?.root.onTap))
         let event = try XCTUnwrap(events.first)
         let write = try XCTUnwrap(PrototypeDataWriteEvent.decode(
             kind: event.wireKind, name: event.name, payload: event.payload
@@ -104,7 +105,11 @@ final class PrototypeDataActionsTests: XCTestCase {
     }
 
     func testPrependNeedsBothDataActionsAndLazyListCapabilities() throws {
-        let bytes = Data(#"{"id":"prepend","window":{"placement":{"type":"fullscreen"}},"data":{"items":[]},"root":{"type":"text","text":"Add","onTap":[{"type":"prependData","path":"/data/items","value":{"value":1}}]}}"#.utf8)
+        let bytes =
+            Data(
+                #"{"id":"prepend","window":{"placement":{"type":"fullscreen"}},"data":{"items":[]},"root":{"type":"text","text":"Add","onTap":[{"type":"prependData","path":"/data/items","value":{"value":1}}]}}"#
+                    .utf8
+            )
         let required: Set<String> = ["prototype_data_model_v1", "prototype_data_actions_v1", "prototype_lazy_list_v1"]
         XCTAssertNoThrow(try PrototypeSpecStrictValidator.validate(data: bytes, supportedCapabilities: required))
         for missing in ["prototype_data_actions_v1", "prototype_lazy_list_v1"] {
@@ -112,17 +117,32 @@ final class PrototypeDataActionsTests: XCTestCase {
                 data: bytes, supportedCapabilities: required.subtracting([missing])
             ))
         }
-        XCTAssertTrue(required.isSubset(of: Set(try PrototypeBundleCapabilities.required(bytes))))
+        XCTAssertTrue(try required.isSubset(of: Set(PrototypeBundleCapabilities.required(bytes))))
     }
 
     func testPrependEventAllowsOmittedPageButRejectsMalformedPage() {
         let pages: [JSONValue?] = [.array([.number(1)]), nil]
         for value in pages {
-            let event = PrototypeDataWriteEvent(op: .prepend, path: "/data/items", value: value, maxItems: 2, revision: 1)
-            XCTAssertEqual(PrototypeDataWriteEvent.decode(kind: "change", name: event.path, payload: event.payload), event)
+            let event = PrototypeDataWriteEvent(
+                op: .prepend,
+                path: "/data/items",
+                value: value,
+                maxItems: 2,
+                revision: 1
+            )
+            XCTAssertEqual(
+                PrototypeDataWriteEvent.decode(kind: "change", name: event.path, payload: event.payload),
+                event
+            )
         }
         for value in [JSONValue.number(1), .object([:])] {
-            let event = PrototypeDataWriteEvent(op: .prepend, path: "/data/items", value: value, maxItems: 2, revision: 1)
+            let event = PrototypeDataWriteEvent(
+                op: .prepend,
+                path: "/data/items",
+                value: value,
+                maxItems: 2,
+                revision: 1
+            )
             XCTAssertNil(PrototypeDataWriteEvent.decode(kind: "change", name: event.path, payload: event.payload))
         }
     }

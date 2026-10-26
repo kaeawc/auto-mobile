@@ -72,10 +72,11 @@ internal fun rememberStackListState(
   hasHeader: Boolean,
 ): LazyListState {
   val entry = LocalStackScrollEntry.current
-  val initial = remember(entry, identity) {
-    entry?.store?.readList(entry.position, entry.screen, identity)?.restore(keys, hasHeader)
-      ?: PrototypeListAnchorTarget(0, 0)
-  }
+  val initial =
+    remember(entry, identity) {
+      entry?.store?.readList(entry.position, entry.screen, identity)?.restore(keys, hasHeader)
+        ?: PrototypeListAnchorTarget(0, 0)
+    }
   val state = rememberLazyListState(initial.index, initial.offset)
   val currentKeys = rememberUpdatedState(keys)
   val currentHeader = rememberUpdatedState(hasHeader)

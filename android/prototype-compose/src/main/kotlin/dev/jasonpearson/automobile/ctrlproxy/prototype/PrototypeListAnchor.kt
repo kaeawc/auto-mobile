@@ -15,7 +15,9 @@ internal data class PrototypeListAnchor(
     if (headerVisible && hasHeader && key != null && newKeys.firstOrNull() == key) {
       return PrototypeListAnchorTarget(0, offset)
     }
-    resolve(key, offset, newKeys, hasHeader)?.let { return it }
+    resolve(key, offset, newKeys, hasHeader)?.let {
+      return it
+    }
     if (newKeys.isEmpty()) return PrototypeListAnchorTarget(0, 0)
     return PrototypeListAnchorTarget(
       index.coerceIn(newKeys.indices) + if (hasHeader) 1 else 0,
@@ -38,8 +40,7 @@ internal data class PrototypeListAnchor(
     fun capture(state: LazyListState, keys: List<String>, hasHeader: Boolean): PrototypeListAnchor {
       val row = state.layoutInfo.visibleItemsInfo.firstOrNull { it.contentType == "row" }
       val index =
-        ((row?.index ?: state.firstVisibleItemIndex) - if (hasHeader) 1 else 0)
-          .coerceAtLeast(0)
+        ((row?.index ?: state.firstVisibleItemIndex) - if (hasHeader) 1 else 0).coerceAtLeast(0)
       return PrototypeListAnchor(
         (row?.key as? String)?.removePrefix("row:") ?: keys.getOrNull(index),
         index,

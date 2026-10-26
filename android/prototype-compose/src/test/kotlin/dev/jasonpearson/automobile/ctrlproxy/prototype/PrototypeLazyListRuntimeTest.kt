@@ -112,22 +112,26 @@ class PrototypeLazyListRuntimeTest {
   @Test
   fun oversizedPrependPageOmitsOnlyTheEventValue() = runTest {
     val runtime = runtime(listSpec())
-    val page = JsonArray(
-      (2..40).map { index ->
-        buildJsonObject {
-          put("id", index)
-          put("title", "x".repeat(500))
-        }
-      },
-    )
+    val page =
+      JsonArray(
+        (2..40).map { index ->
+          buildJsonObject {
+            put("id", index)
+            put("title", "x".repeat(500))
+          }
+        },
+      )
     runtime.handle(
       PrototypeInteraction.Tap(
         listOf(PrototypePrependDataAction("/data/items", buildJsonObject { put("value", page) })),
       ),
     )
-    assertEquals(listOf(2, 3), runtime.data("items")!!.jsonArray.map {
-      it.jsonObject.getValue("id").jsonPrimitive.int
-    })
+    assertEquals(
+      listOf(2, 3),
+      runtime.data("items")!!.jsonArray.map {
+        it.jsonObject.getValue("id").jsonPrimitive.int
+      },
+    )
     val payload = events.single().payload!!.jsonObject
     assertEquals("prepend", payload.getValue("op").jsonPrimitive.content)
     assertEquals(2, payload.getValue("maxItems").jsonPrimitive.int)

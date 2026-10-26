@@ -29,7 +29,13 @@ final class PrototypeLazyListRuntimeTests: XCTestCase {
 
     func testPrependUsesListWindowAndRefusesDuplicateKeysAtomically() throws {
         var session = PrototypeSession()
-        let list = try JSONDecoder().decode(PrototypeSpec.self, from: Data(#"{"id":"prepend-list","window":{"placement":{"type":"fullscreen"}},"data":{"feed":{"items":[{"id":1,"title":"One"},{"id":2,"title":"Two"}]}},"root":{"type":"list","maxItems":2,"repeat":{"items":{"path":"/feed/items"},"as":"post","key":"id"},"children":[{"type":"text","text":"{post.title}"}]}}"#.utf8))
+        let list = try JSONDecoder().decode(
+            PrototypeSpec.self,
+            from: Data(
+                #"{"id":"prepend-list","window":{"placement":{"type":"fullscreen"}},"data":{"feed":{"items":[{"id":1,"title":"One"},{"id":2,"title":"Two"}]}},"root":{"type":"list","maxItems":2,"repeat":{"items":{"path":"/feed/items"},"as":"post","key":"id"},"children":[{"type":"text","text":"{post.title}"}]}}"#
+                    .utf8
+            )
+        )
         session.show(list)
         let prepend = try action(
             #"{"type":"prependData","path":"/data/feed/items","value":{"value":{"id":0,"title":"Zero"}}}"#

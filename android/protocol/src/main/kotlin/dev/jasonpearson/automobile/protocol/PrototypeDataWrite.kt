@@ -124,12 +124,10 @@ object PrototypeDataWriter {
         is PrototypeDataWrite.Prepend -> write.value as JsonArray
         else -> listOf((write as PrototypeDataWrite.Append).value)
       }
-    val combined =
-      if (write is PrototypeDataWrite.Prepend) incoming + target else target + incoming
+    val combined = if (write is PrototypeDataWrite.Prepend) incoming + target else target + incoming
     val maximum = maximum(write)
     val trimmed =
-      if (maximum == null) 0
-      else (combined.size.toLong() - maximum).coerceAtLeast(0.0).toInt()
+      if (maximum == null) 0 else (combined.size.toLong() - maximum).coerceAtLeast(0.0).toInt()
     val rows =
       if (write is PrototypeDataWrite.Prepend) combined.dropLast(trimmed)
       else combined.drop(trimmed)

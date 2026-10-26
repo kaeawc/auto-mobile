@@ -804,11 +804,11 @@ class PrototypeRuntime(
     }
 
   /**
-   * A `setData`, `appendData`, `prependData` or `removeData` action (#12519). The write is the shared
-   * [PrototypeDataWriter] semantics, applied to an immutable copy of the data so Compose sees a new
-   * spec; a refused write (typed error, or a result the renderer cannot take) changes and emits
-   * nothing and the rest of the list still runs. An accepted write bumps the revision and reports
-   * itself as a `change` event named by the written path.
+   * A `setData`, `appendData`, `prependData` or `removeData` action (#12519). The write is the
+   * shared [PrototypeDataWriter] semantics, applied to an immutable copy of the data so Compose
+   * sees a new spec; a refused write (typed error, or a result the renderer cannot take) changes
+   * and emits nothing and the rest of the list still runs. An accepted write bumps the revision and
+   * reports itself as a `change` event named by the written path.
    */
   private suspend fun writeData(action: PrototypeAction) {
     val write = dataWrite(action) ?: return

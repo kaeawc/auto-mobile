@@ -72,7 +72,9 @@ class PrototypeListAnchorRenderTest {
 
   private fun firstRow(): VisibleRow {
     val node =
-      compose.onAllNodesWithTag("row", useUnmergedTree = true).fetchSemanticsNodes()
+      compose
+        .onAllNodesWithTag("row", useUnmergedTree = true)
+        .fetchSemanticsNodes()
         .filter { it.boundsInRoot.height > 0f }
         .minBy { it.positionInRoot.y }
     val text = node.config[SemanticsProperties.Text].single().text

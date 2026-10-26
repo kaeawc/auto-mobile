@@ -31,7 +31,7 @@ struct PrototypeDataWriteEvent: Equatable {
             guard let count = safeInteger(fields["maxItems"], minimum: 1) else { return nil }
             maxItems = count
         } else { maxItems = nil }
-        if (op == .extend || op == .prepend), let value = fields["value"] {
+        if op == .extend || op == .prepend, let value = fields["value"] {
             guard case .array = value else { return nil }
         }
         return Self(op: op, path: path, value: fields["value"], maxItems: maxItems, revision: revision)

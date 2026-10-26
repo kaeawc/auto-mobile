@@ -86,7 +86,8 @@ enum PrototypeStrictCapabilities {
             if type == "emit", fields["context"] != nil { need("emit_context") }
             if type == "platform" { need("platform") }
             for (key, child) in fields {
-                if key == "payload" || (key == "value" && !["setData", "appendData", "prependData"].contains(type)) { continue }
+                if key == "payload" ||
+                    (key == "value" && !["setData", "appendData", "prependData"].contains(type)) { continue }
                 if key == "repeat" {
                     if let repeatSpec = child.objectFields,
                        repeatSpec["items"]?

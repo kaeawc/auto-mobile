@@ -79,9 +79,10 @@ internal fun RenderPrototypeLazyList(
   val header = node.children.firstOrNull { it.identity == "${node.identity}.header" }
   val footer = node.children.firstOrNull { it.identity == "${node.identity}.footer" }
   val keys = model.rows.indices.map(model::key)
-  val state = key(epoch, node.identity) {
-    rememberStackListState(node.identity, keys, header != null)
-  }
+  val state =
+    key(epoch, node.identity) {
+      rememberStackListState(node.identity, keys, header != null)
+    }
   key(epoch, node.identity) { PrototypeListAnchorEffect(state, keys, header != null) }
   PrototypeListEndEffect(model, state, trigger, header != null, interact)
   val content: @Composable (Modifier) -> Unit = { listModifier ->
@@ -156,19 +157,25 @@ private fun PrototypeListEndEffect(
 
 /** Capture the old measured rows during composition, before the new item provider is applied. */
 @Composable
-private fun PrototypeListAnchorEffect(state: LazyListState, keys: List<String>, hasHeader: Boolean) {
+private fun PrototypeListAnchorEffect(
+  state: LazyListState,
+  keys: List<String>,
+  hasHeader: Boolean,
+) {
   val previous = remember(state) { PrototypeListKeys(keys, hasHeader) }
-  val target = remember(state, keys, hasHeader) {
-    val anchor = PrototypeListAnchor.capture(state, previous.keys, previous.hasHeader)
-    val oldIndex = anchor.index + if (previous.hasHeader) 1 else 0
-    val changed = previous.keys != keys || previous.hasHeader != hasHeader
-    previous.keys = keys
-    previous.hasHeader = hasHeader
-    if (changed) {
-      PrototypeListAnchor.resolve(anchor.key, anchor.offset, keys, hasHeader)
-        ?.takeIf { it.index != oldIndex }
-    } else null
-  }
+  val target =
+    remember(state, keys, hasHeader) {
+      val anchor = PrototypeListAnchor.capture(state, previous.keys, previous.hasHeader)
+      val oldIndex = anchor.index + if (previous.hasHeader) 1 else 0
+      val changed = previous.keys != keys || previous.hasHeader != hasHeader
+      previous.keys = keys
+      previous.hasHeader = hasHeader
+      if (changed) {
+        PrototypeListAnchor.resolve(anchor.key, anchor.offset, keys, hasHeader)?.takeIf {
+          it.index != oldIndex
+        }
+      } else null
+    }
   LaunchedEffect(state, keys, hasHeader) {
     target?.let { state.scrollToItem(it.index, it.offset) }
   }

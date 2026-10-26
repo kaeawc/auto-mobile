@@ -41,7 +41,10 @@ class PrototypeLazyListTest {
     assertTrue(PrototypeListEndTriggers().get("root.screens.feed", 3).onVisibleRange(9, 10, "ten"))
   }
 
-  internal fun spec(count: Int = PrototypeSpecValidator.MAX_PROTOTYPE_LIST_ITEMS, axis: String = "vertical"): PrototypeSpec {
+  internal fun spec(
+    count: Int = PrototypeSpecValidator.MAX_PROTOTYPE_LIST_ITEMS,
+    axis: String = "vertical",
+  ): PrototypeSpec {
     val list =
       PrototypeListNode(
         testTag = "feed",

@@ -32,7 +32,9 @@ class PrototypePrependDataTest {
   @Test
   fun trimRunsBeforeFinalDataLimits() {
     val page =
-      JsonArray(List(PrototypeSpecValidator.MAX_PROTOTYPE_DATA_ARRAY_ITEMS + 1) { JsonPrimitive(it) })
+      JsonArray(
+        List(PrototypeSpecValidator.MAX_PROTOTYPE_DATA_ARRAY_ITEMS + 1) { JsonPrimitive(it) },
+      )
     val result =
       PrototypeDataWriter.apply(before, PrototypeDataWrite.Prepend("/data/items", page, 1))
         as PrototypeDataWriteResult.Success
@@ -54,10 +56,14 @@ class PrototypePrependDataTest {
   fun typedFailuresIdentifyPrependData() {
     val cases =
       listOf(
-        PrototypeDataWrite.Prepend("/data/items", json("1")) to PrototypeDataWriteErrorCode.INVALID_VALUE,
-        PrototypeDataWrite.Prepend("/data/missing", json("[]")) to PrototypeDataWriteErrorCode.NOT_FOUND,
-        PrototypeDataWrite.Prepend("/data/other", json("[]")) to PrototypeDataWriteErrorCode.NOT_ARRAY,
-        PrototypeDataWrite.Prepend("/data/items", json("[]"), 0) to PrototypeDataWriteErrorCode.INVALID_VALUE,
+        PrototypeDataWrite.Prepend("/data/items", json("1")) to
+          PrototypeDataWriteErrorCode.INVALID_VALUE,
+        PrototypeDataWrite.Prepend("/data/missing", json("[]")) to
+          PrototypeDataWriteErrorCode.NOT_FOUND,
+        PrototypeDataWrite.Prepend("/data/other", json("[]")) to
+          PrototypeDataWriteErrorCode.NOT_ARRAY,
+        PrototypeDataWrite.Prepend("/data/items", json("[]"), 0) to
+          PrototypeDataWriteErrorCode.INVALID_VALUE,
       )
     for ((write, code) in cases) {
       val result = PrototypeDataWriter.apply(before, write) as PrototypeDataWriteResult.Failure
@@ -80,7 +86,8 @@ class PrototypePrependDataTest {
     val required = PrototypeStrictPolicy.required(json(text).jsonObject)
     assertEquals(
       required,
-      PrototypeBundleCapabilities.required(PrototypeBundleSpec.references(text.toByteArray())).toSet(),
+      PrototypeBundleCapabilities.required(PrototypeBundleSpec.references(text.toByteArray()))
+        .toSet(),
     )
     assertTrue(required.containsAll(setOf("prototype_data_actions_v1", "prototype_lazy_list_v1")))
     for (capability in listOf("prototype_data_actions_v1", "prototype_lazy_list_v1")) {

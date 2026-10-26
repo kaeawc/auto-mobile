@@ -105,6 +105,16 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     children: [{ type: "spacer" }],
   }),
   prototype_motion_v2: fixture({ ...label, animate: { durationMs: 300 } }),
+  prototype_stack_transitions_v1: {
+    ...fixture({
+      type: "stack",
+      id: "label",
+      start: "home",
+      transition: "slide",
+      screens: { home: { type: "spacer" } },
+    }),
+    with: ["prototype_stack_v1"],
+  },
   prototype_choreography_v1: fixture({ ...label, transition: { type: "fade", delayMs: 100 } }),
   // A chart reads a /data array, so the spec carries data and the data capability is advertised.
   prototype_lazy_list_v1: {

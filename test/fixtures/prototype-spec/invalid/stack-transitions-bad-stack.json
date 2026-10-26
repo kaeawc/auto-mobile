@@ -1,0 +1,38 @@
+{
+  "spec": {
+    "id": "stack-transitions",
+    "motion": "none",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "stack",
+      "id": "nav",
+      "start": "home",
+      "transition": "zoom",
+      "screens": {
+        "home": {
+          "type": "button",
+          "label": "Next",
+          "onTap": [
+            {
+              "type": "push",
+              "stack": "nav",
+              "screen": "home",
+              "transition": "slide"
+            },
+            {
+              "type": "replace",
+              "stack": "nav",
+              "screen": "home",
+              "transition": "fade"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "expectedPath": "root.transition"
+}

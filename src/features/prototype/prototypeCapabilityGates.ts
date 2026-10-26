@@ -1,7 +1,12 @@
 import { prototypeTimerFields, prototypeTimersUnsupportedMessage } from "./prototypeTimers";
 import {
+  prototypeStackTransitionFields,
+  prototypeStackTransitionsUnsupportedMessage,
+} from "./prototypeStackTransitions";
+import {
   PROTOTYPE_TIMERS_CAPABILITY,
   PROTOTYPE_STACK_CAPABILITY,
+  PROTOTYPE_STACK_TRANSITIONS_CAPABILITY,
   PROTOTYPE_THEME_MODES_CAPABILITY,
   PROTOTYPE_DATA_MODEL_CAPABILITY,
   PROTOTYPE_FLOW_GRID_CAPABILITY,
@@ -226,6 +231,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_STACK_CAPABILITY,
     fields: prototypeStackFields,
     unsupportedMessage: (_fields, platform) => prototypeStackUnsupportedMessage(platform),
+  },
+  {
+    capability: PROTOTYPE_STACK_TRANSITIONS_CAPABILITY,
+    fields: prototypeStackTransitionFields,
+    unsupportedMessage: prototypeStackTransitionsUnsupportedMessage,
   },
   {
     capability: PROTOTYPE_EMIT_CONTEXT_CAPABILITY,

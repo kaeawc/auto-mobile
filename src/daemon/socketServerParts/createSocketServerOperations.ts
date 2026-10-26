@@ -149,6 +149,7 @@ function bindMcpRouting(target: McpRouting): Pick<McpRouting, keyof McpRouting> 
 function bindMcpBindings(target: McpBindings): Pick<McpBindings, keyof McpBindings> {
   return {
     restoreSelectorSessions: target.restoreSelectorSessions.bind(target),
+    holdsSession: target.holdsSession.bind(target),
     failIfCallTargetsRefusedRestore: target.failIfCallTargetsRefusedRestore.bind(target),
     ownedSessionsOwnerToken: target.ownedSessionsOwnerToken.bind(target),
     selectorSessionIds: target.selectorSessionIds.bind(target),

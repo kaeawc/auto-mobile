@@ -102,19 +102,25 @@ export async function runUpgradeInPlace(
     return pass("install previous release", artifacts.previous);
   });
   checks.push(installPrevious);
-  if (installPrevious.status === "fail") return checks;
+  if (installPrevious.status === "fail") {
+    return checks;
+  }
 
   const before = await driver.installedApp();
   const imported = await importBundle(driver, bundle);
   checks.push(imported.check);
-  if (imported.libraryId === undefined) return checks;
+  if (imported.libraryId === undefined) {
+    return checks;
+  }
 
   const installCandidate = await guarded("install candidate over previous", async () => {
     await driver.install(artifacts.candidate);
     return pass("install candidate over previous", artifacts.candidate);
   });
   checks.push(installCandidate);
-  if (installCandidate.status === "fail") return checks;
+  if (installCandidate.status === "fail") {
+    return checks;
+  }
 
   checks.push(
     await guarded("upgraded in place", async () => {
@@ -181,7 +187,9 @@ export async function runMinifiedSmoke(
     return pass("install release artifact", artifact);
   });
   checks.push(installed);
-  if (installed.status === "fail") return checks;
+  if (installed.status === "fail") {
+    return checks;
+  }
 
   for (const bundle of [bundles.bundled, bundles.imported]) {
     const imported = await importBundle(driver, bundle);

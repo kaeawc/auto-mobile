@@ -105,6 +105,7 @@ type Callbacks = Pick<
   | "forgetLateSessionToolBindings"
   | "abortRequestControllers"
   | "writeFrameData"
+  | "holdsSession"
 >;
 /** Socket Transport over shared connection state and explicit callbacks. */
 export class SocketTransport {
@@ -546,8 +547,12 @@ export class SocketTransport {
    * distinct from the released daemon session carried in the frame.
    */
   broadcastSessionDeviceRebound(event: SessionDeviceRebound): void {
+    // Only sockets that hold the session learn its serial and AVD name (#15456).
+    const holders = Array.from(this.state.notificationSubscribers).filter((socketSessionId) =>
+      this.callbacks.holdsSession(socketSessionId, event.sessionId),
+    );
     fanOutSessionDeviceRebound(
-      this.state.notificationSubscribers,
+      holders,
       this.notificationTransport,
       this.state.pendingSessionReleaseWrites,
       event,

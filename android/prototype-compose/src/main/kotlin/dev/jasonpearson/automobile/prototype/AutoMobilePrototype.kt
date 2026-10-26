@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.prototype
 
+import android.annotation.SuppressLint
 import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.PredictiveBackHandler
@@ -131,6 +132,8 @@ private data class EmbeddedInput(
   val network: PrototypeNetwork,
 )
 
+// The progress flow is collected inside collectStackBackProgress, which lint cannot see through.
+@SuppressLint("NoCollectCallFound")
 @Composable
 private fun EmbeddedPrototype(
   input: EmbeddedInput,

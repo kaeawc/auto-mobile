@@ -15,6 +15,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export interface PackageNode {
   identity: string;
@@ -277,7 +278,7 @@ function runSwiftShowDependencies(packagePath: string): SwiftRun {
 const REGENERATE = "regenerate on macOS: bun scripts/ios/protoviewer-notices.ts";
 
 export function main(argv: readonly string[], platform: string = process.platform): number {
-  const repoRoot = new URL("../../", import.meta.url).pathname;
+  const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
   const check = argv.includes("--check");
   const inputs: DigestInputs = {
     manifest: readFileSync(join(repoRoot, noticesPaths.package, "Package.swift"), "utf8"),

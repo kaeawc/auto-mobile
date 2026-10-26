@@ -74,6 +74,12 @@ type; pick a plain id such as `checkoutFlow` for a hash-free name.
 A missing asset falls back to the renderer's placeholder, and a missing spec shows the renderer's
 load-error view, on both platforms.
 
+An embedded prototype draws edge to edge inside the space the app gives it, and an image with no
+authored size takes its natural size. Place the composable inside the content area of your
+screen, below any app bar or status bar. If a custom layout offsets it by a fixed pixel amount
+that is smaller than the bar's height, the image row is laid out but hidden behind the bar, and the
+text appears to start right under it.
+
 ## Requests
 
 `request` actions follow the embedded routing decision
@@ -82,6 +88,9 @@ load-error view, on both platforms.
 - **Android:** pass a device client, `PrototypeNetwork(device = myClient)`. Without one, every
   request fails with a typed `network` error. A `hostHandler` takes over host-routed requests (those
   with `via: "host"` or no `via`), for example to add authentication or serve canned responses.
+  The app supplies its own HTTP client; the renderer ships none. On Android 17, a request to the
+  emulator host alias `10.0.2.2` (a local-network address) times out until the app declares
+  `android.permission.ACCESS_LOCAL_NETWORK` and the user grants it.
 - **iOS:** the default `PrototypeNetworkConfiguration` uses the renderer's `URLSession` client with
   its egress checks. Pass `PrototypeNetworkConfiguration(hostHandler:)` to take over host-routed
   requests, or `deviceClient:` to replace the transport.

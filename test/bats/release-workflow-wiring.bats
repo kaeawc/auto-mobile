@@ -885,6 +885,7 @@ wiring_requires_yq() {
   ! grep -Fq "secrets." "$workflow"
   ! grep -Fq "notarytool" "$workflow"
 }
+
 @test "prepare-release gates the release on artifact capabilities before any build starts (#15347)" {
   wiring_requires_yq
   local workflow=".github/workflows/prepare-release.yml"
@@ -911,4 +912,17 @@ wiring_requires_yq() {
 @test "capability guard passes for the pinned release recorded in the manifest (#15347)" {
   run bun scripts/release/check-artifact-capabilities.ts
   [ "$status" -eq 0 ]
+}
+
+@test "prepare-release blocks promotion on the ProtoViewer artifact policy gate (#14154)" {
+  wiring_requires_yq
+  local prepare=".github/workflows/prepare-release.yml"
+  local gate=".github/workflows/verify-protoviewer-artifact-policy.yml"
+  [ "$(yq -r '.jobs."build-candidate-protoviewer-artifact-policy".uses' "$prepare")" = \
+    "./.github/workflows/verify-protoviewer-artifact-policy.yml" ]
+  yq -e '.jobs."verify-prepared-release".needs[] | select(. == "build-candidate-protoviewer-artifact-policy")' "$prepare" > /dev/null
+  # Both gates run the checker on the built artifact, and release builds never allow -SNAPSHOT.
+  [ "$(grep -c 'check-protoviewer-artifact-policy.ts' "$gate")" -eq 2 ]
+  ! grep -Fq -- "--allow-snapshot" "$gate"
+  grep -Fq "check-protoviewer-artifact-policy.ts android" ".github/workflows/pull_request.yml"
 }

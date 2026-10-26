@@ -1,14 +1,19 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
+import android.util.Log
 import dev.jasonpearson.automobile.protocol.PrototypeAction
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
 import dev.jasonpearson.automobile.protocol.PrototypeStartTimerAction
 import dev.jasonpearson.automobile.protocol.PrototypeTimerReport
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+
+class PrototypeTimerAdvanceLimitException(val fired: Int) :
+  IllegalStateException("Prototype timer advance exceeded 10000 fires")
 
 /** Owned by one runtime; all calls, including scheduled fires, share its interaction lock. */
 @OptIn(InternalAutoMobilePrototypeApi::class)
@@ -16,6 +21,9 @@ internal class PrototypeTimers(
   private val clock: () -> Long,
   private val scope: CoroutineScope,
   private val exclusively: suspend (suspend () -> Unit) -> Unit,
+  private val warn: (Exception) -> Unit = {
+    Log.w("PrototypeTimers", "Prototype timer fire failed", it)
+  },
   private val fire: suspend (List<PrototypeAction>) -> Unit,
 ) {
   private class Timer(val action: PrototypeStartTimerAction, var at: Long, val order: Long) {
@@ -97,11 +105,17 @@ internal class PrototypeTimers(
         val timer = first?.takeIf { it.at <= target } ?: break
         if (fired == PrototypeSpecValidator.MAX_PROTOTYPE_TIMER_RUNS) {
           reached = checkNotNull(cursor)
-          error("Prototype timer advance exceeded 10000 fires")
+          throw PrototypeTimerAdvanceLimitException(fired)
         }
         cursor = timer.at
         // Keep the identity registered during the fire: self-cancel and replacement win.
-        fire(timer.action.actions)
+        try {
+          fire(timer.action.actions)
+        } catch (error: CancellationException) {
+          throw error
+        } catch (error: Exception) {
+          warn(error)
+        }
         fired++
         timer.runs++
         if (ledger[timer.action.id] !== timer) continue

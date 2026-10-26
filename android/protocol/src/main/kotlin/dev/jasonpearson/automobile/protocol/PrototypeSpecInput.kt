@@ -112,8 +112,8 @@ internal object PrototypeSpecInput {
   }
 
   private fun nodeVocabularyErrors(value: JsonElement, context: Context): PrototypeSpecError? =
-    PrototypeTimerRules.error(context)
-      ?: platformErrors(value, context)
+    platformErrors(value, context)
+      ?: PrototypeTimerRules.error(context)
       ?: motionErrors(context)
       ?: choreographyErrors(context)
       ?: shimmerErrors(context)

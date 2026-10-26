@@ -198,6 +198,45 @@ class PrototypeTimersRuntimeTest {
   }
 
   @Test
+  fun `throwing fire counts the run and keeps the planned schedule`() = runTest {
+    var fires = 0
+    val failures = mutableListOf<Exception>()
+    val engine =
+      PrototypeTimers(
+        { testScheduler.currentTime },
+        backgroundScope,
+        { it() },
+        warn = { failures += it },
+      ) {
+        fires++
+        throw IllegalStateException("Host dismiss failed")
+      }
+    engine.start(timer("a", period = 100, max = 2))
+    runCurrent()
+    advanceTimeBy(100)
+    runCurrent()
+    assertEquals(1, fires)
+    assertEquals(PrototypeTimerReport("a", 100, 1), engine.reports().single())
+    advanceTimeBy(100)
+    runCurrent()
+    assertEquals(2, fires)
+    assertEquals(2, failures.size)
+    assertTrue(engine.reports().isEmpty())
+  }
+
+  @Test
+  fun `exactly ten thousand due fires succeed`() = runTest {
+    val engine = PrototypeTimers({ testScheduler.currentTime }, backgroundScope, { it() }) {}
+    engine.start(timer("a", period = 100, max = 10000))
+    assertEquals(10000, engine.advance(1_000_100))
+    assertTrue(engine.reports().isEmpty())
+    engine.start(timer("b", period = 100))
+    assertEquals(10000, engine.advance(1_000_000))
+    assertEquals(100L, engine.reports().single().nextFireInMs)
+    engine.cancelAll()
+  }
+
+  @Test
   fun `advance refuses more than ten thousand fires`() = runTest {
     var fires = 0
     val engine =
@@ -206,10 +245,13 @@ class PrototypeTimersRuntimeTest {
     try {
       engine.advance(1_000_100)
       fail("Expected fire limit")
-    } catch (error: IllegalStateException) {
+    } catch (error: PrototypeTimerAdvanceLimitException) {
+      assertEquals(10000, error.fired)
       assertTrue(error.message.orEmpty().contains("10000"))
     }
     assertEquals(10000, fires)
+    assertEquals(100L, engine.reports().single().nextFireInMs)
+    assertEquals(1, engine.advance(100))
     engine.cancelAll()
   }
 }

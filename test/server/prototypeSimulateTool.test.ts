@@ -125,6 +125,29 @@ describe("prototype simulate and timer reports", () => {
     ]);
   });
 
+  test("advance cap failures retain the number of completed fires", async () => {
+    proxy.setSupportedCommands(["prototype_timers_v1"]);
+    proxy.setAdvanceClockResult({ success: false, fired: 10000, error: "10000-fire limit" });
+    expect(
+      await call(android, { action: "simulate", id: "proto", advanceTimeMs: 1000100 }),
+    ).toMatchObject({ success: false, fired: 10000, error: "10000-fire limit" });
+    agent.handshake.capabilities.push("prototype_timers_v1");
+    agent.queueReplies({ success: false, fired: 10000, error: "10000-fire limit" });
+    expect(
+      await call(ios, { action: "simulate", id: "proto", advanceTimeMs: 1000100 }),
+    ).toMatchObject({ success: false, fired: 10000, error: "10000-fire limit" });
+  });
+
+  test("inspect omits malformed timer reports on capable devices", async () => {
+    proxy.setSupportedCommands(["prototype_persistence_replay_v1", "prototype_timers_v1"]);
+    const reported = { id: "proto", persistent: false, state: {}, pages: {}, lastSequence: 0 };
+    proxy.setInspectReply({ success: true, prototypes: [{ ...reported, timers: {} }] });
+    expect((await call(android, { action: "inspect" })).prototypes?.[0]?.timers).toBeUndefined();
+    agent.handshake.capabilities.push("prototype_timers_v1");
+    agent.queueReplies({ status: { shown: true, ...reported, timers: null } });
+    expect((await call(ios, { action: "inspect" })).prototypes?.[0]?.timers).toBeUndefined();
+  });
+
   test("a device refusal is reported as a failure", async () => {
     proxy.setSupportedCommands(["prototype_timers_v1"]);
     proxy.setAdvanceClockResult({ success: false, error: "disk full" });

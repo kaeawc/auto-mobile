@@ -18,9 +18,16 @@ public enum PrototypeSpecStrictValidator {
             try PrototypeLimits.guardRepeatPathCells(root, data: modelData)
             try PrototypeLimits.guardSubstitutedText(root, data: modelData)
             try repeats.expanded(root.objectFields ?? [:], path: "root")
-            try PrototypeTimerValidator.validate(context.actions)
             try PrototypeStrictSemantics.storage(fields)
             try PrototypeDataWrite.validate(actions: context.actions, data: modelData)
+            try PrototypeRequestValidator.validate(root, state: state)
+            try PrototypePlatformValidator.validate(
+                requires: fields["requires"],
+                handlers: fields["platform"],
+                root: root,
+                state: state
+            )
+            try PrototypeTimerValidator.validate(context.actions)
             try PrototypeStrictSemantics.vocabulary(context, data: modelData)
             try PrototypeLinkify.validate(root: root, nodes: context.locatedNodes)
             try PrototypeStrictSemantics.targets(context)
@@ -28,14 +35,7 @@ public enum PrototypeSpecStrictValidator {
             let actions = repeats.bound(context.actions, actions: true)
             try PrototypeStrictBindings.validate(nodes: nodes, actions: actions, state: state)
             try PrototypeChecks.validate(nodes: nodes, actions: actions, state: state)
-            try PrototypePlatformValidator.validate(
-                requires: fields["requires"],
-                handlers: fields["platform"],
-                root: root,
-                state: state
-            )
             try PrototypeLimits.guardAuthoredTree(root)
-            try PrototypeRequestValidator.validate(root, state: state)
             try PrototypeMenus.validateAuthoredText(root)
             try PrototypeRepeat.validateEmitContexts(root, data: modelData)
             let resolved = PrototypeDataResolver.resolveRoot(root, data: modelData)

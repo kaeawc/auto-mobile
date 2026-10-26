@@ -1027,6 +1027,7 @@
     "time-picker-hour-out-of-range.json",
     "time-picker-minute-not-integer.json",
     "time-picker-same-keys.json",
+    "timer-after-data-action-error.json",
     "timer-afterMs-below-min.json",
     "timer-afterMs-over-max.json",
     "timer-empty-actions.json",

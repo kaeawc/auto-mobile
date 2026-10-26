@@ -31,7 +31,11 @@ export async function performPrototypeSimulate(
       : await target.ios!.advanceClock(args.id!, args.advanceTimeMs!, args.timeoutMs);
     return reply.success
       ? { success: true, ...(reply.fired === undefined ? {} : { fired: reply.fired }) }
-      : { success: false, error: reply.error ?? "simulate failed" };
+      : {
+          success: false,
+          error: reply.error ?? "simulate failed",
+          ...(reply.fired === undefined ? {} : { fired: reply.fired }),
+        };
   } catch (error) {
     logger.warn("[prototype] simulate request failed", error);
     return { success: false, error: toActionableError(error, "simulate failed").message };

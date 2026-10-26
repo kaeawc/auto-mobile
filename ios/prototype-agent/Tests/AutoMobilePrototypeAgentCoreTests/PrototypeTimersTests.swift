@@ -205,13 +205,22 @@ final class PrototypeTimersTests: XCTestCase {
         XCTAssertEqual(timers.advance(100).fired, 1)
     }
 
-    func testExactAdvanceCapReportsLimitEvenWhenLastTimerCompletes() throws {
+    func testExactAdvanceCapSucceedsWhenLastTimerCompletes() throws {
         let timers = PrototypeTimers(clock: TimerTestClock()) { _ in }
         try timers.perform([.start(start(extra: #", "everyMs":100,"maxRuns":10000"#))])
         let result = timers.advance(1_000_000)
         XCTAssertEqual(result.fired, 10000)
-        XCTAssertNotNil(result.error)
+        XCTAssertNil(result.error)
         XCTAssertTrue(timers.snapshot().isEmpty)
+    }
+
+    func testExactAdvanceCapSucceedsWithNextFireOutsideWindow() throws {
+        let timers = PrototypeTimers(clock: TimerTestClock()) { _ in }
+        try timers.perform([.start(start(extra: #", "everyMs":100"#))])
+        let result = timers.advance(1_000_000)
+        XCTAssertEqual(result.fired, 10000)
+        XCTAssertNil(result.error)
+        XCTAssertEqual(timers.snapshot().first?.nextFireInMs, 100)
     }
 
     func testTimerFiresNeverRestartIdleTTL() throws {

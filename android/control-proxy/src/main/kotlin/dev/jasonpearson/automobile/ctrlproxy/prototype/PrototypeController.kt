@@ -108,6 +108,9 @@ fun interface PrototypeResultSink {
 
   suspend fun sendAdvanced(requestId: String?, fired: Int) = send(requestId, true, null)
 
+  suspend fun sendAdvanceFailed(requestId: String?, fired: Int, error: String) =
+    send(requestId, false, error)
+
   /** The reply to `inspect_prototypes`. Sinks that predate it answer a bare success. */
   suspend fun sendPrototypeStatus(
     requestId: String?,
@@ -789,10 +792,9 @@ class PrototypeController(
           // Compose reports its initial/restored settled page; that is rendering, not idle
           // activity.
           if (
-            interaction !is PrototypeInteraction.TimerFire &&
-              (interaction !is PrototypeInteraction.PagerMotion ||
-                interaction.scrolling ||
-                runtime.current.pages[interaction.pager] != interaction.page)
+            (interaction !is PrototypeInteraction.PagerMotion ||
+              interaction.scrolling ||
+              runtime.current.pages[interaction.pager] != interaction.page)
           )
             armIdle(runtime)
           runtime.handle(interaction)
@@ -962,6 +964,10 @@ class PrototypeController(
       sink.sendAdvanced(requestId, fired)
     } catch (error: CancellationException) {
       throw error
+    } catch (error: PrototypeTimerAdvanceLimitException) {
+      Log.w("PrototypeController", "Prototype clock advance reached fire limit", error)
+      surfaces[id]?.runtime?.let { syncAfterChange(it) }
+      sink.sendAdvanceFailed(requestId, error.fired, checkNotNull(error.message))
     } catch (error: Exception) {
       Log.w("PrototypeController", "Prototype clock advance failed", error)
       sink.send(requestId, false, error.message ?: "Prototype clock advance failed")
@@ -1082,9 +1088,9 @@ class PrototypeController(
     ) {
       PrototypeWindowDecision.DISMISS -> runtime.dismiss(PrototypeDismissReason.TEARDOWN)
       PrototypeWindowDecision.HIDE -> {
-        runtime.pauseTimers()
         val wasShowing = isShowing
         check(surface.host.dismiss()) { "Prototype host failed to hide window" }
+        runtime.pauseTimers()
         if (wasShowing && !isShowing) notifyDetached()
       }
       PrototypeWindowDecision.RELAYOUT -> relayoutOrRestore(runtime)

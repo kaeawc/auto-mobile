@@ -159,7 +159,7 @@ private fun EmbeddedPrototype(
     }
   }
   if (host == null) EmbeddedLifetime(owner, lifecycle, scope, interactions)
-  else EmbeddedHostLifetime(owner, host)
+  else EmbeddedHostLifetime(owner, host, lifecycle)
   val session = owner.session
   if (session != null) {
     val active by session.runtime.snapshots.collectAsState()
@@ -177,8 +177,33 @@ private fun EmbeddedPrototype(
   owner.error?.let { onError(it) }
 }
 
+internal fun prototypeTimerLifecycleObserver(
+  scope: CoroutineScope,
+  interactions: Mutex,
+  runtime: () -> PrototypeRuntime?,
+): LifecycleEventObserver = LifecycleEventObserver { _, event ->
+  if (event == Lifecycle.Event.ON_START || event == Lifecycle.Event.ON_STOP) {
+    scope.launch(NonCancellable, start = CoroutineStart.UNDISPATCHED) {
+      interactions.withLock {
+        if (event == Lifecycle.Event.ON_STOP) runtime()?.pauseTimers()
+        else runtime()?.resumeTimers()
+      }
+    }
+  }
+}
+
 @Composable
-private fun EmbeddedHostLifetime(owner: EmbeddedOwner, host: EmbeddedPrototypeHost) {
+private fun EmbeddedHostLifetime(
+  owner: EmbeddedOwner,
+  host: EmbeddedPrototypeHost,
+  lifecycle: Lifecycle,
+) {
+  DisposableEffect(owner, host, lifecycle) {
+    val observer =
+      prototypeTimerLifecycleObserver(host.scope, host.interactions) { owner.session?.runtime }
+    lifecycle.addObserver(observer)
+    onDispose { lifecycle.removeObserver(observer) }
+  }
   // The host performs its own flush before reload and on stop, and closes on destroy. Only the
   // composition's temporary assets belong to this disposal path.
   DisposableEffect(owner) {

@@ -127,7 +127,7 @@ final class PrototypeTimers {
                 }
             }
         }
-        let capped = count == 10000
+        let capped = count == 10000 && sortedEntries().first.map { $0.value.nextFireAt <= target } == true
         let end = capped ? (firingAt ?? target) : target
         if advancing { offset = end - initialClockTime }
         firingAt = nil

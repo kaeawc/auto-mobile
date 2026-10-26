@@ -42,6 +42,11 @@ class PrototypeTimerControllerTest {
           this@PrototypeTimerControllerTest.fired += fired
         }
 
+        override suspend fun sendAdvanceFailed(requestId: String?, fired: Int, error: String) {
+          results += false
+          this@PrototypeTimerControllerTest.fired += fired
+        }
+
         override suspend fun sendPrototypeStatus(
           requestId: String?,
           prototypes: List<PrototypeStatusEntry>,
@@ -127,6 +132,43 @@ class PrototypeTimerControllerTest {
     assertEquals(armed, idle.tasks.size)
     controller.inspect("inspect")
     assertEquals(PrototypeTimerReport("a", 100, 2), statuses.last().single().timers.single())
+  }
+
+  @Test
+  fun `advance cap failure includes completed fires and retains the live surface`() = runTest {
+    val controller = controller()
+    val runtime = controller.start()
+    controller.interact(
+      runtime,
+      PrototypeInteraction.Tap(
+        listOf(
+          PrototypeStartTimerAction(
+            "a",
+            100,
+            100,
+            actions = listOf(PrototypeCancelTimerAction("unknown")),
+          ),
+        ),
+      ),
+    )
+    controller.advanceClock("cap", "panel", 1_000_100)
+    assertFalse(results.last())
+    assertEquals(10000, fired.last())
+    controller.inspect("inspect")
+    assertEquals(PrototypeTimerReport("a", 100, 10000), statuses.last().single().timers.single())
+    controller.advanceClock("next", "panel", 100)
+    assertEquals(1, fired.last())
+  }
+
+  @Test
+  fun `failed hide keeps visible timers running`() = runTest {
+    val controller = controller()
+    val runtime = controller.start()
+    blocked = true
+    host.accept = false
+    controller.onConfigurationChanged()
+    assertTrue(host.isShowing)
+    assertEquals(1, runtime.advanceClock(100))
   }
 
   @Test

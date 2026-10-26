@@ -2440,10 +2440,12 @@ The injected clock/scheduler drives real scheduling. `prototype {action:"simulat
 advances 1..3600000 ms without waiting and returns optional `fired`, refusing before sending unless
 the capability is advertised. `advance_prototype_clock {id,advanceTimeMs}` fires due timers in
 chronological order, ties by start order, including newly started timers due in the window.
-Paused advancement fires zero times; at 10000 fires it stops with an error. Real scheduling then
-continues from shifted time. Inspect reports `timers:[{id,nextFireInMs,runs}]` sorted by remaining
+Paused advancement fires zero times. Exactly 10000 due fires succeed; if an additional fire is
+still due, advancement stops at the last fire with an error and fired=10000, retaining pending timers
+for the next call. Real scheduling continues from shifted time. Inspect reports `timers:[{id,nextFireInMs,runs}]` sorted by remaining
 time then start order, with nonnegative remaining time frozen while paused. Devices omit the field
-when empty; the host returns an array for capable devices, including an empty array when absent.
+when empty; the host returns an array for capable devices, including an empty array when absent,
+and omits malformed timer reports.
 
 Cross-field errors point to `.maxRuns` when everyMs is absent and to `.id` on the ninth distinct
 startTimer in contract document order. A cancelTimer id with no declaration produces a host-only

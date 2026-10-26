@@ -9,7 +9,6 @@ import {
 import type {
   PrototypeEvent,
   PrototypeResult,
-  PrototypeStatusEntry,
 } from "../../features/observe/android/ctrlProxyProtocol";
 import { PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY } from "../../features/observe/android/ctrlProxyProtocol";
 import type { PrototypeEventSource } from "../../features/prototype/PrototypeEventCoordinator";
@@ -55,12 +54,12 @@ const devicePrototypeEntrySchema = z.object({
   // Absent from a device without prototype_appearance_v1; a malformed one is dropped, not guessed.
   appearance: z.unknown().optional().transform(parsePrototypeAppearance),
   storage: z.unknown().optional().transform(parsePrototypeStorageReport),
-  timers: z.unknown().optional().transform(parsePrototypeTimerReports),
+  timers: z.unknown().optional(),
 });
 
 function parseReportedPrototypes(
   prototypes: readonly unknown[] | undefined,
-): PrototypeStatusEntry[] {
+): z.infer<typeof devicePrototypeEntrySchema>[] {
   return (prototypes ?? []).flatMap((entry) => {
     const parsed = devicePrototypeEntrySchema.safeParse(entry);
     if (!parsed.success) {
@@ -131,7 +130,11 @@ function adoptReportedPrototypes(
       store.adopt(scope, {
         ...entry,
         storage: parsePrototypeStorageReport(entry.storage),
-        timers: timersSupported ? (parsePrototypeTimerReports(entry.timers) ?? []) : undefined,
+        timers: timersSupported
+          ? entry.timers === undefined
+            ? []
+            : parsePrototypeTimerReports(entry.timers)
+          : undefined,
       });
     }
   }
@@ -237,7 +240,7 @@ const iosAgentStatusSchema = z.object({
   // agent without prototype_appearance_v1.
   appearance: z.unknown().optional().transform(parsePrototypeAppearance),
   storage: z.unknown().optional().transform(parsePrototypeStorageReport),
-  timers: z.unknown().optional().transform(parsePrototypeTimerReports),
+  timers: z.unknown().optional(),
 });
 
 /**

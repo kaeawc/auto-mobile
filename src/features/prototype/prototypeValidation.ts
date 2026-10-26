@@ -788,11 +788,11 @@ function behaviourErrors(
 ): PrototypeValidationError | undefined {
   return (
     prototypeDataActionsError(context.actions, data.data, prototypeDataError) ??
-    prototypeTimersError([...context.actions, ...componentTimers]) ??
     prototypeRequestsError(context.actions) ??
+    prototypePlatformError(value, context.actions, platformArgumentError) ??
+    prototypeTimersError([...context.actions, ...componentTimers]) ??
     prototypeLoadingStatesError(context.nodes) ??
     motionErrors(context.nodes) ??
-    prototypePlatformError(value, context.actions, platformArgumentError) ??
     prototypeChartError(context.nodes, data.data) ??
     prototypeLinkifyError(value) ??
     prototypeChatScrollError(context.nodes, context.actions) ??

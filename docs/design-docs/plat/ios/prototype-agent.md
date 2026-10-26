@@ -231,14 +231,15 @@ device-verified. One mode is resolved per shown prototype ([Appearance](#appeara
   Positions apply only if every stop has one (made non-decreasing); else stops spread evenly. `card` and
   `topAppBar` drop their default container when a gradient is set.
 - **Scrims.** `window.placement.scrim` and bottomSheet `scrim` resolve through
-  `PrototypePalette.scrim` (owner decision 2026-10-10). Only the `scrim` role gets alpha: 40%
+  `PrototypePalette.scrim` (owner decision 2026-10-10); a sheet without `scrim` draws the `scrim` role
+  at that 40% like Android's default (`sheetScrim`, #15117). Only the `scrim` role gets alpha: 40%
   (`PrototypePalette.scrimRoleAlpha`, Android's `PROTOTYPE_SHEET_SCRIM_ALPHA`), because the role is
   opaque black. Other roles draw unchanged; hex keeps authored alpha; outside scrim slots the role is the
   plain colour. An authored sheet `scrim` takes the touches it covers; a tap closes the sheet by writing
   `!equals` to its `openWhen` key.
-- **Differences from Android.** A sheet without `scrim` draws none (Android draws the default). The
-  scrim covers the sheet node's own frame behind the surface, not the whole window (the sheet draws in
-  place rather than hoisted). A `button` keeps its system fill, covering a gradient behind it.
+- **Differences from Android.** The scrim covers the sheet node's own frame behind the surface (and
+  its safe areas), not the whole window when the sheet is nested (the sheet draws in place rather than
+  hoisted). A `button` keeps its system fill, covering a gradient behind it.
 - **Images.** `image.asset` and `tabBar`/`bottomNav` item `image` take an id or `{light, dark}`; the
   resolved id is drawn. Nav items draw the image at 24 pt if uploaded, else `icon`, else a placeholder
   square. Both ids of a pair appear in `missingAssets` until uploaded.

@@ -47,6 +47,8 @@ add_check "schema-copy-drift" "bun \"$PROJECT_ROOT/scripts/check-schema-copy-dri
 add_check "tool-definitions" "bun \"$PROJECT_ROOT/scripts/generate-tool-definitions.ts\" --check" "config,typescript" "Keep schemas/tool-definitions.json in sync with the live tool registry"
 add_check "prototype-spec-models" "bun \"$PROJECT_ROOT/scripts/prototype/generate-prototype-spec-models.ts\" --check" "config,typescript,kotlin,ios" "Keep selected prototype spec models in sync with the contract"
 add_check "protoviewer-notices" "bun \"$PROJECT_ROOT/scripts/ios/protoviewer-notices.ts\" --check" "config,typescript,ios" "Keep the ProtoViewer iOS third-party notices in sync with SwiftPM dependencies (skips without swift)"
+add_check "privacy-manifests" "bun \"$PROJECT_ROOT/scripts/ios/check-privacy-manifests.ts\"" "config,typescript,ios" "Keep the prototype library and ProtoViewer PrivacyInfo.xcprivacy in step with the required-reason APIs their Swift sources use"
+add_check "store-listing" "bun \"$PROJECT_ROOT/scripts/store-listing/validate-store-listing.ts\"" "config,typescript" "Keep the ProtoViewer fastlane store listing within Play and App Store limits and its icon sources well-formed (#14152)"
 add_check "bun-version-coherence" "bun \"$PROJECT_ROOT/scripts/check-bun-version-coherence.ts\"" "config,dependencies" "Keep Bun versions aligned across package, workflows, Docker, and local development"
 add_check "xml" "\"$PROJECT_ROOT/scripts/xml/validate_xml.sh\"" "config,xml" "Validate XML files"
 add_check "shellcheck" "\"$PROJECT_ROOT/scripts/shellcheck/validate_shell_scripts.sh\"" "lint,shell" "Validate shell scripts with shellcheck"

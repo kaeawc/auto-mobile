@@ -39,6 +39,37 @@ describe("AppLinksRestoreRegistry (#14110)", () => {
     expect(entry?.selections.get(0)).toEqual(["b.example.com"]);
   });
 
+  test("later writes add domains without overwriting an earlier original", () => {
+    const registry = new AppLinksRestoreRegistry();
+    registry.record(
+      device,
+      "com.a",
+      snapshot({ "b.example.com": "none" }),
+      { verification: true },
+      undefined,
+    );
+    const entry = registry.record(
+      device,
+      "com.a",
+      snapshot({ "a.example.com": "system_configured", "b.example.com": "approved" }),
+      { verification: true },
+      undefined,
+    );
+    expect(Object.fromEntries(entry.verification ?? [])).toEqual({
+      "a.example.com": "system_configured",
+      "b.example.com": "none",
+    });
+  });
+
+  test("record never replaces the first session owner", () => {
+    const registry = new AppLinksRestoreRegistry();
+    registry.record(device, "com.a", snapshot({}), { verification: false }, "s1");
+    const entry = registry.record(device, "com.a", snapshot({}), { verification: false }, "s2");
+    expect(entry.owner).toBe("s1");
+    expect(registry.takeOwnedBy(device.deviceId, "s2")).toEqual([]);
+    expect(registry.takeOwnedBy(device.deviceId, "s1")).toEqual([entry]);
+  });
+
   test("takeOwnedBy returns only the session's entries on that device", () => {
     const registry = new AppLinksRestoreRegistry();
     const scope = { verification: true };
@@ -91,6 +122,28 @@ describe("planAppLinksRestore", () => {
     ]);
   });
 
+  test("untouched system-configured domains need no restore or inexact warning", async () => {
+    const appLinks = new FakeAppLinksDevice().install("com.a", {
+      verification: { "a.example.com": "system_configured", "b.example.com": "approved" },
+    });
+    const current = await appLinks.read("com.a");
+    if (!current.found) {
+      throw new Error(current.reason);
+    }
+    const plan = planAppLinksRestore(
+      {
+        verification: new Map([
+          ["a.example.com", "system_configured"],
+          ["b.example.com", "none"],
+        ]),
+        selections: new Map(),
+      },
+      { verification: current.snapshot.verification, users: new Map() },
+    );
+    expect([...plan.verification]).toEqual([["none", ["b.example.com"]]]);
+    expect(plan.inexact).toEqual([]);
+  });
+
   test("user selections diff both ways and skip domains no longer declared", () => {
     const plan = planAppLinksRestore(
       { selections: new Map([[0, ["a.example.com", "removed.example.com"]]]) },
@@ -103,6 +156,35 @@ describe("planAppLinksRestore", () => {
 });
 
 describe("restoreAppLinksEntries", () => {
+  test("session release restores the first originals from a merged entry", async () => {
+    const registry = new AppLinksRestoreRegistry();
+    const appLinks = new FakeAppLinksDevice().install("com.a", {
+      verification: { "a.example.com": "verified", "b.example.com": "approved" },
+      users: { 0: { enabled: ["a.example.com"] } },
+    });
+    const original = await appLinks.read("com.a", 0);
+    registry.record(
+      device,
+      "com.a",
+      snapshot({ "a.example.com": "verified" }),
+      { verification: true },
+      undefined,
+    );
+    await appLinks.setVerificationState("com.a", "approved", ["a.example.com"]);
+    const beforeReset = await appLinks.read("com.a", 0);
+    if (!beforeReset.found) {
+      throw new Error(beforeReset.reason);
+    }
+    registry.record(device, "com.a", beforeReset.snapshot, { verification: true, userId: 0 }, "s1");
+    await appLinks.setVerificationState("com.a", "none", "all");
+    await appLinks.setUserSelection("com.a", 0, false, "all");
+    const entries = registry.takeOwnedBy(device.deviceId, "s1");
+    expect(entries).toHaveLength(1);
+    expect(registry.get(device.deviceId, "com.a")).toBeUndefined();
+    expect(await restoreAppLinksEntries(entries, () => appLinks)).toEqual([]);
+    expect(await appLinks.read("com.a", 0)).toEqual(original);
+  });
+
   test("restores each entry and reports the ones that fail", async () => {
     const appLinks = new FakeAppLinksDevice()
       .install("com.a", { verification: { "a.example.com": "approved" } })

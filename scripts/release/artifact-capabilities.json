@@ -58,11 +58,7 @@
         "semantic_node_actions_v1",
         "tap_double_v1"
       ],
-      "ios-runner": [
-        "display_cutout_info",
-        "double_tap_v1",
-        "path_gesture_v1"
-      ],
+      "ios-runner": ["display_cutout_info", "double_tap_v1", "path_gesture_v1"],
       "prototype-agent-dylib": [
         "prototype_anchor_v1",
         "prototype_appearance_v1",
@@ -150,11 +146,7 @@
         "sdk_capabilities_user_id_v1",
         "tap_double_v1"
       ],
-      "ios-runner": [
-        "display_cutout_info",
-        "double_tap_v1",
-        "path_gesture_v1"
-      ],
+      "ios-runner": ["display_cutout_info", "double_tap_v1", "path_gesture_v1"],
       "prototype-agent-dylib": [
         "prototype_anchor_v1",
         "prototype_appearance_v1",
@@ -228,10 +220,7 @@
         "sdk_capabilities_user_id_v1",
         "tap_double_v1"
       ],
-      "ios-runner": [
-        "display_cutout_info",
-        "double_tap_v1"
-      ],
+      "ios-runner": ["display_cutout_info", "double_tap_v1"],
       "prototype-agent-dylib": [
         "prototype_anchor_v1",
         "prototype_appearance_v1",

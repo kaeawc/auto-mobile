@@ -115,6 +115,8 @@ struct PrototypeSession {
     /// The shown spec's size outside its `state`, for the spec byte cap (#11562); see
     /// `PrototypeStateValidator.stateBytes`.
     private var nonStateBytes = 0
+    /// End-edge trackers survive tree rebuilds and are reset by every show.
+    private var listEnds: [String: PrototypeListEndDriver] = [:]
     private(set) var appearanceOverride = PrototypeAppearanceOverride.device
     /// The device's own appearance, as last reported through `setDeviceDark`; it outlives a show.
     private(set) var deviceDark = false
@@ -157,6 +159,7 @@ struct PrototypeSession {
         specBytes: Int? = nil,
         restoredState: [String: JSONValue]? = nil
     ) {
+        listEnds = [:]
         appearanceOverride = appearance
         // The agent keeps no raw spec, so the request's own size (when the caller has it) less the
         // state it carried is what the cap adds every later state to; without it only state counts.
@@ -411,8 +414,16 @@ struct PrototypeSession {
     {
         guard let spec else { return .failure(.init(code: .notFound, message: "No prototype is shown")) }
         let data: [String: JSONValue]
-        switch PrototypeDataWrite.apply(spec.data, op: operation, path: path, value: value) {
-        case let .success(written): data = written
+        let maxItems = operation == .append || operation == .extend
+            ? PrototypeLazyList.listMaxItems(spec: spec, dataPath: path) : nil
+        switch PrototypeDataWrite.applyWindowed(
+            spec.data,
+            op: operation,
+            path: path,
+            value: value,
+            maxItems: maxItems.map(Double.init)
+        ) {
+        case let .success(written): data = written.data
         case let .failure(failure): return .failure(failure)
         }
         guard let rebuilt = try? spec.replacingData(data) else {
@@ -430,6 +441,7 @@ struct PrototypeSession {
         let revision = dataRevision + 1
         revisions[rebuilt.id] = revision
         var payload: [String: JSONValue] = ["op": .string(operation.rawValue), "revision": .number(Double(revision))]
+        if let maxItems { payload["maxItems"] = .number(Double(maxItems)) }
         // The value is left out when the event would not fit the emit payload limit, so the host,
         // which cannot mirror a write it was not shown, stops tracking the spec (as on Android).
         if let value, PrototypeEmitContext.fits(.object(payload.merging(["value": value]) { $1 })) {
@@ -842,7 +854,8 @@ extension PrototypeSession {
             into: into,
             statusKey: action.statusKey,
             onSuccess: action.onSuccess ?? [],
-            onError: action.onError ?? []
+            onError: action.onError ?? [],
+            append: action.append
         )
         if case let .failure(error) = resolved {
             return events + finishRequest(inFlight, .failed(error, durationMs: 0))
@@ -874,6 +887,7 @@ extension PrototypeSession {
     )
         -> [PrototypeEvent]
     {
+        if inFlight.append != nil { return finishAppendRequest(inFlight, response) }
         var meta = PrototypeRequestMeta(response)
         var events: [PrototypeEvent] = []
         var minimalMeta = false
@@ -988,4 +1002,64 @@ private struct EmitContextInputs: PrototypeEmitContextInputs {
     func state(_ key: String) -> JSONValue? { state[key] }
     func page(_ id: String) -> Int? { pages[id] }
     func data(_ pointer: String) -> JSONValue? { PrototypeDataPointer.resolve(dataModel, pointer: pointer) }
+}
+
+extension PrototypeSession {
+    /// Both visibility and content changes enter the same synchronous session transition.
+    mutating func listVisible(_ node: PrototypeNode, appearedIndex: Int? = nil) -> [PrototypeEvent] {
+        guard isShown, let actions = node.onEndReached,
+              let rows = try? PrototypeLazyList.rows(node: node, data: data) else { return [] }
+        var driver = listEnds[node.nodePath] ?? PrototypeListEndDriver(endThreshold: node.endThreshold ?? 3)
+        let fires = driver.update(appearedIndex: appearedIndex, rowKeys: rows.map(\.key))
+        listEnds[node.nodePath] = driver
+        return fires ? run(actions) : []
+    }
+
+    /// Preflight with the shared outcome, then stage replayable writes on a value copy. No await or
+    /// external callback can interleave a host data write between the append and its metadata.
+    private mutating func finishAppendRequest(
+        _ request: PrototypeInFlightRequest, _ response: PrototypeRequestResponse
+    )
+        -> [PrototypeEvent]
+    {
+        guard let spec, var append = request.append else { return [] }
+        append.maxItems = PrototypeLazyList.listMaxItems(spec: spec, dataPath: append.to).map(Double.init)
+        let outcome = PrototypeRequestOutcome.apply(
+            spec.data ?? [:],
+            into: request.into,
+            response: response,
+            append: append
+        )
+        var meta = outcome.meta
+        var staged = self
+        var events: [PrototypeEvent] = []
+        do {
+            if outcome.status == "success", case let .received(_, _, body, _) = response {
+                let items = PrototypeDataPointer.resolve(body, tokens: PrototypeDataPointer.tokens(append.from)[...])
+                events += try staged.commitDataWrite(.extend, path: append.to, value: items).get()
+                if let into = request.into, let pointer = PrototypeDataWrite.pointer(ofPath: into) {
+                    let rest = PrototypeDataPointer.resolve(outcome.data, pointer: pointer)
+                    events += try staged.commitDataWrite(.set, path: into, value: rest).get()
+                }
+            }
+            if let into = request.into {
+                guard let written = staged.writeRequestMeta(meta, beside: into, minimal: outcome.status == "error")
+                else { throw PrototypeRequestError(.invalidResponse, PrototypeRequestOutcome.noRoomForMeta) }
+                events += written
+            }
+            self = staged
+        } catch {
+            events = []
+            meta.error = .init(.invalidResponse, "Request append completion could not rebuild the prototype")
+            if let into = request.into { events += writeRequestMeta(meta, beside: into, minimal: true) ?? [] }
+        }
+        let failed = meta.error != nil
+        events += writeRequestStatus(request.statusKey, failed ? "error" : "success")
+        events += emit(
+            kind: "emit",
+            name: PrototypeRequestEvent.name,
+            payload: PrototypeRequestEvent.payload(job: request.job, into: request.into, meta: meta)
+        )
+        return events + run(failed ? request.onError : request.onSuccess)
+    }
 }

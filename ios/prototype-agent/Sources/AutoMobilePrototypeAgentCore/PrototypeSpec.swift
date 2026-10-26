@@ -728,6 +728,8 @@ struct PrototypeListItemTrailing: Decodable {
 
 /// One spec node. A class so `child` can recurse; the renderer reads only the fields its type uses.
 final class PrototypeNode: Decodable {
+    /// Structural identity retained across data-driven tree rebuilds.
+    let nodePath: String
     let type: String
     let id: String?
     let testTag: String?
@@ -882,6 +884,10 @@ final class PrototypeNode: Decodable {
     }
 
     init(from decoder: Decoder) throws {
+        nodePath = decoder.codingPath.reduce(into: "") { path, key in
+            if let index = key.intValue { path += "[\(index)]" }
+            else { path += (path.isEmpty ? "" : ".") + key.stringValue }
+        }
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let decodedType = try container.decode(String.self, forKey: .type)
         type = decodedType

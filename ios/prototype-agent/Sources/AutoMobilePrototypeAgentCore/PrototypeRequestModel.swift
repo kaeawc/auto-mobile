@@ -126,6 +126,7 @@ struct PrototypeInFlightRequest {
     let statusKey: String?
     let onSuccess: [PrototypeAction]
     let onError: [PrototypeAction]
+    var append: PrototypeRequestAppend? = nil
 }
 
 /// The session's request bookkeeping: ids, who is waiting, and the commands for the driver.

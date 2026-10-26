@@ -78,6 +78,7 @@ data class PrototypeRenderNode(
   val errorMessage: String? = null,
   /** A `chart`'s points and summary read against the current `/data`; null for other roles. */
   val chart: PrototypeChartModel? = null,
+  val list: PrototypeLazyListModel? = null,
   /**
    * How long this node waits before its `visibleWhen` enter starts (#15247): its parent's stagger
    * rank times `ms` plus its own `transition.delayMs`, at most 600 ms.
@@ -111,7 +112,7 @@ fun prototypeOpaqueSurface(model: PrototypeRenderModel): Boolean =
 
 /**
  * Path spelling and traversal order match the protocol validator, including unsupported nodes.
- * `repeat` templates count once per instance, so an expanded list cannot exceed the node limit.
+ * Eager repeats count per instance; lazy list row templates and header/footer count once.
  */
 @InternalAutoMobilePrototypeApi
 fun guardPrototypeTree(root: PrototypeNode) {
@@ -120,6 +121,10 @@ fun guardPrototypeTree(root: PrototypeNode) {
     require(++count <= PrototypeSpecValidator.MAX_PROTOTYPE_NODES) { "$path: Node limit exceeded" }
     require(depth <= PrototypeSpecValidator.MAX_PROTOTYPE_DEPTH) {
       "$path: Tree depth limit exceeded"
+    }
+    requirePrototypeRenderSizes(node.style, path)
+    node.styleWhen?.forEachIndexed { index, entry ->
+      requirePrototypeRenderSizes(entry.style, "$path.styleWhen[$index]")
     }
     prototypeChildEntries(node, path, bind = false).forEach { visit(it.node, it.path, depth + 1) }
   }
@@ -143,7 +148,10 @@ fun mapPrototypeSpec(
           pages = pages,
           stacks = stacks,
           validity =
-            prototypeValidity(checkedPrototypeNodes(resolved.root), resolved.state.orEmpty()),
+            prototypeValidity(
+              checkedPrototypeNodes(resolved.root, resolved.data),
+              resolved.state.orEmpty(),
+            ),
           shownErrors = shownErrors,
           data = resolved.data,
         )
@@ -162,6 +170,18 @@ internal fun prototypeRenderModel(spec: PrototypeSpec, mapped: PrototypeRenderNo
     isDevicePersistent(spec),
     spec.motion,
   )
+
+/** The inputs a lazy list's rows are mapped from; equality makes equal lists compare equal. */
+internal data class PrototypeListSnapshot(
+  val state: Map<String, PrototypeScalar>,
+  val pages: Map<String, Int>,
+  val stacks: Map<String, PrototypeStackSnapshot>,
+  val validity: Map<String, Boolean>,
+  val shownErrors: Set<String>,
+  val data: JsonObject?,
+  val path: String,
+  val inPager: Boolean,
+)
 
 /** Shared bottom-up mapping; the fresh public mapper uses no caches. */
 internal class PrototypeNodeMapping(
@@ -209,6 +229,7 @@ internal class PrototypeNodeMapping(
           state[node.activeKey] != PrototypeScalar.BooleanValue(true)
       )
         emptyList()
+      else if (node is PrototypeListNode) entries.filter { it.path != "$path.children[0]" }
       else entries
     val staggerDelays = prototypeStaggerDelays(node, visibleEntries.map { it.node })
     val children = visibleEntries.mapIndexed { index, (child, childPath) ->
@@ -260,7 +281,8 @@ internal class PrototypeNodeMapping(
         checked =
           (prototypeToggleKey(node)
               ?: prototypeListItemToggleKey(node)
-              ?: (node as? PrototypeScrollNode)?.refresh?.stateKey)
+              ?: (node as? PrototypeScrollNode)?.refresh?.stateKey
+              ?: (node as? PrototypeListNode)?.refresh?.stateKey)
             ?.let {
               state[it] == PrototypeScalar.BooleanValue(true)
             } ?: false,
@@ -279,6 +301,37 @@ internal class PrototypeNodeMapping(
         spans =
           (node as? PrototypeTextNode)?.let { mapPrototypeTextSpans(it, localState, inPager) },
         chart = chart,
+        list =
+          (node as? PrototypeListNode)?.let { list ->
+            val snapshot =
+              PrototypeListSnapshot(
+                state = localState,
+                pages = pages,
+                stacks = stacks,
+                validity = validity,
+                shownErrors = shownErrors,
+                data = data,
+                path = path,
+                inPager = inPager,
+              )
+            PrototypeLazyListModel(list, PrototypeListRows.items(list, data), snapshot) {
+              item,
+              index ->
+              PrototypeNodeMapping(
+                  state = localState,
+                  pages = pages,
+                  stacks = stacks,
+                  validity = validity,
+                  shownErrors = shownErrors,
+                  data = data,
+                )
+                .map(
+                  bindPrototypeListRow(list, item, index),
+                  "$path.repeat[${JsonPrimitive(PrototypeListRows.key(list, item))}].children[0]",
+                  if (inPager) localState else null,
+                )
+            }
+          },
         enterDelayMs =
           (staggerDelayMs + (node.transition?.delayMs ?: 0)).coerceAtMost(
             PrototypeChoreographyRules.MAX_DELAY_MS,
@@ -306,6 +359,11 @@ internal fun validatedPrototypeChildren(
   requirePrototypeRenderSizes(node.style, path)
   node.styleWhen?.forEachIndexed { index, entry ->
     requirePrototypeRenderSizes(entry.style, "$path.styleWhen[$index]")
+  }
+  if (node is PrototypeListNode) {
+    require(listOfNotNull(node.spacing, node.contentPadding).all { it.toFloat().isFinite() }) {
+      "$path: Size cannot be represented in Compose dp"
+    }
   }
   return prototypeChildEntries(node, path)
 }
@@ -341,6 +399,7 @@ internal fun prototypeNodeRole(node: PrototypeNode): String =
     is PrototypeDividerNode -> "divider"
     is PrototypeBadgeNode -> "badge"
     is PrototypeProgressNode -> "progress"
+    is PrototypeListNode -> "list"
     is PrototypeChartNode -> "chart"
     is PrototypeDialogNode -> "dialog"
     is PrototypeSnackbarNode -> "snackbar"
@@ -765,10 +824,19 @@ private fun inlineTextFieldVisible(node: PrototypeRenderNode): Boolean =
     !node.visible -> false
     node.role in setOf("textField", "searchBar") -> true
     node.role in PROTOTYPE_MODAL_ROLES -> false // Hoisted: only modalPrototypeSheets renders it.
+    node.list != null ->
+      node.children.any(::inlineTextFieldVisible) ||
+        (node.list.rows.isNotEmpty() && node.list.source.children.any(::hasPrototypeListTextField))
     node.role == "pager" ->
       node.children.getOrNull(node.page)?.let(::inlineTextFieldVisible) == true
     else -> node.children.any(::inlineTextFieldVisible)
   }
+
+/** Lazy fields reserve keyboard input without eagerly instantiating every row. */
+private fun hasPrototypeListTextField(node: PrototypeNode): Boolean =
+  node is PrototypeTextFieldNode ||
+    node is PrototypeSearchBarNode ||
+    prototypeDescendants(node).any(::hasPrototypeListTextField)
 
 /** Roles drawn above the whole author tree while their `openWhen` holds, never inline. */
 internal val PROTOTYPE_MODAL_ROLES = setOf("bottomSheet", "dialog", "snackbar", "menu")

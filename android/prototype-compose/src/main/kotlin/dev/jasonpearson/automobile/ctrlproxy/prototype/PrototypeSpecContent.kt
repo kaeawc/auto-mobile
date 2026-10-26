@@ -822,6 +822,8 @@ private fun RenderPrototypeNodeContent(
     "divider" -> RenderPrototypeDivider(node, modifier)
     "badge" -> RenderPrototypeBadge(node, modifier)
     "progress" -> RenderPrototypeProgress(node, modifier)
+    "list" ->
+      RenderPrototypeLazyList(node, modifier, interact) { RenderPrototypeNode(it, interact) }
     "chart" -> RenderPrototypeChart(node, modifier)
     "timePicker" ->
       PrototypeCheckedControl(node, parentModifier) {
@@ -1513,6 +1515,7 @@ private val SEMANTICS_FREE_CONTAINERS =
     "grid",
     "carousel",
     "scroll",
+    "list",
     "pager",
     "stack",
     "spacer",

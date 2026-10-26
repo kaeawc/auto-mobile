@@ -342,6 +342,8 @@
                 checkboxView
             case "button":
                 buttonView
+            case "list":
+                PrototypeLazyListView(node: node, model: model).id(model.showRevision)
             case "scroll":
                 if node.axis != "horizontal", let refresh = node.refresh {
                     PrototypeRefreshableScroll(node: node, refresh: refresh, model: model)
@@ -1410,6 +1412,61 @@
             }
             .scrollTargetBehavior(.viewAligned)
             .scrollIndicators(.hidden)
+        }
+    }
+
+    /// Row identity belongs to the data key; lazy stacks alone decide which row views exist.
+    private struct PrototypeLazyListView: View {
+        let node: PrototypeNode
+        let model: PrototypeModel
+        @State private var pulling = false
+
+        private var rows: [PrototypeLazyList.Row] {
+            (try? PrototypeLazyList.rows(node: node, data: model.spec?.data)) ?? []
+        }
+
+        @ViewBuilder private var content: some View {
+            if let header = node.header { NodeView(node: header, model: model) }
+            ForEach(rows, id: \.key) { row in
+                NodeView(node: row.node, model: model)
+                    .onAppear { model.listVisible(node, appearedIndex: row.index) }
+            }
+            if let footer = node.footer { NodeView(node: footer, model: model) }
+        }
+
+        private var scroll: some View {
+            ScrollView(node.axis == "horizontal" ? .horizontal : .vertical, showsIndicators: true) {
+                Group {
+                    if node.axis == "horizontal" {
+                        LazyHStack(spacing: node.spacing.map { CGFloat($0) }) { content }
+                    } else {
+                        LazyVStack(spacing: node.spacing.map { CGFloat($0) }) { content }
+                    }
+                }
+                .padding(CGFloat(node.contentPadding ?? 0))
+            }
+            .onChange(of: rows.map(\.key)) { _, _ in model.listVisible(node) }
+        }
+
+        var body: some View {
+            if node.axis != "horizontal", let refresh = node.refresh {
+                scroll.refreshable {
+                    guard model.state[refresh.stateKey]?.boolValue != true else { return }
+                    pulling = true
+                    model.run(PrototypeRefresh.actions(for: refresh))
+                    await PrototypeRefresh.awaitCompletion(
+                        isRefreshing: { model.state[refresh.stateKey]?.boolValue == true },
+                        isCancelled: { Task.isCancelled },
+                        sleep: { try? await Task.sleep(for: .milliseconds(100)) }
+                    )
+                    pulling = false
+                }
+                .overlay(alignment: .top) {
+                    if model.state[refresh.stateKey]?.boolValue == true, !pulling {
+                        ProgressView().padding(.top, 8)
+                    }
+                }
+            } else { scroll }
         }
     }
 

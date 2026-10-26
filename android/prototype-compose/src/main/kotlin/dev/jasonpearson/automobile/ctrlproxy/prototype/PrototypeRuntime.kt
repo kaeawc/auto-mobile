@@ -855,7 +855,13 @@ class PrototypeRuntime(
       is PrototypeSetDataAction ->
         value(action.value, action.path)?.let { PrototypeDataWrite.Set(action.path, it) }
       is PrototypeAppendDataAction ->
-        value(action.value, action.path)?.let { PrototypeDataWrite.Append(action.path, it) }
+        value(action.value, action.path)?.let {
+          PrototypeDataWrite.Append(
+            action.path,
+            it,
+            prototypeListMaxItemsFor(current.spec, action.path),
+          )
+        }
       is PrototypeRemoveDataAction -> PrototypeDataWrite.Remove(action.path)
       else -> null
     }
@@ -869,12 +875,20 @@ class PrototypeRuntime(
     fun payload(value: JsonElement?) = buildJsonObject {
       put("op", write.op)
       if (value != null) put("value", value)
+      val maximum =
+        when (write) {
+          is PrototypeDataWrite.Append -> write.maxItems
+          is PrototypeDataWrite.Extend -> write.maxItems
+          else -> null
+        }
+      maximum?.let { put("maxItems", it.toLong()) }
       put("revision", revision)
     }
     val value =
       when (write) {
         is PrototypeDataWrite.Set -> write.value
         is PrototypeDataWrite.Append -> write.value
+        is PrototypeDataWrite.Extend -> write.value
         is PrototypeDataWrite.Remove -> null
       }
     val full = payload(value)
@@ -899,6 +913,7 @@ class PrototypeRuntime(
     val startedAt: Long,
     val onSuccess: List<PrototypeAction>?,
     val onError: List<PrototypeAction>?,
+    val append: PrototypeRequestAppend?,
   ) {
     lateinit var job: Job
 
@@ -975,6 +990,7 @@ class PrototypeRuntime(
         clock(),
         action.onSuccess,
         action.onError,
+        action.append,
       )
     }
     // The newest request wins even when it fails to resolve: the older one must not land later.
@@ -1085,12 +1101,24 @@ class PrototypeRuntime(
    * `prototype_request` event, then `onSuccess` or `onError`.
    */
   private suspend fun finishRequest(request: RequestInFlight, response: PrototypeRequestResponse) {
+    val writes = mutableListOf<PrototypeDataWrite>()
     val result =
-      PrototypeRequestOutcome.complete(request.into, response, ::trialDataWrites) { write ->
-        applyDataWrite(write)?.also {
-          warn("Refused request write at ${write.path}: ${it.message}")
-        }
+      PrototypeRequestOutcome.complete(
+        request.into,
+        response,
+        request.append?.let {
+          it.copy(maxItems = prototypeListMaxItemsFor(current.spec, it.to)?.toLong())
+        },
+        ::trialDataWrites,
+      ) { write ->
+        writes += write
+        null
       }
+    // The outcome stages every write before any suspendable event delivery. The controller's
+    // exclusive lock covers both this trial and the complete ordered commit.
+    for (write in writes) {
+      check(applyDataWrite(write) == null) { "A staged request write was refused at ${write.path}" }
+    }
     if (!current.active) return
     request.statusKey?.let { key ->
       val status =
@@ -1105,14 +1133,14 @@ class PrototypeRuntime(
     )
     val followUps = (if (result.succeeded) request.onSuccess else request.onError).orEmpty()
     if (followUps.isEmpty() || !current.active || !requireValid(followUps)) return
-    val writes =
+    val followUpWrites =
       try {
         plannedWrites(followUps, current.spec)
       } catch (error: IllegalArgumentException) {
         warn("Refused the follow-up of request ${request.requestId}: ${error.message}")
         return
       }
-    run(followUps, writes)
+    run(followUps, followUpWrites)
   }
 
   private suspend fun sendRequestEvent(
@@ -1192,7 +1220,7 @@ class PrototypeRuntime(
   }
 
   private fun checkedNodes(): List<PrototypeNode> =
-    checkedPrototypeNodes(PrototypeDataResolver.resolve(current.spec).root)
+    checkedPrototypeNodes(PrototypeDataResolver.resolve(current.spec).root, current.spec.data)
 
   private fun validity(): Map<String, Boolean> = prototypeValidity(checkedNodes(), current.state)
 
@@ -1257,6 +1285,7 @@ internal fun prototypeDescendants(node: PrototypeNode): List<PrototypeNode> =
     is PrototypePagerNode -> node.children
     is PrototypeStackNode -> node.screens.values.toList()
     is PrototypeCardNode -> node.children
+    is PrototypeListNode -> listOfNotNull(node.header) + node.children + listOfNotNull(node.footer)
     is PrototypeScrollNode -> listOf(node.child)
     is PrototypeBottomSheetNode -> listOf(node.child)
     is PrototypeDialogNode -> listOfNotNull(node.child)

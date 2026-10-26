@@ -43,6 +43,7 @@ enum PrototypeAgentProtocol {
         textFieldActionsCapability,
         carouselCapability,
         chartCapability,
+        PrototypeLazyList.capability,
         loadingStatesCapability,
         textFieldLeadingIconCapability,
         refreshCapability,

@@ -309,6 +309,10 @@
             swipe.closed(ObjectIdentifier(node))
         }
 
+        func listVisible(_ node: PrototypeNode, appearedIndex: Int? = nil) {
+            apply(activity: false) { $0.listVisible(node, appearedIndex: appearedIndex) }
+        }
+
         func run(_ actions: [PrototypeAction]) {
             apply { $0.run(actions) }
         }

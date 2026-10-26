@@ -352,6 +352,7 @@ class WebSocketServer(
     add("prototype_choreography_v1")
     // Line, area, bar and ring charts over /data arrays (#14209).
     add("prototype_chart_v1")
+    add("prototype_lazy_list_v1")
     // Text nodes linkify mentions, hashtags and URLs into links running linkify.onTap (#14233).
     add("prototype_linkify_v1")
     // Chat-list scrolls: reverse, stickToEnd, atEndKey, onStartReached and scrollTo (#14232).

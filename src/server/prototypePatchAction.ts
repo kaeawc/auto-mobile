@@ -22,6 +22,10 @@ import {
   prototypeAccessibilityOutput,
   type PrototypeAccessibilityFinding,
 } from "../features/prototype/prototypeAccessibilityLint";
+import {
+  prototypePlaceholderOutput,
+  type PrototypePlaceholderFinding,
+} from "../features/prototype/prototypePlaceholderLint";
 import type { ShownSpecJson } from "../features/prototype/PrototypeShownSpecs";
 
 export interface PrototypePatchQueue {
@@ -74,6 +78,8 @@ export interface PrototypePatchOutput {
   warning?: string;
   accessibilityFindings?: PrototypeAccessibilityFinding[];
   accessibilityFindingsTotal?: number;
+  placeholderFindings?: PrototypePlaceholderFinding[];
+  placeholderFindingsTotal?: number;
 }
 const failure = (error: string): PrototypePatchOutput => ({ success: false, error });
 
@@ -194,6 +200,7 @@ async function finishPatch(
     ...output,
     ...(warning ? { warning } : {}),
     ...prototypeAccessibilityOutput(applied.spec),
+    ...prototypePlaceholderOutput(applied.spec),
   };
 }
 

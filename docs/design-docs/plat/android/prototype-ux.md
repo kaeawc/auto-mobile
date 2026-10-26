@@ -1895,6 +1895,24 @@ Device checks must cover keyguard timing, daemon death, pager page 3 across rota
 
 Android only. The iOS agent does not lift a sheet above the keyboard; whether to rely on UIKit keyboard avoidance or match this is an open decision (see [iOS prototype agent](../ios/prototype-agent.md#open-decisions)).
 
+## Placeholder lint (#15444)
+
+A successful `show` or `patch` returns `placeholderFindings` when a repeat or state placeholder sits
+in a field that does not bind it, so it would be drawn literally. It is advisory, host-only and
+never refuses a show. Each finding names the field `path` (for example `root.children[0].label`),
+the `placeholder` as authored and a `detail`. The output keeps 50 findings, and
+`placeholderFindingsTotal` reports the full count when it is capped.
+
+- A repeat placeholder (`{index}`, or `{alias.field}` for an enclosing `repeat.as`) in a text field
+  that is not in the bindable set, such as `chip.label` or `badge.text`. Fields that bind
+  (`button.label`, `topAppBar.title`, `searchBar.placeholder`, and `text` nodes) are not reported.
+- A `{key}` state placeholder naming a declared `state` key in `chip.label`, `badge.text`,
+  `textField.placeholder` or `searchBar.placeholder`. Only a `text` node reads `{key}` from state.
+  Other fields are left alone because a renderer may bind them beyond the contract.
+
+Whether to widen binding to these fields is a separate contract decision (#15444); until then use a
+`text` node next to the field.
+
 ## Accessibility lint (#14126)
 
 A successful `show` or `patch` returns `accessibilityFindings`: an advisory, host-only lint of the

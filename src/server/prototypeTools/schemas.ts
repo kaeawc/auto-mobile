@@ -30,6 +30,7 @@ import {
   MAX_PROTOTYPE_ACCESSIBILITY_FINDINGS,
   PROTOTYPE_ACCESSIBILITY_RULES,
 } from "../../features/prototype/prototypeAccessibilityLint";
+import { MAX_PROTOTYPE_PLACEHOLDER_FINDINGS } from "../../features/prototype/prototypePlaceholderLint";
 import {
   MAX_PROTOTYPE_SPEC_BYTES,
   prototypeSpecSchema,
@@ -789,6 +790,25 @@ export const prototypeOutputSchema = z.object({
     .positive()
     .optional()
     .describe("Total accessibility findings, present only when accessibilityFindings was capped"),
+  placeholderFindings: z
+    .array(
+      z.object({
+        path: z.string(),
+        placeholder: z.string(),
+        detail: z.string(),
+      }),
+    )
+    .max(MAX_PROTOTYPE_PLACEHOLDER_FINDINGS)
+    .optional()
+    .describe(
+      "Successful show or patch: advisory lint for a repeat or state placeholder in a field that does not bind it, so it would be drawn literally (for example chip.label, badge.text, textField.placeholder). path is the field in the component-expanded device spec; placeholder is the text as authored. Never refuses a show. Absent when nothing is found.",
+    ),
+  placeholderFindingsTotal: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Total placeholder findings, present only when placeholderFindings was capped"),
   event: prototypeEventOutputSchema.optional(),
   timedOut: z
     .literal(true)

@@ -1,5 +1,6 @@
 import { prototypeTimerWarnings } from "../../features/prototype/prototypeTimers";
 import { prototypeAccessibilityOutput } from "../../features/prototype/prototypeAccessibilityLint";
+import { prototypePlaceholderOutput } from "../../features/prototype/prototypePlaceholderLint";
 import { pseudoLocalizeSpec } from "../../features/prototype/prototypePseudoLocale";
 import { z } from "zod/v4";
 import { createDeviceHierarchyCapture } from "../../features/observe/DeviceHierarchyCapture";
@@ -334,10 +335,18 @@ function showAdviceOutput(
   device: BootedDevice,
   target: PrototypeTarget,
   success: boolean,
-): Pick<PrototypeOutput, "platformNotes" | "accessibilityFindings" | "accessibilityFindingsTotal"> {
+): Pick<
+  PrototypeOutput,
+  | "platformNotes"
+  | "accessibilityFindings"
+  | "accessibilityFindingsTotal"
+  | "placeholderFindings"
+  | "placeholderFindingsTotal"
+> {
   return {
     ...platformNotesOutput(args, device, target, success),
     ...(args.action === "show" && success ? prototypeAccessibilityOutput(args.spec) : {}),
+    ...(args.action === "show" && success ? prototypePlaceholderOutput(args.spec) : {}),
   };
 }
 

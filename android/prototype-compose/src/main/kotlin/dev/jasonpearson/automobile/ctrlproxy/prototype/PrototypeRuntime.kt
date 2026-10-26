@@ -41,6 +41,7 @@ data class PrototypeRuntimeSnapshot(
   val shownErrors: Set<String> = emptySet(),
   /** The latest `scrollTo` per scroll id (#14232); the scroll performs each once. */
   val scrollRequests: Map<String, PrototypeScrollRequest> = emptyMap(),
+  val platformState: JsonObject = JsonObject(emptyMap()),
 ) {
   val state: Map<String, PrototypeScalar>
     get() = spec.state.orEmpty()
@@ -48,6 +49,10 @@ data class PrototypeRuntimeSnapshot(
 
 @InternalAutoMobilePrototypeApi
 sealed interface PrototypeInteraction {
+  /** Device observation and restored pager positions do not extend the host's idle expiry. */
+  fun countsAsUserActivity(pages: Map<String, Int>): Boolean =
+    this !is DeviceState && (this !is PagerMotion || scrolling || pages[pager] != page)
+
   data class Guarded(val identity: String, val interaction: PrototypeInteraction) :
     PrototypeInteraction
 
@@ -58,6 +63,8 @@ sealed interface PrototypeInteraction {
   data object Back : PrototypeInteraction
 
   data class Tap(val actions: List<PrototypeAction>) : PrototypeInteraction
+
+  data class DeviceState(val snapshot: JsonObject) : PrototypeInteraction
 
   data class TimerFire(val actions: List<PrototypeAction>) : PrototypeInteraction
 
@@ -161,6 +168,7 @@ class PrototypeRuntime(
   private val newRequestId: () -> String = { UUID.randomUUID().toString() },
   /** The device-wide cap on requests in flight; the controller shares one across its surfaces. */
   private val requestLimiter: PrototypeRequestLimiter = PrototypeRequestLimiter(),
+  initialPlatformState: JsonObject = JsonObject(emptyMap()),
 ) {
   @Volatile private var stateWriteValidator: PrototypeStateWriteValidator? = null
   internal var prepareStateWrites: (PrototypeSpec) -> PrototypeStateWriteValidator = {
@@ -183,6 +191,32 @@ class PrototypeRuntime(
 
   suspend fun advanceClock(ms: Int): Int = timerEngine.advance(ms)
 
+  private val platformState =
+    PrototypePlatformState(CoroutinePrototypeScheduler(requestScope), exclusively) { name, data ->
+        deliverPlatformEvent(name, data)
+      }
+      .also { if (initialPlatformState.isNotEmpty()) it.update(initialPlatformState) }
+  private var eventData: JsonObject? = null
+
+  private suspend fun deliverPlatformEvent(name: String, data: JsonObject) {
+    if (!current.active) return
+    val payload = buildJsonObject {
+      put("event", name)
+      put("data", data)
+    }
+    require(
+      payload.toString().toByteArray(Charsets.UTF_8).size <=
+        PrototypeSpecValidator.MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES,
+    )
+    emit(PrototypeEventKind.EMIT, PrototypePlatform.DELIVERED_EVENT_NAME, payload)
+    eventData = data
+    try {
+      handle(PrototypeInteraction.Tap(current.spec.platform?.on?.get(name).orEmpty()))
+    } finally {
+      eventData = null
+    }
+  }
+
   private val renderMapper = PrototypeRenderMapper()
 
   /** The running animations of this prototype's window, published in its window metadata. */
@@ -190,7 +224,13 @@ class PrototypeRuntime(
 
   @InternalAutoMobilePrototypeApi
   fun renderModel(snapshot: PrototypeRuntimeSnapshot = current): PrototypeRenderModel =
-    renderMapper.map(snapshot.spec, snapshot.pages, snapshot.stacks, snapshot.shownErrors)
+    renderMapper.map(
+      snapshot.spec,
+      snapshot.pages,
+      snapshot.stacks,
+      snapshot.shownErrors,
+      snapshot.platformState,
+    )
 
   internal val renderMappingPasses: Int
     get() = renderMapper.mappingPasses
@@ -199,6 +239,7 @@ class PrototypeRuntime(
     MutableStateFlow(
       snapshot(spec, previousPages, previousStacks)
         .copy(
+          platformState = platformState.snapshot,
           revision = initialRevision,
           stateRevisions = spec.state.orEmpty().keys.associateWith { initialRevision },
         ),
@@ -226,6 +267,7 @@ class PrototypeRuntime(
       textEpochs = before.textEpochs + changed.associateWith { (before.textEpochs[it] ?: 0) + 1 },
       revision = before.revision,
       stateRevisions = before.stateRevisions,
+      platformState = before.platformState,
     )
   }
 
@@ -341,6 +383,7 @@ class PrototypeRuntime(
   private fun allocateRevision(): Long = nextRevision?.invoke() ?: (current.revision + 1L)
 
   fun close() {
+    platformState.close()
     mutableSnapshot.value = current.copy(active = false)
     timerEngine.cancelAll()
     cancelRequests()
@@ -382,8 +425,15 @@ class PrototypeRuntime(
       )
   }
 
+  private fun updateDeviceState(snapshot: JsonObject) {
+    if (platformState.update(snapshot)) {
+      mutableSnapshot.value = current.copy(platformState = platformState.snapshot)
+    }
+  }
+
   private suspend fun handleInteraction(interaction: PrototypeInteraction) {
     when (interaction) {
+      is PrototypeInteraction.DeviceState -> updateDeviceState(interaction.snapshot)
       is PrototypeInteraction.Guarded -> {
         fun find(node: PrototypeRenderNode): PrototypeRenderNode? =
           if (node.identity == interaction.identity) node
@@ -800,6 +850,12 @@ class PrototypeRuntime(
 
       override fun data(pointer: String): JsonElement? =
         PrototypeDataPointer.resolve(current.spec.data, pointer)
+
+      override fun platform(pointer: String): JsonElement? =
+        PrototypeDataPointer.resolve(current.platformState, pointer)
+
+      override fun event(pointer: String): JsonElement? =
+        PrototypeDataPointer.resolve(eventData, pointer)
     }
 
   /**

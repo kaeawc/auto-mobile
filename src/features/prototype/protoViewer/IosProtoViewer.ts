@@ -29,6 +29,11 @@ const PROTOVIEWER_MIN_RESULT_WAIT_MS = 1_000;
 export interface IosProtoViewerSimctl {
   installed(udid: string, signal?: AbortSignal): Promise<boolean>;
   dataContainer(udid: string, signal?: AbortSignal): Promise<string>;
+  /**
+   * Brings ProtoViewer to the foreground (`simctl launch`). iOS asks "Open in ProtoViewer?" when a URL
+   * is opened while the app is in the background, and nothing answers that alert (#15435).
+   */
+  launch(udid: string, timeoutMs: number, signal?: AbortSignal): Promise<void>;
   /** Resolves only on exit zero; rejects for non-delivery or a typed command timeout. */
   openurl(args: readonly string[], timeoutMs: number, signal?: AbortSignal): Promise<void>;
 }
@@ -95,6 +100,7 @@ export class IosProtoViewer implements ProtoViewerDevice {
         "bytes" in work
           ? protoViewerIosImportUrl(request, work.label)
           : protoViewerIosOpenUrl(request, work.libraryId);
+      await this.foreground(timeoutMs, signal);
       await this.deliver(url, timeoutMs, signal);
       // One budget for delivery and polling, so a slow cold launch cannot double the wait.
       const pollMs = Math.max(
@@ -148,6 +154,20 @@ export class IosProtoViewer implements ProtoViewerDevice {
       throw new ProtoViewerStorageError(
         `Could not prepare ProtoViewer's inbox: ${errorMessage(error)}`,
         { cause: error },
+      );
+    }
+  }
+
+  /** Best effort: a failed launch still lets openurl try, which then reports its own failure. */
+  private async foreground(timeoutMs: number, signal?: AbortSignal): Promise<void> {
+    try {
+      await this.deps.simctl.launch(this.deps.deviceId, timeoutMs, signal);
+    } catch (error) {
+      if (signal?.aborted) {
+        throw error;
+      }
+      logger.warn(
+        `[protoviewer] could not bring ProtoViewer to the foreground; an "Open in" alert may appear: ${errorMessage(error)}`,
       );
     }
   }

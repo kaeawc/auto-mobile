@@ -25,6 +25,7 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRuntime
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRuntimeContent
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeStoragePersistence
 import dev.jasonpearson.automobile.ctrlproxy.prototype.collectStackBackProgress
+import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeInitialDeviceState
 import dev.jasonpearson.automobile.protocol.PrototypeEvent
 import dev.jasonpearson.automobile.protocol.PrototypeEventKind
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
@@ -135,6 +136,30 @@ private data class EmbeddedInput(
 // The progress flow is collected inside collectStackBackProgress, which lint cannot see through.
 @SuppressLint("NoCollectCallFound")
 @Composable
+private fun EmbeddedBackHandling(
+  runtime: PrototypeRuntime,
+  seek: PrototypeBackSeek,
+  enabled: Boolean,
+  dispatch: suspend (PrototypeInteraction) -> Unit,
+  scope: CoroutineScope,
+) {
+  // Keep the predictive handler alive through commit delivery and settling at the root.
+  if (runtime.hasPoppableStack() || seek.preview != null) {
+    PredictiveBackHandler(enabled = enabled) { events ->
+      val preview = runtime.backPreview()
+      if (preview != null) {
+        seek.start(preview)
+        val committed = collectStackBackProgress(events.map { it.progress }) { seek.progress = it }
+        if (committed) dispatch(PrototypeInteraction.Back)
+        seek.result = committed
+      }
+    }
+  } else {
+    BackHandler(enabled = enabled) { scope.launch { dispatch(PrototypeInteraction.Back) } }
+  }
+}
+
+@Composable
 private fun EmbeddedPrototype(
   input: EmbeddedInput,
   callbacks: EmbeddedCallbacks,
@@ -155,14 +180,7 @@ private fun EmbeddedPrototype(
   LaunchedEffect(owner) {
     interactions.withLock {
       owner.open(
-        EmbeddedConfiguration(
-          input.spec,
-          input.storage,
-          input.network,
-          scope,
-          environment,
-          context.cacheDir,
-        ),
+        EmbeddedConfiguration(input, scope, environment, context),
       ) {
         environment.host?.eventSink?.send(it)
         latestCallbacks.send(it)
@@ -179,25 +197,7 @@ private fun EmbeddedPrototype(
       if (host == null) interactions.withLock { session.runtime.handle(it) }
       else host.onInteraction(it, session.runtime)
     }
-    if (handleBack) {
-      // Keep the predictive handler alive through commit delivery and settling at the root.
-      if (session.runtime.hasPoppableStack() || seek.preview != null) {
-        PredictiveBackHandler(enabled = active.active) { events ->
-          val preview = session.runtime.backPreview()
-          if (preview != null) {
-            seek.start(preview)
-            val committed =
-              collectStackBackProgress(events.map { it.progress }) { seek.progress = it }
-            if (committed) dispatch(PrototypeInteraction.Back)
-            seek.result = committed
-          }
-        }
-      } else {
-        BackHandler(enabled = active.active) {
-          scope.launch { dispatch(PrototypeInteraction.Back) }
-        }
-      }
-    }
+    if (handleBack) EmbeddedBackHandling(session.runtime, seek, active.active, dispatch, scope)
     CompositionLocalProvider(LocalPrototypeBackSeek provides if (handleBack) seek else null) {
       PrototypeRuntimeContent(session.runtime, session.images, session.fonts, dispatch)
     }
@@ -283,13 +283,17 @@ private fun EmbeddedLifetime(
 }
 
 private class EmbeddedConfiguration(
-  val spec: PrototypeSpec,
-  val storage: PrototypeStorage,
-  val network: PrototypeNetwork,
+  input: EmbeddedInput,
   val scope: CoroutineScope,
   val environment: EmbeddedPrototypeEnvironment,
-  val cacheDir: java.io.File,
-)
+  context: android.content.Context,
+) {
+  val spec = input.spec
+  val storage = input.storage
+  val network = input.network
+  val cacheDir = context.cacheDir
+  val initialDeviceState = prototypeInitialDeviceState(context)
+}
 
 private class EmbeddedOwner(
   assets: PrototypeAssets,
@@ -348,6 +352,7 @@ private class EmbeddedOwner(
         requestScope = config.scope,
         exclusively = { block -> interactions.withLock { block() } },
         newRequestId = config.environment.requestId,
+        initialPlatformState = config.initialDeviceState,
       )
     config.environment.host?.onRuntime?.invoke(runtime)
     session =

@@ -156,6 +156,7 @@ nav:
       - "iOS simulator load reduction": design-docs/plat/ios/simulator-load-reduction.md
       - "iOS keep-booted reset": design-docs/ios-keep-booted-reset.md
       - "Android emulator optimization": design-docs/android-emulator-optimization.md
+      - "Android emulator host cost": design-docs/android-emulator-host-cost.md
       - "Android prototype specification": design-docs/plat/android/prototype-ux.md
       - "Prototype performance measurement": design-docs/plat/android/prototype-performance-measurement.md
       - "Prototype Compose compiler report": design-docs/plat/android/prototype-compose-compiler-report.md

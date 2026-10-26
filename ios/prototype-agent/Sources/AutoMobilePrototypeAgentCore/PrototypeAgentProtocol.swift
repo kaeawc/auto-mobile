@@ -52,7 +52,7 @@ enum PrototypeAgentProtocol {
         linkifyCapability,
         menusCapability,
         stackCapability,
-        "prototype_stack_transitions_v1",
+        stackTransitionsCapability,
         emitContextCapability,
         checksCapability,
         identifierTestTagOnlyCapability,
@@ -60,6 +60,8 @@ enum PrototypeAgentProtocol {
         clearStorageRequest,
         storageCapability,
         timersCapability,
+        "prototype_platform_v1",
+        "prototype_platform_device_v1",
         advanceClockRequest,
     ]
     /// A same-id `show_prototype` replaces the prototype in place keeping pager pages and stack paths, and
@@ -68,6 +70,7 @@ enum PrototypeAgentProtocol {
     static let showInPlaceCapability = "prototype_show_in_place_v1"
     /// Stack paths, four navigation actions, screen_changed and left-edge Back (#12068).
     static let stackCapability = "prototype_stack_v1"
+    static let stackTransitionsCapability = "prototype_stack_transitions_v1"
     /// Positions `{type: "bounds"}` node anchors (#9316). The host refuses anchors on an agent that
     /// does not advertise it, which would draw the node at its normal position. Same name as the
     /// CtrlProxy capability.

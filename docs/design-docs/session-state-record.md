@@ -328,6 +328,30 @@ Unreachable: `rebinding` -> `ended`, `fenced` -> `live`, `ended` -> `fenced` (a
 terminal upgrade happens while `releasing`). `commitReleaseRemoval` returning false is
 unreachable under the slot design (the from-state assertion replaces it).
 
+Only a recovery rebind (`RebindSessionOptions.recovery`: Android AVD recovery or System UI
+replacement, i.e. an explicit bind carrying `expectedExistingSessionDeviceId`, and the terminal-release
+recovery) counts. A client-chosen move (`setActiveDevice`, an explicit bind without that expectation)
+and the undo of a cancelled one change the serial but neither bump the generation nor notify (#15456;
+the conservative reading: when the cause is unclear the rebind is treated as a move). A
+serial-changing recovery rebind increments `Session.deviceGeneration` (absent
+means zero) and records `previousDeviceId`, the serial before the latest recovery (a later client-chosen move keeps both unchanged, so they describe the last recovery, not the current move), preserving the session
+UUID and stable AVD/UDID identity. These two fields are in-memory only, have no DB
+schema or migration, and reset on daemon restart/rehydration. Same-serial rebinds,
+including forced ones, preserve them. `sessionDeviceBinding` defines the shared
+client shape; session-info and active-sessions use its diagnostic field names.
+
+After persistence and live binding/index publication, SessionManager emits once
+per serial-changing recovery rebind through an injected emitter. The process broadcaster
+feeds only the notification-subscribed sockets that hold the session (acquired or restored it,
+hold its autolock route, or last routed a call to it; a derived `base:label` is held through its
+base), then proxies filter again to held sessions,
+and the MCP server forwards `session_device_rebound` as an info logging message.
+Fan-out failures warn without failing recovery. Admitted daemon tool results add
+`_meta["automobile/sessionDevice"]` only after generation zero; steady-state
+results are unchanged, and the proxy preserves result metadata. Device-loss
+shaping independently reads the live session on every incident-resolution path,
+adding replacement/retry evidence without replacing an incident's recovery status.
+
 Rebind during release: `rebindSession` awaits an in-flight release then throws
 unconditionally, even if the release was declined and the session is `live` again.
 The slot design would replace that with `await slot.settled` and re-dispatch on the new

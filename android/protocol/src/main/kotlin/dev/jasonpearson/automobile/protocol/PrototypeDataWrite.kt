@@ -259,6 +259,13 @@ object PrototypeDataWriter {
         inputs.data(pointer)?.let(PrototypeDataValue::Resolved)
           ?: fail(PrototypeDataWriteErrorCode.NOT_FOUND, "Data pointer $pointer does not exist")
       }
+      "platform" in binding || "event" in binding -> {
+        val source = if ("platform" in binding) "platform" else "event"
+        val pointer = binding.getValue(source).jsonPrimitive.content
+        val value = if (source == "platform") inputs.platform(pointer) else inputs.event(pointer)
+        value?.let(PrototypeDataValue::Resolved)
+          ?: fail(PrototypeDataWriteErrorCode.NOT_FOUND, "Data pointer $pointer does not exist")
+      }
       else ->
         fail(
           PrototypeDataWriteErrorCode.INVALID_VALUE,

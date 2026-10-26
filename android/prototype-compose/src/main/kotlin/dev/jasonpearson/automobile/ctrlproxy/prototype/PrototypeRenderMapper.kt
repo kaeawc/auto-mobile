@@ -32,6 +32,7 @@ internal class PrototypeRenderMapper {
   private var resolvedSpec: PrototypeSpec? = null
   private var sourceRoot: PrototypeNode? = null
   private var sourceData: JsonObject? = null
+  private var sourcePlatform: JsonObject? = null
   private var resolvedRoot: PrototypeNode? = null
   private var cache: PrototypeRenderCache? = null
   private var previousSpec: PrototypeSpec? = null
@@ -53,9 +54,10 @@ internal class PrototypeRenderMapper {
     pages: Map<String, Int>,
     stacks: Map<String, PrototypeStackSnapshot> = emptyMap(),
     shownErrors: Set<String> = emptySet(),
+    platform: JsonObject? = null,
   ): PrototypeRenderModel =
     synchronized(lock) {
-      val resolved = resolveLocked(spec)
+      val resolved = resolveLocked(spec, platform)
       previousModel?.let { model ->
         if (
           previousSpec?.root === resolved.root &&
@@ -98,13 +100,15 @@ internal class PrototypeRenderMapper {
       }
     }
 
-  /** Called only under [lock]; state writes preserve both authored cache keys. */
-  private fun resolveLocked(spec: PrototypeSpec): PrototypeSpec {
-    if (authoredSpec === spec) return checkNotNull(resolvedSpec)
+  /** Called only under [lock]; state writes preserve authored root and data identities. */
+  private fun resolveLocked(spec: PrototypeSpec, platform: JsonObject?): PrototypeSpec {
+    if (authoredSpec === spec && sourcePlatform == platform) return checkNotNull(resolvedSpec)
     val root =
-      if (sourceRoot === spec.root && sourceData === spec.data) checkNotNull(resolvedRoot)
+      if (sourceRoot === spec.root && sourceData === spec.data && sourcePlatform == platform)
+        checkNotNull(resolvedRoot)
       else {
-        PrototypeDataResolver.resolve(spec).root.also {
+        PrototypeDataResolver.resolve(spec, platform).root.also {
+          sourcePlatform = platform
           sourceRoot = spec.root
           sourceData = spec.data
           resolvedRoot = it

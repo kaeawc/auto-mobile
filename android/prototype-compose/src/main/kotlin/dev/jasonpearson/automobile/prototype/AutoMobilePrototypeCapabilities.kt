@@ -26,6 +26,8 @@ object AutoMobilePrototype {
       "prototype_network_device_v1",
       "prototype_network_v1",
       "prototype_pager_options_v1",
+      "prototype_platform_device_v1",
+      "prototype_platform_v1",
       "prototype_refresh_v1",
       "prototype_rich_text_v1",
       "prototype_search_bar_v1",

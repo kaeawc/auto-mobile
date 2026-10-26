@@ -142,6 +142,27 @@
             self?.apply(activity: false) { $0.run(actions) }
         }
 
+        @ObservationIgnored private lazy var deviceState =
+            PrototypeDeviceStateStore(clock: clock) { [weak self] name, data in
+                self?.apply(activity: false) { session in
+                    do { return try session.deliverPlatformEvent(name, data: data) }
+                    catch { NSLog("Prototype platform event failed: %@", String(describing: error)); return [] }
+                }
+            }
+
+        @ObservationIgnored private var lastDeviceState: PrototypeDeviceState?
+        @ObservationIgnored var syncDeviceState: (() -> Void)?
+
+        func updateDeviceState(_ state: PrototypeDeviceState) {
+            lastDeviceState = state
+            guard deviceState.update(state) else { return }
+            apply(activity: false) { session in
+                do { try session.setPlatformState(deviceState.snapshot) }
+                catch { NSLog("Prototype platform state failed: %@", String(describing: error)) }
+                return []
+            }
+        }
+
         func pauseTimers() { timers.pause() }
         func resumeTimers() { timers.resume() }
 
@@ -238,18 +259,24 @@
         ) {
             // Keep the touchable rects: SwiftUI re-reports a frame only when it changes, so clearing
             // them on a same-geometry re-show would leave the prototype passing every touch through.
+            syncDeviceState?()
             var next = session
             // Stored values replace the spec's for the keys it lists before the first draw, and emit
             // nothing (#12526); the session only receives the result.
             let prepared = storage?.prepare(spec)
+            let seeded: PrototypeSpec
+            do { seeded = try (prepared?.spec ?? spec).replacingPlatform(deviceState.snapshot) }
+            catch { NSLog("Prototype platform seed failed: %@", String(describing: error)); return }
             next.show(
-                prepared?.spec ?? spec, reset: reset, appearance: appearance, specBytes: specBytes,
+                seeded, reset: reset, appearance: appearance, specBytes: specBytes,
                 restoredState: prepared?.state
             )
             // A show that replaces another prototype cancels that one's requests.
             let requestCommands = next.takeRequestCommands()
             let timerCommands = next.takeTimerCommands()
             publish(next, replacingSpec: true)
+            deviceState.reset()
+            if let lastDeviceState { updateDeviceState(lastDeviceState) }
             timers.perform(timerCommands)
             requestDriver?.perform(requestCommands)
             expandedSelect = nil

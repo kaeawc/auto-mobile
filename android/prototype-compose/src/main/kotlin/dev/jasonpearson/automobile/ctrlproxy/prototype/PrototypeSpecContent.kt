@@ -189,6 +189,7 @@ fun PrototypeRuntimeContent(
         val traceSink = PrototypeTrace.sink
         val traceEnabled = traceSink.isEnabled()
         if (traceEnabled) traceSink.begin(PrototypeTrace.COMPOSE)
+        ObservePrototypeDevice(send)
         PrototypeSpecContent(runtime.renderModel(snapshot).root, snapshot.spec.theme, send)
         if (traceEnabled) traceSink.end()
       }
@@ -447,6 +448,7 @@ internal fun Modifier.boundedScrollViewport(vertical: Boolean): Modifier =
   }
 
 @Composable
+@Suppress("LongParameterList") // The shared render entry point; callers pass only what they need.
 internal fun RenderPrototypeNode(
   node: PrototypeRenderNode,
   interact: (PrototypeInteraction) -> Unit,
@@ -460,11 +462,7 @@ internal fun RenderPrototypeNode(
     CaptureAnchorLocals(node.identity)
     return
   }
-  if (
-    node.role != "stack" &&
-      node.source?.visibleWhen != null &&
-      (node.source.transition?.type == "fade" || node.source.transition?.type == "none")
-  ) {
+  if (usesPlainVisibility(node)) {
     RenderPrototypeVisibility(node, interact, parentModifier, weightAxis, windowRoot)
     return
   }
@@ -496,6 +494,13 @@ internal fun RenderPrototypeNode(
   } else if (node.visible) {
     RenderPrototypeNodeContent(node, interact, parentModifier, weightAxis, windowRoot)
   }
+}
+
+private fun usesPlainVisibility(node: PrototypeRenderNode): Boolean {
+  val type = node.source?.transition?.type
+  return node.role != "stack" &&
+    node.source?.visibleWhen != null &&
+    (type == "fade" || type == "none")
 }
 
 @Composable

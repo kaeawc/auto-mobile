@@ -8,11 +8,17 @@ struct PrototypeContractValidator {
         let checkControls: [String: [String]]
         let definitions: [String: JSONValue]
         let limits: [String: Int]
+        let platformModules: [String: JSONValue]
     }
 
     private static let contract = try? JSONDecoder().decode(
         Contract.self, from: Data(prototypeSpecContractData.utf8)
     )
+    static var platformModules: [String: JSONValue] {
+        guard let contract else { preconditionFailure("Embedded structural contract is unavailable") }
+        return contract.platformModules
+    }
+
     private static let patterns = contract?.patterns.compactMapValues { try? NSRegularExpression(pattern: $0) } ?? [:]
 
     static func matches(_ name: String, _ text: String) -> Bool {

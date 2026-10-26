@@ -214,6 +214,18 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     },
     ops: [],
   },
+  prototype_platform_device_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["device"] },
+      root: {
+        ...base.root,
+        children: [{ ...label, text: "{platform:/device/os}" }],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
   prototype_platform_test_v1: {
     minimalSpec: {
       ...base,

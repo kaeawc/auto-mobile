@@ -660,16 +660,17 @@ indirect enum Condition: Decodable, Equatable {
         case let .equals(key, value): state[key] == value
         case let .notEquals(key, value): state[key] != value
         case let .contains(key, value): state[key]?.stringValue.map { text in
-            guard let value = value.stringValue else { return false }
-            let units = Array(text.utf16)
-            let operand = Array(value.utf16)
-            return operand.isEmpty || (operand.count <= units.count && (0 ... (units.count - operand.count)).contains {
-                units[$0 ..< ($0 + operand.count)].elementsEqual(operand)
-            })
-        } ?? false
+                guard let value = value.stringValue else { return false }
+                let units = Array(text.utf16)
+                let operand = Array(value.utf16)
+                return operand
+                    .isEmpty || (operand.count <= units.count && (0 ... (units.count - operand.count)).contains {
+                        units[$0 ..< ($0 + operand.count)].elementsEqual(operand)
+                    })
+            } ?? false
         case let .startsWith(key, value): state[key]?.stringValue.map { text in
-            value.stringValue.map { Array(text.utf16).starts(with: Array($0.utf16)) } ?? false
-        } ?? false
+                value.stringValue.map { Array(text.utf16).starts(with: Array($0.utf16)) } ?? false
+            } ?? false
         case let .lengthGt(key, value): state[key]?.stringValue.map { $0.utf16.count > value } ?? false
         case let .lengthLt(key, value): state[key]?.stringValue.map { $0.utf16.count < value } ?? false
         case let .greaterThan(key, value): state[key]?.numberValue.map { $0 > value } ?? false

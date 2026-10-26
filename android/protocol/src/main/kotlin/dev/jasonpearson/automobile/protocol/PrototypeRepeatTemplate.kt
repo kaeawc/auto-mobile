@@ -257,7 +257,9 @@ internal object PrototypeBindableFields {
         return it
       }
       for (operand in listOf("contains", "startsWith")) {
-        field(condition, operand, path, operandKind)?.let { return it }
+        field(condition, operand, path, operandKind)?.let {
+          return it
+        }
       }
       condition(condition["not"], "$path.not")?.let {
         return it

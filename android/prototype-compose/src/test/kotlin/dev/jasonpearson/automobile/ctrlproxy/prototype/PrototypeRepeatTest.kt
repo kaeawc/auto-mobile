@@ -437,4 +437,24 @@ class PrototypeRepeatTest {
     assertTrue(mapped.isError)
     assertEquals("Bad ", mapped.errorMessage)
   }
+
+  @Test
+  fun `a numeric repeat placeholder binds a substring operand as text`() {
+    val field =
+      PrototypeTextFieldNode(
+        stateKey = "value",
+        errorWhen = PrototypeCondition(key = "value", contains = PrototypeScalar.Text("{item.n}")),
+      )
+    val root = list(field, repeat = listOf(mapOf("n" to PrototypeScalar.Numeric(3.0))))
+
+    fun errorFor(value: String) =
+      mapPrototypeSpec(spec(root, mapOf("value" to PrototypeScalar.Text(value))))
+        .root
+        .children
+        .single()
+        .isError
+
+    assertTrue(errorFor("a3"))
+    assertFalse(errorFor("a4"))
+  }
 }

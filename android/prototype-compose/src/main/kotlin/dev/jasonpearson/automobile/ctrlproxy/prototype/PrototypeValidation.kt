@@ -99,12 +99,13 @@ internal fun prototypeShownError(
   shown: Set<String>,
   validity: Map<String, Boolean> = emptyMap(),
 ): String? {
-  val checkMessage = node.checkedKeys().firstNotNullOfOrNull { key ->
-    if (key !in shown) null
-    else
-      PrototypeChecks.evaluate(state[key], node.checks(), prototypeNodeRole(node))
-        .firstFailingMessage
-  }
+  val checkMessage =
+    node.checkedKeys().firstNotNullOfOrNull { key ->
+      if (key !in shown) null
+      else
+        PrototypeChecks.evaluate(state[key], node.checks(), prototypeNodeRole(node))
+          .firstFailingMessage
+    }
   return if (node is PrototypeTextFieldNode && node.errorWhen?.holds(state, validity) == true)
     node.errorText ?: checkMessage ?: node.supportingText
   else checkMessage

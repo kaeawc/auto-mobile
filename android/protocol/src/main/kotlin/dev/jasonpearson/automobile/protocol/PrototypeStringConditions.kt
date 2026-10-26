@@ -8,7 +8,8 @@ internal object PrototypeStringConditions {
 
   private fun condition(value: JsonElement?): Boolean {
     val fields = value as? JsonObject ?: return false
-    return fields.keys.any { it in comparisons } || condition(fields["not"]) ||
+    return fields.keys.any { it in comparisons } ||
+      condition(fields["not"]) ||
       listOf("all", "any").any { group ->
         (fields[group] as? JsonArray).orEmpty().any(::condition)
       }

@@ -129,7 +129,7 @@ export function bindTyped(value: unknown, instance: Instance): unknown {
 
 /**
  * How a bindable field is bound: `text` and `emitName` render to text, `operand` keeps a single
- * placeholder's type, and `key` renders to text that must then be a literal state key.
+ * placeholder's type, `substring` (a condition's `contains`/`startsWith`) always renders to text, and `key` renders to text that must then be a literal state key.
  * `dataPath` is a data action's `/data/...` pointer: it renders to text, and only a whole
  * `{index}` segment may be a placeholder; `requestInto` is the same grammar for a `request`'s
  * `into`, kept apart so `setData` capability gating does not claim it. `request` and `deviceRequest` mark a whole `request`
@@ -139,6 +139,7 @@ export function bindTyped(value: unknown, instance: Instance): unknown {
 export type FieldKind =
   | "text"
   | "operand"
+  | "substring"
   | "emitName"
   | "key"
   | "emitBinding"
@@ -211,8 +212,8 @@ function mapCondition(condition: Raw, path: string, visit: FieldVisitor): Raw {
     visit(value, fieldPath, kind, Object.hasOwn(condition, "data"));
   mapField(condition, "equals", path, "operand", operandVisit);
   mapField(condition, "notEquals", path, "operand", operandVisit);
-  mapField(condition, "contains", path, "operand", operandVisit);
-  mapField(condition, "startsWith", path, "operand", operandVisit);
+  mapField(condition, "contains", path, "substring", operandVisit);
+  mapField(condition, "startsWith", path, "substring", operandVisit);
   mapObject(condition, "not", path, (entry, entryPath) => mapCondition(entry, entryPath, visit));
   for (const form of ["all", "any"]) {
     mapList(condition, form, path, (entry, entryPath) => mapCondition(entry, entryPath, visit));

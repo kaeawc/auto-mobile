@@ -101,7 +101,9 @@ internal object PrototypeObjectRules {
     return null
   }
 
-  /** Single-trigger dependents are optional; a pipe-separated trigger group requires exactly one. */
+  /**
+   * Single-trigger dependents are optional; a pipe-separated trigger group requires exactly one.
+   */
   fun formConstraint(
     data: JsonObject,
     rule: JsonObject,

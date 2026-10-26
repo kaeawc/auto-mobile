@@ -96,7 +96,7 @@ test("repeat binds string operands and error conditions like equality operands",
     errorWhen: {
       all: [
         { key: "value", contains: "" },
-        { key: "value", startsWith: 0 },
+        { key: "value", startsWith: "0" },
       ],
     },
     errorText: "Bad 0",

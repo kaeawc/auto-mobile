@@ -196,6 +196,7 @@ private struct PrototypeSubstitutionGuard {
             try optionFields(fields, path: path, scope: scope)
         case "textField":
             try part(fields["trailingIcon"], path: "\(path).trailingIcon", scope: scope)
+            try field(fields, "errorText", path: path, text: true, scope: scope)
             try actions(fields, path: path, scope: scope, list: "onSubmit")
         case "row", "listItem":
             try swipeFields(fields, path: path, scope: scope)
@@ -264,7 +265,8 @@ private struct PrototypeSubstitutionGuard {
         guard case let .object(fields) = value else { return }
         try field(fields, "key", path: path, scope: scope)
         if fields["data"] == nil {
-            for key in ["equals", "notEquals", "contains", "startsWith"] { try field(fields, key, path: path, scope: scope) }
+            for key in ["equals", "notEquals"] { try field(fields, key, path: path, scope: scope) }
+            for key in ["contains", "startsWith"] { try field(fields, key, path: path, scope: scope) }
         }
         if let negated = fields["not"] {
             try conditionFields(negated, path: "\(path).not", scope: scope)

@@ -555,8 +555,12 @@ struct PrototypeRepeatInstance {
         } else {
             bindString("valid", in: &fields)
         }
-        for operand in ["equals", "notEquals", "contains", "startsWith"] {
+        for operand in ["equals", "notEquals"] {
             if let value = fields[operand] { fields[operand] = interpolateScalar(value) }
+        }
+        // Substring operands always bind as text, so `contains: "{item.n}"` matches the rendered number.
+        for operand in ["contains", "startsWith"] {
+            if case let .string(text)? = fields[operand] { fields[operand] = .string(interpolate(text)) }
         }
         for group in ["all", "any"] {
             if case let .array(conditions)? = fields[group] { fields[group] = .array(conditions.map(bindCondition)) }

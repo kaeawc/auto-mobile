@@ -1334,7 +1334,7 @@ A condition is exactly one of these forms. `visibleWhen` takes any of them;
 | `{any: [condition, ...]}`   | At least one member holds. One to 16 members.                                         |
 | `{not: condition}`          | The member does not hold.                                                             |
 
-String comparisons require `prototype_string_conditions_v1` and are key-only. Missing and non-string values fail all four. `contains`/`startsWith` literals are nonempty, at most 256 UTF-16 units; operands bind repeat `{item.x}`/`{index}` placeholders like state equality operands. An empty substituted operand holds for every string. No Unicode normalization is performed. `lengthGt`/`lengthLt` are literal integers in 0..100000; equality to the length fails both, and `😀` has length 2.
+String comparisons require `prototype_string_conditions_v1` and are key-only. Missing and non-string values fail all four. `contains`/`startsWith` literals are nonempty, at most 256 UTF-16 units; operands bind repeat `{item.x}`/`{index}` placeholders as text (a numeric item renders as its text, unlike `equals`). An empty substituted operand holds for every string. No Unicode normalization is performed. `lengthGt`/`lengthLt` are literal integers in 0..100000; equality to the length fails both, and `😀` has length 2.
 
 Numbers compare by value, so a state of `-0` equals `0` on every platform (#11408).
 

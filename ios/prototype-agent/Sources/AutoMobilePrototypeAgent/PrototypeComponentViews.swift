@@ -260,7 +260,8 @@
                     .overlay {
                         RoundedRectangle(cornerRadius: 4)
                             .stroke(
-                                model.fieldError(node).isError ? .red : (focused ? colors.primary : colors.fieldOutline),
+                                model.fieldError(node)
+                                    .isError ? .red : (focused ? colors.primary : colors.fieldOutline),
                                 lineWidth: focused ? 2 : 1
                             )
                             .accessibilityHidden(true)
@@ -277,8 +278,8 @@
                         Rectangle().fill(
                             model.fieldError(node).isError ? .red : (focused ? colors.primary : colors.fieldOutline)
                         )
-                            .frame(height: 1)
-                            .accessibilityHidden(true)
+                        .frame(height: 1)
+                        .accessibilityHidden(true)
                     }
             }
         }

@@ -56,7 +56,6 @@ enum PrototypeBundleCapabilities {
                     "label",
                     "variant",
                     "supportingText",
-                "errorText",
                     "keyboardType",
                     "secure",
                     "multiline",

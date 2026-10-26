@@ -35,10 +35,17 @@ class PrototypeStringConditionsTest {
       )
     assertTrue(prototypeIsError(field, state, emptySet()))
     assertNull(prototypeShownError(field, state, emptySet()))
-    assertEquals("Help", prototypeShownError(field.copy(supportingText = "Help"), state, emptySet()))
+    assertEquals(
+      "Help",
+      prototypeShownError(field.copy(supportingText = "Help"), state, emptySet()),
+    )
     assertEquals(
       "Error",
-      prototypeShownError(field.copy(errorText = "Error", supportingText = "Help"), state, emptySet()),
+      prototypeShownError(
+        field.copy(errorText = "Error", supportingText = "Help"),
+        state,
+        emptySet(),
+      ),
     )
     val checked =
       field.copy(
@@ -47,7 +54,10 @@ class PrototypeStringConditionsTest {
       )
     assertEquals("Help", prototypeShownError(checked, state, emptySet()))
     assertEquals("Too short", prototypeShownError(checked, state, setOf("value")))
-    assertEquals("Error", prototypeShownError(checked.copy(errorText = "Error"), state, setOf("value")))
+    assertEquals(
+      "Error",
+      prototypeShownError(checked.copy(errorText = "Error"), state, setOf("value")),
+    )
     val normal =
       field.copy(
         errorWhen = PrototypeCondition(key = "value", startsWith = PrototypeScalar.Text("z")),
@@ -55,7 +65,11 @@ class PrototypeStringConditionsTest {
     assertFalse(prototypeIsError(normal, state, emptySet()))
     assertTrue(checkedPrototypeNodes(field).isEmpty())
     assertTrue(PrototypeCondition(key = "value", contains = PrototypeScalar.Text("")).holds(state))
-    assertTrue(PrototypeCondition(key = "value", startsWith = PrototypeScalar.Text("")).holds(state))
-    assertFalse(PrototypeCondition(key = "value", contains = PrototypeScalar.Numeric(1.0)).holds(state))
+    assertTrue(
+      PrototypeCondition(key = "value", startsWith = PrototypeScalar.Text("")).holds(state),
+    )
+    assertFalse(
+      PrototypeCondition(key = "value", contains = PrototypeScalar.Numeric(1.0)).holds(state),
+    )
   }
 }

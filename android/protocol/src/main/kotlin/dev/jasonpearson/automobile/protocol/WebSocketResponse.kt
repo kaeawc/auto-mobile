@@ -905,7 +905,7 @@ data class PrototypeResult(
   /**
    * Only the reply to a successful `show_prototype` whose spec has `window.backdrop`
    * (`prototype_backdrop_v1`): `blur` when what is behind the window was blurred, `fallback` when
-   * the solid dim was drawn instead.
+   * the tonal fill was drawn instead.
    */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val backdrop: String? = null,
 ) : WebSocketResponse(), CorrelatedResponse

@@ -13,8 +13,8 @@ import { record } from "./prototypeTemplate";
  * - `tint` is one colour (a hex or a role, no `{light, dark}` pair, so no theme-modes dependency)
  *   laid over the blur. It is the fallback colour too.
  * - Where blur is unavailable (Android below API 31, cross-window blur disabled, an app layer or
- *   system layer that cannot blur, iOS below the material's minimum) the device draws a solid dim
- *   (`tint` at 85% alpha, else black at 50%), never a silent no-op, and reports
+ *   system layer that cannot blur, iOS below the material's minimum) the device draws a tonal fill
+ *   (`tint` at 85% alpha, else the `surfaceContainer` role at 85%), never a silent no-op, and reports
  *   `backdrop: "fallback"` in the show result. Applies to every placement and blurs the app behind
  *   the window only, never the prototype's own content.
  * - The field is gated by `prototype_backdrop_v1`: a device without it would ignore it, so the

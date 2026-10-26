@@ -26,5 +26,5 @@ export const prototypeBackdropSchema = z
   })
   .strict()
   .describe(
-    "Blur what is behind the window (needs prototype_backdrop_v1). The show result reports backdrop blur or fallback; fallback is a solid dim (tint at 85% alpha, else black at 50%) where blur is unavailable",
+    "Blur what is behind the window (needs prototype_backdrop_v1). The show result reports backdrop blur or fallback; fallback is a tonal fill (tint at 85% alpha, else the surfaceContainer role at 85%) where blur is unavailable",
   );

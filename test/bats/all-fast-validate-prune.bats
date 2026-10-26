@@ -189,3 +189,16 @@ teardown() {
 
   [ "$status" -eq 0 ]
 }
+
+@test "fast validation registers the privacy manifest guard" {
+  run "$ABS_SCRIPT" --list-checks
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *$'privacy-manifests\tscripts/ios/check-privacy-manifests.ts'* ]]
+}
+
+@test "pull_request Fast Validation runs the privacy manifest guard" {
+  run grep -E -- '--only .*(^|,)privacy-manifests(,|[[:space:]])' .github/workflows/pull_request.yml
+
+  [ "$status" -eq 0 ]
+}

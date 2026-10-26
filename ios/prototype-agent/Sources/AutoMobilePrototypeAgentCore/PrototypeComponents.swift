@@ -30,7 +30,11 @@ extension PrototypeNode {
     var toggleKey: String? {
         switch type {
         case "switch", "checkbox", "chip": stateKey
-        case "listItem": ["switch", "checkbox"].contains(trailing?.type) ? trailing?.stateKey : nil
+        case "listItem":
+            switch trailing {
+            case let .switch(stateKey), let .checkbox(stateKey): stateKey
+            default: nil
+            }
         default: nil
         }
     }

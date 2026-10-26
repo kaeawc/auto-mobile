@@ -100,7 +100,12 @@
         "ios/prototype-agent/ICON-SYMBOLS.md",
         "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeIconSymbolData.swift",
         "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeSpecContractData.swift",
-        "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeTheme.swift"
+        "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeTheme.swift",
+        "ios/prototype-agent/Sources/**",
+        "ios/prototype-agent/ProtoViewer/*.swift",
+        "ios/prototype-agent/ProtoViewer/PrivacyInfo.xcprivacy",
+        "Package.swift",
+        "scripts/ios/protoviewer-build.sh"
       ],
       "outputs": [],
       "outputLogs": "new-only",
@@ -162,7 +167,12 @@
         "ios/prototype-agent/ICON-SYMBOLS.md",
         "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeIconSymbolData.swift",
         "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeSpecContractData.swift",
-        "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeTheme.swift"
+        "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeTheme.swift",
+        "ios/prototype-agent/Sources/**",
+        "ios/prototype-agent/ProtoViewer/*.swift",
+        "ios/prototype-agent/ProtoViewer/PrivacyInfo.xcprivacy",
+        "Package.swift",
+        "scripts/ios/protoviewer-build.sh"
       ],
       "outputs": [],
       "outputLogs": "new-only",
@@ -251,7 +261,12 @@
         "ios/prototype-agent/ICON-SYMBOLS.md",
         "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeIconSymbolData.swift",
         "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeSpecContractData.swift",
-        "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeTheme.swift"
+        "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeTheme.swift",
+        "ios/prototype-agent/Sources/**",
+        "ios/prototype-agent/ProtoViewer/*.swift",
+        "ios/prototype-agent/ProtoViewer/PrivacyInfo.xcprivacy",
+        "Package.swift",
+        "scripts/ios/protoviewer-build.sh"
       ],
       "outputs": [],
       "outputLogs": "new-only",
@@ -393,7 +408,12 @@
         "ios/prototype-agent/ICON-SYMBOLS.md",
         "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeIconSymbolData.swift",
         "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeSpecContractData.swift",
-        "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeTheme.swift"
+        "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeTheme.swift",
+        "ios/prototype-agent/Sources/**",
+        "ios/prototype-agent/ProtoViewer/*.swift",
+        "ios/prototype-agent/ProtoViewer/PrivacyInfo.xcprivacy",
+        "Package.swift",
+        "scripts/ios/protoviewer-build.sh"
       ],
       "outputs": ["coverage/**"],
       "outputLogs": "new-only",

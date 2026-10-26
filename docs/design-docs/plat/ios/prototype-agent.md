@@ -192,6 +192,17 @@ release or daemon restart. On iOS the host sends `get_prototype_status` and adop
 is dropped. The agent advertises `prototype_inspect_v1`; without it the host refuses `inspect` before
 sending anything and asks to relaunch with `launchApp { prototype: true }`.
 
+## Native presentations and touches (#15463)
+
+A native presentation (`.sheet`, `.alert`, `.confirmationDialog`, `.popover`) presented from the
+overlay window's root lives in the prototype window, but no prototype hit rect covers it, so
+`PassthroughWindow.hitTest` also claims touches for it, computed at hit time from the presented
+controller (`PrototypeNativePresentationHitRegion`). A modal presentation claims the whole window,
+so an outside tap dismisses it; a sheet whose selected detent is at or below
+`largestUndimmedDetentIdentifier` (`presentationBackgroundInteraction`) claims only its own frame and
+lets other touches reach the app. Menus use a system window and need no claim. Not yet
+device-verified.
+
 ## Bottom sheet and the keyboard
 
 Matches [Android](../android/prototype-ux.md#bottom-sheet-and-the-keyboard-10262): a `sheet` with

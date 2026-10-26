@@ -56,6 +56,15 @@ export { isStaleFrameContextRejection };
 /** A tap that was written to the device but whose outcome was never confirmed. */
 export class IndeterminateTapError extends ActionableError {}
 
+/**
+ * An element-search debug context re-reads the hierarchy to list near misses. It only explains a
+ * target that was not found: after a tap was dispatched the target is known, and the re-read
+ * waits behind a runner still executing that tap (15 s of a 20 s `tapOn` in #15296).
+ */
+export function tapFailureNeedsSearchDebugContext(error: unknown): boolean {
+  return !(error instanceof IndeterminateTapError);
+}
+
 export function indeterminateTapError(error: string | undefined): ActionableError {
   return new IndeterminateTapError(
     `Tap outcome is indeterminate: the request was dispatched but no result was confirmed (${error ?? "unknown error"}). Do not retry automatically.`,
@@ -220,6 +229,13 @@ async function dispatchIosTap(
     return;
   }
   if (isUnconfirmedIosTapReply(result, dispatched)) {
+    // The runner's press is a blocking XCUITest call: the timeout here does not cancel it, so
+    // later reads fail with `runner is busy` until it returns. The runner's late
+    // `tap_coordinates_result ... lateResponse=true` line names the phase that stalled (#15296).
+    logger.warn(
+      `[coordinateTapDispatch] iOS ${failureLabel} at (${x}, ${y}) unconfirmed after ${timeoutMs}ms: ` +
+        `${result.error ?? "no error"}; the runner may stay busy until its XCUITest gesture returns`,
+    );
     throw indeterminateTapError(result.error);
   }
   throw new ActionableError(`CtrlProxy iOS ${failureLabel} failed: ${result.error}`);

@@ -217,6 +217,9 @@ Fullscreen, floating and top sheets never move. Not yet verified on a simulator.
   ignores every safe-area region. On an iOS 26.5 simulator `ignoresSafeArea(.keyboard)` alone still moved
   a 300 pt sheet 527 pt for a 334 pt lift. Core tests pin sheet bottom == keyboard top, including a
   window with non-zero origin and shorter height.
+- **Native presentations (#15464).** While a native presentation (`.sheet`, `.popover`) is up from the
+  overlay window's root, the lift is 0: UIKit's presentation controller already avoids the keyboard, so
+  the agent's lift would stack on it. Not yet device-verified.
 - **Touch and clip.** Content is padded up by the lift inside its full-window frame, so the touch rect
   moves with it; the anchor layer's clip uses the same lift (`PrototypeSheetFrame.rect(lift:)`).
 - **Motion.** Keyboard duration, ease-in-out (UIKit's keyboard curve is private); instant under

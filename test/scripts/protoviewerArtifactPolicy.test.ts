@@ -307,7 +307,8 @@ function iosRunner(options: {
   });
 }
 
-const BUNDLE = ["Info.plist", "ProtoViewer", "_CodeSignature", "en.lproj"];
+const BUNDLE = ["Info.plist", "ProtoViewer", "PrivacyInfo.xcprivacy", "_CodeSignature", "en.lproj"];
+const BUNDLE_WITHOUT_MANIFEST = BUNDLE.filter((entry) => entry !== "PrivacyInfo.xcprivacy");
 
 async function iosReport(
   runner: ReplayRunner,
@@ -329,19 +330,23 @@ async function iosReport(
 }
 
 describe("iOS artifact policy", () => {
-  test("the real simulator build passes with the two not-yet-landed rules as warnings", async () => {
+  test("the real simulator build with its privacy manifest passes, forbidden symbols as a warning", async () => {
     const report = await iosReport(iosRunner({}));
     expect(report.failures).toEqual([]);
     expect(report.warnings.map((warning) => [warning.rule, warning.pendingIssue])).toEqual([
       ["ios.forbiddenSymbols", "#14150"],
-      ["ios.privacyManifest", "#14151"],
     ]);
   });
 
-  test("once the advisory table is emptied, the same build fails on those two rules", async () => {
+  test("a build without PrivacyInfo.xcprivacy fails (enforced since #14151)", async () => {
+    const report = await iosReport(iosRunner({}), { bundle: BUNDLE_WITHOUT_MANIFEST });
+    expect(rules(report.failures)).toEqual(["ios.privacyManifest"]);
+  });
+
+  test("once the advisory table is emptied, the forbidden-symbol rule fails too", async () => {
     const policy = { ...loadPolicy(), advisory: {} };
     const report = await iosReport(iosRunner({}), { policy });
-    expect(rules(report.failures)).toEqual(["ios.forbiddenSymbols", "ios.privacyManifest"]);
+    expect(rules(report.failures)).toEqual(["ios.forbiddenSymbols"]);
   });
 
   test("a device ipa must say iPhoneOS", async () => {
@@ -417,9 +422,7 @@ describe("iOS artifact policy", () => {
       .split("\n")
       .filter((line) => !line.includes("PrototypeServer"))
       .join("\n");
-    const report = await iosReport(iosRunner({ nm: cleanNm }), {
-      bundle: [...BUNDLE, "PrivacyInfo.xcprivacy"],
-    });
+    const report = await iosReport(iosRunner({ nm: cleanNm }), {});
     expect(report.failures).toEqual([]);
     expect(report.warnings).toEqual([]);
   });
@@ -427,7 +430,7 @@ describe("iOS artifact policy", () => {
 
 describe("policy data and report", () => {
   test("every advisory rule is a rule the evaluators can emit", () => {
-    const known = ["ios.forbiddenSymbols", "ios.privacyManifest"];
+    const known = ["ios.forbiddenSymbols"];
     expect(Object.keys(loadPolicy().advisory).every((rule) => known.includes(rule))).toBe(true);
   });
 
@@ -436,7 +439,7 @@ describe("policy data and report", () => {
     const text = formatReport("ProtoViewer.app", report);
     expect(text).toContain("FAILED: ProtoViewer.app");
     expect(text).toContain("FAIL [ios.platform]");
-    expect(text).toContain("WARN [ios.privacyManifest]");
-    expect(text).toContain("advisory until #14151");
+    expect(text).toContain("WARN [ios.forbiddenSymbols]");
+    expect(text).toContain("advisory until #14150");
   });
 });

@@ -2491,6 +2491,14 @@ prototype id; tapping it opens `SavedPrototypeActivity`, which needs no host.
   fresh pin is reported `pending`. Declining delivers no callback. `autoConfirm` taps the dialog's accept
   button by label and reports `pinned` only after `listSaved` confirms (#12266, device-verification
   work: launcher dialogs differ).
+- A launcher caches its workspace, so a new or updated shortcut can stay invisible (#14887). After a
+  `pinned` result, or a save whose shortcut was `updated`, the host looks for the label on the home
+  screen. If it is missing, it resolves the default launcher (`cmd package resolve-activity`), and
+  when that package is a known launcher runs `am force-stop` plus a HOME intent once, waits for the
+  launcher's tree to go quiet, and looks again. The result reports `launcherRestarted` and
+  `shortcutVisible`; an unknown launcher is left alone with a warning. It is on by default on
+  emulators and physical devices; `restartLauncher:false` opts out. It never runs on a pending pin
+  (no shortcut exists yet) and runs at most once per call.
 - An unsupported launcher keeps the save and reports `pinned:"unsupported"`. A locked or
   screen-off device reports `device_locked`; the save remains and a retry is safe.
 - The app cannot remove a pinned icon: `deleteSaved` disables the shortcut. `removeIcon:true`

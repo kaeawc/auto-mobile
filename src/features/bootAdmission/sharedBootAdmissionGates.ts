@@ -10,6 +10,7 @@ import { FileHostBootAdmissionRegistry } from "./FileHostBootAdmissionRegistry";
 import { ActionableError } from "../../models/ActionableError";
 import type { Platform } from "../../models/Platform";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import { FileAvdConfigReader } from "../../utils/android-cmdline-tools/AvdConfigReader";
 import { DefaultHostCommandExecutor } from "../../utils/HostCommandExecutor";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
@@ -135,6 +136,10 @@ export function createBootAdmissionGates(
           timer,
           {
             env,
+            resolvedGuestBytes: async (avdName) => {
+              const hardware = await new FileAvdConfigReader().readResolvedHardware(avdName);
+              return hardware?.ramMb === undefined ? undefined : hardware.ramMb * 1024 * 1024;
+            },
             hostRegistry: new FileHostBootAdmissionRegistry({
               timer,
               directory: () => androidBootAdmissionRegistryDirectory(env),

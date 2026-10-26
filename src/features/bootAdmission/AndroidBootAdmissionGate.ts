@@ -32,6 +32,7 @@ import {
 } from "./BootAdmissionGate";
 import {
   ANDROID_EMULATOR_MEMORY_POLICY,
+  raisePerDeviceBytes,
   estimateSettledPerDeviceBytes,
   resolveBootCapacityLimits,
   type CapacityLimits,
@@ -64,6 +65,11 @@ export interface AndroidBootAdmissionGateOptions {
   hostRegistry?: HostBootAdmissionRegistry;
   env?: NodeJS.ProcessEnv;
   retryAfterMs?: number;
+  /**
+   * Guest RAM in bytes the named AVD resolves to (its `hardware-qemu.ini`), when known. Only
+   * ever raises the per-emulator estimate used to derive the limit (#15475).
+   */
+  resolvedGuestBytes?: (avdName: string, signal?: AbortSignal) => Promise<number | undefined>;
 }
 
 /**
@@ -77,6 +83,7 @@ export class AndroidBootAdmissionGate
 {
   private readonly env: NodeJS.ProcessEnv;
   private readonly retryAfterMs: number;
+  private readonly resolvedGuestBytes: AndroidBootAdmissionGateOptions["resolvedGuestBytes"];
   private readonly ledger: BootAdmissionLedger;
   private readonly reservations = new BootReservationScope<BootAdmission>();
   private readonly hostRegistry: HostBootAdmissionRegistry | undefined;
@@ -100,6 +107,7 @@ export class AndroidBootAdmissionGate
   ) {
     this.env = options.env ?? process.env;
     this.retryAfterMs = options.retryAfterMs ?? DEFAULT_ADMISSION_RETRY_AFTER_MS;
+    this.resolvedGuestBytes = options.resolvedGuestBytes;
     this.ledger = new BootAdmissionLedger(timer);
     this.hostRegistry = options.hostRegistry;
   }
@@ -134,6 +142,10 @@ export class AndroidBootAdmissionGate
     replacingDeviceId?: string,
   ): Promise<{ admission: BootAdmission; bind: () => void; markReplacedDeviceGone: () => void }> {
     const deadlineMs = this.timer.now() + request.timeoutMs;
+    // No extra await without a resolver: tests pin the gate's microtask interleavings.
+    const candidateBytes = this.resolvedGuestBytes
+      ? await this.candidateGuestBytes(request)
+      : undefined;
     let admitted: LedgerAdmission | undefined;
     let published: PublishedBootAdmission | undefined;
     let peers: HostBootAdmissionRecord[] = [];
@@ -158,7 +170,8 @@ export class AndroidBootAdmissionGate
           return sample;
         },
         ledger: this.ledger,
-        decide: (sample, window) => this.decide(sample, window, peers, replacingDeviceId),
+        decide: (sample, window) =>
+          this.decide(sample, window, peers, replacingDeviceId, candidateBytes),
         admit: () => {
           admitted = this.ledger.admit(replacingDeviceId, replacingDeviceId !== undefined);
           try {
@@ -385,9 +398,10 @@ export class AndroidBootAdmissionGate
     window?: LedgerSampleWindow,
     peers: readonly HostBootAdmissionRecord[] = [],
     replacingDeviceId?: string,
+    candidateBytes?: number,
   ): AndroidAdmissionDecision | RefusedCapacityDecision {
     this.forgetExitedSerials(sample);
-    const { limits, effective: bootedCount } = this.count(sample, window, peers);
+    const { limits, effective: bootedCount } = this.count(sample, window, peers, candidateBytes);
     const credit =
       replacingDeviceId !== undefined && sample.emulatorSerials.includes(replacingDeviceId) ? 1 : 0;
     if (bootedCount - credit < limits.maxBooted) {
@@ -468,6 +482,7 @@ export class AndroidBootAdmissionGate
     sample: AndroidCapacitySample,
     window?: LedgerSampleWindow,
     peers: readonly HostBootAdmissionRecord[] = [],
+    candidateBytes?: number,
   ): {
     booted: number;
     inFlight: number;
@@ -495,7 +510,7 @@ export class AndroidBootAdmissionGate
       listed + count,
       processes + unseenBoots + inFlight.listedWithoutProcess + peerCounts.listedWithoutProcess,
     );
-    const limits = this.limitsFor(sample, [...inFlight.boots, ...peerCounts.boots]);
+    const limits = this.limitsFor(sample, [...inFlight.boots, ...peerCounts.boots], candidateBytes);
     return { booted, inFlight: reported - booted, effective, limits };
   }
 
@@ -639,21 +654,45 @@ export class AndroidBootAdmissionGate
     }
   }
 
+  /** The AVD's resolved guest RAM, or undefined when unknown; a failed read never blocks a boot. */
+  private async candidateGuestBytes(
+    request: AndroidBootAdmissionRequest,
+  ): Promise<number | undefined> {
+    if (!this.resolvedGuestBytes) {
+      return undefined;
+    }
+    try {
+      return await this.resolvedGuestBytes(request.avdName, request.signal);
+    } catch (error) {
+      // The estimate falls back to the measured or default value; reading is best effort.
+      logger.warn(
+        `[BootAdmission] Could not read resolved RAM for '${request.avdName}': ${errorMessage(error)}`,
+        error,
+      );
+      return undefined;
+    }
+  }
+
   /** All admission and reporting callers size from the boots returned by their single count. */
   private limitsFor(
     sample: AndroidCapacitySample,
     inFlight: readonly InFlightBootMemory[],
+    candidateBytes?: number,
   ): CapacityLimits {
     const limits = resolveBootCapacityLimits(
       this.env,
       ANDROID_MAX_BOOTED_ENV,
       sample.host,
-      estimateSettledPerDeviceBytes(
-        sample.emulatorProcessRssBytes?.map((rssBytes, index) => ({
-          rssBytes,
-          ...sample.emulatorProcessIds?.[index],
-        })),
-        inFlight,
+      raisePerDeviceBytes(
+        estimateSettledPerDeviceBytes(
+          sample.emulatorProcessRssBytes?.map((rssBytes, index) => ({
+            rssBytes,
+            ...sample.emulatorProcessIds?.[index],
+          })),
+          inFlight,
+          ANDROID_EMULATOR_MEMORY_POLICY,
+        ),
+        candidateBytes,
         ANDROID_EMULATOR_MEMORY_POLICY,
       ),
     );

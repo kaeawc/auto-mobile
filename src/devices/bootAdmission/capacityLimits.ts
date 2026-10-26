@@ -60,6 +60,23 @@ export function estimatePerDeviceBytes(
   return Math.min(policy.maxBytes, Math.max(policy.minBytes, average));
 }
 
+/**
+ * Raises a per-device estimate to at least the guest RAM the next AVD will resolve to
+ * (`hardware-qemu.ini`, #15475), capped by the policy maximum. Never lowers the estimate: an
+ * emulator's host footprint exceeds its guest RAM, so a small configured value saves nothing
+ * until a device measurement says so.
+ */
+export function raisePerDeviceBytes(
+  estimateBytes: number,
+  candidateGuestBytes: number | undefined,
+  policy: PerDeviceMemoryPolicy,
+): number {
+  if (candidateGuestBytes === undefined || !Number.isFinite(candidateGuestBytes)) {
+    return estimateBytes;
+  }
+  return Math.min(policy.maxBytes, Math.max(estimateBytes, candidateGuestBytes));
+}
+
 /** One sampled emulator process, with identities when the source can provide them. */
 export interface EmulatorMemoryRow {
   rssBytes: number;

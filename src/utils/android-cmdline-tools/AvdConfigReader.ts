@@ -284,6 +284,25 @@ export class FileAvdConfigReader implements AvdConfigReader, AvdDirectoryResolve
     }
   }
 
+  /** Resolved hardware from `<avd>.avd/hardware-qemu.ini`; null before the first launch or when unreadable. */
+  async readResolvedHardware(avdName: string): Promise<ResolvedAvdHardware | null> {
+    const directory = await this.resolveAvdDirectory(avdName);
+    if (!directory) {
+      return null;
+    }
+    const path = require("path");
+    const file = path.join(directory, "hardware-qemu.ini");
+    if (!this.existsFn(file)) {
+      return null;
+    }
+    try {
+      return parseResolvedAvdHardware(await this.readFileFn(file, "utf-8"));
+    } catch (error) {
+      logger.warn(`Failed to read resolved hardware for ${avdName}: ${error}`, error);
+      return null;
+    }
+  }
+
   private async resolveRegistryConfigPath(avdName: string): Promise<string | null> {
     const path = require("path");
     const candidates = await this.registryDirectoryCandidates(avdName);
@@ -313,6 +332,34 @@ export class FileAvdConfigReader implements AvdConfigReader, AvdDirectoryResolve
       return [];
     }
   }
+}
+
+/** What the emulator resolved for an AVD at its last launch (`hardware-qemu.ini`), not what `config.ini` asks for. */
+export interface ResolvedAvdHardware {
+  /** Guest RAM in MB. On API 35+ images this exceeds a configured `2G` (#15475). */
+  ramMb?: number;
+  cpuCores?: number;
+  gpuMode?: string;
+}
+
+/** The emulator writes `key = value` lines; absent before the AVD's first launch. */
+export function parseResolvedAvdHardware(content: string): ResolvedAvdHardware {
+  const props = parseKeyValueProperties(content);
+  const positiveInt = (value: string | undefined): number | undefined => {
+    if (value === undefined || !/^\d+$/.test(value)) {
+      return undefined;
+    }
+    const parsed = Number(value);
+    return parsed > 0 ? parsed : undefined;
+  };
+  const ramMb = positiveInt(props.get("hw.ramSize"));
+  const cpuCores = positiveInt(props.get("hw.cpu.ncore"));
+  const gpuMode = props.get("hw.gpu.mode");
+  return {
+    ...(ramMb !== undefined ? { ramMb } : {}),
+    ...(cpuCores !== undefined ? { cpuCores } : {}),
+    ...(gpuMode ? { gpuMode } : {}),
+  };
 }
 
 /**

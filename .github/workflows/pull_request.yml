@@ -3420,6 +3420,15 @@ jobs:
           release-key-alias: ${{ secrets.RELEASE_KEY_ALIAS }}
           release-key-password: ${{ secrets.RELEASE_KEY_PASSWORD }}
 
+      # Artifact policy (#14154): judge the built release APK, not the source manifest, so a
+      # library manifest merge cannot carry CtrlProxy's posture into ProtoViewer. PR builds keep
+      # the development -SNAPSHOT versionName; the release workflow runs without --allow-snapshot.
+      - name: "Check the ProtoViewer release APK against the artifact policy"
+        working-directory: .
+        run: >-
+          bun scripts/release/check-protoviewer-artifact-policy.ts android
+          android/protoviewer/build/outputs/apk/release/protoviewer-release.apk --allow-snapshot
+
       - name: "Store AAR"
         uses: actions/upload-artifact@v6
         with:

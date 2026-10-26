@@ -1,0 +1,5 @@
+  type xml id=0c entryCount=2
+    resource 0x7f0c0000 xml/data_extraction_rules
+      () (file) res/4j.xml type=XML
+    resource 0x7f0c0001 xml/export_paths
+      () (file) res/xN.xml type=XML

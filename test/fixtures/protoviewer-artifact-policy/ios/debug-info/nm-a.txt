@@ -1,0 +1,41 @@
+0000000000000000 - 01 0000    SO 
+0000000000000000 - 01 0000    SO 
+000000000000000c - 00 0000   FUN 
+000000000000002c - 00 0000   FUN 
+000000000000002c - 00 0000   FUN 
+0000000000000040 - 00 0000   FUN 
+00000000000000c8 - 00 0000   FUN 
+00000001000005c0 - 01 0000 ENSYM 
+00000001000005c0 - 01 0000 BNSYM 
+0000000100000688 - 01 0000 ENSYM 
+0000000100000688 - 01 0000 BNSYM 
+00000001000006c8 - 01 0000 ENSYM 
+00000001000006c8 - 01 0000 BNSYM 
+00000001000006f4 - 01 0000 ENSYM 
+00000001000006f4 - 01 0000 BNSYM 
+0000000100000720 - 01 0000 ENSYM 
+0000000100000720 - 01 0000 BNSYM 
+000000006adf46d1 a /var/folders/cc/5cjn1v792wq3ts082kyl5j200000gn/T/TemporaryDirectory.yc4v8v/main-1.swiftmodule
+000000006adf46d1 - 00 0001   OSO /var/folders/cc/5cjn1v792wq3ts082kyl5j200000gn/T/TemporaryDirectory.yc4v8v/main-2.o
+0000000000000000 - 00 0000    SO /var/folders/cc/5cjn1v792wq3ts082kyl5j200000gn/T/tmp.u4FvakGQ7X/
+                 U _$sSS21_builtinStringLiteral17utf8CodeUnitCount7isASCIISSBp_BwBi1_tcfC
+                 U _$sSSN
+0000000100000720 t _$sSa12_endMutationyyF
+0000000100000720 - 01 0000   FUN _$sSa12_endMutationyyF
+                 U _$sSaMa
+                 U _$ss27_allocateUninitializedArrayySayxG_BptBwlF
+0000000100000688 t _$ss27_finalizeUninitializedArrayySayxGABnlF
+0000000100000688 - 01 0000   FUN _$ss27_finalizeUninitializedArrayySayxGABnlF
+                 U _$ss5print_9separator10terminatoryypd_S2StF
+00000001000006c8 - 01 0000   FUN _$ss5print_9separator10terminatoryypd_S2StFfA0_
+00000001000006c8 t _$ss5print_9separator10terminatoryypd_S2StFfA0_
+00000001000006f4 - 01 0000   FUN _$ss5print_9separator10terminatoryypd_S2StFfA1_
+00000001000006f4 t _$ss5print_9separator10terminatoryypd_S2StFfA1_
+                 U _$sypN
+0000000000000000 - 00 0000  GSYM ___swift_reflection_version
+0000000100000778 s ___swift_reflection_version
+0000000100000000 T __mh_execute_header
+00000001000005c0 - 01 0000   FUN _main
+00000001000005c0 T _main
+                 U _swift_bridgeObjectRelease
+0000000000000000 - 00 0000    SO main.swift

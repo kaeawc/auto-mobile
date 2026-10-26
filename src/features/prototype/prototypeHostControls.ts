@@ -16,12 +16,14 @@ export const PROTOTYPE_WINDOW_MARKER_IDENTIFIERS: readonly string[] = [
   PROTOTYPE_DISMISS_ID,
 ];
 
-/** Whether a node's resource id (bare, or `<package>:id/<id>`) is a host dismiss control. */
+/**
+ * Whether a node's resource id is a host dismiss control. Only the bare id counts: Android exposes
+ * the host's `testTag` unchanged, and the reserved `automobile-` prefix is enforced on authored
+ * tags, so a package-qualified look-alike (`example:id/automobile-prototype-dismiss`) is an
+ * authored node, not a host control.
+ */
 export function isPrototypeHostDismissId(resourceId: unknown): boolean {
-  return (
-    typeof resourceId === "string" &&
-    (resourceId === PROTOTYPE_DISMISS_ID || resourceId.endsWith(`:id/${PROTOTYPE_DISMISS_ID}`))
-  );
+  return resourceId === PROTOTYPE_DISMISS_ID;
 }
 
 /** Where a tap on a target may land once host dismiss controls are kept clear. */

@@ -21,9 +21,9 @@ describe("host dismiss control ids", () => {
     ]);
   });
 
-  test("a bare or package-qualified resource id is a host control and nothing else is", () => {
+  test("only the bare resource id is a host control; a package-qualified look-alike is authored", () => {
     expect(isPrototypeHostDismissId("automobile-prototype-dismiss")).toBe(true);
-    expect(isPrototypeHostDismissId("dev.example:id/automobile-prototype-dismiss")).toBe(true);
+    expect(isPrototypeHostDismissId("dev.example:id/automobile-prototype-dismiss")).toBe(false);
     expect(isPrototypeHostDismissId("automobile-prototype-dismiss-2")).toBe(false);
     expect(isPrototypeHostDismissId("my-dismiss")).toBe(false);
     expect(isPrototypeHostDismissId(undefined)).toBe(false);

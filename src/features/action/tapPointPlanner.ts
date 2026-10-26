@@ -365,6 +365,16 @@ export class TapPointPlanner {
     });
   }
 
+  private hostControls(hierarchy: ViewHierarchyResult): { id: string; bounds: ElementBounds }[] {
+    return new SearchableHierarchy()
+      .project(hierarchy)
+      .flatMap((entry) =>
+        isPrototypeHostDismissId(entry.nativeId) && entry.bounds
+          ? [{ id: entry.nativeId as string, bounds: entry.bounds }]
+          : [],
+      );
+  }
+
   /**
    * A tap point outside AutoMobile's host dismiss controls (#15120): a control drawn over the target
    * would take the touch and dismiss the prototype, so the point moves to the target's largest part
@@ -376,13 +386,7 @@ export class TapPointPlanner {
     visibleBounds: ElementBounds,
     point: { x: number; y: number },
   ): { x: number; y: number } {
-    const controls = new SearchableHierarchy()
-      .project(hierarchy)
-      .flatMap((entry) =>
-        isPrototypeHostDismissId(entry.nativeId) && entry.bounds
-          ? [{ id: entry.nativeId as string, bounds: entry.bounds }]
-          : [],
-      );
+    const controls = this.hostControls(hierarchy);
     if (controls.length === 0) {
       return point;
     }
@@ -466,6 +470,22 @@ export class TapPointPlanner {
       visibleBounds,
       visibleTapPoint,
     );
+    // Moving the point off a host control must not move it back under the keyboard.
+    const ime = this.getImeOccluderForTap(tapElement, viewHierarchy, screenSize);
+    if (
+      ime &&
+      clearPoint !== visibleTapPoint &&
+      pointInTapBounds(clearPoint, {
+        left: ime.bounds[0],
+        top: ime.bounds[1],
+        right: ime.bounds[2],
+        bottom: ime.bounds[3],
+      })
+    ) {
+      throw new KeyboardOcclusionError(
+        "Target is covered by the soft keyboard and a host dismiss control; dismiss the keyboard first.",
+      );
+    }
     const barDecision = this.prototypeBarTapDecision(viewHierarchy, tapElement, clearPoint);
     if (barDecision.kind === "refuse") {
       throw new ActionableError(
@@ -474,6 +494,18 @@ export class TapPointPlanner {
       );
     }
     const tapPoint = barDecision.point;
+    // The system-bar adjustment may move the point; it must not land back inside a host control.
+    const covering = this.hostControls(viewHierarchy).find(
+      (control) =>
+        !isPrototypeHostDismissId(tapElement["resource-id"]) &&
+        pointInTapBounds(tapPoint, control.bounds),
+    );
+    if (covering) {
+      throw new ActionableError(
+        `Cannot tap (${tapPoint.x}, ${tapPoint.y}): the AutoMobile prototype control ${covering.id} covers the visible target once the system bars are avoided and a touch there would dismiss the prototype. ` +
+          "Move the target away from the top-end corner (or the top-centre escape pill), then retry.",
+      );
+    }
     // The selector resolved in the scoped tree; the touch lands on whatever is on top (#9305).
     assertAppGestureNotUnderPrototype(viewHierarchy, options.layer, tapPoint, "tap");
     return { tapPoint, ...(barDecision.warning ? { warning: barDecision.warning } : {}) };

@@ -941,6 +941,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
+  private val prototypePlatform =
+    dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeRuntimePlatform()
+
   /**
    * Emits a `type:"error"` frame when a `serviceScope.launch { … }` throws uncaught. Correlation is
    * recovered from [RequestIdContext], which request-correlated raw launches attach through
@@ -1969,6 +1972,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                 device = RetrofitPrototypeHttpClient(OkHttpClient()),
               ),
             requestScope = serviceScope,
+            platform = prototypePlatform,
           )
         // Service start: drop anything a previous process left in the cache directory.
         prototypeAssets.purgeLeftovers()
@@ -2116,6 +2120,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         webSocketServer =
           WebSocketServer(
             port = 8765,
+            platform = prototypePlatform,
             scope = serviceScope,
             options =
               WebSocketServerOptions(

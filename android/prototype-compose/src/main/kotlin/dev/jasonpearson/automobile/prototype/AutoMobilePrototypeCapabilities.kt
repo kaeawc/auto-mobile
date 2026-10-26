@@ -6,6 +6,9 @@ object AutoMobilePrototype {
    * The spec features this renderer supports. The embedding app checks a spec's required
    * capabilities against this set.
    */
+  fun capabilities(platform: PrototypePlatform): Set<String> =
+    (capabilities + platform.registry.capabilities).toSortedSet()
+
   val capabilities: Set<String> =
     setOf(
       "prototype_carousel_v1",

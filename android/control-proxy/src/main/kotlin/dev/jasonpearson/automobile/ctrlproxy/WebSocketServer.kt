@@ -38,6 +38,8 @@ class WebSocketServer(
   private val scope: CoroutineScope,
   private val perfProvider: PerfProvider = PerfProvider.instance,
   private val options: WebSocketServerOptions = WebSocketServerOptions(),
+  private val platform: dev.jasonpearson.automobile.prototype.PrototypePlatform =
+    dev.jasonpearson.automobile.prototype.PrototypePlatform.None,
 ) {
   companion object {
     private const val TAG = "WebSocketServer"
@@ -362,6 +364,7 @@ class WebSocketServer(
     add("prototype_network_device_v1")
     add("prototype_platform_v1")
     add("prototype_platform_device_v1")
+    addAll(platform.registry.capabilities)
     // Prototype text fields honour labels, variants, keyboard/security, line limits and maxLength.
     // Older APKs reject these fields as unknown, so hosts require this flag before sending them.
     add("prototype_text_field_options_v1")

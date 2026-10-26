@@ -1373,6 +1373,15 @@ a `_v2` gate that checks the fields that version introduced. The gates are gener
 refuse uniformly. Because every module use must be declared in the root `requires`, which a patch
 cannot add, a patch never introduces a module the shown spec did not already require.
 
+Android's renderer accepts an identity-stable `PrototypePlatform` containing an immutable module
+registry. The host supplies modules; it retains ownership and closes them after all surfaces detach.
+The built-in device module projects the host's measured window state. Each surface subscribes to
+module state and events, and the controller shares a four-call limiter across its surfaces. Calls
+resolve arguments at invocation, wait outside the interaction lock, and commit result, metadata,
+status, outcome event and follow-ups under that lock. Replacement, reset and dismissal cancel calls;
+cancellation reports an outcome without running follow-ups. CtrlProxy registers only the device
+module in release; debug additionally registers the permission-free test module.
+
 The shared fixtures `test/fixtures/prototype-spec/valid/platform-*.json` and
 `invalid/platform-*.json` are replayed by the TypeScript, Kotlin and Swift validators.
 

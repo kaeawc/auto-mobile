@@ -6,6 +6,7 @@ import {
   APP_LINKS_MIN_API_LEVEL,
   appLinkDomains,
   appLinkRestoreTarget,
+  isVerifiedEquivalentState,
   toAppLinkDomainStates,
   type AppLinkSettableState,
   type AppLinksSnapshot,
@@ -18,6 +19,7 @@ import {
   type AppLinksRecordScope,
   type AppLinksRestoreEntry,
   type AppLinksRestoreRegistry,
+  type AppLinksRestorePlan,
 } from "./AppLinkRestore";
 
 export const SET_APP_LINKS_ACTIONS = [
@@ -76,6 +78,8 @@ export interface SetAppLinksResult {
   changed: AppLinkChange[];
   /** Requested domains whose state did not take (pm reports no per-domain failure). */
   unapplied?: string[];
+  /** Already satisfied domains left untouched because their state cannot be restored exactly. */
+  skipped?: { domain: string; state: string; reason: string }[];
   appLinks: AppLinkDomainState[];
   appLinkHandlingAllowed?: boolean;
   /** Present while a recorded original state remains to restore. */
@@ -160,7 +164,11 @@ function diffDomains(before: AppLinksSnapshot, after: AppLinksSnapshot): AppLink
   });
 }
 
-function unappliedDomains(request: SetAppLinksRequest, after: AppLinksSnapshot): string[] {
+function unappliedDomains(
+  request: SetAppLinksRequest,
+  after: AppLinksSnapshot,
+  skipped: NonNullable<SetAppLinksResult["skipped"]>,
+): string[] {
   const states = toAppLinkDomainStates(after);
   const requested = request.domains ? new Set(request.domains) : undefined;
   const inScope = (domain: AppLinkDomainState): boolean =>
@@ -168,7 +176,13 @@ function unappliedDomains(request: SetAppLinksRequest, after: AppLinksSnapshot):
   switch (request.action) {
     case "approve":
       return states
-        .filter((d) => d.autoVerify && inScope(d) && d.state !== "approved")
+        .filter(
+          (d) =>
+            d.autoVerify &&
+            inScope(d) &&
+            d.state !== "approved" &&
+            !skipped.some((skip) => skip.domain === d.domain),
+        )
         .map((d) => d.domain);
     case "reset":
       return states
@@ -207,31 +221,71 @@ export function appLinksRestoreReceipt(
   };
 }
 
-function runChange(
+async function runChange(
   action: ChangeAction,
   request: SetAppLinksRequest,
-  userId: number,
   deps: SetAppLinksDependencies,
-): Promise<void> {
+  context: { userId: number; before: AppLinksSnapshot; device: BootedDevice },
+): Promise<NonNullable<SetAppLinksResult["skipped"]>> {
   const { appLinks } = deps.target;
+  const { userId, before, device } = context;
   const options = { signal: deps.signal };
   const domains = request.domains ?? "all";
+  const skipped: NonNullable<SetAppLinksResult["skipped"]> = [];
   switch (action) {
-    case "approve":
-      return appLinks.setVerificationState(request.appId, "approved", domains, options);
+    case "approve": {
+      const writable = (request.domains ?? [...before.verification.keys()]).filter((domain) => {
+        const state = before.verification.get(domain);
+        if (
+          state !== undefined &&
+          isVerifiedEquivalentState(state) &&
+          !appLinkRestoreTarget(state).exact
+        ) {
+          skipped.push({
+            domain,
+            state,
+            reason: `already ${state}; the shell cannot restore that state, so it was left untouched`,
+          });
+          return false;
+        }
+        return true;
+      });
+      if (writable.length > 0) {
+        deps.registry.record(
+          device,
+          request.appId,
+          {
+            ...before,
+            verification: new Map(
+              [...before.verification].filter(([domain]) => writable.includes(domain)),
+            ),
+          },
+          RECORD_SCOPE.approve(userId),
+          deps.owner,
+        );
+        await appLinks.setVerificationState(request.appId, "approved", writable, options);
+      } else if (deps.owner !== undefined && deps.registry.get(device.deviceId, request.appId)) {
+        deps.registry.record(device, request.appId, before, { verification: false }, deps.owner);
+      }
+      break;
+    }
     case "reset":
-      return appLinks.setVerificationState(request.appId, "none", domains, options);
+      await appLinks.setVerificationState(request.appId, "none", domains, options);
+      break;
     case "reverify":
-      return appLinks.reverify(request.appId, options);
+      await appLinks.reverify(request.appId, options);
+      break;
     case "userSelection":
-      return appLinks.setUserSelection(
+      await appLinks.setUserSelection(
         request.appId,
         userId,
         request.enabled === true,
         domains,
         options,
       );
+      break;
   }
+  return skipped;
 }
 
 /**
@@ -243,7 +297,7 @@ async function restoreRecorded(
   device: BootedDevice,
   appId: string,
   deps: SetAppLinksDependencies,
-): Promise<void> {
+): Promise<AppLinksRestorePlan | undefined> {
   const entry = deps.registry.get(device.deviceId, appId);
   if (!entry) {
     return;
@@ -255,6 +309,7 @@ async function restoreRecorded(
   if (deps.registry.get(device.deviceId, appId) === entry) {
     deps.registry.take(device.deviceId, appId);
   }
+  return plan;
 }
 
 function actionNote(
@@ -272,6 +327,27 @@ function actionNote(
     return 'Link handling is turned off for this app ("Open supported links"), so links still do not open it directly.';
   }
   return undefined;
+}
+
+/** Explain both completed approximations and any inexact restore still pending. */
+function restoreNotes(
+  restorePlan: AppLinksRestorePlan | undefined,
+  receipt: AppLinksRestoreReceipt | undefined,
+  after: AppLinksSnapshot,
+): string[] {
+  const restored =
+    restorePlan?.inexact.map(
+      (entry) =>
+        `Restored ${entry.domain} as ${entry.restoredAs}; the shell cannot set its original state ${entry.original}.`,
+    ) ?? [];
+  const pending =
+    receipt?.verification
+      ?.filter((entry) => !entry.exact && after.verification.get(entry.domain) !== entry.original)
+      .map(
+        (entry) =>
+          `Restore will use ${entry.restoreAs} for ${entry.domain}; the shell cannot set its original state ${entry.original}.`,
+      ) ?? [];
+  return [...restored, ...pending];
 }
 
 async function assertAppLinksSupported(
@@ -329,19 +405,26 @@ export async function setAppLinks(
   validateDomains(request, before);
 
   const hadRecord = registry.get(device.deviceId, request.appId) !== undefined;
+  let restorePlan: AppLinksRestorePlan | undefined;
+  let skipped: NonNullable<SetAppLinksResult["skipped"]> = [];
   if (request.action === "restore") {
-    await restoreRecorded(device, request.appId, deps);
+    restorePlan = await restoreRecorded(device, request.appId, deps);
   } else {
-    const scope = RECORD_SCOPE[request.action](userId);
-    registry.record(device, request.appId, before, scope, deps.owner);
-    await runChange(request.action, request, userId, deps);
+    if (request.action !== "approve") {
+      const scope = RECORD_SCOPE[request.action](userId);
+      registry.record(device, request.appId, before, scope, deps.owner);
+    }
+    skipped = await runChange(request.action, request, deps, { userId, before, device });
   }
 
   const after = await readSnapshot(target, request.appId, userId, signal);
   forgetSettledRecord(registry, device, request.appId, userId, after);
-  const unapplied = unappliedDomains(request, after);
-  const note = actionNote(request, after, hadRecord);
+  const unapplied = unappliedDomains(request, after, skipped);
+  const actionMessage = actionNote(request, after, hadRecord);
   const receipt = appLinksRestoreReceipt(registry.get(device.deviceId, request.appId));
+  const note = [actionMessage, ...restoreNotes(restorePlan, receipt, after)]
+    .filter(Boolean)
+    .join(" ");
   const handling = after.user?.linkHandlingAllowed;
   return {
     appId: request.appId,
@@ -349,6 +432,7 @@ export async function setAppLinks(
     action: request.action,
     changed: diffDomains(before, after),
     ...(unapplied.length > 0 ? { unapplied } : {}),
+    ...(skipped.length > 0 ? { skipped } : {}),
     appLinks: toAppLinkDomainStates(after),
     ...(handling === undefined ? {} : { appLinkHandlingAllowed: handling }),
     ...(receipt ? { restore: receipt } : {}),

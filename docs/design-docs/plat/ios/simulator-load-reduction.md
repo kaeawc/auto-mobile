@@ -171,8 +171,12 @@ the foreground. Builds replace inconsistent manifests only under their own key l
 
 A missing template starts a background build without waiting for it. Builders are single-flight
 per key and use the shared boot admission instrumentation. They apply the selected preboot profile,
-boot, require measured CPU below 5 percent of one core for 120 seconds (up to 900 seconds total),
-then shut down and verify before publishing ready. Missing CPU measurements reset the quiet window.
+boot, require the 60-second trailing mean of measured CPU to stay below 15 percent of one core for
+120 seconds (up to 900 seconds total), then shut down and verify before publishing ready. A steady
+background service holds a booted simulator near 10 percent in a 1-20 percent sawtooth, which an
+instantaneous 5 percent threshold never accepted (#15294). Missing CPU measurements reset the quiet
+window. An interrupted build (SIGINT) removes its partial simulator, releases its lock, records no
+retry delay, and exits 130 (#15312).
 Failures delete partial templates and defer attempts exponentially from 60 seconds up to six
 hours, resetting the attempt count on success. Capacity refusal uses a fixed short delay without
 incrementing attempts or recording failure. Builders skip starting when the read-only capacity

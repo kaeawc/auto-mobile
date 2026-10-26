@@ -31,6 +31,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeEventKind
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidation
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
+import java.io.File
 import java.io.IOException
 import java.util.UUID
 import kotlinx.coroutines.*
@@ -291,7 +292,7 @@ private class EmbeddedConfiguration(
   val spec = input.spec
   val storage = input.storage
   val network = input.network
-  val cacheDir = context.cacheDir
+  val cacheDir: File = context.cacheDir
   val initialDeviceState = prototypeInitialDeviceState(context)
 }
 

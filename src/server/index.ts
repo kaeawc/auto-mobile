@@ -1,3 +1,4 @@
+import { clientAdvertisesMcpApps } from "./mcpAppsSupport";
 import { DeviceReadiness } from "../daemon/readiness/DeviceReadiness";
 import type { ListToolsResult, McpServer } from "@modelcontextprotocol/server";
 import { createSdkMcpServer } from "./sdkMcpServer";
@@ -423,6 +424,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       ownsSession: (sessionUuid) => sessionToolBinding.ownsSession(bindingKey, sessionUuid),
       releasedSessionUuid: sessionToolBinding.releasedResourceSessionUuid(bindingKey),
       signal,
+      clientSupportsApps: clientAdvertisesMcpApps(server.server.getClientCapabilities()),
     }),
     registration,
   );

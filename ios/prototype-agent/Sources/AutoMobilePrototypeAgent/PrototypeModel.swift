@@ -258,6 +258,7 @@
             // An accepted show, including a same-id replace, is activity.
             if mode.expiresWhenIdle { idleTimer.arm() }
             onVisibilityChange?(true)
+            apply(activity: false) { _ in [] }
         }
 
         /// `patch_prototype` (#11675): the session edits the shown prototype in place and its `change` event is

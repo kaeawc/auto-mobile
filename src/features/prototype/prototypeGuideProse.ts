@@ -998,7 +998,16 @@ On iOS nothing is reversed, and \`localhost\`, \`127.0.0.1\` and \`[::1]\` are r
 
 export const GUIDE_TIMERS = `### Timers
 
-Both timer actions require \`prototype_timers_v1\`. Start a timer from any action list:
+Timer actions and \`onAppear\` require \`prototype_timers_v1\`.
+The root and nodes declaring \`visibleWhen\` may set \`onAppear\` to 1..32 ordinary actions.
+They run on first show if visible, and on each hidden-to-visible edge; visible-to-visible
+and a same-id show without reset do not run them again. Repeat placeholders bind as in onTap.
+Each list is atomic, validates like a tap, and emits change for a net state change, without
+restarting idle TTL. A handler runs at most once per interaction, bounded by the action-depth limit.
+For a splash, put \`onAppear:[{type:"startTimer",id:"splash",afterMs:2000,
+actions:[{type:"setState",key:"loading",value:false}]}]\` on the root and use
+\`visibleWhen:{key:"loading",equals:false}\` on content. Hiding a node does not cancel its timer.
+Start a timer from any action list:
 \`{type:"startTimer",id:"tick",afterMs:100,everyMs:1000,maxRuns:10,actions:[{type:"emit",name:"tick"}]}\`.
 \`afterMs\` is required; it and optional \`everyMs\` are integers 100..3600000 ms.
 \`maxRuns\` is 1..10000 total fires, including the first, and requires \`everyMs\`.

@@ -122,7 +122,7 @@ function fieldRuleValues(definition: string, field: string): string[] {
 /** Markdown limits table; every value comes from the contract's `limits`. */
 export function renderLimitsTable(): string {
   const rows = Object.entries(contract.limits).map(([name, value]) => `| \`${name}\` | ${value} |`);
-  const actionFields = ["onTap", "onLongPress", "onDoubleTap"];
+  const actionFields = ["onTap", "onLongPress", "onDoubleTap", "onAppear"];
   const items = (definitions.repeat.fields?.items.rule ?? {}) as Rule;
   for (const field of actionFields) {
     const rule = (definitions.node.variants?.box.fields?.[field].rule ?? {}) as Rule;
@@ -156,7 +156,7 @@ function renderActions(): string {
   return [
     "## Actions",
     "",
-    "Used in `onTap`, `onLongPress`, `onDoubleTap` and searchBar `onSubmit` lists.",
+    "Used in `onTap`, `onLongPress`, `onDoubleTap`, `onAppear` and searchBar `onSubmit` lists.",
     "",
     `Gesture fields are available only on ${code(
       Object.entries(definitions.node.variants ?? {})

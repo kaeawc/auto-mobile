@@ -116,6 +116,40 @@ struct PrototypeSession {
     /// `takeRequestCommands`.
     private(set) var requests = PrototypeRequestLedger()
     private var timerCommands: [PrototypeTimerCommand] = []
+    private var appeared: Set<String> = []
+
+    private func visibleAppearances() -> [(String, [PrototypeAction])] {
+        guard let root = spec?.root else { return [] }
+        func visit(_ node: PrototypeNode, _ path: String) -> [(String, [PrototypeAction])] {
+            guard node.visibleWhen?.holds(state) ?? true else { return [] }
+            if ["bottomSheet", "dialog", "menu", "snackbar"].contains(node.type),
+               !(node.openWhen?.holds(state) ?? false) { return [] }
+            let own = node.onAppear.map { [(path, $0)] } ?? []
+            return own + node.currentChildEntries(path: path, pages: pages, stacks: stacks, state: state)
+                .flatMap { visit($0.node, $0.path) }
+        }
+        return visit(root, "root")
+    }
+
+    /// Drained inside the same transition; neither this nor timer fires count as idle activity.
+    mutating func runAppearances() -> [PrototypeEvent] {
+        var events: [PrototypeEvent] = []
+        var ran: Set<String> = []
+        for _ in 0 ..< PrototypeLimits.maxActionDepth {
+            let visible = visibleAppearances()
+            let entering = visible.filter { !appeared.contains($0.0) }
+            appeared = Set(visible.map(\.0))
+            if entering.isEmpty { return events }
+            for (path, actions) in entering {
+                guard isShown else { return events }
+                guard visibleAppearances().contains(where: { $0.0 == path }),
+                      ran.insert(path).inserted else { continue }
+                events += run(actions)
+            }
+        }
+        appeared = Set(visibleAppearances().map(\.0))
+        return events
+    }
 
     mutating func takeTimerCommands() -> [PrototypeTimerCommand] {
         defer { timerCommands = [] }
@@ -194,6 +228,7 @@ struct PrototypeSession {
         revisions[spec.id] = shownRevision
         stateRevisions = state.keys.reduce(into: [:]) { $0[$1] = shownRevision }
         self.spec = spec
+        appeared = keepNavigation ? Set(visibleAppearances().map(\.0)) : []
         // The show result reports this mode, so the show itself is not a change.
         reportedDark = self.appearance?.dark
     }
@@ -277,7 +312,7 @@ struct PrototypeSession {
     /// caused it. Every transition of a shown prototype goes through here.
     mutating func transition(_ body: (inout PrototypeSession) -> [PrototypeEvent]) -> [PrototypeEvent] {
         let events = body(&self)
-        return events + appearanceChange()
+        return events + runAppearances() + appearanceChange()
     }
 
     /// Exactly one `appearance_changed` when the shown prototype's mode differs from the one last

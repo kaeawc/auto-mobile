@@ -97,12 +97,23 @@ function visitReference(
       return fail(`${path}.image`, "Image limit exceeded");
     }
   }
-  if (rule.name !== "node") {
-    return walk(value, refRule(rule), path, context, depth);
-  }
+  return rule.name === "node"
+    ? visitNodeReference(value, rule, path, context, depth)
+    : walk(value, refRule(rule), path, context, depth);
+}
+function visitNodeReference(
+  value: unknown,
+  rule: Rule,
+  path: string,
+  context: Context,
+  depth: number,
+): PrototypeValidationError | undefined {
   const node = object(value);
   if (!node) {
     return fail(path, "Expected object");
+  }
+  if (node.onAppear !== undefined && path !== "root" && node.visibleWhen === undefined) {
+    return fail(`${path}.onAppear`, "onAppear requires visibleWhen or the root");
   }
   context.nodes.push({ value: node, path });
   if (context.nodes.length > contract.limits.MAX_PROTOTYPE_NODES) {

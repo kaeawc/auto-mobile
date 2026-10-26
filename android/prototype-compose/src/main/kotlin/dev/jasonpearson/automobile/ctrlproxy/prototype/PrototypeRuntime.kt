@@ -172,6 +172,65 @@ class PrototypeRuntime(
       handle(PrototypeInteraction.TimerFire(actions))
     }
 
+  private var appeared = emptySet<String>()
+  private var appearanceRoot: PrototypeNode? = null
+  private var hasAppearances = false
+
+  /** Called only after the host accepts the show. A preserving replacement seeds without firing. */
+  suspend fun shown(preservingState: Boolean = false) {
+    appeared = if (preservingState) visibleAppearances().keys else emptySet()
+    if (!preservingState) handle(PrototypeInteraction.TimerFire(emptyList()))
+  }
+
+  private fun visibleAppearances(): Map<String, List<PrototypeAction>> {
+    val root = current.spec.root
+    if (appearanceRoot !== root) {
+      fun contains(node: PrototypeNode): Boolean =
+        node.onAppear != null || prototypeDescendants(node).any(::contains)
+      appearanceRoot = root
+      hasAppearances = contains(root)
+    }
+    if (!current.active || !hasAppearances) return emptyMap()
+    return buildMap {
+      fun visit(node: PrototypeRenderNode) {
+        if (!node.visible) return
+        if (node.role in PROTOTYPE_MODAL_ROLES && !node.sheetOpen) return
+        node.source?.onAppear?.let { put(node.identity, it) }
+        val children =
+          if (node.role == "pager") listOfNotNull(node.children.getOrNull(node.page))
+          else node.children
+        children.forEach(::visit)
+      }
+      visit(renderModel().root)
+    }
+  }
+
+  /** One appearance per identity per interaction, with the contract's existing nesting bound. */
+  private suspend fun runAppearances() {
+    val ran = mutableSetOf<String>()
+    repeat(PrototypeSpecValidator.MAX_PROTOTYPE_ACTION_DEPTH) {
+      val visible = visibleAppearances()
+      val entering = visible.filterKeys { it !in appeared }
+      appeared = visible.keys.toSet()
+      if (entering.isEmpty()) return
+      for ((identity, actions) in entering) {
+        if (!current.active) return
+        if (identity !in visibleAppearances()) continue
+        if (!ran.add(identity)) {
+          warn("Refused repeated onAppear at $identity within one interaction")
+          continue
+        }
+        try {
+          control(emptyMap(), actions)
+        } catch (error: IllegalArgumentException) {
+          warn("Refused onAppear at $identity: ${error.message}")
+        }
+      }
+    }
+    appeared = visibleAppearances().keys.toSet()
+    warn("onAppear action nesting limit reached")
+  }
+
   fun pauseTimers() = timerEngine.pause()
 
   fun resumeTimers() = timerEngine.resume()
@@ -332,7 +391,8 @@ class PrototypeRuntime(
     } catch (error: Exception) {
       Log.w("PrototypeRuntime", "Prototype patch change delivery failed", error)
     }
-    return PatchResult.Applied(revision)
+    runAppearances()
+    return PatchResult.Applied(current.revision)
   }
 
   private fun allocateRevision(): Long = nextRevision?.invoke() ?: (current.revision + 1L)
@@ -347,6 +407,7 @@ class PrototypeRuntime(
     if (!current.active) return
     try {
       handleInteraction(interaction)
+      runAppearances()
     } finally {
       interactionRevision = null
       // Every device write ends an interaction here, so one diff covers state, data and checks.
@@ -1118,6 +1179,7 @@ class PrototypeRuntime(
     if (!registered || !current.active) return
     try {
       finishRequest(request, response)
+      runAppearances()
     } finally {
       interactionRevision = null
       // A response writes outside handle(), so a stored key it changed is recorded here (#12522).

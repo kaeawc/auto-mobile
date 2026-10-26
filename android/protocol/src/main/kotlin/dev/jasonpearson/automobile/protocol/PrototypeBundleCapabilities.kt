@@ -48,6 +48,7 @@ internal object PrototypeBundleCapabilities {
   }
 
   private fun fields(node: JsonObject, caps: MutableSet<String>) {
+    if ("onAppear" in node) caps.add("prototype_timers_v1")
     val checks = setOf("checks", "validateOn", "enabledWhen", "valid", "requireValid")
     if (hasField(node, checks, setOf("payload", "data", "state", "repeat")))
       caps.add("prototype_checks_v1")

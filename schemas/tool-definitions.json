@@ -20292,6 +20292,14 @@
                 {
                   "type": "object",
                   "properties": {
+                    "onAppear": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items"
+                      },
+                      "minItems": 1,
+                      "maxItems": 32
+                    },
                     "span": {
                       "type": "integer",
                       "minimum": 1
@@ -21220,6 +21228,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -21332,6 +21343,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -21398,6 +21412,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -21459,6 +21476,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -21536,6 +21556,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -21607,6 +21630,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -21739,6 +21765,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -21831,6 +21860,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -21891,6 +21923,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -21938,6 +21973,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22179,6 +22217,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22256,6 +22297,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22319,6 +22363,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22382,6 +22429,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22443,6 +22493,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22522,6 +22575,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22596,6 +22652,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22706,6 +22765,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22778,6 +22840,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22839,6 +22904,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22903,6 +22971,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22960,6 +23031,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23021,6 +23095,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23091,6 +23168,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23157,6 +23237,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23208,6 +23291,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23259,6 +23345,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23316,6 +23405,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23414,6 +23506,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23505,6 +23600,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23598,6 +23696,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23660,6 +23761,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23725,6 +23829,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23784,6 +23891,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23874,6 +23984,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23972,6 +24085,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -24025,6 +24141,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -24104,6 +24223,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -24166,6 +24288,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },

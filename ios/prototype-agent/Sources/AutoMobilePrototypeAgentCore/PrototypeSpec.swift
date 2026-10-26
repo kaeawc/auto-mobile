@@ -705,6 +705,7 @@ final class PrototypeNode: Decodable {
     let type: String
     let id: String?
     let testTag: String?
+    let onAppear: [PrototypeAction]?
     let onTap: [PrototypeAction]?
     let onLongPress: [PrototypeAction]?
     let onDoubleTap: [PrototypeAction]?
@@ -832,7 +833,7 @@ final class PrototypeNode: Decodable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case type, id, testTag, onTap, style, styleWhen, visibleWhen, transition
+        case type, id, testTag, onAppear, onTap, style, styleWhen, visibleWhen, transition
         case safeAreaPadding, anchor, children, child, text, contentDescription, asset, contentScale
         case name, label, variant, stateKey, placeholder, axis, items, pager
         case scrollable, openWhen, detents, scrim, dragHandle, options, icon, size
@@ -854,6 +855,7 @@ final class PrototypeNode: Decodable {
         type = decodedType
         id = try container.decodeIfPresent(String.self, forKey: .id)
         testTag = try container.decodeIfPresent(String.self, forKey: .testTag)
+        onAppear = try container.decodeIfPresent([PrototypeAction].self, forKey: .onAppear)
         onTap = try container.decodeIfPresent([PrototypeAction].self, forKey: .onTap)
         style = try container.decodeIfPresent(Style.self, forKey: .style)
         styleWhen = try container.decodeIfPresent([StyleWhen].self, forKey: .styleWhen)

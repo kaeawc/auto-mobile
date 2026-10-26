@@ -54,6 +54,89 @@ describe("prototype simulate and timer reports", () => {
     return prototypeOutputSchema.parse(toolStructured(response));
   }
 
+  test("splash onAppear reaches native show, simulate and timer inspection on both platforms", async () => {
+    const splash = {
+      id: "splash",
+      state: { loading: true },
+      window: { placement: { type: "fullscreen" } },
+      root: {
+        type: "column",
+        onAppear: [
+          {
+            type: "startTimer",
+            id: "splash",
+            afterMs: 2000,
+            actions: [{ type: "setState", key: "loading", value: false }],
+          },
+        ],
+        children: [
+          { type: "text", text: "Content", visibleWhen: { key: "loading", equals: false } },
+        ],
+      },
+    };
+    proxy.setSupportedCommands(["prototype_timers_v1", "prototype_persistence_replay_v1"]);
+    agent.handshake.capabilities.push("prototype_timers_v1");
+    for (const device of [android, ios]) {
+      expect((await call(device, { action: "show", spec: splash })).success).toBe(true);
+      const timers = [{ id: "splash", nextFireInMs: 2000, runs: 0 }];
+      const status = {
+        id: "splash",
+        persistent: false,
+        state: { loading: true },
+        pages: {},
+        lastSequence: 0,
+        timers,
+      };
+      if (device.platform === "android") {
+        proxy.setInspectReply({ success: true, prototypes: [status] });
+      } else {
+        agent.queueReplies({ status: { ...status, shown: true } });
+      }
+      expect((await call(device, { action: "inspect" })).prototypes?.[0]?.timers).toEqual(timers);
+      if (device.platform === "android") {
+        proxy.setAdvanceClockResult({ success: true, fired: 1 });
+      } else {
+        agent.queueReplies({ fired: 1 });
+      }
+      expect(
+        await call(device, { action: "simulate", id: "splash", advanceTimeMs: 2000 }),
+      ).toMatchObject({ success: true, fired: 1 });
+      const completed = { ...status, state: { loading: false }, timers: [] };
+      if (device.platform === "android") {
+        proxy.setInspectReply({ success: true, prototypes: [completed] });
+      } else {
+        agent.queueReplies({ status: { ...completed, shown: true } });
+      }
+      expect((await call(device, { action: "inspect" })).prototypes?.[0]).toMatchObject({
+        state: { loading: false },
+        timers: [],
+      });
+    }
+    expect(proxy.getPrototypeHistory().find((entry) => entry.method === "show")).toMatchObject({
+      spec: { root: { onAppear: splash.root.onAppear } },
+    });
+    expect(agent.requests.find((entry) => entry.type === "show_prototype")?.body).toMatchObject({
+      spec: { root: { onAppear: splash.root.onAppear } },
+    });
+    expect(proxy.advanceClockRequests).toEqual([{ id: "splash", advanceTimeMs: 2000 }]);
+    expect(agent.requests.some((entry) => entry.type === "advance_prototype_clock")).toBe(true);
+  });
+
+  test("onAppear alone refuses show without timer capability before sending", async () => {
+    const spec = {
+      id: "appear",
+      window: { placement: { type: "fullscreen" } },
+      root: { type: "text", text: "Hello", onAppear: [{ type: "emit", name: "shown" }] },
+    };
+    for (const device of [android, ios]) {
+      const result = await call(device, { action: "show", spec });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("prototype_timers_v1");
+    }
+    expect(proxy.getPrototypeHistory()).toEqual([]);
+    expect(agent.requests).toEqual([]);
+  });
+
   test("simulate needs id and bounded integer advanceTimeMs", () => {
     for (const input of [
       { action: "simulate", id: "proto" },

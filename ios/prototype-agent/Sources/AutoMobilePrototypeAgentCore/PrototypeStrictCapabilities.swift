@@ -25,6 +25,7 @@ enum PrototypeStrictCapabilities {
             }
             var own = fields
             PrototypeRepeat.bindTextFields(&own) { text in textBinding(text); return text }
+            if fields["onAppear"] != nil { need("timers") }
             let type = fields["type"]?.stringValue ?? ""
             let types = [
                 "startTimer": "timers",

@@ -243,7 +243,9 @@ extension PrototypeRepeat {
         throws
     {
         guard case let .object(fields) = node else { return }
-        try validateEmitActions(fields["onTap"], path: "\(path).onTap", scope: scope)
+        for name in ["onTap", "onAppear"] {
+            try validateEmitActions(fields[name], path: "\(path).\(name)", scope: scope)
+        }
         // Existing composite-part action locations, matching Instance.bindComponentActions.
         for part in ["navigationIcon", "confirm", "dismiss", "action"] {
             if case let .object(member)? = fields[part] {
@@ -435,7 +437,7 @@ struct PrototypeRepeatInstance {
 
     /// A part's actions; its label was already mapped by `bindTextFields`.
     private func bindPartFields(_ part: inout [String: JSONValue]) {
-        for key in ["onTap", "onLongPress", "onDoubleTap"] {
+        for key in ["onTap", "onLongPress", "onDoubleTap", "onAppear"] {
             if case let .array(actions)? = part[key] { part[key] = .array(actions.map(bindAction)) }
         }
     }

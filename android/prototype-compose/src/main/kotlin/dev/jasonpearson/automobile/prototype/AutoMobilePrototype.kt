@@ -350,6 +350,7 @@ private class EmbeddedOwner(
         newRequestId = config.environment.requestId,
       )
     config.environment.host?.onRuntime?.invoke(runtime)
+    runtime.shown()
     session =
       EmbeddedSession(
         runtime,

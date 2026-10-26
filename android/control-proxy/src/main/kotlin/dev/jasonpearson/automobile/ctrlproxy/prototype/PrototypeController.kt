@@ -646,6 +646,8 @@ class PrototypeController(
       }
     if (blocked) runtime.pauseTimers()
     armIdle(runtime)
+    runtime.shown(preservingState = preservePages)
+    syncAfterChange(runtime)
     // The accepted show succeeds even if a sibling host cannot detach. Its closed runtime stays
     // addressable only for host cleanup retries, never as a live inspected surface.
     forEachSurface(retiring) { retire(it) }

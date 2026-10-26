@@ -97,11 +97,13 @@ Hypotheses to test, each with a basis and an expected direction, none measured h
 ## 5. Confirmed without a device, and filed
 
 1. **Effective RAM differs from the configured RAM** (#15475). `config.ini` says 2G; the emulator
-   gave 2.5 GiB on API 35-36 and 4 GiB on API 37. Nothing in `src/` reads `hardware-qemu.ini`, so
-   receipts and `memoryMb` validation describe a value that does not run.
+   gave 2.5 GiB on API 35-36 and 4 GiB on API 37. `AvdConfig.effectiveRamMb` and `effectiveCpuCores` now
+   carry the launch-time values from `hardware-qemu.ini`, and the boot gate raises its per-emulator
+   estimate to the AVD's effective RAM (never lowering it).
 2. **The boot gate's CPU budget disagrees with the AVD vCPU count** (#15476). Two cores per device
-   against four vCPUs. Needs a device run to choose between creating AVDs with two vCPUs and
-   budgeting four.
+   against four vCPUs. The gate can now budget the AVD's own vCPUs under
+   `AUTOMOBILE_ANDROID_BOOT_BUDGET_VCPUS=configured`; the default stays two cores. A device run has to
+   choose between that and creating AVDs with two vCPUs, which changes guest speed.
 3. **Quick-boot snapshots accumulate and are written at every exit** (#15477). Broker-provisioned emulators now launch with
    `-no-snapshot-save` when the host config sets no `androidResetMode` (released emulators are destroyed);
    `snapshot` and `keep-booted` hosts, user AVDs and `startDevice` keep the default. 74.6 GiB of

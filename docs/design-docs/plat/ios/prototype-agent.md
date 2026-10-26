@@ -356,6 +356,12 @@ transition as a real tap, including on part identifiers.
   `prototype_icon_set_material_v1` nor `prototype_icon_variant_v1` (Material parity is a future option).
 - **Snackbar** `durationMs` closes by writing `!equals` to its `openWhen` key (plain timer behind
   injectable `PrototypeClock`).
+- **Stack transitions** have a shared contract: stack `transition` defaults to `platform`, with
+  `slide`, `fade` and `none` alternatives and optional push/replace overrides. Explicit values
+  require `prototype_stack_transitions_v1`; the agent validates them but does not advertise the
+  capability yet. The renderer contract honours `motion: "none"` and Reduce Motion; interactive
+  edge-swipe pop scrubs the slide and cancels when released early, while overlay windows use a
+  non-seekable animation. Wrap a stack in a box to animate its own visibility.
 - **Motion** matches Android (#10442, #10439): `visibleWhen` nodes fade/expand, `transition`
   (`none`, `fade`, `expand`, `slide`) picks the animation, pager changes animate. `box`/`row`/`column`
   animate size (`animateContentSize`) when a direct child appears, disappears or resolves a new

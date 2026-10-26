@@ -350,7 +350,7 @@ Every node has required `type`. All other common properties are optional:
 | `style`              | Strict style object below.                                                                                                                   |
 | `styleWhen`          | Conditional style overrides (see Conditional style below). One to 8 entries.                                                                 |
 | `visibleWhen`        | Condition (see Conditions below). A false condition, or a missing key, means hidden.                                                         |
-| `transition`         | Optional `none`, `fade`, `expand` or `slide`: the `visibleWhen` enter/exit. See Motion.                                                      |
+| `transition`         | Except on stacks (see Stack transitions), optional `none`, `fade`, `expand` or `slide`: the `visibleWhen` enter/exit. See Motion.            |
 | `anchor`             | Bounds or app-element anchor below.                                                                                                          |
 | `safeAreaPadding`    | Explicit inset selection below.                                                                                                              |
 
@@ -736,7 +736,7 @@ appear, disappear or change (`animateContentSize`), gated by the same
 motion-enabled check, so a sibling slides into the freed space instead of
 jumping.
 
-A node's optional `transition` picks the `visibleWhen` enter/exit: `none`
+A non-stack node's optional `transition` picks the `visibleWhen` enter/exit: `none`
 (instant), `fade`, `expand` (grow/shrink) or `slide` (vertical slide with a
 fade). Absent keeps the default fade + expand. It has no effect on nodes
 without `visibleWhen`, or when motion is off.
@@ -758,6 +758,26 @@ intentional infinite animations (today only the shimmer) and is ignored by hosts
 `observe(waitFor: stable)` and the launcher/SystemUI quiet-tree wait do not settle
 while `active` is positive and stay bounded by their usual timeout. The count is
 zero after a single frame under `motion: "none"` or animator scale 0.
+
+
+### Stack transitions
+
+`prototype_stack_transitions_v1` gates every explicit stack `transition` and push/replace
+`transition` override. Omission means `platform`; pop/popToRoot have no override. The contract
+is validated by both agents; neither advertises the capability until its renderer implements it.
+
+| Value      | Platform behaviour                         |
+| ---------- | ------------------------------------------ |
+| `platform` | Native navigation animation (default).     |
+| `slide`    | Directional screen slide, reversed on pop. |
+| `fade`     | Screen crossfade.                          |
+| `none`     | Instant screen change.                     |
+
+The renderer contract honours `motion: "none"`, animator duration scale 0 and system reduced
+motion. Android predictive back drives animation progress on API 34+, with a non-interactive
+fallback below. iOS interactive edge-swipe pop scrubs the slide and cancels when released early;
+an overlay window uses a non-seekable animation. A stack's transition replaces its visibility
+transition: wrap it in a box to animate the stack's own `visibleWhen` enter/exit.
 
 ### Motion v2 (#14208, `prototype_motion_v2`, not device-verified)
 

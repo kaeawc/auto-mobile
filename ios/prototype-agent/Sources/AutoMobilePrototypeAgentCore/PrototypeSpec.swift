@@ -501,6 +501,7 @@ struct PrototypeAction: Decodable, Sendable {
     let page: JSONValue?
     let stack: String?
     let screen: String?
+    let transition: PrototypeStackTransition?
     /// `setData`/`appendData`/`removeData`: `/data/<pointer>`, a whole `{index}` segment bound per
     /// repeat row at expansion (#12519).
     let path: String?
@@ -532,7 +533,7 @@ struct PrototypeAction: Decodable, Sendable {
     let onError: [PrototypeAction]?
 
     private enum CodingKeys: String, CodingKey {
-        case type, name, payload, context, pager, page, stack, screen, path, key, value
+        case type, name, payload, context, pager, page, stack, screen, transition, path, key, value
         case id, afterMs, everyMs, maxRuns, actions
         case incrementAmount = "by"
         case requireValid, method, url, headers, query, body, into, statusKey, via, timeoutMs, onSuccess, onError
@@ -546,7 +547,7 @@ struct PrototypeAction: Decodable, Sendable {
         into: String? = nil, statusKey: String? = nil, via: String? = nil, timeoutMs: Double? = nil,
         onSuccess: [PrototypeAction]? = nil, onError: [PrototypeAction]? = nil,
         id: String? = nil, afterMs: Int? = nil, everyMs: Int? = nil, maxRuns: Int? = nil,
-        actions: [PrototypeAction]? = nil
+        actions: [PrototypeAction]? = nil, transition: PrototypeStackTransition? = nil
     ) {
         self.id = id
         self.afterMs = afterMs
@@ -561,6 +562,7 @@ struct PrototypeAction: Decodable, Sendable {
         self.page = page
         self.stack = stack
         self.screen = screen
+        self.transition = transition
         self.path = path
         self.key = key
         self.value = value

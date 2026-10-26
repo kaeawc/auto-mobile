@@ -80,7 +80,7 @@ metro = "1.4.5"
 conveyor = "2.0"
 # Build-time license collection for ProtoViewer's in-app licenses screen (#14158). Gradle plugin only:
 # no runtime library, the app renders the generated JSON itself.
-aboutlibraries = "15.2.0"
+aboutlibraries = "15.3.0"
 # Conveyor's in-app update control API (SoftwareUpdateController). Versioned independently of the
 # `conveyor` Gradle plugin above — this is the runtime library the desktop app links against.
 conveyor-control = "1.1"

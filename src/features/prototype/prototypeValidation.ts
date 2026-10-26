@@ -772,6 +772,17 @@ function platformArgumentError(
   return walk(value, rule, path, context, 0);
 }
 
+/** The host-owned vocabulary: the reserved `automobile-` testTag namespace, then the platform rules. */
+function hostVocabularyError(
+  value: unknown,
+  context: Context,
+): PrototypeValidationError | undefined {
+  return (
+    prototypeReservedTestTagError(context.nodes) ??
+    prototypePlatformError(value, context.actions, platformArgumentError)
+  );
+}
+
 /** Action, container and state checks, after the layout checks pass. */
 function behaviourErrors(
   value: unknown,
@@ -785,8 +796,7 @@ function behaviourErrors(
     prototypeLoadingStatesError(context.nodes) ??
     prototypeMotionV2Error(context.nodes) ??
     prototypeChoreographyError(context.nodes) ??
-    prototypeReservedTestTagError(context.nodes) ??
-    prototypePlatformError(value, context.actions, platformArgumentError) ??
+    hostVocabularyError(value, context) ??
     prototypeChartError(context.nodes, data.data) ??
     prototypeLinkifyError(value) ??
     prototypeChatScrollError(context.nodes, context.actions) ??

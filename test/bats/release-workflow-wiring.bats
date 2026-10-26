@@ -912,6 +912,9 @@ wiring_requires_yq() {
 @test "capability guard passes for the pinned release recorded in the manifest (#15347)" {
   run bun scripts/release/check-artifact-capabilities.ts
   [ "$status" -eq 0 ]
+  # Only gates that existed when the release was cut are held against it; later ones wait for the
+  # next release and the --candidate check above enforces them.
+  [[ "$output" == *"gated on when it was cut"* ]]
 }
 
 @test "prepare-release blocks promotion on the ProtoViewer artifact policy gate (#14154)" {

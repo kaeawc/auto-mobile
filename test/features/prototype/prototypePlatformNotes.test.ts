@@ -144,7 +144,6 @@ describe("prototype platform notes", () => {
       "alarm_add",
     ]);
     const exactly = specFor({
-      ...many.root,
       type: "column",
       children: (many.root as Extract<PrototypeNode, { type: "column" }>).children.slice(0, 20),
     });

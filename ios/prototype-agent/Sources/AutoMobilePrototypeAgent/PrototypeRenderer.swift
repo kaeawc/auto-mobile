@@ -230,11 +230,14 @@
             }
         }
 
-        /// `visibleWhen` appears and disappears with the node's `transition`; instant when motion is
+        /// `visibleWhen` uses the node's `transition` (the default for stacks); instant when motion is
         /// off (spec `motion: "none"` or the system's Reduce Motion), as on Android (#10442).
         private var transition: PrototypeVisibilityTransition {
             let motion = PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
-            return node.visibleWhen == nil ? .instant : motion.visibility(transition: node.transition)
+            return node.visibleWhen == nil ? .instant : motion.visibility(
+                transition: node.transition,
+                nodeType: node.type
+            )
         }
 
         /// Whether anything is drawn for the node in the slot this view occupies. Unfiltered parents
@@ -351,14 +354,7 @@
                     }
                 }
             case "stack":
-                if let screen = node.currentScreen(stacks: model.stacks), let top = node.screens?[screen] {
-                    // Only the top view exists: inactive screens are absent from the native
-                    // accessibility tree as well as from rendering. Navigation is instant.
-                    NodeView(node: top, model: model)
-                        .id(screen)
-                        .transition(.identity)
-                        .animation(nil, value: screen)
-                }
+                PrototypeStackView(node: node, model: model)
             case "pager":
                 PagerView(node: node, model: model)
             case "tabBar", "bottomNav":

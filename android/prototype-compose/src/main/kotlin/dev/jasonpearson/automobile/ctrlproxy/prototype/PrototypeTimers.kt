@@ -109,13 +109,7 @@ internal class PrototypeTimers(
         }
         cursor = timer.at
         // Keep the identity registered during the fire: self-cancel and replacement win.
-        try {
-          fire(timer.action.actions)
-        } catch (error: CancellationException) {
-          throw error
-        } catch (error: Exception) {
-          warn(error)
-        }
+        fireOnce(timer)
         fired++
         timer.runs++
         if (ledger[timer.action.id] !== timer) continue
@@ -131,6 +125,18 @@ internal class PrototypeTimers(
       cursor = null
       processing = false
       schedule()
+    }
+  }
+
+  /**
+   * A failing fire is reported and counted; cancellation and non-Exception throwables propagate.
+   */
+  private suspend fun fireOnce(timer: Timer) {
+    when (val failure = runCatching { fire(timer.action.actions) }.exceptionOrNull()) {
+      null -> Unit
+      is CancellationException -> throw failure
+      is Exception -> warn(failure)
+      else -> throw failure
     }
   }
 

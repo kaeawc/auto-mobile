@@ -444,6 +444,7 @@ internal fun Modifier.boundedScrollViewport(vertical: Boolean): Modifier =
   }
 
 @Composable
+@Suppress("LongParameterList") // The shared render entry point; callers pass only what they need.
 internal fun RenderPrototypeNode(
   node: PrototypeRenderNode,
   interact: (PrototypeInteraction) -> Unit,
@@ -457,15 +458,7 @@ internal fun RenderPrototypeNode(
     CaptureAnchorLocals(node.identity)
     return
   }
-  if (
-    node.role != "stack" &&
-      node.source?.visibleWhen != null &&
-      when (node.source.transition?.type) {
-        "fade",
-        "none" -> true
-        else -> false
-      }
-  ) {
+  if (usesPlainVisibility(node)) {
     RenderPrototypeVisibility(node, interact, parentModifier, weightAxis, windowRoot)
     return
   }
@@ -497,6 +490,13 @@ internal fun RenderPrototypeNode(
   } else if (node.visible) {
     RenderPrototypeNodeContent(node, interact, parentModifier, weightAxis, windowRoot)
   }
+}
+
+private fun usesPlainVisibility(node: PrototypeRenderNode): Boolean {
+  val type = node.source?.transition?.type
+  return node.role != "stack" &&
+    node.source?.visibleWhen != null &&
+    (type == "fade" || type == "none")
 }
 
 @Composable

@@ -43,6 +43,14 @@ class Simctl implements IosProtoViewerSimctl {
   failure?: Error;
   onOpen: () => void = () => {};
   argv: readonly string[] = [];
+  calls: string[] = [];
+  launchFailure?: Error;
+  async launch(udid: string, _timeoutMs: number) {
+    this.calls.push(`launch:${udid}`);
+    if (this.launchFailure) {
+      throw this.launchFailure;
+    }
+  }
   async installed(_udid: string) {
     return this.present;
   }
@@ -51,6 +59,7 @@ class Simctl implements IosProtoViewerSimctl {
   }
   async openurl(args: readonly string[]) {
     this.argv = args;
+    this.calls.push("openurl");
     this.onOpen();
     if (this.failure) {
       throw this.failure;
@@ -183,4 +192,16 @@ test("iOS delivery and polling share one timeout budget", async () => {
   );
   // Not 4000 (delivery) plus another full 5000.
   expect(timer.now() - started).toBeLessThan(7000);
+});
+
+test("iOS brings ProtoViewer to the foreground before openurl so no Open-in alert appears (#15435)", async () => {
+  const { viewer, simctl } = setup();
+  await viewer.importBundle(new Uint8Array([1]), undefined, 1000);
+  expect(simctl.calls).toEqual([`launch:${UDID}`, "openurl"]);
+});
+test("iOS still tries openurl when the foreground launch fails (#15435)", async () => {
+  const { viewer, simctl } = setup();
+  simctl.launchFailure = new Error("launch failed");
+  expect((await viewer.importBundle(new Uint8Array([1]), undefined, 1000)).status).toBe("imported");
+  expect(simctl.calls).toEqual([`launch:${UDID}`, "openurl"]);
 });

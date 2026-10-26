@@ -1,9 +1,11 @@
+import type { SessionDeviceRebound } from "../sessionDeviceReboundBroadcast";
 import { serializeControlFrame } from "../socketServer/controlRoutes";
 import {
   applyResourceSubscription,
   broadcastListChanged as fanOutListChanged,
   broadcastResourceUpdated as fanOutResourceUpdated,
   broadcastSessionReleased as fanOutSessionReleased,
+  broadcastSessionDeviceRebound as fanOutSessionDeviceRebound,
   pushProgressNotification as fanOutProgress,
   type NotificationTransport,
 } from "../socketServer/notificationFanOut";
@@ -543,6 +545,15 @@ export class SocketTransport {
    * {@link broadcastListChanged}. Note `sessionId` here is the socket-client id,
    * distinct from the released daemon session carried in the frame.
    */
+  broadcastSessionDeviceRebound(event: SessionDeviceRebound): void {
+    fanOutSessionDeviceRebound(
+      this.state.notificationSubscribers,
+      this.notificationTransport,
+      this.state.pendingSessionReleaseWrites,
+      event,
+    );
+  }
+
   broadcastSessionReleased(
     releasedSessionId: string,
     reason?: string,

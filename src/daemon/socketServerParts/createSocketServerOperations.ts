@@ -56,6 +56,7 @@ function bindSocketTransport(
     broadcastListChanged: target.broadcastListChanged.bind(target),
     broadcastResourceUpdated: target.broadcastResourceUpdated.bind(target),
     handleResourceSubscription: target.handleResourceSubscription.bind(target),
+    broadcastSessionDeviceRebound: target.broadcastSessionDeviceRebound.bind(target),
     broadcastSessionReleased: target.broadcastSessionReleased.bind(target),
     pushProgressNotification: target.pushProgressNotification.bind(target),
     writeFrame: target.writeFrame.bind(target),

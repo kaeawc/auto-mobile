@@ -895,6 +895,10 @@ describe.each([
         expect(structuredClone(sessions.getSession(sessionUuid!))).toEqual({
           ...before!,
           cacheData: { ...before!.cacheData, keepScreenAwake },
+          // A rebind undone after it published moved the session out and back: two serial changes.
+          ...(point === "before the bind"
+            ? {}
+            : { deviceGeneration: 2, previousDeviceId: OTHER_SIM_UDID }),
         });
         expect(released).toEqual([]);
         expect(await persistence.getSession!(sessionUuid!)).toMatchObject({

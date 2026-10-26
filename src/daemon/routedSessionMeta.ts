@@ -1,3 +1,5 @@
+import type { sessionDeviceBinding } from "./sessionDeviceBinding";
+
 /**
  * The device session a daemon `tools/call` was routed to and admitted under (#10974).
  *
@@ -18,13 +20,24 @@ export const ROUTED_SESSION_META_KEY = "automobile/routedSessionUuid";
  */
 export const FOREIGN_OWNED_SESSION_META_KEY = "automobile/foreignOwnedSessionUuid";
 
-function withSessionMeta<T>(result: T, key: string, sessionUuid: string | undefined): T {
-  if (!sessionUuid || result === null || typeof result !== "object") {
+export const SESSION_DEVICE_META_KEY = "automobile/sessionDevice";
+
+export function withSessionDeviceMeta<T>(
+  result: T,
+  binding: ReturnType<typeof sessionDeviceBinding>,
+): T {
+  return binding.generation > 0
+    ? withSessionMeta(result, SESSION_DEVICE_META_KEY, binding)
+    : result;
+}
+
+function withSessionMeta<T>(result: T, key: string, value: unknown): T {
+  if (!value || result === null || typeof result !== "object") {
     return result;
   }
   const existing = (result as { _meta?: unknown })._meta;
   const meta = existing !== null && typeof existing === "object" ? existing : {};
-  return { ...result, _meta: { ...meta, [key]: sessionUuid } };
+  return { ...result, _meta: { ...meta, [key]: value } };
 }
 
 function sessionMetaFromResult(result: unknown, key: string): string | undefined {

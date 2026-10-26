@@ -136,6 +136,30 @@ private data class EmbeddedInput(
 // The progress flow is collected inside collectStackBackProgress, which lint cannot see through.
 @SuppressLint("NoCollectCallFound")
 @Composable
+private fun EmbeddedBackHandling(
+  runtime: PrototypeRuntime,
+  seek: PrototypeBackSeek,
+  enabled: Boolean,
+  dispatch: suspend (PrototypeInteraction) -> Unit,
+  scope: CoroutineScope,
+) {
+  // Keep the predictive handler alive through commit delivery and settling at the root.
+  if (runtime.hasPoppableStack() || seek.preview != null) {
+    PredictiveBackHandler(enabled = enabled) { events ->
+      val preview = runtime.backPreview()
+      if (preview != null) {
+        seek.start(preview)
+        val committed = collectStackBackProgress(events.map { it.progress }) { seek.progress = it }
+        if (committed) dispatch(PrototypeInteraction.Back)
+        seek.result = committed
+      }
+    }
+  } else {
+    BackHandler(enabled = enabled) { scope.launch { dispatch(PrototypeInteraction.Back) } }
+  }
+}
+
+@Composable
 private fun EmbeddedPrototype(
   input: EmbeddedInput,
   callbacks: EmbeddedCallbacks,
@@ -173,25 +197,7 @@ private fun EmbeddedPrototype(
       if (host == null) interactions.withLock { session.runtime.handle(it) }
       else host.onInteraction(it, session.runtime)
     }
-    if (handleBack) {
-      // Keep the predictive handler alive through commit delivery and settling at the root.
-      if (session.runtime.hasPoppableStack() || seek.preview != null) {
-        PredictiveBackHandler(enabled = active.active) { events ->
-          val preview = session.runtime.backPreview()
-          if (preview != null) {
-            seek.start(preview)
-            val committed =
-              collectStackBackProgress(events.map { it.progress }) { seek.progress = it }
-            if (committed) dispatch(PrototypeInteraction.Back)
-            seek.result = committed
-          }
-        }
-      } else {
-        BackHandler(enabled = active.active) {
-          scope.launch { dispatch(PrototypeInteraction.Back) }
-        }
-      }
-    }
+    if (handleBack) EmbeddedBackHandling(session.runtime, seek, active.active, dispatch, scope)
     CompositionLocalProvider(LocalPrototypeBackSeek provides if (handleBack) seek else null) {
       PrototypeRuntimeContent(session.runtime, session.images, session.fonts, dispatch)
     }

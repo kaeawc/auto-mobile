@@ -1,3 +1,9 @@
+import {
+  kotlinBody,
+  kotlinProperty,
+  swiftProperties,
+  swiftObjectDecoder,
+} from "./prototype-model-members";
 import type { Rule } from "../../src/features/prototype/prototypeBindingValidation";
 import type {
   ModelLanguage,
@@ -51,6 +57,7 @@ export function docLines(doc: string | undefined, language: ModelLanguage): stri
     : ["/**", ...lines.map((line) => ` * ${line}`), " */"];
 }
 export interface RenderContext {
+  kotlinImports: Set<string>;
   definitions: Readonly<Record<string, Rule>>;
   selection: ModelSelection;
   refs: TypeRefs;
@@ -61,6 +68,9 @@ export interface RenderField {
   name: string;
   type: string;
   optional: boolean;
+  doc?: string;
+  defaultValue?: string;
+  validator?: string;
 }
 
 function unsupported(path: string, rule: Rule): never {
@@ -139,6 +149,20 @@ function fieldType(
   visiting: readonly string[],
 ): string {
   switch (rule.kind) {
+    case "json":
+      if (context.language === "kotlin") {
+        context.kotlinImports.add("kotlinx.serialization.json.JsonElement");
+      }
+      return context.language === "kotlin" ? "JsonElement" : "JSONValue";
+    case "scalar":
+      return context.language === "kotlin" ? "PrototypeScalar" : "JSONValue";
+    case "record": {
+      if (!rule.item) {
+        break;
+      }
+      const item = fieldType(rule.item, path, nestedName, context, visiting);
+      return context.language === "kotlin" ? `Map<String, ${item}>` : `[String: ${item}]`;
+    }
     case "number":
       return rule.integer ? "Int" : "Double";
     case "boolean":
@@ -174,6 +198,8 @@ export function renderFields(
   rule: Rule,
   context: RenderContext,
   visiting: readonly string[],
+  options: ModelOptions = {},
+  variant?: string,
 ): RenderField[] {
   const fields = Object.entries(rule.fields ?? {});
   if (!fields.length) {
@@ -183,15 +209,36 @@ export function renderFields(
     if (!field) {
       throw new Error(`Definition ${name}.${fieldName}: unsupported kind missing`);
     }
-    return {
-      name: fieldName,
-      type: fieldType(
+    const key = variant ? `${variant}.${fieldName}` : fieldName;
+    const languageOption = (values: TypeRefs | undefined) =>
+      values?.[key]?.[context.language] ?? values?.[fieldName]?.[context.language];
+    const defaultValue = languageOption(options.fieldDefaults);
+    if (context.language === "swift" && defaultValue !== undefined) {
+      throw new Error(`Definition ${name}.${fieldName}: Swift field defaults are unsupported`);
+    }
+    if (defaultValue !== undefined && (!field.optional || defaultValue.trim() === "null")) {
+      throw new Error(
+        `Definition ${name}.${fieldName}: defaults require an optional field and a non-null value`,
+      );
+    }
+    const type =
+      languageOption(options.fieldTypes) ??
+      fieldType(
         field.rule,
         `${name}.${fieldName}`,
         `${name}${capitalized(fieldName)}`,
         context,
         visiting,
-      ),
+      );
+    if (context.language === "kotlin" && /\bJsonElement\b/.test(type)) {
+      context.kotlinImports.add("kotlinx.serialization.json.JsonElement");
+    }
+    return {
+      name: fieldName,
+      doc: options.fieldDocs?.[key] ?? options.fieldDocs?.[fieldName],
+      defaultValue,
+      validator: languageOption(options.validators),
+      type,
       optional: field.optional,
     };
   });
@@ -200,16 +247,32 @@ export function renderKotlinClass(
   name: string,
   fields: readonly RenderField[],
   suffix = "",
+  options: ModelOptions = {},
 ): string[] {
-  const parameters = fields.map(
-    (field) =>
-      `val ${escapeModelIdentifier(field.name, "kotlin")}: ${field.type}${field.optional ? "? = null" : ""}`,
-  );
+  const parameters = fields.map(kotlinProperty);
+  const body = kotlinBody(fields, options);
   // ktfmt keeps short single-field data classes on one line.
-  if (fields.length === 1 && `data class ${name}(${parameters[0]})${suffix}`.length <= 100) {
-    return [`data class ${name}(${parameters[0]})${suffix}`];
+  if (
+    fields.length === 1 &&
+    !fields[0].doc &&
+    `data class ${name}(${parameters[0]})${suffix}`.length <= 100
+  ) {
+    return [
+      `data class ${name}(${parameters[0]})${suffix}${body.length ? " {" : ""}`,
+      ...body,
+      ...(body.length ? ["}"] : []),
+    ];
   }
-  return [`data class ${name}(`, ...parameters.map((field) => `  ${field},`), `)${suffix}`];
+  return [
+    `data class ${name}(`,
+    ...fields.flatMap((field) => [
+      ...docLines(field.doc, "kotlin").map((line) => `  ${line}`),
+      `  ${kotlinProperty(field)},`,
+    ]),
+    `)${suffix}${body.length ? " {" : ""}`,
+    ...body,
+    ...(body.length ? ["}"] : []),
+  ];
 }
 export function renderObject(
   name: string,
@@ -218,28 +281,29 @@ export function renderObject(
   context: RenderContext,
   visiting: readonly string[],
 ): void {
-  const fields = renderFields(name, rule, context, visiting);
+  const fields = renderFields(name, rule, context, visiting, options);
   const type = modelName(name, options, context.language);
   context.output.push("", ...docLines(options.doc, context.language));
   if (context.language === "kotlin") {
+    const body = kotlinBody(fields, options);
     // Existing scalar model output is deliberately stable, including one-field objects.
     context.output.push(
       "@Serializable",
       `data class ${type}(`,
-      ...fields.map(
-        (field) =>
-          `  val ${escapeModelIdentifier(field.name, "kotlin")}: ${field.type}${field.optional ? "? = null" : ""},`,
-      ),
-      ")",
+      ...fields.flatMap((field) => [
+        ...docLines(field.doc, "kotlin").map((line) => `  ${line}`),
+        `  ${kotlinProperty(field)},`,
+      ]),
+      body.length ? ") {" : ")",
+      ...body,
+      ...(body.length ? ["}"] : []),
     );
   } else {
     const conformances = options.swiftConformances ?? ["Codable", "Equatable", "Sendable"];
     context.output.push(
       `struct ${type}${conformances.length ? `: ${conformances.join(", ")}` : ""} {`,
-      ...fields.map(
-        (field) =>
-          `    let ${escapeModelIdentifier(field.name, "swift")}: ${field.type}${field.optional ? "?" : ""}`,
-      ),
+      ...swiftProperties(fields),
+      ...swiftObjectDecoder(fields, conformances),
       "}",
     );
   }

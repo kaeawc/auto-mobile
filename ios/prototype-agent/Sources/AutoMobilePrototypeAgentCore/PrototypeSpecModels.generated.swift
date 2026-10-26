@@ -79,6 +79,44 @@ enum Placement: Decodable {
     }
 }
 
+enum PrototypeGradient: Decodable, Equatable {
+    case linear(angle: Double, stops: [PrototypeGradientStop])
+    case radial(stops: [PrototypeGradientStop])
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case angle
+        case stops
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try container.decode(String.self, forKey: .type)
+        switch type {
+        case "linear":
+            let angle = try container.decode(Double.self, forKey: .angle)
+            let stops = try container.decode([PrototypeGradientStop].self, forKey: .stops)
+            try PrototypeGradient.validateStops(stops, forKey: .stops, in: container)
+            self = .linear(
+                angle: angle,
+                stops: stops
+            )
+        case "radial":
+            let stops = try container.decode([PrototypeGradientStop].self, forKey: .stops)
+            try PrototypeGradient.validateStops(stops, forKey: .stops, in: container)
+            self = .radial(
+                stops: stops
+            )
+        default:
+            throw DecodingError.dataCorruptedError(
+                forKey: .type,
+                in: container,
+                debugDescription: "Unknown PrototypeGradient type \(type)"
+            )
+        }
+    }
+}
+
 /// The control at the end of a `listItem`: a bound switch or checkbox, or a decorative icon.
 enum PrototypeListItemTrailing: Codable, Equatable, Sendable {
     case `switch`(stateKey: String)
@@ -141,4 +179,11 @@ struct PrototypeGradientStop: Decodable, Equatable {
 struct Border: Decodable {
     let width: Double
     let color: PrototypeModeValue
+}
+
+struct NavItem: Decodable {
+    let label: String
+    let icon: String?
+    /// An uploaded image asset id, or a `{light, dark}` pair of ids (#11218).
+    let image: PrototypeModeValue?
 }

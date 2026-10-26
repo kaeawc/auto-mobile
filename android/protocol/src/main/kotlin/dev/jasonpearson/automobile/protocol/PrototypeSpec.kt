@@ -16,98 +16,6 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
-@Serializable
-data class PrototypeCondition(
-  val key: String? = null,
-  val equals: PrototypeScalar? = null,
-  val notEquals: PrototypeScalar? = null,
-  val gt: Double? = null,
-  val lt: Double? = null,
-  val all: List<PrototypeCondition>? = null,
-  val any: List<PrototypeCondition>? = null,
-  val not: PrototypeCondition? = null,
-  val data: String? = null,
-  /** A `/platform` pointer (#14294); platform state is device-owned and read-only. */
-  val platform: String? = null,
-  val valid: PrototypeValidityKeys? = null,
-  /** With [data]: holds when that value is missing, `[]`, `{}` or `""` (#14207). */
-  val empty: Boolean? = null,
-)
-
-@Serializable
-data class PrototypeBorder(
-  val width: Double,
-  val color: PrototypeModeValue,
-) {
-  constructor(width: Double, color: String) : this(width, PrototypeModeValue.Single(color))
-}
-
-@Serializable
-data class PrototypeGradientStop(
-  val color: PrototypeModeValue,
-  val position: Double? = null,
-) {
-  constructor(
-    color: String,
-    position: Double? = null,
-  ) : this(PrototypeModeValue.Single(color), position)
-}
-
-@Serializable
-data class PrototypeStyle(
-  val width: PrototypeDimension? = null,
-  val height: PrototypeDimension? = null,
-  val weight: Double? = null,
-  val minWidth: Double? = null,
-  val maxWidth: Double? = null,
-  val minHeight: Double? = null,
-  val maxHeight: Double? = null,
-  val padding: PrototypePadding? = null,
-  /** Hex, colour role, or a `{light, dark}` pair of either, as every colour slot (#11218). */
-  val background: PrototypeModeValue? = null,
-  /** A dp number, a Material Shapes token, or per-corner dp radii. */
-  val cornerRadius: PrototypeCornerRadius? = null,
-  val border: PrototypeBorder? = null,
-  val elevation: Double? = null,
-  /** Hex or colour role tinting the `elevation` shadow; absent keeps the platform shadow colour. */
-  val shadowColor: PrototypeModeValue? = null,
-  val gradient: PrototypeGradient? = null,
-  val aspectRatio: Double? = null,
-  /** A dp draw offset; it moves the drawn and touchable node without changing its layout slot. */
-  val offset: PrototypeOffset? = null,
-  val alpha: Double? = null,
-  /** Scale (0.5-1) a tappable node shrinks to while pressed; absent leaves it unscaled. */
-  val pressScale: Double? = null,
-  /** An animated highlight sweep over a loading placeholder's background (#14207). */
-  val shimmer: Boolean? = null,
-  /** A drawn scale (0-4) about the node's centre; absent is 1 (#14208). */
-  val scale: Double? = null,
-  /** A drawn rotation in degrees (-360..360) about the node's centre (#14208). */
-  val rotation: Double? = null,
-  val alignment: String? = null,
-  val arrangement: String? = null,
-  val spacing: Double? = null,
-  val runSpacing: Double? = null,
-  val textSize: Double? = null,
-  val fontWeight: Int? = null,
-  val color: PrototypeModeValue? = null,
-  val textAlign: String? = null,
-  val maxLines: Int? = null,
-  /** Positive sp between baselines. */
-  val lineHeight: Double? = null,
-  /** sp added between letters; negative tightens. */
-  val letterSpacing: Double? = null,
-  /** `none`, `underline`, `lineThrough` or `underlineLineThrough`. */
-  val textDecoration: String? = null,
-  /** `normal` or `italic`. */
-  val fontStyle: String? = null,
-  /** How text past `maxLines` or its width ends: `clip` (default), `ellipsis` or `visible`. */
-  val overflow: String? = null,
-  val fontFamily: PrototypeFontFamily? = null,
-  /** A Material 3 type role (`titleLarge`, ...); explicit size, weight and family still win. */
-  val textStyle: String? = null,
-)
-
 /**
  * A literal list template: the container's children are instantiated once per [items] entry, with
  * `{as.field}` and `{index}` bound per instance. Each item maps field names to scalar values.
@@ -151,20 +59,6 @@ object PrototypeRepeatSerializer :
         ?: json.encodeToJsonElement(value.items)
     return json.encodeToJsonElement(PrototypeRepeatWire(items, value.`as`, value.key))
   }
-}
-
-@Serializable
-data class PrototypeItem(
-  val label: String,
-  val icon: String? = null,
-  /** An uploaded image asset id, or a `{light, dark}` pair of ids (#11218). */
-  val image: PrototypeModeValue? = null,
-) {
-  constructor(
-    label: String,
-    icon: String? = null,
-    image: String,
-  ) : this(label, icon, PrototypeModeValue.Single(image))
 }
 
 @Serializable sealed class PrototypeAction

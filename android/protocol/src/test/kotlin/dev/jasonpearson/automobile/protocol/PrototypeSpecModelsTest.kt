@@ -66,6 +66,7 @@ class PrototypeSpecModelsTest {
           PrototypeGradientStop.serializer(),
           PrototypeCondition.serializer(),
           PrototypeStyle.serializer(),
+          PrototypeItem.serializer(),
           PrototypeAction.serializer(),
         )
       for (serializer in serializers) {
@@ -181,6 +182,111 @@ class PrototypeSpecModelsTest {
     val modes = PrototypeModeValue.Modes("#112233", "#445566")
     assertRoundTrip("border", PrototypeBorder(2.5, "#112233"))
     assertRoundTrip("gradientStop", PrototypeGradientStop(modes, 0.5))
+  }
+
+  @Test
+  fun `generated items retain mode and string constructors`() {
+    assertRoundTrip(
+      "item",
+      PrototypeItem(
+        label = "Home",
+        icon = "home",
+        image = PrototypeModeValue.Modes("home-light", "home-dark"),
+      ),
+    )
+    assertRoundTrip(
+      "itemString",
+      PrototypeItem(label = "Search", icon = "search", image = "search-image"),
+    )
+  }
+
+  @Test
+  fun `generated condition round trips every field and recursive branches`() {
+    val enabled = PrototypeCondition(key = "enabled", equals = PrototypeScalar.BooleanValue(true))
+    // An all-fields wire value exercises serialization; semantic conditions select one branch.
+    assertRoundTrip(
+      "conditionFilled",
+      PrototypeCondition(
+        key = "enabled",
+        equals = PrototypeScalar.BooleanValue(true),
+        notEquals = PrototypeScalar.BooleanValue(false),
+        gt = 1.0,
+        lt = 10.0,
+        empty = false,
+        all = listOf(enabled),
+        any = listOf(enabled),
+        not = PrototypeCondition(key = "enabled", equals = PrototypeScalar.BooleanValue(false)),
+        data = "/items",
+        valid = PrototypeValidityKeys.Multiple(listOf("name", "email")),
+        platform = "/os",
+      ),
+    )
+    assertRoundTrip(
+      "condition",
+      PrototypeCondition(
+        all = listOf(
+          enabled,
+          PrototypeCondition(any = listOf(
+            PrototypeCondition(key = "count", gt = 1.0),
+            PrototypeCondition(key = "count", lt = 10.0),
+          )),
+          PrototypeCondition(not = PrototypeCondition(key = "name", notEquals = PrototypeScalar.Text("hidden"))),
+          PrototypeCondition(data = "/items", empty = true),
+          PrototypeCondition(valid = PrototypeValidityKeys.Multiple(listOf("name", "email"))),
+          PrototypeCondition(platform = "/os", equals = PrototypeScalar.Text("android")),
+        ),
+      ),
+    )
+  }
+
+  @Test
+  fun `generated style round trips every field including nested values`() {
+    val modes = PrototypeModeValue.Modes("#112233", "#445566")
+    assertRoundTrip(
+      "style",
+      PrototypeStyle(
+        width = PrototypeDimension.Dp(240.0),
+        height = PrototypeDimension.Wrap,
+        weight = 1.0,
+        minWidth = 10.0,
+        maxWidth = 300.0,
+        minHeight = 20.0,
+        maxHeight = 400.0,
+        padding = PrototypePadding(top = 1.5, bottom = 2.5, start = 3.5, end = 4.5),
+        background = PrototypeModeValue.Single("#112233"),
+        cornerRadius = PrototypeCornerRadius.Corners(topStart = 1.0, topEnd = 2.0, bottomStart = 3.0, bottomEnd = 4.0),
+        border = PrototypeBorder(width = 2.5, color = "#112233"),
+        elevation = 2.0,
+        shadowColor = modes,
+        gradient = PrototypeLinearGradient(angle = 45.0, stops = listOf(
+          PrototypeGradientStop(color = "#112233", position = 0.0),
+          PrototypeGradientStop(color = modes, position = 1.0),
+        )),
+        aspectRatio = 1.5,
+        offset = PrototypeOffset(x = -12.5, y = 24.25),
+        alpha = 0.8,
+        pressScale = 0.9,
+        shimmer = true,
+        alignment = "center",
+        arrangement = "spaceBetween",
+        spacing = 4.0,
+        runSpacing = 5.0,
+        textSize = 16.0,
+        fontWeight = 500,
+        color = PrototypeModeValue.Single("#112233"),
+        textAlign = "start",
+        maxLines = 2,
+        lineHeight = 22.0,
+        letterSpacing = 0.5,
+        textDecoration = "underline",
+        fontStyle = "italic",
+        overflow = "ellipsis",
+        fontFamily = PrototypeFontFamily.Asset("body-font"),
+        textStyle = "bodyLarge",
+        scale = 1.2,
+        rotation = 15.0,
+      ),
+    )
   }
 
   private inline fun <reified T> assertRoundTrip(name: String, expected: T) {

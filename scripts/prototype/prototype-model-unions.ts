@@ -1,3 +1,4 @@
+import { swiftDecodeLocals } from "./prototype-model-members";
 import type { Rule } from "../../src/features/prototype/prototypeBindingValidation";
 import type { ModelOptions } from "./generate-prototype-spec-models";
 import {
@@ -55,9 +56,14 @@ export function renderUnion(
     }
     return {
       name: variant,
-      fields: renderFields(`${name}${capitalized(variant)}`, { kind: "object", fields }, context, [
-        name,
-      ]),
+      fields: renderFields(
+        `${name}${capitalized(variant)}`,
+        { kind: "object", fields },
+        context,
+        [name],
+        options,
+        variant,
+      ),
     };
   });
   const type = modelName(name, options, context.language);
@@ -73,7 +79,7 @@ export function renderUnion(
         ...docLines(options.variantDocs?.[variant.name], "kotlin"),
         `@SerialName("${variant.name}")`,
         "@Serializable",
-        ...renderKotlinClass(variantType, variant.fields, ` : ${type}()`),
+        ...renderKotlinClass(variantType, variant.fields, ` : ${type}()`, options),
       );
     }
   } else {
@@ -97,11 +103,19 @@ function renderSwiftUnion(
       ...docLines(options.variantDocs?.[variant.name], "swift").map((line) => `    ${line}`),
     );
     output.push(
+      ...variant.fields.flatMap((field) =>
+        docLines(field.doc, "swift").map((line) => `    ${line}`),
+      ),
+    );
+    output.push(
       `    case ${id(variant.name)}(${variant.fields.map((field) => `${argument(field.name)}: ${field.type}${field.optional ? "?" : ""}`).join(", ")})`,
     );
   }
   const decodes = conformances.includes("Decodable") || conformances.includes("Codable");
   const encodes = conformances.includes("Encodable") || conformances.includes("Codable");
+  if (!decodes && variants.some((variant) => variant.fields.some((field) => field.validator))) {
+    throw new Error("Swift validators require a Decodable conformance");
+  }
   if (decodes || encodes) {
     const keys = [
       ...new Set([
@@ -133,17 +147,27 @@ function renderDecoder(type: string, tag: string, variants: Variant[], output: s
     "        switch type {",
   );
   for (const variant of variants) {
-    output.push(
-      `        case "${variant.name}":`,
-      `            self = try .${member(variant.name)}(`,
-    );
-    output.push(
-      ...variant.fields.map(
-        (field, index) =>
-          `                ${argument(field.name)}: container.${field.optional ? "decodeIfPresent" : "decode"}(${field.type}.self, forKey: .${member(field.name)})${index < variant.fields.length - 1 ? "," : ""}`,
-      ),
-    );
-    output.push("            )");
+    output.push(`        case "${variant.name}":`);
+    if (variant.fields.some((field) => field.validator)) {
+      output.push(...swiftDecodeLocals(variant.fields, "            "));
+      output.push(
+        `            self = .${member(variant.name)}(`,
+        ...variant.fields.map(
+          (field, index) =>
+            `                ${argument(field.name)}: ${id(field.name)}${index < variant.fields.length - 1 ? "," : ""}`,
+        ),
+        "            )",
+      );
+    } else {
+      output.push(
+        `            self = try .${member(variant.name)}(`,
+        ...variant.fields.map(
+          (field, index) =>
+            `                ${argument(field.name)}: container.${field.optional ? "decodeIfPresent" : "decode"}(${field.type}.self, forKey: .${member(field.name)})${index < variant.fields.length - 1 ? "," : ""}`,
+        ),
+        "            )",
+      );
+    }
   }
   output.push(
     "        default:",

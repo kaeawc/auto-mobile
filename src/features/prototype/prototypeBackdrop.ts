@@ -10,8 +10,8 @@ import { record } from "./prototypeTemplate";
  *   other platform draws the fallback for it.
  * - `blur` is a whole dp radius, 0 to {@link MAX_PROTOTYPE_BACKDROP_BLUR_DP}; absent means the
  *   material's own radius.
- * - `tint` is a colour value (hex, role or `{light, dark}`) laid over the blur. It is the fallback
- *   colour too.
+ * - `tint` is one colour (a hex or a role, no `{light, dark}` pair, so no theme-modes dependency)
+ *   laid over the blur. It is the fallback colour too.
  * - Where blur is unavailable (Android below API 31, cross-window blur disabled, an app layer or
  *   system layer that cannot blur, iOS below the material's minimum) the device draws a solid dim
  *   (`tint` at 85% alpha, else black at 50%), never a silent no-op, and reports
@@ -51,14 +51,15 @@ export function prototypeBackdropUnsupportedMessage(
   return `The ${device} does not advertise ${PROTOTYPE_BACKDROP_CAPABILITY}, so it would ignore ${fields[0]} and draw a plain window. Nothing was shown. ${update}, or remove window.backdrop (a scrim colour on the placement still dims what is behind).`;
 }
 
+/** The device-reported outcome from a raw reply field, dropping anything but the two values. */
+export function parsePrototypeBackdrop(value: unknown): { backdrop?: PrototypeBackdropOutcome } {
+  return value === "blur" || value === "fallback" ? { backdrop: value } : {};
+}
+
 /** The outcome a landed show reported; absent for any other action or a device that omits it. */
 export function shownBackdrop(
   action: "show" | "dismiss",
   result: PrototypeResult,
 ): { backdrop?: PrototypeBackdropOutcome } {
-  return action === "show" &&
-    result.success &&
-    (result.backdrop === "blur" || result.backdrop === "fallback")
-    ? { backdrop: result.backdrop }
-    : {};
+  return action === "show" && result.success ? parsePrototypeBackdrop(result.backdrop) : {};
 }

@@ -376,7 +376,7 @@ effect, a separate issue). The contract is conservative, one closed choice per o
   plain window, so the host refuses the show (a placement `scrim` still dims what is behind).
   The capability is advertised by the renderer slices, not by the contract.
 - A successful show reports `lastResult.backdrop`: `blur`, or `fallback` when the solid dim was
-  drawn. It is absent without `window.backdrop`, on dismiss and on a failed show.
+  drawn. It is absent without `window.backdrop`, on dismiss, on a failed show and for adopted prototypes.
 
 ## Common node properties
 

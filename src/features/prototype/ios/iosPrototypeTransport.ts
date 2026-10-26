@@ -1,3 +1,4 @@
+import { parsePrototypeBackdrop } from "../prototypeBackdrop";
 import { PROTOTYPE_TIMERS_CAPABILITY } from "../../observe/android/ctrlProxyProtocol";
 import { prototypeTimersUnsupportedMessage } from "../prototypeTimers";
 import { prototypeHasStack, prototypeStackUnsupportedMessage } from "../prototypeSpec";
@@ -143,6 +144,7 @@ function toPrototypeResult(result: PrototypeAgentResult): PrototypeResult {
   const appearance = parsePrototypeAppearance(result.appearance);
   return {
     ...(appearance ? { appearance } : {}),
+    ...parsePrototypeBackdrop(result.backdrop),
     ...(prototypeStacksSchema.parse(result.stacks)
       ? { stacks: prototypeStacksSchema.parse(result.stacks) }
       : {}),

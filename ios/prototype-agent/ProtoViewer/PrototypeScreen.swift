@@ -6,6 +6,9 @@ struct PrototypeScreen: View {
     let store: PrototypeLibraryStore
     let entry: PrototypeLibraryEntry
     let networkSwitch: PrototypeLibraryNetworkSwitch
+    /// MCP `open` reports success on the first render and failure on any load error or watchdog expiry.
+    let onLoaded: @MainActor () -> Void
+    let onLoadFailed: @MainActor () -> Void
     @State private var showsSettings = false
     @Environment(\.dismiss) private var dismiss
     @State private var revision = 0
@@ -15,10 +18,16 @@ struct PrototypeScreen: View {
     @State private var storage: URL?
     @State private var error: Error?
     @State private var confirmsReset = false
+    @State private var watchdog = PrototypeRenderWatchdog(clock: SystemPrototypeClock())
 
     private let network: PrototypeNetworkConfiguration
 
-    init(store: PrototypeLibraryStore, entry: PrototypeLibraryEntry, networkSwitch: PrototypeLibraryNetworkSwitch) {
+    init(
+        store: PrototypeLibraryStore, entry: PrototypeLibraryEntry, networkSwitch: PrototypeLibraryNetworkSwitch,
+        onLoaded: @escaping @MainActor () -> Void = {}, onLoadFailed: @escaping @MainActor () -> Void = {}
+    ) {
+        self.onLoaded = onLoaded
+        self.onLoadFailed = onLoadFailed
         self.store = store
         self.entry = entry
         self.networkSwitch = networkSwitch
@@ -68,6 +77,7 @@ struct PrototypeScreen: View {
             Button("Reset and relaunch", role: .destructive) { relaunch(.reset) }
         }
         .onAppear(perform: load)
+        .onDisappear { watchdog.cancel() }
     }
 
     private var prototypeContent: some View {
@@ -79,10 +89,16 @@ struct PrototypeScreen: View {
                     spec: content.spec, assets: content.assets, storage: .directory(storage), network: network,
                     onDismiss: { _ in dismiss() },
                     onLoadError: {
+                        watchdog.cancel()
                         error = $0
                         self.content = nil
+                        onLoadFailed()
                     }
                 )
+                .onFirstRender {
+                    watchdog.cancel()
+                    onLoaded()
+                }
                 .onStopped {
                     PrototypeAssetRegistrar.releaseProcessFonts()
                     rendererActive = false
@@ -97,6 +113,7 @@ struct PrototypeScreen: View {
 
     private func relaunch(_ action: Action) {
         pending = action
+        watchdog.cancel()
         content = nil // Unmount first; the renderer's onStopped callback follows its final flush.
         if !rendererActive { finishRelaunch() }
     }
@@ -109,7 +126,10 @@ struct PrototypeScreen: View {
             revision += 1
             error = nil
             load()
-        } catch { self.error = error }
+        } catch {
+            self.error = error
+            onLoadFailed()
+        }
     }
 
     private func load() {
@@ -120,6 +140,15 @@ struct PrototypeScreen: View {
             storage = directory
             rendererActive = true
             content = loaded
-        } catch { self.error = error }
+            watchdog.start {
+                // No first content within the budget: show the error state; Back and Close stay available.
+                error = PrototypeLibraryFailure(path: entry.label, message: "Prototype did not render in time")
+                content = nil
+                onLoadFailed()
+            }
+        } catch {
+            self.error = error
+            onLoadFailed()
+        }
     }
 }

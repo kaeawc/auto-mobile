@@ -73,11 +73,13 @@ export class AppLinksRestoreRegistry {
     };
     this.entries.set(key, entry);
     entry.device = device;
-    if (owner !== undefined) {
+    if (entry.owner === undefined && owner !== undefined) {
       entry.owner = owner;
     }
-    if (scope.verification && !entry.verification) {
-      entry.verification = new Map(snapshot.verification);
+    if (scope.verification) {
+      // Approve records only writable domains; later actions can add other domains.
+      // Each domain's first original still wins.
+      entry.verification = new Map([...snapshot.verification, ...(entry.verification ?? [])]);
     }
     if (scope.userId !== undefined && !entry.selections.has(scope.userId)) {
       entry.selections.set(scope.userId, [...(snapshot.user?.enabled ?? [])]);

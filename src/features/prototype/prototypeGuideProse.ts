@@ -254,13 +254,16 @@ app icon is already on the home screen. \`listSaved\` on iOS returns bundle ids 
 \`deleteSaved\` also accepts the authored id; it removes the iOS app icon, so
 \`removeIcon:true\` is ignored with a warning.
 
-On Android with the ProtoViewer app installed, \`save\` without \`pin\` or \`icon\` imports
+On Android or an iOS simulator with the ProtoViewer app installed, \`save\` without \`pin\` or \`icon\` imports
 the prototype into the ProtoViewer library instead, and does not need CtrlProxy or
 \`prototype_saved_v1\`. It returns \`viewer\` \`{app, libraryId, label}\`; every save is a new
 library entry, which \`listSaved\` and \`deleteSaved\` do not see. ProtoViewer treats the entry
 as imported: its requests stay off until the user allows network in ProtoViewer, and it is not
 attached to this host (no \`awaitEvent\`, \`patch\` or \`inspect\`). \`{action:"open",id}\` with
-that \`libraryId\` launches it (Android only).
+that \`libraryId\` launches it on Android or an iOS simulator. It needs ProtoViewer installed.
+If ProtoViewer is absent, too old for this route, or its inbox cannot be used, \`save\`
+keeps the platform save path. A timeout after delivery may still have saved the entry; check
+ProtoViewer before retrying.
 
 ## Fullscreen host chrome
 

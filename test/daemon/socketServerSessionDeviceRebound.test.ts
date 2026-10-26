@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { McpBindings } from "../../src/daemon/socketServerParts/McpBindings";
 import { createHarnessServer } from "./helpers/UnixSocketServerHarness";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -47,17 +48,6 @@ function harness(ownedBy: ReadonlySet<string>) {
   return { server, frames };
 }
 
-/** The socket's recorded route, as a routed call leaves it. */
-function bind(server: ReturnType<typeof harness>["server"], socketId: string, sessionUuid: string) {
-  // oxlint-disable-next-line auto-mobile/no-unknown-cast -- the route map is protected runtime state with no test hook
-  const runtime = server as unknown as {
-    runtime: {
-      boundMcpClientKeysBySocketSession: Map<string, { clientKey: string; sessionUuid: string }>;
-    };
-  };
-  runtime.runtime.boundMcpClientKeysBySocketSession.set(socketId, { clientKey: "k", sessionUuid });
-}
-
 const flush = async () => {
   for (let turn = 0; turn < 5; turn++) {
     await Promise.resolve();
@@ -68,9 +58,8 @@ const rebounds = (frames: Map<string, DaemonNotification[]>, id: string) =>
   frames.get(id)!.filter((frame) => frame.method === SESSION_DEVICE_REBOUND_NOTIFICATION_METHOD);
 
 describe("session_device_rebound reaches only sockets that hold the session (#15456)", () => {
-  test("a socket bound by a routed call and the connection that acquired it are told; others are not", async () => {
-    const { server, frames } = harness(new Set(["B:s"]));
-    bind(server, "A", "s");
+  test("connections that own the session are told; a subscriber that does not is not", async () => {
+    const { server, frames } = harness(new Set(["A:s", "B:s"]));
     server.testHooks.transport.broadcastSessionDeviceRebound(EVENT);
     await flush();
     expect(rebounds(frames, "A")).toHaveLength(1);
@@ -88,13 +77,48 @@ describe("session_device_rebound reaches only sockets that hold the session (#15
     expect(rebounds(frames, "C")).toHaveLength(0);
   });
 
-  test("a socket bound to a different session is not told", async () => {
+  test("a session owned by no connection reaches nobody", async () => {
     const { server, frames } = harness(new Set());
-    bind(server, "A", "t");
     server.testHooks.transport.broadcastSessionDeviceRebound(EVENT);
     await flush();
     for (const id of ["A", "B", "C"]) {
       expect(rebounds(frames, id)).toHaveLength(0);
     }
+  });
+});
+
+describe("McpBindings.holdsSession", () => {
+  function bindings(routes: Record<string, string>) {
+    const unexpected = (): never => {
+      throw new Error("Unexpected daemon state access");
+    };
+    const routeMap = new Map(
+      Object.entries(routes).map(([socketId, sessionUuid]) => [
+        socketId,
+        { clientKey: "k", sessionUuid },
+      ]),
+    );
+    return new McpBindings(
+      {
+        clientSockets: new Map(),
+        daemonState: {
+          isInitialized: () => false,
+          getSessionManager: unexpected,
+          getDevicePool: unexpected,
+          getDeviceSessionRegistry: unexpected,
+        },
+        boundMcpClientKeysBySocketSession: routeMap,
+        clearConnectionDevicePin: () => {},
+      },
+      () => ({}) as never,
+    );
+  }
+
+  test("a socket whose last routed call named the session, or its base, holds it", () => {
+    const held = bindings({ A: "s", B: "t" });
+    expect(held.holdsSession("A", "s")).toBe(true);
+    expect(held.holdsSession("A", "s:second")).toBe(true);
+    expect(held.holdsSession("B", "s")).toBe(false);
+    expect(held.holdsSession("C", "s")).toBe(false);
   });
 });

@@ -4,6 +4,12 @@ import {
   prototypeStylePolishV2UnsupportedMessage,
 } from "./prototypeStylePolishV2";
 import { PROTOTYPE_STYLE_POLISH_V2_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+import {
+  prototypeReducedMotionFields,
+  prototypeSharedElementFields,
+  prototypeReducedMotionUnsupportedMessage,
+  prototypeSharedElementUnsupportedMessage,
+} from "./prototypeSharedElement";
 import { prototypeTimerFields, prototypeTimersUnsupportedMessage } from "./prototypeTimers";
 import {
   prototypeStackTransitionFields,
@@ -12,6 +18,8 @@ import {
 import {
   PROTOTYPE_TIMERS_CAPABILITY,
   PROTOTYPE_EFFECTS_CAPABILITY,
+  PROTOTYPE_REDUCED_MOTION_CAPABILITY,
+  PROTOTYPE_SHARED_ELEMENT_CAPABILITY,
   PROTOTYPE_STACK_CAPABILITY,
   PROTOTYPE_STACK_TRANSITIONS_CAPABILITY,
   PROTOTYPE_THEME_MODES_CAPABILITY,
@@ -255,6 +263,16 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_STACK_CAPABILITY,
     fields: prototypeStackFields,
     unsupportedMessage: (_fields, platform) => prototypeStackUnsupportedMessage(platform),
+  },
+  {
+    capability: PROTOTYPE_REDUCED_MOTION_CAPABILITY,
+    fields: prototypeReducedMotionFields,
+    unsupportedMessage: prototypeReducedMotionUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_SHARED_ELEMENT_CAPABILITY,
+    fields: prototypeSharedElementFields,
+    unsupportedMessage: prototypeSharedElementUnsupportedMessage,
   },
   {
     capability: PROTOTYPE_STACK_TRANSITIONS_CAPABILITY,

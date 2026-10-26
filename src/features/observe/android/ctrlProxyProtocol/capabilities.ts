@@ -123,6 +123,9 @@ export const PROTOTYPE_TEXT_FIELD_LEADING_ICON_CAPABILITY = "prototype_text_fiel
 /** Draws pull-to-refresh on a vertical prototype `scroll` bound to a boolean state key. */
 export const PROTOTYPE_REFRESH_CAPABILITY = "prototype_refresh_v1";
 
+export const PROTOTYPE_REDUCED_MOTION_CAPABILITY = "prototype_reduced_motion_v1";
+export const PROTOTYPE_SHARED_ELEMENT_CAPABILITY = "prototype_shared_element_v1";
+
 /** Screen stacks and push/pop/popToRoot/replace actions with screen_changed snapshots. */
 export const PROTOTYPE_STACK_TRANSITIONS_CAPABILITY = "prototype_stack_transitions_v1";
 export const PROTOTYPE_STACK_CAPABILITY = "prototype_stack_v1";

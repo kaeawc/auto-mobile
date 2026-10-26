@@ -75,6 +75,8 @@ class PrototypeStackTransitionRenderTest {
             CompositionLocalProvider(
               LocalPrototypeMotionActivity provides activity,
               LocalPrototypeMotion provides prototypeMotionEnabled(motion, durationScale),
+              LocalPrototypeMotionProfile provides
+                prototypeMotionProfile(motion, durationScale, 1f),
               LocalPrototypeStackRuntime provides runtime,
               LocalPrototypeStackSnapshot provides snapshot,
             ) {
@@ -310,6 +312,17 @@ class PrototypeStackTransitionRenderTest {
     assertEquals(1, count("detail"))
     settle()
     assertEquals(0, count("detail"))
+  }
+
+  @Test
+  fun `reduced stack crossfades without spatial movement`() {
+    val runtime = show("reduced")
+    act(runtime, PrototypePushAction("nav", "detail"))
+    val mid = compose.onNodeWithTag("detail").fetchSemanticsNode().boundsInRoot
+    assertTrue(runtime.motionActivity.snapshot().active > 0)
+    settle()
+    assertEquals(mid, compose.onNodeWithTag("detail").fetchSemanticsNode().boundsInRoot)
+    assertEquals(0, runtime.motionActivity.snapshot().active)
   }
 
   @Test

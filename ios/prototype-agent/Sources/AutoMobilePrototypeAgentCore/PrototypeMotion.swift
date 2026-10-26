@@ -28,20 +28,37 @@ enum PrototypeVisibilityTransition: Equatable {
     case slide
 }
 
-/// Android's prototype motion decision (#10442), device-free. Motion is on unless the spec sets
-/// `motion: "none"` or the system reduces motion (`UIAccessibility.isReduceMotionEnabled`).
+enum PrototypeMotionProfile: Equatable {
+    case full, reduced, off
+}
+
+/// The spec can disable all animation; system Reduce Motion preserves fades and colors.
 struct PrototypeMotion: Equatable {
-    let enabled: Bool
+    let profile: PrototypeMotionProfile
+    var enabled: Bool { profile != .off }
+    var spatial: Bool { profile == .full }
+    var fadeOnly: Bool { profile == .reduced }
+    var fadeDuration: Double? { enabled ? 0.25 : nil }
 
     init(specMotion: String?, reduceMotion: Bool) {
-        enabled = specMotion != "none" && !reduceMotion
+        profile = specMotion == "none" ? .off : (specMotion == "reduced" || reduceMotion ? .reduced : .full)
     }
 
     /// Nodes without `visibleWhen` have nothing to animate, so callers pass the transition only for
     /// those that do. A stack's transition controls navigation only, so visibility uses the default.
-    func visibility(transition: String?, nodeType: String? = nil) -> PrototypeVisibilityTransition {
+    /// A `shared` node (one with a `sharedKey`) crossfades even under `transition: "none"`, as on Android.
+    func visibility(
+        transition: String?,
+        nodeType: String? = nil,
+        shared: Bool = false
+    )
+        -> PrototypeVisibilityTransition
+    {
         guard enabled else { return .instant }
-        switch nodeType == "stack" ? nil : transition {
+        let transition = nodeType == "stack" ? nil : transition
+        if transition == "none" { return shared ? .fade : .instant }
+        if fadeOnly { return .fade }
+        switch transition {
         case "none": return .instant
         case "fade": return .fade
         case "expand": return .expand
@@ -56,15 +73,15 @@ extension PrototypeMotion {
     /// (Android's `animateContentSize`); nil is instant, so settled screenshots never see an
     /// in-flight size when motion is off.
     var containerSizeDuration: Double? {
-        enabled ? 0.25 : nil
+        spatial ? 0.25 : nil
     }
 }
 
 extension PrototypeMotion {
     /// Seconds the press-scale feedback (`pressScale`) springs for; nil snaps instantly under spec
-    /// `motion: "none"` or Reduce Motion, as every other animation does (#10885).
+    /// `motion: "none"` or the reduced profile (#10885).
     var pressScaleDuration: Double? {
-        enabled ? 0.2 : nil
+        spatial ? 0.2 : nil
     }
 }
 

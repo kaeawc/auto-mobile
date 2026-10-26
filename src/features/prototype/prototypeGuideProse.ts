@@ -28,7 +28,7 @@ fling) runs the swiped side's first entry and closes the row. Only one row is op
 tap on an open row closes it instead of running its \`onTap\`. Revealed buttons get the test tag
 \`<rowTestTag>.swipe.<index>\`, counting \`start\` entries first and then \`end\`; they exist only while
 the row is open. Every entry is also an accessibility action (TalkBack custom action, VoiceOver
-action) on the row, so assistive technology can run it without swiping. Reduced motion or spec
+action) on the row, so assistive technology can run it without swiping. The reduced profile snaps row settling; spec
 \`motion: "none"\` snaps instead of animating. Put swipeActions on repeated rows; a row inside a
 horizontal \`pager\` or a \`carousel\` is refused because their drag would compete.
 
@@ -82,7 +82,8 @@ Android Back and the iOS edge swipe pop a stack above depth 1. A stack's optiona
 \`transition: "platform" | "slide" | "fade" | "none"\` selects screen navigation animation
 (default \`platform\`); \`push\` and \`replace\` can override it with their own \`transition\`.
 Any explicit value needs \`prototype_stack_transitions_v1\`; pop/popToRoot take no override.
-Transitions honour \`motion: "none"\`, animator scale 0 and system reduced motion. A stack's
+Transitions snap under \`motion: "none"\` or Android animator/transition scale 0, and fade under
+\`motion: "reduced"\` or iOS Reduce Motion. A stack's
 \`transition\` accepts only those four values and no longer animates the stack's own visibility
 (earlier specs using \`expand\`, \`scale\`, \`slideStart\`, \`slideEnd\` or \`blurReplace\` on a stack
 are now refused): wrap the stack in a \`box\` with \`visibleWhen\` and a visibility transition for
@@ -161,8 +162,8 @@ are reported in \`platformNotes\`.
 missing, \`[]\`, \`{}\` or \`""\`; \`empty: false\` is its inverse. It replaces the comparison, so
 it cannot be combined with \`equals\`, \`notEquals\`, \`gt\` or \`lt\`, and it applies to data
 conditions only. Style \`shimmer: true\` on a \`box\`, \`row\`, \`column\` or \`card\` sweeps an
-animated highlight over its background and reads "Loading" to accessibility; it is static under
-\`motion: "none"\` or animator scale 0. The canonical trio uses a request's \`statusKey\`:
+animated highlight over its background and reads "Loading" to accessibility; it stays at its rest pose under
+\`motion: "reduced"\`, iOS Reduce Motion, \`motion: "none"\` or Android animator/transition scale 0. The canonical trio uses a request's \`statusKey\`:
 
 - **Loading:** a column with \`visibleWhen: {key: "feedStatus", equals: "loading"}\` that repeats a
   few literal placeholder rows styled \`{shimmer: true, height: {dp: 56}, background:
@@ -184,6 +185,23 @@ bounded params. Shader source is never accepted. Any effect may loop with \`anim
 {periodMs: 400-20000}\` and start at \`phase\` 0-1; a spec has at most 64 effects and 8 animated ones
 across its expanded \`repeat\` tree, counting every \`styleWhen\` style's list too.
 
+## Motion profiles and shared elements
+
+\`motion\` is \`standard\` (default), \`reduced\` or \`none\`. Explicit \`motion: "reduced"\`
+requires \`prototype_reduced_motion_v1\`. iOS Reduce Motion selects the reduced profile;
+Android animator scale or transition scale 0 selects off. Spec \`none\` or system off wins over
+reduced. Reduced replaces spatial animation (slides, scale, container size, presses, swipe-row
+settling, pager scrolling and shared morphs) with a crossfade or snap with fade. Shimmer and
+other ambient/attention loops stop at rest and report no loop; color, alpha and fades still animate.
+Off makes every change instant.
+
+\`sharedKey\` requires \`prototype_shared_element_v1\` and \`visibleWhen\` on the same node.
+Keys match \`[A-Za-z_][A-Za-z0-9_]{0,63}\`; each key labels exactly two nodes, at most 16 distinct
+keys per spec. A pair cannot be ancestor/descendant, and neither a repeat carrier nor any node
+inside its template may carry a sharedKey. Authors choose visibility conditions so the pair is
+not visible together. Full motion morphs the pair's bounds between different content; reduced
+uses ordinary visibility fades and off swaps instantly.
+
 ## Motion v2
 
 (needs \`prototype_motion_v2\`) A node's \`animate: {durationMs?, easing?}\` (0-2000 ms, default
@@ -194,7 +212,8 @@ node's centre without moving siblings. \`transition\` also takes \`slideStart\` 
 (slide in from that edge, mirrored right to left: drawers) and \`scale\`. An \`image\` with
 \`zoomable: {maxScale}\` (1-8) pinches, pans when zoomed and toggles 1x/2x on a double tap, with
 accessibility zoom actions; it cannot also have \`onDoubleTap\`. Everything snaps under
-\`motion: "none"\` or animator scale 0. The iOS agent does not support it yet (#14684).
+\`motion: "none"\` or Android animator/transition scale 0. In the reduced profile spatial changes
+snap or crossfade; color and alpha still animate. The iOS agent does not support Motion v2 yet (#14684).
 
 ## Choreography
 
@@ -205,7 +224,8 @@ before the enter starts) besides the plain names, and \`blurReplace\`: a blur-an
 enter one after another in layout order, each \`ms\` apart, including the children a \`repeat\` makes.
 A child's own \`transition.delayMs\` adds to its stagger wait, and no child may wait more than 600 ms
 in all (a literal \`repeat\` is counted; a data-bound one is clamped on the device). Delays are zero
-under \`motion: "none"\` or animator scale 0. Delays apply to enters only. The iOS agent does not
+under \`motion: "none"\` or Android animator/transition scale 0. In the reduced profile spatial
+transitions become fades. Delays apply to enters only. The iOS agent does not
 support it yet.
 
 ## Charts
@@ -851,7 +871,8 @@ Authoring choices:
   (#12139).* \`repeat\` expands to real nodes that count against the node limit.
 - **\`motion: "none"\`.** It removes the visibility animations, size animations and press springs
   (changes become instant) and a hidden \`visibleWhen\` node is simply absent, so it is the right
-  choice for automated checks. Motion is also off when the system animation scale is 0.
+  choice for automated checks. Motion is also off when Android animator or transition scale is 0. The reduced profile
+  keeps fades and color/alpha animation while removing spatial movement and ambient loops.
 - **Window format.** On Android an opaque fullscreen prototype is still composited as a
   translucent layer, whatever the spec says. *Being changed (#12140).*
 - **Accessibility events.** The Android accessibility service resolves an event's window type once

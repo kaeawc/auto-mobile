@@ -296,7 +296,7 @@ object PrototypeDataResolver {
   fun resolve(spec: PrototypeSpec, platform: JsonObject? = null): PrototypeSpec {
     val json = PrototypeSpecValidator.json
     val root = json.encodeToJsonElement(PrototypeNode.serializer(), spec.root).jsonObject
-    if (!hasBindings(root)) return spec
+    if (!PrototypeBindingScan.hasBindings(root)) return spec
     val resolved = json.decodeFromJsonElement<PrototypeNode>(resolveRoot(root, spec.data, platform))
     return spec.copy(root = resolved)
   }
@@ -409,7 +409,10 @@ object PrototypeDataResolver {
           )),
     )
   }
+}
 
+/** Whether a prototype node tree uses any data or platform binding. */
+private object PrototypeBindingScan {
   private fun conditionBound(value: JsonElement?): Boolean {
     val condition = value as? JsonObject ?: return false
     return condition.containsKey("data") ||
@@ -420,33 +423,33 @@ object PrototypeDataResolver {
       }
   }
 
-  private fun hasBindings(node: JsonObject): Boolean {
+  private fun fieldBound(value: JsonElement?, kind: PrototypeBindableKind): Boolean {
+    if (kind == PrototypeBindableKind.EMIT_BINDING) {
+      return (value as? JsonObject)?.containsKey("data") == true
+    }
+    val text = (value as? JsonPrimitive)?.takeIf { it.isString }?.content
+    return kind == PrototypeBindableKind.TEXT &&
+      text != null &&
+      (PrototypeDataText.hasBinding(text) || PrototypeDataText.hasBinding(text, "platform"))
+  }
+
+  private fun hasOwnBindings(node: JsonObject): Boolean {
     val textBound =
       PrototypeBindableFields.first<Boolean>(node, "") { value, _, kind ->
-        if (
-          kind == PrototypeBindableKind.EMIT_BINDING &&
-            (value as? JsonObject)?.containsKey("data") == true
-        )
-          return@first true
-        val text = (value as? JsonPrimitive)?.takeIf { it.isString }?.content
-        if (
-          kind == PrototypeBindableKind.TEXT &&
-            text != null &&
-            (PrototypeDataText.hasBinding(text) || PrototypeDataText.hasBinding(text, "platform"))
-        )
-          true
-        else null
+        if (fieldBound(value, kind)) true else null
       } == true
     val stylesBound =
       (node["styleWhen"] as? JsonArray).orEmpty().any {
         conditionBound((it as? JsonObject)?.get("when"))
       }
-    val own =
-      (node["repeat"] as? JsonObject)?.get("items") is JsonObject ||
-        textBound ||
-        conditionBound(node["enabledWhen"]) ||
-        conditionBound(node["visibleWhen"]) ||
-        stylesBound
+    return (node["repeat"] as? JsonObject)?.get("items") is JsonObject ||
+      textBound ||
+      conditionBound(node["enabledWhen"]) ||
+      conditionBound(node["visibleWhen"]) ||
+      stylesBound
+  }
+
+  fun hasBindings(node: JsonObject): Boolean {
     val child = node["child"] as? JsonObject
     val nested =
       if (child != null) hasBindings(child)
@@ -455,6 +458,6 @@ object PrototypeDataResolver {
     val screensBound =
       (node["screens"] as? JsonObject)?.values?.filterIsInstance<JsonObject>()?.any(::hasBindings)
         ?: false
-    return own || nested || screensBound
+    return hasOwnBindings(node) || nested || screensBound
   }
 }

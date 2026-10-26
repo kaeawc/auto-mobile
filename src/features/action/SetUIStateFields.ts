@@ -1,3 +1,4 @@
+import { isAndroidHintText } from "./androidHintText";
 import type { ScreenSizeForOffscreenCheckOptions } from "../../models/ScreenSize";
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -486,7 +487,11 @@ export class SetUIStateFields {
       case "text":
         if (fieldSpec.value !== undefined) {
           const currentValue = this.fieldTypeDetector.getTextValue(element);
-          return currentValue === fieldSpec.value;
+          return (
+            currentValue === fieldSpec.value ||
+            (fieldSpec.value === "" &&
+              isAndroidHintText(element.class, element["hint-text"], currentValue))
+          );
         }
         return false;
 
@@ -898,7 +903,14 @@ export class SetUIStateFields {
             return { verified: false, observation, unverifiable: true };
           }
           const observedValue = this.fieldTypeDetector.getTextValue(element);
-          return { verified: observedValue === fieldSpec.value, observation, observedValue };
+          return {
+            verified:
+              observedValue === fieldSpec.value ||
+              (fieldSpec.value === "" &&
+                isAndroidHintText(element.class, element["hint-text"], observedValue)),
+            observation,
+            observedValue,
+          };
         }
         return { verified: true, observation };
 

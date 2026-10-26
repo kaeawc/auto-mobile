@@ -6,7 +6,7 @@ import { record } from "./prototypeTemplate";
 import { prototypeDataError } from "./prototypeValidation";
 
 /**
- * The pure semantics of a `setData` / `appendData` / `removeData` action (#12519). Device runtimes
+ * The pure semantics of a `setData` / `appendData` / `prependData` / `removeData` action (#12519). Device runtimes
  * and the host mirror apply a write with this one function so they cannot drift; `request`
  * responses (#12523) and storage restores (#12522) write `/data` through it as well.
  *
@@ -16,6 +16,7 @@ import { prototypeDataError } from "./prototypeValidation";
 export type PrototypeDataWrite =
   | { op: "set"; path: string; value: unknown }
   | { op: "append"; path: string; value: unknown; maxItems?: number }
+  | { op: "prepend"; path: string; value: unknown[]; maxItems?: number }
   | { op: "extend"; path: string; value: unknown[]; maxItems?: number }
   | { op: "remove"; path: string };
 
@@ -42,7 +43,7 @@ const refused = (code: PrototypeDataWriteErrorCode, message: string): PrototypeD
 
 /** The patch op that performs a write whose target has been checked. */
 function patchOp(
-  write: Exclude<PrototypeDataWrite, { op: "append" | "extend" }>,
+  write: Exclude<PrototypeDataWrite, { op: "append" | "extend" | "prepend" }>,
   exists: boolean,
 ): PrototypePatchOp {
   if (write.op === "remove") {
@@ -59,8 +60,9 @@ function targetRefusal(
   write: PrototypeDataWrite,
 ): PrototypeDataWriteResult | undefined {
   const existing = resolvePrototypeDataPointer(data, pointer);
-  if (write.op === "append" || write.op === "extend") {
-    const name = write.op === "append" ? "appendData" : "extend";
+  if (write.op === "append" || write.op === "extend" || write.op === "prepend") {
+    const name =
+      write.op === "append" ? "appendData" : write.op === "prepend" ? "prependData" : "extend";
     if (existing === undefined) {
       return refused("not_found", `${name} target ${write.path} does not exist`);
     }
@@ -92,18 +94,22 @@ function setTargetRefusal(
 }
 
 function valueRefusal(write: PrototypeDataWrite): PrototypeDataWriteResult | undefined {
-  if (write.op !== "remove" && write.value === undefined) {
-    return refused("invalid_value", "A set or append write needs a value");
+  if (write.op === "remove") {
+    return undefined;
   }
-  if (write.op === "extend" && !Array.isArray(write.value)) {
-    return refused("invalid_value", "An extend write needs an array value");
+  const name = write.op === "prepend" ? "prependData" : write.op;
+  if (write.value === undefined) {
+    return refused("invalid_value", `${name} write needs a value`);
+  }
+  if (["extend", "prepend"].includes(write.op) && !Array.isArray(write.value)) {
+    return refused("invalid_value", `${name} needs an array value`);
   }
   if (
-    (write.op === "append" || write.op === "extend") &&
+    "maxItems" in write &&
     write.maxItems !== undefined &&
     (!Number.isSafeInteger(write.maxItems) || write.maxItems < 1)
   ) {
-    return refused("invalid_value", "maxItems must be a positive safe integer");
+    return refused("invalid_value", `${name} maxItems must be a positive safe integer`);
   }
   return undefined;
 }
@@ -113,21 +119,38 @@ function windowedWrite(
   current: PrototypeData,
   pointer: string,
   write: PrototypeDataWrite,
-): { effective: Exclude<PrototypeDataWrite, { op: "append" | "extend" }>; trimmed: number } {
-  if (write.op !== "append" && write.op !== "extend") {
+): {
+  effective: Exclude<PrototypeDataWrite, { op: "append" | "extend" | "prepend" }>;
+  trimmed: number;
+} {
+  if (write.op !== "append" && write.op !== "extend" && write.op !== "prepend") {
     return { effective: write, trimmed: 0 };
   }
   const existing = resolvePrototypeDataPointer(current, pointer) as unknown[];
-  const combined = existing.concat(write.op === "extend" ? write.value : [write.value]);
+  const combined =
+    write.op === "prepend"
+      ? write.value.concat(existing)
+      : existing.concat(write.op === "extend" ? write.value : [write.value]);
   const trimmed = write.maxItems === undefined ? 0 : Math.max(0, combined.length - write.maxItems);
-  return { effective: { op: "set", path: write.path, value: combined.slice(trimmed) }, trimmed };
+  return {
+    effective: {
+      op: "set",
+      path: write.path,
+      value:
+        write.op === "prepend"
+          ? combined.slice(0, combined.length - trimmed)
+          : combined.slice(trimmed),
+    },
+    trimmed,
+  };
 }
 
 /**
  * Applies one write to `data` (absent data is an empty object) and returns the new data without
  * touching the input. `set` creates or replaces an object member and replaces an existing array
  * element; `append` pushes one element, `extend` concatenates elements, then both trim from the
- * start when maxItems is present; `remove` deletes an existing member or element
+ * start when maxItems is present. `prepend` inserts an ordered page at the start and trims
+ * from the end, keeping the first maxItems rows; `remove` deletes an existing member or element
  * (later array elements shift down). The result must still satisfy the data limits, including
  * `MAX_PROTOTYPE_DATA_WRITE_BYTES`, or nothing is written.
  */

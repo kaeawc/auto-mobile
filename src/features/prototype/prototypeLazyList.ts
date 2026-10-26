@@ -111,6 +111,9 @@ export function prototypeLazyListFields(spec: unknown): string[] {
       fields.push(path);
     }
     mapBindableFields(node, path, (value, actionPath, kind) => {
+      if (kind === "prependData") {
+        fields.push(actionPath);
+      }
       if (kind === "request" && Object.hasOwn(record(value) ?? {}, "append")) {
         fields.push(`${actionPath}.append`);
       }
@@ -130,5 +133,5 @@ export function prototypeLazyListUnsupportedMessage(
       ? "Relaunch the app with launchApp prototype: true to load the agent built for this AutoMobile version"
       : "Update the connected CtrlProxy";
   const more = fields.length > 1 ? ` (and ${fields.length - 1} more)` : "";
-  return `The ${device} does not advertise ${PROTOTYPE_LAZY_LIST_CAPABILITY}, so it cannot run the lazy list at ${fields[0]}${more}. Nothing was shown. ${update}, or use a plain scroll without request.append.`;
+  return `The ${device} does not advertise ${PROTOTYPE_LAZY_LIST_CAPABILITY}, so it cannot run the lazy list feature at ${fields[0]}${more}. Nothing was shown. ${update}, or use a plain scroll without request.append or prependData.`;
 }

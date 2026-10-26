@@ -59,6 +59,7 @@
     "list-header-footer.json",
     "list-horizontal.json",
     "list-paging.json",
+    "list-prepend-data.json",
     "loading-states.json",
     "material-app-bar-dialog-pickers.json",
     "material-controls.json",
@@ -74,6 +75,7 @@
     "platform-reads.json",
     "platform-repeat.json",
     "platform-requires.json",
+    "prepend-data.json",
     "press-scale.json",
     "repeat-component-labels.json",
     "repeat-exact-node-limit.json",
@@ -588,6 +590,9 @@
     "platform-unknown-event.json",
     "platform-unknown-module.json",
     "platform-unknown-permission.json",
+    "prepend-data-outside-data.json",
+    "prepend-data-partial-index.json",
+    "prepend-data-target-not-array.json",
     "press-scale-high.json",
     "press-scale-low.json",
     "progress-max-not-positive.json",
@@ -755,6 +760,7 @@
     "strict-duplicate-envelope.json",
     "strict-duplicate-escaped-key.json",
     "strict-duplicate-opaque.json",
+    "strict-gate-prepend-prototype_lazy_list_v1.json",
     "strict-gate-prototype_carousel_v1.json",
     "strict-gate-prototype_chart_v1.json",
     "strict-gate-prototype_chat_scroll_v1.json",
@@ -945,6 +951,7 @@
     "strict-unknown-092-node-menu.json",
     "strict-unknown-093-action-request-append.json",
     "strict-unknown-093-menuItem.json",
+    "strict-unknown-094-action-prependData.json",
     "strict-unknown-094-animate.json",
     "strict-unknown-095-zoomable.json",
     "strict-unknown-096-node-pager-peek.json",
@@ -974,6 +981,7 @@
     "strict-unknown-120-themeShapes.json",
     "strict-unknown-121-action-startTimer.json",
     "strict-unknown-122-action-cancelTimer.json",
+    "strict-unknown-prependData-value.json",
     "strict-url-invalid.json",
     "strict-url-javascript.json",
     "strict-url-noAuthority.json",
@@ -1373,6 +1381,16 @@
       "prototype_timers_v1"
     ],
     "transition-slide.json": [],
-    "width-dp-at-max.json": []
+    "width-dp-at-max.json": [],
+    "list-prepend-data.json": [
+      "prototype_data_actions_v1",
+      "prototype_data_model_v1",
+      "prototype_lazy_list_v1"
+    ],
+    "prepend-data.json": [
+      "prototype_data_actions_v1",
+      "prototype_data_model_v1",
+      "prototype_lazy_list_v1"
+    ]
   }
 }

@@ -147,6 +147,7 @@ export type FieldKind =
   | "requestInto"
   | "request"
   | "deviceRequest"
+  | "prependData"
   | "scrollTo"
   | "timer"
   | "stackTransition";
@@ -243,6 +244,9 @@ function mapEmitAction(action: Raw, path: string, visit: FieldVisitor): void {
 }
 
 function mapDataAction(action: Raw, path: string, visit: FieldVisitor): void {
+  if (action.type === "prependData") {
+    visit(action, path, "prependData");
+  }
   mapField(action, "path", path, "dataPath", visit);
   if (action.type !== "removeData" && action.value !== undefined) {
     action.value = mapBinding(action.value, `${path}.value`, visit);
@@ -260,6 +264,10 @@ function mapTimerAction(action: Raw, path: string, visit: FieldVisitor): void {
 }
 
 function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
+  if (["setData", "appendData", "prependData", "removeData"].includes(String(action.type))) {
+    mapDataAction(action, path, visit);
+    return action;
+  }
   switch (action.type) {
     case "setState":
       mapField(action, "key", path, "key", visit);
@@ -272,11 +280,6 @@ function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
     case "increment":
     case "decrement":
       mapField(action, "key", path, "key", visit);
-      break;
-    case "setData":
-    case "appendData":
-    case "removeData":
-      mapDataAction(action, path, visit);
       break;
     case "request":
       mapRequestAction(action, path, visit);

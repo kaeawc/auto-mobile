@@ -222,8 +222,15 @@ final data limits. The smallest cap among lists sharing the exact data path wins
 member at \`from\`, extends the existing \`/data/...\` array \`to\`, and writes the remaining response
 to optional \`into\`. These paths must not overlap. Any failure rolls back all writes and returns
 \`invalid_response\`. Extend events precede into/meta/status/request/onSuccess events; change
-payloads are \`{op:"append"|"extend",value,maxItems?,revision}\`. \`prependData\` and per-stack-entry
-scroll state are not yet supported. Device acceptance and benchmarks remain unverified.
+payloads are \`{op:"append"|"extend"|"prepend",value,maxItems?,revision}\`. \`prependData {path,value}\` resolves one row and sends writer op \`prepend\` with \`value:[row]\`;
+it requires the lazy-list, data-actions and data-model capabilities. It uses the smallest matching
+list cap and trims from the end, keeping the first maxItems rows. A missing event value means the
+page exceeded the byte budget and the host stops tracking the spec.
+Renderers keep the first visible row key and offset across writes, even at the top; new rows sit
+above it. Headers/footers are not anchors; a trimmed key uses the renderer default. Each stack
+entry restores its list key/offset after push/pop; a missing key falls back to the nearest surviving
+index or top. Prepend, anchoring and per-stack-entry list scroll restore are not device-verified
+until the acceptance run; benchmark qualification remains unverified.
 
 ## Charts
 
@@ -447,6 +454,7 @@ written:
 - \`{type: "setData", path, value}\` creates or replaces an object member, or replaces an existing
   array element. A missing parent is an error.
 - \`{type: "appendData", path, value}\` appends to the existing array at \`path\`.
+- \`{type: "prependData", path, value}\` inserts one row at the start; list maxItems trims from the end.
 - \`{type: "removeData", path}\` removes an existing member or element; later elements shift down.
 
 \`value\` uses the emit.context binding forms except \`page\`: \`{value: json}\` is the literal,
@@ -457,7 +465,7 @@ finite numbers, arrays and objects, without null. Inside a repeat, a whole \`{in
 \`{alias.field}\`, is rejected.
 
 The host validates pointer syntax and \`{index}\` use, rejects a literal value data cannot hold, and
-rejects an \`appendData\` whose target resolves in the spec's own \`data\` to something other than an
+rejects an \`appendData\` or \`prependData\` whose target resolves in the spec's own \`data\` to something other than an
 array. A target that only exists after earlier writes is checked by the device. A write that would
 leave \`data\` over \`MAX_PROTOTYPE_DATA_WRITE_BYTES\` (or over a depth or array limit), or whose
 target is missing or not an array, changes nothing.

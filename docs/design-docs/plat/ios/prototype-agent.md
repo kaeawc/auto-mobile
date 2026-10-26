@@ -425,7 +425,7 @@ host's traversal order; the strict boundary also enforces the host data byte-cos
 
 ## Data actions capability
 
-Advertises `prototype_data_actions_v1` for `setData`, `appendData`, `removeData`
+Advertises `prototype_data_actions_v1` for `setData`, `appendData`, `prependData`, `removeData`
 ([contract](../android/prototype-ux.md#data-actions-12519)). `PrototypeRepeat` binds a whole `{index}`
 path segment and `{item}`/`{index}` values per row at expansion, so row actions arrive concrete.
 `PrototypeSession` resolves `{value}`/`{state}`/`{data}`, applies `PrototypeDataWrite` (twin of the
@@ -434,11 +434,20 @@ host's `applyPrototypeDataWrite`: codes `invalid_path`, `invalid_value`, `not_fo
 `PrototypeSpec.replacingData`, so data text, repeat rows and conditions refresh. A write the tree can't
 be rebuilt for within show limits is refused.
 
+The shared prepend contract uses `prependData {path,value}` (one resolved row) and writer/event
+`{op:"prepend",value:[row],maxItems?,revision}` at the written array path. It needs lazy-list,
+data-actions and data-model capabilities. Rows retain input order at the front; the smallest
+matching list cap trims from the end before final limits. Malformed pages/caps are dropped.
+Renderers retain the first visible row key and offset across writes, including at the top
+(headers/footers excluded); a trimmed key uses the renderer default. Stack entries preserve and
+restore list anchors across push/pop, falling back to the nearest surviving index or top when the
+row is gone. Prepend, anchoring and per-stack-entry list scroll restore are not device-verified
+until the acceptance run.
+
 A refused write changes and emits nothing and does not stop the rest of the action list. An accepted
 write bumps the id's data revision (monotonic per id, never rewound by re-show; every show is one
 revision, so the first reports 1 as on Android, #13040) and emits one `change` event named by the
-written `/data/...` path (the array for an append) with payload `{op, value?, revision}`; the value
-always travels. The counter is shared with `prototype_patch_v1` (#11675): device state writes and
+written `/data/...` path (the array for an append) with payload `{op, value?, revision}`; extend/prepend values may be absent when over the emit byte budget, which abandons the host mirror. The counter is shared with `prototype_patch_v1` (#11675): device state writes and
 accepted patches take the next revision too.
 
 ## Storage capability
@@ -528,7 +537,7 @@ Android doc, [Data, storage and network](../android/prototype-ux.md#data-storage
 
 | Capability                    | Gates                                                                | iOS agent                                                      |
 | ----------------------------- | -------------------------------------------------------------------- | -------------------------------------------------------------- |
-| `prototype_data_actions_v1`   | `setData`, `appendData`, `removeData`                                | [Data actions capability](#data-actions-capability)            |
+| `prototype_data_actions_v1`   | `setData`, `appendData`, `prependData`, `removeData`                 | [Data actions capability](#data-actions-capability)            |
 | `prototype_storage_v1`        | root `storage` block, `inspect` `storage`, `clear_prototype_storage` | Sandbox `Application Support/AutoMobilePrototypeAgent/storage` |
 | `prototype_network_v1`        | `request` with `via: "host"`                                         | [Request action capability](#request-action-capability)        |
 | `prototype_network_device_v1` | `request` with `via: "device"`                                       | Dedicated ephemeral `URLSession`                               |

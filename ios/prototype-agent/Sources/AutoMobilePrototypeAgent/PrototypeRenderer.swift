@@ -351,14 +351,7 @@
                     }
                 }
             case "stack":
-                if let screen = node.currentScreen(stacks: model.stacks), let top = node.screens?[screen] {
-                    // Only the top view exists: inactive screens are absent from the native
-                    // accessibility tree as well as from rendering. Navigation is instant.
-                    NodeView(node: top, model: model)
-                        .id(screen)
-                        .transition(.identity)
-                        .animation(nil, value: screen)
-                }
+                PrototypeStackView(node: node, model: model)
             case "pager":
                 PagerView(node: node, model: model)
             case "tabBar", "bottomNav":

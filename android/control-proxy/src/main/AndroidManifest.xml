@@ -72,6 +72,7 @@
 
       <activity
         android:name=".prototype.SavedPrototypeActivity"
+        android:enableOnBackInvokedCallback="true"
         android:exported="false"
         android:documentLaunchMode="intoExisting"
         android:excludeFromRecents="false"

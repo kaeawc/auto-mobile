@@ -141,6 +141,9 @@
         let model: PrototypeModel
         let layer: PrototypeHostLayer
         @Environment(\.accessibilityReduceMotion) private var reduceMotion
+        @Environment(\.layoutDirection) private var layoutDirection
+        @State private var swipeTarget: String?
+        @State private var swipeRevision: Int?
 
         var body: some View {
             // The model's one resolved mode, not this window's `colorScheme`: the window carries that
@@ -227,15 +230,73 @@
             // Android: the hosts keep no safe area (`PrototypeKeyboardLift.hostSafeAreaRegions`), and
             // this ignores every region too, so no second lift can stack on the sheet's (#11042).
             .ignoresSafeArea()
-            // Observe edge drags alongside authored gestures without reserving a tappable strip.
-            .simultaneousGesture(DragGesture(minimumDistance: 10, coordinateSpace: .local).onEnded { value in
-                if value.startLocation.x <= 20,
-                   value.translation.width >= 60,
-                   abs(value.translation.height) < abs(value.translation.width)
-                {
+            // Edge navigation observes authored scroll/pager gestures without reserving a touch strip.
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 10, coordinateSpace: .global)
+                    .onChanged(edgeSwipeChanged)
+                    .onEnded(edgeSwipeEnded)
+            )
+        }
+
+        private var swipeRTL: Bool { layoutDirection == .rightToLeft }
+
+        private func swipeAnimation(_ target: String) -> PrototypeStackAnimation {
+            PrototypeStackNavigation.animation(
+                declared: model.stackTransition(target), specMotion: model.spec?.motion,
+                reduceMotion: reduceMotion, direction: .pop
+            )
+        }
+
+        private func edgeSwipeChanged(_ value: DragGesture.Value) {
+            guard model.stackDrag?.settling != true, let target = model.stackPopTarget else { return }
+            if swipeTarget == nil {
+                guard PrototypeStackSwipe.isAtEdge(
+                    start: value.startLocation.x,
+                    width: model.windowSize.width, rtl: swipeRTL
+                ), abs(value.translation.height) < abs(value.translation.width),
+                PrototypeStackSwipe.distance(translation: value.translation.width, rtl: swipeRTL) > 0
+                else { return }
+                swipeTarget = target
+                swipeRevision = model.stackChanges[target]?.revision
+            }
+            guard swipeTarget == target, swipeRevision == model.stackChanges[target]?.revision,
+                  swipeAnimation(target) == .slide, let revision = swipeRevision else { return }
+            model.stackDrag = PrototypeModel.StackDrag(
+                target: target, revision: revision,
+                progress: PrototypeStackSwipe.progress(
+                    translation: value.translation.width, width: model.windowSize.width, rtl: swipeRTL
+                )
+            )
+        }
+
+        private func edgeSwipeEnded(_ value: DragGesture.Value) {
+            defer { swipeTarget = nil; swipeRevision = nil }
+            guard let target = swipeTarget, let revision = swipeRevision,
+                  model.stackPopTarget == target, model.stackChanges[target]?.revision == revision else { return }
+            guard swipeAnimation(target) == .slide, let drag = model.stackDrag else {
+                model.stackDrag = nil
+                if PrototypeStackSwipe.distance(translation: value.translation.width, rtl: swipeRTL) >= 60,
+                   abs(value.translation.height) < abs(value.translation.width) { model.popTopmostStack() }
+                return
+            }
+            let commit = PrototypeStackSwipe.commits(
+                translation: value.translation.width, predicted: value.predictedEndTranslation.width,
+                width: model.windowSize.width, rtl: swipeRTL
+            )
+            model.stackDrag?.settling = true
+            withAnimation(
+                .easeOut(duration: 0.35 * (commit ? 1 - drag.progress : drag.progress)), completionCriteria: .removed
+            ) {
+                model.stackDrag?.progress = commit ? 1 : 0
+            } completion: {
+                guard model.stackChanges[target]?.revision == revision else { return }
+                if commit, model.stackPopTarget == target {
+                    model.completedStackSwipe = target
                     model.popTopmostStack()
+                } else {
+                    model.stackDrag = nil
                 }
-            })
+            }
         }
 
         /// The spec's anchored nodes, above its tree and below its modals, as Android's anchor layer.
@@ -402,11 +463,13 @@
         let model: PrototypeModel
         let clip: CGRect?
         let enabled: Bool
+        @Environment(\.prototypeStackActive) private var stackActive
         // Branches sharing a key still have distinct view lifetimes (#12207).
         @State private var owner = PrototypeHitRectOwner()
         @State private var frame: CGRect?
 
-        private var configuration: Configuration { Configuration(key: key, clip: clip, enabled: enabled) }
+        private var configuration: Configuration { Configuration(key: key, clip: clip, enabled: enabled && stackActive)
+        }
 
         func body(content: Content) -> some View {
             content

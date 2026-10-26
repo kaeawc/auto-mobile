@@ -356,12 +356,22 @@ transition as a real tap, including on part identifiers.
   `prototype_icon_set_material_v1` nor `prototype_icon_variant_v1` (Material parity is a future option).
 - **Snackbar** `durationMs` closes by writing `!equals` to its `openWhen` key (plain timer behind
   injectable `PrototypeClock`).
-- **Stack transitions** have a shared contract: stack `transition` defaults to `platform`, with
-  `slide`, `fade` and `none` alternatives and optional push/replace overrides. Explicit values
-  require `prototype_stack_transitions_v1`; the agent validates them but does not advertise the
-  capability yet. The renderer contract honours `motion: "none"` and Reduce Motion; interactive
-  edge-swipe pop scrubs the slide and cancels when released early, while overlay windows use a
-  non-seekable animation. Wrap a stack in a box to animate its own visibility.
+- **Stack transitions** advertise `prototype_stack_transitions_v1`. Stack `transition` defaults to
+  `platform`; push/replace overrides take precedence. Platform and slide pushes enter from trailing
+  over a 30% parallax-shifted outgoing screen; pop and pop-to-root reverse this, mirrored for RTL.
+  Platform replace crossfades; explicit fade crossfades and none is instant. Animations use a
+  deterministic 0.35-second ease-out. Spec `motion: "none"` is instant; system Reduce Motion maps
+  slide to crossfade. Session-only change direction, transition and stable entry identities leave
+  wire stack snapshots unchanged. Reload resets presentation without animation.
+  A simultaneous drag beginning within 20 points of the leading window edge scrubs eligible slides,
+  including parallax and dimming. Release commits past half width or when predicted end translation
+  passes half width; otherwise it animates back without mutating the session. Fade/none retain the
+  60-point release-to-pop policy. Pop targeting follows visible screens and modal precedence.
+  Back-stack entries stay mounted, transparent, non-interactive and accessibility-hidden, preserving
+  scroll positions on pop within the bounded stack depth; removed entries are released after motion.
+  Navigation posts a screen-changed accessibility notification targeting the new native screen
+  container after layout; accessibility escape uses the same animated pop path. Wrap a stack in a box
+  to animate its own visibility.
 - **Motion** matches Android (#10442, #10439): `visibleWhen` nodes fade/expand, `transition`
   (`none`, `fade`, `expand`, `slide`) picks the animation, pager changes animate. `box`/`row`/`column`
   animate size (`animateContentSize`) when a direct child appears, disappears or resolves a new

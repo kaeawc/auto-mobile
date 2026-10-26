@@ -21,7 +21,6 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
         let exclusions: Set<String> = [
             "prototype_platform_v1", "prototype_platform_test_v1",
             "prototype_chat_scroll_v1", "prototype_motion_v2", "prototype_choreography_v1",
-            "prototype_stack_transitions_v1",
         ]
         XCTAssertTrue(exclusions.isSubset(of: required), "Exclusions must name current spec gates")
         XCTAssertTrue(exclusions.isDisjoint(with: supported), "Remove exclusions once supported")

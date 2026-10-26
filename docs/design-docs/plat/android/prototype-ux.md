@@ -764,7 +764,7 @@ zero after a single frame under `motion: "none"` or animator scale 0.
 
 `prototype_stack_transitions_v1` gates every explicit stack `transition` and push/replace
 `transition` override. Omission means `platform`; pop/popToRoot have no override. The contract
-is validated by both agents; neither advertises the capability until its renderer implements it.
+is validated by both agents; the Android renderer advertises the capability.
 
 | Value      | Platform behaviour                         |
 | ---------- | ------------------------------------------ |
@@ -773,10 +773,21 @@ is validated by both agents; neither advertises the capability until its rendere
 | `fade`     | Screen crossfade.                          |
 | `none`     | Instant screen change.                     |
 
-The renderer contract honours `motion: "none"`, animator duration scale 0 and system reduced
-motion. Android predictive back drives animation progress on API 34+, with a non-interactive
-fallback below. iOS interactive edge-swipe pop scrubs the slide and cancels when released early;
-an overlay window uses a non-seekable animation. A stack's transition replaces its visibility
+Android slides enter from the end edge with 30% outgoing parallax, mirrored in RTL; pop and
+popToRoot reverse that direction. Platform replace crossfades. Animations finish within 300 ms.
+`motion: "none"` and animator duration scale 0 snap immediately. The reduced-motion composition
+hook changes slides to crossfades; system preference wiring is deferred to #15115.
+
+Activity hosts scrub the pop with predictive back on API 34+, settle on commit, and restore the
+current screen on cancellation. Earlier APIs pop with the ordinary animation. Overlay windows
+and authored actions use ordinary transitions. Each path entry owns its scroll offsets, retained
+while covered and discarded on pop, replacement or removal. Settled screen containers expose
+`paneTitle`; outgoing content leaves composition and semantics after the animation.
+
+The motion-active window signal (#15114) is not available; there is no additional metadata field.
+Transitions use finite animations so Compose idle detection settles before observation.
+
+A stack's transition replaces its visibility
 transition: wrap it in a box to animate the stack's own `visibleWhen` enter/exit.
 
 ### Motion v2 (#14208, `prototype_motion_v2`, not device-verified)

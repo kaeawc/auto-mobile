@@ -97,6 +97,10 @@ struct PrototypeSession {
     private(set) var structureRevision = 0
     private(set) var pages: [String: Int] = [:]
     private(set) var stacks: [String: PrototypeStackSnapshot] = [:]
+    private(set) var stackChanges: [String: PrototypeStackChange] = [:]
+    private(set) var stackEntries: [String: [PrototypeStackEntry]] = [:]
+    private var stackRevision = 0
+    private var nextStackEntry = 0
     private var stackNodes: [String: PrototypeNode] = [:]
     private(set) var pageCounts: [String: Int] = [:]
     /// Keys whose errors have been revealed by change, blur or a failed guard.
@@ -207,6 +211,17 @@ struct PrototypeSession {
             let path = (node.id.flatMap { previousStacks[$0]?.path } ?? [])
                 .filter { node.screens?[$0] != nil }.prefix(PrototypeLimits.maxStackDepth)
             return PrototypeStackSnapshot(path: path.isEmpty ? [node.start ?? ""] : Array(path))
+        }
+        stackChanges = [:]
+        stackEntries = stacks.mapValues { snapshot in
+            snapshot.path.map { screen in
+                nextStackEntry += 1
+                return PrototypeStackEntry(id: nextStackEntry, screen: screen)
+            }
+        }
+        for id in stacks.keys {
+            stackRevision += 1
+            stackChanges[id] = PrototypeStackChange(direction: .reset, transition: .none, revision: stackRevision)
         }
         pageCounts = root.pagerCounts()
         pages = pageCounts.reduce(into: [:]) { result, entry in
@@ -593,14 +608,23 @@ struct PrototypeSession {
         return PrototypeStacks.popTarget(root: spec.root, state: state, pages: pages, stacks: stacks)
     }
 
+    func stackTransition(_ id: String) -> PrototypeStackTransition {
+        PrototypeStackTransition(rawValue: stackNodes[id]?.transition ?? "") ?? .platform
+    }
+
     mutating func popTopmostStack() -> [PrototypeEvent] {
         guard let id = stackPopTarget else { return [] }
-        return changeStack(id) { _, path in Array(path.dropLast()) }
+        return changeStack(id, direction: .pop) { _, path in Array(path.dropLast()) }
     }
 
     private mutating func runStack(_ action: PrototypeAction) -> [PrototypeEvent] {
         guard let id = action.stack else { return [] }
-        return changeStack(id) { node, path in
+        let direction: PrototypeStackChange.Direction = switch action.type {
+        case "push": .push
+        case "replace": .replace
+        default: .pop
+        }
+        return changeStack(id, direction: direction, override: action.transition) { node, path in
             switch action.type {
             case "push":
                 guard path.count < PrototypeLimits.maxStackDepth, let screen = action.screen,
@@ -620,7 +644,8 @@ struct PrototypeSession {
     }
 
     private mutating func changeStack(
-        _ id: String, transform: (PrototypeNode, [String]) -> [String]
+        _ id: String, direction: PrototypeStackChange.Direction, override: PrototypeStackTransition? = nil,
+        transform: (PrototypeNode, [String]) -> [String]
     )
         -> [PrototypeEvent]
     {
@@ -629,6 +654,19 @@ struct PrototypeSession {
         guard path != before.path, let screen = path.last else { return [] }
         let next = PrototypeStackSnapshot(path: path)
         stacks[id] = next
+        stackRevision += 1
+        stackChanges[id] = PrototypeStackChange(
+            direction: direction,
+            transition: override ?? PrototypeStackTransition(rawValue: node.transition ?? "") ?? .platform,
+            revision: stackRevision
+        )
+        let retained = zip(before.path, path).prefix(while: { $0.0 == $0.1 }).count
+        var entries = Array((stackEntries[id] ?? []).prefix(retained))
+        for screen in path.dropFirst(entries.count) {
+            nextStackEntry += 1
+            entries.append(PrototypeStackEntry(id: nextStackEntry, screen: screen))
+        }
+        stackEntries[id] = entries
         // popToRoot can change a depth-one replacement back to start; repeated pushes of the
         // same screen change depth. Both are real changes, just as on Android.
         guard before.path.last != screen || before.depth != next.depth else { return [] }

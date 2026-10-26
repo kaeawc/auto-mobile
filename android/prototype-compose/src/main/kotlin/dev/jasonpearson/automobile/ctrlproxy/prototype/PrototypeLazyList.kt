@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.protocol.PrototypeListNode
 import dev.jasonpearson.automobile.protocol.PrototypeListRows
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
 /** One signature per page/window, retained until a new show recreates the holder. */
 internal class PrototypeListEndTrigger(private val endThreshold: Int) {
@@ -61,6 +62,18 @@ internal constructor(
 
   override fun hashCode(): Int =
     31 * (31 * source.hashCode() + rows.hashCode()) + snapshot.hashCode()
+}
+
+/** Resolve only the addressed row against this snapshot without exposing templates in children. */
+internal fun PrototypeRenderNode.childrenForIdentity(identity: String): List<PrototypeRenderNode> {
+  val model = list ?: return children
+  if (!identity.startsWith("${this.identity}.repeat[")) return children
+  val index =
+    model.rows.indices.firstOrNull { index ->
+      val path = "${this.identity}.repeat[${JsonPrimitive(model.key(index))}].children[0]"
+      identity == path || identity.startsWith("$path.")
+    } ?: return children
+  return children + model.render(model.rows[index], index)
 }
 
 @Composable

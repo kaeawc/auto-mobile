@@ -84,6 +84,8 @@ class PrototypeLazyListRuntimeTest {
 
   private fun warmRuntime() = runTest {
     val runtime = runtime(listSpec())
+    val list = checkNotNull(runtime.renderModel().root.list)
+    list.render(list.rows.first(), 0)
     runtime.handle(PrototypeInteraction.Tap(listOf(appendRequest())))
     runCurrent()
     host.answer(0, received(json("""{"items":[{"id":2,"title":"Third"}],"next":"p3"}""")))
@@ -108,6 +110,52 @@ class PrototypeLazyListRuntimeTest {
       onSuccess = listOf(PrototypeEmitAction("done")),
       onError = listOf(PrototypeEmitAction("bad")),
     )
+
+  @Test
+  fun `guarded lazy row taps honor current row bound enabled state`() = runTest {
+    val base = listSpec()
+    val button =
+      PrototypeButtonNode(
+        label = "Choose",
+        enabledWhen = PrototypeCondition("ready_{post.id}", PrototypeScalar.BooleanValue(true)),
+        onTap = listOf(PrototypeEmitAction("chosen")),
+      )
+    val runtime =
+      runtime(
+        base.copy(
+          root =
+            (base.root as PrototypeListNode).copy(
+              children = listOf(PrototypeColumnNode(children = listOf(button))),
+            ),
+          state =
+            base.state.orEmpty() +
+              mapOf(
+                "ready_0" to PrototypeScalar.BooleanValue(true),
+                "ready_1" to PrototypeScalar.BooleanValue(false),
+              ),
+        ),
+      )
+    val list = checkNotNull(runtime.renderModel().root.list)
+    val enabled = list.render(list.rows[0], 0).children.single()
+    val disabled = list.render(list.rows[1], 1).children.single()
+    assertTrue(enabled.enabled)
+    assertFalse(disabled.enabled)
+    val tap = PrototypeInteraction.Tap(checkNotNull(button.onTap))
+    runtime.handle(PrototypeInteraction.Guarded(enabled.identity, tap))
+    assertEquals(listOf("chosen"), events.map { it.name })
+    runtime.handle(PrototypeInteraction.Guarded(disabled.identity, tap))
+    assertEquals(1, events.size)
+    runtime.handle(
+      PrototypeInteraction.Tap(
+        listOf(
+          PrototypeSetStateAction("ready_0", PrototypeScalar.BooleanValue(false)),
+        ),
+      ),
+    )
+    events.clear()
+    runtime.handle(PrototypeInteraction.Guarded(enabled.identity, tap))
+    assertTrue(events.isEmpty())
+  }
 
   @Test
   fun `appendData trims in one revision and reports the replay limit`() = runTest {

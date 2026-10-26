@@ -387,7 +387,7 @@ class PrototypeRuntime(
       is PrototypeInteraction.Guarded -> {
         fun find(node: PrototypeRenderNode): PrototypeRenderNode? =
           if (node.identity == interaction.identity) node
-          else node.children.firstNotNullOfOrNull(::find)
+          else node.childrenForIdentity(interaction.identity).firstNotNullOfOrNull(::find)
         val node = find(renderModel().root) ?: return
         if (node.enabled || interaction.interaction is PrototypeInteraction.Blur)
           handle(interaction.interaction)

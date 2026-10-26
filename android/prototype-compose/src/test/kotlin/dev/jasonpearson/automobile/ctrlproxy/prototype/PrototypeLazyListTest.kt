@@ -11,6 +11,7 @@ class PrototypeLazyListTest {
     @JvmStatic
     @BeforeClass
     fun warmMapping() {
+      PrototypeMenuLayers().expandedSelect = "warm"
       mapPrototypeSpec(PrototypeLazyListTest().spec(1))
       PrototypeLazyListTest()
         .`lazy fields keep per item checks and reserve input without eager rendered children`()
@@ -135,6 +136,40 @@ class PrototypeLazyListTest {
       mapOf("field_0" to false, "field_1" to true),
       prototypeValidity(checkedPrototypeNodes(root, spec.data), spec.state.orEmpty()),
     )
+  }
+
+  @Test
+  fun `lazy row select remains discoverable while expanded`() {
+    val base = spec(2)
+    val root =
+      mapPrototypeSpec(
+          base.copy(
+            root =
+              (base.root as PrototypeListNode).copy(
+                children =
+                  listOf(
+                    PrototypeSelectNode(
+                      stateKey = "choice_{post.id}",
+                      options = listOf(PrototypeRadioOption("a", "{post.title}")),
+                    ),
+                  ),
+              ),
+          ),
+        )
+        .root
+    val list = checkNotNull(root.list)
+    val row = list.render(list.rows[1], 1)
+    val layers = PrototypeMenuLayers()
+    layers.expandedSelect = row.identity
+    val select = visiblePrototypeSelect(root, checkNotNull(layers.expandedSelect))
+    if (select == null) layers.expandedSelect = null
+    assertEquals(row.identity, layers.expandedSelect)
+    val source = checkNotNull(select).source as PrototypeSelectNode
+    assertEquals("choice_1", source.stateKey)
+    assertEquals("Post 1", source.options.single().label)
+    assertEquals(listOf("Feed", "End"), root.children.map { it.text })
+    assertNull(visiblePrototypeSelect(root.copy(visible = false), row.identity))
+    assertNull(visiblePrototypeSelect(root, "root.children[0]"))
   }
 
   @Test

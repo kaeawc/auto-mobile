@@ -32,9 +32,11 @@ class ImportActivity : ComponentActivity() {
     super.onCreate(savedInstanceState)
     setContent {
       ProtoViewerTheme {
-        ImportStatus(rejection?.let { "${it.path}: ${it.reason}" } ?: stringResource(R.string.loading)) {
-          finish()
-        }
+        val failed = rejection
+        val text =
+          if (failed == null) stringResource(R.string.loading)
+          else stringResource(R.string.import_rejected, failed.path, failed.reason)
+        ImportStatus(text) { finish() }
       }
     }
     if (savedInstanceState != null) {
@@ -65,7 +67,8 @@ class ImportActivity : ComponentActivity() {
         }
         is LibraryImportResult.Rejected -> rejection = result
         null ->
-          rejection = LibraryImportResult.Rejected("library", getString(R.string.import_unavailable))
+          rejection =
+            LibraryImportResult.Rejected("library", getString(R.string.import_unavailable))
       }
     }
   }
@@ -73,7 +76,9 @@ class ImportActivity : ComponentActivity() {
 
 @Composable
 internal fun ImportStatus(text: String, back: () -> Unit) {
-  Column(Modifier.windowInsetsPadding(WindowInsets.safeDrawing).verticalScroll(rememberScrollState())) {
+  Column(
+    Modifier.windowInsetsPadding(WindowInsets.safeDrawing).verticalScroll(rememberScrollState()),
+  ) {
     Text(text)
     TextButton(onClick = back) { Text(stringResource(R.string.back)) }
   }

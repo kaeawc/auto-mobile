@@ -300,7 +300,9 @@ private fun LibraryRow(
       Modifier.fillMaxWidth().testTag("library-${entry.libraryId}").clickable(
         role = Role.Button,
         onClickLabel = openLabel,
-      ) { open(entry, false, false) },
+      ) {
+        open(entry, false, false)
+      },
     trailingContent = {
       LibraryEntryMenu(entry, open, share, { confirm = true }, { confirmDelete = true })
     },

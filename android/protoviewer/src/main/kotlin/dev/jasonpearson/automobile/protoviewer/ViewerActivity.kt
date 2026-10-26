@@ -271,7 +271,10 @@ internal fun ViewerStatus(state: ViewerScreenState, back: () -> Unit) {
         null -> R.string.loading
         else -> R.string.corrupt
       }
-    Text(stringResource(title), modifier = Modifier.testTag("viewer-status").semantics { heading() })
+    Text(
+      stringResource(title),
+      modifier = Modifier.testTag("viewer-status").semantics { heading() },
+    )
     if (error != null) Button(onClick = back) { Text(stringResource(R.string.back)) }
   }
 }

@@ -11,10 +11,11 @@ class StringsHygieneTest {
   @Test
   fun everyStringHasAnAdjacentTranslatorComment() {
     val source = File(System.getProperty("user.dir"), "src/main/res/values/strings.xml")
-    val factory = DocumentBuilderFactory.newInstance().apply {
-      setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true)
-      setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
-    }
+    val factory =
+      DocumentBuilderFactory.newInstance().apply {
+        setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true)
+        setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
+      }
     val strings = factory.newDocumentBuilder().parse(source).getElementsByTagName("string")
     assertTrue("No strings found in $source", strings.length > 0)
     for (index in 0 until strings.length) {

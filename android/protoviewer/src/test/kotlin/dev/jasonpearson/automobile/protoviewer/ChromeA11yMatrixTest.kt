@@ -30,11 +30,11 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.test.core.app.ApplicationProvider
 import java.util.Locale
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
-import org.junit.After
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -60,6 +60,7 @@ class ChromeA11yMatrixTest {
 
   private data class Cell(val locale: String, val dark: Boolean, val scale: Float) {
     val direction = if (locale == "ar-XB") LayoutDirection.Rtl else LayoutDirection.Ltr
+
     override fun toString() = "$locale/${if (dark) "dark" else "light"}/font=$scale"
   }
 
@@ -79,23 +80,17 @@ class ChromeA11yMatrixTest {
     controller = null
   }
 
-  @Test
-  fun libraryPhone() = libraryMatrix()
+  @Test fun libraryPhone() = libraryMatrix()
 
-  @Test
-  fun libraryTablet() = libraryMatrix(TABLET)
+  @Test fun libraryTablet() = libraryMatrix(TABLET)
 
-  @Test
-  fun viewerPhone() = viewerMatrix()
+  @Test fun viewerPhone() = viewerMatrix()
 
-  @Test
-  fun viewerTablet() = viewerMatrix(TABLET)
+  @Test fun viewerTablet() = viewerMatrix(TABLET)
 
-  @Test
-  fun dialogsAndImportPhone() = dialogsAndImportMatrix()
+  @Test fun dialogsAndImportPhone() = dialogsAndImportMatrix()
 
-  @Test
-  fun dialogsAndImportTablet() = dialogsAndImportMatrix(TABLET)
+  @Test fun dialogsAndImportTablet() = dialogsAndImportMatrix(TABLET)
 
   private fun startMatrix(sizeQualifiers: String) {
     size = sizeQualifiers
@@ -106,7 +101,9 @@ class ChromeA11yMatrixTest {
     if (hosted == cell) return
     closeActivity()
     val language = cell.locale.replace("-X", "-rX")
-    RuntimeEnvironment.setQualifiers("$language-$size-${if (cell.dark) "night" else "notnight"}-mdpi")
+    RuntimeEnvironment.setQualifiers(
+      "$language-$size-${if (cell.dark) "night" else "notnight"}-mdpi",
+    )
     RuntimeEnvironment.setFontScale(cell.scale)
     val created = Robolectric.buildActivity(ComponentActivity::class.java).setup()
     controller = created
@@ -124,10 +121,11 @@ class ChromeA11yMatrixTest {
 
   private fun configuredContext(cell: Cell): Context {
     if (hosted == cell) return controller!!.get()
-    val configuration = Configuration(context.resources.configuration).apply {
-      setLocale(Locale.forLanguageTag(cell.locale))
-      fontScale = cell.scale
-    }
+    val configuration =
+      Configuration(context.resources.configuration).apply {
+        setLocale(Locale.forLanguageTag(cell.locale))
+        fontScale = cell.scale
+      }
     return context.createConfigurationContext(configuration)
   }
 
@@ -161,22 +159,26 @@ class ChromeA11yMatrixTest {
         repository.prototypes.clear()
         if (scenario == "entries") {
           repository.prototypes[FIRST] =
-            Fixtures.prototype().copy(
-              entry = Fixtures.entry().copy(
-                label = "A very long imported prototype label that wraps over several lines",
-              ),
-            )
+            Fixtures.prototype()
+              .copy(
+                entry =
+                  Fixtures.entry()
+                    .copy(
+                      label = "A very long imported prototype label that wraps over several lines",
+                    ),
+              )
           repository.prototypes[SECOND] = Fixtures.prototype(SECOND)
         }
         repository.error = if (scenario == "failure") LibraryError.Storage else null
         settings.setAllowNetwork(scenario == "network")
         val result = if (scenario == "loading") null else repository.list()
+        val allowNetwork = settings.allowNetwork.value
         render(cell, "library/$scenario") {
           LibraryScreen(
             result,
             scenario == "denied",
             { _, _, _ -> },
-            allowNetwork = settings.allowNetwork.value,
+            allowNetwork = allowNetwork,
             localNetworkDenied = scenario == "denied",
             setAllowNetwork = settings::setAllowNetwork,
           )
@@ -195,11 +197,13 @@ class ChromeA11yMatrixTest {
       when (scenario) {
         "loading" -> listOf(R.string.loading)
         "failure" -> listOf(R.string.library_error)
-        "denied" -> listOf(R.string.local_network_denied, R.string.action_error, R.string.empty_library)
+        "denied" ->
+          listOf(R.string.local_network_denied, R.string.action_error, R.string.empty_library)
         else -> listOf(R.string.empty_library)
       }
     for (message in messages) {
-      compose.onNode(SemanticsMatcher.keyIsDefined(SemanticsActions.ScrollToIndex))
+      compose
+        .onNode(SemanticsMatcher.keyIsDefined(SemanticsActions.ScrollToIndex))
         .performScrollToNode(hasText(configuredContext(cell).getString(message)))
       assertChrome(cell, scroll = true)
     }
@@ -208,10 +212,13 @@ class ChromeA11yMatrixTest {
   private fun assertNetworkDirection(cell: Cell) {
     val switch = compose.onNodeWithTag("allow-network").fetchSemanticsNode().boundsInRoot
     val label =
-      compose.onNodeWithText(
-        configuredContext(cell).getString(R.string.allow_network),
-        useUnmergedTree = true,
-      ).fetchSemanticsNode().boundsInRoot
+      compose
+        .onNodeWithText(
+          configuredContext(cell).getString(R.string.allow_network),
+          useUnmergedTree = true,
+        )
+        .fetchSemanticsNode()
+        .boundsInRoot
     assertEquals(
       "$cell network switch mirrors relative to its headline",
       cell.direction == LayoutDirection.Rtl,
@@ -222,7 +229,8 @@ class ChromeA11yMatrixTest {
   private fun assertLibraryEntries(cell: Cell) {
     for (id in listOf(FIRST, SECOND)) {
       val tag = "library-$id"
-      compose.onNode(SemanticsMatcher.keyIsDefined(SemanticsActions.ScrollToIndex))
+      compose
+        .onNode(SemanticsMatcher.keyIsDefined(SemanticsActions.ScrollToIndex))
         .performScrollToNode(hasTestTag(tag))
       val row = compose.onNodeWithTag(tag).fetchSemanticsNode()
       assertEquals("$cell row role", Role.Button, row.config.getOrNull(SemanticsProperties.Role))
@@ -234,13 +242,16 @@ class ChromeA11yMatrixTest {
     }
     // Exercise app-owned dropdown and delete dialog as well as the always-visible chrome.
     val more = configuredContext(cell).getString(R.string.more, Fixtures.entry(SECOND).label)
-    compose.onNode(SemanticsMatcher.keyIsDefined(SemanticsActions.ScrollToIndex))
+    compose
+      .onNode(SemanticsMatcher.keyIsDefined(SemanticsActions.ScrollToIndex))
       .performScrollToNode(hasTestTag("library-$SECOND"))
-    compose.onNode(
+    compose
+      .onNode(
         SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf(more)),
         useUnmergedTree = true,
       )
-      .performScrollTo().performClick()
+      .performScrollTo()
+      .performClick()
     assertChrome(cell, overlay = true)
     compose.onNodeWithText(configuredContext(cell).getString(R.string.delete)).performClick()
     assertChrome(cell, overlay = true)
@@ -269,7 +280,8 @@ class ChromeA11yMatrixTest {
     for (cell in cells()) {
       render(cell, "reset") { ResetConfirmation({}, {}) }
       assertChrome(cell)
-      val messages = listOf(R.string.loading, R.string.import_interrupted, R.string.import_unavailable)
+      val messages =
+        listOf(R.string.loading, R.string.import_interrupted, R.string.import_unavailable)
       for (message in messages) {
         render(cell, "import/$message") { ImportStatus(stringResource(message)) {} }
         assertChrome(cell)
@@ -280,17 +292,25 @@ class ChromeA11yMatrixTest {
   }
 
   private fun assertHeading(cell: Cell) {
-    val headings = compose.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading))
-      .fetchSemanticsNodes()
+    val headings =
+      compose
+        .onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading))
+        .fetchSemanticsNodes()
     assertTrue("$cell/${frame?.name} needs a heading", headings.isNotEmpty())
   }
 
   private fun assertChrome(cell: Cell, scroll: Boolean = false, overlay: Boolean = false) {
     assertTextLayouts(cell, overlay)
-    val actions = compose.onAllNodes(SemanticsMatcher("clickable or toggleable in active surface") {
-      (!overlay || inOverlay(it)) &&
-        (it.config.contains(SemanticsActions.OnClick) || it.config.contains(SemanticsProperties.ToggleableState))
-    }).fetchSemanticsNodes()
+    val actions =
+      compose
+        .onAllNodes(
+          SemanticsMatcher("clickable or toggleable in active surface") {
+            (!overlay || inOverlay(it)) &&
+              (it.config.contains(SemanticsActions.OnClick) ||
+                it.config.contains(SemanticsProperties.ToggleableState))
+          },
+        )
+        .fetchSemanticsNodes()
     for (node in actions) {
       val matcher = SemanticsMatcher("node ${node.id}") { it.id == node.id }
       val interaction = compose.onNode(matcher)
@@ -308,13 +328,16 @@ class ChromeA11yMatrixTest {
   }
 
   private fun inOverlay(node: SemanticsNode): Boolean =
-    generateSequence(node) { it.parent }.any {
-      it.config.contains(SemanticsProperties.IsPopup) || it.config.contains(SemanticsProperties.IsDialog)
-    }
+    generateSequence(node) { it.parent }
+      .any {
+        it.config.contains(SemanticsProperties.IsPopup) ||
+          it.config.contains(SemanticsProperties.IsDialog)
+      }
 
   private fun assertAccessibleTarget(cell: Cell, node: SemanticsNode) {
     val text = node.config.getOrNull(SemanticsProperties.Text).orEmpty().joinToString { it.text }
-    val description = node.config.getOrNull(SemanticsProperties.ContentDescription).orEmpty().joinToString()
+    val description =
+      node.config.getOrNull(SemanticsProperties.ContentDescription).orEmpty().joinToString()
     val message = "$cell/${frame?.name}/node=${node.id} text=$text description=$description"
     assertTrue("$message needs an accessible name", text.isNotBlank() || description.isNotBlank())
     val bounds = node.touchBoundsInRoot
@@ -325,9 +348,15 @@ class ChromeA11yMatrixTest {
   }
 
   private fun assertTextLayouts(cell: Cell, overlay: Boolean) {
-    val texts = compose.onAllNodes(SemanticsMatcher("text layout in active surface") {
-      it.config.contains(SemanticsActions.GetTextLayoutResult) && (!overlay || inOverlay(it))
-    }, useUnmergedTree = true).fetchSemanticsNodes()
+    val texts =
+      compose
+        .onAllNodes(
+          SemanticsMatcher("text layout in active surface") {
+            it.config.contains(SemanticsActions.GetTextLayoutResult) && (!overlay || inOverlay(it))
+          },
+          useUnmergedTree = true,
+        )
+        .fetchSemanticsNodes()
     assertTrue("$cell/${frame?.name} must expose text layouts", texts.isNotEmpty())
     compose.runOnIdle {
       for (node in texts) {
@@ -359,7 +388,10 @@ class ChromeA11yMatrixTest {
       layout.getLineEnd(last, visibleEnd = true) >= layout.layoutInput.text.trimEnd().length,
     )
     val widest = (0..last).maxOf { layout.getLineRight(it) - layout.getLineLeft(it) }
-    assertTrue("$message node ${node.size} is narrower than its text $widest", node.size.width + 1 >= widest)
+    assertTrue(
+      "$message node ${node.size} is narrower than its text $widest",
+      node.size.width + 1 >= widest,
+    )
     assertTrue(
       "$message node ${node.size} is shorter than its text ${layout.multiParagraph.height}",
       node.size.height + 1 >= layout.multiParagraph.height,

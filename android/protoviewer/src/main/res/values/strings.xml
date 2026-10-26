@@ -1,6 +1,6 @@
 <resources>
-  <!-- App title shown at the top of the prototype library. -->
-  <string name="app_name">ProtoViewer</string>
+  <!-- App title and launcher label; a brand name kept untranslated because it is the product name. -->
+  <string name="app_name" translatable="false">ProtoViewer</string>
   <!-- Empty state in the library when no prototypes have been imported. -->
   <string name="empty_library">Your prototype library is empty.</string>
   <!-- Loading status in the library, viewer and import screen. -->
@@ -49,6 +49,8 @@
   <string name="network_provenance">Imported prototype · Network enabled</string>
   <!-- Accessible click action on a library row; %1$s is the prototype label. -->
   <string name="open_prototype">Open %1$s</string>
+  <!-- Import screen error line; %1$s is a technical path or token, %2$s the reason. Translators may reorder the placeholders. -->
+  <string name="import_rejected">%1$s: %2$s</string>
   <!-- Import screen error after an interrupted import is restored. -->
   <string name="import_interrupted">Import interrupted; open the file again</string>
   <!-- Import screen error when the import service is unavailable. -->

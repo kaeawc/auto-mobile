@@ -1,6 +1,15 @@
 import { MAX_PROTOTYPE_PATCH_OPS } from "./prototypePatch";
 import { MAX_PROTOTYPE_SPEC_BYTES } from "./prototypeSpec";
-export const GUIDE_GESTURES = `## Gestures
+export const GUIDE_GESTURES = `## Platform namespaces
+
+Prefer portable node/window fields, then portable theme tokens, then \`theme.design\` when
+available, and finally a platform namespace as the last resort. Every namespace field has a
+\`why\` explaining its lack of portable meaning.
+Optional \`ios\` and \`android\` objects may appear on any node, \`window\` or \`theme\`.
+The other platform’s block is ignored with a \`platformNotes\` entry. Own-platform blocks
+require \`prototype_platform_namespace_v1\`; current renderers do not implement these fields.
+
+## Gestures
 
 \`onLongPress\` and \`onDoubleTap\` run their action lists exactly like \`onTap\`, with no new
 event kind. A node with either list is interactive even without \`onTap\`. All three may coexist;

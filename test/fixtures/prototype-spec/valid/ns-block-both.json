@@ -1,0 +1,38 @@
+{
+  "id": "namespaces",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    },
+    "ios": {
+      "sheet": {
+        "sizing": "form"
+      }
+    }
+  },
+  "theme": {
+    "ios": {
+      "navigationTitle": "large"
+    },
+    "android": {
+      "indication": "none"
+    }
+  },
+  "root": {
+    "type": "button",
+    "label": "Save",
+    "ios": {
+      "buttonStyle": "glass",
+      "tab": {
+        "role": "search"
+      },
+      "hover": "lift"
+    },
+    "android": {
+      "predictiveBack": {
+        "style": "default"
+      },
+      "indication": "ripple"
+    }
+  }
+}

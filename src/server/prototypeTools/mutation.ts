@@ -357,16 +357,16 @@ function platformNotesOutput(
   target: PrototypeTarget,
   success: boolean,
 ): Pick<PrototypeOutput, "platformNotes"> {
-  if (args.action !== "show" || !success || device.platform !== "ios") {
+  if (args.action !== "show" || !success) {
     return {};
   }
   const notes: NonNullable<PrototypeOutput["platformNotes"]> = prototypePlatformNotes(
     args.spec as PrototypeSpec,
-    "ios",
+    device.platform,
     (capability) => target.ios?.supportsCapability(capability) === true,
   );
   const gestures = prototypeGestureFields(args.spec);
-  if (gestures.length > 0) {
+  if (device.platform === "ios" && gestures.length > 0) {
     notes.push({
       platform: "ios",
       construct: "node.gestures",

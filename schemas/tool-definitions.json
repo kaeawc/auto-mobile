@@ -19047,6 +19047,67 @@
             "window": {
               "type": "object",
               "properties": {
+                "ios": {
+                  "type": "object",
+                  "properties": {
+                    "buttonStyle": {
+                      "type": "string",
+                      "enum": ["glass", "glassProminent"]
+                    },
+                    "tab": {
+                      "type": "object",
+                      "properties": {
+                        "role": {
+                          "type": "string",
+                          "enum": ["search"]
+                        }
+                      },
+                      "required": ["role"],
+                      "additionalProperties": false
+                    },
+                    "sheet": {
+                      "type": "object",
+                      "properties": {
+                        "sizing": {
+                          "type": "string",
+                          "enum": ["form", "page", "fitted"]
+                        }
+                      },
+                      "required": ["sizing"],
+                      "additionalProperties": false
+                    },
+                    "hover": {
+                      "type": "string",
+                      "enum": ["lift", "highlight"]
+                    },
+                    "navigationTitle": {
+                      "type": "string",
+                      "enum": ["large", "inline"]
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "android": {
+                  "type": "object",
+                  "properties": {
+                    "predictiveBack": {
+                      "type": "object",
+                      "properties": {
+                        "style": {
+                          "type": "string",
+                          "enum": ["default", "crossActivity", "none"]
+                        }
+                      },
+                      "required": ["style"],
+                      "additionalProperties": false
+                    },
+                    "indication": {
+                      "type": "string",
+                      "enum": ["ripple", "none"]
+                    }
+                  },
+                  "additionalProperties": false
+                },
                 "placement": {
                   "anyOf": [
                     {
@@ -19259,6 +19320,12 @@
             "theme": {
               "type": "object",
               "properties": {
+                "ios": {
+                  "$ref": "#/properties/spec/properties/window/properties/ios"
+                },
+                "android": {
+                  "$ref": "#/properties/spec/properties/window/properties/android"
+                },
                 "mode": {
                   "type": "string",
                   "enum": ["light", "dark", "system"]
@@ -20301,6 +20368,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "type": "integer",
                       "minimum": 1
@@ -21585,6 +21658,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -21697,6 +21776,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -21763,6 +21848,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -21824,6 +21915,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -21901,6 +21998,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -21972,6 +22075,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22104,6 +22213,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22210,6 +22325,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22270,6 +22391,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22317,6 +22444,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22558,6 +22691,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22635,6 +22774,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22698,6 +22843,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22761,6 +22912,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22822,6 +22979,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22901,6 +23064,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22975,6 +23144,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23085,6 +23260,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23157,6 +23338,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23218,6 +23405,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23282,6 +23475,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23339,6 +23538,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23400,6 +23605,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23470,6 +23681,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23536,6 +23753,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23587,6 +23810,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23638,6 +23867,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23695,6 +23930,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23793,6 +24034,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23884,6 +24131,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23970,6 +24223,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -24033,6 +24292,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -24126,6 +24391,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -24188,6 +24459,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -24253,6 +24530,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -24312,6 +24595,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -24428,6 +24717,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -24526,6 +24821,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -24579,6 +24880,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -24658,6 +24965,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -24720,6 +25033,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -25479,14 +25798,14 @@
           "additionalProperties": false
         },
         "platformNotes": {
-          "description": "Successful show on iOS only: platform and construct identify the difference; effect says ignored or substituted; paths list affected fields in the component-expanded, anchor-resolved device spec in tree order, capped at 20, including bottomSheet.dismissOnSwipe when absent and defaulted; total is the full count only when capped; values are distinct sorted placeholder icon names for icon.name; detail explains iOS and Android behavior. Absent when nothing applies or the show failed.",
+          "description": "Successful show on either platform (legacy renderer differences apply to iOS only): platform and construct identify the difference; effect says ignored or substituted; paths list affected fields in the component-expanded, anchor-resolved device spec in tree order, capped at 20, including bottomSheet.dismissOnSwipe when absent and defaulted; total is the full count only when capped; values are distinct sorted placeholder icon names for icon.name; detail explains iOS and Android behavior. Absent when nothing applies or the show failed.",
           "type": "array",
           "items": {
             "type": "object",
             "properties": {
               "platform": {
                 "type": "string",
-                "const": "ios"
+                "enum": ["ios", "android"]
               },
               "construct": {
                 "type": "string",
@@ -25504,6 +25823,7 @@
                   "searchBar",
                   "searchBar.icons",
                   "rich-text-links",
+                  "platformNamespace",
                   "menu",
                   "select"
                 ]

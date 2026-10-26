@@ -8,6 +8,10 @@ internal object PrototypeBundleCapabilities {
   fun required(refs: PrototypeBundleReferences): List<String> {
     val spec = refs.spec
     val caps = linkedSetOf<String>()
+    for (key in listOf("window", "theme")) {
+      val block = spec[key] as? JsonObject ?: continue
+      if ("ios" in block || "android" in block) caps.add("prototype_platform_namespace_v1")
+    }
     if ("data" in spec) caps.add("prototype_data_model_v1")
     if ("storage" in spec) caps.add("prototype_storage_v1")
     val colors = (spec["theme"] as? JsonObject)?.get("colors") as? JsonObject

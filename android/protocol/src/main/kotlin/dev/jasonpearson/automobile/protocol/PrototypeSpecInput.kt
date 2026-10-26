@@ -141,7 +141,9 @@ internal object PrototypeSpecInput {
     return try {
       PrototypeSpecValidation.Success(
         json.decodeFromJsonElement<PrototypeSpec>(
-          normalizeIntegers(value, definitions.getValue("spec").jsonObject),
+          stripPlatformNamespaces(
+            normalizeIntegers(value, definitions.getValue("spec").jsonObject),
+          ),
         ),
       )
     } catch (_: SerializationException) {

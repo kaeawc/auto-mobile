@@ -32,6 +32,7 @@ internal object PrototypeBundleNodeCapabilities {
     fun mark(name: String, used: Boolean) {
       if (used) caps.add("prototype_$name")
     }
+    mark("platform_namespace_v1", "ios" in n || "android" in n)
     mark("flow_grid_v1", "span" in n)
     mark("gestures_v1", n.keys.any { it in setOf("onLongPress", "onDoubleTap") })
     mark("swipe_actions_v1", type in setOf("row", "listItem") && "swipeActions" in n)

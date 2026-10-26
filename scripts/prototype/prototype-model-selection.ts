@@ -13,6 +13,8 @@ export const prototypeModelSelection = {
   tooltipSpotlight: {
     doc: "Tooltip spotlight hole: padding 0..64 dp (default 8), cornerRadius 0..64 dp (default 12).",
   },
+  iosNamespace: {},
+  androidNamespace: {},
   offset: {},
   padding: {},
   bounds: { languages: ["kotlin"] },

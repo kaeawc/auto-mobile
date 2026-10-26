@@ -363,6 +363,7 @@ class WebSocketServer(
     // Prototype text fields honour labels, variants, keyboard/security, line limits and maxLength.
     // Older APKs reject these fields as unknown, so hosts require this flag before sending them.
     add("prototype_text_field_options_v1")
+    add("prototype_scroll_motion_v1")
     add("prototype_gestures_v1")
     add("prototype_swipe_actions_v1")
     add("prototype_text_field_actions_v1")

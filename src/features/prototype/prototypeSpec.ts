@@ -1,3 +1,4 @@
+import { prototypeScrollMotionShape } from "./prototypeScrollMotionSchema";
 import * as timers from "./prototypeTimerSchema";
 import { stackScreenActionSchema, stackTransitionSchema } from "./prototypeStackTransitions";
 import { z } from "zod";
@@ -173,6 +174,7 @@ const checksShape = {
   validateOn: z.enum(["change", "blur", "submit"]).optional(),
 };
 const commonNodeShape = {
+  ...prototypeScrollMotionShape,
   span: z.number().finite().int().min(1).optional(),
   id: z.string().min(1).optional(),
   testTag: z.string().min(1).optional(),
@@ -895,7 +897,7 @@ const specSchema = z
             .safeParse(value).success,
       )
       .optional(),
-    motion: z.enum(["none", "standard"]).optional(),
+    motion: z.enum(["none", "standard", "reduced"]).optional(),
     storage: prototypeStorageSchema.optional(),
     requires: prototypeRequiresSchema.optional(),
     platform: prototypePlatformHandlersSchema.optional(),

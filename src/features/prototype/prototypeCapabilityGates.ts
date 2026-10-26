@@ -1,3 +1,4 @@
+import { prototypeScrollMotionFields } from "./prototypeScrollMotion";
 import { prototypeTimerFields, prototypeTimersUnsupportedMessage } from "./prototypeTimers";
 import {
   prototypeStackTransitionFields,
@@ -11,6 +12,7 @@ import {
   PROTOTYPE_DATA_MODEL_CAPABILITY,
   PROTOTYPE_FLOW_GRID_CAPABILITY,
   PROTOTYPE_PAGER_OPTIONS_CAPABILITY,
+  PROTOTYPE_SCROLL_MOTION_CAPABILITY,
   PROTOTYPE_GESTURES_CAPABILITY,
   PROTOTYPE_SWIPE_ACTIONS_CAPABILITY,
   PROTOTYPE_TEXT_FIELD_ACTIONS_CAPABILITY,
@@ -118,6 +120,12 @@ interface PrototypeSpecCapabilityGate {
 
 /** Spec-introduced features must be checked on both show and the complete patch result. */
 export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGate[] = [
+  {
+    capability: PROTOTYPE_SCROLL_MOTION_CAPABILITY,
+    fields: prototypeScrollMotionFields,
+    unsupportedMessage: (fields, platform) =>
+      `The connected ${platform} renderer does not advertise prototype_scroll_motion_v1 required by ${fields[0]}. Nothing was shown. Update the renderer or remove scroll motion.`,
+  },
   {
     capability: PROTOTYPE_THEME_MODES_CAPABILITY,
     fields: prototypeThemeModeFields,

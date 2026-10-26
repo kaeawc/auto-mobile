@@ -6,6 +6,9 @@ import type { ModelSelection, TypeRefs } from "./generate-prototype-spec-models"
  * preserve each native API. Type refs below bridge definitions that remain hand-written.
  */
 export const prototypeModelSelection = {
+  scrollEdge: {},
+  scrollTransition: {},
+  scrollLinked: {},
   offset: {},
   padding: {},
   bounds: { languages: ["kotlin"] },

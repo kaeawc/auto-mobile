@@ -40,6 +40,10 @@ const fixtures: Record<string, Node> = {
   },
   prototype_flow_grid_v1: { type: "flow", children: [label] },
   prototype_pager_options_v1: { type: "pager", axis: "horizontal", children: [label] },
+  prototype_scroll_motion_v1: {
+    ...label,
+    scrollLinked: { source: "feed", range: [0, 160], alpha: [1, 0] },
+  },
   prototype_gestures_v1: { ...label, onLongPress: [{ type: "emit", name: "long" }] },
   prototype_carousel_v1: { type: "carousel", itemWidth: 120, children: [label] },
   prototype_refresh_v1: {

@@ -122,6 +122,7 @@ enum PrototypeLimits {
     static func guardTree(_ root: JSONValue) throws {
         var expandedCount = 0
         try visit(root, path: "root", depth: 1, authored: false, count: &expandedCount)
+        try PrototypeScrollMotion.validate(root)
     }
 
     /// Known nonempty literal instances use the expanded budget. Unknown or empty templates use

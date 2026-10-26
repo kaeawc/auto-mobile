@@ -1,6 +1,27 @@
 // Generated from schemas/prototype-spec-contract.json; do not edit.
 // Regenerate: bun scripts/prototype/generate-prototype-spec-models.ts
 
+struct ScrollEdge: Codable, Equatable, Sendable {
+    let scale: Double?
+    let alpha: Double?
+    let rotation: Double?
+}
+
+struct ScrollTransition: Codable, Equatable, Sendable {
+    let axis: String
+    let edge: ScrollEdge
+}
+
+struct ScrollLinked: Codable, Equatable, Sendable {
+    let source: String
+    let range: [Double]
+    let alpha: [Double]?
+    let scale: [Double]?
+    let offsetY: [Double]?
+    let offsetX: [Double]?
+    let blur: [Double]?
+}
+
 struct Offset: Codable, Equatable, Sendable {
     let x: Double
     let y: Double

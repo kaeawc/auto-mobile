@@ -116,8 +116,13 @@ fun prototypeOpaqueSurface(model: PrototypeRenderModel): Boolean =
 @InternalAutoMobilePrototypeApi
 fun guardPrototypeTree(root: PrototypeNode) {
   var count = 0
+  var scrollBindings = 0
   fun visit(node: PrototypeNode, path: String, depth: Int) {
     require(++count <= PrototypeSpecValidator.MAX_PROTOTYPE_NODES) { "$path: Node limit exceeded" }
+    scrollBindings += listOfNotNull(node.scrollLinked, node.scrollTransition).size
+    require(scrollBindings <= PrototypeScrollMotion.MAX_PROTOTYPE_SCROLL_BINDINGS) {
+      "$path: Scroll binding limit exceeded"
+    }
     require(depth <= PrototypeSpecValidator.MAX_PROTOTYPE_DEPTH) {
       "$path: Tree depth limit exceeded"
     }

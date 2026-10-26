@@ -6,6 +6,30 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
+data class PrototypeScrollEdge(
+  val scale: Double? = null,
+  val alpha: Double? = null,
+  val rotation: Double? = null,
+)
+
+@Serializable
+data class PrototypeScrollTransition(
+  val axis: String,
+  val edge: PrototypeScrollEdge,
+)
+
+@Serializable
+data class PrototypeScrollLinked(
+  val source: String,
+  val range: List<Double>,
+  val alpha: List<Double>? = null,
+  val scale: List<Double>? = null,
+  val offsetY: List<Double>? = null,
+  val offsetX: List<Double>? = null,
+  val blur: List<Double>? = null,
+)
+
+@Serializable
 data class PrototypeOffset(
   val x: Double,
   val y: Double,

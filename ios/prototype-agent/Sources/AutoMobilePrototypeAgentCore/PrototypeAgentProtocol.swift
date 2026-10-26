@@ -29,6 +29,7 @@ enum PrototypeAgentProtocol {
         inspectCapability,
         themeModesCapability,
         flowGridCapability,
+        "prototype_scroll_motion_v1",
         pagerOptionsCapability,
         appearanceCapability,
         windowChromeCapability,

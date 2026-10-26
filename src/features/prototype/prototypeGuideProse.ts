@@ -174,6 +174,19 @@ animated highlight over its background and reads "Loading" to accessibility; it 
 
 The rows themselves repeat over \`{path: "/feed"}\`. The iOS agent draws shimmer too.
 
+## Scroll-driven motion
+
+(needs \`prototype_scroll_motion_v1\`) A node under a scroll, pager, carousel or repeat takes
+\`scrollTransition: {axis: "horizontal" | "vertical", edge: {scale?, alpha?, rotation?}}\`.
+It interpolates from the edge values to identity at the viewport centre. Any node can take
+\`scrollLinked: {source: "feed", range: [0, 160], alpha: [1, 0], offsetY: [0, -40]}\`:
+\`source\` names a scroll in the same screen; the input endpoints increase, and each output
+is a two-number range. Outputs are \`alpha\`, \`scale\`, \`offsetX\`, \`offsetY\` and \`blur\`.
+They interpolate linearly and clamp outside the input range. At most 16 bindings are allowed
+across the expanded tree; each field counts once per instance. These effects change drawing,
+not layout, hit targets or observed bounds. \`motion: "reduced"\` keeps alpha only;
+\`motion: "none"\` keeps all scroll-driven outputs. Android blur requires Android 12 or later.
+
 ## Motion v2
 
 (needs \`prototype_motion_v2\`) A node's \`animate: {durationMs?, easing?}\` (0-2000 ms, default

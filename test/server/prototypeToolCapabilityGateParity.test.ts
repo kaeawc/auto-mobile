@@ -68,6 +68,15 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
       children: [{ type: "spacer" }],
     }),
   },
+  prototype_scroll_motion_v1: fixture({
+    type: "scroll",
+    id: "label",
+    child: {
+      type: "text",
+      text: "Hero",
+      scrollLinked: { source: "label", range: [0, 160], alpha: [1, 0] },
+    },
+  }),
   prototype_gestures_v1: fixture({
     ...label,
     onLongPress: [{ type: "emit", name: "long" }],

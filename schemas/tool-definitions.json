@@ -19534,7 +19534,7 @@
             "state": {},
             "motion": {
               "type": "string",
-              "enum": ["none", "standard"]
+              "enum": ["none", "standard", "reduced"]
             },
             "storage": {
               "type": "object",
@@ -20300,6 +20300,66 @@
                 {
                   "type": "object",
                   "properties": {
+                    "scrollLinked": {
+                      "type": "object",
+                      "properties": {
+                        "source": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "range": {
+                          "type": "array",
+                          "items": {
+                            "type": "number"
+                          },
+                          "minItems": 2,
+                          "maxItems": 2
+                        },
+                        "alpha": {
+                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked/properties/range"
+                        },
+                        "scale": {
+                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked/properties/range"
+                        },
+                        "offsetY": {
+                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked/properties/range"
+                        },
+                        "offsetX": {
+                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked/properties/range"
+                        },
+                        "blur": {
+                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked/properties/range"
+                        }
+                      },
+                      "required": ["source", "range"],
+                      "additionalProperties": false
+                    },
+                    "scrollTransition": {
+                      "type": "object",
+                      "properties": {
+                        "axis": {
+                          "type": "string",
+                          "enum": ["horizontal", "vertical"]
+                        },
+                        "edge": {
+                          "type": "object",
+                          "properties": {
+                            "scale": {
+                              "type": "number"
+                            },
+                            "alpha": {
+                              "type": "number"
+                            },
+                            "rotation": {
+                              "type": "number"
+                            }
+                          },
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["axis", "edge"],
+                      "additionalProperties": false
+                    },
                     "span": {
                       "type": "integer",
                       "minimum": 1
@@ -21228,6 +21288,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -21340,6 +21406,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -21406,6 +21478,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -21467,6 +21545,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -21544,6 +21628,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -21615,6 +21705,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -21747,6 +21843,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -21839,6 +21941,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -21899,6 +22007,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -21946,6 +22060,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22187,6 +22307,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22264,6 +22390,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22327,6 +22459,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22390,6 +22528,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22451,6 +22595,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22530,6 +22680,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22604,6 +22760,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22714,6 +22876,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22786,6 +22954,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22847,6 +23021,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22911,6 +23091,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22968,6 +23154,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23029,6 +23221,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23099,6 +23297,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23165,6 +23369,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23216,6 +23426,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23267,6 +23483,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23324,6 +23546,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23422,6 +23650,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23513,6 +23747,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23606,6 +23846,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23668,6 +23914,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23733,6 +23985,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23792,6 +24050,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23882,6 +24146,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23980,6 +24250,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -24033,6 +24309,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -24112,6 +24394,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -24174,6 +24462,12 @@
                 {
                   "type": "object",
                   "properties": {
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },

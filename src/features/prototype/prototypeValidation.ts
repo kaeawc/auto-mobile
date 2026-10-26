@@ -1,3 +1,4 @@
+import { prototypeScrollMotionError } from "./prototypeScrollMotion";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import { prototypeStrictPolicyError, type PrototypeStrictOptions } from "./prototypeStrictPolicy";
 import { prototypeStrictJson } from "./prototypeStrictJson";
@@ -818,6 +819,7 @@ function validateValue(
   const error =
     walk(value, definitions.spec, "", context, 0) ??
     layoutErrors(value, context, repeats) ??
+    prototypeScrollMotionError(value, context.nodes) ??
     behaviourErrors(value, context, data, repeats, componentTimers);
   if (error) {
     return { success: false, error };

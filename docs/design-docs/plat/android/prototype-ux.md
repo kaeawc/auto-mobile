@@ -40,7 +40,7 @@ blanket focusability proposal).
 | `window`  | Required window configuration below.                                                                                   |
 | `data`    | Optional agent-owned read-only nested JSON object; see Data model.                                                     |
 | `state`   | Optional flat object of string, finite number, or boolean values.                                                      |
-| `motion`  | Optional `none` or `standard` (default). See Motion below.                                                             |
+| `motion`  | Optional `none`, `standard` (default), or `reduced` for alpha-only scroll motion. See Motion below.                    |
 | `storage` | Optional `{version, keys}` naming state keys and `/data` pointers the device keeps across shows. See Storage (#12522). |
 | `root`    | Required single node.                                                                                                  |
 
@@ -718,6 +718,20 @@ host). The spec carries only the id; font bytes, MIME types and caps stay out of
   one. Upload a font file per weight and use `styleWhen` to choose between them.
 
 ## Motion
+
+`scrollTransition: {axis, edge: {scale?, alpha?, rotation?}}` on a descendant
+of a scroll, pager, carousel or repeat interpolates from the authored edge values
+to identity at the viewport center. `axis` is `horizontal` or `vertical`.
+`scrollLinked: {source, range: [start, end], alpha?, scale?, offsetY?, offsetX?, blur?}`
+uses the offset in dp of a scroll with that `id` in the same stack screen. The
+input endpoints increase; each output is a pair that may increase or decrease.
+Values interpolate linearly and clamp outside the input range. At least one
+output is required. Alpha is clamped to 0–1 and blur to a nonnegative radius. Android blur requires Android 12 or later.
+Both fields require `prototype_scroll_motion_v1`; each counts as one binding,
+with at most 16 bindings after component and repeat expansion. These are drawing
+transforms: layout slots, hit targets and reported bounds stay fixed. The
+`reduced` profile keeps alpha and drops scale, rotation, offsets and blur;
+`none` retains all scroll-driven outputs because they follow position, not time.
 
 Prototype state changes animate by default (#10442). A node with `visibleWhen`
 fades and expands in and fades and shrinks out; a pager page change driven by

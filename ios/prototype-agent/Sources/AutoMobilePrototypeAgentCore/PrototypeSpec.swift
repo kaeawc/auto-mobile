@@ -167,6 +167,7 @@ struct PrototypeSpec: Decodable {
     {
         try PrototypeSizeBounds.validate(.object(["root": raw]))
         try PrototypeLimits.guardAuthoredTree(raw)
+        try PrototypeScrollMotion.validate(raw, data: data)
         try PrototypeRequestValidator.validate(raw, state: menuState)
         try PrototypeLimits.guardRepeatPathCells(raw, data: data)
         try PrototypeMenus.validateAuthoredText(raw)
@@ -717,6 +718,8 @@ final class PrototypeNode: Decodable {
     /// Stack navigation, or other nodes' `visibleWhen` enter/exit (`none`, `fade`, `expand`, `slide`).
     /// Absent visibility transitions use fade + expand; stacks always use that visibility default.
     let transition: String?
+    let scrollTransition: ScrollTransition?
+    let scrollLinked: ScrollLinked?
     let safeAreaPadding: SafeAreaPadding?
     /// Screen placement resolved by the host (#9316); see `PrototypeAnchor`.
     let anchor: PrototypeAnchor?
@@ -832,6 +835,7 @@ final class PrototypeNode: Decodable {
     }
 
     private enum CodingKeys: String, CodingKey {
+        case scrollTransition, scrollLinked
         case type, id, testTag, onTap, style, styleWhen, visibleWhen, transition
         case safeAreaPadding, anchor, children, child, text, contentDescription, asset, contentScale
         case name, label, variant, stateKey, placeholder, axis, items, pager
@@ -859,6 +863,8 @@ final class PrototypeNode: Decodable {
         styleWhen = try container.decodeIfPresent([StyleWhen].self, forKey: .styleWhen)
         visibleWhen = try container.decodeIfPresent(Condition.self, forKey: .visibleWhen)
         transition = try container.decodeIfPresent(PrototypeTransitionForm.self, forKey: .transition)?.type
+        scrollTransition = try container.decodeIfPresent(ScrollTransition.self, forKey: .scrollTransition)
+        scrollLinked = try container.decodeIfPresent(ScrollLinked.self, forKey: .scrollLinked)
         safeAreaPadding = try container.decodeIfPresent(SafeAreaPadding.self, forKey: .safeAreaPadding)
         anchor = try container.decodeIfPresent(PrototypeAnchor.self, forKey: .anchor)
         children = try container.decodeIfPresent([PrototypeNode].self, forKey: .children)

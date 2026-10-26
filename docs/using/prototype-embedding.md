@@ -86,6 +86,22 @@ load-error view, on both platforms.
   its egress checks. Pass `PrototypeNetworkConfiguration(hostHandler:)` to take over host-routed
   requests, or `deviceClient:` to replace the transport.
 
+## Shrinking (R8)
+
+Android icons named in a spec are looked up by reflection, which R8 cannot see. The library ships no
+consumer keep rule for them, because one would retain all of `material-icons-extended` (about 3 MB
+of dex) in every app that embeds a prototype. An app that minifies and renders icons by name adds the
+rule itself:
+
+```
+-keep class androidx.compose.material.icons.** { *; }
+```
+
+Narrow it to the icons your specs use if size matters, for example
+`-keep class androidx.compose.material.icons.filled.HomeKt { *; }` per icon and style. An icon the
+shrinker removed draws no glyph, and the renderer logs `Prototype icon '<name>' resolved in no style`
+once per name at warn level. Apps that never shrink, and specs without icons, need nothing.
+
 ## Storage
 
 When the spec has a `storage` block, the generated host opts in to file-backed storage

@@ -7,6 +7,7 @@ import {
 } from "../../devices/bootAdmission/BootSlotReservation";
 import { BootedDeviceDiscoveryIncompleteError } from "../../models/BootedDeviceDiscoveryIncompleteError";
 import { logger } from "../../utils/logger";
+import { defaultRandom, type Random } from "../../utils/Random";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import type { Timer } from "../../utils/SystemTimer";
 import {
@@ -91,6 +92,8 @@ export interface CapacityGateOptions {
   sustainedSamples?: number;
   /** The ledger of admitted boots; injectable so a test can watch its sample windows. */
   ledger?: BootAdmissionLedger;
+  /** Jitters the retry hint of a timed-out sample so concurrent callers do not retry in lock-step. */
+  random?: Random;
 }
 
 const CAPACITY_LABEL = "iOS simulator capacity";
@@ -102,6 +105,7 @@ export class IosSimCapacityGate
   private readonly env: NodeJS.ProcessEnv;
   private readonly retryAfterMs: number;
   private readonly sustainedSamples: number;
+  private readonly random: Random;
   private pressuredStreak = 0;
   private readonly bootGate: BootConcurrencyPool;
   private warnedBootConcurrency: string | undefined;
@@ -128,6 +132,7 @@ export class IosSimCapacityGate
     this.env = options.env ?? process.env;
     this.retryAfterMs = options.retryAfterMs ?? DEFAULT_ADMISSION_RETRY_AFTER_MS;
     this.sustainedSamples = options.sustainedSamples ?? DEFAULT_SUSTAINED_SAMPLES;
+    this.random = options.random ?? defaultRandom;
     this.admittedBoots = options.ledger ?? new BootAdmissionLedger(timer);
   }
 
@@ -250,6 +255,7 @@ export class IosSimCapacityGate
       platform: "ios",
       signal: options.signal,
       label: CAPACITY_LABEL,
+      timeoutRetryAfterMs: this.jitteredRetryAfterMs(),
       // Fresh: the listing must start after the ledger window opened (see FleetCostSource).
       sample: async () => {
         return this.refreshOwnership(await this.refresh({ fresh: true }));
@@ -321,6 +327,7 @@ export class IosSimCapacityGate
       signal: options.signal,
       sampleTimeoutMs,
       label: CAPACITY_LABEL,
+      timeoutRetryAfterMs: this.jitteredRetryAfterMs(),
       sample: async () => {
         return this.refreshOwnership(await this.refresh({ fresh: true, sampleTimeoutMs }));
       },
@@ -449,6 +456,7 @@ export class IosSimCapacityGate
       // the whole run (listing, then host snapshot) ends by this race's own deadline, so an
       // abandoned one has ended too by the time a caller can retry (#13801, #14496).
       const deadlineMs = this.timer.now() + DEFAULT_SAMPLE_TIMEOUT_MS;
+      const retryAfterMs = this.jitteredRetryAfterMs();
       const report = await raceWithDeadline(
         async () => {
           const report = await this.fleet.collectFresh({ deadlineMs });
@@ -460,11 +468,17 @@ export class IosSimCapacityGate
           signal: options.signal,
           label: `Collecting ${CAPACITY_LABEL}`,
           timeoutError: () =>
-            new BootedDeviceDiscoveryIncompleteError("ios", {
-              code: "timeout",
-              message: `timed out after ${DEFAULT_SAMPLE_TIMEOUT_MS}ms collecting ${CAPACITY_LABEL}`,
-              retryable: true,
-            }),
+            new BootedDeviceDiscoveryIncompleteError(
+              "ios",
+              {
+                code: "timeout",
+                message: `timed out after ${DEFAULT_SAMPLE_TIMEOUT_MS}ms collecting ${CAPACITY_LABEL}`,
+                retryable: true,
+                retryAfterMs,
+              },
+              undefined,
+              retryAfterMs,
+            ),
         },
       );
       options.signal?.throwIfAborted();
@@ -472,6 +486,11 @@ export class IosSimCapacityGate
     } finally {
       window.close();
     }
+  }
+
+  /** The refusal hint stretched by up to 100%, so callers refused together retry apart (#15307). */
+  private jitteredRetryAfterMs(): number {
+    return Math.round(this.retryAfterMs * (1 + this.random.next()));
   }
 
   /**

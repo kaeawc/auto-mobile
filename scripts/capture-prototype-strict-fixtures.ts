@@ -466,7 +466,10 @@ capture("backdrop-missing-material", backdropSpec({ blur: 10 }));
 capture("backdrop-blur-over-cap", backdropSpec({ material: "thick", blur: 151 }));
 capture("backdrop-blur-negative", backdropSpec({ material: "thick", blur: -1 }));
 capture("backdrop-blur-fractional", backdropSpec({ material: "thick", blur: 2.5 }));
-capture("backdrop-tint-per-mode", backdropSpec({ material: "thin", tint: "#FFFFFF" }));
+capture(
+  "backdrop-tint-per-mode",
+  backdropSpec({ material: "thin", tint: { light: "#FFFFFF", dark: "#000000" } }),
+);
 capture("backdrop-tint-invalid", backdropSpec({ material: "thick", tint: "not-a-colour" }));
 capture("backdrop-unknown-key", backdropSpec({ material: "thick", radius: 4 }));
 capture("backdrop-not-object", backdropSpec("thin"));

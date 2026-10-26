@@ -657,6 +657,42 @@ describe("CtrlProxy prototypes", () => {
       }
     });
 
+    test("a reply's backdrop outcome is kept when blur or fallback and dropped otherwise (#15126)", async () => {
+      for (const [reported, expected] of [
+        ["blur", { backdrop: "blur" }],
+        ["fallback", { backdrop: "fallback" }],
+        ["frosted", {}],
+      ] as const) {
+        const { client, socket, receive } = await harness(inspectable);
+        let finish!: (value: Record<string, unknown>) => void;
+        const sent = new Promise<Record<string, unknown>>((resolve) => {
+          finish = resolve;
+        });
+        const send = spyOn(socket, "send").mockImplementation((data) =>
+          finish(JSON.parse(String(data))),
+        );
+        try {
+          const pending = client.requestInspectPrototypes();
+          const message = await sent;
+          await receive({
+            type: "prototype_result",
+            timestamp: 1,
+            requestId: message.requestId as string,
+            success: true,
+            backdrop: reported,
+          });
+          const result = await pending;
+          if (expected.backdrop) {
+            expect(result).toMatchObject(expected);
+          } else {
+            expect(result).not.toHaveProperty("backdrop");
+          }
+        } finally {
+          send.mockRestore();
+        }
+      }
+    });
+
     test.each([
       ["without the flag", ["full_command_set_v1", "inspect_prototypes"]],
       ["on a legacy handshake", ["inspect_prototypes"]],

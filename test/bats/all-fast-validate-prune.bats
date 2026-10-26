@@ -163,3 +163,16 @@ teardown() {
 
   [ "$status" -eq 0 ]
 }
+
+@test "fast validation registers the ProtoViewer notices drift check" {
+  run "$ABS_SCRIPT" --list-checks
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *$'protoviewer-notices\tscripts/ios/protoviewer-notices.ts'* ]]
+}
+
+@test "pull_request Fast Validation runs the ProtoViewer notices drift check" {
+  run grep -E -- '--only .*(^|,)protoviewer-notices(,|[[:space:]])' .github/workflows/pull_request.yml
+
+  [ "$status" -eq 0 ]
+}

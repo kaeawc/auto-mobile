@@ -6,6 +6,7 @@ plugins {
   id("automobile.robolectric-sdk-pin")
   alias(libs.plugins.compose.compiler)
   alias(libs.plugins.kotlin.serialization)
+  alias(libs.plugins.aboutlibraries)
 }
 
 android {
@@ -86,3 +87,24 @@ val verifyProtoViewerDependencies =
   }
 
 tasks.named("check") { dependsOn(verifyProtoViewerDependencies) }
+
+// Generated third-party notices (#14158): the plugin collects the release runtime classpath's
+// licenses into res/raw/aboutlibraries.json, which LicensesActivity renders. Strict mode fails the
+// build when a dependency's license is outside the allow-list, so an unreviewed license never
+// ships.
+aboutLibraries {
+  offlineMode = true
+  collect {
+    // Full Apache-2.0 text comes from the repository LICENSE (offline mode embeds none).
+    configPath = file("license-config")
+    // The Compose BOM is a version constraint with no code, owner or license of its own.
+    includePlatform = false
+    filterVariants.addAll("release")
+  }
+  license {
+    strictMode = com.mikepenz.aboutlibraries.plugin.StrictMode.FAIL
+    allowedLicenses.addAll("Apache-2.0")
+  }
+  // Strict mode accepts a library that declares no license at all; this rejects it.
+  library { requireLicense = true }
+}

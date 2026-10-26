@@ -8,6 +8,10 @@ test/fixtures/macos-profiles/*.txt text eol=lf
 test/fixtures/bats-joblog/*.tsv text eol=lf
 test/fixtures/ci-time-to-green/*.json text eol=lf
 test/fixtures/prototype-capabilities/*.json text eol=lf
+# ProtoViewer iOS notices are compared byte-for-byte against the generator output.
+test/fixtures/protoviewer-notices/*.json text eol=lf
+ios/prototype-agent/ProtoViewer/Acknowledgements.generated.swift text eol=lf
+ios/prototype-agent/ProtoViewer/third-party-licenses/*.txt text eol=lf
 # Real dumpsys captures whose exact bytes are asserted (issue #4329): pin to LF
 # so a Windows checkout with core.autocrlf=true cannot rewrite them to CRLF and
 # break the byte-exact fixture premise.

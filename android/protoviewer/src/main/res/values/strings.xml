@@ -55,4 +55,7 @@
   <string name="import_interrupted">Import interrupted; open the file again</string>
   <!-- Import screen error when the import service is unavailable. -->
   <string name="import_unavailable">Import unavailable</string>
+  <string name="open_source_licenses">Open-source licenses</string>
+  <string name="licenses_error">Unable to read the open-source licenses.</string>
+  <string name="security_policy">Security policy</string>
 </resources>

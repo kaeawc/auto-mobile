@@ -474,6 +474,28 @@
           }
         }
       }
+    },
+    "Open-source licenses": {
+      "comment": "LibrarySettingsView row and LicensesView title: opens the list of bundled third-party licenses.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open-source licenses"
+          }
+        }
+      }
+    },
+    "Security policy": {
+      "comment": "LibrarySettingsView row: opens the project security policy in the browser.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Security policy"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

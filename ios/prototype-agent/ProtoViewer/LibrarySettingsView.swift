@@ -1,5 +1,9 @@
 import SwiftUI
 
+// A constant, well-formed literal.
+// swiftlint:disable:next force_unwrapping
+let protoViewerSecurityPolicyURL = URL(string: "https://github.com/kaeawc/auto-mobile/blob/main/SECURITY.md")!
+
 @MainActor
 struct LibrarySettingsView: View {
     let networkSwitch: PrototypeLibraryNetworkSwitch
@@ -26,6 +30,12 @@ struct LibrarySettingsView: View {
                     Text(
                         "Off by default. When enabled, private LAN addresses are allowed. Loopback, link-local addresses, and AutoMobile daemon ports on LAN addresses are blocked."
                     )
+                }
+                Section {
+                    NavigationLink("Open-source licenses") { LicensesView() }
+                        .accessibilityIdentifier("open-licenses")
+                    Link("Security policy", destination: protoViewerSecurityPolicyURL)
+                        .accessibilityIdentifier("open-security-policy")
                 }
             }
             .navigationTitle("Settings")

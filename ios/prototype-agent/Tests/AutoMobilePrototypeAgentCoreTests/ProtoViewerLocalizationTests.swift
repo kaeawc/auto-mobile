@@ -74,9 +74,6 @@ final class ProtoViewerLocalizationTests: XCTestCase {
 
     func testChromeLiteralCoverage() throws {
         let strings = try catalog("Localizable")
-        // Per-file EXEMPT list: independent licenses lane owns its text and catalog integration.
-        // Remove this exemption when LicensesView's catalog entries land.
-        let exempt = ["LicensesView.swift": "Concurrent licenses work has its own strings."]
         // Lint-style scan only: SwiftSyntax is not a dependency. This covers plain first
         // literal arguments, not arbitrary Swift expressions or prototype content.
         let calls =
@@ -87,7 +84,7 @@ final class ProtoViewerLocalizationTests: XCTestCase {
             let files = try FileManager.default.contentsOfDirectory(
                 at: package.appendingPathComponent(directory), includingPropertiesForKeys: nil
             )
-            for file in files where file.pathExtension == "swift" && exempt[file.lastPathComponent] == nil {
+            for file in files where file.pathExtension == "swift" {
                 let source = try String(contentsOf: file, encoding: .utf8)
                 for match in regex.matches(in: source, range: NSRange(source.startIndex..., in: source)) {
                     let capture = match.range(at: match.range(at: 1).location == NSNotFound ? 2 : 1)

@@ -563,7 +563,7 @@ class PrototypeSpecContentScreenshotTest {
   fun stylePolishV2() =
     prototypeScreenshotTest(
       "style_polish_v2",
-      validPrototypeFixture("style-polish-v2"),
+      validPrototypeFixture("theme-modes-style-polish-v2"),
       pending = true,
     )
 
@@ -572,7 +572,7 @@ class PrototypeSpecContentScreenshotTest {
   fun stylePolishV2Dark() =
     prototypeScreenshotTest(
       "style_polish_v2_dark",
-      validPrototypeFixture("style-polish-v2"),
+      validPrototypeFixture("theme-modes-style-polish-v2"),
       pending = true,
     )
 

@@ -157,7 +157,7 @@
     "strict-url-uppercase.json",
     "strict-url-userinfo.json",
     "strict-url-whitespace.json",
-    "style-polish-v2.json",
+    "theme-modes-style-polish-v2.json",
     "style-polish.json",
     "style-when.json",
     "substituted-text-exact-limit.json",
@@ -1349,6 +1349,6 @@
     ],
     "transition-slide.json": [],
     "width-dp-at-max.json": [],
-    "style-polish-v2.json": ["prototype_style_polish_v2", "prototype_theme_modes_v1"]
+    "theme-modes-style-polish-v2.json": ["prototype_style_polish_v2", "prototype_theme_modes_v1"]
   }
 }

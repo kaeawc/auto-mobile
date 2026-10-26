@@ -11,7 +11,7 @@ final class PrototypeStyleRenderingTests: XCTestCase {
         do {
             _ = try JSONDecoder().decode(PrototypeSpec.self, from: Data(
                 contentsOf:
-                PrototypeSpecFixtures.directory.appendingPathComponent("valid/style-polish-v2.json")
+                PrototypeSpecFixtures.directory.appendingPathComponent("valid/theme-modes-style-polish-v2.json")
             ))
         } catch {
             XCTFail("Cannot decode style polish fixture: \(error)")
@@ -183,7 +183,7 @@ final class PrototypeStyleRenderingTests: XCTestCase {
     func testSharedStylePolishFixtureResolvesEveryField() throws {
         let spec = try JSONDecoder().decode(PrototypeSpec.self, from: Data(
             contentsOf:
-            PrototypeSpecFixtures.directory.appendingPathComponent("valid/style-polish-v2.json")
+            PrototypeSpecFixtures.directory.appendingPathComponent("valid/theme-modes-style-polish-v2.json")
         ))
         let scroll = spec.root
         XCTAssertEqual(scroll.fadeEdges, FadeEdges(top: 0, bottom: 24, start: 12, end: 1000))

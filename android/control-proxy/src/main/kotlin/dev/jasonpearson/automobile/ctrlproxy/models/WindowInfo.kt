@@ -5,6 +5,9 @@ import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 
+/** The animations running in CtrlProxy's prototype window (#15114). */
+@Serializable data class PrototypeWindowMotion(val active: Int, val loops: Int)
+
 /** Window information */
 @Serializable
 @OptIn(ExperimentalSerializationApi::class)
@@ -44,5 +47,12 @@ data class WindowInfo(
    * omitted by older APKs.
    */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val prototypeAppearance: PrototypeAppearance? = null,
+  /**
+   * Only alongside [prototypePlacement]: the animations running in the prototype window, as
+   * `{active, loops}` (#15114). `active` settles and `observe(waitFor: stable)` waits for it to
+   * reach zero; `loops` are intentional infinite animations and are ignored. Older APKs omit it and
+   * consumers read absence as settled.
+   */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val prototypeMotion: PrototypeWindowMotion? = null,
   @EncodeDefault(EncodeDefault.Mode.NEVER) val truncationReasons: List<String>? = null,
 )

@@ -188,6 +188,8 @@ interface CtrlProxyActions {
 
   suspend fun deleteSavedPrototype(requestId: String?, id: String)
 
+  suspend fun advancePrototypeClock(requestId: String?, id: String, advanceTimeMs: Int)
+
   suspend fun clearPrototypeStorage(requestId: String?, id: String)
 
   suspend fun putPrototypeAsset(

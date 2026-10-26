@@ -62,6 +62,8 @@ final class PrototypeThemeModesTests: XCTestCase {
             "prototype_bottom_sheet_drag_v1",
             "clear_prototype_storage",
             "prototype_storage_v1",
+            "prototype_timers_v1",
+            "advance_prototype_clock",
         ])
     }
 

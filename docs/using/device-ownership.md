@@ -105,6 +105,13 @@ device's readiness lock, so a concurrent `startDevice` or session upgrade for th
 simulator waits within its own deadline. Retry the observe shortly.
 A warm retry can complete in about 1.4 seconds; timing depends on the device and host.
 
+A rollback of an Android AVD that `provisionDevice` created and never attempted to boot
+is not blocked by an unrelated unnamed sibling emulator while the request holds the
+lifecycle reservation. If rollback is refused before changing the device, the response
+keeps the original failure's retryability and reports the retained device in `lifecycle`;
+follow `recovery.nextAction`, which permits reacquiring an intact retained device when
+the original failure is retryable.
+
 ## When a session is released
 
 A session is released by an explicit release, a lost owner heartbeat, the idle

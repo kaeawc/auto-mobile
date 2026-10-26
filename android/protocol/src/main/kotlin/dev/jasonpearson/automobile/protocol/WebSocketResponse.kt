@@ -901,6 +901,7 @@ data class PrototypeResult(
   @EncodeDefault(EncodeDefault.Mode.NEVER) val pin: SavedPrototypePinInfo? = null,
   /** Only the reply to `clear_prototype_storage`: how many stored keys were removed. */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val cleared: Int? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val fired: Int? = null,
 ) : WebSocketResponse(), CorrelatedResponse
 
 @OptIn(ExperimentalSerializationApi::class)
@@ -1045,6 +1046,7 @@ data class PrototypeStatusEntry(
    * What the device stores for this prototype (`prototype_storage_v1`); absent without `storage`.
    */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val storage: PrototypeStorageReport? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val timers: List<PrototypeTimerReport> = emptyList(),
 )
 
 /** Input validation vocabulary understood by this protocol version. */
@@ -1279,3 +1281,5 @@ data class LaunchIntentResult(
   val totalTimeMs: Long,
   val error: String? = null,
 ) : WebSocketResponse(), CorrelatedResponse
+
+@Serializable data class PrototypeTimerReport(val id: String, val nextFireInMs: Long, val runs: Int)

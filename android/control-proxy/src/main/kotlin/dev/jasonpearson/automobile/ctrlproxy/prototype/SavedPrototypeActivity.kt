@@ -36,6 +36,7 @@ import dev.jasonpearson.automobile.prototype.ProvideEmbeddedPrototypeHost
 import dev.jasonpearson.automobile.prototype.prototypeHostStorage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
@@ -207,12 +208,24 @@ class SavedPrototypeActivity : ComponentActivity() {
     finish()
   }
 
+  override fun onStart() {
+    super.onStart()
+    scope.launch(start = CoroutineStart.UNDISPATCHED) {
+      interactions.withLock { runtime?.resumeTimers() }
+    }
+  }
+
   /** The last point a stopped activity is sure to run: write what the debounce still holds. */
   override fun onStop() {
     // Not on [scope]: onDestroy cancels it, and a stop followed by a destroy must still save.
     val target = runtime
-    SavedPrototypeActivityDependencies.flushScope.launch {
-      withContext(NonCancellable) { interactions.withLock { target?.flushStorage() } }
+    SavedPrototypeActivityDependencies.flushScope.launch(start = CoroutineStart.UNDISPATCHED) {
+      withContext(NonCancellable) {
+        interactions.withLock {
+          target?.pauseTimers()
+          target?.flushStorage()
+        }
+      }
     }
     super.onStop()
   }

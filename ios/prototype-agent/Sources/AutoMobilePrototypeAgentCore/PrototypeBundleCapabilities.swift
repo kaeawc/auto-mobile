@@ -96,6 +96,7 @@ enum PrototypeBundleCapabilities {
         }; return }
         guard let fields = value.objectFields else { return }
         let type = fields["type"]?.stringValue
+        if type == "startTimer" || type == "cancelTimer" { names.insert("prototype_timers_v1") }
         if type == "request" {
             names.insert("prototype_network_v1")
             if fields["via"]?.stringValue == "device" { names.insert("prototype_network_device_v1") }

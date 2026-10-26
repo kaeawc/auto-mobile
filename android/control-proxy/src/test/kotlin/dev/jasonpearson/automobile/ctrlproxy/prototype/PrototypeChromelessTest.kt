@@ -131,7 +131,7 @@ class PrototypeChromelessTest {
   @Test
   fun `bar keeps content below its reserved dismiss row`() {
     show(PrototypeWindowChrome.BAR)
-    pill().assertIsDisplayed()
+    compose.onNodeWithTag(PROTOTYPE_DISMISS_TEST_TAG).assertIsDisplayed()
     assertTrue(compose.onNodeWithTag("authored").fetchSemanticsNode().boundsInRoot.top > 0f)
   }
 

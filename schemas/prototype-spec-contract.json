@@ -9,6 +9,11 @@
     "pointer": "^(?:/(?:[^~/]|~[01])*)+$(?![\\s\\S])"
   },
   "limits": {
+    "MIN_PROTOTYPE_TIMER_MS": 100,
+    "MAX_PROTOTYPE_TIMER_MS": 3600000,
+    "MAX_PROTOTYPE_TIMERS": 8,
+    "MAX_PROTOTYPE_TIMER_RUNS": 10000,
+    "MAX_PROTOTYPE_TIMER_ID_LENGTH": 64,
     "MAX_PROTOTYPE_NODES": 2000,
     "MAX_PROTOTYPE_DEPTH": 24,
     "MAX_PROTOTYPE_IMAGES": 32,
@@ -2147,6 +2152,83 @@
                 }
               },
               "optional": true
+            }
+          }
+        },
+        "startTimer": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["startTimer"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string",
+                "max": 64
+              },
+              "optional": false
+            },
+            "afterMs": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 100,
+                "max": 3600000
+              },
+              "optional": false
+            },
+            "everyMs": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 100,
+                "max": 3600000
+              },
+              "optional": true
+            },
+            "maxRuns": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1,
+                "max": 10000
+              },
+              "optional": true
+            },
+            "actions": {
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              },
+              "optional": false
+            }
+          }
+        },
+        "cancelTimer": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["cancelTimer"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string",
+                "max": 64
+              },
+              "optional": false
             }
           }
         },

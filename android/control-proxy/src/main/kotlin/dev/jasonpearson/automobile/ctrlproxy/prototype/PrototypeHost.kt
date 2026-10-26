@@ -1027,7 +1027,8 @@ private fun PrototypeChrome(
   if (chrome.dismissVisible) {
     Column(Modifier.fillMaxSize()) {
       // Reserve inset-aware space and clip the spec below it. Modal scrims cannot cover it. The
-      // bar is translucent, themed like the spec, and only as tall as its small button (#10437).
+      // bar is translucent, themed like the spec, and only as tall as its close chip's hit target
+      // (#10437, #15119).
       val dismissColors = prototypeDismissColors(MaterialTheme.colorScheme)
       Box(
         Modifier.fillMaxWidth()
@@ -1038,14 +1039,10 @@ private fun PrototypeChrome(
               .only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
           ),
       ) {
-        TextButton(
+        PrototypeCloseChip(
           onClick = { scope.launch { request.onHostDismiss() } },
-          modifier = Modifier.align(Alignment.CenterEnd).height(32.dp),
-          contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-          colors = ButtonDefaults.textButtonColors(contentColor = dismissColors.content),
-        ) {
-          Text("Dismiss AutoMobile prototype", style = MaterialTheme.typography.labelMedium)
-        }
+          modifier = Modifier.align(Alignment.CenterEnd),
+        )
       }
       Box(
         Modifier.weight(1f)
@@ -1073,14 +1070,16 @@ private fun PrototypeChrome(
         CompositionLocalProvider(LocalPrototypeInsetFloor provides floor) { request.content() }
       }
       // Drawn after the content so authored nodes cannot cover it.
-      val closeColors = prototypeCloseColors(MaterialTheme.colorScheme)
-      TextButton(
+      PrototypeCloseChip(
         onClick = { scope.launch { request.onHostDismiss() } },
-        modifier = Modifier.align(Alignment.TopEnd).background(closeColors.background),
-        colors = ButtonDefaults.textButtonColors(contentColor = closeColors.content),
-      ) {
-        Text("Close")
-      }
+        modifier =
+          Modifier.align(Alignment.TopEnd)
+            .windowInsetsPadding(
+              WindowInsets.systemBars
+                .union(WindowInsets.displayCutout)
+                .only(WindowInsetsSides.Top + WindowInsetsSides.End),
+            ),
+      )
     }
   } else
     Box { CompositionLocalProvider(LocalPrototypeInsetFloor provides floor) { request.content() } }

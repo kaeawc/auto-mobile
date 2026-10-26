@@ -291,11 +291,11 @@ describe("request contract mirror", () => {
     expect(Object.keys(option!.shape).sort()).toEqual(Object.keys(variant.fields).sort());
   });
 
-  test("request and platform (#14294) are the only actions whose lists nest actions", () => {
+  test("request, platform and startTimer are the actions whose lists nest actions", () => {
     const nesting = Object.entries(contract.definitions.action.variants).filter(([, variant]) =>
       JSON.stringify(variant).includes('"name":"action"'),
     );
-    expect(nesting.map(([name]) => name)).toEqual(["request", "platform"]);
+    expect(nesting.map(([name]) => name)).toEqual(["request", "platform", "startTimer"]);
   });
 });
 

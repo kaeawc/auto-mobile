@@ -1,9 +1,30 @@
 import { describe, expect, test } from "bun:test";
 import {
+  inferIosFormFactor,
+  isIosDuoDeviceType,
   isIosPhysicalUdid,
   isIosSimulatorUdid,
   isIosUdid,
 } from "../../../src/utils/ios-cmdline-tools/iosDeviceType";
+
+describe("iPhone Duo detection", () => {
+  const duo = "com.apple.CoreSimulator.SimDeviceType.iPhone-Duo";
+
+  test("detects the Duo by its device-type identifier suffix only", () => {
+    expect(isIosDuoDeviceType(duo)).toBe(true);
+    expect(isIosDuoDeviceType("com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro")).toBe(false);
+    expect(isIosDuoDeviceType("iPhone Duo")).toBe(false);
+    expect(isIosDuoDeviceType(undefined)).toBe(false);
+  });
+
+  test("reports the Duo as foldable while other iPhones stay phones", () => {
+    expect(inferIosFormFactor(duo)).toBe("foldable");
+    expect(inferIosFormFactor("com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro")).toBe("phone");
+    expect(inferIosFormFactor("com.apple.CoreSimulator.SimDeviceType.iPad-Air-11-inch-M4")).toBe(
+      "tablet",
+    );
+  });
+});
 
 /**
  * `isIosSimulatorUdid` is the routing predicate that decides simctl (simulator)

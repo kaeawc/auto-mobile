@@ -58,6 +58,8 @@ sealed interface PrototypeInteraction {
 
   data class Tap(val actions: List<PrototypeAction>) : PrototypeInteraction
 
+  data class TimerFire(val actions: List<PrototypeAction>) : PrototypeInteraction
+
   data class PagerMotion(val pager: String, val page: Int, val scrolling: Boolean) :
     PrototypeInteraction
 
@@ -164,7 +166,23 @@ class PrototypeRuntime(
     PrototypeSpecValidator.prepareStateWrites(it, runtimeJson)
   }
 
+  private val timerEngine =
+    PrototypeTimers(clock, requestScope, exclusively) { actions ->
+      handle(PrototypeInteraction.TimerFire(actions))
+    }
+
+  fun pauseTimers() = timerEngine.pause()
+
+  fun resumeTimers() = timerEngine.resume()
+
+  fun timerReports(): List<PrototypeTimerReport> = timerEngine.reports()
+
+  suspend fun advanceClock(ms: Int): Int = timerEngine.advance(ms)
+
   private val renderMapper = PrototypeRenderMapper()
+
+  /** The running animations of this prototype's window, published in its window metadata. */
+  @InternalAutoMobilePrototypeApi val motionActivity = PrototypeMotionActivity()
 
   @InternalAutoMobilePrototypeApi
   fun renderModel(snapshot: PrototypeRuntimeSnapshot = current): PrototypeRenderModel =
@@ -320,6 +338,7 @@ class PrototypeRuntime(
 
   fun close() {
     mutableSnapshot.value = current.copy(active = false)
+    timerEngine.cancelAll()
     cancelRequests()
   }
 
@@ -382,6 +401,13 @@ class PrototypeRuntime(
       // eligible, preserve the existing Back dismissal rather than changing a hidden screen.
       PrototypeInteraction.Back -> if (!popTopmostStack()) dismiss()
       is PrototypeInteraction.Tap -> control(emptyMap(), interaction.actions)
+      is PrototypeInteraction.TimerFire -> {
+        try {
+          control(emptyMap(), interaction.actions)
+        } catch (error: IllegalArgumentException) {
+          warn("Refused timer fire: ${error.message}")
+        }
+      }
       is PrototypeInteraction.PagerMotion ->
         if (!interaction.scrolling) setPage(interaction.pager, interaction.page)
       is PrototypeInteraction.SettledPage -> setPage(interaction.pager, interaction.page)
@@ -509,6 +535,8 @@ class PrototypeRuntime(
         is PrototypeRemoveDataAction -> writeData(action)
         is PrototypeRequestAction -> startRequest(action, touched)
         is PrototypeScrollToAction -> requestScroll(action)
+        is PrototypeStartTimerAction -> timerEngine.start(action)
+        is PrototypeCancelTimerAction -> timerEngine.cancel(action.id)
         else ->
           writes[index]?.let { (key, planned) ->
             // A data write earlier in this list may have added rows that bind this key, so a

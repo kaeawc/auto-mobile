@@ -2921,6 +2921,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     launchRequestScope(requestId) { savedPrototypeController.delete(requestId, id) }
   }
 
+  override suspend fun advancePrototypeClock(requestId: String?, id: String, advanceTimeMs: Int) {
+    launchRequestScope(requestId) { prototypeController.advanceClock(requestId, id, advanceTimeMs) }
+  }
+
   override suspend fun clearPrototypeStorage(requestId: String?, id: String) {
     launchRequestScope(requestId) { prototypeController.clearStorage(requestId, id) }
   }

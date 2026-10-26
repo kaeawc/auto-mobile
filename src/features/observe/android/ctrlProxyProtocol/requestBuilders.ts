@@ -1,3 +1,4 @@
+import type { AdvancePrototypeClockMessage } from "./prototypeMessages";
 /** Typed request builders and millisecond normalization for byte-identical wire frames. */
 import type { PrototypePatchRequest } from "../../../prototype/prototypePatchWire";
 import type { PrototypeSpec } from "../../../prototype/prototypeSpec";
@@ -363,6 +364,11 @@ export const ctrlProxyRequests = {
   deleteSavedPrototype(args: { requestId: string; id: string }): DeleteSavedPrototypeMessage {
     return { type: "delete_saved_prototype", requestId: args.requestId, id: args.id };
   },
+  advancePrototypeClock: (args: {
+    requestId: string;
+    id: string;
+    advanceTimeMs: number;
+  }): AdvancePrototypeClockMessage => ({ type: "advance_prototype_clock", ...args }),
   clearPrototypeStorage: clearPrototypeStorageMessage,
   patchPrototype(args: { requestId: string } & PrototypePatchRequest): PatchPrototypeMessage {
     return {

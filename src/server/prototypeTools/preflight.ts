@@ -25,6 +25,7 @@ import {
   prototypeAppearanceOverride,
   prototypeAppearanceUnsupportedMessage,
 } from "../../features/prototype/prototypeAppearance";
+import { prototypeShaderOptInProblem } from "../../features/prototype/prototypeShaders";
 import { prototypeRequiredCapabilities } from "../../features/prototype/prototypeCapabilityGates";
 import {
   PROTOTYPE_IOS_MINIMUM_OS,
@@ -158,6 +159,10 @@ export async function specCapabilityRefusal(
   signal: AbortSignal | undefined,
   iosMinimumOs: Readonly<Record<string, number>> = PROTOTYPE_IOS_MINIMUM_OS,
 ): Promise<PrototypeResult | undefined> {
+  const optIn = prototypeShaderOptInProblem(spec);
+  if (optIn) {
+    return { success: false, error: optIn };
+  }
   for (const gate of prototypeRequiredCapabilities(spec)) {
     const supported = target.android
       ? await target.android.supportsCommand(gate.capability)

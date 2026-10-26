@@ -1,3 +1,5 @@
+import { cachedPrototypeShaderAssetProblem } from "../../features/prototype/prototypeShaders";
+import { defaultPrototypeAssetCache } from "../../features/prototype/prototypeAssetCache";
 import { prototypeTimerWarnings } from "../../features/prototype/prototypeTimers";
 import { prototypeAccessibilityOutput } from "../../features/prototype/prototypeAccessibilityLint";
 import { prototypePlaceholderOutput } from "../../features/prototype/prototypePlaceholderLint";
@@ -41,7 +43,6 @@ import { appLayerGrant, preflightMutation, specCapabilityRefusal } from "./prefl
 import { prototypeSchema } from "./schemas";
 import type {
   AnchorStage,
-  AssetReaders,
   AssetStage,
   PreflightStage,
   PrototypeHandlerDependencies,
@@ -110,14 +111,20 @@ function shownOnDevice(
 /** A refused display ends the call before any asset is uploaded. */
 async function stageUnlessRefused(
   failure: PrototypeResult | undefined,
-  target: PrototypeTarget,
   args: z.infer<typeof prototypeSchema>,
-  readers: AssetReaders,
+  dependencies: PrototypeHandlerDependencies,
+  device: BootedDevice,
   signal: AbortSignal | undefined,
 ): Promise<AssetStage> {
   return failure
     ? { uploaded: [], prepared: [], failure }
-    : stageAssets(target, args, readers, signal);
+    : stageAssets(
+        dependencies.target,
+        args,
+        dependencies.assetReaders,
+        signal,
+        shaderCacheContext(dependencies, device.deviceId),
+      );
 }
 
 export async function performPrototypeAction(
@@ -141,7 +148,13 @@ export async function performPrototypeAction(
             : target.ios?.supportsCapability(PROTOTYPE_PATCH_CAPABILITY) === true,
         // A patched node may add or drop a via "device" localhost request (#12530): staged here.
         specRefusal: async (spec) =>
-          (await specCapabilityRefusal(target, spec, signal))?.error ?? patchReverse.stage(spec),
+          (await specCapabilityRefusal(target, spec, signal))?.error ??
+          (await cachedPrototypeShaderAssetProblem(
+            spec,
+            device.deviceId,
+            dependencies.shaderAssetCache ?? defaultPrototypeAssetCache(),
+          )) ??
+          patchReverse.stage(spec),
         settleSpec: patchReverse.settle,
         platform: device.platform === "android" ? "android" : "ios",
         queue,
@@ -162,7 +175,7 @@ async function performMutation(
   scope: PrototypeScope,
   signal?: AbortSignal,
 ): Promise<PrototypeOutput> {
-  const { store, events, target: prototypeTarget, assetReaders, commits } = dependencies;
+  const { store, events, target: prototypeTarget, commits } = dependencies;
   const target = mutationTarget(args);
   const source = prototypeEventSource(prototypeTarget.transport);
   // The device holds one active prototype, so presence is device-wide, not per session.
@@ -209,7 +222,7 @@ async function performMutation(
     const stage = await withdrawOnAbort(
       ordering,
       signal,
-      stageUnlessRefused(resolved.failure, prototypeTarget, sendArgs, assetReaders, signal),
+      stageUnlessRefused(resolved.failure, sendArgs, dependencies, device, signal),
     );
     // A failed upload ends the call unsent, like a refusal: it must not supersede a valid show.
     if (stage.failure) {
@@ -696,4 +709,11 @@ function missingAssetsOutput(
       : {}),
     ...(warning ? { warning } : {}),
   };
+}
+
+function shaderCacheContext(
+  dependencies: PrototypeHandlerDependencies,
+  serial: string,
+): NonNullable<Parameters<typeof stageAssets>[4]> {
+  return { serial, cache: dependencies.shaderAssetCache ?? defaultPrototypeAssetCache() };
 }

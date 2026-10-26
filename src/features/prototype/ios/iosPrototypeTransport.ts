@@ -1,3 +1,9 @@
+import {
+  prototypeShaderPatchSpec,
+  prototypeShaderFields,
+  prototypeShadersUnsupportedMessage,
+} from "../prototypeShaders";
+import { PROTOTYPE_SHADER_MIME_TYPE } from "../prototypeShaderSource";
 import { PROTOTYPE_TIMERS_CAPABILITY } from "../../observe/android/ctrlProxyProtocol";
 import { prototypeTimersUnsupportedMessage } from "../prototypeTimers";
 import { prototypeHasStack, prototypeStackUnsupportedMessage } from "../prototypeSpec";
@@ -244,6 +250,9 @@ export class IosPrototypeTransport implements PrototypeTransport {
    * `prototype_show_in_place_v1`.
    */
   async show(spec: PrototypeSpec, options: PrototypeShowOptions = {}): Promise<PrototypeResult> {
+    if (prototypeShaderFields(spec).length) {
+      throw new ActionableError(prototypeShadersUnsupportedMessage([], "ios"));
+    }
     if (prototypeHasStack(spec) && !this.supportsCapability(PROTOTYPE_STACK_CAPABILITY)) {
       throw new ActionableError(prototypeStackUnsupportedMessage("ios"));
     }
@@ -286,6 +295,13 @@ export class IosPrototypeTransport implements PrototypeTransport {
   }
 
   async patch(patch: PrototypePatchRequest, timeoutMs?: number): Promise<PrototypePatchReply> {
+    if (prototypeShaderFields(prototypeShaderPatchSpec(patch.ops)).length) {
+      return {
+        success: false,
+        delivery: "unsent",
+        error: prototypeShadersUnsupportedMessage([], "ios"),
+      };
+    }
     if (!this.supportsCapability(PROTOTYPE_PATCH_CAPABILITY)) {
       return { success: false, delivery: "unsent", error: prototypePatchUnsupportedMessage("ios") };
     }
@@ -343,6 +359,11 @@ export class IosPrototypeTransport implements PrototypeTransport {
     asset: PrototypeAssetUpload,
     options: PrototypeAssetRequestOptions = {},
   ): Promise<PrototypeAssetResult> {
+    if (asset.mimeType === PROTOTYPE_SHADER_MIME_TYPE) {
+      throw new ActionableError(
+        "iOS prototype agents refuse application/vnd.automobile.agsl assets: custom shaders are Android-only.",
+      );
+    }
     const problem = prototypeAssetUploadProblem(asset);
     if (problem !== null) {
       throw new ActionableError(`Invalid prototype asset: ${problem}`);

@@ -665,6 +665,9 @@ final class PrototypeAgent: NSObject {
     }
 
     private func putAsset(_ message: [String: Any], result: ProtocolResult) {
+        if message["mimeType"] as? String == PrototypeCustomShaders.mimeType {
+            return result(false, PrototypeCustomShaders.refusal)
+        }
         guard let id = message["id"] as? String,
               let base64 = message["dataBase64"] as? String,
               let data = Data(base64Encoded: base64),

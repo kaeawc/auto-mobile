@@ -90,6 +90,12 @@ data class PrototypeSelector(
 )
 
 @Serializable
+data class PrototypeShader(
+  val asset: String,
+  val uniforms: Map<String, Double>? = null,
+)
+
+@Serializable
 data class PrototypeStyleWhen(
   val `when`: PrototypeCondition,
   val style: PrototypeStyle,

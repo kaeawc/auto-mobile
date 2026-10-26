@@ -606,3 +606,24 @@ struct Mixed: Codable, Equatable, Sendable {
     expect(paddingSchema.parse({})).toEqual({});
   });
 });
+
+test("selected bounded records generate native number maps", () => {
+  const sources = renderPrototypeSpecModels(
+    {
+      definitions: {
+        shader: {
+          kind: "object",
+          fields: {
+            uniforms: {
+              optional: true,
+              rule: { kind: "record", maxEntries: 16, item: { kind: "number", integer: false } },
+            },
+          },
+        },
+      },
+    },
+    { shader: {} },
+  );
+  expect(sources.kotlin).toContain("Map<String, Double>?");
+  expect(sources.swift).toContain("[String: Double]?");
+});

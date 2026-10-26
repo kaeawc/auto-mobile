@@ -19,6 +19,8 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
         // transition choreography (#15247).
         let exclusions: Set<String> = [
             "prototype_platform_test_v1",
+            // #15131: custom AGSL shaders are Android-only by owner decision.
+            "prototype_custom_shaders_v1",
             "prototype_chat_scroll_v1", "prototype_motion_v2", "prototype_choreography_v1",
         ]
         XCTAssertTrue(exclusions.isSubset(of: required), "Exclusions must name current spec gates")

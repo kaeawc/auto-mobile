@@ -104,6 +104,7 @@ data class PrototypeStyle(
   /** How text past `maxLines` or its width ends: `clip` (default), `ellipsis` or `visible`. */
   val overflow: String? = null,
   val fontFamily: PrototypeFontFamily? = null,
+  val shader: PrototypeShader? = null,
   /** A Material 3 type role (`titleLarge`, ...); explicit size, weight and family still win. */
   val textStyle: String? = null,
 )
@@ -552,6 +553,7 @@ data class PrototypeTextSpanStyle(
   val textSize: Double? = null,
   val letterSpacing: Double? = null,
   val fontFamily: PrototypeFontFamily? = null,
+  val shader: PrototypeShader? = null,
   val background: PrototypeModeValue? = null,
 )
 

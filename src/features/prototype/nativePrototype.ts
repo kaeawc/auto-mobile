@@ -72,6 +72,7 @@ const MIME_EXTENSIONS: Record<PrototypeAssetMimeType, string> = {
   "image/webp": "webp",
   "font/ttf": "ttf",
   "font/otf": "otf",
+  "application/vnd.automobile.agsl": "agsl",
 };
 
 function required(value: string | undefined, name: string): string {

@@ -170,6 +170,7 @@ struct PrototypeSpec: Decodable {
     )
         throws -> PrototypeNode
     {
+        try PrototypeCustomShaders.refuse(["root": raw])
         try PrototypeSizeBounds.validate(.object(["root": raw]))
         try PrototypeLimits.guardAuthoredTree(raw)
         try PrototypeRequestValidator.validate(raw, state: menuState)

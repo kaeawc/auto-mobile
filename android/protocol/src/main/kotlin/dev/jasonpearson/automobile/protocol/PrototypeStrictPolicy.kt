@@ -14,6 +14,11 @@ internal object PrototypeStrictPolicy {
     if (supported != null && !supported.containsAll(required(spec))) {
       return PrototypeSpecError("$", "Unsupported capabilities")
     }
+    if (library && "prototype_custom_shaders_v1" in required(spec))
+      return PrototypeSpecError(
+        "$",
+        "ProtoViewer bundles refuse custom AGSL shaders",
+      )
     val window = spec["window"] as? JsonObject
     if (library && window?.text("layer") == "system")
       return PrototypeSpecError("window.layer", "Privileged window")
@@ -295,6 +300,8 @@ internal object PrototypeStrictPolicy {
 
     private fun fieldFeatures(key: String, child: JsonElement, field: String) {
       fieldFeatures[key]?.let(::need)
+      if (key == "style" && (child as? JsonObject)?.containsKey("shader") == true)
+        need("custom_shaders")
       if (usesMotion(key, child)) result.add("prototype_motion_v2")
       if (usesChoreography(key, child)) need("choreography")
       if (key == "data" && child is JsonPrimitive && child.isString) need("data_model")

@@ -47,6 +47,10 @@ export interface PrototypeTarget {
   >;
 }
 export interface PrototypeToolDependencies {
+  shaderAssetCache?: Pick<
+    import("../../features/prototype/prototypeAssetCache").PrototypeAssetCache,
+    "get"
+  >;
   /** Saved iOS actions use the host installer without an agent connection; created lazily by default. */
   iosSavedPrototypeInstaller?: IosSavedPrototypeInstaller;
   /** ProtoViewer on Android or an iOS simulator for saved `save`/`open` (#13621). */
@@ -107,6 +111,6 @@ export type PrototypeHandlerDependencies = {
   timer?: Timer;
 } & Pick<
   PrototypeToolDependencies,
-  "adbFactory" | "lastRenderedObservation" | "anchorHierarchyCaptureFactory"
+  "adbFactory" | "lastRenderedObservation" | "anchorHierarchyCaptureFactory" | "shaderAssetCache"
 >;
 export type PrototypeOutput = z.infer<typeof prototypeOutputSchema>;

@@ -1676,3 +1676,135 @@ describe("CtrlProxy clear_prototype_storage (#12522)", () => {
     }
   });
 });
+
+describe("custom AGSL host boundary", () => {
+  const asset = {
+    id: "effect",
+    mimeType: "application/vnd.automobile.agsl" as const,
+    bytes: Buffer.from("uniform float strength;"),
+  };
+  const shaderSpec = {
+    ...spec,
+    root: { ...spec.root, style: { shader: { asset: "effect", uniforms: { strength: 1 } } } },
+  };
+  test("disabled shaders refuse put, show and replaceNode before socket dispatch", async () => {
+    const { client, socket } = await harness([
+      "show_prototype",
+      "put_prototype_asset",
+      "prototype_patch_v1",
+      "prototype_custom_shaders_v1",
+    ]);
+    const delegate = new CtrlProxyPrototypes(client.testHooks.createDelegateContext(), {});
+    const send = spyOn(socket, "send");
+    await expect(delegate.requestPutPrototypeAsset(asset)).rejects.toThrow(
+      "AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS=1",
+    );
+    await expect(delegate.requestShowPrototype(shaderSpec)).rejects.toThrow(
+      "AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS=1",
+    );
+    expect(
+      await delegate.requestPatchPrototype({
+        id: spec.id,
+        ops: [{ op: "replaceNode", id: "node", node: shaderSpec.root }],
+      }),
+    ).toMatchObject({
+      success: false,
+      delivery: "unsent",
+      error: expect.stringContaining("AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS=1"),
+    });
+    expect(send).not.toHaveBeenCalled();
+  });
+  test("available cached assets must match shader uniforms on show and patch", async () => {
+    const cache = new FakePrototypeAssetCache();
+    await cache.put("prototype-test", { ...asset, bytes: Buffer.from("uniform float other;") });
+    const { client, socket } = await harness(
+      ["show_prototype", "prototype_patch_v1", "prototype_custom_shaders_v1"],
+      undefined,
+      cache,
+    );
+    const delegate = new CtrlProxyPrototypes(client.testHooks.createDelegateContext(), {
+      AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS: "1",
+    });
+    const send = spyOn(socket, "send");
+    await expect(delegate.requestShowPrototype(shaderSpec)).rejects.toThrow("not declared");
+    expect(
+      await delegate.requestPatchPrototype({
+        id: spec.id,
+        ops: [{ op: "replaceNode", id: "node", node: shaderSpec.root }],
+      }),
+    ).toMatchObject({
+      success: false,
+      delivery: "unsent",
+      error: expect.stringContaining("not declared"),
+    });
+    expect(send).not.toHaveBeenCalled();
+  });
+});
+
+test.each([
+  { commands: null },
+  { commands: ["put_prototype_asset"] },
+  { commands: ["full_command_set_v1", "put_prototype_asset"] },
+])(
+  "AGSL put requires an explicit capability even on legacy or unconfirmed handshakes: %j",
+  async ({ commands }) => {
+    const { client, socket } = await harness(commands ? [...commands] : null);
+    const context = client.testHooks.createDelegateContext();
+    expect(context.isCommandSupported?.("prototype_custom_shaders_v1")).toBe(false);
+    const delegate = new CtrlProxyPrototypes(context, { AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS: "1" });
+    const send = spyOn(socket, "send");
+    await expect(
+      delegate.requestPutPrototypeAsset({
+        id: "effect",
+        mimeType: "application/vnd.automobile.agsl",
+        bytes: Buffer.from("uniform float strength;"),
+      }),
+    ).rejects.toThrow("prototype_custom_shaders_v1");
+    expect(send).not.toHaveBeenCalled();
+  },
+);
+
+test("enabled AGSL uploads forward exact source bytes and cap compile replies", async () => {
+  const { client, socket } = await harness([
+    "full_command_set_v1",
+    "request_id_echo_v1",
+    "put_prototype_asset",
+    "prototype_custom_shaders_v1",
+  ]);
+  const delegate = new CtrlProxyPrototypes(client.testHooks.createDelegateContext(), {
+    AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS: "1",
+  });
+  const bytes = Buffer.from("uniform float strength;");
+  const send = spyOn(socket, "send").mockImplementation((data) => {
+    const message = JSON.parse(String(data));
+    expect(message.mimeType).toBe("application/vnd.automobile.agsl");
+    expect(Buffer.from(message.dataBase64, "base64")).toEqual(bytes);
+    client.connectionTestHooks.requestManager.resolve(message.requestId, {
+      success: false,
+      error: "😀".repeat(2000),
+    });
+  });
+  const result = await delegate.requestPutPrototypeAsset({
+    id: "effect",
+    mimeType: "application/vnd.automobile.agsl",
+    bytes,
+  });
+  expect(result).toMatchObject({ success: false, dispatched: true, acknowledged: true });
+  expect(Buffer.byteLength(result.error!)).toBe(2048);
+  expect(send).toHaveBeenCalledTimes(1);
+});
+
+test("enabled shader specs still require the advertised capability before dispatch", async () => {
+  const { client, socket } = await harness(["full_command_set_v1", "show_prototype"]);
+  const delegate = new CtrlProxyPrototypes(client.testHooks.createDelegateContext(), {
+    AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS: "1",
+  });
+  const send = spyOn(socket, "send");
+  await expect(
+    delegate.requestShowPrototype({
+      ...spec,
+      root: { ...spec.root, style: { shader: { asset: "effect" } } },
+    }),
+  ).rejects.toThrow("prototype_custom_shaders_v1");
+  expect(send).not.toHaveBeenCalled();
+});

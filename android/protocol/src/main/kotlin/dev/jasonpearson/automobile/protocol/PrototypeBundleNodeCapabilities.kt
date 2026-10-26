@@ -93,6 +93,7 @@ internal object PrototypeBundleNodeCapabilities {
           (it as? JsonObject)?.get("style") as? JsonObject
         }
     for (style in styles) {
+      if ("shader" in style) caps.add("prototype_custom_shaders_v1")
       if ("runSpacing" in style) caps.add("prototype_flow_grid_v1")
       if ("scale" in style || "rotation" in style) caps.add("prototype_motion_v2")
       if (themedStyle(style)) caps.add("prototype_theme_modes_v1")

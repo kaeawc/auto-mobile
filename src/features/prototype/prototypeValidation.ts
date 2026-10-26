@@ -384,6 +384,14 @@ function visitRecord(
     if (key.length === 0) {
       return fail(at, "Invalid context name");
     }
+    if (
+      rule.keyPattern &&
+      !prototypeContractPatterns[rule.keyPattern as keyof typeof prototypeContractPatterns]?.test(
+        key,
+      )
+    ) {
+      return fail(at, "Invalid record key");
+    }
     const error = walk(child, rule.item ?? { kind: "json" }, at, context, depth);
     if (error) {
       return error;

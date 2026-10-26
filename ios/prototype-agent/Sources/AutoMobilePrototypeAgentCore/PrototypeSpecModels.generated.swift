@@ -24,6 +24,11 @@ struct PrototypeChartRange: Codable, Equatable, Sendable {
     let max: Double
 }
 
+struct PrototypeShader: Codable, Equatable, Sendable {
+    let asset: String
+    let uniforms: [String: Double]?
+}
+
 /// An icon-only control in a `topAppBar`: the icon, its accessible label and its tap.
 struct PrototypeAppBarAction: Decodable {
     let icon: String

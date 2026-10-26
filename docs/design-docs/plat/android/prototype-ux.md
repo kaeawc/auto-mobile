@@ -4,10 +4,12 @@ Current, unversioned contract for the agent-authored prototype (#9296, child of 
 rendering, asset transport, the wire messages, the `prototype` MCP tool and the
 [iOS simulator agent](../ios/prototype-agent.md) implement it; the iOS
 [feature support table](../ios/prototype-agent.md#feature-support) lists what is Android only (`display`,
-`window.layer: "app"`, `window.persistence: "device"`, `inspect`, idle TTL). A spec accepts no code,
+`window.layer: "app"`, `window.persistence: "device"`, `inspect`, idle TTL). A spec accepts no code except the opt-in Android-only AGSL asset referenced by `style.shader`,
 expressions, URLs, image bytes or migration instructions.
 
 ## Owner decisions
+
+- 2026-10-26: Android-only custom AGSL shaders require `prototype_custom_shaders_v1` and the host opt-in `AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS=1` (off by default). Source assets use `application/vnd.automobile.agsl`, valid UTF-8, at most 16 KiB (16384 bytes), and at most 16 scalar `uniform float name;` declarations. The only other permitted uniform is one optional `uniform shader content;`: only the node's own rendered content may be sampled. Comments (`//` and `/* */`) are stripped to separators before token scanning. Code tokens must be ASCII; no preprocessor directives, strings, escapes, qualifiers, arrays, initializers, comma declarations, duplicate names, or other uniform types/samplers are accepted. `content` is reserved. `style.shader: {asset, uniforms?}` supplies at most 16 declared float names matching `[A-Za-z_][A-Za-z0-9_]*`, with finite values in [-1000000, 1000000]; the host cross-checks available source assets. The Android runtime must compile on `put_prototype_asset` before retaining source and cap returned errors at 2 KiB of UTF-8. Execution fails closed under the preset frame-budget guard. iOS agents and ProtoViewer bundle import/export explicitly refuse both this MIME type and `style.shader`.
 
 The 2026-10-04 decisions supersede the issue's earlier proposals:
 
@@ -666,6 +668,10 @@ sit in the CtrlProxy cache directory and are cleared when the prototype session 
 on any dismissal, on service start, unbind or teardown, on `dismiss_prototype` with
 `all`, and when the last client disconnects (even with no prototype showing). A show
 replacement and a temporary lock-screen hide keep them.
+
+### Custom shader assets
+
+`application/vnd.automobile.agsl` assets carry UTF-8 AGSL source, capped at `MAX_PROTOTYPE_SHADER_ASSET_BYTES = 16384`. Upload a local `.agsl` file through `assets: [{id, path}]`, then reference its id with `style.shader: {asset, uniforms?}` (also accepted in `styleWhen`). The host refuses uploads and shader specs unless `AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS=1`; the Android runtime must advertise `prototype_custom_shaders_v1`. Shader assets share the existing count and total-byte limits. Available assets must have the AGSL MIME type and every supplied uniform must be declared as a scalar float in that source. iOS and ProtoViewer bundles refuse custom shaders.
 
 ### Rendering assets (#9301, second slice)
 

@@ -28,6 +28,7 @@ describe("prototype asset contract", () => {
       "image/webp",
       "font/ttf",
       "font/otf",
+      "application/vnd.automobile.agsl",
     ]);
   });
 

@@ -7301,6 +7301,20 @@
         "hasDefault": true
       }
     ],
+    "dev.jasonpearson.automobile.protocol.PrototypeShader": [
+      {
+        "name": "asset",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "uniforms",
+        "type": "map",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
     "dev.jasonpearson.automobile.protocol.PrototypeSheetCondition": [
       {
         "name": "key",
@@ -8041,6 +8055,12 @@
         "hasDefault": true
       },
       {
+        "name": "shader",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShader",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "textStyle",
         "type": "string",
         "nullable": true,
@@ -8173,6 +8193,12 @@
       {
         "name": "fontFamily",
         "type": "object:PrototypeFontFamily",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "shader",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShader",
         "nullable": true,
         "hasDefault": true
       },

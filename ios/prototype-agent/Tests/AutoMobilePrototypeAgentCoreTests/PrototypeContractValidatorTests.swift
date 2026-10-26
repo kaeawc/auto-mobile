@@ -77,6 +77,11 @@ final class PrototypeContractValidatorTests: XCTestCase {
         XCTAssertFalse(valid.isEmpty)
         for url in valid {
             let data = try Data(contentsOf: url)
+            if url.lastPathComponent.hasPrefix("custom-shader") {
+                XCTAssertNoThrow(try PrototypeSpecStrictValidator.validate(data: data))
+                XCTAssertThrowsError(try PrototypeEmbeddedSpec.load(data: data, supported: supported))
+                continue
+            }
             XCTAssertNoThrow(try PrototypeSpecStrictValidator.validate(data: data), url.lastPathComponent)
             if hostAnchors.contains(url.lastPathComponent) {
                 XCTAssertThrowsError(try PrototypeEmbeddedSpec.load(data: data, supported: supported)) { error in

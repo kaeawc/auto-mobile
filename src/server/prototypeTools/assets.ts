@@ -1,3 +1,8 @@
+import {
+  cachedPrototypeShaderAssetProblem,
+  prototypeShaderAssetProblem,
+  prototypeShaderOptInProblem,
+} from "../../features/prototype/prototypeShaders";
 import { z } from "zod/v4";
 import type {
   PrototypeDismiss,
@@ -48,9 +53,24 @@ export async function stageAssets(
   args: z.infer<typeof prototypeSchema>,
   readers: AssetReaders,
   signal: AbortSignal | undefined,
+  cached?: {
+    serial: string;
+    cache: Pick<import("../../features/prototype/prototypeAssetCache").PrototypeAssetCache, "get">;
+  },
 ): Promise<AssetStage> {
+  const optIn = prototypeShaderOptInProblem(args.spec);
+  if (optIn) {
+    return { uploaded: [], prepared: [], failure: { success: false, error: optIn } };
+  }
   if (args.assets === undefined) {
-    return { uploaded: [], prepared: [] };
+    const problem = cached
+      ? await cachedPrototypeShaderAssetProblem(args.spec, cached.serial, cached.cache)
+      : undefined;
+    return {
+      uploaded: [],
+      prepared: [],
+      ...(problem ? { failure: { success: false, error: problem } } : {}),
+    };
   }
   const prepared = await preparePrototypeAssets(
     args.assets,
@@ -59,6 +79,17 @@ export async function stageAssets(
   );
   if ("error" in prepared) {
     return { uploaded: [], prepared: [], failure: { success: false, error: prepared.error } };
+  }
+  const shaderProblem = cached
+    ? await cachedPrototypeShaderAssetProblem(
+        args.spec,
+        cached.serial,
+        cached.cache,
+        prepared.assets,
+      )
+    : prototypeShaderAssetProblem(args.spec, prepared.assets);
+  if (shaderProblem) {
+    return { uploaded: [], prepared: [], failure: { success: false, error: shaderProblem } };
   }
   const outcome = await uploadPrototypeAssets(
     prototypeAssetPutClient(target.transport),

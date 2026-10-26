@@ -8,12 +8,20 @@ class PrototypeAssetContractTest {
   @Test
   fun `limits are the conservative caps the TypeScript host also imports`() {
     assertEquals(4 * 1024 * 1024, PrototypeAssetContract.MAX_PROTOTYPE_ASSET_BYTES)
+    assertEquals(16384, PrototypeAssetContract.MAX_PROTOTYPE_SHADER_ASSET_BYTES)
     assertEquals(32, PrototypeAssetContract.MAX_PROTOTYPE_ASSET_COUNT)
     assertEquals(16 * 1024 * 1024, PrototypeAssetContract.MAX_PROTOTYPE_ASSET_TOTAL_BYTES)
     assertEquals(256, PrototypeAssetContract.MAX_PROTOTYPE_ASSET_ID_LENGTH)
     assertEquals(2 * 1024 * 1024, PrototypeAssetContract.MAX_PROTOTYPE_FONT_ASSET_BYTES)
     assertEquals(
-      setOf("image/png", "image/jpeg", "image/webp", "font/ttf", "font/otf"),
+      setOf(
+        "image/png",
+        "image/jpeg",
+        "image/webp",
+        "font/ttf",
+        "font/otf",
+        "application/vnd.automobile.agsl",
+      ),
       PrototypeAssetContract.MIME_TYPES,
     )
   }

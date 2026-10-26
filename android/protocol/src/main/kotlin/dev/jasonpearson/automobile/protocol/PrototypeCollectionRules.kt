@@ -108,6 +108,12 @@ internal object PrototypeCollectionRules {
     for ((key, child) in data) {
       val at = keyPath(path, key)
       if (key.isEmpty()) return fail(at, "Invalid context name")
+      if (
+        rule["keyPattern"] != null &&
+          PrototypeSpecContract.patterns[rule.getValue("keyPattern").jsonPrimitive.content]
+            ?.matches(key) != true
+      )
+        return fail(at, "Invalid record key")
       walk(child, rule.getValue("item").jsonObject, at, context, depth)?.let {
         return it
       }

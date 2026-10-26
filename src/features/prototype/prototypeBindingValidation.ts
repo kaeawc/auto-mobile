@@ -22,6 +22,7 @@ export interface Rule {
   options?: Rule[];
   values?: (string | boolean)[];
   maxEntries?: number;
+  keyPattern?: string;
   fields?: Record<string, { rule: Rule; optional: boolean } | undefined>;
   variants?: Record<string, Rule>;
 }

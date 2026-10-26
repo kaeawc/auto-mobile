@@ -58,6 +58,7 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     stateKey: "name",
     leadingIcon: "search",
   }),
+  prototype_custom_shaders_v1: fixture({ ...label, style: { shader: { asset: "effect" } } }),
   prototype_flow_grid_v1: fixture({ type: "flow", id: "label", children: [label] }),
   prototype_pager_options_v1: {
     ...fixture({
@@ -348,6 +349,12 @@ test.each(cases)(
   "$device.platform accepts $capability and state-only patches with it advertised",
   async ({ capability, minimalSpec, ops, device, with: others }) => {
     advertise(capability, ...(others ?? []));
+    if (capability === "prototype_custom_shaders_v1") {
+      const refused = await show(device, minimalSpec);
+      expect(refused.success).toBe(false);
+      expect(refused.error).toContain("AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS=1");
+      return;
+    }
     expect((await show(device, minimalSpec)).success).toBe(true);
     expect(
       (
@@ -422,3 +429,18 @@ test.each(["android", "ios"] as const)(
     expect(requests(device)).toHaveLength(1);
   },
 );
+
+test("shader opt-in refusal also covers host-only screenMap and save specs", async () => {
+  const spec = fixtures.prototype_custom_shaders_v1.minimalSpec;
+  const device: BootedDevice = { platform: "android", deviceId: "parity-android", name: "Fake" };
+  for (const action of ["screenMap", "save"]) {
+    const refused = await call(device, {
+      action,
+      spec,
+      ...(action === "save" ? { label: "Effect" } : {}),
+    });
+    expect(refused.success).toBe(false);
+    expect(refused.error).toContain("AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS=1");
+  }
+  expect(proxy.getPrototypeHistory()).toEqual([]);
+});

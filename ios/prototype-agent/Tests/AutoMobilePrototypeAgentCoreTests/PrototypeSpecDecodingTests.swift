@@ -94,6 +94,10 @@ final class PrototypeSpecDecodingTests: XCTestCase {
             XCTAssertTrue(names.contains("\(name).json"))
         }
         for file in files {
+            if file.lastPathComponent.hasPrefix("custom-shader") {
+                XCTAssertThrowsError(try JSONDecoder().decode(PrototypeSpec.self, from: Data(contentsOf: file)))
+                continue
+            }
             XCTAssertNoThrow(
                 try JSONDecoder().decode(PrototypeSpec.self, from: Data(contentsOf: file)),
                 file.lastPathComponent

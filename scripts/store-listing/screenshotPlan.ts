@@ -114,9 +114,13 @@ function acquire(profile: DeviceProfile, pins: PlanPins): McpStep {
     ? {
         kind: "mcp",
         tool: "getAndroid",
-        args: { avdName: profile.avdName, deviceId: pins.androidSerial },
+        args: {
+          avdName: profile.avdName,
+          deviceId: pins.androidSerial,
+          enableTools: ["statusBar"],
+        },
       }
-    : { kind: "mcp", tool: "getApple", args: { udid: pins.iosUdid } };
+    : { kind: "mcp", tool: "getApple", args: { udid: pins.iosUdid, enableTools: ["statusBar"] } };
 }
 
 function appearanceStep(profile: DeviceProfile, appearance: Appearance, pins: PlanPins): HostStep {

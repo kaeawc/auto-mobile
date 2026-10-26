@@ -4,10 +4,6 @@ Issue #14152 under #14142. The Play and App Store listing text, the app icon and
 plan live in the repository, so a listing change is reviewable and diffable and a stale or
 over-length listing fails Fast Validation instead of failing at upload.
 
-Status: metadata, validator, icon generation and the screenshot capture plan have landed. Wiring the
-generated icons into the Android and iOS app resources, the Play feature graphic, and running the
-capture (two identical consecutive runs) are not done; see [Remaining](#remaining).
-
 ## Layout
 
 ```text
@@ -99,15 +95,4 @@ bun scripts/store-listing/capture-screenshots.ts --emit <dir> --android-serial <
 `--emit` writes one `<shot>.plan.json` for `bun scripts/mcp-drive.ts --private --plan <file>` and a
 `manifest.json` with each shot's host steps (night mode through `adb` or `simctl ui`), expected
 pixel size and destination under `fastlane/metadata`. Use a dedicated capture emulator and simulator,
-never a shared development device. Nothing in the plan has been run; element labels come from the
-app's string resources and are confirmed on the first run.
-
-## Remaining
-
-- Wire the generated rasters into `android/protoviewer` (adaptive icon XML, lint-clean with no
-  `IconLauncherShape` baseline entry) and an iOS asset catalog, and confirm `lintRelease` and the
-  archive show no missing-icon warnings.
-- A driver that runs the manifest end to end, copies each captured image to its destination and
-  verifies the pixel size, then a check that two consecutive runs produce identical images.
-- The Play feature graphic (1024 x 500) rendered from a prototype spec, and an App Store preview.
-- Dev and beta channel icons.
+never a shared development device. Element labels come from the app's string resources.

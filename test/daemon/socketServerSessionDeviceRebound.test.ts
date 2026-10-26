@@ -95,7 +95,7 @@ describe("McpBindings.holdsSession", () => {
     const routeMap = new Map(
       Object.entries(routes).map(([socketId, sessionUuid]) => [
         socketId,
-        { clientKey: "k", sessionUuid },
+        { clientKey: "k", executionKey: "e", sessionUuid, requiresLiveDaemonSession: false },
       ]),
     );
     return new McpBindings(

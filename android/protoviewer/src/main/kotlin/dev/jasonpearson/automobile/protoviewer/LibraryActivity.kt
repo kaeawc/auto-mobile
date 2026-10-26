@@ -95,6 +95,8 @@ class LibraryActivity : ComponentActivity() {
             localNetworkDenied = false
             networkSettings.setEnabled(enabled)
           },
+          openLicenses = { startActivity(Intent(this, LicensesActivity::class.java)) },
+          openSecurityPolicy = { actionFailed = !launchSecurityPolicy(this) },
         )
         pendingExport?.let { exported ->
           AlertDialog(
@@ -244,6 +246,8 @@ internal fun LibraryScreen(
   allowNetwork: Boolean = false,
   localNetworkDenied: Boolean = false,
   setAllowNetwork: (Boolean) -> Unit = {},
+  openLicenses: () -> Unit = {},
+  openSecurityPolicy: () -> Unit = {},
 ) {
   Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).padding(16.dp)) {
     Text(stringResource(R.string.app_name))
@@ -263,6 +267,15 @@ internal fun LibraryScreen(
       },
     )
     if (localNetworkDenied) Text(stringResource(R.string.local_network_denied))
+    ListItem(
+      headlineContent = { Text(stringResource(R.string.open_source_licenses)) },
+      modifier = Modifier.fillMaxWidth().testTag("open-licenses").clickable { openLicenses() },
+    )
+    ListItem(
+      headlineContent = { Text(stringResource(R.string.security_policy)) },
+      modifier =
+        Modifier.fillMaxWidth().testTag("open-security-policy").clickable { openSecurityPolicy() },
+    )
     if (actionFailed) Text(stringResource(R.string.action_error))
     when (result) {
       null -> Text(stringResource(R.string.loading))

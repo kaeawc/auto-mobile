@@ -885,3 +885,30 @@ wiring_requires_yq() {
   ! grep -Fq "secrets." "$workflow"
   ! grep -Fq "notarytool" "$workflow"
 }
+@test "prepare-release gates the release on artifact capabilities before any build starts (#15347)" {
+  wiring_requires_yq
+  local workflow=".github/workflows/prepare-release.yml"
+  local run
+  run="$(yq -r '.jobs."prepare-version".steps[]
+    | select(.name == "Check artifact capabilities") | .run' "$workflow")"
+  [ "$run" = "bun scripts/release/check-artifact-capabilities.ts --candidate" ]
+  # Every build job depends on prepare-version, so a failure here stops the release first.
+  local index_check index_install
+  index_install="$(yq -r '.jobs."prepare-version".steps | to_entries[]
+    | select(.value.name == "Install Bun dependencies") | .key' "$workflow")"
+  index_check="$(yq -r '.jobs."prepare-version".steps | to_entries[]
+    | select(.value.name == "Check artifact capabilities") | .key' "$workflow")"
+  [ "$index_check" -gt "$index_install" ]
+  [ "$(yq -r '.jobs."build-candidate-control-proxy-apk".needs' "$workflow")" = "prepare-version" ]
+}
+
+@test "capability guard --candidate passes on the checked-in sources (#15347)" {
+  run bun scripts/release/check-artifact-capabilities.ts --candidate
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"advertises every capability the host gates on"* ]]
+}
+
+@test "capability guard passes for the pinned release recorded in the manifest (#15347)" {
+  run bun scripts/release/check-artifact-capabilities.ts
+  [ "$status" -eq 0 ]
+}

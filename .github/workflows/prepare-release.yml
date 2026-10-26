@@ -44,6 +44,12 @@ jobs:
       - name: Install Bun dependencies
         run: bun install --frozen-lockfile
 
+      # Release guard (#12996, #15347): every capability the host gates on must be advertised by
+      # the artifacts built from this commit, or be listed as deliberately unimplemented. Fails
+      # before the builds start, so a release cannot ship with gaps.
+      - name: Check artifact capabilities
+        run: bun scripts/release/check-artifact-capabilities.ts --candidate
+
       - name: Install ripgrep
         run: |
           if ! command -v rg >/dev/null 2>&1; then

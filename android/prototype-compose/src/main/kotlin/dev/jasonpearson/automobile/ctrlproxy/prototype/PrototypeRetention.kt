@@ -177,9 +177,13 @@ internal fun PrototypeRetainedVisibility(
 @Composable
 private fun retainedVisibilityAlpha(visible: Boolean, fade: Boolean): State<Float> =
   if (fade) {
-    animateFloatAsState(
-      if (visible) 1f else 0f,
-      spring(stiffness = Spring.StiffnessMediumLow),
-      label = "prototypeRetainedVisibility",
-    )
+    val target = if (visible) 1f else 0f
+    val alpha =
+      animateFloatAsState(
+        target,
+        spring(stiffness = Spring.StiffnessMediumLow),
+        label = "prototypeRetainedVisibility",
+      )
+    ReportPrototypeMotion { alpha.value != target }
+    alpha
   } else rememberUpdatedState(if (visible) 1f else 0f)

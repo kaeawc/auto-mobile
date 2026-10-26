@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.view.accessibility.AccessibilityWindowInfo
+import dev.jasonpearson.automobile.ctrlproxy.models.PrototypeWindowMotion
 import dev.jasonpearson.automobile.ctrlproxy.models.WindowInfo
 import dev.jasonpearson.automobile.protocol.*
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -339,6 +340,35 @@ class PrototypeWindowMetadataTest {
   }
 
   @Test
+  fun `window entries carry the prototype motion only when set and round trip it`() {
+    val wire = Json {
+      ignoreUnknownKeys = true
+      encodeDefaults = true
+    }
+    assertFalse(
+      wire
+        .encodeToString(WindowInfo.serializer(), WindowInfo(id = 3, type = 1))
+        .contains("prototypeMotion"),
+    )
+    val prototype =
+      WindowInfo(
+        id = 4,
+        type = 4,
+        prototypePlacement = "floating",
+        prototypeMotion = PrototypeWindowMotion(active = 2, loops = 1),
+      )
+    val encoded = wire.encodeToString(WindowInfo.serializer(), prototype)
+    assertTrue(encoded, encoded.contains(""""prototypeMotion":{"active":2,"loops":1}"""))
+    assertEquals(prototype, wire.decodeFromString(WindowInfo.serializer(), encoded))
+    // An APK that predates the motion signal sends none, and the host reads that as settled.
+    assertNull(
+      wire
+        .decodeFromString(WindowInfo.serializer(), """{"id":4,"prototypePlacement":"floating"}""")
+        .prototypeMotion,
+    )
+  }
+
+  @Test
   fun `controller reports the active prototype and nothing once it is dismissed`() = runTest {
     val host = FakePrototypeHost()
     val controller =
@@ -352,8 +382,10 @@ class PrototypeWindowMetadataTest {
 
     controller.show("r1", spec(PrototypeFullscreenPlacement()))
     // The appearance the show resolved to rides along; PrototypeAppearanceTest covers it.
-    fun placementAndOpacity() = controller.windowMetadata()?.copy(appearance = null)
+    fun placementAndOpacity() = controller.windowMetadata()?.copy(appearance = null, motion = null)
     assertEquals(PrototypeWindowMetadata("fullscreen", true), placementAndOpacity())
+    // Nothing animates in a freshly shown, static prototype (#15114).
+    assertEquals(PrototypeMotionState.Settled, controller.windowMetadata()?.motion)
 
     controller.show(
       "bar",

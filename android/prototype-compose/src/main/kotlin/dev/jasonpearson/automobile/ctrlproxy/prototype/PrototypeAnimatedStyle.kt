@@ -11,7 +11,6 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.offset
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -50,22 +49,23 @@ internal fun <T> prototypeStyleAnimation(animate: PrototypeAnimate?): AnimationS
 internal fun prototypeAnimatedAlpha(node: PrototypeRenderNode): Float {
   val target = (node.style.source.alpha ?: 1.0).toFloat()
   val animate = node.source?.animate ?: return target
-  val alpha by
-    animateFloatAsState(target, prototypeStyleAnimation(animate), label = "prototypeAlpha")
-  return alpha
+  val alpha = animateFloatAsState(target, prototypeStyleAnimation(animate), label = "prototypeAlpha")
+  ReportPrototypeMotion { alpha.value != target }
+  return alpha.value
 }
 
 /** An authored colour, animated when the node declares `animate`; unspecified stays unspecified. */
 @Composable
 internal fun prototypeAnimatedColor(node: PrototypeRenderNode, color: Color): Color {
   if (!color.isSpecified || node.source?.animate == null) return color
-  val animated by
+  val animated =
     animateColorAsState(
       color,
       prototypeStyleAnimation(node.source.animate),
       label = "prototypeColor",
     )
-  return animated
+  ReportPrototypeMotion { animated.value != color }
+  return animated.value
 }
 
 /**
@@ -104,6 +104,12 @@ private fun Modifier.animatedTransform(
   val animatedY = animateFloatAsState(y, spec, label = "prototypeY")
   val animatedScale = animateFloatAsState(scale, spec, label = "prototypeScale")
   val animatedRotation = animateFloatAsState(rotation, spec, label = "prototypeRotation")
+  ReportPrototypeMotion {
+    animatedX.value != x ||
+      animatedY.value != y ||
+      animatedScale.value != scale ||
+      animatedRotation.value != rotation
+  }
   return offset { IntOffset(animatedX.value.dp.roundToPx(), animatedY.value.dp.roundToPx()) }
     .graphicsLayer {
       scaleX = animatedScale.value

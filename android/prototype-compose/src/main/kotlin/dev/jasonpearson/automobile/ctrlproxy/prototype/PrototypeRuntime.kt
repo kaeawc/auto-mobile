@@ -166,6 +166,9 @@ class PrototypeRuntime(
 
   private val renderMapper = PrototypeRenderMapper()
 
+  /** The running animations of this prototype's window, published in its window metadata. */
+  @InternalAutoMobilePrototypeApi val motionActivity = PrototypeMotionActivity()
+
   @InternalAutoMobilePrototypeApi
   fun renderModel(snapshot: PrototypeRuntimeSnapshot = current): PrototypeRenderModel =
     renderMapper.map(snapshot.spec, snapshot.pages, snapshot.stacks, snapshot.shownErrors)

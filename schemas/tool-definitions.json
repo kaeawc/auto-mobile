@@ -25025,6 +25025,33 @@
           "exclusiveMinimum": 0,
           "maximum": 9007199254740991
         },
+        "placeholderFindings": {
+          "description": "Successful show or patch: advisory lint for a repeat or state placeholder in a field that does not bind it, so it would be drawn literally (for example chip.label, badge.text, textField.placeholder). path is the field in the component-expanded device spec; placeholder is the text as authored. Never refuses a show. Absent when nothing is found.",
+          "maxItems": 50,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "placeholder": {
+                "type": "string"
+              },
+              "detail": {
+                "type": "string"
+              }
+            },
+            "required": ["path", "placeholder", "detail"],
+            "additionalProperties": false
+          }
+        },
+        "placeholderFindingsTotal": {
+          "description": "Total placeholder findings, present only when placeholderFindings was capped",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
         "event": {
           "type": "object",
           "properties": {

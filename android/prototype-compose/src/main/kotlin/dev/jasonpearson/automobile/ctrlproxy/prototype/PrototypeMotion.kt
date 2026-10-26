@@ -153,9 +153,9 @@ internal fun Modifier.prototypeAnimateSize(enabled: Boolean): Modifier {
     activity.report(owner, outer != null && inner != null && outer != inner)
   }
   return onSizeChanged {
-      sizes[0] = it
-      report()
-    }
+    sizes[0] = it
+    report()
+  }
     .animateContentSize()
     .onSizeChanged {
       sizes[1] = it

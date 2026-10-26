@@ -180,8 +180,7 @@ class PrototypeMotionActivityTest {
   @Test
   fun `slideEnd settles in one frame at animator scale zero`() = assertSnapsAtScaleZero("slideEnd")
 
-  @Test
-  fun `scale settles in one frame at animator scale zero`() = assertSnapsAtScaleZero("scale")
+  @Test fun `scale settles in one frame at animator scale zero`() = assertSnapsAtScaleZero("scale")
 
   private fun assertSnapsUnderNone(transition: String) =
     assertTransitionSnaps(transition, motion = "none", scale = 1f)
@@ -199,7 +198,11 @@ class PrototypeMotionActivityTest {
         PrototypeBoxNode(
           testTag = "box",
           animate = animate,
-          style = PrototypeStyle(width = PrototypeDimension.Dp(80.0), height = PrototypeDimension.Dp(80.0)),
+          style =
+            PrototypeStyle(
+              width = PrototypeDimension.Dp(80.0),
+              height = PrototypeDimension.Dp(80.0),
+            ),
           styleWhen =
             listOf(
               PrototypeStyleWhen(

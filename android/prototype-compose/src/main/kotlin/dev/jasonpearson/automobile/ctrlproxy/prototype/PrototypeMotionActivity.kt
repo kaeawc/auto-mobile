@@ -32,7 +32,9 @@ class PrototypeMotionActivity {
   private val settling = HashSet<Any>()
   private val looping = HashSet<Any>()
 
-  /** Marks [owner] as running (or not). A [loop] owner is counted in [PrototypeMotionState.loops]. */
+  /**
+   * Marks [owner] as running (or not). A [loop] owner is counted in [PrototypeMotionState.loops].
+   */
   fun report(owner: Any, running: Boolean, loop: Boolean = false) {
     synchronized(this) {
       val set = if (loop) looping else settling
@@ -52,13 +54,15 @@ class PrototypeMotionActivity {
     synchronized(this) { PrototypeMotionState(settling.size, looping.size) }
 }
 
-/** The window's motion counter; null (previews, direct [PrototypeSpecContent] callers) counts none. */
+/**
+ * The window's motion counter; null (previews, direct [PrototypeSpecContent] callers) counts none.
+ */
 internal val LocalPrototypeMotionActivity = compositionLocalOf<PrototypeMotionActivity?> { null }
 
 /**
  * Reports an animation site to the window's [PrototypeMotionActivity] while [running] is true, and
- * releases it when the site leaves composition. [running] is read in a snapshot flow rather than
- * in composition, so reading an animated value there costs no recomposition per frame.
+ * releases it when the site leaves composition. [running] is read in a snapshot flow rather than in
+ * composition, so reading an animated value there costs no recomposition per frame.
  */
 @Composable
 internal fun ReportPrototypeMotion(loop: Boolean = false, running: () -> Boolean) {

@@ -49,7 +49,8 @@ internal fun <T> prototypeStyleAnimation(animate: PrototypeAnimate?): AnimationS
 internal fun prototypeAnimatedAlpha(node: PrototypeRenderNode): Float {
   val target = (node.style.source.alpha ?: 1.0).toFloat()
   val animate = node.source?.animate ?: return target
-  val alpha = animateFloatAsState(target, prototypeStyleAnimation(animate), label = "prototypeAlpha")
+  val alpha =
+    animateFloatAsState(target, prototypeStyleAnimation(animate), label = "prototypeAlpha")
   ReportPrototypeMotion { alpha.value != target }
   return alpha.value
 }

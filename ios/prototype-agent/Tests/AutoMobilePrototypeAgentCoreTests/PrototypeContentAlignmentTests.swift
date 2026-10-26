@@ -15,6 +15,10 @@ final class PrototypeContentAlignmentTests: XCTestCase {
         XCTAssertEqual(alignment("text", textAlign: "end"), .trailing)
     }
 
+    func testCardContentStartsAtTheTopLeadingCorner() {
+        XCTAssertEqual(alignment("card"), .topLeading)
+    }
+
     func testOtherLeavesStayCentred() {
         XCTAssertEqual(alignment("image"), .center)
         XCTAssertEqual(alignment("button"), .center)

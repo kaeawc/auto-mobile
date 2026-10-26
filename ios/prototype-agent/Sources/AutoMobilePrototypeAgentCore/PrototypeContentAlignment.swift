@@ -26,6 +26,8 @@ func prototypeContentAlignment(
         default: return .topLeading
         }
     case "box": return boxAlignment
+    // Compose's Card lays its content out from the top-start corner, not the centre (#15445).
+    case "card": return .topLeading
     case "text":
         switch textAlign {
         case "center": return .center

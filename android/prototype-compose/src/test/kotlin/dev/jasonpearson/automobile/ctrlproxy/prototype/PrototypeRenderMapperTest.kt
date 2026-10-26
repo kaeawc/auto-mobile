@@ -201,6 +201,9 @@ class PrototypeRenderMapperFixtureTest(private val name: String, private val inp
           .first { it.isDirectory }
       return checkNotNull(directory.listFiles())
         .filter { it.extension == "json" }
+        // Derived values format through android.icu, which a plain JVM test cannot run (it is
+        // covered under Robolectric by PrototypeDerivedMappingTest and PrototypeValueFormatterTest).
+        .filterNot { it.readText().contains("\"derive\"") }
         .sortedBy { it.name }
         .map { file ->
           val validated =

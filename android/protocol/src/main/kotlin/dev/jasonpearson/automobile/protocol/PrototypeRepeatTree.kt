@@ -42,7 +42,10 @@ internal object PrototypeRepeatTree {
       if (pointer != null) data.items(pointer)
       else (repeat["items"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }
     val names = (repeat["derive"] as? JsonObject)?.keys.orEmpty()
-    val projected = items.map { JsonObject(it + names.associateWith { JsonPrimitive("") }) }
+    // Only copy rows when derived fields are added; the projected list is otherwise shared.
+    val projected =
+      if (names.isEmpty()) items
+      else items.map { JsonObject(it + names.associateWith { JsonPrimitive("") }) }
     return Scope(path, alias, projected, source != null, names)
   }
 

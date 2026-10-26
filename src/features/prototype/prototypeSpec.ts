@@ -25,7 +25,6 @@ import {
   fadeEdgesSchema,
   imageFilterSchema,
   anchorSchema,
-  colorTokenSchema,
   colorValueSchema,
   conditionSchema,
   detentSchema,

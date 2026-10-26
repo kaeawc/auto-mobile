@@ -71,7 +71,7 @@
           }
         ]
       },
-      "maxItems": 501,
+      "maxItems": 2001,
       "children": [
         {
           "type": "text",

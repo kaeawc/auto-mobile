@@ -49,7 +49,7 @@ for (const kind of ["valid", "invalid"]) {
     });
   }
 }
-test("500 rows count the row template once toward nodes and images, even when empty", () => {
+test("rows at the list limit count the row template once toward nodes and images, even when empty", () => {
   const image = { type: "image", asset: "photo" };
   for (const count of [0, contract.limits.MAX_PROTOTYPE_LIST_ITEMS]) {
     expect(

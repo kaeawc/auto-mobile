@@ -89,15 +89,16 @@ describe("data validation", () => {
     },
   );
   test("depth is checked before array length, then children", () => {
+    const tooMany = contract.limits.MAX_PROTOTYPE_DATA_ARRAY_ITEMS + 1;
     const value = nested(
       8,
-      Array.from({ length: 501 }, () => null),
+      Array.from({ length: tooMany }, () => null),
     );
     expect(prototypeDataError(value)).toEqual({
       path: "data" + ".a".repeat(8),
       message: "Data depth limit exceeded",
     });
-    expect(prototypeDataError({ a: Array.from({ length: 501 }, () => null) })).toEqual({
+    expect(prototypeDataError({ a: Array.from({ length: tooMany }, () => null) })).toEqual({
       path: "data.a",
       message: "Data array limit exceeded",
     });
@@ -121,7 +122,11 @@ describe("data validation", () => {
     expect(
       prototypeDataError({ a: "x".repeat(contract.limits.MAX_PROTOTYPE_DATA_BYTES - 8) }),
     ).toBeUndefined();
-    expect(prototypeDataError({ a: Array.from({ length: 500 }, () => 1) })).toBeUndefined();
+    expect(
+      prototypeDataError({
+        a: Array.from({ length: contract.limits.MAX_PROTOTYPE_DATA_ARRAY_ITEMS }, () => 1),
+      }),
+    ).toBeUndefined();
     expect(
       prototypeDataError({ a: "x".repeat(contract.limits.MAX_PROTOTYPE_DATA_BYTES - 44), b: 0 }),
     ).toEqual({ path: "data", message: "Data byte limit exceeded" });

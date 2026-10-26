@@ -87,7 +87,6 @@ final class PrototypeLazyListTests: XCTestCase {
     func testListInRepeat() throws { try assertFixture("list-in-repeat.json") }
     func testListInSameAxisScroll() throws { try assertFixture("list-in-same-axis-scroll.json") }
     func testListItemsExceedMaxItems() throws { try assertFixture("list-items-exceed-maxItems.json") }
-    func testListItemsOver500() throws { try assertFixture("list-items-over-500.json") }
     func testListLiteralItems() throws { try assertFixture("list-literal-items.json") }
     func testListMissingKey() throws { try assertFixture("list-missing-key.json") }
     func testListRefreshUndeclared() throws { try assertFixture("list-refresh-undeclared.json") }
@@ -173,9 +172,9 @@ final class PrototypeLazyListTests: XCTestCase {
             .object(["type": .string("image"), "asset": .string("picture")])
         })])])
         spec["root"] = .object(node)
-        let items = (0 ..< 500).map { JSONValue.object(["id": .number(Double($0))]) }
+        let items = (0 ..< PrototypeLimits.maxListItems).map { JSONValue.object(["id": .number(Double($0))]) }
         spec["data"] = .object(["feed": .object(["items": .array(items)])])
-        // Five images and seven nodes, even with 500 rows (eager expansion would exceed both limits).
+        // Five images and seven nodes, even at the list item limit (eager expansion would exceed both limits).
         var repeats = PrototypeStrictRepeats(data: spec["data"]?.objectFields)
         try repeats.templates(node, path: "root")
         try repeats.expanded(node, path: "root")

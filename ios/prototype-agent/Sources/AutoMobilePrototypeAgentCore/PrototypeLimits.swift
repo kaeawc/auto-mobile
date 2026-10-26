@@ -4,8 +4,8 @@ import Foundation
 /// `guardPrototypeTree`. A spec that reaches the agent without the host check (a direct client)
 /// cannot exhaust it: the tree is bounded before `repeat` expansion allocates anything.
 ///
-/// The constants repeat `schemas/prototype-spec-contract.json`; `PrototypeLimitsTests` fails when they
-/// drift from it.
+/// The constants repeat `schemas/prototype-spec-contract.json` (the data and list limits read it
+/// directly); `PrototypeLimitsTests` fails when any of them drifts from it.
 enum PrototypeLimits {
     static let maxStackScreens = 32
     static let maxStackDepth = 32
@@ -26,9 +26,9 @@ enum PrototypeLimits {
     static let maxSpecBytes = 1_048_576
 
     static let maxDataDepth = 8
-    static let maxDataArrayItems = 500
+    static let maxDataArrayItems = PrototypeContractValidator.limit("MAX_PROTOTYPE_DATA_ARRAY_ITEMS")
     static let maxDataPointerLength = 256
-    static let maxDataBytes = 262_144
+    static let maxDataBytes = PrototypeContractValidator.limit("MAX_PROTOTYPE_DATA_BYTES")
     /// `MAX_PROTOTYPE_STORAGE_BYTES` (#12522): stored bytes per prototype id, summed over entries as
     /// the UTF-8 length of the storage key plus the compact JSON of the value.
     static let maxStorageBytes = 262_144
@@ -36,7 +36,7 @@ enum PrototypeLimits {
     static let maxStorageKeys = 64
     /// `MAX_PROTOTYPE_DATA_WRITE_BYTES`: the host validator's byte cost of `data` after a device
     /// `setData`, `appendData` or `removeData` write.
-    static let maxDataWriteBytes = 262_144
+    static let maxDataWriteBytes = PrototypeContractValidator.limit("MAX_PROTOTYPE_DATA_WRITE_BYTES")
 
     /// Agent-side depth/array backstop, in the host's sorted UTF-16 member order. Data is depth 1.
     /// The host's byte-cost rule is not duplicated: there is no Swift validator twin, and the

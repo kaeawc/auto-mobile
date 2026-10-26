@@ -18,19 +18,20 @@ class PrototypeLazyListTest {
       mapOf("root" to root, "data" to data)
 
   @Test
-  fun `five hundred rows count their image and node template once`() {
+  fun `rows at the list limit count their image and node template once`() {
     val root =
       obj(list).let {
         JsonObject(
           it + ("children" to JsonArray(listOf(obj("""{"type":"image","asset":"pic"}""")))),
         )
       }
-    val items = JsonArray((0 until 500).map { obj("""{"id":$it,"title":"Row"}""") })
+    val limit = PrototypeSpecValidator.MAX_PROTOTYPE_LIST_ITEMS
+    val items = JsonArray((0 until limit).map { obj("""{"id":$it,"title":"Row"}""") })
     val input = JsonObject(spec(root, JsonObject(mapOf("items" to items))))
     assertTrue(PrototypeSpecValidator.validate(input.toString()) is PrototypeSpecValidation.Success)
     val projected = PrototypeRepeatData(input.getValue("data").jsonObject).items("/items")
-    assertEquals(500, projected.size)
-    assertEquals(JsonPrimitive(499), projected.last()["id"])
+    assertEquals(limit, projected.size)
+    assertEquals(JsonPrimitive(limit - 1), projected.last()["id"])
   }
 
   @Test
@@ -91,18 +92,19 @@ class PrototypeLazyListTest {
 
   @Test
   fun `extend trims before array budget and failures leave input unchanged`() {
-    val before = JsonObject(mapOf("items" to JsonArray((0 until 480).map(::JsonPrimitive))))
-    val incoming = JsonArray((480 until 520).map(::JsonPrimitive))
+    val size = PrototypeSpecValidator.MAX_PROTOTYPE_DATA_ARRAY_ITEMS - 20
+    val before = JsonObject(mapOf("items" to JsonArray((0 until size).map(::JsonPrimitive))))
+    val incoming = JsonArray((size until size + 40).map(::JsonPrimitive))
     val result =
       PrototypeDataWriter.apply(before, PrototypeDataWrite.Extend("/data/items", incoming, 100))
         as PrototypeDataWriteResult.Success
-    assertEquals(420, result.trimmed)
+    assertEquals(size - 60, result.trimmed)
     assertEquals(100, result.data.getValue("items").jsonArray.size)
     val failed =
       PrototypeDataWriter.apply(before, PrototypeDataWrite.Extend("/data/items", incoming))
         as PrototypeDataWriteResult.Failure
     assertEquals(PrototypeDataWriteErrorCode.LIMIT_EXCEEDED, failed.error.code)
-    assertEquals(480, before.getValue("items").jsonArray.size)
+    assertEquals(size, before.getValue("items").jsonArray.size)
   }
 
   @Test

@@ -143,14 +143,14 @@ final class PrototypeDataTests: XCTestCase {
     }
 
     func testDepthBeforeArrayLengthAndSortedMemberOrder() throws {
-        let oversized: JSONValue = .array(Array(repeating: .bool(true), count: 501))
+        let oversized: JSONValue = .array(Array(repeating: .bool(true), count: PrototypeLimits.maxDataArrayItems + 1))
         var nested = oversized
         for _ in 0 ..< 7 {
             nested = .object(["a": nested])
         }
         assertViolation(["a": nested], "data.a.a.a.a.a.a.a.a: Data depth limit exceeded")
         assertViolation(["z": .null, "a b": .null], "data[\"a b\"]: Invalid data value")
-        try PrototypeLimits.guardData(["items": .array(Array(repeating: .number(0), count: 500))])
+        try PrototypeLimits.guardData(["items": .array(Array(repeating: .number(0), count: PrototypeLimits.maxDataArrayItems))])
         assertViolation(["items": oversized], "data.items: Data array limit exceeded")
         var exact: JSONValue = .object(["leaf": .bool(true)])
         for _ in 0 ..< 6 {

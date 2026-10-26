@@ -425,10 +425,10 @@ The hardening promises above are checked on the **built artifact**, not the sour
   `UIFileSharingEnabled`, `CFBundleSupportedPlatforms` matches `--platform`, entitlements within the
   allowlist and never a `get-task-allow` that is not `false` (simulator builds keep entitlements in the
   executable, so `codesign` reports none and these rules bite on the device `.ipa`), no `.dSYM` in the bundle and no debug map left in the
-  executable. The forbidden-symbol check (`PrototypeServer`, `bootViewerHost`) and the
-  `PrivacyInfo.xcprivacy` check are **advisory** (reported as warnings, table `advisory` in the
-  policy file) until the App Store archive (#14150) and privacy manifest (#14151) land; delete the
-  table entry then to enforce them.
+  executable. The `PrivacyInfo.xcprivacy` check is enforced (#14151, #15387). The
+  forbidden-symbol check (`PrototypeServer`, `bootViewerHost`) is **advisory** (reported as a warning,
+  table `advisory` in the policy file) until the App Store archive (#14150) lands; delete the table
+  entry then to enforce it.
 
 It runs in the pull-request Android build, in `prepare-release.yml` through
 `verify-protoviewer-artifact-policy.yml` (which `verify-prepared-release` waits on), and locally with

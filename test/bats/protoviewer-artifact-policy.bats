@@ -74,12 +74,20 @@ gate() {
   [[ "$output" == *"[android.cleartext]"* ]]
 }
 
-@test "ios: the real simulator app passes, with the not-yet-landed rules as advisory warnings" {
+@test "ios: the real simulator app passes, with the forbidden-symbol rule as an advisory warning" {
   mkdir "$work/ProtoViewer.app"
+  : > "$work/ProtoViewer.app/PrivacyInfo.xcprivacy"
   run gate ios "$work/ProtoViewer.app" --platform iphonesimulator
   [ "$status" -eq 0 ]
-  [[ "$output" == *"WARN [ios.privacyManifest]"* ]]
-  [[ "$output" == *"advisory until #14151"* ]]
+  [[ "$output" == *"WARN [ios.forbiddenSymbols]"* ]]
+  [[ "$output" == *"advisory until #14150"* ]]
+}
+
+@test "ios: an app without PrivacyInfo.xcprivacy fails" {
+  mkdir "$work/ProtoViewer.app"
+  run gate ios "$work/ProtoViewer.app" --platform iphonesimulator
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL [ios.privacyManifest]"* ]]
 }
 
 @test "ios: an .ipa whose Info.plist has NSAllowsArbitraryLoads fails" {

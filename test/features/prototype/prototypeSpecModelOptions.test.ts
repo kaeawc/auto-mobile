@@ -337,3 +337,118 @@ enum Sample: Decodable {
 }
 `);
 });
+
+test("Kotlin tag-only variants are serializable data objects; Swift and empty objects reject them", () => {
+  const rule: Rule = {
+    kind: "tagged",
+    variants: { dismiss: object({ type: field({ kind: "enum", values: ["dismiss"] }) }) },
+  };
+  expect(render(rule, { languages: ["kotlin"] }).kotlin)
+    .toBe(`${header}package dev.jasonpearson.automobile.protocol
+
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+
+@Serializable sealed class PrototypeSample
+
+@SerialName("dismiss") @Serializable data object PrototypeDismissSample : PrototypeSample()
+`);
+  expect(() => render(rule, { languages: ["swift"] })).toThrow(
+    "variant without fields is unsupported",
+  );
+  expect(() => render(object({}), { languages: ["kotlin"] })).toThrow(
+    "empty objects are unsupported",
+  );
+});
+
+const baseUnion = (): Rule => ({
+  kind: "tagged",
+  variants: {
+    first: object({
+      type: field({ kind: "enum", values: ["first"] }),
+      own: field({ kind: "boolean" }),
+      id: field({ kind: "string" }, true),
+      tap: field({ kind: "string" }, true),
+    }),
+    second: object({
+      type: field({ kind: "enum", values: ["second"] }),
+      id: field({ kind: "string" }),
+    }),
+  },
+});
+
+test("Kotlin bases render documented abstract and open properties and ordered overrides exactly", () => {
+  expect(
+    render(baseUnion(), {
+      languages: ["kotlin"],
+      kotlinBase: { fields: ["id", "tap"], docs: { id: "Identity.", tap: "Optional gesture." } },
+    }).kotlin,
+  ).toBe(`${header}package dev.jasonpearson.automobile.protocol
+
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+
+@Serializable
+sealed class PrototypeSample {
+  /** Identity. */
+  abstract val id: String?
+  /** Optional gesture. */
+  open val tap: String?
+    get() = null
+}
+
+@SerialName("first")
+@Serializable
+data class PrototypeFirstSample(
+  override val id: String? = null,
+  override val tap: String? = null,
+  val own: Boolean,
+) : PrototypeSample()
+
+@SerialName("second")
+@Serializable
+data class PrototypeSecondSample(override val id: String) : PrototypeSample()
+`);
+});
+
+test("Kotlin bases reject unknown names and inconsistent variant types", () => {
+  expect(() =>
+    render(baseUnion(), { languages: ["kotlin"], kotlinBase: { fields: ["missing"] } }),
+  ).toThrow("unknown field missing");
+  expect(() =>
+    render(baseUnion(), {
+      languages: ["kotlin"],
+      kotlinBase: { fields: ["id"] },
+      fieldTypes: { "second.id": { kotlin: "Int" } },
+    }),
+  ).toThrow("types differ between variants");
+});
+
+test("future union fields render from the contract and unmappable rules name the variant and field", () => {
+  const rule: Rule = {
+    kind: "tagged",
+    variants: {
+      future: object({
+        type: field({ kind: "enum", values: ["future"] }),
+        id: field({ kind: "string" }, true),
+        added: field({ kind: "boolean" }, true),
+      }),
+    },
+  };
+  const options: ModelOptions = { languages: ["kotlin"], kotlinBase: { fields: ["id"] } };
+  expect(render(rule, options).kotlin).toContain(
+    "override val id: String? = null,\n  val added: Boolean? = null,",
+  );
+  const unmappable: Rule = {
+    kind: "tagged",
+    variants: {
+      future: object({
+        type: field({ kind: "enum", values: ["future"] }),
+        added: field({ kind: "choice" }),
+      }),
+    },
+  };
+  expect(() => render(unmappable, { languages: ["kotlin"] })).toThrow(
+    "Definition future.added: unsupported kind choice",
+  );
+});

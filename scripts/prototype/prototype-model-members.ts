@@ -2,7 +2,7 @@ import type { ModelOptions } from "./prototype-model-selection";
 import { docLines, escapeModelIdentifier, type RenderField } from "./prototype-model-rendering";
 
 export function kotlinProperty(field: RenderField): string {
-  return `val ${escapeModelIdentifier(field.name, "kotlin")}: ${kotlinParameterType(field)}`;
+  return `${field.override ? "override " : ""}val ${escapeModelIdentifier(field.name, "kotlin")}: ${kotlinParameterType(field)}`;
 }
 function kotlinParameterType(field: RenderField): string {
   if (field.defaultValue !== undefined) {

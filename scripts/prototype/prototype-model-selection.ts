@@ -1,3 +1,9 @@
+import {
+  actionModelOptions,
+  nodeActionTypeRefs,
+  nodeModelOptions,
+} from "./prototype-model-node-action-options";
+
 export type ModelLanguage = "kotlin" | "swift";
 export type TypeRefs = Readonly<
   Record<string, { readonly kotlin?: string; readonly swift?: string }>
@@ -15,6 +21,10 @@ export interface ModelOptions {
   readonly fieldDocs?: Readonly<Record<string, string>>;
   /** Kotlin non-null defaults for optional fields; Swift defaults are unsupported. */
   readonly fieldDefaults?: TypeRefs;
+  readonly kotlinBase?: {
+    readonly fields: readonly string[];
+    readonly docs?: Readonly<Record<string, string>>;
+  };
   readonly kotlinStringOverloads?: readonly string[];
   readonly validators?: TypeRefs;
 }
@@ -26,6 +36,9 @@ export type ModelSelection = Readonly<Record<string, ModelOptions>>;
  * preserve each native API. Type refs below bridge definitions that remain hand-written.
  */
 export const prototypeModelSelection = {
+  // Swift Action is a flat struct and Node a final class with different shapes; both stay hand-written.
+  action: actionModelOptions,
+  node: nodeModelOptions,
   offset: {},
   padding: {},
   bounds: { languages: ["kotlin"] },
@@ -138,6 +151,7 @@ export const prototypeModelSelection = {
 } as const satisfies ModelSelection;
 
 export const prototypeTypeRefs = {
+  ...nodeActionTypeRefs,
   colorValue: { kotlin: "PrototypeModeValue", swift: "PrototypeModeValue" },
   action: { kotlin: "PrototypeAction", swift: "PrototypeAction" },
   dimension: { kotlin: "PrototypeDimension" },

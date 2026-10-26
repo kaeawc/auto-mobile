@@ -1,3 +1,4 @@
+import { renderKotlinBase } from "./prototype-model-base";
 import { swiftDecodeLocals } from "./prototype-model-members";
 import type { Rule } from "../../src/features/prototype/prototypeBindingValidation";
 import type { ModelOptions } from "./generate-prototype-spec-models";
@@ -51,25 +52,27 @@ export function renderUnion(
     const fields = Object.fromEntries(
       Object.entries(object.fields ?? {}).filter(([key]) => key !== tag),
     );
-    if (!Object.keys(fields).length) {
+    if (!Object.keys(fields).length && context.language !== "kotlin") {
       throw new Error(`Definition ${name}.${variant}: variant without fields is unsupported`);
     }
     return {
       name: variant,
-      fields: renderFields(
-        `${name}${capitalized(variant)}`,
-        { kind: "object", fields },
-        context,
-        [name],
-        options,
-        variant,
-      ),
+      fields: Object.keys(fields).length
+        ? renderFields(
+            `${name}${capitalized(variant)}`,
+            { kind: "object", fields },
+            context,
+            [name],
+            options,
+            variant,
+          )
+        : [],
     };
   });
   const type = modelName(name, options, context.language);
   context.output.push("", ...docLines(options.doc, context.language));
   if (context.language === "kotlin") {
-    context.output.push(`@Serializable sealed class ${type}`);
+    context.output.push(...renderKotlinBase(type, variants, options));
     for (const variant of variants) {
       const variantType =
         options.variantNames?.[variant.name] ??
@@ -77,9 +80,12 @@ export function renderUnion(
       context.output.push(
         "",
         ...docLines(options.variantDocs?.[variant.name], "kotlin"),
-        `@SerialName("${variant.name}")`,
-        "@Serializable",
-        ...renderKotlinClass(variantType, variant.fields, ` : ${type}()`, options),
+        ...(variant.fields.length ? [`@SerialName("${variant.name}")`, "@Serializable"] : []),
+        ...(variant.fields.length
+          ? renderKotlinClass(variantType, variant.fields, ` : ${type}()`, options)
+          : [
+              `@SerialName("${variant.name}") @Serializable data object ${variantType} : ${type}()`,
+            ]),
       );
     }
   } else {

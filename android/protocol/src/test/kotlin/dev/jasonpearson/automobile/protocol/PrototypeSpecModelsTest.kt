@@ -8,6 +8,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.BeforeAll
@@ -68,6 +69,7 @@ class PrototypeSpecModelsTest {
           PrototypeStyle.serializer(),
           PrototypeItem.serializer(),
           PrototypeAction.serializer(),
+          PrototypeNode.serializer(),
         )
       for (serializer in serializers) {
         val descriptor = serializer.descriptor
@@ -304,6 +306,47 @@ class PrototypeSpecModelsTest {
         rotation = 15.0,
       ),
     )
+  }
+
+  @Test
+  fun `generated node fixtures retain variant classes and round trip`() {
+    for ((name, element) in fixture.filterKeys { it.startsWith("node") }) {
+      val value = PrototypeSpecValidator.json.decodeFromJsonElement<PrototypeNode>(element)
+      val tag = element.jsonObject.getValue("type").jsonPrimitive.content
+      assertEquals(
+        "Prototype" + tag.replaceFirstChar { it.uppercaseChar() } + "Node",
+        value.javaClass.simpleName,
+        name,
+      )
+      // Fixtures omit optional values equal to their defaults, preserving wire equality.
+      val encoded = PrototypeSpecValidator.json.encodeToJsonElement<PrototypeNode>(value)
+      assertEquals(
+        value,
+        PrototypeSpecValidator.json.decodeFromJsonElement<PrototypeNode>(encoded),
+        name,
+      )
+      assertEquals(element, encoded, name)
+    }
+  }
+
+  @Test
+  fun `generated action fixtures retain variant classes and round trip`() {
+    for ((name, element) in fixture.filterKeys { it.startsWith("action") }) {
+      val value = PrototypeSpecValidator.json.decodeFromJsonElement<PrototypeAction>(element)
+      val tag = element.jsonObject.getValue("type").jsonPrimitive.content
+      assertEquals(
+        "Prototype" + tag.replaceFirstChar { it.uppercaseChar() } + "Action",
+        value.javaClass.simpleName,
+        name,
+      )
+      val encoded = PrototypeSpecValidator.json.encodeToJsonElement<PrototypeAction>(value)
+      assertEquals(element, encoded, name)
+      assertEquals(
+        value,
+        PrototypeSpecValidator.json.decodeFromJsonElement<PrototypeAction>(encoded),
+        name,
+      )
+    }
   }
 
   private inline fun <reified T> assertRoundTrip(name: String, expected: T) {

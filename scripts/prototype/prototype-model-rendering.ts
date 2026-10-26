@@ -71,6 +71,7 @@ export interface RenderField {
   doc?: string;
   defaultValue?: string;
   validator?: string;
+  override?: boolean;
 }
 
 function unsupported(path: string, rule: Rule): never {
@@ -225,7 +226,7 @@ export function renderFields(
       languageOption(options.fieldTypes) ??
       fieldType(
         field.rule,
-        `${name}.${fieldName}`,
+        variant ? `${variant}.${fieldName}` : `${name}.${fieldName}`,
         `${name}${capitalized(fieldName)}`,
         context,
         visiting,

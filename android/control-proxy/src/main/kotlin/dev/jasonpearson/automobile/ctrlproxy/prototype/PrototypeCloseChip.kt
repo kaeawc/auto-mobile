@@ -50,7 +50,12 @@ internal fun PrototypeCloseChip(onClick: () -> Unit, modifier: Modifier = Modifi
         Modifier.size(PROTOTYPE_CLOSE_CHIP_DIAMETER).background(colors.background, CircleShape),
         contentAlignment = Alignment.Center,
       ) {
-        Icon(Icons.Filled.Close, contentDescription = null, tint = colors.content, modifier = Modifier.size(18.dp))
+        Icon(
+          Icons.Filled.Close,
+          contentDescription = null,
+          tint = colors.content,
+          modifier = Modifier.size(18.dp),
+        )
       }
     }
   }

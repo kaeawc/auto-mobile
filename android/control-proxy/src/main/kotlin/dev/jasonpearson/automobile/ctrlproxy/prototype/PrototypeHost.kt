@@ -1027,7 +1027,8 @@ private fun PrototypeChrome(
   if (chrome.dismissVisible) {
     Column(Modifier.fillMaxSize()) {
       // Reserve inset-aware space and clip the spec below it. Modal scrims cannot cover it. The
-      // bar is translucent, themed like the spec, and only as tall as its close chip's hit target (#10437, #15119).
+      // bar is translucent, themed like the spec, and only as tall as its close chip's hit target
+      // (#10437, #15119).
       val dismissColors = prototypeDismissColors(MaterialTheme.colorScheme)
       Box(
         Modifier.fillMaxWidth()

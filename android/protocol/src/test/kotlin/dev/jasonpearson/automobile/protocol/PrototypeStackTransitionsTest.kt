@@ -63,11 +63,11 @@ class PrototypeStackTransitionsTest {
     assertEquals(transition, root.stackTransition)
     assertEquals(
       transition,
-      (root.screens.getValue("home").onTap!![0] as PrototypePushAction).transition,
+      (root.screens.getValue("home").onTap!![0] as PrototypePushAction).stackTransition,
     )
     assertEquals(
       transition,
-      (root.screens.getValue("home").onTap!![1] as PrototypeReplaceAction).transition,
+      (root.screens.getValue("home").onTap!![1] as PrototypeReplaceAction).stackTransition,
     )
   }
 

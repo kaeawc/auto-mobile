@@ -156,6 +156,5 @@ export const prototypeTypeRefs = {
   action: { kotlin: "PrototypeAction", swift: "PrototypeAction" },
   dimension: { kotlin: "PrototypeDimension" },
   cornerRadius: { kotlin: "PrototypeCornerRadius" },
-  stackTransition: { kotlin: "PrototypeStackTransition" },
   imageAsset: { kotlin: "PrototypeModeValue", swift: "PrototypeModeValue" },
 } as const satisfies TypeRefs;

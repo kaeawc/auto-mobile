@@ -9798,7 +9798,7 @@
       },
       {
         "name": "transition",
-        "type": "enum",
+        "type": "string",
         "nullable": true,
         "hasDefault": true
       }
@@ -9938,7 +9938,7 @@
       },
       {
         "name": "transition",
-        "type": "enum",
+        "type": "string",
         "nullable": true,
         "hasDefault": true
       }

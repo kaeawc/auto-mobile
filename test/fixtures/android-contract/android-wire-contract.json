@@ -5643,12 +5643,6 @@
         "hasDefault": true
       },
       {
-        "name": "enabledWhen",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "checks",
         "type": "list",
         "nullable": true,
@@ -5657,6 +5651,12 @@
       {
         "name": "validateOn",
         "type": "enum",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "enabledWhen",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
         "nullable": true,
         "hasDefault": true
       }
@@ -5943,12 +5943,6 @@
         "hasDefault": false
       },
       {
-        "name": "enabledWhen",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "checks",
         "type": "list",
         "nullable": true,
@@ -5957,6 +5951,12 @@
       {
         "name": "validateOn",
         "type": "enum",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "enabledWhen",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
         "nullable": true,
         "hasDefault": true
       }
@@ -6981,6 +6981,12 @@
         "hasDefault": true
       },
       {
+        "name": "empty",
+        "type": "boolean",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "all",
         "type": "list",
         "nullable": true,
@@ -7005,20 +7011,14 @@
         "hasDefault": true
       },
       {
-        "name": "platform",
-        "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "valid",
         "type": "object:PrototypeValidityKeys",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "empty",
-        "type": "boolean",
+        "name": "platform",
+        "type": "string",
         "nullable": true,
         "hasDefault": true
       }
@@ -7939,18 +7939,6 @@
         "hasDefault": true
       },
       {
-        "name": "scale",
-        "type": "double",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "rotation",
-        "type": "double",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "alignment",
         "type": "string",
         "nullable": true,
@@ -8043,6 +8031,18 @@
       {
         "name": "textStyle",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scale",
+        "type": "double",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "rotation",
+        "type": "double",
         "nullable": true,
         "hasDefault": true
       }
@@ -8985,12 +8985,6 @@
         "hasDefault": true
       },
       {
-        "name": "columns",
-        "type": "object:PrototypeGridColumns",
-        "nullable": false,
-        "hasDefault": false
-      },
-      {
         "name": "children",
         "type": "list",
         "nullable": false,
@@ -9001,6 +8995,12 @@
         "type": "object:PrototypeRepeat",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "columns",
+        "type": "object:PrototypeGridColumns",
+        "nullable": false,
+        "hasDefault": false
       }
     ],
     "icon": [
@@ -9497,14 +9497,14 @@
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
@@ -9891,12 +9891,6 @@
         "hasDefault": false
       },
       {
-        "name": "enabledWhen",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "checks",
         "type": "list",
         "nullable": true,
@@ -9905,6 +9899,12 @@
       {
         "name": "validateOn",
         "type": "enum",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "enabledWhen",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
         "nullable": true,
         "hasDefault": true
       }
@@ -9933,16 +9933,16 @@
     ],
     "request": [
       {
-        "name": "url",
-        "type": "string",
-        "nullable": false,
-        "hasDefault": false
-      },
-      {
         "name": "method",
         "type": "string",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "url",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
       },
       {
         "name": "headers",
@@ -10085,6 +10085,12 @@
         "hasDefault": true
       },
       {
+        "name": "swipeActions",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSwipeActions",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "children",
         "type": "list",
         "nullable": false,
@@ -10099,12 +10105,6 @@
       {
         "name": "stagger",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeStagger",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "swipeActions",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSwipeActions",
         "nullable": true,
         "hasDefault": true
       }
@@ -10307,14 +10307,14 @@
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
@@ -10515,14 +10515,14 @@
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
@@ -10705,12 +10705,6 @@
         "hasDefault": true
       },
       {
-        "name": "enabledWhen",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "checks",
         "type": "list",
         "nullable": true,
@@ -10719,6 +10713,12 @@
       {
         "name": "validateOn",
         "type": "enum",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "enabledWhen",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
         "nullable": true,
         "hasDefault": true
       }
@@ -11387,12 +11387,6 @@
         "hasDefault": true
       },
       {
-        "name": "enabledWhen",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "checks",
         "type": "list",
         "nullable": true,
@@ -11401,6 +11395,12 @@
       {
         "name": "validateOn",
         "type": "enum",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "enabledWhen",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
         "nullable": true,
         "hasDefault": true
       }
@@ -11497,12 +11497,6 @@
         "hasDefault": true
       },
       {
-        "name": "enabledWhen",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "checks",
         "type": "list",
         "nullable": true,
@@ -11511,6 +11505,12 @@
       {
         "name": "validateOn",
         "type": "enum",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "enabledWhen",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
         "nullable": true,
         "hasDefault": true
       }

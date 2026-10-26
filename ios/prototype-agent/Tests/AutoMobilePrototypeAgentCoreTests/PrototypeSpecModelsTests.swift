@@ -133,7 +133,7 @@ final class PrototypeSpecModelsTests: XCTestCase {
     func testGradientRejectsInvalidStopCountsAndPositionsInBothVariants() throws {
         for type in ["linear", "radial"] {
             for count in [0, 1, 5] {
-                let stops = Array(repeating: #"{"color":"#112233"}"#, count: count).joined(separator: ",")
+                let stops = Array(repeating: "{\"color\":\"#112233\"}", count: count).joined(separator: ",")
                 let data = Data("{\"type\":\"\(type)\",\"angle\":45,\"stops\":[\(stops)]}".utf8)
                 XCTAssertThrowsError(try JSONDecoder().decode(PrototypeGradient.self, from: data)) { error in
                     guard case let DecodingError.dataCorrupted(context) = error else {
@@ -157,7 +157,10 @@ final class PrototypeSpecModelsTests: XCTestCase {
                 }
             }
         }
-        for json in [#"{"type":"unknown","stops":[]}"#, #"{"type":"linear","stops":[{"color":"#112233"},{"color":"#445566"}]}"#] {
+        for json in [
+            #"{"type":"unknown","stops":[]}"#,
+            "{\"type\":\"linear\",\"stops\":[{\"color\":\"#112233\"},{\"color\":\"#445566\"}]}",
+        ] {
             XCTAssertThrowsError(try JSONDecoder().decode(PrototypeGradient.self, from: Data(json.utf8)))
         }
         let item = try JSONDecoder().decode(NavItem.self, from: Data(#"{"label":"Home"}"#.utf8))

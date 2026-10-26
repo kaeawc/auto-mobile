@@ -24,7 +24,9 @@ extension PrototypeGradient {
     /// The shared validator's stop-count and position rules at the decoding boundary.
     static func validateStops<Key: CodingKey>(
         _ stops: [PrototypeGradientStop], forKey key: Key, in container: KeyedDecodingContainer<Key>
-    ) throws {
+    )
+        throws
+    {
         guard stopCount.contains(stops.count) else {
             throw DecodingError.dataCorruptedError(
                 forKey: key, in: container, debugDescription: "A gradient needs 2 to 4 stops"

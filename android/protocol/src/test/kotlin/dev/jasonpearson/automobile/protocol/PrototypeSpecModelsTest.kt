@@ -3,9 +3,12 @@ package dev.jasonpearson.automobile.protocol
 import java.io.File
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -325,7 +328,7 @@ class PrototypeSpecModelsTest {
         PrototypeSpecValidator.json.decodeFromJsonElement<PrototypeNode>(encoded),
         name,
       )
-      assertEquals(element, encoded, name)
+      assertEquals(canonical(element), canonical(encoded), name)
     }
   }
 
@@ -340,7 +343,7 @@ class PrototypeSpecModelsTest {
         name,
       )
       val encoded = PrototypeSpecValidator.json.encodeToJsonElement<PrototypeAction>(value)
-      assertEquals(element, encoded, name)
+      assertEquals(canonical(element), canonical(encoded), name)
       assertEquals(
         value,
         PrototypeSpecValidator.json.decodeFromJsonElement<PrototypeAction>(encoded),
@@ -349,10 +352,20 @@ class PrototypeSpecModelsTest {
     }
   }
 
+  /** Double fields encode as `1.0`; compare numbers by value so fixtures may write `1`. */
+  private fun canonical(element: JsonElement): JsonElement =
+    when (element) {
+      is JsonObject -> JsonObject(element.mapValues { canonical(it.value) })
+      is JsonArray -> JsonArray(element.map(::canonical))
+      is JsonPrimitive ->
+        element.takeIf { !it.isString }?.doubleOrNull?.let(::JsonPrimitive) ?: element
+      else -> element
+    }
+
   private inline fun <reified T> assertRoundTrip(name: String, expected: T) {
     val element = fixture.getValue(name)
     assertEquals(expected, json.decodeFromJsonElement<T>(element))
-    assertEquals(element, json.encodeToJsonElement(expected))
+    assertEquals(canonical(element), canonical(json.encodeToJsonElement(expected)))
   }
 
   @Test

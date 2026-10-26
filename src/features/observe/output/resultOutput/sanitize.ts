@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
+import { importedPrototypeContent } from "../../importedPrototypeContent";
 import { parseObserveResultJson } from "../observeResultWire";
 import type { Element } from "../../../../models/Element";
 import type { ObserveResult, SkeletonElement } from "../../../../models/ObserveResult";
@@ -158,6 +159,7 @@ export function sanitizeObserveResult(
   // (ViewHierarchy.ts) and the wire's own JSON semantics (undefined/functions
   // dropped), so it can never throw on a value structuredClone would reject.
   const out = clone(obs);
+  markImportedPrototypeContent(out, obs);
   sanitizeHierarchyMetadata(out);
 
   stripPerformanceAudit(out);
@@ -205,6 +207,16 @@ export function sanitizeObserveResult(
   }
 
   return out;
+}
+
+/** Keep absent trust metadata absent: structured-content validators reject own undefined fields. */
+function markImportedPrototypeContent(out: ObserveResult, source: ObserveResult): void {
+  const imported = importedPrototypeContent(source);
+  if (imported) {
+    out.importedPrototypeContent = { ...imported };
+  } else {
+    delete out.importedPrototypeContent;
+  }
 }
 
 /** Derive the skeleton from an already-sanitized full tree without cloning it. */

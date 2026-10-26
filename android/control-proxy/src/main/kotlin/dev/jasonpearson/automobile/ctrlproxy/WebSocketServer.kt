@@ -271,6 +271,29 @@ class WebSocketServer(
     // The handler dispatches exhaustively over this sealed hierarchy, so its serializer is the
     // source of truth for every request type accepted by the wire decoder.
     addAll(registeredRequestTypes)
+    addInputAndGestureFlags()
+    addPrototypeSpecFlags()
+    addPrototypeRuntimeFlags()
+    addPrototypeWindowFlags()
+    add("prototype_menus_v1")
+    // request_action honours the semantic actions (expand, collapse, dismiss, select, scroll and
+    // page directions, press_and_hold, set_progress with progress, custom with customAction) and
+    // lists the node's available actions in a refusal (#14077). Older APKs refuse them as
+    // unsupported, so hosts require this flag before sending one.
+    add("semantic_node_actions_v1")
+    // request_global_action accepts the system actions beyond back/home/recent/notifications
+    // (power_dialog, quick_settings, split_screen, lock_screen, screenshot,
+    // dismiss_notification_shade). Each flag is advertised only when the device API level can
+    // perform it (#14095), so a host needs one check to cover both the APK and the API level.
+    addAll(SystemGlobalActions.advertisedFlags(options.sdkInt()))
+    add("full_command_set_v1")
+    // Every response to a request carrying requestId echoes it, including hierarchy_update for
+    // request_hierarchy. Unsolicited pushes remain id-less; older hosts ignore unknown flags.
+    add("request_id_echo_v1")
+  }
+
+  /** IME, gesture and display-routing flags. */
+  private fun MutableList<String>.addInputAndGestureFlags() {
     add("node_selector_actions")
     add("ime_key_events_v1")
     add("ime_clear_field_v1")
@@ -299,6 +322,10 @@ class WebSocketServer(
       add("prototype_display_id_v1")
       add("prototype_display_id_v2")
     }
+  }
+
+  /** Prototype spec feature flags: layout, data, text, motion and charts. */
+  private fun MutableList<String>.addPrototypeSpecFlags() {
     // ORCHESTRATOR-CHOSEN: to be folded into the PROTOTYPE_SPEC_CAPABILITY_GATES registry.
     // show_prototype honours replaceOthers=false and addresses up to four independent surfaces.
     add("prototype_multi_surface_v1")
@@ -351,12 +378,17 @@ class WebSocketServer(
     add("prototype_motion_v2")
     // Transition delayMs, container stagger and the blurReplace transition (#15247).
     add("prototype_choreography_v1")
+    add("prototype_stack_transitions_v1")
     // Line, area, bar and ring charts over /data arrays (#14209).
     add("prototype_chart_v1")
     // Text nodes linkify mentions, hashtags and URLs into links running linkify.onTap (#14233).
     add("prototype_linkify_v1")
     // Chat-list scrolls: reverse, stickToEnd, atEndKey, onStartReached and scrollTo (#14232).
     add("prototype_chat_scroll_v1")
+  }
+
+  /** Prototype runtime flags: checks, appearance, persistence, storage and timers. */
+  private fun MutableList<String>.addPrototypeRuntimeFlags() {
     // ORCHESTRATOR-CHOSEN gate; fold into PROTOTYPE_SPEC_CAPABILITY_GATES when it lands.
     add("prototype_emit_context_v1")
     // Prototype checks expose validity and guard actions; older APKs ignore these spec fields.
@@ -377,6 +409,10 @@ class WebSocketServer(
     // clear_prototype_storage wipes them (#12522). Hosts refuse storage without this flag.
     add("prototype_storage_v1")
     add("prototype_timers_v1")
+  }
+
+  /** Prototype window, patch, anchor and screenshot flags. */
+  private fun MutableList<String>.addPrototypeWindowFlags() {
     // show_prototype replaces a same-id prototype in place (display and pager pages kept) unless
     // reset
     // is set. Older APKs ignore reset and re-show fresh; hosts warn that pages restarted (#10642).
@@ -399,21 +435,6 @@ class WebSocketServer(
     // ignore the field, so hosts keep reporting that an app-layer screenshot includes the
     // prototype.
     add("screenshot_hide_prototype_v1")
-    add("prototype_menus_v1")
-    // request_action honours the semantic actions (expand, collapse, dismiss, select, scroll and
-    // page directions, press_and_hold, set_progress with progress, custom with customAction) and
-    // lists the node's available actions in a refusal (#14077). Older APKs refuse them as
-    // unsupported, so hosts require this flag before sending one.
-    add("semantic_node_actions_v1")
-    // request_global_action accepts the system actions beyond back/home/recent/notifications
-    // (power_dialog, quick_settings, split_screen, lock_screen, screenshot,
-    // dismiss_notification_shade). Each flag is advertised only when the device API level can
-    // perform it (#14095), so a host needs one check to cover both the APK and the API level.
-    addAll(SystemGlobalActions.advertisedFlags(options.sdkInt()))
-    add("full_command_set_v1")
-    // Every response to a request carrying requestId echoes it, including hierarchy_update for
-    // request_hierarchy. Unsolicited pushes remain id-less; older hosts ignore unknown flags.
-    add("request_id_echo_v1")
   }
 
   @Volatile private var server: EmbeddedServer<*, *>? = null

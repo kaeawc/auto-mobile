@@ -67,7 +67,9 @@ class SavedPrototypeActivity : ComponentActivity() {
       this,
       object : OnBackPressedCallback(true) {
         override fun handleOnBackPressed() {
-          scope.launch { interactions.withLock { dismiss() } }
+          scope.launch {
+            interactions.withLock { if (runtime?.popTopmostStack() != true) dismiss() }
+          }
         }
       },
     )

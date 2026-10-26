@@ -2405,12 +2405,14 @@ in `PrototypeEffectShaders`.
   to the node's bounds. `gradientMesh` paints between the background and the content. `shimmer`,
   `glow`, `vignette` and `noise` paint over the content, clipped to the node's shape, undistorted.
   Effects sit inside the node, so the host dismiss controls and the node's observe bounds are untouched.
+  A node with a distortion clips anything that overflows its bounds, as the effect itself must not.
 - **API floors and fallback.** Brush-based looks (`shimmer`, `glow`, `vignette`) draw on any API,
   `blur` needs 31, the AGSL ones 33. Below its floor an effect is omitted and the node renders
   unshaded. The device reports every omitted effect as `degradedEffects: [{path, type, reason:
   "api"}]` on the show result and on `inspect_prototypes` (omitted when empty; older hosts see the
-  same frame). `path` is the node's structural path (`root.children[1].style.effects[0]`; a
-  `styleWhen` style adds `styleWhen[j]`).
+  same frame). `path` is the node's render identity (the `root.child...` key the renderer and
+  `observe` use) plus the authored effect index, `<identity>.style.effects[<i>]`, and follows the
+  `styleWhen` style in force when the reply is built. `reason: "budget"` entries use the same form.
 - **Settled by the renderer (conservative choices).**
   - `phase` and `animate` move only `shimmer`, `wave` and `ripple`; `noise`, `gradientMesh`,
     `glow`, `vignette`, `blur`, `pixelate` and `chromaticAberration` are static looks and ignore
@@ -2428,7 +2430,9 @@ in `PrototypeEffectShaders`.
   direct `PrototypeSpecContent` callers (previews and screenshots), so those keep the authored
   `phase`. `noise` is seeded from `seed` alone.
 - **Frame budget.** If a node's frame interval stays above 32 ms for 30 frames in a row the node
-  freezes its phase and `inspect_prototypes` lists its animated effects with reason `budget`.
+  freezes its phase and `inspect_prototypes` lists its animated effects with reason `budget`. The
+  guard times the window's frames, not the effect's own cost, so a slow GPU (the `-gpu swiftshader`
+  CI emulators) freezes animated effects; the entry clears when a patch or show replaces the node.
   Decision on the open question: no new `prototype_event` kind (that closed list is a contract change
   shared with the TS host and iOS), so a frozen effect is visible on the next `inspect`, not pushed.
   ProtoViewer shows no note when it degrades an effect; that stays an open follow-up.

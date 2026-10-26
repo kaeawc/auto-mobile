@@ -384,7 +384,10 @@ class PrototypeController(
           pages = shown.runtime.current.pages,
           stacks = shown.runtime.current.stacks,
           degradedEffects =
-            prototypeEffectReport(shown.runtime.current.spec.root, shown.runtime.effectHealth),
+            prototypeEffectReport(
+              shown.runtime.renderModel(shown.runtime.current).root,
+              shown.runtime.effectHealth,
+            ),
         )
     }
 
@@ -1038,7 +1041,8 @@ class PrototypeController(
       appearance = surface.theme.value.appearance,
       storage = runtime.storage?.report(),
       timers = runtime.timerReports(),
-      degradedEffects = prototypeEffectReport(runtime.current.spec.root, runtime.effectHealth),
+      degradedEffects =
+        prototypeEffectReport(runtime.renderModel(runtime.current).root, runtime.effectHealth),
     )
   }
 

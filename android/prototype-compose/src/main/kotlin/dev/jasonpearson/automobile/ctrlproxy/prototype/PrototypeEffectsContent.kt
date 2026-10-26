@@ -2,9 +2,11 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.os.Build
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
@@ -49,18 +51,25 @@ internal fun rememberPrototypeEffectElapsed(
   val motion = LocalPrototypeMotion.current
   val running = plan.animated && motion
   if (running) {
-    ReportPrototypeMotion(loop = true) { true }
+    // A node whose effects blew the frame budget stops reporting a running loop.
+    val frozen = remember(plan, identity) { mutableStateOf(false) }
+    ReportPrototypeMotion(loop = true) { !frozen.value }
     val health = LocalPrototypeEffectHealth.current
     val view = LocalView.current
+    val paths =
+      plan.indexed
+        .filter { it.value.animated }
+        .map { prototypeEffectPath(identity, it.index) to it.value.type }
+    DisposableEffect(plan, identity) { onDispose { paths.forEach { health?.clear(it.first) } } }
     LaunchedEffect(plan, identity) {
       val budget = PrototypeEffectBudget {
-        plan.drawn.forEachIndexed { index, effect ->
-          if (effect.animated) health?.markBudget("$identity.style.effects[$index]", effect.type)
-        }
+        frozen.value = true
+        paths.forEach { (path, type) -> health?.markBudget(path, type) }
       }
       PrototypeEffectClock(ComposeFrameSource, budget).run(
         motionEnabled = { true },
         visible = { view.isShown },
+        startNanos = elapsed.longValue,
       ) {
         elapsed.longValue = it
       }

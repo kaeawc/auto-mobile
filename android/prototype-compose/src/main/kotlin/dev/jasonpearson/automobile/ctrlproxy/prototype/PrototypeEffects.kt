@@ -4,8 +4,6 @@ import android.os.Build
 import androidx.compose.ui.graphics.Color
 import dev.jasonpearson.automobile.protocol.PrototypeDegradedEffect
 import dev.jasonpearson.automobile.protocol.PrototypeModeValue
-import dev.jasonpearson.automobile.protocol.PrototypeNode
-import dev.jasonpearson.automobile.protocol.PrototypeStyle
 import kotlinx.serialization.json.JsonObject
 
 /**
@@ -159,12 +157,15 @@ internal val PrototypeEffect.minSdk: Int
       is PrototypeEffect.Ripple -> Build.VERSION_CODES.TIRAMISU
     }
 
-/** What a node draws on a device at [sdk]: the effects in order, and the ones it had to omit. */
+/**
+ * What a node draws on a device at [sdk]: the effects in order, and the ones it had to omit. Both
+ * lists keep each effect's index in the authored `style.effects` list, which reports use.
+ */
 internal class PrototypeEffectPlan(
-  val drawn: List<PrototypeEffect>,
-  /** Indexes into the authored list of the effects omitted below their API floor. */
+  val indexed: List<IndexedValue<PrototypeEffect>>,
   val omitted: List<IndexedValue<PrototypeEffect>>,
 ) {
+  val drawn: List<PrototypeEffect> = indexed.map { it.value }
   val distortions: List<PrototypeEffect> = drawn.filter { it.distorts }
   val animated: Boolean = drawn.any { it.animated }
   val isEmpty: Boolean = drawn.isEmpty()
@@ -176,9 +177,13 @@ internal class PrototypeEffectPlan(
 
 internal fun prototypeEffectPlan(effects: List<JsonObject>?, sdk: Int): PrototypeEffectPlan {
   if (effects.isNullOrEmpty()) return PrototypeEffectPlan.EMPTY
-  val parsed = effects.mapNotNull(::prototypeParseEffect).withIndex()
+  // An unknown shape is skipped, but the authored index of the rest is kept.
+  val parsed =
+    effects.withIndex().mapNotNull { (index, raw) ->
+      prototypeParseEffect(raw)?.let { IndexedValue(index, it) }
+    }
   val (drawn, omitted) = parsed.partition { sdk >= it.value.minSdk }
-  return PrototypeEffectPlan(drawn.map { it.value }, omitted)
+  return PrototypeEffectPlan(drawn, omitted)
 }
 
 /** The effect colours resolve like `style.color` against the shown palette. */
@@ -187,46 +192,37 @@ internal fun prototypeEffectColor(
   spec: PrototypeModeValue?,
 ): Color? = spec?.let { prototypeResolveColor(palette, null, it) }
 
-/**
- * Where an omitted effect sits: `<node>.style.effects[i]` or
- * `<node>.styleWhen[j].style.effects[i]`.
- */
-private fun degradedFor(
-  stylePath: String,
-  style: PrototypeStyle?,
-  sdk: Int,
-): List<PrototypeDegradedEffect> =
-  prototypeEffectPlan(style?.effects, sdk).omitted.map {
-    PrototypeDegradedEffect(
-      path = "$stylePath.effects[${it.index}]",
-      type = it.value.type,
-      reason = PROTOTYPE_DEGRADED_API,
-    )
-  }
-
 internal const val PROTOTYPE_DEGRADED_API = "api"
 internal const val PROTOTYPE_DEGRADED_BUDGET = "budget"
 
+/** `<node identity>.style.effects[<authored index>]`: one path form for every `reason`. */
+internal fun prototypeEffectPath(identity: String, authoredIndex: Int): String =
+  "$identity.style.effects[$authoredIndex]"
+
 /**
- * Every effect in the spec this device cannot draw at [sdk], so a host can tell the author a look
- * is missing. The path is the node's structural path (`root`, `root.children[1]`, ...), with a
- * `styleWhen` style named by its index; entries are in tree order.
+ * Every effect on a visible node of the current render tree that this device cannot draw at [sdk],
+ * so a host can tell the author a look is missing. A path is the node's render identity (the
+ * `root.child...` key the renderer uses) plus the authored effect index; it follows whichever
+ * `styleWhen` style is in force now. Entries are in tree order.
  */
 internal fun prototypeDegradedEffects(
-  root: PrototypeNode,
+  root: PrototypeRenderNode,
   sdk: Int,
 ): List<PrototypeDegradedEffect> {
   val found = mutableListOf<PrototypeDegradedEffect>()
-  fun visit(node: PrototypeNode, path: String) {
-    found += degradedFor("$path.style", node.style, sdk)
-    node.styleWhen.orEmpty().forEachIndexed { index, entry ->
-      found += degradedFor("$path.styleWhen[$index].style", entry.style, sdk)
+  fun visit(node: PrototypeRenderNode) {
+    if (!node.visible) return
+    prototypeEffectPlan(node.style.source.effects, sdk).omitted.forEach {
+      found +=
+        PrototypeDegradedEffect(
+          prototypeEffectPath(node.identity, it.index),
+          it.value.type,
+          PROTOTYPE_DEGRADED_API,
+        )
     }
-    prototypeDescendants(node).forEachIndexed { index, child ->
-      visit(child, "$path.children[$index]")
-    }
+    node.children.forEach(::visit)
   }
-  visit(root, "root")
+  visit(root)
   return found
 }
 
@@ -236,7 +232,7 @@ internal fun prototypeDegradedEffects(
  */
 @InternalAutoMobilePrototypeApi
 fun prototypeEffectReport(
-  root: PrototypeNode,
+  root: PrototypeRenderNode,
   health: PrototypeEffectHealth,
 ): List<PrototypeDegradedEffect> =
   prototypeDegradedEffects(root, Build.VERSION.SDK_INT) + health.snapshot()

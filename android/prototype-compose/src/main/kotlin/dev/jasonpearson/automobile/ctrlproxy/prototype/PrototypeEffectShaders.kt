@@ -101,7 +101,8 @@ half4 main(float2 p) {
   uv = mix(uv, smoothstep(0.0, 1.0, uv), softness);
   half4 top = mix(topStart, topEnd, half(uv.x));
   half4 bottom = mix(bottomStart, bottomEnd, half(uv.x));
-  return mix(top, bottom, half(uv.y));
+  half4 c = mix(top, bottom, half(uv.y));
+  return half4(c.rgb * c.a, c.a);
 }
 """
 }

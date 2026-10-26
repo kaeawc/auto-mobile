@@ -100,30 +100,41 @@ class PrototypeEffectsTest {
   }
 
   @Test
-  fun `an API 30 device reports each omitted effect at its path with reason api`() {
-    val report = prototypeDegradedEffects(allTypes.root, 30)
+  fun `an API 30 device reports each omitted effect at its node and authored index`() {
+    val root = mapPrototypeSpec(allTypes).root
+    val ids = root.children.map { it.identity }
+    val report = prototypeDegradedEffects(root, 30)
     assertEquals(
       listOf(
-        "root.children[0].style.effects[0]" to "noise",
-        "root.children[0].style.effects[1]" to "gradientMesh",
-        "root.children[2].style.effects[0]" to "blur",
-        "root.children[2].style.effects[1]" to "pixelate",
-        "root.children[2].style.effects[2]" to "chromaticAberration",
-        "root.children[3].style.effects[0]" to "wave",
-        "root.children[3].style.effects[1]" to "ripple",
+        prototypeEffectPath(ids[0], 0) to "noise",
+        prototypeEffectPath(ids[0], 1) to "gradientMesh",
+        prototypeEffectPath(ids[2], 0) to "blur",
+        prototypeEffectPath(ids[2], 1) to "pixelate",
+        prototypeEffectPath(ids[2], 2) to "chromaticAberration",
+        prototypeEffectPath(ids[3], 0) to "wave",
+        prototypeEffectPath(ids[3], 1) to "ripple",
       ),
       report.map { it.path to it.type },
     )
     assertTrue(report.all { it.reason == "api" })
-    assertTrue(prototypeDegradedEffects(allTypes.root, 33).isEmpty())
+    assertTrue(prototypeDegradedEffects(root, 33).isEmpty())
   }
 
   @Test
-  fun `styleWhen effects are reported by their own path`() {
+  fun `the authored index survives an omitted earlier effect`() {
+    // On API 31 the noise (index 0) is omitted, so the shimmer after it is drawn as index 1.
+    val raw = effects.filter { it["type"].toString() in setOf("\"noise\"", "\"shimmer\"") }
+    val plan = prototypeEffectPlan(raw, 31)
+    assertEquals(listOf(1), plan.indexed.map { it.index })
+    assertEquals(listOf(0), plan.omitted.map { it.index })
+  }
+
+  @Test
+  fun `the report follows the styleWhen style in force`() {
     val spec = fixture("z-effects-style-when.json")
-    val report = prototypeDegradedEffects(spec.root, 30)
+    val report = prototypeDegradedEffects(mapPrototypeSpec(spec).root, 30)
     assertTrue(report.isNotEmpty())
-    assertTrue(report.any { ".styleWhen[" in it.path })
+    assertTrue(report.all { it.path.contains(".style.effects[") })
   }
 
   @Test
@@ -246,13 +257,30 @@ class PrototypeEffectsTest {
   }
 
   @Test
-  fun `the health report lists a frozen effect once at its path with reason budget`() {
+  fun `the health report lists a frozen effect once and drops it when cleared`() {
     val health = PrototypeEffectHealth()
-    health.markBudget("root.children[1].style.effects[0]", "wave")
-    health.markBudget("root.children[1].style.effects[0]", "wave")
+    health.markBudget("root.child.style.effects[0]", "wave")
+    health.markBudget("root.child.style.effects[0]", "wave")
     assertEquals(
-      listOf("root.children[1].style.effects[0]" to "budget"),
+      listOf("root.child.style.effects[0]" to "budget"),
       health.snapshot().map { it.path to it.reason },
     )
+    health.clear("root.child.style.effects[0]")
+    assertTrue(health.snapshot().isEmpty())
+  }
+
+  @Test
+  fun `a resumed clock continues from where it stopped`() {
+    var elapsed = 0L
+    runBlocking {
+      PrototypeEffectClock(FakeFrames(frames(3, 16)), PrototypeEffectBudget(onDegraded = {})).run(
+        { true },
+        { true },
+        startNanos = 500_000_000L,
+      ) {
+        elapsed = it
+      }
+    }
+    assertEquals(532_000_000L, elapsed)
   }
 }

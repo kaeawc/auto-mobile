@@ -64,9 +64,14 @@ internal class PrototypeEffectClock(
   private val frames: PrototypeFrameSource,
   private val budget: PrototypeEffectBudget,
 ) {
-  suspend fun run(motionEnabled: () -> Boolean, visible: () -> Boolean, publish: (Long) -> Unit) {
+  suspend fun run(
+    motionEnabled: () -> Boolean,
+    visible: () -> Boolean,
+    startNanos: Long = 0L,
+    publish: (Long) -> Unit,
+  ) {
     var last: Long? = null
-    var elapsed = 0L
+    var elapsed = startNanos
     while (!budget.degraded) {
       val now = frames.nextFrameNanos() ?: return
       val delta = last?.let { now - it } ?: 0L
@@ -107,5 +112,7 @@ class PrototypeEffectHealth {
 
   fun snapshot(): List<PrototypeDegradedEffect> = frozen.values.sortedBy { it.path }
 
-  fun clear() = frozen.clear()
+  internal fun clear(path: String) {
+    frozen.remove(path)
+  }
 }

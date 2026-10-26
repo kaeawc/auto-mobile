@@ -103,6 +103,7 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     // Info.plists to pin the profile payloads to the shipped app.
     "ios/network-filter/Packaging/**",
     // Prototype icon tests read the Swift capability declaration, generated symbol data and doc.
+    "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/AutoMobilePrototypeCapabilities.swift",
     "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeAgentProtocol.swift",
     "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeIconSymbolData.swift",
     "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeSpecContractData.swift",

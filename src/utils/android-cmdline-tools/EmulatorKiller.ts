@@ -415,7 +415,7 @@ export class DefaultEmulatorKiller implements EmulatorKiller {
           signal: options.signal,
         })
       : ({ kind: "read", candidates: [] } satisfies EmulatorSerialDescription);
-    if (described.kind === "unreadable") {
+    if (described.kind !== "read") {
       // Fail closed: an unreadable table (ps failure, deadline, unsupported platform) cannot
       // prove absence, and this wording must not match the already-stopped classifier.
       throw new ActionableError(

@@ -787,7 +787,8 @@ enum PrototypeTestHooks {
     /// Capabilities to advertise in `hello_result`: the test hooks are listed only when enabled,
     /// because the host client refuses to send a request type the agent does not advertise.
     static func capabilities(enabled: Bool) -> [String] {
-        enabled ? PrototypeAgentProtocol.capabilities + gatedRequestTypes.sorted() : PrototypeAgentProtocol.capabilities
+        let advertised = PrototypeAgentProtocol.advertisedCapabilities()
+        return enabled ? advertised + gatedRequestTypes.sorted() : advertised
     }
 
     /// The error to reply with when `requestType` is a test hook and hooks are off; nil otherwise.

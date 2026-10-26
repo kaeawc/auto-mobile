@@ -35,7 +35,11 @@ class PrototypeRetentionTest {
       identity,
       children = List(size - 1) { node("$identity.$it", role = "text") },
       source =
-        PrototypeBoxNode(visibleWhen = condition, transition = "none", children = emptyList()),
+        PrototypeBoxNode(
+          visibleWhen = condition,
+          transition = PrototypeTransition("none"),
+          children = emptyList(),
+        ),
     )
 
   private fun retained(child: PrototypeRenderNode, parent: PrototypeRenderNode = node("root")) =
@@ -143,7 +147,10 @@ class PrototypeRetentionTest {
       assertEquals(
         setOf("child"),
         retained(
-          child.copy(source = (child.source as PrototypeBoxNode).copy(transition = "fade")),
+          child.copy(
+            source =
+              (child.source as PrototypeBoxNode).copy(transition = PrototypeTransition("fade")),
+          ),
           node("parent", role),
         ),
       )
@@ -165,7 +172,12 @@ class PrototypeRetentionTest {
     listOf(null, "expand", "slide").forEach { transition ->
       assertTrue(
         retained(
-            child.copy(source = (child.source as PrototypeBoxNode).copy(transition = transition)),
+            child.copy(
+              source =
+                (child.source as PrototypeBoxNode).copy(
+                  transition = transition?.let(::PrototypeTransition),
+                ),
+            ),
           )
           .isEmpty(),
       )

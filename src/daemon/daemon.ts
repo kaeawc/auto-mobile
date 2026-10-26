@@ -280,6 +280,7 @@ export class Daemon {
       bindingExclusionFactory: retained.bindingExclusionFactory,
       foreignCtrlProxyForwardEvidence: retained.foreignCtrlProxyForwardEvidence,
       stopManagedAdbServer: managedAdbServerShutdown,
+      hostIoStalled: retained.hostIoStalled,
     };
     installDefaultProvisionedDeviceTransportFence();
     // Startup can fail before the socket server exists or any request awaits it.
@@ -538,6 +539,25 @@ export class Daemon {
         this.devicePool = pool;
       },
       recordAndTryRecoverCapturedDisconnect: this.recordAndTryRecoverCapturedDisconnect.bind(this),
+      deviceLoss: this.deviceLoss,
+      stoppingRecordings: this.stoppingRecordings,
+      stopRecordingAfterDeviceDisconnect: this.stopRecordingAfterDeviceDisconnect.bind(this),
+      runtime: this.runtime,
+      startDeviceDisconnectMonitor: this.startDeviceDisconnectMonitor.bind(this),
+      createPlanDeviceLossCheck: this.createPlanDeviceLossCheck.bind(this),
+      /** Replaces the staleness and retirement checks the captured-disconnect recovery consults. */
+      overrideCapturedDisconnectChecks: (checks: {
+        shouldSkipStaleDisconnectCleanup: DaemonDisconnect["shouldSkipStaleDisconnectCleanup"];
+        isCapturedDisconnectTargetCurrent: DaemonDisconnect["isCapturedDisconnectTargetCurrent"];
+        retireAdbServerResetDisconnectState: DaemonDisconnect["retireAdbServerResetDisconnectState"];
+      }): void => {
+        Object.assign(this, checks);
+      },
+      overrideCleanupDisconnectedDevice: (
+        cleanup: DaemonDisconnect["cleanupDisconnectedDevice"],
+      ) => {
+        this.cleanupDisconnectedDevice = cleanup;
+      },
       deferredSessionRecoverySweeps: this.runtime.deferredSessionRecoverySweeps,
       replaceObserverSessionRegistry: (registry: ObserverSessionRegistry): void => {
         this.observerSessionRegistry = registry;
@@ -584,8 +604,12 @@ export class Daemon {
       },
     } as const;
   }
-  stop(...args: Parameters<DaemonShutdown["stop"]>) {
-    return this.shutdown.stop(...args);
+  async stop(...args: Parameters<DaemonShutdown["stop"]>) {
+    try {
+      return await this.shutdown.stop(...args);
+    } finally {
+      this.daemonState.retireForeignAndroidSerialSource(this.devicePool);
+    }
   }
 
   /**
@@ -776,6 +800,7 @@ export class Daemon {
       lastDatabaseHealthFailure: () => this.runtime.lastDatabaseHealthFailure,
       setLastDatabaseHealthFailure: (value) => (this.runtime.lastDatabaseHealthFailure = value),
       recoverFromDatabaseHealthFailure: () => this.database.recoverFromDatabaseHealthFailure,
+      hostIoStalled: () => this.injected.hostIoStalled,
       attemptRecovery: (...args) => this.attemptRecovery(...args),
       sessionExecutionProbe: (...args) => this.sessions.sessionExecutionProbe(...args),
       cancelAndReleaseSession: (...args) => this.cancelAndReleaseSession(...args),

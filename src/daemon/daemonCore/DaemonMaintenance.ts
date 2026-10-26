@@ -88,6 +88,7 @@ export interface DaemonMaintenanceHost {
   lastDatabaseHealthFailure: () => string | undefined;
   setLastDatabaseHealthFailure: (value: string | undefined) => void;
   recoverFromDatabaseHealthFailure: () => DatabaseHealthFailureRecovery;
+  hostIoStalled?: () => (() => boolean) | undefined;
   attemptRecovery: DaemonMaintenance["attemptRecovery"];
   sessionExecutionProbe: DaemonSessions["sessionExecutionProbe"];
   cancelAndReleaseSession: DaemonSessions["cancelAndReleaseSession"];
@@ -118,7 +119,8 @@ export class DaemonMaintenance {
           this.host.setLastDatabaseHealthFailure(message);
         },
         recover: (kind) => this.host.attemptRecovery(kind),
-        hostIoStalled: () => logSinkStalledWithin(HOST_IO_STALL_MEMORY_MS),
+        hostIoStalled:
+          this.host.hostIoStalled?.() ?? (() => logSinkStalledWithin(HOST_IO_STALL_MEMORY_MS)),
       }),
     );
     this.host.healthCheck()!.start();

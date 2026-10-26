@@ -34,6 +34,8 @@ export interface AvdConfig {
   ramSizeInvalid?: boolean;
   /** Whether the AVD's GPU is explicitly enabled in config.ini. */
   gpuEnabled?: boolean;
+  /** Raw `hw.gpu.mode` from config.ini; unset means the emulator picks (`auto`). */
+  gpuMode?: string;
   deviceName?: string;
   tag?: string;
   /** Stable hardware features derived from the AVD's local profile settings. */
@@ -345,6 +347,7 @@ export function parseAvdConfig(content: string): AvdConfig {
     hardware: hardware as AndroidAvdConfiguration,
     systemImagePath: props.get("image.sysdir.1"),
     gpuEnabled: parseYesNo(props.get("hw.gpu.enabled")),
+    gpuMode: props.get("hw.gpu.mode"),
     ...parseScreenDimensions(props),
     ...parseRamSize(props),
     ...parseDeviceMetadata(props),

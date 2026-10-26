@@ -2267,6 +2267,7 @@ describe("boot readiness provisioning classification", () => {
       shutdownSimulatorCoordinated: async () => {},
       executeCommandArgs: async () => createExecResult("", ""),
       readSimulatorTarget: async () => undefined,
+      invalidateDeviceListCache: () => {},
     });
   }
 

@@ -1,3 +1,4 @@
+import { disabledDeviceResourceReport } from "../../utils/iosDeviceResourceImpact";
 import { mergeProvenResourceStates } from "../../utils/deviceResourceStates";
 import { observeConfiguredDeviceResources } from "../deviceResourceTools";
 import { computeDeviceResourceDrift } from "../../utils/deviceResourceDrift";
@@ -245,6 +246,14 @@ export function buildProvisionDeviceResult(
   });
   return {
     ...postBootResults(booted),
+    ...disabledDeviceResourceReport(
+      Object.fromEntries(
+        (createdByRequest && provisioned.device.platform === "ios"
+          ? (provisioned.prebootDisabledResources ?? [])
+          : []
+        ).map((key) => [key, { state: "disabled" }]),
+      ),
+    ),
     device: projectProvisionedDevice(description),
     requestedSpec: args.device.spec,
     resolvedSpec: provisioned.resolvedSpec,

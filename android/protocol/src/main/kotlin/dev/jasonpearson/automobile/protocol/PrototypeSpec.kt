@@ -17,14 +17,6 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
 @Serializable
-data class PrototypeBounds(
-  val x: Double,
-  val y: Double,
-  val width: Double,
-  val height: Double,
-)
-
-@Serializable
 data class PrototypeContainer(
   val elementId: String? = null,
   val text: String? = null,
@@ -57,18 +49,6 @@ data class PrototypeCondition(
   val valid: PrototypeValidityKeys? = null,
   /** With [data]: holds when that value is missing, `[]`, `{}` or `""` (#14207). */
   val empty: Boolean? = null,
-)
-
-@Serializable
-data class PrototypeSheetCondition(
-  val key: String,
-  val equals: Boolean,
-)
-
-@Serializable
-data class PrototypeSafeAreaPadding(
-  val edges: List<String>,
-  val types: List<String>,
 )
 
 @Serializable
@@ -412,10 +392,11 @@ sealed class PrototypeNode {
   abstract val styleWhen: List<PrototypeStyleWhen>?
   abstract val visibleWhen: PrototypeCondition?
   /**
-   * `none`, `fade`, `expand`, `slide`, or (#14208) `slideStart`, `slideEnd` or `scale`: the
-   * `visibleWhen` enter/exit; absent is fade + expand. Start and end follow the layout direction.
+   * `none`, `fade`, `expand`, `slide`, or (#14208) `slideStart`, `slideEnd` or `scale`, or (#15247)
+   * `blurReplace`: the `visibleWhen` enter/exit; absent is fade + expand. Start and end follow the
+   * layout direction. Written as the type alone or `{type, delayMs?}`.
    */
-  abstract val transition: String?
+  abstract val transition: PrototypeTransition?
   /** Animates styleWhen-driven alpha, offset, scale, rotation, background and color (#14208). */
   abstract val animate: PrototypeAnimate?
   abstract val anchor: PrototypeAnchor?
@@ -435,13 +416,15 @@ data class PrototypeBoxNode(
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
-  override val transition: String? = null,
+  override val transition: PrototypeTransition? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
   val children: List<PrototypeNode>,
   val repeat: PrototypeRepeat? = null,
+  /** Spaces the enters of `visibleWhen` children apart (#15247). */
+  val stagger: PrototypeStagger? = null,
 ) : PrototypeNode()
 
 @SerialName("row")
@@ -456,13 +439,15 @@ data class PrototypeRowNode(
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
-  override val transition: String? = null,
+  override val transition: PrototypeTransition? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
   val children: List<PrototypeNode>,
   val repeat: PrototypeRepeat? = null,
+  /** Spaces the enters of `visibleWhen` children apart (#15247). */
+  val stagger: PrototypeStagger? = null,
   val swipeActions: PrototypeSwipeActions? = null,
 ) : PrototypeNode()
 
@@ -478,13 +463,15 @@ data class PrototypeColumnNode(
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
-  override val transition: String? = null,
+  override val transition: PrototypeTransition? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
   val children: List<PrototypeNode>,
   val repeat: PrototypeRepeat? = null,
+  /** Spaces the enters of `visibleWhen` children apart (#15247). */
+  val stagger: PrototypeStagger? = null,
 ) : PrototypeNode()
 
 /**
@@ -520,7 +507,7 @@ data class PrototypeFlowNode(
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
-  override val transition: String? = null,
+  override val transition: PrototypeTransition? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
@@ -575,7 +562,7 @@ data class PrototypeGridNode(
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
-  override val transition: String? = null,
+  override val transition: PrototypeTransition? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
@@ -597,7 +584,7 @@ data class PrototypeTextNode(
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
-  override val transition: String? = null,
+  override val transition: PrototypeTransition? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
@@ -657,7 +644,7 @@ data class PrototypeImageNode(
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
-  override val transition: String? = null,
+  override val transition: PrototypeTransition? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
@@ -668,12 +655,6 @@ data class PrototypeImageNode(
   /** Pinch, double-tap and pan zoom up to `maxScale` (#14208). */
   val zoomable: PrototypeZoomable? = null,
 ) : PrototypeNode()
-
-/** A node's style animation (#14208): [durationMs] 0..2000 (default 300) and [easing]. */
-@Serializable data class PrototypeAnimate(val durationMs: Int? = null, val easing: String? = null)
-
-/** An image's zoom range: 1 up to [maxScale] (1..8). */
-@Serializable data class PrototypeZoomable(val maxScale: Double)
 
 @SerialName("icon")
 @Serializable
@@ -687,7 +668,7 @@ data class PrototypeIconNode(
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
-  override val transition: String? = null,
+  override val transition: PrototypeTransition? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
@@ -707,7 +688,7 @@ data class PrototypeSpacerNode(
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
-  override val transition: String? = null,
+  override val transition: PrototypeTransition? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
@@ -724,7 +705,7 @@ data class PrototypeTextFieldNode(
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
-  override val transition: String? = null,
+  override val transition: PrototypeTransition? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
@@ -759,7 +740,7 @@ data class PrototypeSearchBarNode(
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
-  override val transition: String? = null,
+  override val transition: PrototypeTransition? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -784,7 +765,7 @@ data class PrototypeSwitchNode(
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
-  override val transition: String? = null,
+  override val transition: PrototypeTransition? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
@@ -806,7 +787,7 @@ data class PrototypeCheckboxNode(
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
-  override val transition: String? = null,
+  override val transition: PrototypeTransition? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
@@ -828,7 +809,7 @@ data class PrototypeButtonNode(
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
-  override val transition: String? = null,
+  override val transition: PrototypeTransition? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
@@ -838,8 +819,6 @@ data class PrototypeButtonNode(
   val icon: String? = null,
   val enabledWhen: PrototypeCondition? = null,
 ) : PrototypeNode()
-
-@Serializable data class PrototypeRadioOption(val value: String, val label: String)
 
 @SerialName("radioGroup")
 @Serializable
@@ -851,7 +830,7 @@ data class PrototypeRadioGroupNode(
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
-  override val transition: String? = null,
+  override val transition: PrototypeTransition? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
@@ -873,7 +852,7 @@ data class PrototypeSelectNode(
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
-  override val transition: String? = null,
+  override val transition: PrototypeTransition? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -924,7 +903,7 @@ data class PrototypeMenuNode(
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
-  override val transition: String? = null,
+  override val transition: PrototypeTransition? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -958,7 +937,7 @@ data class PrototypeListItemNode(
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
-  override val transition: String? = null,
+  override val transition: PrototypeTransition? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
@@ -981,7 +960,7 @@ data class PrototypeSliderNode(
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
-  override val transition: String? = null,
+  override val transition: PrototypeTransition? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
@@ -1006,7 +985,7 @@ data class PrototypeChipNode(
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
-  override val transition: String? = null,
+  override val transition: PrototypeTransition? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
@@ -1029,7 +1008,7 @@ data class PrototypeCardNode(
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
-  override val transition: String? = null,
+  override val transition: PrototypeTransition? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
@@ -1061,7 +1040,7 @@ data class PrototypeIconButtonNode(
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
-  override val transition: String? = null,
+  override val transition: PrototypeTransition? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
@@ -1082,7 +1061,7 @@ data class PrototypeFabNode(
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
-  override val transition: String? = null,
+  override val transition: PrototypeTransition? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
@@ -1104,7 +1083,7 @@ data class PrototypeSegmentedButtonNode(
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
-  override val transition: String? = null,
+  override val transition: PrototypeTransition? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
@@ -1124,7 +1103,7 @@ data class PrototypeTopAppBarNode(
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
-  override val transition: String? = null,
+  override val transition: PrototypeTransition? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
@@ -1146,7 +1125,7 @@ data class PrototypeDividerNode(
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
-  override val transition: String? = null,
+  override val transition: PrototypeTransition? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
@@ -1165,7 +1144,7 @@ data class PrototypeBadgeNode(
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
-  override val transition: String? = null,
+  override val transition: PrototypeTransition? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
@@ -1187,7 +1166,7 @@ data class PrototypeProgressNode(
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
-  override val transition: String? = null,
+  override val transition: PrototypeTransition? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
@@ -1212,7 +1191,7 @@ data class PrototypeChartNode(
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
-  override val transition: String? = null,
+  override val transition: PrototypeTransition? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
@@ -1234,9 +1213,6 @@ data class PrototypeChartSeries(
   val color: PrototypeModeValue? = null,
 )
 
-/** A fixed y axis for a chart; [max] is above [min]. */
-@Serializable data class PrototypeChartRange(val min: Double, val max: Double)
-
 /**
  * A Material alert dialog, open while [openWhen] holds. Its buttons and scrim close it by writing
  * the opposite boolean; [child] is optional custom content between the text and the buttons.
@@ -1251,7 +1227,7 @@ data class PrototypeDialogNode(
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
-  override val transition: String? = null,
+  override val transition: PrototypeTransition? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
@@ -1280,7 +1256,7 @@ data class PrototypeSnackbarNode(
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
-  override val transition: String? = null,
+  override val transition: PrototypeTransition? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
@@ -1302,7 +1278,7 @@ data class PrototypeTimePickerNode(
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
-  override val transition: String? = null,
+  override val transition: PrototypeTransition? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
@@ -1326,7 +1302,7 @@ data class PrototypeDatePickerNode(
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
-  override val transition: String? = null,
+  override val transition: PrototypeTransition? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
@@ -1347,7 +1323,7 @@ data class PrototypeScrollNode(
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
-  override val transition: String? = null,
+  override val transition: PrototypeTransition? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
@@ -1383,7 +1359,7 @@ data class PrototypePagerNode(
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
-  override val transition: String? = null,
+  override val transition: PrototypeTransition? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
@@ -1411,7 +1387,7 @@ data class PrototypeCarouselNode(
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
-  override val transition: String? = null,
+  override val transition: PrototypeTransition? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
@@ -1435,7 +1411,7 @@ data class PrototypeStackNode(
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
-  override val transition: String? = null,
+  override val transition: PrototypeTransition? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
@@ -1454,7 +1430,7 @@ data class PrototypeTabBarNode(
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
-  override val transition: String? = null,
+  override val transition: PrototypeTransition? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
@@ -1475,7 +1451,7 @@ data class PrototypeBottomNavNode(
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
-  override val transition: String? = null,
+  override val transition: PrototypeTransition? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
@@ -1495,7 +1471,7 @@ data class PrototypeBottomSheetNode(
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,
-  override val transition: String? = null,
+  override val transition: PrototypeTransition? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,

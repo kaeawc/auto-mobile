@@ -179,6 +179,7 @@ export class SimCtlClient implements SimCtl {
       get observationSequence() {
         return client.observationSequence;
       },
+      invalidateDeviceListCache: (...args) => SimCtlClient.invalidateDeviceListCache(...args),
     });
   }
 

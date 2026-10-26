@@ -14,6 +14,7 @@ import type {
   SimulatorTemplateManifestStore,
 } from "./SimulatorTemplateManifestStore";
 import type { XcodeVersionReader } from "./XcodeVersionReader";
+import type { SimulatorCloneRelocator } from "./SimulatorCloneRelocator";
 export interface TemplateSimulatorClient {
   createSimulator(
     name: string,
@@ -37,8 +38,11 @@ export interface TemplateCreationDependencies {
   timer: Pick<Timer, "now">;
   profile(): SimulatorTemplateKey["profile"];
   builder: TemplateBuildRequester;
+  /** Points a fresh clone's recorded paths at itself instead of its template (#15327). */
+  relocator: Pick<SimulatorCloneRelocator, "relocate">;
 }
 export class SimulatorCreationService {
+  private readonly cloneFailures = new Map<string, number>();
   private readonly lifetime = new AbortController();
   async stop(): Promise<void> {
     this.lifetime.abort();
@@ -84,9 +88,8 @@ export class SimulatorCreationService {
   }
   private async tryClone(
     request: SimulatorCreateRequest,
-    dependencies?: TemplateCreationDependencies,
+    deps: TemplateCreationDependencies = this.dependencies(),
   ): Promise<string | undefined> {
-    const deps = dependencies ?? this.dependencies();
     const key = await this.resolveKey(deps, request);
     if (!key) {
       return undefined;
@@ -96,9 +99,9 @@ export class SimulatorCreationService {
       await this.markStale(deps, manifest, request.signal);
     }
     if (manifest?.state === "ready" && this.buildsMatch(manifest, key)) {
-      const udid = await this.cloneReady(deps, manifest, request);
-      if (udid) {
-        return udid;
+      const result = await this.cloneReady(deps, manifest, request);
+      if (result.preserveTemplate) {
+        return result.udid;
       }
       await this.markStale(deps, manifest, request.signal);
     }
@@ -136,13 +139,13 @@ export class SimulatorCreationService {
     deps: TemplateCreationDependencies,
     manifest: SimulatorTemplateManifest,
     request: SimulatorCreateRequest,
-  ): Promise<string | undefined> {
+  ): Promise<{ udid?: string; preserveTemplate: boolean }> {
     const sims = await deps.client.listSimulators(undefined, request.signal);
     const sim = Object.values(sims.devices)
       .flat()
       .find((entry) => entry.udid === manifest.udid);
     if (sim?.state !== "Shutdown" || sim.name !== templateName(manifest.key)) {
-      return undefined;
+      return { preserveTemplate: sim?.name === templateName(manifest.key) };
     }
     const before = new Set(
       Object.values(sims.devices)
@@ -150,12 +153,40 @@ export class SimulatorCreationService {
         .map((entry) => entry.udid),
     );
     try {
-      return await deps.client.cloneSimulator(manifest.udid, request.name, request.signal);
+      const udid = await deps.client.cloneSimulator(manifest.udid, request.name, request.signal);
+      // An unrelocated clone runs Safari and system daemons against the template's data.
+      await deps.relocator.relocate({
+        templateUdid: manifest.udid,
+        cloneUdid: udid,
+        signal: request.signal,
+      });
+      this.cloneFailures.delete(manifest.udid);
+      return { udid, preserveTemplate: true };
     } catch (error) {
       logger.warn(`Template clone failed: ${errorMessage(error)}`, error);
-      request.signal?.throwIfAborted();
-      await this.removeFailedClone(deps, request, before);
-      return undefined;
+      let failures = this.cloneFailures.get(manifest.udid) ?? 0;
+      if (!request.signal?.aborted) {
+        failures++;
+        this.cloneFailures.set(manifest.udid, failures);
+      }
+      const preserveTemplate = await runWithAbortSignal(undefined, async () => {
+        await this.removeFailedClone(deps, { ...request, signal: undefined }, before);
+        const after = await deps.client.listSimulators();
+        const template = Object.values(after.devices)
+          .flat()
+          .find((entry) => entry.udid === manifest.udid);
+        return (
+          template?.name === templateName(manifest.key) &&
+          (template.state !== "Shutdown" || request.signal?.aborted === true || failures < 2)
+        );
+      });
+      if (request.signal?.aborted) {
+        if (!preserveTemplate) {
+          await runWithAbortSignal(undefined, () => this.markStale(deps, manifest));
+        }
+        request.signal.throwIfAborted();
+      }
+      return { preserveTemplate };
     }
   }
   private async removeFailedClone(
@@ -187,6 +218,7 @@ export class SimulatorCreationService {
       const current = await deps.store.read(manifest.key);
       if (current?.udid === manifest.udid && current.state === "ready") {
         await deps.store.write({ ...current, state: "stale" });
+        this.cloneFailures.delete(manifest.udid);
       }
     } finally {
       release();

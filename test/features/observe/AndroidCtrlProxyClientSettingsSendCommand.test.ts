@@ -63,9 +63,9 @@ async function harness() {
     connects++;
     return true;
   };
-  client["cancelScreenshotBackoff"] = () => {
+  client.testHooks.overrideCancelScreenshotBackoff(() => {
     backoffCancels++;
-  };
+  });
   return {
     device,
     adb,
@@ -92,7 +92,7 @@ test("cancelled Rotate sends the auto-rotate restore put through the real settin
       }
     }
     queueMicrotask(() => {
-      void h.client["handleWebSocketMessage"](
+      void h.client.testHooks.handleWebSocketMessage(
         JSON.stringify({
           type: frame.type.replace("request_", "") + "_result",
           requestId: frame.requestId,
@@ -210,13 +210,13 @@ for (const method of methods) {
       h.client.connectionTestHooks.supportedCommands = new Set([
         ANDROID_FULL_COMMAND_SET_CAPABILITY,
       ]);
-      h.client["rejectedCommands"].add(`request_settings_${method.operation}`);
+      h.client.testHooks.rejectedCommands.add(`request_settings_${method.operation}`);
       const pending = method.invoke(h.client);
       expect(h.socket.frames).toEqual([method.literal]);
       expect(h.socket.frames[0]).toBe(method.oldFrame(id));
       expect(h.connects()).toBe(0);
       expect(h.cancels()).toBe(0);
-      await h.client["handleWebSocketMessage"](
+      await h.client.testHooks.handleWebSocketMessage(
         JSON.stringify({
           type: `settings_${method.operation}_result`,
           requestId: id,
@@ -268,7 +268,7 @@ for (const method of methods) {
           }
           expect(h.socket.frames).toEqual([method.literal]);
           expect(h.manager.getPendingCount()).toBe(1);
-          await h.client["handleWebSocketMessage"](
+          await h.client.testHooks.handleWebSocketMessage(
             JSON.stringify({
               type: `settings_${method.operation}_result`,
               requestId: id,

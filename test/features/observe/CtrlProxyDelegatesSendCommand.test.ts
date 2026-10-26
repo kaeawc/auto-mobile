@@ -51,9 +51,9 @@ async function harness() {
     connects++;
     return true;
   };
-  client["cancelScreenshotBackoff"] = () => {
+  client.testHooks.overrideCancelScreenshotBackoff(() => {
     cancels++;
-  };
+  });
   return { client, timer, socket, manager, connects: () => connects, cancels: () => cancels };
 }
 
@@ -93,9 +93,12 @@ const methods: Method[] = [
     name: "requestInstallCaCertificateFromFile",
     autoConnect: true,
     invoke: (h) => {
-      const certs = new CtrlProxyCertificates(h.client["createCertificatesDelegateContext"](), {
-        stat: async () => ({ size: 1, isFile: () => true }),
-      });
+      const certs = new CtrlProxyCertificates(
+        h.client.testHooks.createCertificatesDelegateContext(),
+        {
+          stat: async () => ({ size: 1, isFile: () => true }),
+        },
+      );
       certs["pushCertificateToDevice"] = async () => "/sdcard/ca.pem";
       return certs.requestInstallCaCertificateFromFile("/tmp/ca.pem", 50);
     },
@@ -249,14 +252,14 @@ for (const method of methods) {
 
     test("sends the literal and builder frame and correlates the reply", async () => {
       const h = await harness();
-      h.client["rejectedCommands"].add(JSON.parse(method.literal).type);
+      h.client.testHooks.rejectedCommands.add(JSON.parse(method.literal).type);
       const pending = method.invoke(h);
       await flushDispatch();
       expect(h.socket.frames).toEqual([method.literal]);
       expect(h.socket.frames[0]).toBe(serializeCtrlProxyRequest(method.frame(id)));
       expect(h.connects()).toBe(method.autoConnect ? 1 : 0);
       expect(h.cancels()).toBe(0);
-      await h.client["handleWebSocketMessage"](
+      await h.client.testHooks.handleWebSocketMessage(
         JSON.stringify({ ...method.response, requestId: id, success: true, totalTimeMs: 7 }),
       );
       await pending;
@@ -309,7 +312,7 @@ for (const method of methods) {
       const pending = runWithAbortSignal(controller.signal, () => method.invoke(h));
       await flushDispatch();
       expect(h.socket.frames).toEqual([method.literal]);
-      await h.client["handleWebSocketMessage"](
+      await h.client.testHooks.handleWebSocketMessage(
         JSON.stringify({ ...method.response, requestId: id, success: true, totalTimeMs: 7 }),
       );
       await pending;

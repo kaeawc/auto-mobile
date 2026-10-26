@@ -20,6 +20,12 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PrototypeRenderModelTest {
+  // These tests probe unknown icon names on a plain JVM, where android.util.Log is not mocked.
+  @org.junit.Before
+  fun silenceIconWarnings() {
+    prototypeIconWarning = {}
+  }
+
   companion object {
     @JvmStatic
     @org.junit.BeforeClass

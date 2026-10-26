@@ -20,6 +20,19 @@ erases the device instead (#15017). iOS reuse requires defaults.ios. The legacy
 or off. On Android-only hosts the legacy flag is accepted but inert. This does
 not enable Android reuse or accept Android reuse keys.
 
+### Destroy fallback
+
+`keep-booted` also accepts `"fallback": "destroy"`, for operators who cannot accept
+erase (erase shuts the simulator down, drops it from the pool and serializes reboots
+outside acquisition admission). Every path that would erase instead returns a non-clean
+outcome (`pending`, mode `keep-booted`, with the same `fallbackReason`), so the release
+takes the existing destroy path: the simulator is deleted, the receipt ends `destroyed`,
+and the next acquisition creates a fresh simulator through boot admission. The erase port
+is never called, so a redrive after a daemon restart cannot resume as an erase. `maxUses`
+then means "destroy after N uses". A recorded cleaning failure is kept for the resetter
+instance, so a redrive repeats the destroy instead of cleaning again. `erase` mode accepts
+only `"erase"`.
+
 ## Best-effort cleaning, not isolation certification
 
 The owner decision is to run cleaning operations, not require readback evidence
@@ -92,7 +105,11 @@ Each release that is not due for maxUses erase runs:
    gains them (#15017). Added Documents/Safari files are removed and changed or added
    defaults are restored or deleted. Added or missing photos, missing files, a baseline
    without these inventories, and residue that survives the revert are a cleaning
-   failure and fall back to erase.
+   failure and fall back to erase. On a template-cloned simulator `simctl get_app_container`
+   reports Safari's container under the template's device directory; the reader never
+   touches that path and instead uses the clone's own container with the same UUID, only
+   after its `MCMMetadataIdentifier` proves it is `com.apple.mobilesafari` (#15314).
+   Any other path, or a missing or mismatched identifier, is refused and falls back to erase.
 7. Check fresh exact-UDID Booted/type/runtime/OS inventory and the existing
    device-identified automation health endpoint. Only then report clean.
 
@@ -129,6 +146,15 @@ Total lifetime uses equal durable reuseCount + 1. Each multiple of maxUses still
 takes erase, without resetting the counter. Only erase reserves a ResetBootQueue
 slot. Keep-booted runs outside that queue. Readiness admission and wakeups retain
 their existing ownership, wait bounds and committed-idle-state requirements.
+
+### Container ownership
+
+All app-data and App Group consumers share `resolveOwnAppContainer`: normalized own-device
+paths are accepted, while foreign registrations require matching clone metadata (the bundle
+ID for data containers, the group ID for App Groups). Ownership refusals fail before file
+access. The TypeScript AST boundary guard prevents raw data-container lookups outside the
+resolver; read-only app-bundle lookups and the separately confined groups listing are exempt.
+The device-set root must match simctl's reported path literally; `CORESIMULATOR_DEVICE_SET_PATH` or `HOME` symlink and case differences are refused fail-closed.
 
 ## Limits
 

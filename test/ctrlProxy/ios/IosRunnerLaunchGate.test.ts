@@ -165,3 +165,31 @@ test("a throwing queue observer cannot stall the hand-off to the next launch", a
   (await waiting).release();
   expect((await gate.acquire()).release).toBeFunction();
 });
+
+test("isLaunching is true for an owner holding a slot, from immediate or queued admission, until release", async () => {
+  const gate = new DefaultIosRunnerLaunchGate(1);
+  expect(gate.isLaunching("a")).toBe(false);
+  const first = await gate.acquire(undefined, "a");
+  expect(gate.isLaunching("a")).toBe(true);
+  const queuedSlot = gate.acquire(undefined, "b");
+  expect(gate.queueStatus("b")).toBeDefined();
+  expect(gate.isLaunching("b")).toBe(false);
+  first.release();
+  first.release();
+  expect(gate.isLaunching("a")).toBe(false);
+  const second = await queuedSlot;
+  expect(gate.isLaunching("b")).toBe(true);
+  second.release();
+  expect(gate.isLaunching("b")).toBe(false);
+});
+
+test("isLaunching ignores ownerless launches and cancelled queue entries", async () => {
+  const gate = new DefaultIosRunnerLaunchGate(1);
+  const held = await gate.acquire();
+  const controller = new AbortController();
+  const aborted = gate.acquire(controller.signal, "x").catch(() => undefined);
+  controller.abort(new Error("cancelled"));
+  await aborted;
+  expect(gate.isLaunching("x")).toBe(false);
+  held.release();
+});

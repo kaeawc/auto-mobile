@@ -19,6 +19,8 @@ export class BootedDeviceDiscoveryIncompleteError extends ActionableError {
     readonly discoveryError: DeviceDiscoveryError | undefined,
     /** Overrides the default text when a caller already has user-facing wording for the cause. */
     message?: string,
+    /** Wait hint for a controller retrying a transient listing failure (e.g. a simctl timeout). */
+    readonly retryAfterMs?: number,
   ) {
     super(
       message ??

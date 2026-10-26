@@ -53,6 +53,10 @@ class PrototypeMotionTest {
 
   @Test
   fun `source node carries the transition`() {
-    assertEquals("slide", PrototypeBoxNode(transition = "slide", children = emptyList()).transition)
+    assertEquals(
+      PrototypeTransition("slide"),
+      PrototypeBoxNode(transition = PrototypeTransition("slide"), children = emptyList())
+        .transition,
+    )
   }
 }

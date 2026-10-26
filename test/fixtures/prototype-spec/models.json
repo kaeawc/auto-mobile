@@ -1,4 +1,12 @@
 {
   "offset": { "x": -12.5, "y": 24.25 },
-  "padding": { "top": 1.5, "bottom": 2.5, "start": 3.5, "end": 4.5 }
+  "padding": { "top": 1.5, "bottom": 2.5, "start": 3.5, "end": 4.5 },
+  "bounds": { "x": -1.5, "y": 2.5, "width": 300.25, "height": 400.5 },
+  "sheetCondition": { "key": "sheetOpen", "equals": true },
+  "safeAreaPadding": { "edges": ["top", "start"], "types": ["systemBars", "ime"] },
+  "animate": { "durationMs": 450, "easing": "spring" },
+  "stagger": { "ms": 40, "order": "center" },
+  "zoomable": { "maxScale": 4.5 },
+  "radioOption": { "value": "small", "label": "Small" },
+  "chartRange": { "min": -2.5, "max": 10.5 }
 }

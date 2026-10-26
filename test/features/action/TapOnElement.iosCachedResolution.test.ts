@@ -23,6 +23,7 @@ import { FakeTapStrategy } from "../../fakes/FakeTapStrategy";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
+import { setDebugModeEnabled } from "../../../src/utils/debug";
 
 const device = { name: "cached-ios", deviceId: "cached-ios-9821", platform: "ios" } as const;
 const raw = (left: number | null): XCTestHierarchy => ({
@@ -364,3 +365,45 @@ class TapAnyElement extends RealTapAnyElement {
     };
   }
 }
+
+describe("tapOn iOS indeterminate tap with debug mode (#15296)", () => {
+  afterEach(() => setDebugModeEnabled(false));
+  const timedOut = {
+    success: false,
+    totalTimeMs: 5000,
+    dispatched: true,
+    acknowledged: false,
+    error: "Tap timed out after 5000ms",
+  } as const;
+
+  test("fails without a post-failure hierarchy read behind the still-busy runner", async () => {
+    setDebugModeEnabled(true);
+    const h = harness("tapOn");
+    try {
+      h.client.setTapResult(timedOut);
+      const result = await h.run();
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Tap outcome is indeterminate");
+      const dispatchedAt = h.dispatch.mock.invocationCallOrder[0] ?? 0;
+      const readsAfterDispatch = h.sync.mock.invocationCallOrder.filter(
+        (order) => order > dispatchedAt,
+      );
+      expect(readsAfterDispatch).toEqual([]);
+      expect(result.debug).toBeUndefined();
+    } finally {
+      h.restore();
+    }
+  });
+
+  test("an element that is not found still gets the search debug context", async () => {
+    setDebugModeEnabled(true);
+    const h = harness("tapOn", null);
+    try {
+      const result = await h.run();
+      expect(result.success).toBe(false);
+      expect(result.debug?.elementSearch).toBeDefined();
+    } finally {
+      h.restore();
+    }
+  });
+});

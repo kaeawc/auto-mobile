@@ -78,6 +78,11 @@ data class PrototypeRenderNode(
   val errorMessage: String? = null,
   /** A `chart`'s points and summary read against the current `/data`; null for other roles. */
   val chart: PrototypeChartModel? = null,
+  /**
+   * How long this node waits before its `visibleWhen` enter starts (#15247): its parent's stagger
+   * rank times `ms` plus its own `transition.delayMs`, at most 600 ms.
+   */
+  val enterDelayMs: Int = 0,
 )
 
 @Immutable
@@ -175,6 +180,7 @@ internal class PrototypeNodeMapping(
     node: PrototypeNode,
     path: String,
     pagerState: Map<String, PrototypeScalar>? = null,
+    staggerDelayMs: Int = 0,
   ): PrototypeRenderNode {
     val localState =
       if (node is PrototypePagerNode)
@@ -204,8 +210,9 @@ internal class PrototypeNodeMapping(
       )
         emptyList()
       else entries
-    val children = visibleEntries.map { (child, childPath) ->
-      map(child, childPath, if (inPager) localState else null)
+    val staggerDelays = prototypeStaggerDelays(node, visibleEntries.map { it.node })
+    val children = visibleEntries.mapIndexed { index, (child, childPath) ->
+      map(child, childPath, if (inPager) localState else null, staggerDelays[index])
     }
     val pager =
       when (node) {
@@ -272,6 +279,10 @@ internal class PrototypeNodeMapping(
         spans =
           (node as? PrototypeTextNode)?.let { mapPrototypeTextSpans(it, localState, inPager) },
         chart = chart,
+        enterDelayMs =
+          (staggerDelayMs + (node.transition?.delayMs ?: 0)).coerceAtMost(
+            PrototypeChoreographyRules.MAX_DELAY_MS,
+          ),
       )
     val shared = intern(mapped, old)
     nodes[path] = shared

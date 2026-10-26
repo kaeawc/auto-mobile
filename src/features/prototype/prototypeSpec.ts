@@ -15,6 +15,7 @@ import {
   type PrototypeJson,
 } from "./prototypeJson";
 import { prototypeChartShape } from "./prototypeChartSchema";
+import { prototypeStaggerShape } from "./prototypeChoreographySchema";
 import { prototypeImageShape, prototypeMotionNodeShape } from "./prototypeMotionV2Schema";
 import { prototypeSpecNodeRoots, walkPrototypeNodes } from "./prototypeNodeChildren";
 import {
@@ -200,8 +201,10 @@ const repeatSchema = z
   })
   .strict();
 const repeatShape = { repeat: repeatSchema.optional() };
+// `box`, `row` and `column` also stagger their `visibleWhen` children (#15247).
+const containerShape = { ...repeatShape, ...prototypeStaggerShape };
 const boxBaseSchema = z
-  .object({ ...commonNodeShape, ...gestureNodeShape, ...repeatShape, type: z.enum(["box"]) })
+  .object({ ...commonNodeShape, ...gestureNodeShape, ...containerShape, type: z.enum(["box"]) })
   .strict();
 const swipeActionSchema = z
   .object({
@@ -226,12 +229,12 @@ const rowBaseSchema = z
     ...commonNodeShape,
     ...gestureNodeShape,
     ...swipeActionsShape,
-    ...repeatShape,
+    ...containerShape,
     type: z.enum(["row"]),
   })
   .strict();
 const columnBaseSchema = z
-  .object({ ...commonNodeShape, ...gestureNodeShape, ...repeatShape, type: z.enum(["column"]) })
+  .object({ ...commonNodeShape, ...gestureNodeShape, ...containerShape, type: z.enum(["column"]) })
   .strict();
 const flowBaseSchema = z
   .object({

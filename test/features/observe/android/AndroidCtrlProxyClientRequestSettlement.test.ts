@@ -86,8 +86,8 @@ async function harness() {
     "remove_prototype_asset",
   ]);
   client.ensureConnected = async () => true;
-  client["connectWebSocket"] = async () => true;
-  client["cancelScreenshotBackoff"] = () => {};
+  client.testHooks.overrideConnectWebSocket(async () => true);
+  client.testHooks.overrideCancelScreenshotBackoff(() => {});
   // A lost connection otherwise arms a reconnect timer, which is not a request leak.
   client.connectionTestHooks.autoReconnectEnabled = false;
   adb.setCommandResponse("pidof", createExecResult("1234", ""));
@@ -571,7 +571,7 @@ async function settle(
   if (trigger === "abort") {
     controller.abort(new Error("caller cancelled"));
   } else {
-    h.client["finishEstablishedConnection"](h.socket);
+    h.client.testHooks.finishEstablishedConnection(h.socket);
   }
   await flush();
   if (!settled) {

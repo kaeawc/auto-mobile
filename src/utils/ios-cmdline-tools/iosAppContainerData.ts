@@ -1,3 +1,9 @@
+import {
+  resolveOwnAppDataContainer,
+  SimulatorContainerOwnershipError,
+  SimulatorContainerUnresolvedError,
+  type SimulatorContainerOwnershipOptions,
+} from "./simulatorOwnContainer";
 import type { SimCtlClient } from "./SimCtlClient";
 import { logger } from "../logger";
 
@@ -23,21 +29,23 @@ export async function getAppDataContainerPath(
   simctl: Pick<SimCtlClient, "executeCommandArgs">,
   deviceId: string,
   bundleId: string,
+  ownership: SimulatorContainerOwnershipOptions = {},
 ): Promise<string | null> {
   try {
-    const result = await simctl.executeCommandArgs([
-      "get_app_container",
+    return await resolveOwnAppDataContainer({
+      ...ownership,
       deviceId,
       bundleId,
-      "data",
-    ]);
-    const containerPath = result.stdout.trim();
-    if (!containerPath) {
-      logger.warn(`[iOS] No data container path for ${bundleId}`);
+      run: (args) => simctl.executeCommandArgs(args),
+    });
+  } catch (error) {
+    if (error instanceof SimulatorContainerOwnershipError) {
+      throw error;
+    }
+    if (error instanceof SimulatorContainerUnresolvedError) {
+      logger.warn(`[iOS] No data container path for ${bundleId} on ${deviceId}`);
       return null;
     }
-    return containerPath;
-  } catch (error) {
     logger.warn(`[iOS] Failed to resolve container for ${bundleId}: ${error}`);
     return null;
   }

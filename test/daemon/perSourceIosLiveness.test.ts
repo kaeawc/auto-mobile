@@ -12,6 +12,8 @@ import type { BootedDevice, Platform } from "../../src/models";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { drainUntilQuiescent } from "../helpers/fakeTimerStepping";
+import { IOS_LIVENESS_REDISCOVERY_DELAYS_MS } from "../../src/daemon/devicePoolParts/contracts";
 import { IdleDeviceReaper } from "../../src/daemon/idleDeviceReaper";
 import { DevicectlDeviceLister } from "../../src/utils/ios-cmdline-tools/DevicectlDeviceLister";
 import { FakeDiscoveryObservationSequence } from "../fakes/FakeDiscoveryObservationSequence";
@@ -212,9 +214,10 @@ describe("DevicePool idle assignability is decided per source (#5683)", () => {
   let devicePool: DevicePool;
   let sessionManager: SessionManager;
   let deviceManager: FakeDeviceManager;
+  let timer: FakeTimer;
 
   function arrangeHarness(): void {
-    const timer = new FakeTimer();
+    timer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     deviceManager = new FakeDeviceManager();
     devicePool = makePool(sessionManager, "test-daemon-session-id", {
@@ -242,6 +245,23 @@ describe("DevicePool idle assignability is decided per source (#5683)", () => {
   const pool = async (devices: BootedDevice[]): Promise<void> => {
     deviceManager.bootedDevices = devices;
     await devicePool.initializeWithDevices(devices);
+  };
+
+  /**
+   * An exact-device bind whose iOS liveness listing failed re-lists after each backoff delay
+   * (#15289) before refusing. Walk the fake clock through every delay so the refusal settles
+   * without any real waiting, then return the message the bind rejected with.
+   */
+  const rejectionAfterRelists = async (bind: Promise<unknown>): Promise<string> => {
+    const rejection = bind.then(
+      () => "bind resolved",
+      (error: unknown) => (error instanceof Error ? error.message : String(error)),
+    );
+    for (const delayMs of IOS_LIVENESS_REDISCOVERY_DELAYS_MS) {
+      await drainUntilQuiescent(timer);
+      timer.advanceTime(delayMs);
+    }
+    return await rejection;
   };
 
   arranged("a confirmed physical iPhone stays assignable when simctl fails", async () => {
@@ -276,13 +296,14 @@ describe("DevicePool idle assignability is decided per source (#5683)", () => {
     await pool([PHYSICAL, SIMULATOR]);
     deviceManager.failedSources.add("ios-simulator");
 
-    await expect(
+    const message = await rejectionAfterRelists(
       devicePool.bindOrReuseDeviceSession({
         sessionId: "session-c",
         deviceId: SIMULATOR_UDID,
         platform: "ios",
       }),
-    ).rejects.toThrow(/Unable to verify iOS simulator/);
+    );
+    expect(message).toMatch(/Unable to verify iOS simulator/);
     // Unverifiable, never proven gone: the pooled entry survives.
     expect(devicePool.getDevice(SIMULATOR_UDID)).toBeDefined();
   });
@@ -373,13 +394,14 @@ describe("DevicePool idle assignability is decided per source (#5683)", () => {
       deviceManager.retainedSources.add("ios-physical");
       deviceManager.failedSources.add("ios-simulator");
 
-      await expect(
+      const message = await rejectionAfterRelists(
         devicePool.bindOrReuseDeviceSession({
           sessionId: "session-f",
           deviceId: PHYSICAL_UDID,
           platform: "ios",
         }),
-      ).rejects.toThrow(/Unable to verify iOS device/);
+      );
+      expect(message).toMatch(/Unable to verify iOS device/);
       // Unverifiable, never proven gone: retained, not pruned.
       expect(devicePool.getDevice(PHYSICAL_UDID)).toBeDefined();
     },

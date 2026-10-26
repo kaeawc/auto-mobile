@@ -179,6 +179,18 @@ node's centre without moving siblings. \`transition\` also takes \`slideStart\` 
 accessibility zoom actions; it cannot also have \`onDoubleTap\`. Everything snaps under
 \`motion: "none"\` or animator scale 0. The iOS agent does not support it yet (#14684).
 
+## Choreography
+
+(needs \`prototype_choreography_v1\`) \`transition\` also takes \`{type, delayMs?}\` (\`delayMs\` 0-600 ms, the wait
+before the enter starts) besides the plain names, and \`blurReplace\`: a blur-and-fade enter and exit
+(iOS \`.blurReplace\`; Android 12 and later blur, Android 11 and earlier fade only). A \`box\`, \`row\` or \`column\` takes \`stagger: {ms, order?}\` (\`ms\` 0-100 per child;
+\`order\` \`forward\` (default), \`reverse\` or \`center\`): its direct children with \`visibleWhen\`
+enter one after another in layout order, each \`ms\` apart, including the children a \`repeat\` makes.
+A child's own \`transition.delayMs\` adds to its stagger wait, and no child may wait more than 600 ms
+in all (a literal \`repeat\` is counted; a data-bound one is clamped on the device). Delays are zero
+under \`motion: "none"\` or animator scale 0. Delays apply to enters only. The iOS agent does not
+support it yet.
+
 ## Charts
 
 \`{type: "chart", variant, series, yRange?, xLabels?, goal?}\` draws a \`line\`, \`area\`, \`bar\` or
@@ -242,13 +254,16 @@ app icon is already on the home screen. \`listSaved\` on iOS returns bundle ids 
 \`deleteSaved\` also accepts the authored id; it removes the iOS app icon, so
 \`removeIcon:true\` is ignored with a warning.
 
-On Android with the ProtoViewer app installed, \`save\` without \`pin\` or \`icon\` imports
+On Android or an iOS simulator with the ProtoViewer app installed, \`save\` without \`pin\` or \`icon\` imports
 the prototype into the ProtoViewer library instead, and does not need CtrlProxy or
 \`prototype_saved_v1\`. It returns \`viewer\` \`{app, libraryId, label}\`; every save is a new
 library entry, which \`listSaved\` and \`deleteSaved\` do not see. ProtoViewer treats the entry
 as imported: its requests stay off until the user allows network in ProtoViewer, and it is not
 attached to this host (no \`awaitEvent\`, \`patch\` or \`inspect\`). \`{action:"open",id}\` with
-that \`libraryId\` launches it (Android only).
+that \`libraryId\` launches it on Android or an iOS simulator. It needs ProtoViewer installed.
+If ProtoViewer is absent, too old for this route, or its inbox cannot be used, \`save\`
+keeps the platform save path. A timeout after delivery may still have saved the entry; check
+ProtoViewer before retrying.
 
 ## Fullscreen host chrome
 

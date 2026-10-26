@@ -770,6 +770,30 @@ Android draws scale and rotation with a `graphicsLayer`, animates with `animateF
 `animateColorAsState`, and zooms with `transformable`. The iOS agent does not implement motion v2
 yet and does not advertise the capability (#14684), so the host refuses these fields there.
 
+### Transition choreography (#15247, `prototype_choreography_v1`, not device-verified)
+
+- **Delayed enters.** `transition` also takes `{type, delayMs?}` (`delayMs` 0-600 ms) in place of
+  the plain name; the enter starts after the delay and runs a 300 ms tween. A delay applies to
+  enters only, so a hidden node still leaves at once.
+- **`blurReplace`.** A blur and fade: the node enters from a 12 dp blur that clears as it fades in,
+  and leaves the other way. `Modifier.blur` does nothing below Android 12, which leaves the plain
+  fade there.
+- **Stagger.** A `box`, `row` or `column` takes `stagger: {ms, order?}` (`ms` 0-100; `order`
+  `forward` (default), `reverse` or `center`). Its direct children with `visibleWhen` enter one
+  after another in layout order, each `ms` apart, including the children a `repeat` makes. A child's
+  own `transition.delayMs` adds to its stagger wait.
+- **Limit.** No child waits more than 600 ms in all. The validator counts the children and a
+  literal `repeat` and rejects a longer wait at `<path>.stagger`; a data-bound `repeat` has no
+  static count, so the renderer clamps the wait to 600 ms instead.
+- **Reduced motion.** Under `motion: "none"` or animator duration scale 0 nothing animates, so no
+  delay applies and `observe` sees the settled tree.
+- **Retained subtrees.** A large `fade` or `none` subtree that the renderer keeps composed while
+  hidden (a scroll list) still fades without the delay.
+
+The render model carries each child's wait as `enterDelayMs` (stagger rank times `ms` plus its own
+delay, at most 600), so the stagger is decided with the tree and not while it draws. The iOS agent
+does not advertise the capability yet, so the host refuses these fields there.
+
 ## Actions and state
 
 | Action `type` | Properties                                                                                                                                                                                                  |

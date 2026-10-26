@@ -7,7 +7,7 @@ import {
   readLockOwnerPid,
 } from "../../utils/fileLock";
 import { defaultLockOwnerGenerationProbe } from "../../daemon/lockOwnerGeneration";
-import { ensureSecureDirectorySync, getSharedAutoMobileDir } from "../../utils/tempDir";
+import { ensureSecureDirectorySync, getHostGlobalAutoMobileDir } from "../../utils/tempDir";
 import type { Timer } from "../../utils/SystemTimer";
 import {
   templateKeyHash,
@@ -21,7 +21,7 @@ export class FileSimulatorTemplateLock implements SimulatorTemplateLock {
   constructor(
     private readonly timer: Timer,
     private readonly directory: () => string = () =>
-      ensureSecureDirectorySync(getSharedAutoMobileDir("ios-sim-templates")),
+      ensureSecureDirectorySync(getHostGlobalAutoMobileDir("ios-sim-templates")),
     private readonly options: ExclusiveLockOptions = {},
   ) {}
   private path(key: SimulatorTemplateKey): string {

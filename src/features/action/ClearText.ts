@@ -1,3 +1,4 @@
+import { isAndroidHintText } from "./androidHintText";
 import { getTextRequestDeadlineMs } from "./textTransportTimeout";
 import { clearIosFieldWithVerification } from "./iosClearVerification";
 import { toActionableError, unsupportedPlatformError } from "../../models/ActionableError";
@@ -57,15 +58,12 @@ function getEditableTextLength(
 ): number | undefined {
   const searchable = toSearchable(properties);
   const text = searchable.textSources.value ?? searchable.textSources.text;
-  const hint = properties["hint-text"];
   const android = ["android.", "androidx."].some((prefix) =>
     searchable.className?.startsWith(prefix),
   );
-  // Android hierarchy nodes carry no showing-hint flag. Typed text identical to
-  // the hint is indistinguishable and counts as empty for verification/skip-clear.
   // SendKeys includes the raw hint length for deletes so replace cannot under-delete
   // that real text; the existing clear sequence runs before verification and typing.
-  if (!includeHintText && android && typeof hint === "string" && hint !== "" && text === hint) {
+  if (!includeHintText && isAndroidHintText(searchable.className, properties["hint-text"], text)) {
     return 0;
   }
   const capturedLength = typeof text === "string" ? text.length : searchable.capturedTextLength;

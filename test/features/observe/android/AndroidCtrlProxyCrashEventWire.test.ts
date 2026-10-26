@@ -67,7 +67,7 @@ describe("Android CtrlProxy crash/ANR wire persistence", () => {
   });
 
   test("persists the Kotlin crash frame using its envelope timestamp", async () => {
-    await client["handleWebSocketMessage"](CRASH_FRAME);
+    await client.testHooks.handleWebSocketMessage(CRASH_FRAME);
     const rows = await db.selectFrom("crashes").selectAll().execute();
     expect(rows).toHaveLength(1);
     expect(rows[0].timestamp).toBe(1700000000000);
@@ -78,7 +78,7 @@ describe("Android CtrlProxy crash/ANR wire persistence", () => {
   test("persists an older APK crash without either timestamp using FakeTimer", async () => {
     const frame: { timestamp?: number; event: { timestamp?: number } } = JSON.parse(CRASH_FRAME);
     delete frame.timestamp;
-    await client["handleWebSocketMessage"](JSON.stringify(frame));
+    await client.testHooks.handleWebSocketMessage(JSON.stringify(frame));
     const rows = await db.selectFrom("crashes").selectAll().execute();
     expect(rows).toHaveLength(1);
     expect(rows[0].timestamp).toBe(timer.now());
@@ -87,7 +87,7 @@ describe("Android CtrlProxy crash/ANR wire persistence", () => {
   });
 
   test("persists the Kotlin ANR frame using its envelope timestamp", async () => {
-    await client["handleWebSocketMessage"](ANR_FRAME);
+    await client.testHooks.handleWebSocketMessage(ANR_FRAME);
     const rows = await db.selectFrom("anrs").selectAll().execute();
     expect(rows).toHaveLength(1);
     expect(rows[0].timestamp).toBe(1700000000500);
@@ -101,7 +101,7 @@ describe("Android CtrlProxy crash/ANR wire persistence", () => {
       const withoutNulls = JSON.stringify(JSON.parse(frame), (_key, value: unknown) =>
         value === null ? undefined : value,
       );
-      await client["handleWebSocketMessage"](withoutNulls);
+      await client.testHooks.handleWebSocketMessage(withoutNulls);
     }
     const crashes = await db.selectFrom("crashes").select("timestamp").execute();
     const anrs = await db.selectFrom("anrs").select("timestamp").execute();
@@ -115,7 +115,7 @@ describe("Android CtrlProxy crash/ANR wire persistence", () => {
     for (const encoded of [CRASH_FRAME, ANR_FRAME]) {
       const frame: { event: { timestamp?: number } } = JSON.parse(encoded);
       frame.event.timestamp = 1700000000750;
-      await client["handleWebSocketMessage"](JSON.stringify(frame));
+      await client.testHooks.handleWebSocketMessage(JSON.stringify(frame));
     }
     expect(await db.selectFrom("crashes").select("timestamp").execute()).toEqual([
       { timestamp: 1700000000750 },
@@ -130,7 +130,7 @@ describe("Android CtrlProxy crash/ANR wire persistence", () => {
   test("persists an older APK ANR without either timestamp using FakeTimer", async () => {
     const frame: { timestamp?: number } = JSON.parse(ANR_FRAME);
     delete frame.timestamp;
-    await client["handleWebSocketMessage"](JSON.stringify(frame));
+    await client.testHooks.handleWebSocketMessage(JSON.stringify(frame));
     expect(await db.selectFrom("anrs").select("timestamp").execute()).toEqual([
       { timestamp: timer.now() },
     ]);

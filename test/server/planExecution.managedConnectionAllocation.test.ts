@@ -8,6 +8,7 @@ import * as videoRecordingManager from "../../src/daemon/videoRecordingManager";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
+import { releaseSessionAndDevice } from "../../src/daemon/releaseSessionAndDevice";
 import { RegistryBindingExclusion } from "../../src/daemon/sessionBroker/provisioning/exclusion";
 import { DEVICE_OUTSIDE_BROKER_GRANT_CODE } from "../../src/daemon/sessionBroker/connectionRefusal";
 import type { BindingKey } from "../../src/daemon/sessionBroker/registry/bindingRegistry";
@@ -494,15 +495,34 @@ describe("managed connection executePlan device labels (#11397)", () => {
       await expectSlotSessionLive();
     });
 
-    // docs/tools.md (`holdSessionOnFailure` "instead of auto-releasing them") and the
-    // `plan-auto-release` row of docs/using/device-ownership.md: a generic connection's plan
-    // frees its base session and device, whether or not the session existed before the plan.
+    arrangedNested2("a generic connection keeps its caller-held session after a plan", async () => {
+      await sessionManager.createSession(genericSession, free.deviceId, "ios");
+      sessionManager.setDeviceReadiness(genericSession, "automationReady");
+      await probe(genericSession);
+      const result = await runPlan(PROBE_PLAN, {
+        sessionUuid: genericSession,
+        __mcpSessionId: "mcp-socket-generic",
+      });
+      expect(result).toMatchObject({ success: true, deviceId: free.deviceId });
+      expect(sessionManager.peekSession(genericSession)?.assignedDevice).toBe(free.deviceId);
+      expect(sessionManager.getSessionForDevice(free.deviceId)).toBe(genericSession);
+      await expectSlotSessionLive();
+    });
+
+    // A generic connection's plan frees a base it acquired itself, unlike a binding session.
     arrangedNested2(
       "a generic connection's session is still auto-released after its plan",
       async () => {
         await sessionManager.createSession(genericSession, free.deviceId, "ios");
         sessionManager.setDeviceReadiness(genericSession, "automationReady");
         await probe(genericSession);
+        await releaseSessionAndDevice(
+          sessionManager,
+          pool,
+          free.deviceId,
+          genericSession,
+          "plan-auto-release",
+        );
 
         const result = await runPlan(PROBE_PLAN, {
           sessionUuid: genericSession,

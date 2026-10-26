@@ -5,11 +5,11 @@ const GIB = 1024 ** 3;
 const host = { totalMemoryBytes: 128 * GIB, cpuCount: 16 };
 
 test("settled CPU replaces the two-core cap while preserving memory sizing", () => {
-  expect(resolveCapacityLimits({}, { ...host, totalMemoryBytes: 64 * GIB }).maxBooted).toBe(10);
-  expect(resolveCapacityLimits({}, host).maxBooted).toBe(21);
-  expect(resolveCapacityLimits({}, host, 2 * GIB).maxBooted).toBe(32);
-  expect(resolveCapacityLimits({}, { ...host, cpuCount: 4 }).maxBooted).toBe(21);
-  expect(resolveCapacityLimits({}, { ...host, cpuCount: 4 }, 1.5 * GIB).maxBooted).toBe(36);
+  expect(resolveCapacityLimits({}, { ...host, totalMemoryBytes: 64 * GIB }).maxBooted).toBe(15);
+  expect(resolveCapacityLimits({}, host).maxBooted).toBe(30);
+  expect(resolveCapacityLimits({}, host, 2 * GIB).maxBooted).toBe(38);
+  expect(resolveCapacityLimits({}, { ...host, cpuCount: 4 }).maxBooted).toBe(20);
+  expect(resolveCapacityLimits({}, { ...host, cpuCount: 4 }, 1.5 * GIB).maxBooted).toBe(20);
   expect(resolveCapacityLimits({}, { totalMemoryBytes: 1, cpuCount: 1 }).maxBooted).toBe(1);
 });
 
@@ -37,7 +37,7 @@ test("both overrides work independently and invalid concurrency warns", () => {
     expect(
       resolveCapacityLimits({ AUTOMOBILE_IOS_SIM_BOOT_CONCURRENCY: value }, host),
     ).toMatchObject({
-      maxBooted: 21,
+      maxBooted: 30,
       bootConcurrency: 2,
       bootConcurrencySource: "derived",
       bootConcurrencyWarning: expect.stringContaining("not a positive integer"),

@@ -4,6 +4,7 @@ import { type BindDeviceRequest } from "../explicitDeviceBind";
 import { holderReleaseRemainingMs } from "../holderReleaseRemaining";
 import { type AcquisitionReceipt } from "../acquisitionReceipt";
 import { TransitionalAdbBindWait } from "../transitionalAdbBindWait";
+import { IosLivenessRelist } from "./iosLivenessRelist";
 import { isAnonymousAcquisitionSession, type Session } from "../sessionManager";
 import { ActionableError } from "../../models";
 import { heldDeviceBindRefusal } from "../inputDeviceOwnership";
@@ -252,6 +253,21 @@ export class DevicePoolTargetDiscovery {
     );
   }
 
+  /** An authoritative Android absence may be a transitional transport: wait, then re-snapshot. */
+  private async waitForAbsentTransport(
+    deviceId: string,
+    snapshot: TargetDeviceDiscoverySnapshot,
+    transportWait: TransitionalAdbBindWait,
+  ): Promise<boolean> {
+    const presence = snapshot.androidPresence;
+    return (
+      presence !== undefined &&
+      didSourceSucceedForDevice(presence, "android", deviceId) &&
+      !presence.devices.some((device) => device.deviceId === deviceId) &&
+      (await transportWait.waitIfTransitional())
+    );
+  }
+
   /** Snapshot first, then serialize assertions and claim; replacements retry unlocked. */
   async withTargetDeviceDiscovery({
     deviceId,
@@ -275,6 +291,11 @@ export class DevicePoolTargetDiscovery {
       hasResolvedRuntime:
         expectedIdentity?.platform === "android" && expectedIdentity.deviceId === deviceId,
     });
+    const iosLivenessRelist = new IosLivenessRelist(
+      deviceId,
+      this.state.timer,
+      this.state.idleDeviceReaper,
+    );
     while (true) {
       throwIfRequestAborted();
       const capturedEntry = this.state.devices.get(deviceId);
@@ -314,11 +335,11 @@ export class DevicePoolTargetDiscovery {
         ].some(Boolean);
         if (
           !skipTransportWait &&
-          snapshot.androidPresence &&
-          didSourceSucceedForDevice(snapshot.androidPresence, "android", deviceId) &&
-          !snapshot.androidPresence.devices.some((device) => device.deviceId === deviceId) &&
-          (await transportWait.waitIfTransitional())
+          (await this.waitForAbsentTransport(deviceId, snapshot, transportWait))
         ) {
+          continue;
+        }
+        if (await iosLivenessRelist.waitIfUnverified(capturedEntry, platform, snapshot)) {
           continue;
         }
         snapshot.readyNotifiedEntry = readyNotifiedEntry;

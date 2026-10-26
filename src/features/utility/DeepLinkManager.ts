@@ -350,11 +350,13 @@ export class DeepLinkManager implements DeepLinkManager {
         const message = errorMessage(error);
         if (outputReportsMissingIosApp(message)) {
           // Missing apps are an expected lookup outcome; the empty path reports not installed below.
-          logger.debug(`[DeepLinkManager] get_app_container missing app ${bundleId}: ${message}`);
+          logger.debug(
+            `[DeepLinkManager] app container lookup missing app ${bundleId}: ${message}`,
+          );
           throwIfAborted(signal);
         } else {
           logger.warn(
-            `[DeepLinkManager] get_app_container failed for ${bundleId}: ${message}`,
+            `[DeepLinkManager] app container lookup failed for ${bundleId}: ${message}`,
             error,
           );
           throwIfAborted(signal);

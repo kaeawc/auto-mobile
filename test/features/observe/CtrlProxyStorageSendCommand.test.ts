@@ -57,9 +57,9 @@ async function harness() {
     connects++;
     return true;
   };
-  client["cancelScreenshotBackoff"] = () => {
+  client.testHooks.overrideCancelScreenshotBackoff(() => {
     cancels++;
-  };
+  });
   const storage = client.testHooks.storage();
   return {
     client,
@@ -287,13 +287,13 @@ for (const method of methods) {
     const isSdk = method.operation === "get_sdk_capabilities";
     const isKeystore = method.operation === "discover_keystore";
     const respond = (h: Awaited<ReturnType<typeof harness>>) =>
-      h.client["handleWebSocketMessage"](
+      h.client.testHooks.handleWebSocketMessage(
         JSON.stringify({ ...method.response, requestId: id, success: true, totalTimeMs: 7 }),
       );
 
     test("preserves the literal and builder frame, bypasses generic support, and correlates the reply", async () => {
       const h = await harness();
-      h.client["rejectedCommands"].add(method.operation);
+      h.client.testHooks.rejectedCommands.add(method.operation);
       const pending = method.invoke(h.storage);
       await flushDispatch();
       expect(h.socket.frames).toEqual([method.literal]);

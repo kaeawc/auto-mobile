@@ -29,13 +29,13 @@ test("template names are deterministic, reserved, and sensitive to every key fie
   expect(isTemplateSimName("AutoMobile-phone")).toBe(false);
   expect(isTemplateSimName("automobile-template-mine")).toBe(false);
 });
-test("clone flag is tri-state with a single disabled default", () => {
+test("clone flag is off by default and opt-in with 1/true", () => {
   expect(TEMPLATE_CLONE_DEFAULT_ENABLED).toBe(false);
   expect(resolveTemplateCloneEnabled({})).toBe(false);
-  for (const value of ["1", "true"]) {
+  for (const value of ["1", "true", " TRUE "]) {
     expect(resolveTemplateCloneEnabled({ AUTOMOBILE_IOS_TEMPLATE_CLONE: value })).toBe(true);
   }
-  for (const value of ["0", "false", "invalid"]) {
+  for (const value of ["0", "false", "invalid", ""]) {
     expect(resolveTemplateCloneEnabled({ AUTOMOBILE_IOS_TEMPLATE_CLONE: value })).toBe(false);
   }
 });

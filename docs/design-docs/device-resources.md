@@ -347,7 +347,15 @@ The field is omitted when no catalog resource is disabled and on Android results
 Reconciliation uses its final observed snapshot. Booted-device MCP resources remain
 free of resource probes.
 
-startDevice will surface the same field once #15217 applies a default profile.
+`startDevice` and `provisionDevice` also report top-level `disabledResources` for
+newly created iOS simulators. This lists catalog resources disabled before first
+boot by the default `minimal` profile and explicit requests (explicit enabled
+resources remove profile entries). It records the successful host disabled-database
+write; it is not independently re-read, unlike `setDeviceResources` verification.
+It is omitted for adopted devices, Android, failed writes and empty profiles, and
+appears on both boot and no-boot provisioning paths alongside any
+`resources.disabledResources` post-boot evidence. Set
+`AUTOMOBILE_IOS_PREBOOT_LEAN_PROFILE=none` to opt out of the default profile.
 
 | Resource               | Launchd labels                                                                                                                                                                        | AutoMobile functionality affected                                                                                                                                                                                                                                                                                                                                             | App functionality affected                                                                                         | Confidence                                                                                        |
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |

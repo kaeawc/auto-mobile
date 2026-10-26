@@ -1,127 +1,112 @@
 {
   "spec": {
-    "id": "motion-v2",
+    "id": "a",
     "window": {
       "placement": {
         "type": "fullscreen"
       }
     },
     "state": {
-      "liked": false,
-      "drawer": false
+      "show": true
     },
     "root": {
       "type": "column",
+      "stagger": {
+        "ms": 60,
+        "order": "center"
+      },
       "children": [
         {
-          "type": "icon",
-          "id": "heart",
-          "name": "favorite",
-          "animate": {
-            "durationMs": 250,
-            "easing": "spring"
+          "type": "text",
+          "text": "Header",
+          "visibleWhen": {
+            "key": "show",
+            "equals": true
           },
-          "style": {
-            "color": "onSurface",
-            "scale": 1
+          "transition": {
+            "type": "blurReplace",
+            "delayMs": 0
+          }
+        },
+        {
+          "type": "text",
+          "text": "Row 1",
+          "visibleWhen": {
+            "key": "show",
+            "equals": true
           },
-          "styleWhen": [
+          "transition": {
+            "type": "fade",
+            "delayMs": 120
+          }
+        },
+        {
+          "type": "text",
+          "text": "Row 2",
+          "visibleWhen": {
+            "key": "show",
+            "equals": true
+          },
+          "transition": "blurReplace"
+        },
+        {
+          "type": "text",
+          "text": "Row 3",
+          "visibleWhen": {
+            "key": "show",
+            "equals": true
+          },
+          "transition": {
+            "type": "slideStart"
+          }
+        },
+        {
+          "type": "box",
+          "visibleWhen": {
+            "key": "show",
+            "equals": true
+          },
+          "stagger": {
+            "ms": 0
+          },
+          "children": [
             {
-              "when": {
-                "key": "liked",
+              "type": "text",
+              "text": "Row 4",
+              "visibleWhen": {
+                "key": "show",
                 "equals": true
-              },
-              "style": {
-                "color": "error",
-                "scale": 1.4,
-                "rotation": -10
               }
             }
-          ],
-          "onTap": [
-            {
-              "type": "toggle",
-              "key": "liked"
-            }
           ]
         },
         {
-          "type": "box",
-          "id": "drawer",
-          "visibleWhen": {
-            "key": "drawer",
-            "equals": true
+          "type": "row",
+          "stagger": {
+            "ms": 40,
+            "order": "reverse"
           },
-          "transition": "slideStart",
-          "children": [
-            {
-              "type": "text",
-              "text": "Drawer"
-            }
-          ]
-        },
-        {
-          "type": "box",
-          "visibleWhen": {
-            "key": "drawer",
-            "equals": true
-          },
-          "transition": "slideEnd",
-          "children": [
-            {
-              "type": "text",
-              "text": "Panel"
-            }
-          ]
-        },
-        {
-          "type": "box",
-          "visibleWhen": {
-            "key": "liked",
-            "equals": true
-          },
-          "transition": "scale",
-          "children": [
-            {
-              "type": "text",
-              "text": "Liked!"
-            }
-          ]
-        },
-        {
-          "type": "image",
-          "asset": "photo",
-          "contentScale": "fit",
-          "zoomable": {
-            "maxScale": 4
-          },
-          "contentDescription": "Photo"
-        },
-        {
-          "type": "button",
-          "label": "Menu",
-          "onTap": [
-            {
-              "type": "toggle",
-              "key": "drawer"
-            }
-          ],
-          "animate": {},
-          "style": {
-            "alpha": 1
-          },
-          "styleWhen": [
-            {
-              "when": {
-                "key": "drawer",
-                "equals": true
+          "repeat": {
+            "items": [
+              {
+                "n": "a"
               },
-              "style": {
-                "alpha": 0.6,
-                "offset": {
-                  "x": 8,
-                  "y": 0
-                }
+              {
+                "n": "b"
+              },
+              {
+                "n": "c"
+              }
+            ],
+            "as": "item"
+          },
+          "children": [
+            {
+              "type": "text",
+              "text": "Row 5",
+              "visibleWhen": {
+                "key": "show",
+                "equals": true
               }
             }
           ]
@@ -130,7 +115,7 @@
     }
   },
   "options": {
-    "supportedCapabilities": []
+    "supportedCapabilities": ["prototype_choreography_v1"]
   },
   "expectedPath": "$"
 }

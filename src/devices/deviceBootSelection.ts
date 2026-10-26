@@ -1,3 +1,4 @@
+import type { ConfigurableDeviceResource } from "../models/DeviceResourceConfiguration";
 import type { BootedDevice, DeviceInfo, Platform } from "../models";
 import { ActionableError } from "../models";
 import type {
@@ -289,6 +290,7 @@ export interface DeviceBootProgress {
 }
 
 export interface DeviceBootResult {
+  prebootDisabledResources?: readonly ConfigurableDeviceResource[];
   device: BootedDevice;
   source: "booted" | "cold-boot";
   runningBeforeCall?: true;

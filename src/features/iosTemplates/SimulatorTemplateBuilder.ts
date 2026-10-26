@@ -20,6 +20,7 @@ import type { SimulatorTemplateLock } from "./SimulatorTemplateLock";
 import type { TemplateSimulatorClient } from "./SimulatorCreationService";
 import type { XcodeVersionReader } from "./XcodeVersionReader";
 import {
+  TEMPLATE_CPU_MEAN_WINDOW_MS,
   TEMPLATE_CPU_THRESHOLD_PERCENT,
   TEMPLATE_MAX_WAIT_MS,
   TEMPLATE_QUIET_WINDOW_MS,
@@ -74,13 +75,14 @@ export class SimulatorTemplateBuilder {
         return "retry later";
       }
       const xcodeBuild = key.xcodeBuild;
-      if (await this.readyExists(previous, xcodeBuild, signal)) {
-        return "ready";
+      const untracked = await this.scanUntracked(key, previous, signal);
+      const ready = await this.readyStatus(previous, xcodeBuild, signal);
+      if (ready) {
+        return ready;
       }
       if (previous?.udid) {
         await deleteTemplateSimulator(this.deps.client, key, previous.udid, signal);
       }
-      await this.removeCrashLeftovers(key, signal);
       const manifest: SimulatorTemplateManifest = {
         attempt: previous?.attempt ?? 0,
         key,
@@ -90,7 +92,7 @@ export class SimulatorTemplateBuilder {
         runtimeBuild: key.runtimeBuild,
         builtAtMs: this.deps.timer.now(),
       };
-      return await this.populate(manifest, signal);
+      return await this.populate(manifest, untracked, signal);
     } finally {
       release();
     }
@@ -111,42 +113,61 @@ export class SimulatorTemplateBuilder {
     const xcode = await this.deps.xcode.readBuild(signal);
     return xcode !== "unknown" && xcode === key.xcodeBuild;
   }
-  private async removeCrashLeftovers(
+  private async scanUntracked(
     key: SimulatorTemplateKey,
+    previous: SimulatorTemplateManifest | undefined,
     signal?: AbortSignal,
-  ): Promise<void> {
+  ): Promise<ReadonlySet<string>> {
+    const untracked = new Set<string>();
     const list = await this.deps.client.listSimulators(undefined, signal);
     for (const sim of Object.values(list.devices).flat()) {
-      if (sim.name === templateName(key)) {
-        await deleteTemplateSimulator(this.deps.client, key, sim.udid, signal);
+      if (sim.name === templateName(key) && sim.udid !== previous?.udid) {
+        untracked.add(sim.udid);
+        logger.warn(
+          `leaving untracked template simulator ${sim.udid} (${sim.state}); not owned by this manifest, remove with the ios-templates clean command`,
+        );
       }
     }
+    return untracked;
   }
-  private async readyExists(
+  private async readyStatus(
     manifest: SimulatorTemplateManifest | undefined,
     xcodeBuild: string,
     signal?: AbortSignal,
-  ): Promise<boolean> {
-    if (
-      manifest?.state !== "ready" ||
-      manifest.xcodeBuild !== xcodeBuild ||
-      manifest.runtimeBuild !== manifest.key.runtimeBuild ||
-      manifest.xcodeBuild !== manifest.key.xcodeBuild
-    ) {
-      return false;
+  ): Promise<TemplateBuildResult | undefined> {
+    if (!manifest) {
+      return undefined;
     }
     const list = await this.deps.client.listSimulators(undefined, signal);
-    return Object.values(list.devices)
+    const sim = Object.values(list.devices)
       .flat()
-      .some(
-        (sim) =>
-          sim.udid === manifest.udid &&
-          sim.name === templateName(manifest.key) &&
-          sim.state === "Shutdown",
-      );
+      .find((sim) => sim.udid === manifest.udid && sim.name === templateName(manifest.key));
+    if (sim && sim.state !== "Shutdown") {
+      if (manifest.state === "ready" || manifest.state === "stale") {
+        logger.warn(`Template ${sim.udid} is ${sim.state}; possibly in use, retry later`);
+        return "retry later";
+      }
+      // The host-global key lock excludes a live writer for this manifest-owned simulator.
+      try {
+        await this.deps.client.shutdownSimulator(sim.udid, signal);
+      } catch (error) {
+        logger.warn(
+          `Could not shut down interrupted template ${sim.udid}: ${errorMessage(error)}`,
+          error,
+        );
+      }
+    }
+    return sim &&
+      manifest.state === "ready" &&
+      manifest.xcodeBuild === xcodeBuild &&
+      manifest.runtimeBuild === manifest.key.runtimeBuild &&
+      manifest.xcodeBuild === manifest.key.xcodeBuild
+      ? "ready"
+      : undefined;
   }
   private async populate(
     manifest: SimulatorTemplateManifest,
+    untracked: ReadonlySet<string>,
     signal?: AbortSignal,
   ): Promise<TemplateBuildResult> {
     const { client, store, timer } = this.deps;
@@ -181,6 +202,7 @@ export class SimulatorTemplateBuilder {
       await this.deps.settle.waitUntilSettled(manifest.udid, {
         quietWindowMs: TEMPLATE_QUIET_WINDOW_MS,
         cpuThresholdPercent: TEMPLATE_CPU_THRESHOLD_PERCENT,
+        cpuMeanWindowMs: TEMPLATE_CPU_MEAN_WINDOW_MS,
         maxWaitMs: TEMPLATE_MAX_WAIT_MS,
         signal,
       });
@@ -209,17 +231,26 @@ export class SimulatorTemplateBuilder {
       });
       return "ready";
     } catch (error) {
-      return this.recordFailure(manifest, error);
+      return this.recordFailure(manifest, untracked, error, signal?.aborted === true);
     }
   }
   private async recordFailure(
     manifest: SimulatorTemplateManifest,
+    untracked: ReadonlySet<string>,
     error: unknown,
+    interrupted = false,
   ): Promise<TemplateBuildResult> {
     const { store, timer } = this.deps;
     logger.warn(`Template build did not complete: ${errorMessage(error)}`, error);
-    const retainedUdid = await runWithAbortSignal(undefined, () => this.removePartial(manifest));
+    const retainedUdid = await runWithAbortSignal(undefined, () =>
+      this.removePartial(manifest, untracked),
+    );
     const refused = error instanceof BootCapacityExhaustedError;
+    if (interrupted) {
+      // The user stopped the build: it is not a failed attempt, so no retry backoff (#15312).
+      await store.write({ ...manifest, udid: retainedUdid, state: "failed", failure: undefined });
+      return "failed";
+    }
     const attempt = (manifest.attempt ?? 0) + (refused ? 0 : 1);
     const delay = refused
       ? 60_000
@@ -239,7 +270,10 @@ export class SimulatorTemplateBuilder {
     return refused ? "retry later" : "failed";
   }
 
-  private async removePartial(manifest: SimulatorTemplateManifest): Promise<string> {
+  private async removePartial(
+    manifest: SimulatorTemplateManifest,
+    untracked: ReadonlySet<string>,
+  ): Promise<string> {
     let udid = manifest.udid;
     try {
       if (!udid) {
@@ -247,7 +281,8 @@ export class SimulatorTemplateBuilder {
         udid =
           Object.values(list.devices)
             .flat()
-            .find((sim) => sim.name === templateName(manifest.key))?.udid ?? "";
+            .find((sim) => sim.name === templateName(manifest.key) && !untracked.has(sim.udid))
+            ?.udid ?? "";
       }
       if (udid) {
         await deleteTemplateSimulator(this.deps.client, manifest.key, udid);

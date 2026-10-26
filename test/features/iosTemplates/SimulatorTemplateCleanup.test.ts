@@ -6,6 +6,7 @@ function rig(held: boolean) {
   fake.ready();
   fake.manifest!.state = "building";
   let released = false;
+  const acquiredNames: string[] = [];
   const lock = {
     acquire: async () =>
       held
@@ -13,10 +14,14 @@ function rig(held: boolean) {
         : () => {
             released = true;
           },
-    acquireName: async () => (held ? undefined : () => {}),
+    acquireName: async (name: string) => {
+      acquiredNames.push(name);
+      return held ? undefined : () => {};
+    },
   };
   return {
     fake,
+    acquiredNames,
     cleanup: new SimulatorTemplateCleanup(fake.client, fake.store, lock),
     released: () => released,
   };
@@ -41,7 +46,7 @@ test("key cleanup does not delete other templates", async () => {
   expect(released()).toBe(true);
 });
 test("all cleanup removes orphan templates and preserves ordinary work sims", async () => {
-  const { fake, cleanup } = rig(false);
+  const { fake, cleanup, acquiredNames } = rig(false);
   fake.client.listSimulators = async () => ({
     devices: {
       ios: [
@@ -58,6 +63,7 @@ test("all cleanup removes orphan templates and preserves ordinary work sims", as
   await cleanup.clean({ all: true });
   expect(fake.events).not.toContain("delete:11111111-1111-1111-1111-111111111111");
   expect(fake.events).toContain("delete:orphan");
+  expect(acquiredNames).toContain("automobile-template-abcdef12");
   expect(fake.events).not.toContain("delete:work");
 });
 test("cleanup preserves a user simulator at a manifest UDID with a foreign name", async () => {

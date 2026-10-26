@@ -1,3 +1,4 @@
+import type { SimulatorContainerOwnershipOptions } from "../../utils/ios-cmdline-tools/simulatorOwnContainer";
 import {
   IOS_SDK_REDACTED_VALUE,
   iosPreferenceType,
@@ -101,6 +102,7 @@ export type IosPreferenceStore =
     };
 
 export interface AppPreferencesDependencies {
+  containerOwnership?: SimulatorContainerOwnershipOptions;
   adbFactory?: AdbClientFactory;
   simctl?: IosSimulatorPreferenceClient | null;
   timer?: Timer;

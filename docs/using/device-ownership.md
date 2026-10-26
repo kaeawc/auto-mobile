@@ -159,7 +159,7 @@ the windows with the variables in
 | `restart-recovery-timeout`                                                                              | Yes        | `session_ownership_lost`, without `idle`: the device-restart recovery window ended without a resume. Acquire a new session.                                                                                                                                         |
 | `device-restart:<device>`                                                                               | No         | The owner can resume the same UUID within the fixed 180 s recovery window. If it lapses unresumed, the session ends terminally as `restart-recovery-timeout`; an earlier idle deadline ends it as `expired` with `idle: true`.                                      |
 | `superseded`                                                                                            | No         | Nothing: a newer incarnation of the same UUID holds the device.                                                                                                                                                                                                     |
-| `plan-auto-release`                                                                                     | No         | The plan freed the device. Naming the same session UUID in a later plan re-issues the session; another client may take the device in between. It is not rehydrated after a daemon restart.                                                                          |
+| `plan-auto-release`                                                                                     | No         | The plan freed a device it acquired; caller-held sessions stay held. Naming the same session UUID in a later plan re-issues the session; another client may take the device in between. It is not rehydrated after a daemon restart.                                |
 | `session-creation-timeout`, `allocation-rollback`, `device-disconnected-during-session-create:<device>` | No         | The session was never handed out; the UUID may be created again.                                                                                                                                                                                                    |
 | `expired`                                                                                               | No         | A non-terminal row past its idle deadline: a control call naming it is refused with `session_ownership_lost`, reason `expired` and `idle: true`; heartbeat and `daemon/sessionInfo` answer `daemon_session_not_found`, `releaseReason: "expired"` and `idle: true`. |
 
@@ -250,8 +250,9 @@ in error stays `error`. `idle + assigned + error` equals the total.
 
 Cold boots are admitted against host capacity. Each platform has its own limit on
 booted devices: for Android, the smaller of half the host RAM divided by the
-measured per-device memory and half the CPU cores; for iOS, the smaller of that
-memory budget and a settled-CPU budget (about 0.055 core per simulator, half the
+measured per-device memory and half the CPU cores; for iOS, the smaller of
+60% of host RAM divided by the measured per-simulator memory footprint (about 2.4 GiB;
+2.5 GiB when unmeasured) and a settled-CPU budget (about 0.1 core per simulator, half the
 cores), at least 1. Every booted emulator or
 simulator counts, including ones started outside AutoMobile. A boot over the
 count limit is not queued: it fails at once with the retryable `capacity_exhausted`,

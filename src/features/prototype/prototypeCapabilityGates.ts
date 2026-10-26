@@ -13,6 +13,7 @@ import {
   PROTOTYPE_SEARCH_BAR_CAPABILITY,
   PROTOTYPE_LOADING_STATES_CAPABILITY,
   PROTOTYPE_MOTION_V2_CAPABILITY,
+  PROTOTYPE_CHOREOGRAPHY_CAPABILITY,
   PROTOTYPE_CHART_CAPABILITY,
   PROTOTYPE_CHAT_SCROLL_CAPABILITY,
   PROTOTYPE_RICH_TEXT_CAPABILITY,
@@ -80,6 +81,10 @@ import {
   prototypeLoadingStatesFields,
   prototypeLoadingStatesUnsupportedMessage,
 } from "./prototypeLoadingStates";
+import {
+  prototypeChoreographyFields,
+  prototypeChoreographyUnsupportedMessage,
+} from "./prototypeChoreography";
 import { prototypeMotionV2Fields, prototypeMotionV2UnsupportedMessage } from "./prototypeMotionV2";
 import { prototypeChartFields, prototypeChartUnsupportedMessage } from "./prototypeChart";
 import { prototypeRichTextFields, prototypeRichTextUnsupportedMessage } from "./prototypeRichText";
@@ -175,6 +180,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_MOTION_V2_CAPABILITY,
     fields: prototypeMotionV2Fields,
     unsupportedMessage: prototypeMotionV2UnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_CHOREOGRAPHY_CAPABILITY,
+    fields: prototypeChoreographyFields,
+    unsupportedMessage: prototypeChoreographyUnsupportedMessage,
   },
   {
     capability: PROTOTYPE_CHART_CAPABILITY,

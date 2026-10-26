@@ -34,6 +34,7 @@ import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { reportToolDispatched } from "../../utils/ToolDispatchContext";
 import { throwIfAborted } from "../../utils/toolUtils";
 import { SelectionCaptureState, SelectionStateTracker } from "../navigation/SelectionStateTracker";
+import { tapFailureNeedsSearchDebugContext } from "./coordinateTapDispatch";
 import { buildElementSearchDebugContext } from "../utility/ElementSearchDebugContext";
 import { type Timer } from "../../utils/SystemTimer";
 import { type ScreenReaderNavigationResult } from "../talkback/TalkBackTapStrategy";
@@ -327,11 +328,13 @@ export class TapExecution {
     }
 
     // Build debug context if debug mode is enabled
-    const debugContext = await buildElementSearchDebugContext(this.host.device(), {
-      text: options.text,
-      resourceId: options.elementId,
-      container: options.container,
-    });
+    const debugContext = tapFailureNeedsSearchDebugContext(error)
+      ? await buildElementSearchDebugContext(this.host.device(), {
+          text: options.text,
+          resourceId: options.elementId,
+          container: options.container,
+        })
+      : undefined;
 
     // Return error result with debug info instead of throwing
     return this.host.readScopeFailureResult(

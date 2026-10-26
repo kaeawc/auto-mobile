@@ -146,7 +146,12 @@ export class IosSimFleetCostCollector implements FleetCostSource {
         )
       : new Map<string, SimulatorProcessCost>();
     const simulators = inventory.map((entry) => this.costFor(entry, snapshot, attribution));
-    const errors = snapshot.error ? [`host snapshot: ${snapshot.error}`] : [];
+    const errors = [
+      ...(snapshot.error ? [`host snapshot: ${snapshot.error}`] : []),
+      ...(snapshot.value?.footprintError && booted.length > 0
+        ? [`memory footprint: ${snapshot.value.footprintError}`]
+        : []),
+    ];
     return {
       collectedAtMs,
       host: snapshot.value?.resources,
@@ -219,10 +224,16 @@ function emptyReport(collectedAtMs: number, errors: string[]): FleetCostReport {
 
 function totalsOf(simulators: readonly SimulatorCost[]): FleetCostTotals {
   const measured = simulators.filter((sim) => sim.quality === "measured");
+  const footprints = measured.flatMap((sim) =>
+    sim.process?.footprintBytes === undefined ? [] : [sim.process.footprintBytes],
+  );
   return {
     bootedCount: simulators.filter((sim) => sim.state === BOOTED_STATE).length,
     measuredCount: measured.length,
     rssBytes: measured.reduce((sum, sim) => sum + (sim.process?.rssBytes ?? 0), 0),
+    ...(footprints.length > 0
+      ? { footprintBytes: footprints.reduce((sum, bytes) => sum + bytes, 0) }
+      : {}),
     cpuPercent: measured.reduce((sum, sim) => sum + (sim.process?.cpuPercent ?? 0), 0),
     diskBytes: simulators.reduce((sum, sim) => sum + (sim.diskBytes ?? 0), 0),
   };

@@ -1,4 +1,9 @@
 import {
+  resolveOwnAppDataContainer,
+  SimulatorContainerUnresolvedError,
+  type SimulatorContainerOwnershipOptions,
+} from "../utils/ios-cmdline-tools/simulatorOwnContainer";
+import {
   type AppFileFileSystem,
   type AppFileListProvider,
   type AppFileProviderListRequest,
@@ -54,6 +59,7 @@ export class IosSimulatorAppFileProvider
   constructor(
     private readonly simctlFactory: (device: BootedDevice) => AppFileSimCtl,
     private readonly fileSystem: AppFileFileSystem,
+    private readonly ownership: SimulatorContainerOwnershipOptions = {},
   ) {}
 
   async putFile(request: PutAppFileProviderRequest): Promise<AppFileProviderWriteResult> {
@@ -357,17 +363,28 @@ export class IosSimulatorAppFileProvider
     }
 
     const simctl = this.simctlFactory(device);
-    const result = await executeIosAppContainerCommand(
-      simctl,
-      `get_app_container ${shellQuote(device.deviceId)} ${shellQuote(appId)} data`,
-      { device, appId, container, operation },
-    );
-    const dataRoot = result.stdout.trim();
-    if (!dataRoot) {
-      throw new ActionableError(
-        `Unable to resolve iOS simulator app data container for ${appId} on ${device.deviceId}. ` +
-          "Confirm the simulator is booted and the app is installed.",
-      );
+    let dataRoot: string;
+    try {
+      dataRoot = await resolveOwnAppDataContainer({
+        ...this.ownership,
+        deviceId: device.deviceId,
+        bundleId: appId,
+        run: (args) =>
+          executeIosAppContainerCommand(simctl, args.map(shellQuote).join(" "), {
+            device,
+            appId,
+            container,
+            operation,
+          }),
+      });
+    } catch (error) {
+      if (error instanceof SimulatorContainerUnresolvedError) {
+        throw new ActionableError(
+          `Unable to resolve iOS simulator app data container for ${appId} on ${device.deviceId}. ` +
+            "Confirm the simulator is booted and the app is installed.",
+        );
+      }
+      throw error;
     }
 
     return join(dataRoot, iosContainerRelativePath(container, operation, appId, device.platform));

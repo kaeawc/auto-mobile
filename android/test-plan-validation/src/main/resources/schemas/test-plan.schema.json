@@ -1914,7 +1914,90 @@
                 "doze": { "type": "string", "enum": ["on", "unset"] },
                 "thermal": { "type": "string", "enum": ["throttling", "critical", "unset"] },
                 "storage": { "type": "string", "enum": ["low", "full", "unset"] },
-                "dontKeepActivities": { "type": "string", "enum": ["on", "unset"] }
+                "dontKeepActivities": { "type": "string", "enum": ["on", "unset"] },
+                "revokePermission": {
+                  "oneOf": [
+                    { "type": "string", "const": "unset" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "package": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$" },
+                        "permission": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.]*$" }
+                      },
+                      "required": ["package", "permission"],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "disablePackage": {
+                  "oneOf": [
+                    { "type": "string", "const": "unset" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "package": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$" }
+                      },
+                      "required": ["package"],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "corruptAppFile": {
+                  "oneOf": [
+                    { "type": "string", "const": "unset" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "package": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$" },
+                        "path": { "type": "string", "pattern": "^(?!\\.{1,2}(?:/|$))[A-Za-z0-9_.-]+(?:/(?!\\.{1,2}(?:/|$))[A-Za-z0-9_.-]+)*$" },
+                        "mode": { "type": "string", "enum": ["overwrite", "truncate"] }
+                      },
+                      "required": ["package", "path", "mode"],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "killApp": {
+                  "oneOf": [
+                    { "type": "string", "const": "unset" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "package": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$" },
+                        "mode": { "type": "string", "enum": ["background", "forceStop"] }
+                      },
+                      "required": ["package", "mode"],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "trimMemory": {
+                  "oneOf": [
+                    { "type": "string", "const": "unset" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "package": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$" },
+                        "level": { "type": "string", "enum": ["HIDDEN", "RUNNING_MODERATE", "BACKGROUND", "RUNNING_LOW", "MODERATE", "RUNNING_CRITICAL", "COMPLETE"] }
+                      },
+                      "required": ["package", "level"],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "clearPackageData": {
+                  "oneOf": [
+                    { "type": "string", "const": "unset" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "package": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$" }
+                      },
+                      "required": ["package"],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
               },
               "additionalProperties": false
             },

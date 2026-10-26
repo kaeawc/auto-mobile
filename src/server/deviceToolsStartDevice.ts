@@ -1,3 +1,5 @@
+import { disabledDeviceResourceReport } from "../utils/iosDeviceResourceImpact";
+import type { DeviceBootResult } from "../devices/deviceBootSelection";
 import { captureAutolockPolicy } from "../daemon/deviceAutolockPolicy";
 import { getProvisionedDeviceTransportFence } from "../utils/provisionedDeviceTransportFence";
 import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
@@ -259,7 +261,7 @@ const bootAndPrepareDevice = async (
   recordStartedDevice(state.boot, options, sessionId);
 
   refreshResourcesAfterCommittedBoot(state.boot, deps);
-  return buildBootedResponse(state.boot.device, state.boot.source, perf, sessionId, {
+  return buildBootedResponse(state.boot, perf, sessionId, {
     readiness: {
       level: "automationReady",
       checks: ["bootCompleted", "runnerReady", "sessionBound"],
@@ -800,8 +802,7 @@ export function bootSourceLabel(source: "booted" | "cold-boot"): string {
 }
 
 function buildBootedResponse(
-  device: BootedDevice,
-  source: "booted" | "cold-boot",
+  { device, source, provisioned, prebootDisabledResources }: DeviceBootResult,
   perf: ReturnType<typeof createPerformanceTracker>,
   sessionId: string,
   {
@@ -837,6 +838,13 @@ function buildBootedResponse(
   return createStructuredToolResponse({
     message: `${device.platform} '${device.name}' is ready (${bootSourceLabel(source)})`,
     ...projected,
+    ...disabledDeviceResourceReport(
+      Object.fromEntries(
+        (provisioned && device.platform === "ios" ? (prebootDisabledResources ?? []) : []).map(
+          (key) => [key, { state: "disabled" }],
+        ),
+      ),
+    ),
     deviceIdentity: deviceIdentityPayload(device, sourceImage),
     processId: processId ?? null,
     isReady: true,

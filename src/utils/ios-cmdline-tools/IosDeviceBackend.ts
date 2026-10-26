@@ -1,3 +1,4 @@
+import type { SimulatorContainerOwnershipOptions } from "./simulatorOwnContainer";
 import type { DeviceUrlLauncher } from "./DeviceAppManager";
 import { logger } from "../logger";
 import { combineWithAmbientAbort } from "../AbortContext";
@@ -251,6 +252,7 @@ export interface IosClearDataReinstaller {
 }
 
 export interface IosClearDataBackendDeps {
+  containerOwnership?: SimulatorContainerOwnershipOptions;
   simctl: Pick<SimCtlClient, "terminateApp" | "executeCommandArgs" | "listAppsOrThrow">;
   createReinstaller: () => IosClearDataReinstaller;
   rm?: typeof fs.rm;

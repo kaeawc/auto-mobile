@@ -61,7 +61,7 @@ describe("Android CtrlProxy device event wire (#10067, #10068)", () => {
   let client: AndroidCtrlProxyClient;
 
   async function dispatch(frame: string): Promise<void> {
-    await client["handleWebSocketMessage"](frame);
+    await client.testHooks.handleWebSocketMessage(frame);
   }
 
   async function installedKeys(): Promise<string[]> {
@@ -88,7 +88,7 @@ describe("Android CtrlProxy device event wire (#10067, #10068)", () => {
         sdkEventIngestor: ingestor,
       },
     );
-    client["workProfileMonitor"] = monitor;
+    client.testHooks.workProfileMonitor = monitor;
   });
 
   describe("package_event userId", () => {

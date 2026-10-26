@@ -959,7 +959,7 @@ export class DeviceAppManager implements DeviceUrlLauncher, DevicectlVersionSour
         // A killed lookup says nothing about whether the app exists; a caller that must not read
         // "unknown" as "absent" opts in to the typed timeout instead of the null.
         throw new SimctlCommandTimeoutError(
-          `simctl get_app_container for ${bundleId} timed out after ${SIMULATOR_APP_CONTAINER_TIMEOUT_MS}ms`,
+          `simctl app container lookup for ${bundleId} timed out after ${SIMULATOR_APP_CONTAINER_TIMEOUT_MS}ms`,
           { cause: error },
         );
       }

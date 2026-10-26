@@ -4,10 +4,23 @@ import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { defaultTimer } from "../utils/SystemTimer";
 import type { ForeignAndroidSerialSource } from "./deviceDiscoveryContracts";
 
+let defaultSource: ForeignAndroidSerialSource | null = null;
+
+/** Publish the live daemon source without a devices-to-daemon dependency. */
+export function registerDefaultForeignAndroidSerialSource(
+  source: ForeignAndroidSerialSource | null,
+): () => void {
+  defaultSource = source;
+  return () => {
+    if (defaultSource === source) {
+      defaultSource = null;
+    }
+  };
+}
+
 /**
- * Bind a lazily-set ownership source into the resolver the Android scanner calls. A failed or
- * absent source means "nothing is foreign": ownership is positive evidence only, so enrichment
- * stays conservative. Cancellation propagates to the caller.
+ * Read the explicit source or current registration on every scan. Without positive ownership
+ * evidence, enrich normally. Cancellation propagates to the caller.
  */
 export function createForeignAndroidSerialResolver(
   source: () => ForeignAndroidSerialSource | undefined,
@@ -15,7 +28,8 @@ export function createForeignAndroidSerialResolver(
   return async (serials, signal) => {
     try {
       return await raceWithDeadline(
-        source()?.foreignSerials(serials, signal) ?? Promise.resolve(new Set<string>()),
+        (source() ?? defaultSource)?.foreignSerials(serials, signal) ??
+          Promise.resolve(new Set<string>()),
         { timer: defaultTimer, signal, label: "Android inventory ownership refresh" },
       );
     } catch (error) {

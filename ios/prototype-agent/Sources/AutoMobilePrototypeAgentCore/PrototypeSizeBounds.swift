@@ -8,6 +8,8 @@ enum PrototypeSizeBounds {
     static let maxTypography = 1000.0
     static let maxElevation = 1000.0
     static let maxDurationMs = 2000.0
+    static let maxTransitionDelayMs = 600.0
+    static let maxStaggerMs = 100.0
     static let maxZoomScale = 8.0
     static let maxStyleScale = 4.0
     static let maxRotation = 360.0
@@ -25,6 +27,8 @@ enum PrototypeSizeBounds {
                          "bottomStart": 0 ... maxLength, "bottomEnd": 0 ... maxLength],
         "border": ["width": 0 ... maxLength],
         "animate": ["durationMs": 0 ... maxDurationMs],
+        "transition": ["delayMs": 0 ... maxTransitionDelayMs],
+        "stagger": ["ms": 0 ... maxStaggerMs],
         "zoomable": ["maxScale": 1 ... maxZoomScale],
         "sheet": ["height": minPositive ... maxLength],
         "textSpanStyle": ["textSize": minPositive ... maxTypography,
@@ -84,6 +88,7 @@ enum PrototypeSizeBounds {
         "spec": ["root": "node", "window": "window"],
         "node": ["child": "node", "children": "node", "style": "style", "spans": "textSpan",
                  "styleWhen": "styleWhen", "animate": "animate", "zoomable": "zoomable",
+                 "transition": "transition", "stagger": "stagger",
                  "anchor": "anchor", "detents": "detent"],
         "styleWhen": ["style": "style"],
         "textSpan": ["style": "textSpanStyle"],

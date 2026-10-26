@@ -468,7 +468,21 @@ export function diffObserveResult(
 
   appendFieldChanges(diff, baseline, next, cfg);
 
+  // A diff can retain imported text from the previous screen in removed/from fields.
+  preserveImportedPrototypeContent(diff, baseline, next);
+
   return diff;
+}
+
+function preserveImportedPrototypeContent(
+  diff: ObserveDiff,
+  baseline: ObserveResult,
+  next: ObserveResult,
+): void {
+  const imported = next.importedPrototypeContent ?? baseline.importedPrototypeContent;
+  if (imported) {
+    diff.importedPrototypeContent = { ...imported };
+  }
 }
 
 /**

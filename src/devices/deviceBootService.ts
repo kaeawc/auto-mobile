@@ -650,7 +650,18 @@ export class DeviceBootService {
         },
       );
       created = provisioned;
-      return await this.bootImage(createdImageFor(provisioned, request), context, progress, true);
+      const boot = await this.bootImage(
+        createdImageFor(provisioned, request),
+        context,
+        progress,
+        true,
+      );
+      return {
+        ...boot,
+        ...(provisioned.prebootDisabledResources
+          ? { prebootDisabledResources: provisioned.prebootDisabledResources }
+          : {}),
+      };
     } catch (error) {
       await this.rollbackFailedProvisioning(request, error, {
         created,

@@ -1,7 +1,10 @@
+import {
+  simulatorOwnership,
+  simulatorDataContainer,
+} from "../../helpers/simulatorContainerFixture";
+import { resolveIosClearDataBackend } from "../../../src/utils/ios-cmdline-tools/IosDeviceBackend";
 import { createExecResult } from "../../../src/utils/execResult";
 import { describe, expect, test } from "bun:test";
-import { useScratchRoot } from "../../helpers/scratchRoot";
-import { promises as fs } from "fs";
 
 import * as path from "path";
 import { ClearAppData, IosAppReinstaller } from "../../../src/features/action/ClearAppData";
@@ -254,38 +257,43 @@ describe("ClearAppData", () => {
       deviceId: "00008030-001A2B3C0E11002E",
     };
     const bundleId = "com.example.app";
-    const scratch = useScratchRoot("automobile-clear-");
-
-    async function makeContainer(): Promise<string> {
-      const root = scratch.next();
-      await fs.mkdir(path.join(root, "Documents"), { recursive: true });
-      await fs.writeFile(path.join(root, "Documents", "state.json"), "{}");
-      await fs.mkdir(path.join(root, "Library", "Preferences"), { recursive: true });
-      await fs.writeFile(path.join(root, "Library", "Preferences", "app.plist"), "x");
-      await fs.mkdir(path.join(root, "tmp"), { recursive: true });
-      return root;
-    }
-
     describe("simulator", () => {
       test("terminates the app and wipes the data container folders", async () => {
-        const container = await makeContainer();
+        const container = simulatorDataContainer(simDevice.deviceId);
+        const directories = new Set([
+          container,
+          ...["Documents", "Library", "tmp"].map((folder) => path.join(container, folder)),
+        ]);
+        const removed: string[] = [];
         const fakeSimctl = new FakeSimctl();
         fakeSimctl.setContainerPath(bundleId, container);
 
-        const result = await new ClearAppData(simDevice, undefined, { simctl: fakeSimctl }).execute(
-          bundleId,
-        );
+        const result = await new ClearAppData(simDevice, undefined, {
+          simctl: fakeSimctl,
+          backendResolver: (id, deps) =>
+            resolveIosClearDataBackend(id, {
+              ...deps,
+              containerOwnership: simulatorOwnership,
+              rm: async (target, options) => {
+                if (typeof target !== "string") {
+                  throw new Error("Expected a string container path");
+                }
+                expect(options).toEqual({ recursive: true, force: true });
+                removed.push(target);
+                directories.delete(target);
+              },
+            }),
+        }).execute(bundleId);
 
         expect(result.success).toBe(true);
         expect(result.packageName).toBe(bundleId);
         expect(fakeSimctl.getMethodCalls("terminateApp")).toEqual([
           { bundleId, deviceId: simDevice.deviceId },
         ]);
-        await expect(fs.access(path.join(container, "Documents"))).rejects.toThrow();
-        await expect(fs.access(path.join(container, "Library"))).rejects.toThrow();
-        await expect(fs.access(path.join(container, "tmp"))).rejects.toThrow();
-        const containerStat = await fs.stat(container);
-        expect(containerStat.isDirectory()).toBe(true);
+        expect(removed.sort()).toEqual(
+          ["Documents", "Library", "tmp"].map((folder) => path.join(container, folder)).sort(),
+        );
+        expect([...directories]).toEqual([container]);
       });
 
       test("returns failure when the data container cannot be resolved for an installed app", async () => {

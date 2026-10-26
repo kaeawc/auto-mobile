@@ -1,3 +1,4 @@
+import type { ProcessTableFailure } from "../../devices/bootAdmission/processTableRetry";
 import { exponentialBackoff } from "../Backoff";
 import { errorMessage } from "../describeUnknownError";
 import { logger } from "../logger";
@@ -23,7 +24,7 @@ export interface EmulatorProcessTableSource {
   read(options: {
     signal?: AbortSignal;
     deadlineMs?: number;
-  }): Promise<{ value?: EmulatorHostProcessRow[]; error?: string }>;
+  }): Promise<{ value?: EmulatorHostProcessRow[]; error?: string; failure?: ProcessTableFailure }>;
 }
 export type EmulatorGroupProbe =
   | { kind: "own-group"; pgid: number }
@@ -57,12 +58,15 @@ export type EmulatorProcessStopOutcome =
       kind: "unidentified";
       identity: Extract<EmulatorProcessIdentity, { kind: "absent" | "ambiguous" | "unreadable" }>;
     };
-/** `unreadable` (failed, timed out, or unsupported table) is not proof that no process exists. */
+/** Unsupported hosts may use other deletion witnesses; failed supported reads must fail closed. */
 export type EmulatorSerialDescription =
+  | { kind: "unsupported"; detail: string }
   | { kind: "read"; candidates: Candidate[] }
   | { kind: "unreadable"; detail: string };
 export interface EmulatorProcessStopper {
   identify(target: StopTarget, options: StopOptions): Promise<EmulatorProcessIdentity>;
+  /** Read-only deletion fence: includes AVD processes even without an explicit port. */
+  describeAvd(avdName: string, options: StopOptions): Promise<EmulatorSerialDescription>;
   /** Diagnostic only. These candidates are never authorization to signal. */
   describeSerial(serial: string, options: StopOptions): Promise<EmulatorSerialDescription>;
   stop(target: StopTarget, options: StopOptions): Promise<EmulatorProcessStopOutcome>;
@@ -179,6 +183,25 @@ export class ProcessTableEmulatorProcessStopper implements EmulatorProcessStoppe
       candidates: candidatesForSerial(result.value, serial, this.options.ownPid ?? process.pid).map(
         ({ pid, command }) => ({ pid, command }),
       ),
+    };
+  }
+
+  async describeAvd(avdName: string, options: StopOptions): Promise<EmulatorSerialDescription> {
+    const result = await this.read(options);
+    if (result.failure?.reason === "unsupported-platform") {
+      return { kind: "unsupported", detail: result.failure.detail };
+    }
+    if (!result.value) {
+      return { kind: "unreadable", detail: result.error ?? "Process table unavailable" };
+    }
+    return {
+      kind: "read",
+      candidates: result.value
+        .filter(
+          (row) =>
+            isEmulatorQemuProcess(row) && emulatorProcessArguments(row.command).avdName === avdName,
+        )
+        .map(({ pid, command }) => ({ pid, command })),
     };
   }
 
@@ -441,7 +464,7 @@ export class ProcessTableEmulatorProcessStopper implements EmulatorProcessStoppe
 
   private async read(
     options: StopOptions,
-  ): Promise<{ value?: EmulatorHostProcessRow[]; error?: string }> {
+  ): Promise<{ value?: EmulatorHostProcessRow[]; error?: string; failure?: ProcessTableFailure }> {
     options.signal?.throwIfAborted();
     const controller = new AbortController();
     const signal = options.signal

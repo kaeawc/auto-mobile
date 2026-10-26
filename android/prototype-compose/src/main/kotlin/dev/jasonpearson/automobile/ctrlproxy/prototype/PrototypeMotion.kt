@@ -5,20 +5,14 @@ import android.database.ContentObserver
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
-import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.expandIn
-import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.interaction.InteractionSource
@@ -98,24 +92,12 @@ internal fun prototypeSlideOffset(transition: String, width: Int, rtl: Boolean):
 @Composable
 internal fun prototypeRtl(): Boolean = LocalLayoutDirection.current == LayoutDirection.Rtl
 
-/** The `visibleWhen` enter transition for a node's `transition`; absent keeps fade + expand. */
-internal fun prototypeEnterTransition(transition: String?, rtl: Boolean = false): EnterTransition =
-  when (transition) {
-    "none" -> EnterTransition.None
-    "fade" -> fadeIn()
-    "expand" -> expandIn()
-    "slide" -> slideInVertically() + fadeIn()
-    "slideStart",
-    "slideEnd" -> slideInHorizontally { prototypeSlideOffset(transition, it, rtl) }
-    "scale" -> scaleIn() + fadeIn()
-    else -> fadeIn() + expandIn()
-  }
-
 /** The `visibleWhen` exit transition for a node's `transition`; absent keeps fade + shrink. */
 internal fun prototypeExitTransition(transition: String?, rtl: Boolean = false): ExitTransition =
   when (transition) {
     "none" -> ExitTransition.None
-    "fade" -> fadeOut()
+    "fade",
+    "blurReplace" -> fadeOut()
     "expand" -> shrinkOut()
     "slide" -> slideOutVertically() + fadeOut()
     "slideStart",

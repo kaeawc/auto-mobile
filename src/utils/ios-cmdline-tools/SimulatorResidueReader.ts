@@ -3,6 +3,10 @@ import { posix } from "node:path";
 import { ActionableError } from "../../models/ActionableError";
 import { errorMessage } from "../describeUnknownError";
 import { sortedReaddir, sortedReaddirEntries } from "../io";
+import { logger } from "../logger";
+import { PlistClient, type PlistReader } from "./PlistClient";
+import { IOS_SIMULATOR_UUID_PATTERN } from "./iosDeviceType";
+import { resolveOwnAppDataContainer } from "./simulatorOwnContainer";
 import type { SimCtl } from "./SimCtlClient";
 import { parsePlist } from "./XctestrunPlist";
 
@@ -72,6 +76,8 @@ export interface SimulatorResidueFileSystem {
   listFiles(directory: string): Promise<string[] | null>;
   /** Names directly inside `directory`; null when the directory does not exist. */
   listEntries(directory: string): Promise<string[] | null>;
+  /** Container metadata identity; null when the directory or metadata cannot be proven. */
+  containerIdentifier(directory: string): Promise<string | null>;
   remove(path: string): Promise<void>;
 }
 
@@ -83,7 +89,6 @@ export interface SimulatorResidueReaderDependencies {
   timeoutMs?: number;
 }
 
-const SIMULATOR_UDID = /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/i;
 const DEFAULT_TIMEOUT_MS = 10_000;
 
 /**
@@ -129,21 +134,66 @@ async function listNodeFiles(directory: string, prefix = ""): Promise<string[] |
   return files.flat();
 }
 
-export const nodeSimulatorResidueFileSystem: SimulatorResidueFileSystem = {
-  listFiles: (directory) => listNodeFiles(directory),
-  listEntries: async (directory) => {
-    try {
-      return await sortedReaddir(directory);
-    } catch (error) {
-      if (isMissingDirectory(error)) {
-        // A directory the simulator never created holds nothing to leave behind.
+function isContainerMetadata(value: unknown): value is { MCMMetadataIdentifier: string } {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    "MCMMetadataIdentifier" in value &&
+    typeof value.MCMMetadataIdentifier === "string"
+  );
+}
+
+export function createNodeSimulatorResidueFileSystem(
+  plist: Pick<PlistReader, "readJsonFile">,
+): SimulatorResidueFileSystem {
+  return {
+    listFiles: (directory) => listNodeFiles(directory),
+    listEntries: async (directory) => {
+      try {
+        return await sortedReaddir(directory);
+      } catch (error) {
+        if (isMissingDirectory(error)) {
+          // A directory the simulator never created holds nothing to leave behind.
+          return null;
+        }
+        throw error;
+      }
+    },
+    containerIdentifier: async (directory) => {
+      try {
+        const metadata = await plist.readJsonFile(
+          posix.join(directory, ".com.apple.mobile_container_manager.metadata.plist"),
+        );
+        if (isContainerMetadata(metadata)) {
+          return metadata.MCMMetadataIdentifier;
+        }
+        logger.warn(
+          `Simulator container metadata has no string MCMMetadataIdentifier: ${directory}`,
+        );
+        return null;
+      } catch (error) {
+        if (isMissingDirectory(error) || isMissingContainer(error)) {
+          // Uncreated containers or metadata cannot establish ownership; callers refuse cleanup.
+          logger.debug(`Simulator container metadata is missing: ${errorMessage(error)}`);
+          return null;
+        }
+        logger.warn(
+          `Simulator container metadata could not be read for ${directory}: ${errorMessage(error)}`,
+          error,
+        );
         return null;
       }
-      throw error;
-    }
-  },
-  remove: (path) => rm(path, { recursive: true, force: false }),
-};
+    },
+    remove: (path) => rm(path, { recursive: true, force: false }),
+  };
+}
+
+let plistClient: PlistClient | undefined;
+
+export const nodeSimulatorResidueFileSystem = createNodeSimulatorResidueFileSystem({
+  readJsonFile: (path, options) => (plistClient ??= new PlistClient()).readJsonFile(path, options),
+});
 
 export class SimulatorResidueReader implements IosResidueInspector {
   constructor(private readonly dependencies: SimulatorResidueReaderDependencies) {}
@@ -152,10 +202,10 @@ export class SimulatorResidueReader implements IosResidueInspector {
     const dataRoot = this.dataRoot(deviceId);
     const { files } = this.dependencies;
     signal.throwIfAborted();
+    const safariRoot = await this.safariDocumentsRoot(deviceId, signal);
     const photos = (await files.listFiles(posix.join(dataRoot, "Media", "DCIM"))) ?? [];
     signal.throwIfAborted();
     const documents = (await files.listEntries(posix.join(dataRoot, "Documents"))) ?? [];
-    const safariRoot = await this.safariDocumentsRoot(deviceId, signal);
     const safariDocuments = safariRoot ? ((await files.listEntries(safariRoot)) ?? []) : [];
     signal.throwIfAborted();
     return {
@@ -203,7 +253,7 @@ export class SimulatorResidueReader implements IosResidueInspector {
   }
 
   private dataRoot(deviceId: string): string {
-    if (!SIMULATOR_UDID.test(deviceId)) {
+    if (!IOS_SIMULATOR_UUID_PATTERN.test(deviceId)) {
       throw new ActionableError(
         `iOS residue lookup requires a simulator UDID, received ${deviceId}`,
       );
@@ -213,28 +263,28 @@ export class SimulatorResidueReader implements IosResidueInspector {
 
   /** Safari's data container `Documents` path, or null when Safari has no container yet. */
   private async safariDocumentsRoot(deviceId: string, signal: AbortSignal): Promise<string | null> {
-    const dataRoot = this.dataRoot(deviceId);
-    let stdout: string;
     try {
-      stdout = (
-        await this.dependencies.simctl.executeCommandArgs(
-          ["get_app_container", deviceId, SAFARI_BUNDLE_ID, "data"],
-          this.dependencies.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-          signal,
-        )
-      ).stdout.trim();
+      const root = await resolveOwnAppDataContainer({
+        deviceId,
+        bundleId: SAFARI_BUNDLE_ID,
+        deviceSetRoot: this.dependencies.deviceSetRoot,
+        identity: this.dependencies.files,
+        run: (args) =>
+          this.dependencies.simctl.executeCommandArgs(
+            args,
+            this.dependencies.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+            signal,
+          ),
+      });
+      return posix.join(root, "Documents");
     } catch (error) {
       if (isMissingContainer(error)) {
-        // simctl reports a container Safari never created as ENOENT: nothing to leave behind.
+        // Safari has never created a container, so there is nothing to leave behind.
+        logger.debug(`Safari container is missing: ${errorMessage(error)}`);
         return null;
       }
       throw error;
     }
-    const containers = posix.join(dataRoot, "Containers", "Data", "Application");
-    if (!stdout.startsWith(`${containers}/`) || posix.normalize(stdout) !== stdout) {
-      throw new ActionableError("iOS residue cleanup refused an unproven file path");
-    }
-    return posix.join(stdout, "Documents");
   }
 
   private async readDefaults(

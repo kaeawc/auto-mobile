@@ -10,7 +10,7 @@ export const APP_FALLBACK_TOOLS = [
   "measureStartup",
 ] as const;
 
-function appFallback(
+export function appFallback(
   tool: (typeof APP_FALLBACK_TOOLS)[number],
   appId: unknown,
   keepData = false,

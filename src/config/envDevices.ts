@@ -165,13 +165,13 @@ export const DEVICES_ENV = {
     name: "AUTOMOBILE_IOS_TEMPLATE_CLONE",
     kind: "string",
     default: "false",
-    doc: "Provision iOS simulators from settled templates: 1/true enables; 0/false disables.",
+    doc: "Provision iOS simulators from settled templates; off by default (clones share Safari and system-app data, #15327): 1/true opts in.",
   },
   IOS_PREBOOT_LEAN_PROFILE: {
     name: "AUTOMOBILE_IOS_PREBOOT_LEAN_PROFILE",
     kind: "string",
-    default: "none",
-    doc: "Pre-boot iOS simulator lean profile: none, minimal, or catalog-cpu; unknown values use none.",
+    default: "minimal",
+    doc: "Pre-boot iOS simulator lean profile: minimal by default, none opts out, or catalog-cpu; unknown values use the default.",
   },
   IOS_SIM_CAPACITY_GATE: {
     name: "AUTOMOBILE_IOS_SIM_CAPACITY_GATE",

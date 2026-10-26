@@ -1,3 +1,4 @@
+import { FakeEmulatorProcessStopper } from "../fakes/FakeEmulatorProcessStopper";
 import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import { bindDevice } from "../../src/daemon/deviceBinding";
@@ -161,6 +162,7 @@ describe("startDevice System UI ANR recovery for an already-running AVD", () => 
       new DeviceSessionRegistry(timer, idGenerator),
     );
     setDeviceToolsDependencies({
+      androidEmulatorProcessStopper: new FakeEmulatorProcessStopper(),
       env,
       timer,
       lifecycleCoordinator,

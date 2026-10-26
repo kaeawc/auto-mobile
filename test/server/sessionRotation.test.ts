@@ -184,9 +184,9 @@ describe("session rotation restoration", () => {
     const h = harness();
     try {
       await h.manager.createSession("rotation-session", device.deviceId, "android");
-      await h.rotate.execute("landscape");
+      await h.rotate.execute("landscape", { lockOrientation: true });
       expect(h.adb.auto).toBe(0);
-      await h.rotate.execute("portrait");
+      await h.rotate.execute("portrait", { lockOrientation: true });
       await h.rotate.execute("landscape", { lockOrientation: true });
       expect(h.manager.getRotation("rotation-session")).toEqual({
         accelerometerRotation: 1,
@@ -217,7 +217,7 @@ describe("session rotation restoration", () => {
     h.adb.printStatesOutput = FOLD_STATES;
     try {
       await h.manager.createSession("rotation-session", device.deviceId, "android");
-      await h.rotate.execute("landscape");
+      await h.rotate.execute("landscape", { lockOrientation: true });
       expect(h.adb.lock).toBe("0:1:1:1:2:0");
       expect(h.manager.getRotation("rotation-session")).toEqual({
         accelerometerRotation: 1,
@@ -394,7 +394,7 @@ describe("session rotation restoration", () => {
     /** Release with a read-back that never verifies and spend all five bounded retries. */
     const abandonedRelease = async (h: ReturnType<typeof harness>) => {
       await h.manager.createSession("rotation-session", device.deviceId, "android");
-      await h.rotate.execute("landscape");
+      await h.rotate.execute("landscape", { lockOrientation: true });
       h.adb.mismatch = true;
       await h.manager.releaseSession("rotation-session");
       const pending = h.manager.getPendingDeviceCleanup(device.deviceId);
@@ -725,7 +725,7 @@ describe("session rotation restoration", () => {
       await h.manager.createSession("rotation-session", device.deviceId, "android");
       await rotateHandler(
         device,
-        { orientation: "landscape", sessionUuid: "rotation-session" },
+        { orientation: "landscape", lockOrientation: true, sessionUuid: "rotation-session" },
         undefined,
         undefined,
         interactionDeps,
@@ -944,9 +944,9 @@ describe("session rotation restoration", () => {
     try {
       await h.manager.createSession("rotation-session", device.deviceId, "android");
       await Promise.all([
-        h.rotate.execute("landscape"),
-        h.rotate.execute("portrait"),
-        h.rotate.execute("landscape"),
+        h.rotate.execute("landscape", { lockOrientation: true }),
+        h.rotate.execute("portrait", { lockOrientation: true }),
+        h.rotate.execute("landscape", { lockOrientation: true }),
       ]);
       expect(h.adb.writes()).toEqual([
         "shell settings put system accelerometer_rotation 0",

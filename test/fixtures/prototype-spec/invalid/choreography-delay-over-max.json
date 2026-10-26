@@ -1,0 +1,27 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "show": true
+    },
+    "root": {
+      "type": "text",
+      "text": "Row 0",
+      "visibleWhen": {
+        "key": "show",
+        "equals": true
+      },
+      "transition": {
+        "type": "fade",
+        "delayMs": 601
+      }
+    }
+  },
+  "expectedPath": "root.transition.delayMs",
+  "expectedMessage": "Invalid number value"
+}

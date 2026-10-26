@@ -76,11 +76,14 @@ export async function checkIosSimulatorFleetCost(
     const atCapacity = booted >= limits.maxBooted;
     const pressured = isPressured(report.host);
     const degraded = report.errors.length > 0 || atCapacity || pressured;
+    const message = `${booted}/${limits.maxBooted} booted simulators (limit ${limits.source}), ${describeFootprint(report.totals.footprintBytes)}, ${formatBytes(report.totals.diskBytes)} device data${atCapacity ? "; a new boot would exceed capacity" : ""}${pressured ? "; host under pressure" : ""}`;
     return {
       name: CHECK_NAME,
       status: degraded ? "warn" : "pass",
-      message: `${booted}/${limits.maxBooted} booted simulators (limit ${limits.source}), ${describeFootprint(report.totals.footprintBytes)}, ${formatBytes(report.totals.diskBytes)} device data${atCapacity ? "; a new boot would exceed capacity" : ""}${pressured ? "; host under pressure" : ""}`,
-      value: booted,
+      message,
+      // The console formatter prints `value` in place of the message, so the derived limit would be
+      // hidden from text output with a bare count (#15310).
+      value: message,
       detail: formatFleetReport(report).join("\n"),
       recommendation: atCapacity
         ? "Shut down an idle simulator or raise AUTOMOBILE_IOS_SIM_MAX_BOOTED"

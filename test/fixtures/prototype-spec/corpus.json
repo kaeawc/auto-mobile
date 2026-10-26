@@ -131,6 +131,7 @@
     "strict-bound-040-node-textField-maxLength-boundary.json",
     "strict-bound-042-node-text-spans-boundary.json",
     "strict-bound-043-themeTypography-scale-boundary.json",
+    "strict-bound-044-imageFilter-saturation-boundary.json",
     "strict-capabilities-data-binding.json",
     "strict-capabilities-malformed-placeholder.json",
     "strict-capabilities-opaque-sentinels.json",
@@ -749,6 +750,7 @@
     "strict-bound-041-node-textField-minLines-plus-one.json",
     "strict-bound-042-node-text-spans-plus-one.json",
     "strict-bound-043-themeTypography-scale-plus-one.json",
+    "strict-bound-044-imageFilter-saturation-plus-one.json",
     "strict-condition-depth-plus-one.json",
     "strict-data-array-plus-one.json",
     "strict-data-bytes-plus-one.json",
@@ -994,9 +996,13 @@
     "strict-unknown-118-themeColors.json",
     "strict-unknown-119-themeModeColors.json",
     "strict-unknown-120-imageAsset.json",
-    "strict-unknown-121-themeShapes.json",
-    "strict-unknown-122-action-startTimer.json",
-    "strict-unknown-123-action-cancelTimer.json",
+    "strict-unknown-121-shadow.json",
+    "strict-unknown-122-shadow-offset.json",
+    "strict-unknown-123-imageFilter.json",
+    "strict-unknown-124-fadeEdges.json",
+    "strict-unknown-125-themeShapes.json",
+    "strict-unknown-126-action-startTimer.json",
+    "strict-unknown-127-action-cancelTimer.json",
     "strict-url-invalid.json",
     "strict-url-javascript.json",
     "strict-url-noAuthority.json",
@@ -1312,6 +1318,10 @@
     "strict-bound-040-node-textField-maxLength-boundary.json": ["prototype_text_field_options_v1"],
     "strict-bound-042-node-text-spans-boundary.json": ["prototype_rich_text_v1"],
     "strict-bound-043-themeTypography-scale-boundary.json": [],
+    "strict-bound-044-imageFilter-saturation-boundary.json": [
+      "prototype_style_polish_v2",
+      "prototype_theme_modes_v1"
+    ],
     "strict-capabilities-data-binding.json": [
       "prototype_data_actions_v1",
       "prototype_data_model_v1"
@@ -1387,6 +1397,7 @@
     "theme-modes-exact-image-limit.json": ["prototype_theme_modes_v1"],
     "theme-modes-images.json": ["prototype_theme_modes_v1"],
     "theme-modes-only-mode-colors.json": ["prototype_theme_modes_v1"],
+    "theme-modes-style-polish-v2.json": ["prototype_style_polish_v2", "prototype_theme_modes_v1"],
     "theme-role-overrides.json": [],
     "theme-seed.json": [],
     "theme-typography-shapes.json": [],
@@ -1397,7 +1408,6 @@
       "prototype_timers_v1"
     ],
     "transition-slide.json": [],
-    "width-dp-at-max.json": [],
-    "theme-modes-style-polish-v2.json": ["prototype_style_polish_v2", "prototype_theme_modes_v1"]
+    "width-dp-at-max.json": []
   }
 }

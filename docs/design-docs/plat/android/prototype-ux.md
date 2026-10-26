@@ -760,6 +760,18 @@ intentional infinite animations (today only the shimmer) and is ignored by hosts
 while `active` is positive and stay bounded by their usual timeout. The count is
 zero after a single frame under `motion: "none"` or animator scale 0.
 
+### Screen map (#14125)
+
+`prototype {action:"screenMap", spec | specPath}` is host-only (no device request). It walks the
+spec, after component expansion, and returns `screenMap {nodes, edges}` plus a `mermaid` flowchart.
+Nodes are the root, each `stack` screen (`stack:<id>/<screen>`, `start` on the start screen), each
+`pager` page (`pager:<id>/<index>`, labelled from a `tabBar` or `bottomNav` that names the pager),
+`bottomSheet` and `dialog`. Edges are `push`, `replace`, `pop`, `popToRoot` and `setPage` actions, from
+the enclosing screen, each tagged with the `testTag`, `id` and text or label of the node that runs it
+and its spec path. A `pop` targets `back` (the previous screen is runtime state), and `setPage` with
+`next` or `prev` keeps the authored word. `visibleWhen` alternatives and sheet or dialog opening by
+state are not resolved. The dynamic cross-check and the diff against `getNavigationGraph` are not built.
+
 ### Stack transitions
 
 `prototype_stack_transitions_v1` gates every explicit stack `transition` and push/replace

@@ -243,11 +243,12 @@ export const prototypeSchema = addDeviceTargetingToSchema(
           "open",
           "clearStorage",
           "simulate",
+          "screenMap",
         ],
         {
           error: (issue) =>
             getRemovedToolActionHint(PROTOTYPE_TOOL_NAME, issue.input) ??
-            "action must be one of show, patch, dismiss, status, inspect or awaitEvent; saved actions: save, listSaved, deleteSaved or open; storage action: clearStorage; timer action: simulate",
+            "action must be one of show, patch, dismiss, status, inspect or awaitEvent; saved actions: save, listSaved, deleteSaved or open; storage action: clearStorage; timer action: simulate; host-only: screenMap",
         },
       ),
       spec: specInput
@@ -448,6 +449,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     dismiss: ["id", "all"],
     status: [],
     inspect: [],
+    screenMap: ["spec", "specPath"],
     awaitEvent: ["id", "eventName", "kind", "afterSequence"],
   };
   for (const field of fields) {
@@ -473,16 +475,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     validateAwaitEventInput(value, ctx);
   }
   validateProtoViewerTimeout(value, ctx);
-  if (value.action === "show" && (value.spec === undefined) === (value.specPath === undefined)) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["spec"],
-      message:
-        value.spec === undefined
-          ? "show requires exactly one of spec or specPath"
-          : "show takes either spec or specPath, not both",
-    });
-  }
+  validateSpecSource(value, ctx);
   if (value.action === "dismiss" && (value.id === undefined) === (value.all === undefined)) {
     ctx.addIssue({
       code: "custom",
@@ -507,6 +500,20 @@ function validateProtoViewerTimeout(
   }
 }
 
+function validateSpecSource(value: z.infer<typeof prototypeSchema>, ctx: z.RefinementCtx): void {
+  const takesSpecSource = value.action === "show" || value.action === "screenMap";
+  if (takesSpecSource && (value.spec === undefined) === (value.specPath === undefined)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["spec"],
+      message:
+        value.spec === undefined
+          ? `${value.action} requires exactly one of spec or specPath`
+          : `${value.action} takes either spec or specPath, not both`,
+    });
+  }
+}
+
 function validateAwaitEventInput(
   value: z.infer<typeof prototypeSchema>,
   ctx: z.RefinementCtx,
@@ -524,7 +531,12 @@ function validateAwaitEventInput(
 }
 
 /** status and inspect show nothing on the device: reads (#10965). The rest are control. */
-export const PROTOTYPE_READ_ACTIONS: readonly string[] = ["status", "inspect", "listSaved"];
+export const PROTOTYPE_READ_ACTIONS: readonly string[] = [
+  "status",
+  "inspect",
+  "listSaved",
+  "screenMap",
+];
 
 export function isPrototypeReadAction(args: z.infer<typeof prototypeSchema>): boolean {
   return PROTOTYPE_READ_ACTIONS.includes(args.action);
@@ -647,6 +659,34 @@ const prototypeEventOutputSchema = z.object({
   timestamp: z.number(),
 });
 export const prototypeOutputSchema = z.object({
+  screenMap: z
+    .object({
+      nodes: z.array(
+        z.object({
+          id: z.string(),
+          kind: z.enum(["root", "stackScreen", "pagerPage", "sheet", "dialog"]),
+          path: z.string(),
+          label: z.string().optional(),
+          start: z.literal(true).optional(),
+        }),
+      ),
+      edges: z.array(
+        z.object({
+          from: z.string(),
+          to: z.string(),
+          action: z.enum(["push", "replace", "pop", "popToRoot", "setPage"]),
+          trigger: z.object({
+            path: z.string(),
+            testTag: z.string().optional(),
+            id: z.string().optional(),
+            label: z.string().optional(),
+          }),
+        }),
+      ),
+    })
+    .optional()
+    .describe("screenMap only: the spec's screens and the actions that move between them"),
+  mermaid: z.string().optional().describe("screenMap only: the same map as a Mermaid flowchart"),
   saved: z.object({ id: z.string(), slug: z.string(), replaced: z.boolean() }).optional(),
   viewer: z
     .object({

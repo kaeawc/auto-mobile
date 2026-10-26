@@ -1,3 +1,4 @@
+import { visitPrototypeHandlerFields } from "./prototypeTemplate";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
 import {
   MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES,
@@ -106,6 +107,12 @@ export function prototypeFieldsOfKind(spec: unknown, kind: FieldKind): string[] 
     });
   };
   walkPrototypeNodes(expansion.spec, scan);
+  visitPrototypeHandlerFields(expansion.spec, (entry, at, fieldKind) => {
+    if (fieldKind === kind) {
+      fields.push(at);
+    }
+    return entry;
+  });
   const located = fields.map(expansion.locate);
   fields.length = 0;
   if (expansion.expanded) {

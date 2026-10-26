@@ -821,3 +821,11 @@ data class StartRecording(override val requestId: String? = null) : WebSocketReq
 @Serializable
 @SerialName("stop_recording")
 data class StopRecording(override val requestId: String? = null) : WebSocketRequest()
+
+@Serializable
+@SerialName("advance_prototype_clock")
+data class AdvancePrototypeClock(
+  override val requestId: String? = null,
+  val id: String,
+  val advanceTimeMs: Int,
+) : WebSocketRequest()

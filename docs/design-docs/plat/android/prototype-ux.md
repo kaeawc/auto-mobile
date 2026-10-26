@@ -2439,3 +2439,37 @@ prototype id; tapping it opens `SavedPrototypeActivity`, which needs no host.
 - Pinning from the accessibility service while no CtrlProxy activity is visible, launcher dialog
   shapes, badges and `clear-shortcuts` behaviour on the workspace are unverified on a device
   (#12261).
+
+### Timers
+
+`startTimer {id, afterMs, everyMs?, maxRuns?, actions}` and `cancelTimer {id}` require
+`prototype_timers_v1`. IDs are literal strings of 1..64 characters and never repeat-bound.
+Delays are integers 100..3600000 ms; maxRuns is 1..10000 total fires including the first and
+requires everyMs. A list contains 1..32 actions and shares the request follow-up depth limit.
+The whole spec, including components and platform handlers, may declare eight distinct timer ids.
+
+Each prototype has a ledger of at most eight live timers. Starting a live id replaces it and resets
+runs. Cancelling an unknown id is a no-op. Each fire uses the same atomic interaction as a tap:
+requireValid and all planned writes are validated together; rejection drops state changes and events
+but counts the run. One change event follows a net state change. Dismiss cancels every timer.
+A timer may cancel itself; replacing its own id during a fire wins over the old timer's reschedule.
+Repeats advance from the planned fire time, without drift, until maxRuns or cancellation.
+Fires never restart idle TTL. Hidden/inactive prototypes freeze remaining time and restore it on
+resume; transient screenshot hides do not pause. Dismiss (including TTL, disconnect or teardown)
+and replacing show cancel timers; patch preserves them.
+
+The injected clock/scheduler drives real scheduling. `prototype {action:"simulate",id,advanceTimeMs}`
+advances 1..3600000 ms without waiting and returns optional `fired`, refusing before sending unless
+the capability is advertised. `advance_prototype_clock {id,advanceTimeMs}` fires due timers in
+chronological order, ties by start order, including newly started timers due in the window.
+Paused advancement fires zero times. Exactly 10000 due fires succeed; if an additional fire is
+still due, advancement stops at the last fire with an error and fired=10000, retaining pending timers
+for the next call. Real scheduling continues from shifted time. Inspect reports `timers:[{id,nextFireInMs,runs}]` sorted by remaining
+time then start order, with nonnegative remaining time frozen while paused. Devices omit the field
+when empty; the host returns an array for capable devices, including an empty array when absent,
+and omits malformed timer reports.
+
+Cross-field errors point to `.maxRuns` when everyMs is absent and to `.id` on the ninth distinct
+startTimer in contract document order. A cancelTimer id with no declaration produces a host-only
+show/patch warning. This asymmetry is deliberate: Kotlin and Swift accept it without a diagnostic
+and cancellation remains a runtime no-op.

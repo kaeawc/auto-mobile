@@ -503,6 +503,15 @@ final class PrototypeAgent: NSObject {
             // No update_prototype (#10550): a same-id show_prototype replaces the shown prototype.
             case "dismiss_prototype":
                 dismissPrototype(message, result: result)
+            case PrototypeAgentProtocol.advanceClockRequest:
+                guard let id = message["id"] as? String, !id.isEmpty,
+                      let raw = message["advanceTimeMs"] as? NSNumber,
+                      CFGetTypeID(raw) != CFBooleanGetTypeID(),
+                      raw.doubleValue.rounded() == raw.doubleValue,
+                      (1 ... 3_600_000).contains(raw.doubleValue)
+                else { return result(false, "advance_prototype_clock needs an id and advanceTimeMs") }
+                let advanced = model.advanceClock(id: id, milliseconds: raw.intValue)
+                result(advanced.error == nil, advanced.error, extra: ["fired": advanced.fired])
             case PrototypeAgentProtocol.clearStorageRequest:
                 clearStorage(message, result: result)
             default: handleAuxiliary(type, message: message, result: result)

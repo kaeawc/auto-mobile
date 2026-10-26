@@ -286,10 +286,20 @@ internal object PrototypeBindableFields {
           field(action, "path", path, PrototypeBindableKind.DATA_PATH)
             ?: binding(action["value"], "$path.value")
         "removeData" -> field(action, "path", path, PrototypeBindableKind.DATA_PATH)
+        "startTimer" -> timer(action, path)
         "request" -> request(action, path)
         "platform" -> platform(action, path)
         else -> null
       }
+
+    private fun timer(value: JsonObject, path: String): T? {
+      for ((entry, at) in objects(value, "actions", path)) {
+        action(entry, at)?.let {
+          return it
+        }
+      }
+      return null
+    }
 
     /** Mirrors `mapPlatformAction` (#14294): argument bindings, into, statusKey, follow-ups. */
     fun platform(action: JsonObject, path: String): T? {

@@ -35,5 +35,6 @@ object AutoMobilePrototype {
       "prototype_text_field_leading_icon_v1",
       "prototype_text_field_options_v1",
       "prototype_theme_modes_v1",
+      "prototype_timers_v1",
     )
 }

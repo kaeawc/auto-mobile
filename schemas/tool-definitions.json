@@ -23139,6 +23139,14 @@
                       "type": "string",
                       "enum": ["topAppBar"]
                     },
+                    "onScroll": {
+                      "type": "string",
+                      "enum": ["pinned", "enterAlways", "exitUntilCollapsed"]
+                    },
+                    "scroll": {
+                      "type": "string",
+                      "minLength": 1
+                    },
                     "title": {
                       "type": "string",
                       "minLength": 1
@@ -24073,6 +24081,14 @@
                       "type": "string",
                       "enum": ["tabBar"]
                     },
+                    "onScroll": {
+                      "type": "string",
+                      "enum": ["none", "hide", "minimize"]
+                    },
+                    "scroll": {
+                      "type": "string",
+                      "minLength": 1
+                    },
                     "items": {
                       "type": "array",
                       "items": {
@@ -24151,6 +24167,14 @@
                     "type": {
                       "type": "string",
                       "enum": ["bottomNav"]
+                    },
+                    "onScroll": {
+                      "type": "string",
+                      "enum": ["none", "hide", "minimize"]
+                    },
+                    "scroll": {
+                      "type": "string",
+                      "minLength": 1
                     },
                     "items": {
                       "type": "array",

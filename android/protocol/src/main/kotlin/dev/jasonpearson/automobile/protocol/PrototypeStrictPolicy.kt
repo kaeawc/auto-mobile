@@ -182,6 +182,9 @@ internal object PrototypeStrictPolicy {
           "text_field_actions" to listOf("trailingIcon", "imeAction", "onSubmit"),
           "text_field_leading_icon" to listOf("leadingIcon"),
         ),
+      "topAppBar" to mapOf("bar_scroll" to listOf("onScroll", "scroll")),
+      "bottomNav" to mapOf("bar_scroll" to listOf("onScroll", "scroll")),
+      "tabBar" to mapOf("bar_scroll" to listOf("onScroll", "scroll")),
       "pager" to
         mapOf(
           "pager_options" to listOf("axis", "pageSpacing", "peek", "pageSize"),

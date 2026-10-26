@@ -38,6 +38,8 @@ enum PrototypeBundleCapabilities {
                 "stack": "stack",
                 "chart": "chart",
             ]
+            if ["topAppBar", "bottomNav", "tabBar"].contains(type),
+               node["onScroll"] != nil || node["scroll"] != nil { need("bar_scroll") }
             if let feature = featureTypes[type] { need(feature) }
             if let repeated = node["repeat"]?.objectFields,
                repeated["items"]?.objectFields != nil || repeated["key"] != nil { need("data_model") }

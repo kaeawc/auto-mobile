@@ -1014,6 +1014,8 @@ data class PrototypeTopAppBarNode(
   val variant: String = "small",
   val navigationIcon: PrototypeAppBarAction? = null,
   val actions: List<PrototypeAppBarAction>? = null,
+  val onScroll: String? = null,
+  val scroll: String? = null,
 ) : PrototypeNode()
 
 /** A Material divider line, horizontal (default) or vertical. */
@@ -1337,6 +1339,8 @@ data class PrototypeTabBarNode(
   val pager: String? = null,
   val stateKey: String? = null,
   val scrollable: Boolean = false,
+  val onScroll: String? = null,
+  val scroll: String? = null,
 ) : PrototypeNode()
 
 @SerialName("bottomNav")
@@ -1357,6 +1361,8 @@ data class PrototypeBottomNavNode(
   val items: List<PrototypeItem>,
   val pager: String? = null,
   val stateKey: String? = null,
+  val onScroll: String? = null,
+  val scroll: String? = null,
 ) : PrototypeNode()
 
 @SerialName("bottomSheet")

@@ -1,3 +1,4 @@
+import { prototypeBarScrollError } from "./prototypeBarScroll";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import { prototypeStrictPolicyError, type PrototypeStrictOptions } from "./prototypeStrictPolicy";
 import { prototypeStrictJson } from "./prototypeStrictJson";
@@ -751,6 +752,7 @@ function layoutErrors(
   repeats: PrototypeRepeatData,
 ): PrototypeValidationError | undefined {
   return (
+    prototypeBarScrollError(context.nodes) ??
     gridSpanErrors(context) ??
     swipeActionsErrors(context) ??
     repeatErrors(value, repeats) ??

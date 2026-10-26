@@ -423,4 +423,5 @@ export const KNOWN_REQUEST_TYPES: readonly CtrlProxyRequestType[] = Object.keys(
   REQUEST_TYPE_REGISTRY,
 ) as CtrlProxyRequestType[];
 
+export const PROTOTYPE_BAR_SCROLL_CAPABILITY = "prototype_bar_scroll_v1";
 export const PROTOTYPE_PAGER_OPTIONS_CAPABILITY = "prototype_pager_options_v1";

@@ -1,5 +1,9 @@
 {
   "valid": [
+    "bar-scroll-defaults.json",
+    "bar-scroll-enter-always.json",
+    "bar-scroll-material.json",
+    "bar-scroll-screen-local.json",
     "bounds-anchor-aligned.json",
     "bounds-at-limits.json",
     "carousel-hero-repeat.json",
@@ -196,6 +200,14 @@
     "bad-shadow-color.json",
     "bad-text-decoration.json",
     "bad-transition.json",
+    "bar-scroll-bottom-enum.json",
+    "bar-scroll-cross-screen.json",
+    "bar-scroll-duplicate-target.json",
+    "bar-scroll-enum.json",
+    "bar-scroll-missing-target.json",
+    "bar-scroll-required-target.json",
+    "bar-scroll-tab-enum.json",
+    "bar-scroll-wrong-type.json",
     "border-width-over-max.json",
     "both-bindings.json",
     "bounds-height-over-max.json",
@@ -726,6 +738,7 @@
     "strict-duplicate-envelope.json",
     "strict-duplicate-escaped-key.json",
     "strict-duplicate-opaque.json",
+    "strict-gate-prototype_bar_scroll_v1.json",
     "strict-gate-prototype_carousel_v1.json",
     "strict-gate-prototype_chart_v1.json",
     "strict-gate-prototype_chat_scroll_v1.json",
@@ -1063,6 +1076,10 @@
     "zero-weight.json"
   ],
   "validCapabilities": {
+    "bar-scroll-defaults.json": ["prototype_bar_scroll_v1"],
+    "bar-scroll-enter-always.json": ["prototype_bar_scroll_v1"],
+    "bar-scroll-material.json": ["prototype_bar_scroll_v1"],
+    "bar-scroll-screen-local.json": ["prototype_bar_scroll_v1", "prototype_stack_v1"],
     "bounds-anchor-aligned.json": [],
     "bounds-at-limits.json": [],
     "carousel-hero-repeat.json": ["prototype_carousel_v1"],

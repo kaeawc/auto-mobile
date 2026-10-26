@@ -176,6 +176,7 @@ struct PrototypeSpec: Decodable {
         let resolved = PrototypeDataResolver.resolveRoot(raw, data: data)
         try PrototypeLimits.guardTree(resolved)
         let expanded = PrototypeRepeat.expand(resolved)
+        try PrototypeBarScroll.validate(expanded)
         try PrototypePagerOptions.validate(expanded)
         try PrototypeSwipe.validate(expanded)
         try PrototypeCarousel.validate(expanded)
@@ -767,6 +768,8 @@ final class PrototypeNode: Decodable {
     /// Menu entries decoded from the same `items` JSON key, preserving navigation items.
     let menuItems: [PrototypeMenuItem]?
     let pager: String?
+    let onScroll: String?
+    let scroll: String?
     let scrollable: Bool?
     let openWhen: Condition?
     /// Pull-to-refresh on a vertical `scroll` (`prototype_refresh_v1`).
@@ -835,6 +838,7 @@ final class PrototypeNode: Decodable {
         case type, id, testTag, onTap, style, styleWhen, visibleWhen, transition
         case safeAreaPadding, anchor, children, child, text, contentDescription, asset, contentScale
         case name, label, variant, stateKey, placeholder, axis, items, pager
+        case onScroll, scroll
         case scrollable, openWhen, detents, scrim, dragHandle, options, icon, size
         case orientation, min, max, step, title, navigationIcon, actions, confirm
         case dismiss, action, durationMs, hourKey, minuteKey, is24Hour, headline, supporting
@@ -881,6 +885,8 @@ final class PrototypeNode: Decodable {
             menuItems = nil
         }
         pager = try container.decodeIfPresent(String.self, forKey: .pager)
+        onScroll = try container.decodeIfPresent(String.self, forKey: .onScroll)
+        scroll = try container.decodeIfPresent(String.self, forKey: .scroll)
         scrollable = try container.decodeIfPresent(Bool.self, forKey: .scrollable)
         openWhen = try container.decodeIfPresent(Condition.self, forKey: .openWhen)
         refresh = try container.decodeIfPresent(PrototypeScrollRefresh.self, forKey: .refresh)

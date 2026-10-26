@@ -4909,6 +4909,18 @@
         "type": "string",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "onScroll",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scroll",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "bottomSheet": [
@@ -11129,6 +11141,18 @@
         "type": "boolean",
         "nullable": false,
         "hasDefault": true
+      },
+      {
+        "name": "onScroll",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scroll",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "text": [
@@ -11629,6 +11653,18 @@
       {
         "name": "actions",
         "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onScroll",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scroll",
+        "type": "string",
         "nullable": true,
         "hasDefault": true
       }

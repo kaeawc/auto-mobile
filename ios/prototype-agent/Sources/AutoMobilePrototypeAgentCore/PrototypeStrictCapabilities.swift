@@ -39,6 +39,8 @@ enum PrototypeStrictCapabilities {
                 "select": "menus",
                 "scrollTo": "chat_scroll",
             ]
+            if ["topAppBar", "bottomNav", "tabBar"].contains(type),
+               fields["onScroll"] != nil || fields["scroll"] != nil { need("bar_scroll") }
             if let feature = types[type] { need(feature) }
             let navigation = ["stack", "push", "replace"].contains(type)
             if navigation, fields["transition"] != nil { need("stack_transitions") }

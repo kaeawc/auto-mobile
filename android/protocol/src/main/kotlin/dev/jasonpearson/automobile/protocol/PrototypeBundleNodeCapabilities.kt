@@ -65,6 +65,9 @@ internal object PrototypeBundleNodeCapabilities {
             "text_field_actions_v1" to setOf("trailingIcon", "imeAction", "onSubmit"),
             "text_field_leading_icon_v1" to setOf("leadingIcon"),
           )
+        "topAppBar",
+        "bottomNav",
+        "tabBar" -> mapOf("bar_scroll_v1" to setOf("onScroll", "scroll"))
         "pager" ->
           mapOf(
             "carousel_v1" to setOf("indicator"),

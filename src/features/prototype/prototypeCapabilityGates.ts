@@ -1,3 +1,7 @@
+import {
+  prototypeBarScrollFields,
+  prototypeBarScrollUnsupportedMessage,
+} from "./prototypeBarScroll";
 import { prototypeTimerFields, prototypeTimersUnsupportedMessage } from "./prototypeTimers";
 import {
   prototypeStackTransitionFields,
@@ -10,6 +14,7 @@ import {
   PROTOTYPE_THEME_MODES_CAPABILITY,
   PROTOTYPE_DATA_MODEL_CAPABILITY,
   PROTOTYPE_FLOW_GRID_CAPABILITY,
+  PROTOTYPE_BAR_SCROLL_CAPABILITY,
   PROTOTYPE_PAGER_OPTIONS_CAPABILITY,
   PROTOTYPE_GESTURES_CAPABILITY,
   PROTOTYPE_SWIPE_ACTIONS_CAPABILITY,
@@ -147,6 +152,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_FLOW_GRID_CAPABILITY,
     fields: prototypeFlowGridFields,
     unsupportedMessage: prototypeFlowGridUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_BAR_SCROLL_CAPABILITY,
+    fields: prototypeBarScrollFields,
+    unsupportedMessage: prototypeBarScrollUnsupportedMessage,
   },
   {
     capability: PROTOTYPE_PAGER_OPTIONS_CAPABILITY,

@@ -6895,6 +6895,19 @@
                 "unique": false
               },
               "optional": true
+            },
+            "onScroll": {
+              "rule": {
+                "kind": "enum",
+                "values": ["pinned", "enterAlways", "exitUntilCollapsed"]
+              },
+              "optional": true
+            },
+            "scroll": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
             }
           }
         },
@@ -8894,6 +8907,19 @@
                 "kind": "boolean"
               },
               "optional": true
+            },
+            "onScroll": {
+              "rule": {
+                "kind": "enum",
+                "values": ["none", "hide", "minimize"]
+              },
+              "optional": true
+            },
+            "scroll": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
             }
           },
           "binding": true
@@ -9068,6 +9094,19 @@
             "stateKey": {
               "rule": {
                 "kind": "boundKey"
+              },
+              "optional": true
+            },
+            "onScroll": {
+              "rule": {
+                "kind": "enum",
+                "values": ["none", "hide", "minimize"]
+              },
+              "optional": true
+            },
+            "scroll": {
+              "rule": {
+                "kind": "string"
               },
               "optional": true
             }

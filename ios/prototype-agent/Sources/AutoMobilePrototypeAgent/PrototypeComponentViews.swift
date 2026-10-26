@@ -680,6 +680,7 @@
     /// `<tag>.navigation` and `<tag>.actions.<index>`. Insets come only from `safeAreaPadding`.
     @MainActor
     struct PrototypeTopAppBarView: View {
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
         @Environment(\.prototypePalette) private var palette
         private var colors: ComponentColors { ComponentColors(palette: palette) }
         let node: PrototypeNode
@@ -689,6 +690,12 @@
 
         var body: some View {
             let variant = node.variant ?? "small"
+            let extent = PrototypeBarScrollState.extent(variant: variant, behavior: node.onScroll)
+            let fraction = model.barScroll(node).collapse(
+                node.onScroll,
+                extent: extent,
+                reduced: reduceMotion || model.spec?.motion == "none"
+            )
             VStack(alignment: .leading, spacing: 0) {
                 ZStack {
                     if variant == "centerAligned" {
@@ -698,7 +705,7 @@
                         if let navigation = node.navigationIcon {
                             button(navigation, identifier: node.partIdentifier("navigation"))
                         }
-                        if variant == "small" {
+                        if variant == "small" || (fraction >= 1 && node.onScroll == "exitUntilCollapsed") {
                             titleText(.title3.weight(.semibold)).padding(.leading, node.navigationIcon == nil ? 12 : 4)
                         }
                         Spacer(minLength: 0)
@@ -713,8 +720,16 @@
                     titleText(variant == "large" ? .largeTitle : .title)
                         .padding(.horizontal, 16)
                         .padding(.bottom, variant == "large" ? 28 : 20)
+                        .frame(
+                            height: ["enterAlways", "exitUntilCollapsed"]
+                                .contains(node.onScroll ?? "") ? (variant == "large" ? 88 : 48) : nil,
+                            alignment: .bottomLeading
+                        )
+                        .modifier(PrototypeBarClip(fraction: node.onScroll == "exitUntilCollapsed" ? fraction : 0))
+                        .accessibilityHidden(node.onScroll == "exitUntilCollapsed" && fraction >= 1)
                 }
             }
+            .modifier(PrototypeBarClip(fraction: node.onScroll == "enterAlways" ? fraction : 0))
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(style?.hasAuthoredFill ?? false ? .clear : colors.surface)
         }

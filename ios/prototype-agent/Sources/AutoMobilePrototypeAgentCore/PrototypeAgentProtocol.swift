@@ -30,6 +30,7 @@ enum PrototypeAgentProtocol {
         themeModesCapability,
         flowGridCapability,
         pagerOptionsCapability,
+        barScrollCapability,
         appearanceCapability,
         windowChromeCapability,
         iconSfSymbolsCapability,
@@ -95,6 +96,7 @@ enum PrototypeAgentProtocol {
     static let flowGridCapability = "prototype_flow_grid_v1"
     /// Draws pager axis, pageSpacing, peek and pageSize natively. The host refuses a spec that
     /// uses one on an agent that does not advertise it. Same name as the CtrlProxy capability.
+    static let barScrollCapability = "prototype_bar_scroll_v1"
     static let pagerOptionsCapability = "prototype_pager_options_v1"
     /// Appearance (#11222): `show_prototype` takes `appearance` (`device`, `light` or `dark`), the
     /// show result and `get_prototype_status` report `appearance: {mode, source, deviceDark}`, and

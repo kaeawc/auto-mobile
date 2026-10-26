@@ -133,6 +133,7 @@ internal object PrototypeSpecInput {
         ?: requestActionErrors(context)
         ?: nodeVocabularyErrors(value, context)
         ?: swipeActionsErrors(context)
+        ?: PrototypeBarScrollRules.error(context)
         ?: pagerErrors(context)
         ?: stackErrors(context)
         ?: stateTypeErrors(value, context, repeats)

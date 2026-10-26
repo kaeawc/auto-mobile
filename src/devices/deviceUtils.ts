@@ -867,13 +867,12 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       case "android": {
         const signal = getAbortSignal();
         const admitter = this.androidBootAdmitter;
-        // Admission is awaited inside the launch, only on its cold-spawn path, so
-        // adopting an AVD that is running or starting is never refused for capacity. By the time a
-        // caller gets here it already holds the Android startup lease and the AVD's
-        // lifecycle lease: a request takes a capacity slot only once it is certain
-        // to cold-boot, and the order is always lease -> admission, so no request
-        // holds a slot while it waits on a lease. Admission itself never waits: at
-        // the limit it fails at once with capacity_exhausted.
+        // Admission is awaited inside the launch, only on its cold-spawn path, so adopting an AVD
+        // that is running or starting is never refused for capacity. By the time a caller gets here
+        // it already holds the Android startup lease and the AVD's lifecycle lease: a request takes
+        // a capacity slot only once it is certain to cold-boot, and the order is always lease ->
+        // admission, so no request holds a slot while it waits on a lease. Admission itself never
+        // waits: at the limit it fails at once with capacity_exhausted.
         const launch = await this.emulator.launchEmulator({
           avdName: device.name,
           deviceId: device.deviceId,

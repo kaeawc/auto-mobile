@@ -10,13 +10,13 @@ import java.util.concurrent.ConcurrentHashMap
  * Resolves a contract icon name (snake_case, e.g. `alarm_add`) to a bundled Material icon.
  *
  * The names are closed by the `iconName` definition in `schemas/prototype-spec-contract.json`,
- * which lists exactly the icons in `androidx.compose.material:material-icons-extended`. Each icon is
- * a top-level extension property compiled to a static getter on `<Pascal>Kt` in the package for its
- * style, so it is found by reflection instead of a 2,000-branch `when`.
+ * which lists exactly the icons in `androidx.compose.material:material-icons-extended`. Each icon
+ * is a top-level extension property compiled to a static getter on `<Pascal>Kt` in the package for
+ * its style, so it is found by reflection instead of a 2,000-branch `when`.
  *
- * R8 cannot see reflective uses, so an app that shrinks and renders icons by name must keep the icon
- * package itself (`-keep class androidx.compose.material.icons.** { *; }`). This library ships no
- * such consumer rule: it would retain every extended icon (about 3 MB of dex) in every embedding
+ * R8 cannot see reflective uses, so an app that shrinks and renders icons by name must keep the
+ * icon package itself (`-keep class androidx.compose.material.icons.** { *; }`). This library ships
+ * no such consumer rule: it would retain every extended icon (about 3 MB of dex) in every embedding
  * app (#14149). A valid name that resolves in no style was most likely stripped, so it is logged
  * once at warn level. Unknown names keep the neutral placeholder (`null`).
  */

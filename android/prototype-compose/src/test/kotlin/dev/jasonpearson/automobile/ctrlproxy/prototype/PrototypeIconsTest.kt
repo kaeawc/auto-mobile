@@ -9,7 +9,9 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.shadows.ShadowLog
 
-/** #14149: the library ships no keep rule, so an unresolvable (stripped) icon must be diagnosable. */
+/**
+ * #14149: the library ships no keep rule, so an unresolvable (stripped) icon must be diagnosable.
+ */
 @RunWith(RobolectricTestRunner::class)
 class PrototypeIconsTest {
   private fun warnings(): List<String> =

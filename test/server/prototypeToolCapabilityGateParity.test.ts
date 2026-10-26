@@ -105,6 +105,7 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     children: [{ type: "spacer" }],
   }),
   prototype_motion_v2: fixture({ ...label, animate: { durationMs: 300 } }),
+  prototype_effects_v1: fixture({ ...label, style: { effects: [{ type: "noise" }] } }),
   prototype_stack_transitions_v1: {
     ...fixture({
       type: "stack",

@@ -1,6 +1,8 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import dev.jasonpearson.automobile.protocol.*
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -191,6 +193,7 @@ class PrototypeStateLogicTest {
         overflow = "ellipsis",
         fontFamily = PrototypeFontFamily.Named("serif"),
         textStyle = "titleLarge",
+        effects = listOf(buildJsonObject { put("type", "noise") }),
       )
     val on = eq("on", PrototypeScalar.BooleanValue(true))
     assertEquals(full, resolvePrototypeStyle(null, listOf(PrototypeStyleWhen(on, full)), state))

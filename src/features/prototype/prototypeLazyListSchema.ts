@@ -1,12 +1,9 @@
 import { z } from "zod";
 import contract from "../../../schemas/prototype-spec-contract.json";
-import { keySchema, pointerSchema } from "./prototypeActionValues";
+import { keySchema, pointerSchema, stateKeySchema } from "./prototypeActionValues";
 
 /** List-only fields; the caller supplies the shared action and refresh schemas. */
-export function prototypeLazyListShape<A extends z.ZodTypeAny, R extends z.ZodTypeAny>(
-  action: A,
-  refresh: R,
-) {
+function shape<A extends z.ZodTypeAny, R extends z.ZodTypeAny>(action: A, refresh: R) {
   return {
     type: z.enum(["list"]),
     axis: z.enum(["vertical", "horizontal"]).default("vertical"),
@@ -29,12 +26,26 @@ export function prototypeLazyListShape<A extends z.ZodTypeAny, R extends z.ZodTy
 }
 
 /** Recursive node slots, supplied lazily by the main node union. */
-export function prototypeLazyListChildren<N extends z.ZodTypeAny>(node: N) {
+export function children<N extends z.ZodTypeAny>(node: N) {
   return { children: z.array(node).length(1), header: node.optional(), footer: node.optional() };
 }
 
-export interface PrototypeLazyListSlots<Node> {
+export interface Slots<Node> {
   children: Node[];
   header?: Node;
   footer?: Node;
+}
+
+/** The strict list schema without its recursive slots. */
+export function base<C extends z.ZodRawShape, A extends z.ZodTypeAny, R extends z.ZodTypeAny>(
+  common: C,
+  action: A,
+  refresh: R,
+) {
+  return z.object({ ...common, ...shape(action, refresh) }).strict();
+}
+
+/** `scroll.refresh` and `list.refresh` share one shape. */
+export function refresh<A extends z.ZodTypeAny>(action: A) {
+  return z.object({ stateKey: stateKeySchema, onRefresh: z.array(action).min(1).max(32) }).strict();
 }

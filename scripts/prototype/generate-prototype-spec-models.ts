@@ -1,14 +1,25 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import contract from "../../schemas/prototype-spec-contract.json";
 import type { Rule } from "../../src/features/prototype/prototypeBindingValidation";
-import { prototypeModelSelection } from "./prototype-model-selection";
+import { prototypeModelSelection, prototypeTypeRefs } from "./prototype-model-selection";
+
+import { renderObject } from "./prototype-model-rendering";
+import { renderUnion } from "./prototype-model-unions";
+export { escapeModelIdentifier } from "./prototype-model-rendering";
 
 export type ModelLanguage = "kotlin" | "swift";
 export interface ModelOptions {
   readonly languages?: readonly ModelLanguage[];
   readonly swiftName?: string;
+  readonly kotlinName?: string;
+  readonly swiftConformances?: readonly string[];
+  readonly variantNames?: Readonly<Record<string, string>>;
+  readonly variantDocs?: Readonly<Record<string, string>>;
   readonly doc?: string;
 }
+export type TypeRefs = Readonly<
+  Record<string, { readonly kotlin?: string; readonly swift?: string }>
+>;
 export type ModelSelection = Readonly<Record<string, ModelOptions>>;
 export interface ModelSources {
   kotlin: string;
@@ -27,14 +38,11 @@ const header = [
   "// Regenerate: bun scripts/prototype/generate-prototype-spec-models.ts",
 ];
 
-/**
- * Plain objects whose fields are numbers, strings, booleans, enums (carried as strings, so models
- * add no decoding error of their own) or arrays of those. Bounds, enum values and formats stay in
- * the contract and are enforced by its interpreters. Refs and nested objects remain hand-written.
- */
+/** Render contract objects, refs, nested objects and tagged unions; validation stays in the contract interpreters. */
 export function renderPrototypeSpecModels(
   source: { definitions: Readonly<Record<string, Rule>> },
   selection: ModelSelection,
+  refs: TypeRefs = {},
 ): ModelSources {
   const kotlin = [
     ...header,
@@ -43,84 +51,41 @@ export function renderPrototypeSpecModels(
     "import kotlinx.serialization.Serializable",
   ];
   const swift = [...header];
+  if (
+    Object.entries(selection).some(
+      ([name, options]) =>
+        source.definitions[name]?.kind === "tagged" &&
+        (!options.languages || options.languages.includes("kotlin")),
+    )
+  ) {
+    kotlin.splice(kotlin.length - 1, 0, "import kotlinx.serialization.SerialName");
+  }
   for (const [name, options] of Object.entries(selection)) {
     const definition = source.definitions[name];
     if (!definition) {
       throw new Error(`Definition ${name}: not found`);
     }
-    if (definition.kind !== "object" || !definition.fields) {
-      throw new Error(`Definition ${name}: unsupported kind ${definition.kind}; expected object`);
-    }
-    const fields = Object.entries(definition.fields);
-    if (!fields.length) {
-      throw new Error(`Definition ${name}: empty objects are unsupported`);
-    }
-    const languages = options.languages ?? ["kotlin", "swift"];
-    const typeName = name.charAt(0).toUpperCase() + name.slice(1);
-    const kotlinFields: string[] = [];
-    const swiftFields: string[] = [];
-    for (const [fieldName, field] of fields) {
-      const types = field ? fieldTypes(field.rule) : undefined;
-      if (!field || !types) {
+    for (const language of options.languages ?? ["kotlin", "swift"]) {
+      const context = {
+        definitions: source.definitions,
+        selection,
+        refs,
+        language,
+        output: language === "kotlin" ? kotlin : swift,
+      };
+      if (definition.kind === "object" && definition.fields) {
+        renderObject(name, definition, options, context, [name]);
+      } else if (definition.kind === "tagged") {
+        renderUnion(name, definition, options, context);
+      } else {
         throw new Error(
-          `Definition ${name}.${fieldName}: unsupported kind ${field?.rule.kind ?? "missing"}`,
+          `Definition ${name}: unsupported kind ${definition.kind}; expected object or tagged`,
         );
       }
-      kotlinFields.push(`  val ${fieldName}: ${types.kotlin}${field.optional ? "? = null" : ""},`);
-      swiftFields.push(`    let ${fieldName}: ${types.swift}${field.optional ? "?" : ""}`);
-    }
-    if (languages.includes("kotlin")) {
-      kotlin.push(
-        "",
-        ...docLines(options.doc, "kotlin"),
-        "@Serializable",
-        `data class Prototype${typeName}(`,
-      );
-      kotlin.push(...kotlinFields, ")");
-    }
-    if (languages.includes("swift")) {
-      swift.push(
-        "",
-        ...docLines(options.doc, "swift"),
-        `struct ${options.swiftName ?? typeName}: Codable, Equatable, Sendable {`,
-        ...swiftFields,
-        "}",
-      );
     }
   }
   return { kotlin: kotlin.join("\n") + "\n", swift: swift.join("\n") + "\n" };
 }
-
-function docLines(doc: string | undefined, language: ModelLanguage): string[] {
-  if (!doc) {
-    return [];
-  }
-  return language === "kotlin" ? [`/** ${doc} */`] : [`/// ${doc}`];
-}
-
-function fieldTypes(rule: Rule): { kotlin: string; swift: string } | undefined {
-  switch (rule.kind) {
-    case "number":
-      return rule.integer ? { kotlin: "Int", swift: "Int" } : { kotlin: "Double", swift: "Double" };
-    case "boolean":
-      return { kotlin: "Boolean", swift: "Bool" };
-    case "enum":
-      return rule.values?.every((value) => typeof value === "string") ? stringTypes : undefined;
-    case "string":
-    case "key":
-    case "boundKey":
-    case "pointer":
-      return stringTypes;
-    case "array": {
-      const item = rule.item?.kind === "array" || !rule.item ? undefined : fieldTypes(rule.item);
-      return item && { kotlin: `List<${item.kotlin}>`, swift: `[${item.swift}]` };
-    }
-    default:
-      return undefined;
-  }
-}
-
-const stringTypes = { kotlin: "String", swift: "String" };
 
 /** Byte-for-byte comparison is shared by --check and fast, in-memory stale-output tests. */
 export function staleModelOutputs(
@@ -133,7 +98,7 @@ export function staleModelOutputs(
 }
 
 if (import.meta.main) {
-  const sources = renderPrototypeSpecModels(contract, prototypeModelSelection);
+  const sources = renderPrototypeSpecModels(contract, prototypeModelSelection, prototypeTypeRefs);
   const urls = {
     kotlin: new URL(`../../${modelOutputPaths.kotlin}`, import.meta.url),
     swift: new URL(`../../${modelOutputPaths.swift}`, import.meta.url),

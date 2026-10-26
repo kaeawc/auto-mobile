@@ -110,6 +110,13 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     // prototypeAccessibilityLint.test.ts pins the TypeScript baseline palette to the Swift tables.
     "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeTheme.swift",
     "ios/prototype-agent/ICON-SYMBOLS.md",
+    // checkPrivacyManifests.test.ts scans the compiled Swift sources and both privacy manifests,
+    // and pins the Package.swift resource and the protoviewer-build.sh copy step (#14151).
+    "ios/prototype-agent/Sources/**",
+    "ios/prototype-agent/ProtoViewer/*.swift",
+    "ios/prototype-agent/ProtoViewer/PrivacyInfo.xcprivacy",
+    "Package.swift",
+    "scripts/ios/protoviewer-build.sh",
   ] as const;
 
   interface TurboConfig {

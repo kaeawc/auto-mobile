@@ -61,6 +61,10 @@ configuration preserves its state; subsequent requests use the updated clients, 
 started keep their original client. Callbacks run on the main actor; `PrototypeEvent` is `Sendable` and
 exposes its semantic category as `kind`. An authored emit named `change` remains `.emitted`.
 
+The `public` surface is pinned by `ios/prototype-agent/api/AutoMobilePrototype.api`, checked by
+`PrototypePublicAPITests` in `swift test`; an intended change regenerates it with
+`UPDATE_PROTOTYPE_API=1 swift test --filter PrototypePublicAPITests` (run from `ios/prototype-agent`).
+
 ### iOS ProtoViewer
 
 The global network switch defaults off, cancels in-flight requests on revocation, and drops stale

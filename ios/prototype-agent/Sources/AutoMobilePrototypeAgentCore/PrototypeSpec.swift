@@ -310,15 +310,6 @@ struct WindowSpec: Decodable {
     }
 }
 
-struct Placement: Decodable {
-    let type: String
-    let scrim: PrototypeModeValue?
-    let edge: String?
-    let height: Double?
-    let gravity: String?
-    let offset: Offset?
-}
-
 enum Dimension: Decodable, Equatable {
     case fill
     case wrap
@@ -355,11 +346,6 @@ enum PrototypeGridColumns: Decodable, Equatable {
             self = try .adaptive(minWidth: container.decode(Adaptive.self).minWidth)
         }
     }
-}
-
-struct Border: Decodable {
-    let width: Double
-    let color: PrototypeModeValue
 }
 
 /// `cornerRadius`: dp number, Material 3 shape token, or per-corner dp radii.
@@ -710,26 +696,6 @@ struct PrototypeOption: Decodable, Equatable {
     let label: String
 }
 
-/// A `topAppBar` navigation icon or action: an icon-only button with its accessible label.
-struct PrototypeAppBarAction: Decodable {
-    let icon: String
-    let label: String
-    let onTap: [PrototypeAction]?
-}
-
-/// A `dialog` or `snackbar` button: a tap closes its container, then runs `onTap`.
-struct PrototypeDialogButton: Decodable {
-    let label: String
-    let onTap: [PrototypeAction]?
-}
-
-/// The control at the end of a `listItem`: a bound `switch` or `checkbox`, or a decorative `icon`.
-struct PrototypeListItemTrailing: Decodable {
-    let type: String
-    let stateKey: String?
-    let name: String?
-}
-
 /// One spec node. A class so `child` can recurse; the renderer reads only the fields its type uses.
 final class PrototypeNode: Decodable {
     let type: String
@@ -1019,5 +985,41 @@ final class PrototypeNode: Decodable {
         children?.forEach { $0.collectAssets(into: &ids) }
         child?.collectAssets(into: &ids)
         screens?.values.forEach { $0.collectAssets(into: &ids) }
+    }
+}
+
+// Compatibility accessors keep layout consumers independent of the wire union's cases.
+extension Placement {
+    var type: String {
+        switch self {
+        case .fullscreen: "fullscreen"
+        case .sheet: "sheet"
+        case .floating: "floating"
+        }
+    }
+
+    var scrim: PrototypeModeValue? {
+        if case let .fullscreen(scrim) = self { return scrim }
+        return nil
+    }
+
+    var edge: String? {
+        if case let .sheet(edge, _) = self { return edge }
+        return nil
+    }
+
+    var height: Double? {
+        if case let .sheet(_, height) = self { return height }
+        return nil
+    }
+
+    var gravity: String? {
+        if case let .floating(gravity, _) = self { return gravity }
+        return nil
+    }
+
+    var offset: Offset? {
+        if case let .floating(_, offset) = self { return offset }
+        return nil
     }
 }

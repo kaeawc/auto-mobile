@@ -11,7 +11,8 @@ setup() {
     "${FIXTURE}/ios/prototype-agent/Sources/AutoMobilePrototypeAgent" \
     "${FIXTURE}/ios/prototype-agent/ProtoViewer" "${FIXTURE}/ios/prototype-agent/Viewer"
   cp "${REPO_ROOT}/scripts/ios/protoviewer-build.sh" "${FIXTURE}/scripts/ios/"
-  cp "${REPO_ROOT}/ios/prototype-agent/ProtoViewer/Info.plist" "${FIXTURE}/ios/prototype-agent/ProtoViewer/"
+  cp "${REPO_ROOT}/ios/prototype-agent/ProtoViewer/Info.plist" \
+    "${REPO_ROOT}/ios/prototype-agent/ProtoViewer/PrivacyInfo.xcprivacy" "${FIXTURE}/ios/prototype-agent/ProtoViewer/"
   cp "${REPO_ROOT}/ios/prototype-agent/ProtoViewer/"*.xcstrings "${FIXTURE}/ios/prototype-agent/ProtoViewer/"
   touch "${FIXTURE}/ios/prototype-agent/ProtoViewer/ProtoViewerApp.swift" \
     "${FIXTURE}/ios/prototype-agent/Viewer/ViewerApp.swift" \
@@ -78,6 +79,8 @@ SCRIPT
   # Caller-owned output outside the fixture repo must remain searchable.
   [ ! -e "$OUT/.metadata_never_index" ]
   [ -s "$OUT/ProtoViewer.app/ProtoViewer" ]
+  # The privacy manifest ships at the bundle root (#14151).
+  cmp "$FIXTURE/ios/prototype-agent/ProtoViewer/PrivacyInfo.xcprivacy" "$OUT/ProtoViewer.app/PrivacyInfo.xcprivacy"
   [[ "$output" == *'/ProtoViewer.app'* ]]
   run cat "$BUILD_LOG"
   [[ "$output" == *'arm64-apple-ios17.0-simulator'* ]]

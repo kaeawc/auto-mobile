@@ -26,6 +26,7 @@ export type AutoRotatePlan = {
   wasAutoRotateEnabled: boolean;
   shouldRestoreAutoRotate: boolean;
   canForceAutoRotateOff: boolean;
+  restoreAfterConfirmation: boolean;
 };
 
 type AlreadyAppliedOrientationDecision =
@@ -275,26 +276,22 @@ export class RotationOutcomes {
     autoRotateState: "locked" | "enabled" | "unknown",
     lockOrientation: boolean | undefined,
     sessionMode = false,
-  ): {
-    preserveLock: boolean;
-    restoreAutomaticRotation: boolean;
-    wasAutoRotateEnabled: boolean;
-    shouldRestoreAutoRotate: boolean;
-    canForceAutoRotateOff: boolean;
-  } {
-    const preserveLock =
-      lockOrientation === true ||
-      (sessionMode && lockOrientation === undefined && autoRotateState !== "unknown");
+  ): AutoRotatePlan {
+    const preserveLock = lockOrientation === true;
     const restoreAutomaticRotation = lockOrientation === false;
     const wasAutoRotateEnabled = autoRotateState === "enabled";
+    const restoreAfterConfirmation =
+      sessionMode && lockOrientation === undefined && wasAutoRotateEnabled;
     return {
       preserveLock,
       restoreAutomaticRotation,
       wasAutoRotateEnabled,
-      shouldRestoreAutoRotate: restoreAutomaticRotation || (wasAutoRotateEnabled && !preserveLock),
-      // The default preserves the #6199 guard against mutating an
-      // unconfirmed setting. Explicit requests deliberately own the
-      // resulting state, so they can force auto-rotate off first.
+      shouldRestoreAutoRotate:
+        restoreAutomaticRotation ||
+        (wasAutoRotateEnabled && !preserveLock && !restoreAfterConfirmation),
+      // A session's omitted lock used to persist until release. Restore it only
+      // after a confirmed rotation, preserving its existing unknown/error policy.
+      restoreAfterConfirmation,
       canForceAutoRotateOff: lockOrientation !== undefined || autoRotateState !== "unknown",
     };
   }

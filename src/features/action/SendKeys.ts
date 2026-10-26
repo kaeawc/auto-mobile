@@ -205,6 +205,12 @@ export interface SendKeysCommandExecution {
 }
 
 export interface SendKeysCommandExecutor {
+  /** Confirm enter has reached the field before a following accessibility insertion. */
+  withEnterReadBack?(
+    action: () => Promise<SendKeysCommandResult>,
+    signal?: AbortSignal,
+    display?: string,
+  ): Promise<SendKeysCommandResult>;
   setTargetLayer?(layer: HierarchyLayer | undefined): void;
   /** The focuser reported the target as a password field; honoured for prototype-layer targets. */
   setTargetPasswordField?(passwordField: boolean): void;

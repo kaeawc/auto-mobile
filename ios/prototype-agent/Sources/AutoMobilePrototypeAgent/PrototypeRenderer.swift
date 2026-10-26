@@ -857,22 +857,12 @@
         }
 
         private var contentAlignment: Alignment {
-            switch node.type {
-            case "row":
-                switch style?.arrangement {
-                case "center": return .center
-                case "end": return .trailing
-                default: return .leading
-                }
-            case "column", "flow", "grid":
-                switch style?.arrangement {
-                case "center": return .leading
-                case "end": return .bottomLeading
-                default: return .topLeading
-                }
-            case "box": return swiftUIAlignment(style?.alignment)
-            default: return .center
-            }
+            prototypeContentAlignment(
+                nodeType: node.type,
+                arrangement: style?.arrangement,
+                boxAlignment: swiftUIAlignment(style?.alignment),
+                textAlign: style?.textAlign
+            )
         }
 
         private var safeAreaEdges: UIEdgeInsets {

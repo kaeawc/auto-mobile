@@ -52,3 +52,19 @@ function nodeIsImportedHost(node: ViewHierarchyNode | ViewHierarchyNode[] | unde
     return typeof packageName === "string" && isImportedPrototypeHost(packageName);
   });
 }
+
+/**
+ * Set or clear `target.importedPrototypeContent` from `source`'s capture provenance. Absent trust
+ * metadata stays absent: structured-content validators reject own undefined fields.
+ */
+export function markImportedPrototypeContent(
+  target: Pick<ObserveResult, "importedPrototypeContent">,
+  source: Pick<ObserveResult, "activeWindow" | "viewHierarchy">,
+): void {
+  const imported = importedPrototypeContent(source);
+  if (imported) {
+    target.importedPrototypeContent = { ...imported };
+  } else {
+    delete target.importedPrototypeContent;
+  }
+}

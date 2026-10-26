@@ -4,12 +4,6 @@ import Foundation
 // role or a `{light, dark}` pair, and the on-device check of every per-mode value. Resolution
 // itself is `PrototypeModeValue.value(dark:)` and `PrototypePalette.resolve`.
 
-/// One gradient stop: a colour slot and an optional position in 0...1.
-struct PrototypeGradientStop: Decodable, Equatable {
-    let color: PrototypeModeValue
-    let position: Double?
-}
-
 /// A resolved gradient stop: the colour for the palette's mode and its location in 0...1.
 struct PrototypeGradientColorStop: Equatable {
     let color: PrototypeRGBA

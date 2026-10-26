@@ -7,6 +7,8 @@ setup() {
     "$FIXTURE_ROOT/android/protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol" \
     "$FIXTURE_ROOT/ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore"
   cp "$REPO_ROOT/scripts/prototype/generate-prototype-spec-models.ts" \
+    "$REPO_ROOT/scripts/prototype/prototype-model-rendering.ts" \
+    "$REPO_ROOT/scripts/prototype/prototype-model-unions.ts" \
     "$REPO_ROOT/scripts/prototype/prototype-model-selection.ts" "$FIXTURE_ROOT/scripts/prototype/"
   cp "$REPO_ROOT/schemas/prototype-spec-contract.json" "$FIXTURE_ROOT/schemas/"
   KOTLIN_OUTPUT="$FIXTURE_ROOT/android/protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol/PrototypeSpecModels.generated.kt"

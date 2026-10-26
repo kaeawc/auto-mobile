@@ -5,6 +5,8 @@ import { KeyEventSupport } from "./KeyEventSupport";
 import {
   FocusedTextClearVerifier,
   checkAbort as checkAbortCheckpoint,
+  isEnterConfirmed,
+  type EnterFieldState,
 } from "./FocusedTextClearVerifier";
 import { EventLastTyper } from "./EventLastTyper";
 import { EventAllTyper } from "./EventAllTyper";
@@ -488,10 +490,10 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     display?: string,
   ): Promise<SendKeysCommandResult> {
     const read = async () =>
-      this.clearVerifier.readFocusedTextSnapshot(
+      this.clearVerifier.readEnterFieldState(
         await this.clearVerifier.readFreshObservation(signal, display),
       );
-    let before: { text: string; length: number } | undefined;
+    let before: EnterFieldState | undefined;
     try {
       // Take the baseline before dispatch, never from the prior command's cached tree.
       before = await read();
@@ -503,34 +505,32 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     if (!result.success) {
       return result;
     }
-    if (before === undefined) {
+    if (before?.kind !== "field" || before.snapshot === undefined) {
       // No readable focused field before the key (password field, unreadable node): the
       // newline cannot be confirmed either way, so keep the pre-guard behaviour.
       logger.warn("[SendKeys] Enter read-back skipped: focused field text was unreadable");
       return result;
     }
-    const baseline = before.text;
+    const baseline = { text: before.snapshot.text, identity: before.identity };
     try {
       // The bug is a stale snapshot: the field still shows its pre-enter text after the key.
-      // The key has landed when a line was added, or when the text no longer extends the
-      // baseline (a submit that clears the field, or focus moving to another field).
-      const confirmed = await readBackWithSettle(
+      // Unavailable observations never confirm; they are polled again and, if they stay
+      // unavailable, reported as an unconfirmed newline (partial application).
+      const { accepted: confirmed, last } = await readBackWithSettle(
         read,
-        (snapshot) =>
-          snapshot === undefined ||
-          snapshot.text.split("\n").length > baseline.split("\n").length ||
-          !snapshot.text.startsWith(baseline),
+        (state) => isEnterConfirmed(baseline, state),
         {
           timer: this.timer,
           beforeRead: () => this.checkAbort(signal),
-          finish: (_, accepted) => accepted,
+          finish: (state, accepted) => ({ accepted, last: state }),
         },
       );
       if (confirmed) {
         return result;
       }
       throw new ActionableError(
-        "Enter was dispatched but its newline could not be confirmed before the next a11y insert. " +
+        "Enter was dispatched but its newline could not be confirmed before the next a11y insert" +
+          (last?.kind === "unavailable" ? " (fresh observations were unavailable). " : ". ") +
           "Observe the field before continuing; do not retry the sequence blindly. " +
           "For a single-line submit action, end the sequence at enter and re-observe the target.",
       );

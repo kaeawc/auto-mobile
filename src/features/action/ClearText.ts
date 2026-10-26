@@ -135,6 +135,38 @@ export function hasFocusedTextInput(
   return false;
 }
 
+/**
+ * Stable identity of the focused editable control: resource id, class and top-left corner. The
+ * size is left out so a multiline field that grows after a newline keeps its identity.
+ */
+export function getFocusedTextFieldIdentity(
+  viewHierarchy: ViewHierarchyResult,
+  parser: ElementParser = new DefaultElementParser(),
+): string | undefined {
+  for (const rootGroup of extractSearchRootGroups(viewHierarchy, parser)) {
+    let identity: string | undefined;
+    for (const rootNode of rootGroup) {
+      parser.traverseNode(rootNode, (node: ViewHierarchyNode) => {
+        const properties = parser.extractNodeProperties(node);
+        if (identity !== undefined || !isFocusedTextInputProperties(properties)) {
+          return;
+        }
+        const searchable = toSearchable(properties);
+        identity = JSON.stringify([
+          searchable.nativeId ?? null,
+          searchable.className ?? null,
+          searchable.bounds?.left ?? null,
+          searchable.bounds?.top ?? null,
+        ]);
+      });
+    }
+    if (identity !== undefined) {
+      return identity;
+    }
+  }
+  return undefined;
+}
+
 /** Read the editable value, never an iOS field's accessibility label or placeholder. */
 export function getFocusedTextValue(
   viewHierarchy: ViewHierarchyResult,

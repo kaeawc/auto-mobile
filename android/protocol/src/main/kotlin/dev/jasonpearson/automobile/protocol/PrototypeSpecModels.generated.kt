@@ -2,6 +2,7 @@
 // Regenerate: bun scripts/prototype/generate-prototype-spec-models.ts
 package dev.jasonpearson.automobile.protocol
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -70,3 +71,125 @@ data class PrototypeChartRange(
   val min: Double,
   val max: Double,
 )
+
+@Serializable
+data class PrototypeContainer(
+  val elementId: String? = null,
+  val text: String? = null,
+  val index: Int? = null,
+  val selectionStrategy: String? = null,
+  val container: PrototypeContainer? = null,
+)
+
+@Serializable
+data class PrototypeSelector(
+  val elementId: String? = null,
+  val text: String? = null,
+  val testTag: String? = null,
+  val container: PrototypeContainer? = null,
+)
+
+@Serializable
+data class PrototypeStyleWhen(
+  val `when`: PrototypeCondition,
+  val style: PrototypeStyle,
+)
+
+/** An icon-only control in a `topAppBar`: the icon, its accessible label and its tap. */
+@Serializable
+data class PrototypeAppBarAction(
+  val icon: String,
+  val label: String,
+  val onTap: List<PrototypeAction>? = null,
+)
+
+/** A `dialog` or `snackbar` button: a tap closes its container, then runs `onTap`. */
+@Serializable
+data class PrototypeDialogButton(
+  val label: String,
+  val onTap: List<PrototypeAction>? = null,
+)
+
+/**
+ * Pull-to-refresh on a vertical [PrototypeScrollNode]: the indicator shows while the boolean state
+ * [stateKey] is true. A pull writes true to it and runs [onRefresh]; the prototype or a patch
+ * writes false to end it.
+ */
+@Serializable
+data class PrototypeScrollRefresh(
+  val stateKey: String,
+  val onRefresh: List<PrototypeAction>,
+)
+
+@Serializable sealed class PrototypeAnchor
+
+/**
+ * Screen-space dp [bounds]. [alignment] (`cover` when absent) lays the node over them or along one
+ * of their edges, then [offset] shifts it. The host resolves an element anchor into this shape, so
+ * it is the only anchor the renderer lays out (#9316).
+ */
+@SerialName("bounds")
+@Serializable
+data class PrototypeBoundsAnchor(
+  val bounds: PrototypeBounds,
+  val alignment: String? = null,
+  val offset: PrototypeOffset? = null,
+) : PrototypeAnchor()
+
+@SerialName("element")
+@Serializable
+data class PrototypeElementAnchor(
+  val selector: PrototypeSelector,
+  val alignment: String,
+  val offset: PrototypeOffset? = null,
+) : PrototypeAnchor()
+
+@Serializable sealed class PrototypePlacement
+
+@SerialName("fullscreen")
+@Serializable
+data class PrototypeFullscreenPlacement(
+  val scrim: PrototypeModeValue? = null,
+) : PrototypePlacement()
+
+@SerialName("sheet")
+@Serializable
+data class PrototypeSheetPlacement(
+  val edge: String,
+  val height: Double,
+) : PrototypePlacement()
+
+@SerialName("floating")
+@Serializable
+data class PrototypeFloatingPlacement(
+  val gravity: String,
+  val offset: PrototypeOffset,
+) : PrototypePlacement()
+
+@Serializable sealed class PrototypeGradient
+
+@SerialName("linear")
+@Serializable
+data class PrototypeLinearGradient(
+  val angle: Double,
+  val stops: List<PrototypeGradientStop>,
+) : PrototypeGradient()
+
+@SerialName("radial")
+@Serializable
+data class PrototypeRadialGradient(val stops: List<PrototypeGradientStop>) : PrototypeGradient()
+
+/** The control at the end of a `listItem`: a bound switch or checkbox, or a decorative icon. */
+@Serializable sealed class PrototypeListItemTrailing
+
+@SerialName("switch")
+@Serializable
+data class PrototypeListItemSwitch(val stateKey: String) : PrototypeListItemTrailing()
+
+@SerialName("checkbox")
+@Serializable
+data class PrototypeListItemCheckbox(val stateKey: String) : PrototypeListItemTrailing()
+
+@SerialName("icon")
+@Serializable
+data class PrototypeListItemIcon(val name: String) : PrototypeListItemTrailing()

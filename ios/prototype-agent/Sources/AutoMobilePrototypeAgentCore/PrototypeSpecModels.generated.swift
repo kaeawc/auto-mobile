@@ -23,3 +23,122 @@ struct PrototypeChartRange: Codable, Equatable, Sendable {
     let min: Double
     let max: Double
 }
+
+/// An icon-only control in a `topAppBar`: the icon, its accessible label and its tap.
+struct PrototypeAppBarAction: Decodable {
+    let icon: String
+    let label: String
+    let onTap: [PrototypeAction]?
+}
+
+/// A `dialog` or `snackbar` button: a tap closes its container, then runs `onTap`.
+struct PrototypeDialogButton: Decodable {
+    let label: String
+    let onTap: [PrototypeAction]?
+}
+
+enum Placement: Decodable {
+    case fullscreen(scrim: PrototypeModeValue?)
+    case sheet(edge: String, height: Double)
+    case floating(gravity: String, offset: Offset)
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case scrim
+        case edge
+        case height
+        case gravity
+        case offset
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try container.decode(String.self, forKey: .type)
+        switch type {
+        case "fullscreen":
+            self = try .fullscreen(
+                scrim: container.decodeIfPresent(PrototypeModeValue.self, forKey: .scrim)
+            )
+        case "sheet":
+            self = try .sheet(
+                edge: container.decode(String.self, forKey: .edge),
+                height: container.decode(Double.self, forKey: .height)
+            )
+        case "floating":
+            self = try .floating(
+                gravity: container.decode(String.self, forKey: .gravity),
+                offset: container.decode(Offset.self, forKey: .offset)
+            )
+        default:
+            throw DecodingError.dataCorruptedError(
+                forKey: .type,
+                in: container,
+                debugDescription: "Unknown Placement type \(type)"
+            )
+        }
+    }
+}
+
+/// The control at the end of a `listItem`: a bound switch or checkbox, or a decorative icon.
+enum PrototypeListItemTrailing: Codable, Equatable, Sendable {
+    case `switch`(stateKey: String)
+    case checkbox(stateKey: String)
+    case icon(name: String)
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case stateKey
+        case name
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try container.decode(String.self, forKey: .type)
+        switch type {
+        case "switch":
+            self = try .switch(
+                stateKey: container.decode(String.self, forKey: .stateKey)
+            )
+        case "checkbox":
+            self = try .checkbox(
+                stateKey: container.decode(String.self, forKey: .stateKey)
+            )
+        case "icon":
+            self = try .icon(
+                name: container.decode(String.self, forKey: .name)
+            )
+        default:
+            throw DecodingError.dataCorruptedError(
+                forKey: .type,
+                in: container,
+                debugDescription: "Unknown PrototypeListItemTrailing type \(type)"
+            )
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case let .switch(stateKey: stateKey):
+            try container.encode("switch", forKey: .type)
+            try container.encode(stateKey, forKey: .stateKey)
+        case let .checkbox(stateKey: stateKey):
+            try container.encode("checkbox", forKey: .type)
+            try container.encode(stateKey, forKey: .stateKey)
+        case let .icon(name: name):
+            try container.encode("icon", forKey: .type)
+            try container.encode(name, forKey: .name)
+        }
+    }
+}
+
+/// One gradient stop: a colour slot and an optional position in 0...1.
+struct PrototypeGradientStop: Decodable, Equatable {
+    let color: PrototypeModeValue
+    let position: Double?
+}
+
+struct Border: Decodable {
+    let width: Double
+    let color: PrototypeModeValue
+}

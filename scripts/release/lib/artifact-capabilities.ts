@@ -21,13 +21,46 @@ export interface CapabilityManifest {
   releases: Record<string, ArtifactCapabilities>;
 }
 
-/** Source files (relative to the repo root) that advertise each artifact's capabilities. */
-export const ADVERTISING_SOURCES: Record<ArtifactId, string> = {
-  "android-ctrlproxy-apk":
+/**
+ * Source files (relative to the repo root) that advertise each artifact's capabilities. An
+ * artifact's parser reads their concatenation, so a capability advertised from a second file is
+ * not missed (#15347).
+ */
+export const ADVERTISING_SOURCES: Record<ArtifactId, string[]> = {
+  "android-ctrlproxy-apk": [
     "android/control-proxy/src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/WebSocketServer.kt",
-  "ios-runner": "ios/control-proxy/Sources/CtrlProxy/Models/RunnerFeature.swift",
-  "prototype-agent-dylib":
+    // The `global_action_<name>_v1` flags are generated here from the action table, then added by
+    // WebSocketServer through `addAll(SystemGlobalActions.advertisedFlags(sdk))`.
+    "android/control-proxy/src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/SystemGlobalActions.kt",
+  ],
+  "ios-runner": ["ios/control-proxy/Sources/CtrlProxy/Models/RunnerFeature.swift"],
+  "prototype-agent-dylib": [
     "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeAgentProtocol.swift",
+    // Standalone mode appends `prototype_persistence_replay_v1` to the handshake list.
+    "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeStandalone.swift",
+  ],
+};
+
+/**
+ * Capabilities the host gates on but an artifact deliberately does not implement, with the reason.
+ * The host gate stays: it fails closed (preflight refuses the spec feature against an agent that
+ * does not advertise the name), which is the right degradation. A gate is exempt only while the
+ * artifact really lacks the feature; once the artifact advertises it, the stale entry fails the
+ * check (see {@link findStaleExemptions}) so it cannot hide a later regression.
+ */
+export const UNIMPLEMENTED_BY_ARTIFACT: Record<ArtifactId, Record<string, string>> = {
+  "android-ctrlproxy-apk": {},
+  "ios-runner": {},
+  "prototype-agent-dylib": {
+    prototype_chat_scroll_v1:
+      "iOS agent only derives the bundle requirement; it does not implement chat scroll options or scrollTo",
+    prototype_choreography_v1:
+      "iOS agent keeps the transition type only; the host refuses delays, stagger and blurReplace (#15247)",
+    prototype_motion_v2:
+      "iOS agent does not advertise it; the host refuses motion v2 features against it",
+    prototype_platform_v1:
+      "iOS agent validates platform specs but has no module registry yet (#14296)",
+  },
 };
 
 /**
@@ -63,7 +96,13 @@ function matchAll(source: string, pattern: RegExp): string[] {
 
 /** `add("name")` flags in WebSocketServer.supportedCommands(), conditional ones included. */
 export function parseAndroidAdvertised(kotlinSource: string): string[] {
-  return matchAll(kotlinSource, new RegExp(`\\badd\\("(${CAPABILITY_NAME})"\\)`, "g"));
+  return uniqueSorted([
+    ...matchAll(kotlinSource, new RegExp(`\\badd\\("(${CAPABILITY_NAME})"\\)`, "g")),
+    // SystemGlobalActions: `flagFor("lock_screen")` expands to `global_action_lock_screen_v1`.
+    ...matchAll(kotlinSource, /\bflagFor\("([a-z][a-z0-9_]*)"\)/g).map(
+      (name) => `global_action_${name}_v1`,
+    ),
+  ]);
 }
 
 /** Raw values of the `RunnerFeature` enum cases. */
@@ -162,11 +201,30 @@ export interface CapabilityGap {
 export function findGaps(
   advertised: ArtifactCapabilities,
   gated: Record<ArtifactId, string[]>,
+  exempt: Record<ArtifactId, Record<string, string>> = {
+    "android-ctrlproxy-apk": {},
+    "ios-runner": {},
+    "prototype-agent-dylib": {},
+  },
 ): CapabilityGap[] {
   return ARTIFACTS.flatMap((artifact) => {
     const have = new Set(advertised[artifact]);
     return uniqueSorted(gated[artifact])
-      .filter((capability) => !have.has(capability))
+      .filter((capability) => !have.has(capability) && !Object.hasOwn(exempt[artifact], capability))
+      .map((capability) => ({ artifact, capability }));
+  });
+}
+
+/** Exempt names the artifact now advertises: the exemption is stale and must be removed. */
+export function findStaleExemptions(
+  advertised: ArtifactCapabilities,
+  exempt: Record<ArtifactId, Record<string, string>>,
+): CapabilityGap[] {
+  return ARTIFACTS.flatMap((artifact) => {
+    const have = new Set(advertised[artifact]);
+    return Object.keys(exempt[artifact])
+      .filter((capability) => have.has(capability))
+      .sort()
       .map((capability) => ({ artifact, capability }));
   });
 }
@@ -176,7 +234,8 @@ export function formatGaps(version: string, gaps: CapabilityGap[]): string {
   return [
     `Pinned release ${version} does not advertise ${gaps.length} capability name(s) the host gates on:`,
     ...lines,
-    "Re-cut the artifacts so they advertise these capabilities (or drop the host gate),",
+    "Make the artifacts advertise these capabilities, list them in UNIMPLEMENTED_BY_ARTIFACT if an",
+    "artifact deliberately lacks them, or drop the host gate,",
     "then record the new release with: bun scripts/release/check-artifact-capabilities.ts --record <version> --ref <git ref>",
   ].join("\n");
 }

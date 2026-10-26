@@ -47,7 +47,11 @@ internal class ViewHierarchyExtractorWrapperPruningFixturesTest {
       val reduction = 1.0 - after.size.toDouble() / before.size
       assertTrue("$path reduced ${"%.2f".format(reduction)}, wanted $minimum", reduction >= minimum)
 
-      assertEquals("$path lost nodes a selector or tap can reach", emptyList<UIElementInfo>(), lost(before, after))
+      assertEquals(
+        "$path lost nodes a selector or tap can reach",
+        emptyList<UIElementInfo>(),
+        lost(before, after),
+      )
     }
   }
 
@@ -63,7 +67,9 @@ internal class ViewHierarchyExtractorWrapperPruningFixturesTest {
     assertTrue("the fixtures hold selector-relevant nodes", checked > 100)
   }
 
-  /** Selector-relevant nodes present before pruning and missing after, compared by their own fields. */
+  /**
+   * Selector-relevant nodes present before pruning and missing after, compared by their own fields.
+   */
   private fun lost(before: List<UIElementInfo>, after: List<UIElementInfo>): List<UIElementInfo> {
     val remaining = after.groupingBy(::ownFields).eachCount().toMutableMap()
     return before.filter(::selectorRelevant).filter { node ->
@@ -74,9 +80,12 @@ internal class ViewHierarchyExtractorWrapperPruningFixturesTest {
     }
   }
 
-  private fun ownFields(node: UIElementInfo): UIElementInfo = node.copy(node = null, children = emptyList())
+  private fun ownFields(node: UIElementInfo): UIElementInfo =
+    node.copy(node = null, children = emptyList())
 
-  /** What a selector names or a tap can reach: id, text, description, tag or a real click handler. */
+  /**
+   * What a selector names or a tap can reach: id, text, description, tag or a real click handler.
+   */
   private fun selectorRelevant(node: UIElementInfo): Boolean =
     !node.resourceId.isNullOrBlank() ||
       !node.text.isNullOrBlank() ||

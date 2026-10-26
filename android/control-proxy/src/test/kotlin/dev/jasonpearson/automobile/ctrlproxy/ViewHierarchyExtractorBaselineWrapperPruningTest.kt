@@ -3,7 +3,6 @@ package dev.jasonpearson.automobile.ctrlproxy
 import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.BeforeClass
@@ -126,7 +125,11 @@ internal class ViewHierarchyExtractorBaselineWrapperPruningTest : ViewHierarchyE
       val parent = mark(baselineNode(children = listOf(baselineNode(), UIElementInfo(text = "x"))))
       val kept = enabled.optimizeHierarchy(parent).single()
       assertEquals("$name parent keeps its own fields", parent.copy(children = kept.children), kept)
-      assertEquals("$name parent keeps the text child", listOf(UIElementInfo(text = "x")), kept.children)
+      assertEquals(
+        "$name parent keeps the text child",
+        listOf(UIElementInfo(text = "x")),
+        kept.children,
+      )
     }
   }
 

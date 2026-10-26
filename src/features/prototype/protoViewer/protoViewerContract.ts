@@ -103,3 +103,22 @@ export const protoViewerWireResultSchema = z.union([workResultSchema, preparedRe
 export type ProtoViewerWireResult = z.infer<typeof protoViewerWireResultSchema>;
 /** What an import or open answers with; the storage-preparing answer never leaves the transport. */
 export type ProtoViewerResult = z.infer<typeof workResultSchema>;
+
+/** Twin: ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeMcp*.swift. */
+export const PROTOVIEWER_IOS_SCHEME = "automobile-proto";
+export const PROTOVIEWER_IOS_MCP_FOLDER = "Library/Application Support/ProtoViewer/mcp";
+export const PROTOVIEWER_INBOX_FOLDER = "inbox";
+export const PROTOVIEWER_RESULTS_FOLDER = "results";
+/** Query values use percent encoding (including apostrophes), never shell interpolation. */
+function queryValue(value: string): string {
+  return encodeURIComponent(value).replace(
+    /[!'()*]/g,
+    (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+}
+export function protoViewerIosImportUrl(request: string, label?: string): string {
+  return `${PROTOVIEWER_IOS_SCHEME}://import?request=${queryValue(request)}${label === undefined ? "" : `&label=${queryValue(label)}`}`;
+}
+export function protoViewerIosOpenUrl(request: string, libraryId: string): string {
+  return `${PROTOVIEWER_IOS_SCHEME}://open?request=${queryValue(request)}&id=${queryValue(libraryId)}`;
+}

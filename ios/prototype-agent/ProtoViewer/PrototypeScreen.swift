@@ -6,6 +6,9 @@ struct PrototypeScreen: View {
     let store: PrototypeLibraryStore
     let entry: PrototypeLibraryEntry
     let networkSwitch: PrototypeLibraryNetworkSwitch
+    /// MCP `open` reports success on the first render and failure on any load error or watchdog expiry.
+    let onLoaded: @MainActor () -> Void
+    let onLoadFailed: @MainActor () -> Void
     @State private var showsSettings = false
     @Environment(\.dismiss) private var dismiss
     @State private var revision = 0
@@ -19,7 +22,12 @@ struct PrototypeScreen: View {
 
     private let network: PrototypeNetworkConfiguration
 
-    init(store: PrototypeLibraryStore, entry: PrototypeLibraryEntry, networkSwitch: PrototypeLibraryNetworkSwitch) {
+    init(
+        store: PrototypeLibraryStore, entry: PrototypeLibraryEntry, networkSwitch: PrototypeLibraryNetworkSwitch,
+        onLoaded: @escaping @MainActor () -> Void = {}, onLoadFailed: @escaping @MainActor () -> Void = {}
+    ) {
+        self.onLoaded = onLoaded
+        self.onLoadFailed = onLoadFailed
         self.store = store
         self.entry = entry
         self.networkSwitch = networkSwitch
@@ -84,9 +92,13 @@ struct PrototypeScreen: View {
                         watchdog.cancel()
                         error = $0
                         self.content = nil
+                        onLoadFailed()
                     }
                 )
-                .onFirstRender { watchdog.cancel() }
+                .onFirstRender {
+                    watchdog.cancel()
+                    onLoaded()
+                }
                 .onStopped {
                     PrototypeAssetRegistrar.releaseProcessFonts()
                     rendererActive = false
@@ -114,7 +126,10 @@ struct PrototypeScreen: View {
             revision += 1
             error = nil
             load()
-        } catch { self.error = error }
+        } catch {
+            self.error = error
+            onLoadFailed()
+        }
     }
 
     private func load() {
@@ -129,7 +144,11 @@ struct PrototypeScreen: View {
                 // No first content within the budget: show the error state; Back and Close stay available.
                 error = PrototypeLibraryFailure(path: entry.label, message: "Prototype did not render in time")
                 content = nil
+                onLoadFailed()
             }
-        } catch { self.error = error }
+        } catch {
+            self.error = error
+            onLoadFailed()
+        }
     }
 }

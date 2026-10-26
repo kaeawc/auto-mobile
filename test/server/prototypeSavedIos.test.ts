@@ -103,6 +103,15 @@ describe("iOS saved prototype tool actions", () => {
     observationReads = [];
     dispose = registerPrototypeTools({
       iosSavedPrototypeInstaller: backend ?? installer,
+      protoViewerFactory: () => ({
+        installed: async () => false,
+        importBundle: async () => {
+          throw new Error("Absent ProtoViewer must not import");
+        },
+        open: async () => {
+          throw new Error("Absent ProtoViewer must not open");
+        },
+      }),
       assetFileReader: reader,
       observationScreenshotReader: async (uri) => {
         observationReads.push(uri);

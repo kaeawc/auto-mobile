@@ -100,22 +100,24 @@ internal object PrototypePlatformRules {
         }
       }
       is Use.Call -> callError(use.action, use.path, declared)
-      is Use.Read -> {
-        val name = pointerModule(use.pointer)
-        when {
-          module(name) == null -> fail(use.path, "Unknown platform module $name")
-          name !in declared.modules -> notDeclared(use.path, name)
-          module(name)?.member("state")?.let { state ->
-            val tokens = PrototypeDataPointer.tokens(use.pointer)
-            tokens.size != 2 || tokens[1] !in state
-          } == true -> fail(use.path, "Unknown platform state ${use.pointer}")
-          else -> null
-        }
-      }
+      is Use.Read -> readError(use, declared)
       is Use.Event ->
         if (use.inHandler) null
         else fail(use.path, "{event} is only available inside a platform.on handler")
     }
+
+  private fun readError(use: Use.Read, declared: Declared): PrototypeSpecError? {
+    val name = pointerModule(use.pointer)
+    return when {
+      module(name) == null -> fail(use.path, "Unknown platform module $name")
+      name !in declared.modules -> notDeclared(use.path, name)
+      module(name)?.member("state")?.let { state ->
+        val tokens = PrototypeDataPointer.tokens(use.pointer)
+        tokens.size != 2 || tokens[1] !in state
+      } == true -> fail(use.path, "Unknown platform state ${use.pointer}")
+      else -> null
+    }
+  }
 
   private fun callError(action: JsonObject, path: String, declared: Declared): PrototypeSpecError? {
     val call = action.text("call")

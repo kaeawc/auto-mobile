@@ -379,7 +379,8 @@ Grammar:
 - Placeholders are bound in a template child's \`text\`, the label/title/text fields of components
   (button, fab, segmentedButton options, topAppBar, dialog, menu item labels/trailingText, select labels/options, snackbar), state condition operands
   (\`equals\`/\`notEquals\` strings), \`setState.value\` and \`emit.name\`. \`emit.payload\` is not bound.
-  Anything else, including a \`{key}\` state placeholder and other braces, is left untouched.
+  Anything else, including a \`{key}\` state placeholder and other braces, is left untouched. A show or patch lists a placeholder
+  in such a field as \`placeholderFindings\` (for example \`chip.label\` or \`badge.text\`).
 - State keys bind too: \`stateKey\`, \`hourKey\`/\`minuteKey\`, a list item's trailing \`stateKey\`,
   \`openWhen.key\`, condition \`key\`s and the \`key\` of \`setState\`, \`toggle\`, \`increment\` and
   \`decrement\`, so \`"key": "liked_{item.id}"\` gives each row its own state. Every bound key must

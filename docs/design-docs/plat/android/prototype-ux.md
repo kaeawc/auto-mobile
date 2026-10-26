@@ -740,7 +740,8 @@ jumping.
 A non-stack node's optional `transition` picks the `visibleWhen` enter/exit: `none`
 (instant), `fade`, `expand` (grow/shrink) or `slide` (vertical slide with a
 fade). Absent keeps the default fade + expand. It has no effect on nodes
-without `visibleWhen`, or when motion is off.
+without `visibleWhen`, or when motion is off; a show reports the advisory
+`transition-without-visible-when` accessibility finding for that case.
 
 A style `pressScale` (0.5–1) shrinks a tappable node while it is pressed. With
 motion on it animates with a short spring; with `motion: "none"` or animator
@@ -759,6 +760,18 @@ intentional infinite animations (today only the shimmer) and is ignored by hosts
 `observe(waitFor: stable)` and the launcher/SystemUI quiet-tree wait do not settle
 while `active` is positive and stay bounded by their usual timeout. The count is
 zero after a single frame under `motion: "none"` or animator scale 0.
+
+### Screen map (#14125)
+
+`prototype {action:"screenMap", spec | specPath}` is host-only (no device request). It walks the
+spec, after component expansion, and returns `screenMap {nodes, edges}` plus a `mermaid` flowchart.
+Nodes are the root, each `stack` screen (`stack:<id>/<screen>`, `start` on the start screen), each
+`pager` page (`pager:<id>/<index>`, labelled from a `tabBar` or `bottomNav` that names the pager),
+`bottomSheet` and `dialog`. Edges are `push`, `replace`, `pop`, `popToRoot` and `setPage` actions, from
+the enclosing screen, each tagged with the `testTag`, `id` and text or label of the node that runs it
+and its spec path. A `pop` targets `back` (the previous screen is runtime state), and `setPage` with
+`next` or `prev` keeps the authored word. `visibleWhen` alternatives and sheet or dialog opening by
+state are not resolved. The dynamic cross-check and the diff against `getNavigationGraph` are not built.
 
 ### Stack transitions
 
@@ -1896,6 +1909,24 @@ Device checks must cover keyguard timing, daemon death, pager page 3 across rota
 
 Android only. The iOS agent does not lift a sheet above the keyboard; whether to rely on UIKit keyboard avoidance or match this is an open decision (see [iOS prototype agent](../ios/prototype-agent.md#open-decisions)).
 
+## Placeholder lint (#15444)
+
+A successful `show` or `patch` returns `placeholderFindings` when a repeat or state placeholder sits
+in a field that does not bind it, so it would be drawn literally. It is advisory, host-only and
+never refuses a show. Each finding names the field `path` (for example `root.children[0].label`),
+the `placeholder` as authored and a `detail`. The output keeps 50 findings, and
+`placeholderFindingsTotal` reports the full count when it is capped.
+
+- A repeat placeholder (`{index}`, or `{alias.field}` for an enclosing `repeat.as`) in a text field
+  that is not in the bindable set, such as `chip.label` or `badge.text`. Fields that bind
+  (`button.label`, `topAppBar.title`, `searchBar.placeholder`, and `text` nodes) are not reported.
+- A `{key}` state placeholder naming a declared `state` key in `chip.label`, `badge.text`,
+  `textField.placeholder` or `searchBar.placeholder`. Only a `text` node reads `{key}` from state.
+  Other fields are left alone because a renderer may bind them beyond the contract.
+
+Whether to widen binding to these fields is a separate contract decision (#15444); until then use a
+`text` node next to the field.
+
 ## Accessibility lint (#14126)
 
 A successful `show` or `patch` returns `accessibilityFindings`: an advisory, host-only lint of the
@@ -1903,13 +1934,14 @@ component-expanded spec sent to the device. It never refuses a show and needs no
 Each finding names a `rule`, the node `path` and a `detail`. The output keeps 50 findings, and
 `accessibilityFindingsTotal` reports the full count when it is capped.
 
-| Rule                   | Finds                                                                                                                                                                                                                                                                                                                                                                 |
-| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `unlabeled-control`    | A node with `onTap`, `onLongPress` or `onDoubleTap`, or an `iconButton`, `fab`, `switch`, `checkbox`, `slider` or `select`, with no `contentDescription`, `label`, `text`, `spans`, `headline` or `title` on itself or a descendant.                                                                                                                                  |
-| `unlabeled-image`      | An `image` or `icon` with a `testTag` but no `contentDescription`. An untagged, non-tappable one without a description is decorative: the renderers hide it from accessibility, so it is not reported.                                                                                                                                                                |
-| `unlabeled-text-field` | A `textField` or `searchBar` with no `label`, `placeholder` or `contentDescription`.                                                                                                                                                                                                                                                                                  |
-| `low-contrast`         | A `text` node with an authored `style.color` below WCAG AA against the nearest background the host can resolve: 4.5:1, or 3:1 for large text (`textSize` 24 or more, 18.66 or more at `fontWeight` 700, or a `display`/`headline` `textStyle`). It is checked in light and dark, or only the mode `theme.mode` pins; `mode` names the failing one, `value` the ratio. |
-| `small-touch-target`   | A tappable node or control whose authored `width`, `height`, `maxWidth` or `maxHeight` is under 48dp (44pt on iOS); `value` is the smallest side. Sizes left to layout are not checked.                                                                                                                                                                               |
+| Rule                              | Finds                                                                                                                                                                                                                                                                                                                                                                 |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `unlabeled-control`               | A node with `onTap`, `onLongPress` or `onDoubleTap`, or an `iconButton`, `fab`, `switch`, `checkbox`, `slider` or `select`, with no `contentDescription`, `label`, `text`, `spans`, `headline` or `title` on itself or a descendant.                                                                                                                                  |
+| `unlabeled-image`                 | An `image` or `icon` with a `testTag` but no `contentDescription`. An untagged, non-tappable one without a description is decorative: the renderers hide it from accessibility, so it is not reported.                                                                                                                                                                |
+| `unlabeled-text-field`            | A `textField` or `searchBar` with no `label`, `placeholder` or `contentDescription`.                                                                                                                                                                                                                                                                                  |
+| `low-contrast`                    | A `text` node with an authored `style.color` below WCAG AA against the nearest background the host can resolve: 4.5:1, or 3:1 for large text (`textSize` 24 or more, 18.66 or more at `fontWeight` 700, or a `display`/`headline` `textStyle`). It is checked in light and dark, or only the mode `theme.mode` pins; `mode` names the failing one, `value` the ratio. |
+| `small-touch-target`              | A tappable node or control whose authored `width`, `height`, `maxWidth` or `maxHeight` is under 48dp (44pt on iOS); `value` is the smallest side. Sizes left to layout are not checked.                                                                                                                                                                               |
+| `transition-without-visible-when` | A non-stack node with a `transition` but no `visibleWhen`: nothing ever enters or exits, so the transition never runs.                                                                                                                                                                                                                                                |
 
 Colours resolve on the host as the renderers do: a hex value, a `{light, dark}` pair, or a role
 from the Material 3 baseline scheme with `theme.colors` overrides (flat, then per mode). A

@@ -106,6 +106,10 @@
             keyboardFrame = frame
         }
 
+        /// Whether a native presentation from the overlay root is up; set by the agent. Such a
+        /// presentation avoids the keyboard itself, so the lift stays 0 (#15464).
+        @ObservationIgnored var nativePresentationActive: () -> Bool = { false }
+
         /// Points a bottom sheet is raised above the keyboard; 0 for every other placement.
         var keyboardLift: Double {
             let placement = spec?.window.placement
@@ -116,7 +120,8 @@
                     PrototypeRect(x: $0.minX, y: $0.minY, width: $0.width, height: $0.height)
                 },
                 windowOriginY: keyboardContainerFrame.map { Double($0.minY) } ?? Double(windowOrigin.y),
-                windowHeight: keyboardContainerFrame.map { Double($0.height) } ?? Double(windowSize.height)
+                windowHeight: keyboardContainerFrame.map { Double($0.height) } ?? Double(windowSize.height),
+                nativePresentationActive: nativePresentationActive()
             )
         }
 

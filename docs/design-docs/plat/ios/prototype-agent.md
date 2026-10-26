@@ -192,6 +192,17 @@ release or daemon restart. On iOS the host sends `get_prototype_status` and adop
 is dropped. The agent advertises `prototype_inspect_v1`; without it the host refuses `inspect` before
 sending anything and asks to relaunch with `launchApp { prototype: true }`.
 
+## Native presentations and touches (#15463)
+
+A native presentation (`.sheet`, `.alert`, `.confirmationDialog`, `.popover`) presented from the
+overlay window's root lives in the prototype window, but no prototype hit rect covers it, so
+`PassthroughWindow.hitTest` also claims touches for it, computed at hit time from the presented
+controller (`PrototypeNativePresentationHitRegion`). A modal presentation claims the whole window,
+so an outside tap dismisses it; a sheet whose selected detent is at or below
+`largestUndimmedDetentIdentifier` (`presentationBackgroundInteraction`) claims only its own frame and
+lets other touches reach the app. Menus use a system window and need no claim. Not yet
+device-verified.
+
 ## Bottom sheet and the keyboard
 
 Matches [Android](../android/prototype-ux.md#bottom-sheet-and-the-keyboard-10262): a `sheet` with
@@ -206,6 +217,9 @@ Fullscreen, floating and top sheets never move. Not yet verified on a simulator.
   ignores every safe-area region. On an iOS 26.5 simulator `ignoresSafeArea(.keyboard)` alone still moved
   a 300 pt sheet 527 pt for a 334 pt lift. Core tests pin sheet bottom == keyboard top, including a
   window with non-zero origin and shorter height.
+- **Native presentations (#15464).** While a native presentation (`.sheet`, `.popover`) is up from the
+  overlay window's root, the lift is 0: UIKit's presentation controller already avoids the keyboard, so
+  the agent's lift would stack on it. Not yet device-verified.
 - **Touch and clip.** Content is padded up by the lift inside its full-window frame, so the touch rect
   moves with it; the anchor layer's clip uses the same lift (`PrototypeSheetFrame.rect(lift:)`).
 - **Motion.** Keyboard duration, ease-in-out (UIKit's keyboard curve is private); instant under

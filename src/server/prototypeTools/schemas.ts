@@ -30,6 +30,7 @@ import {
   MAX_PROTOTYPE_ACCESSIBILITY_FINDINGS,
   PROTOTYPE_ACCESSIBILITY_RULES,
 } from "../../features/prototype/prototypeAccessibilityLint";
+import { MAX_PROTOTYPE_PLACEHOLDER_FINDINGS } from "../../features/prototype/prototypePlaceholderLint";
 import {
   MAX_PROTOTYPE_SPEC_BYTES,
   prototypeSpecSchema,
@@ -243,11 +244,12 @@ export const prototypeSchema = addDeviceTargetingToSchema(
           "open",
           "clearStorage",
           "simulate",
+          "screenMap",
         ],
         {
           error: (issue) =>
             getRemovedToolActionHint(PROTOTYPE_TOOL_NAME, issue.input) ??
-            "action must be one of show, patch, dismiss, status, inspect or awaitEvent; saved actions: save, listSaved, deleteSaved or open; storage action: clearStorage; timer action: simulate",
+            "action must be one of show, patch, dismiss, status, inspect or awaitEvent; saved actions: save, listSaved, deleteSaved or open; storage action: clearStorage; timer action: simulate; host-only: screenMap",
         },
       ),
       spec: specInput
@@ -448,6 +450,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     dismiss: ["id", "all"],
     status: [],
     inspect: [],
+    screenMap: ["spec", "specPath"],
     awaitEvent: ["id", "eventName", "kind", "afterSequence"],
   };
   for (const field of fields) {
@@ -473,16 +476,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     validateAwaitEventInput(value, ctx);
   }
   validateProtoViewerTimeout(value, ctx);
-  if (value.action === "show" && (value.spec === undefined) === (value.specPath === undefined)) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["spec"],
-      message:
-        value.spec === undefined
-          ? "show requires exactly one of spec or specPath"
-          : "show takes either spec or specPath, not both",
-    });
-  }
+  validateSpecSource(value, ctx);
   if (value.action === "dismiss" && (value.id === undefined) === (value.all === undefined)) {
     ctx.addIssue({
       code: "custom",
@@ -507,6 +501,20 @@ function validateProtoViewerTimeout(
   }
 }
 
+function validateSpecSource(value: z.infer<typeof prototypeSchema>, ctx: z.RefinementCtx): void {
+  const takesSpecSource = value.action === "show" || value.action === "screenMap";
+  if (takesSpecSource && (value.spec === undefined) === (value.specPath === undefined)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["spec"],
+      message:
+        value.spec === undefined
+          ? `${value.action} requires exactly one of spec or specPath`
+          : `${value.action} takes either spec or specPath, not both`,
+    });
+  }
+}
+
 function validateAwaitEventInput(
   value: z.infer<typeof prototypeSchema>,
   ctx: z.RefinementCtx,
@@ -524,7 +532,12 @@ function validateAwaitEventInput(
 }
 
 /** status and inspect show nothing on the device: reads (#10965). The rest are control. */
-export const PROTOTYPE_READ_ACTIONS: readonly string[] = ["status", "inspect", "listSaved"];
+export const PROTOTYPE_READ_ACTIONS: readonly string[] = [
+  "status",
+  "inspect",
+  "listSaved",
+  "screenMap",
+];
 
 export function isPrototypeReadAction(args: z.infer<typeof prototypeSchema>): boolean {
   return PROTOTYPE_READ_ACTIONS.includes(args.action);
@@ -647,6 +660,34 @@ const prototypeEventOutputSchema = z.object({
   timestamp: z.number(),
 });
 export const prototypeOutputSchema = z.object({
+  screenMap: z
+    .object({
+      nodes: z.array(
+        z.object({
+          id: z.string(),
+          kind: z.enum(["root", "stackScreen", "pagerPage", "sheet", "dialog"]),
+          path: z.string(),
+          label: z.string().optional(),
+          start: z.literal(true).optional(),
+        }),
+      ),
+      edges: z.array(
+        z.object({
+          from: z.string(),
+          to: z.string(),
+          action: z.enum(["push", "replace", "pop", "popToRoot", "setPage"]),
+          trigger: z.object({
+            path: z.string(),
+            testTag: z.string().optional(),
+            id: z.string().optional(),
+            label: z.string().optional(),
+          }),
+        }),
+      ),
+    })
+    .optional()
+    .describe("screenMap only: the spec's screens and the actions that move between them"),
+  mermaid: z.string().optional().describe("screenMap only: the same map as a Mermaid flowchart"),
   saved: z.object({ id: z.string(), slug: z.string(), replaced: z.boolean() }).optional(),
   viewer: z
     .object({
@@ -781,7 +822,7 @@ export const prototypeOutputSchema = z.object({
     .max(MAX_PROTOTYPE_ACCESSIBILITY_FINDINGS)
     .optional()
     .describe(
-      "Successful show or patch: advisory accessibility lint of the device spec (never refuses a show). rule is unlabeled-control, unlabeled-image, unlabeled-text-field, low-contrast (authored text colour vs. its resolved background, per light/dark mode, WCAG AA) or small-touch-target (authored size under 48dp); path is the node in the component-expanded device spec; value/minimum give the ratio or dp. Absent when nothing is found.",
+      "Successful show or patch: advisory accessibility lint of the device spec (never refuses a show). rule is unlabeled-control, unlabeled-image, unlabeled-text-field, low-contrast (authored text colour vs. its resolved background, per light/dark mode, WCAG AA), small-touch-target (authored size under 48dp) or transition-without-visible-when (a node transition with no visibleWhen, which never runs); path is the node in the component-expanded device spec; value/minimum give the ratio or dp. Absent when nothing is found.",
     ),
   accessibilityFindingsTotal: z
     .number()
@@ -789,6 +830,25 @@ export const prototypeOutputSchema = z.object({
     .positive()
     .optional()
     .describe("Total accessibility findings, present only when accessibilityFindings was capped"),
+  placeholderFindings: z
+    .array(
+      z.object({
+        path: z.string(),
+        placeholder: z.string(),
+        detail: z.string(),
+      }),
+    )
+    .max(MAX_PROTOTYPE_PLACEHOLDER_FINDINGS)
+    .optional()
+    .describe(
+      "Successful show or patch: advisory lint for a repeat or state placeholder in a field that does not bind it, so it would be drawn literally (for example chip.label, badge.text, textField.placeholder). path is the field in the component-expanded device spec; placeholder is the text as authored. Never refuses a show. Absent when nothing is found.",
+    ),
+  placeholderFindingsTotal: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Total placeholder findings, present only when placeholderFindings was capped"),
   event: prototypeEventOutputSchema.optional(),
   timedOut: z
     .literal(true)

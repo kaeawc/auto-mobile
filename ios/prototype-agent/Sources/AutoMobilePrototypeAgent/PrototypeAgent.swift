@@ -39,9 +39,32 @@ final class PassthroughWindow: UIWindow {
     weak var model: PrototypeModel?
 
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        guard let model, model.spec != nil,
-              model.hitRects.contains(point) else { return nil }
+        guard let model, model.spec != nil else { return nil }
+        if nativePresentationRegion()?.contains(point) == true { return super.hitTest(point, with: event) }
+        guard model.hitRects.contains(point) else { return nil }
         return super.hitTest(point, with: event)
+    }
+
+    /// The area a native presentation from the root controller claims (#15463), computed at hit
+    /// time so it follows detent changes and dismissal without observation. Not yet device-verified.
+    private func nativePresentationRegion() -> CGRect? {
+        guard let presented = rootViewController?.presentedViewController, !presented.isBeingDismissed else {
+            return nil
+        }
+        var interaction = PrototypeNativePresentationHitRegion.Interaction.modal
+        if let sheet = presented.sheetPresentationController {
+            let detents = sheet.detents.map(\.identifier)
+            interaction = PrototypeNativePresentationHitRegion.interaction(
+                selectedDetentIndex: sheet.selectedDetentIdentifier.flatMap(detents.firstIndex(of:)),
+                largestUndimmedDetentIndex: sheet.largestUndimmedDetentIdentifier.flatMap(detents.firstIndex(of:))
+            )
+        }
+        return PrototypeNativePresentationHitRegion.region(
+            interaction: interaction,
+            presentedFrame: presented.presentationController?.frameOfPresentedViewInContainerView
+                ?? presented.view.frame,
+            windowBounds: bounds
+        )
     }
 
     override func layoutSubviews() {
@@ -436,6 +459,7 @@ final class PrototypeAgent: NSObject {
         }
         let window = PassthroughWindow(windowScene: scene)
         window.model = model
+        model.nativePresentationActive = { [weak window] in window?.rootViewController?.presentedViewController != nil }
         window.windowLevel = .alert + 1
         let layers = PrototypeLayersViewController(model: model)
         window.rootViewController = layers

@@ -16,7 +16,7 @@ import {
   prototypeJsonSchema,
   type PrototypeJson,
 } from "./prototypeJson";
-import { MAX_PROTOTYPE_BACKDROP_BLUR_DP, PROTOTYPE_BACKDROP_MATERIALS } from "./prototypeBackdrop";
+import { prototypeBackdropSchema } from "./prototypeBackdropSchema";
 import { prototypeChartShape } from "./prototypeChartSchema";
 import { prototypeStaggerShape } from "./prototypeChoreographySchema";
 import { prototypeImageShape, prototypeMotionNodeShape } from "./prototypeMotionV2Schema";
@@ -806,36 +806,10 @@ export const prototypeNodeSchema: z.ZodType<PrototypeNode, z.ZodTypeDef, unknown
       });
     }
   });
-const backdropSchema = z
-  .object({
-    material: z
-      .enum(PROTOTYPE_BACKDROP_MATERIALS)
-      .describe(
-        "Frosted material behind the window: ultraThin, thin, regular, thick, or glass (Liquid Glass on iOS 26+; the fallback dim elsewhere)",
-      ),
-    blur: z
-      .number()
-      .finite()
-      .int()
-      .min(0)
-      .max(MAX_PROTOTYPE_BACKDROP_BLUR_DP)
-      .optional()
-      .describe("Blur radius in dp (points on iOS), 0-150; absent uses the material's own radius"),
-    tint: colorTokenSchema
-      .optional()
-      .describe(
-        "One colour (hex or Material role, not a per-mode pair) laid over the blur, and the solid fallback where blur is unavailable",
-      ),
-  })
-  .strict();
 const windowSchema = z
   .object({
     placement: placementSchema,
-    backdrop: backdropSchema
-      .optional()
-      .describe(
-        "Blur what is behind the window (needs prototype_backdrop_v1). The show result reports backdrop blur or fallback; fallback is a solid dim (tint at 85% alpha, else black at 50%) where blur is unavailable",
-      ),
+    backdrop: prototypeBackdropSchema.optional(),
     chrome: z
       .enum(["none", "bar"])
       .optional()

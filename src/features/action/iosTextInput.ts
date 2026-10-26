@@ -1,4 +1,8 @@
-import { readIosTypedTextField, verifyIosTypedText } from "./iosTypedTextVerification";
+import {
+  explainIosIndeterminateText,
+  readIosTypedTextField,
+  verifyIosTypedText,
+} from "./iosTypedTextVerification";
 import type { IosTypedTextObserver } from "./iosTypedTextVerification";
 import { resolveTextCtrlProxyTimeoutMs, getTextRequestDeadlineMs } from "./textTransportTimeout";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -74,7 +78,11 @@ export async function executeIosTextInput(
     return {
       success: false,
       text,
-      error: result.error,
+      error: await explainIosIndeterminateText(result.error, text, before, {
+        observer: observeScreen,
+        timer,
+        signal,
+      }),
       ...(result.retryable === false ? { retryable: false as const } : {}),
       method: "a11y",
     };

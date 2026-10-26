@@ -26,6 +26,13 @@ const val MCP_EXTRA_REQUEST = "request"
 const val MCP_EXTRA_LABEL = "label"
 const val MCP_EXTRA_LIBRARY_ID = "libraryId"
 private const val MAX_LABEL_LENGTH = 120
+
+/**
+ * A pushed bundle or a result file this old belongs to a request whose host has long given up (the
+ * host waits seconds, not minutes), e.g. a result written after the host's timeout removed its own
+ * copy. Generous so a slow import is never swept under its own request.
+ */
+const val MCP_ORPHAN_MAX_AGE_MS = 10 * 60 * 1000L
 private val REQUEST_ID = Regex("[A-Za-z0-9_-]{1,64}")
 private val logger: Logger = Logger.getLogger("ProtoViewerMcp")
 
@@ -66,12 +73,18 @@ class McpInbox(
   private val root: File,
   private val importer: LibraryBytesImporter,
   private val repository: LibraryRepository,
+  private val nowMillis: () -> Long = System::currentTimeMillis,
 ) {
   /**
    * Runs the command and writes its result, except for an entry to open: that is returned so the
    * caller launches the viewer first and then reports it with [reportOpened] or [reportOpenFailed].
    */
-  fun handle(command: McpCommand): LibraryEntry? =
+  fun handle(command: McpCommand): LibraryEntry? {
+    sweepOrphans()
+    return dispatch(command)
+  }
+
+  private fun dispatch(command: McpCommand): LibraryEntry? =
     when (command) {
       is McpCommand.Import -> {
         write(command.request, importResult(command))
@@ -99,6 +112,21 @@ class McpInbox(
   fun ensureDirectories(): Boolean =
     // Every folder is attempted, so a blocked inbox does not stop the results folder existing.
     listOf(root, File(root, "inbox"), File(root, "results")).map(::ensureDirectory).all { it }
+
+  /**
+   * Deletes regular files in `mcp/inbox` and `mcp/results` not modified for
+   * [MCP_ORPHAN_MAX_AGE_MS]: leftovers of a host timeout or a stray push. Best effort and never
+   * throws; returns the number of files removed. Folders and fresh files, which may belong to a
+   * request in flight, are kept.
+   */
+  fun sweepOrphans(): Int {
+    val cutoff = nowMillis() - MCP_ORPHAN_MAX_AGE_MS
+    return listOf("inbox", "results").sumOf { folder ->
+      File(root, folder).listFiles().orEmpty().count { file ->
+        file.isFile && file.lastModified() < cutoff && file.delete()
+      }
+    }
+  }
 
   fun reportOpened(command: McpCommand.Open, entry: LibraryEntry) {
     write(command.request, entry("opened", command.request, entry))

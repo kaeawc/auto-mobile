@@ -139,6 +139,20 @@ data class PrototypePlatformAction(
   val onError: List<PrototypeAction>? = null,
 ) : PrototypeAction()
 
+@SerialName("startTimer")
+@Serializable
+data class PrototypeStartTimerAction(
+  val id: String,
+  val afterMs: Int,
+  val everyMs: Int? = null,
+  val maxRuns: Int? = null,
+  val actions: List<PrototypeAction>,
+) : PrototypeAction()
+
+@SerialName("cancelTimer")
+@Serializable
+data class PrototypeCancelTimerAction(val id: String) : PrototypeAction()
+
 /**
  * Moves the scroll whose id is [scroll] (`prototype_chat_scroll_v1`, #14232): [to] is `"start"`,
  * `"end"` or `{key: value}`, a `repeat.key` value of a row inside it, kept as JSON.

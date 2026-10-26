@@ -827,5 +827,20 @@
       }
     },
     "requireValid": ["text"]
+  },
+  "actionStartTimer": {
+    "type": "startTimer",
+    "id": "tick",
+    "afterMs": 100,
+    "actions": [
+      {
+        "type": "emit",
+        "name": "tick"
+      }
+    ]
+  },
+  "actionCancelTimer": {
+    "type": "cancelTimer",
+    "id": "tick"
   }
 }

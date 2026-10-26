@@ -3,6 +3,7 @@ import { InMemoryTransport, type JSONRPCMessage } from "@modelcontextprotocol/se
 import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
 import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
+import { SKILLS_EXTENSION_ID } from "@modelcontextprotocol/server/ext/skills";
 import { TASKS_EXTENSION_ID } from "../../src/daemon/tasks/mcpTasksExtension";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
@@ -142,11 +143,12 @@ describe("stdio proxy relays the Tasks extension to the daemon (#4668)", () => {
         tools: { listChanged: true },
         logging: {},
         prompts: {},
+        extensions: { [SKILLS_EXTENSION_ID]: {} },
       }),
     );
     expect(declaring.result.capabilities).toEqual({
       ...plain.result.capabilities,
-      extensions: { [TASKS_EXTENSION_ID]: {} },
+      extensions: { [SKILLS_EXTENSION_ID]: {}, [TASKS_EXTENSION_ID]: {} },
     });
   });
 

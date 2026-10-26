@@ -32,7 +32,8 @@
   "files": [
     "dist",
     "!dist/**/*.map",
-    "schemas"
+    "schemas",
+    "mcp-skills"
   ],
   "main": "dist/src/index.js",
   "publishConfig": {
@@ -193,9 +194,9 @@
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.135.0",
     "@faker-js/faker": "^10.2.0",
-    "@modelcontextprotocol/client": "^2.3.1",
+    "@modelcontextprotocol/client": "^2.4.0",
     "@modelcontextprotocol/node": "^2.1.1",
-    "@modelcontextprotocol/server": "^2.3.1",
+    "@modelcontextprotocol/server": "^2.4.0",
     "@types/bun": "1.4.4",
     "@types/node": "^26.0.0",
     "@types/pngjs": "^6.0.5",

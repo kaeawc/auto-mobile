@@ -1,6 +1,7 @@
 import { DeviceReadiness } from "../daemon/readiness/DeviceReadiness";
 import type { ListToolsResult, McpServer } from "@modelcontextprotocol/server";
 import { createSdkMcpServer } from "./sdkMcpServer";
+import { attachUsageSkill } from "./usageSkill";
 import { installDefaultProvisionedDeviceTransportFence } from "../db/createDefaultProvisionedDeviceTransportFence";
 
 import { installToolCallDispatcher, type ToolCallRequest } from "./toolCallDispatch";
@@ -414,6 +415,10 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   FeatureFlagService.getInstance().setToolListChangedNotifier({
     notifyToolListChanged: () => ToolRegistry.notifyToolListChanged(),
   });
+
+  // Publish the usage skill through the Skills extension: hosts pull it on demand, so it adds
+  // nothing to tools/list, resources/list or the default context (#15430).
+  attachUsageSkill(server);
 
   // Register all resources with the server
   ResourceRegistry.registerWithServer(

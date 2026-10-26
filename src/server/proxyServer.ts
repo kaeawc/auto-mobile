@@ -1,13 +1,15 @@
 import { errorMessage } from "../utils/describeUnknownError";
 import { DaemonShuttingDownError } from "../daemon/DaemonShuttingDownError";
-import type {
-  CallToolResult,
-  ListToolsResult,
-  McpServer,
-  ServerCapabilities,
-  ServerContext,
+import {
+  ResourceNotFoundError,
+  type CallToolResult,
+  type ListToolsResult,
+  type McpServer,
+  type ServerCapabilities,
+  type ServerContext,
 } from "@modelcontextprotocol/server";
 import { createSdkMcpServer } from "./sdkMcpServer";
+import { attachUsageSkill, isSkillUri, readUsageSkillResource } from "./usageSkill";
 import { McpError } from "../daemon/mcpError";
 import { logger } from "../utils/logger";
 import {
@@ -676,6 +678,15 @@ function registerProxyResourceHandlers(server: McpServer, proxy: DaemonMcpProxy)
       throw new ActionableError("Resource URI is missing in the request");
     }
 
+    // Usage-skill files are static and local: serve them without a daemon connection (#15430).
+    if (isSkillUri(uri)) {
+      const skillResult = await readUsageSkillResource(uri);
+      if (skillResult) {
+        return skillResult;
+      }
+      throw new ResourceNotFoundError(uri);
+    }
+
     logger.info(`[ProxyServer] Forwarding resource read: ${uri}`);
 
     try {
@@ -750,6 +761,7 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
     },
     proxyServerCapabilities(options) as ServerCapabilities,
   );
+  attachUsageSkill(server);
 
   // Forward daemon-emitted list-changed notifications to the external client
   // (issue #3223): the proxy has already invalidated its matching cache, so a

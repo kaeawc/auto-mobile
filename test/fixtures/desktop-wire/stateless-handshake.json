@@ -30,7 +30,10 @@
               "tools": {
                 "listChanged": true
               },
-              "prompts": {}
+              "prompts": {},
+              "extensions": {
+                "io.modelcontextprotocol/skills": {}
+              }
             },
             "serverInfo": {
               "name": "AutoMobile",

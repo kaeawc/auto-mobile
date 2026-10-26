@@ -311,7 +311,7 @@ function userFilesDomain(ctx: StorageCapabilityContext): DomainCapability {
       domain: "user_files",
       portable: false,
       platformScope: "cross-platform",
-      note: "iOS Simulator only: managed fixture-app Documents/automobile namespaces. The fixture app is not shipped in this repo. Writes require its installed container; picker visibility is reported separately and unavailable unless verified. Physical iOS is unsupported. Canonical user_files resources list/read only these managed namespaces.",
+      note: "iOS Simulator only: managed fixture-app Documents/automobile namespaces. The fixture app is built and installed on the first write when it is missing (needs Xcode's simulator SDK). Writes require its installed container; picker visibility is reported separately and unavailable unless verified. Physical iOS is unsupported. Canonical user_files resources list/read only these managed namespaces.",
       operations: [
         physicalReason
           ? deriveOperation("list", physicalReason, [])

@@ -28,6 +28,7 @@ import {
   type SessionBrokerService,
 } from "../sessionBroker/service";
 import {
+  discardsAndroidSnapshotOnExit,
   readSessionBrokerHostConfig,
   type SessionBrokerHostConfig,
 } from "../sessionBroker/hostConfig";
@@ -226,6 +227,9 @@ export class DaemonBroker {
     );
     const acquisition = createDaemonBrokerDeviceAcquisition({
       registry: () => this.host.openBindingRegistry(),
+      // Unconfigured Android reuse destroys a released emulator, so its exit snapshot is waste.
+      // Warm reuse (snapshot or keep-booted) and an unread config keep the default (#15477).
+      discardAndroidSnapshotOnExit: () => discardsAndroidSnapshotOnExit(this.sessionBrokerConfig),
       // The broker and native ledger enforce the same cap independently: reservations are not
       // added to native usage twice, and unaccounted native devices can still refuse creation.
       resourceBudgetPolicy: {

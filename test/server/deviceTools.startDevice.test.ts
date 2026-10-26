@@ -274,6 +274,29 @@ describe("startDevice handler", () => {
     expect(received).toBe("/poster.png");
   });
 
+  it("passes discardSnapshotOnExit through the boot service on a cold Android launch (#15477)", async () => {
+    fakeDeviceUtils.setDeviceImages("android", [androidImage]);
+    fakeMatcher.setImageResult(androidImage);
+    const received: Array<boolean | undefined> = [];
+    const originalStart = fakeDeviceUtils.startDevice.bind(fakeDeviceUtils);
+    const manager: import("../../src/devices/deviceUtils").PlatformDeviceManager = fakeDeviceUtils;
+    manager.startDevice = async (device, timeoutMs, options) => {
+      received.push(options?.discardSnapshotOnExit);
+      return originalStart(device, timeoutMs);
+    };
+    const bootService = new DeviceBootService({
+      deviceCreationGate: new FakeDeviceCreationGate(),
+      deviceProvisioner: new FakeDeviceProvisioner(),
+      matchingStrategy: DEVICE_POOL_MATCHING,
+      deviceManager: fakeDeviceUtils,
+      deviceMatcher: fakeMatcher,
+      timer: new FakeTimer(),
+    });
+    await bootService.boot({ platform: "android", discardSnapshotOnExit: true });
+    await bootService.boot({ platform: "android" });
+    expect(received).toEqual([true, undefined]);
+  });
+
   it("renders cameraPosterQr to a poster and passes its path to the cold Android launch", async () => {
     fakeDeviceUtils.setDeviceImages("android", [androidImage]);
     fakeMatcher.setImageResult(androidImage);

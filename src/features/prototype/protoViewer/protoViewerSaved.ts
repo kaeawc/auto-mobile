@@ -8,6 +8,7 @@ import {
 } from "../prototypeAssetUploader";
 import { exportPrototypeBundle, type BundleExportAsset } from "../prototypeBundle";
 import type { PrototypeSpec } from "../prototypeSpec";
+import type { DeviceDisplays } from "../../../models/DisplayPanel";
 import { logger } from "../../../utils/logger";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import {
@@ -16,6 +17,7 @@ import {
   ProtoViewerStorageError,
   type ProtoViewerDevice,
 } from "./protoViewerDevice";
+import { protoViewerDisplayFor, type ProtoViewerDisplay } from "./protoViewerDisplay";
 import {
   PROTOVIEWER_CAPABILITY_PATH,
   PROTOVIEWER_LIBRARY_ID,
@@ -31,6 +33,8 @@ export interface ProtoViewerEntry {
   app: "protoviewer";
   libraryId: string;
   label: string;
+  /** The panel it landed on, on a multi-screen device (iPhone Duo) when the app reported it. */
+  display?: ProtoViewerDisplay;
 }
 
 export type ProtoViewerErrorCode = SavedPrototypeErrorCode | "unsupported_capability";
@@ -58,6 +62,8 @@ export interface ProtoViewerRouteDependencies {
   device: ProtoViewerDevice;
   assetFileReader: PrototypeAssetFileReader;
   observationScreenshotReader: PrototypeObservationScreenshotReader;
+  /** The device's display inventory, to name the panel a result landed on. */
+  displays?: DeviceDisplays;
 }
 
 /**
@@ -151,6 +157,7 @@ async function saveInProtoViewer(
       logger.warn(`[protoviewer] ${error.message} Keeping the platform save path.`);
       return undefined;
     },
+    deps.displays,
   );
 }
 
@@ -196,6 +203,7 @@ async function openInProtoViewer(
   const opened = await deviceCall(
     () => deps.device.open(libraryId, args.timeoutMs ?? PROTOVIEWER_DEFAULT_TIMEOUT_MS, signal),
     (error) => failure("unsupported_capability", error.message),
+    deps.displays,
   );
   return opened ?? failure("unsupported_capability", "ProtoViewer could not open the entry.");
 }
@@ -245,6 +253,7 @@ async function deviceCall(
   onUnreachable: (
     error: ProtoViewerEntryPointMissingError | ProtoViewerStorageError,
   ) => ProtoViewerOutput | undefined,
+  displays: DeviceDisplays | undefined,
 ): Promise<ProtoViewerOutput | undefined> {
   let result: ProtoViewerResult;
   try {
@@ -259,18 +268,28 @@ async function deviceCall(
     logger.warn(`[protoviewer] request failed: ${errorMessage(error)}`, error);
     return { success: false, error: `ProtoViewer request failed: ${errorMessage(error)}` };
   }
-  return outputFor(result);
+  return outputFor(result, displays);
 }
 
-function outputFor(result: ProtoViewerResult): ProtoViewerOutput {
+function outputFor(
+  result: ProtoViewerResult,
+  displays: DeviceDisplays | undefined,
+): ProtoViewerOutput {
   switch (result.status) {
     case "imported":
-    case "opened":
+    case "opened": {
+      const display = protoViewerDisplayFor(result.screen, displays);
       return {
         success: true,
-        viewer: { app: "protoviewer", libraryId: result.libraryId, label: result.label },
+        viewer: {
+          app: "protoviewer",
+          libraryId: result.libraryId,
+          label: result.label,
+          ...(display ? { display } : {}),
+        },
         warning: PROTOVIEWER_IMPORTED_WARNING,
       };
+    }
     case "rejected":
       return rejectionOutput(result.path, result.reason);
     case "not_found":

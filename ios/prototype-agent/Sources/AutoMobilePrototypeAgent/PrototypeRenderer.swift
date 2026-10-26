@@ -366,7 +366,7 @@
             case "chip":
                 PrototypeChipView(node: node, model: model, style: style)
             case "card":
-                PrototypeCardView(node: node, model: model, style: style)
+                PrototypeCardView(node: node, model: model, style: style, cornerRadius: cardCornerRadius)
             case "radioGroup":
                 PrototypeRadioGroupView(node: node, model: model, style: style)
             case "listItem":
@@ -690,12 +690,16 @@
             // as on Android (#10912).
             .layoutPriority(1)
             switch node.variant {
-            case "outlined", "tonal": button.buttonStyle(.bordered)
-            case "elevated": button.buttonStyle(.bordered).shadow(color: .black.opacity(0.2), radius: 2, y: 1)
-            case "text": button.buttonStyle(.borderless)
-            default: button.buttonStyle(.borderedProminent)
+            case "outlined", "tonal": button.buttonStyle(.bordered).tint(themePrimary)
+            case "elevated": button.buttonStyle(.bordered).tint(themePrimary)
+                .shadow(color: .black.opacity(0.2), radius: 2, y: 1)
+            case "text": button.buttonStyle(.borderless).tint(themePrimary)
+            default: button.buttonStyle(.borderedProminent).tint(themePrimary)
             }
         }
+
+        /// The theme's `primary`, so buttons follow the spec theme rather than the system accent (#15445).
+        private var themePrimary: Color { ComponentColors(palette: palette).primary }
 
         /// Wraps onto more lines when the row is narrower than the label, never truncating.
         private var buttonLabel: some View {
@@ -773,7 +777,23 @@
 
         // MARK: Style
 
+        /// A card draws the authored uniform radius (a theme token resolves to one); without it, Material's 12 pt.
+        private var cardCornerRadius: Double {
+            if case let .uniform(radius)? = style?.cornerRadius.map(shapes.resolve) { return radius }
+            return 12
+        }
+
         private var cornerShape: UnevenRoundedRectangle {
+            if node.type == "card" {
+                return UnevenRoundedRectangle(cornerRadii: RectangleCornerRadii(
+                    topLeading: cardCornerRadius, bottomLeading: cardCornerRadius,
+                    bottomTrailing: cardCornerRadius, topTrailing: cardCornerRadius
+                ))
+            }
+            return authoredCornerShape
+        }
+
+        private var authoredCornerShape: UnevenRoundedRectangle {
             switch style?.cornerRadius.map(shapes.resolve) {
             case let .uniform(radius)?:
                 UnevenRoundedRectangle(cornerRadii: RectangleCornerRadii(
@@ -813,16 +833,18 @@
                 // The gradient is painted over the background colour, as on Android.
                 .background {
                     if let gradient = style?.gradient {
-                        PrototypeGradientFill(gradient: gradient, palette: palette)
+                        PrototypeGradientFill(gradient: gradient, palette: palette).clipShape(shape)
                     }
                 }
-                .background(palette.color(style?.background) ?? .clear)
+                .background(shape.fill(palette.color(style?.background) ?? .clear))
                 .modifier(PrototypeShimmerModifier(
                     enabled: style?.shimmer == true,
                     animated: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion).enabled,
                     shape: shape
                 ))
-                .clipShape(shape)
+                // A card's own shape is already rounded; clipping it to the node shape would cut its outline
+                // at the corners and its shadow away entirely (#15445).
+                .clipShape(node.type == "card" ? AnyShape(Rectangle()) : AnyShape(shape))
                 .overlay(
                     shape.stroke(palette.color(style?.border?.color) ?? .clear, lineWidth: style?.border?.width ?? 0)
                 )

@@ -26,24 +26,24 @@
         private var colors: ComponentColors { ComponentColors(palette: palette) }
 
         var body: some View {
-            ZStack {
-                if offset != 0 { buttons }
-                foreground
-            }
-            .clipped()
-            .background(
-                GeometryReader { proxy in
-                    Color.clear.onAppear { rowWidth = proxy.size.width }
-                        .onChange(of: proxy.size.width) { _, width in rowWidth = width }
+            // The buttons are a background of the row, so they take the row's height and cannot grow an
+            // open row to fill a column's free height (#15445).
+            foreground
+                .background { if offset != 0 { buttons } }
+                .clipped()
+                .background(
+                    GeometryReader { proxy in
+                        Color.clear.onAppear { rowWidth = proxy.size.width }
+                            .onChange(of: proxy.size.width) { _, width in rowWidth = width }
+                    }
+                )
+                .onAppear {
+                    if model.swipe
+                        .isOpen(identity) { offset = PrototypeSwipe.restOffset(.open(model.swipe.openSide), geometry) }
                 }
-            )
-            .onAppear {
-                if model.swipe
-                    .isOpen(identity) { offset = PrototypeSwipe.restOffset(.open(model.swipe.openSide), geometry) }
-            }
-            .onChange(of: model.swipe.openRow) { _, open in
-                if open != identity, offset != 0 { move(to: 0) }
-            }
+                .onChange(of: model.swipe.openRow) { _, open in
+                    if open != identity, offset != 0 { move(to: 0) }
+                }
         }
 
         private var foreground: some View {

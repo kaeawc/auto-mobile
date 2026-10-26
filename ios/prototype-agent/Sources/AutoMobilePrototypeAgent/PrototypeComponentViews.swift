@@ -471,7 +471,7 @@
             let isOn = node.toggleKey.flatMap { model.state[$0]?.boolValue } ?? false
             if node.toggleKey != nil {
                 let button = Button { model.activate(.node(node)) } label: { row(isOn: isOn) }.buttonStyle(.plain)
-                if node.trailing?.type == "switch" {
+                if case .switch = node.trailing {
                     button.accessibilityAddTraits(.isToggle).accessibilityValue(isOn ? "1" : "0")
                 } else {
                     button.accessibilityValue(isOn ? "checked" : "unchecked")
@@ -508,13 +508,13 @@
 
         @ViewBuilder
         private func trailing(isOn: Bool) -> some View {
-            switch node.trailing?.type {
-            case "switch":
+            switch node.trailing {
+            case .switch:
                 PrototypeSwitchTrack(isOn: isOn)
-            case "checkbox":
+            case .checkbox:
                 PrototypeGlyph(symbol: isOn ? "checkmark.square.fill" : "square")
-            case "icon":
-                if let symbol = prototypeSymbol(node.trailing?.name) {
+            case let .icon(name):
+                if let symbol = prototypeSymbol(name) {
                     PrototypeGlyph(symbol: symbol).foregroundColor(colors.contentVariant)
                 }
             default:

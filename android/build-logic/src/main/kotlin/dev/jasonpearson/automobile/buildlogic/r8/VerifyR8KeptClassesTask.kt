@@ -40,6 +40,9 @@ abstract class VerifyR8KeptClassesTask : DefaultTask() {
 
   @get:Input abstract val requiredMembers: ListProperty<String>
 
+  /** Slash-form prefixes whose @Serializable classes must stay unrenamed; defaults to all owned. */
+  @get:Input abstract val keptSerializablePrefixes: ListProperty<String>
+
   @get:OutputFile abstract val reportFile: RegularFileProperty
 
   @TaskAction
@@ -53,6 +56,7 @@ abstract class VerifyR8KeptClassesTask : DefaultTask() {
         readClasses(classJars.get().map { it.asFile }, classDirs.get().map { it.asFile }, prefixes),
         prefixes,
         requiredMembers.get(),
+        keptSerializablePrefixes.orNull?.takeIf { it.isNotEmpty() } ?: prefixes,
       )
     val report = reportFile.get().asFile
     report.parentFile.mkdirs()

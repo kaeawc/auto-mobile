@@ -143,7 +143,7 @@ runner queues forever, and its required check with it (#11580).
   that job, so the runner serves the build behind the required `iOS Build` gate
   first; it still runs whatever the build's result.
 - The PR-time XcodeGen drift check (#10939) is the `Check XcodeGen Project
-  Drift` step of Build Xcode Projects, so it runs on the heavy lane.
+Drift` step of Build Xcode Projects, so it runs on the heavy lane.
 - Every moved job isolates `HOME`, `TMPDIR`, the XDG dirs and
   `CFFIXED_USER_HOME` under `$RUNNER_TEMP`, checks out with `clean: true`, and
   removes the isolated home at the end, like the existing self-hosted jobs.

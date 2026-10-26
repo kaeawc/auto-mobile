@@ -51,7 +51,7 @@ converter directly with the same options keeps `schemas/tool-definitions.json` u
     tools bit in too), so the `initialize` capabilities are identical;
   - it maps the `tools/call` validation errors the SDK raises itself back to v1: a malformed
     request answers `-32603` with the bare validation message (v2: `-32602 "Invalid
-    tools/call request: …"`), and a malformed result keeps its `MCP error -32602: ` prefix;
+tools/call request: …"`), and a malformed result keeps its `MCP error -32602: ` prefix;
   - it gives every handler a signal whose transport-close abort reason is an `AbortError`
     DOMException, as v1's was (v2 aborts with `SdkError(ConnectionClosed)`), so the
     `error.name === "AbortError"` checks in `src/` still match.

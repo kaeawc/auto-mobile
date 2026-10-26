@@ -232,7 +232,7 @@ Bundle limits (shared TS/Kotlin/Swift transport contract):
 - Each image is at most `MAX_PROTOTYPE_ASSET_BYTES = 4,194,304` bytes; each font is at most
   `MAX_PROTOTYPE_FONT_ASSET_BYTES = 2,097,152` bytes, from the asset contract.
 - `BUNDLE_MAX_EXPANDED_BYTES = MAX_PROTOTYPE_ASSET_TOTAL_BYTES + BUNDLE_MAX_SPEC_BYTES +
-  BUNDLE_MAX_MANIFEST_BYTES = 17,891,328`; `BUNDLE_MAX_COMPRESSED_BYTES` is the same value and
+BUNDLE_MAX_MANIFEST_BYTES = 17,891,328`; `BUNDLE_MAX_COMPRESSED_BYTES` is the same value and
   caps the entire archive file, including headers.
 - `BUNDLE_MAX_RATIO = 100`: actual total inflated bytes / total compressed entry data bytes;
   the known compressed-data total supplies a hard output budget during inflation. Header sizes

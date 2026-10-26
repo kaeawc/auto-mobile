@@ -626,6 +626,7 @@ final class PrototypeAgent: NSObject {
         var extra = missingAssetsExtra()
         extra.merge(model.session.navigationSnapshot) { _, navigation in navigation }
         if let appearance = model.session.appearance { extra["appearance"] = appearance.wireObject }
+        if let plan = model.backdropPlan { extra["backdrop"] = plan.mode.rawValue }
         // The host can leave before this queued show runs; nothing would remove it later.
         if connectedClients == 0 { model.hostDisconnected() }
         result(true, extra: extra)

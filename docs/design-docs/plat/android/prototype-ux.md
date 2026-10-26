@@ -376,7 +376,8 @@ effect, a separate issue). The contract is conservative, one closed choice per o
   (#15244, #15256) reuses that same blur and fallback.
 - The field needs `prototype_backdrop_v1`. A device without it would ignore the field and draw a
   plain window, so the host refuses the show (a placement `scrim` still dims what is behind).
-  CtrlProxy advertises it (Android slice, #15126); the iOS agent follows in its own slice.
+  CtrlProxy and the iOS prototype agent advertise it (#15126). On iOS an authored `blur` picks the nearest
+  material, and Reduce Transparency draws the tonal fill.
 - Android: from API 31 the window asks for blur-behind (`FLAG_BLUR_BEHIND`, radius = `blur` or the
   material's: ultraThin 8, thin 16, regular 24, thick 40 dp) when `WindowManager.isCrossWindowBlurEnabled`
   is true, with `tint` laid over it at 35% alpha. Otherwise, and always for `glass`, it draws the
@@ -1237,7 +1238,7 @@ the native runtimes):
    failure. If it does not fit the data write limit, `headers` is dropped. The completion is atomic: if
    the body fits `/data` but no form of `__meta` fits beside it, `into` is left unchanged and the request
    is an error with `error.code` `invalid_response` (message `response and metadata exceed the data
-   limit`); its minimal metadata (duration and error) is still written if it fits, the status key
+limit`); its minimal metadata (duration and error) is still written if it fits, the status key
    becomes `error` and `onError` runs.
 4. `statusKey` becomes `"success"` or `"error"`, the request event is sent, then `onSuccess` or
    `onError` runs.
@@ -1540,7 +1541,7 @@ list is a `column` with `repeat` whose single child is the row template).
   item; one that is not fails at that item (`root.repeat.items[1]`, message
   `Bound state key "liked_b-c" is invalid`). A state-key
   placeholder outside every template fails at the key (`State key placeholder outside a
-  repeat template`). A bound key missing from `state` behaves exactly like a literal
+repeat template`). A bound key missing from `state` behaves exactly like a literal
   missing key: the type checks run once per item and fail at the key, naming the item
   (`Toggle requires a boolean state key (repeat item 1)`).
 - Limits count the expanded tree. `MAX_PROTOTYPE_NODES` and `MAX_PROTOTYPE_IMAGES` are

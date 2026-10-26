@@ -10,6 +10,16 @@
     final class PrototypeModel {
         @ObservationIgnored private(set) var session = PrototypeSession()
         private(set) var spec: PrototypeSpec?
+        /// The shown prototype's `window.backdrop` as it is drawn now (`blur` or the tonal `fallback`).
+        var backdropPlan: PrototypeBackdropPlan? {
+            guard let backdrop = spec?.window.backdrop else { return nil }
+            return PrototypeBackdropPlan.resolve(
+                backdrop,
+                osMajorVersion: ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
+                reduceTransparency: UIAccessibility.isReduceTransparencyEnabled
+            )
+        }
+
         /// Ends surviving text drafts even when a replacing show leaves their stored value unchanged.
         private(set) var showRevision = 0
         /// Transient presentation only; never written to or reported as spec state.

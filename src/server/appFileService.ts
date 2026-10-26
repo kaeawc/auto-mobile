@@ -54,6 +54,10 @@ import { AndroidAppFileProvider } from "./AndroidAppFileProvider";
 import { AndroidUserFilesProvider } from "./AndroidUserFilesProvider";
 import { AndroidMediaLibraryProvider } from "./AndroidMediaLibraryProvider";
 import { IosSimulatorAppFileProvider } from "./IosSimulatorAppFileProvider";
+import {
+  HostBuiltIosFilesFixtureInstaller,
+  type IosFilesFixtureInstaller,
+} from "./IosFilesFixtureInstaller";
 import { SimctlIosFilesFixtureContainer } from "./SimctlIosFilesFixtureContainer";
 import { IosSimulatorMediaLibraryProvider } from "./IosSimulatorMediaLibraryProvider";
 import { prepareFileSource } from "./fileSourcePreparation";
@@ -188,6 +192,8 @@ export interface AppFileServiceDependencies {
   sharedStorageService?: SharedStorageService;
   iosSimulatorMediaClient?: IosSimulatorMediaClient;
   iosFilesFixtureContainer?: IosFilesFixtureContainer;
+  /** Production only: tests leave it unset so no simulator is ever built for or installed to. */
+  iosFilesFixtureInstaller?: IosFilesFixtureInstaller;
   documentPickerVisibilityVerifier?: DocumentPickerVisibilityVerifier;
 }
 
@@ -205,7 +211,11 @@ let appFileService: AppFileService | null = null;
 export function getAppFileService(): AppFileService {
   if (!appFileService) {
     appFileService = new DefaultAppFileService(
-      createDefaultProviders(defaultDependencies),
+      createDefaultProviders(defaultDependencies, {
+        iosFilesFixtureInstaller: new HostBuiltIosFilesFixtureInstaller({
+          simctlFactory: defaultDependencies.simctlFactory,
+        }),
+      }),
       defaultDependencies.deviceResolver,
       defaultDependencies.fileSystem,
     );
@@ -248,6 +258,7 @@ function createDefaultProviders(
     | "iosSimulatorMediaClient"
     | "foregroundAppLookup"
     | "iosFilesFixtureContainer"
+    | "iosFilesFixtureInstaller"
     | "documentPickerVisibilityVerifier"
   > = {},
 ): AppFileProvider[] {
@@ -270,6 +281,7 @@ function createDefaultProviders(
           deps.simctlFactory,
           deps.fileSystem,
           options.containerOwnership,
+          options.iosFilesFixtureInstaller,
         ),
       options.documentPickerVisibilityVerifier,
     ),

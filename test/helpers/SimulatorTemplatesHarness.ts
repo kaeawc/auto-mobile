@@ -15,6 +15,7 @@ export class SimulatorTemplatesHarness {
   builds = 0;
   xcode = "X1";
   cloneFails = false;
+  relocateFails = false;
   manifest?: SimulatorTemplateManifest;
   request = { name: "work", deviceType: "phone", runtime: "ios" };
   timer = new FakeTimer();
@@ -86,6 +87,15 @@ export class SimulatorTemplatesHarness {
     },
     list: async () => (this.manifest ? [this.manifest] : []),
   };
+  relocator: TemplateCreationDependencies["relocator"] = {
+    relocate: async ({ templateUdid, cloneUdid }) => {
+      this.events.push(`relocate:${templateUdid}:${cloneUdid}`);
+      if (this.relocateFails) {
+        throw new Error("relocation failed");
+      }
+      return { rewrittenFiles: 0, retargetedLinks: 0, checkpointedDatabases: 0 };
+    },
+  };
   ready(): void {
     this.manifest = {
       key: {
@@ -116,6 +126,7 @@ export class SimulatorTemplatesHarness {
         timer: this.timer,
         profile: () => "none",
         xcode: { readBuild: async () => this.xcode },
+        relocator: this.relocator,
         builder: {
           build: async () => {
             this.builds++;

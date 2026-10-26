@@ -46,16 +46,17 @@ import kotlinx.serialization.json.jsonPrimitive
 /**
  * Embeds a validated prototype. The composition owns its runtime and cancels requests when [spec]
  * changes or it leaves composition. Declared storage keys restore before drawing and flush on
- * lifecycle stop and disposal. Keep [assets], [storage] and [network] stable; replacing one reloads
- * the runtime. Callback changes do not reload it. No daemon or HTTP stack is required. After
- * dismissal, content stays removed until [spec] changes or the caller uses `key()` to create a new
- * composition identity.
+ * lifecycle stop and disposal. Keep [assets], [storage], [network] and [platform] stable; replacing
+ * one reloads the runtime. Callback changes do not reload it. No daemon or HTTP stack is required.
+ * After dismissal, content stays removed until [spec] changes or the caller uses `key()` to create
+ * a new composition identity.
  *
  * @param spec Complete prototype JSON; invalid/unsupported input draws only [onError].
  * @param modifier Applied to the embedded content, including error content.
  * @param assets Custom image and font bytes, addressed by asset id.
  * @param storage Persistence for declared storage keys; disabled by default.
  * @param network App-owned request transports; disabled by default.
+ * @param platform App-owned platform modules; empty by default.
  * @param onEvent Receives typed runtime events on the main thread.
  * @param onDismiss Receives the reason for an authored or user dismissal, once.
  * @param handleBack Opt in to popping stacks, then dismissing at their root; false leaves back to
@@ -71,6 +72,7 @@ fun AutoMobilePrototype(
   assets: PrototypeAssets = PrototypeAssets.None,
   storage: PrototypeStorage = PrototypeStorage.None,
   network: PrototypeNetwork = remember { PrototypeNetwork() },
+  platform: PrototypePlatform = PrototypePlatform.None,
   onEvent: (PrototypeEvent) -> Unit = {},
   onDismiss: (PrototypeDismissReason) -> Unit = {},
   handleBack: Boolean = false,
@@ -83,7 +85,7 @@ fun AutoMobilePrototype(
         onError(PrototypeLoadError.Invalid(validation.error.path, validation.error.message))
       is PrototypeSpecValidation.Success ->
         EmbeddedPrototype(
-          EmbeddedInput(spec, validation.spec, assets, storage, network),
+          EmbeddedInput(spec, validation.spec, assets, storage, network, platform),
           EmbeddedCallbacks(onEvent, onDismiss),
           handleBack,
           onError,
@@ -132,6 +134,7 @@ private data class EmbeddedInput(
   val assets: PrototypeAssets,
   val storage: PrototypeStorage,
   val network: PrototypeNetwork,
+  val platform: PrototypePlatform,
 )
 
 // The progress flow is collected inside collectStackBackProgress, which lint cannot see through.
@@ -292,6 +295,7 @@ private class EmbeddedConfiguration(
   val spec = input.spec
   val storage = input.storage
   val network = input.network
+  val platform = input.platform
   val cacheDir: File = context.cacheDir
   val initialDeviceState = prototypeInitialDeviceState(context)
 }
@@ -350,6 +354,7 @@ private class EmbeddedOwner(
         requestDismiss = config.environment.host?.requestDismiss ?: { true },
         storage = opened.session,
         httpClients = config.network.clients(),
+        platform = config.platform,
         requestScope = config.scope,
         exclusively = { block -> interactions.withLock { block() } },
         newRequestId = config.environment.requestId,
@@ -362,12 +367,14 @@ private class EmbeddedOwner(
         PrototypeImageCache(source, BitmapPrototypeImageDecoder(), dispatcher = io),
         PrototypeFontCache(source, ComposePrototypeFontLoader()),
       )
+    runtime.startPlatformModules()
   }
 
   suspend fun close() {
     try {
       session?.runtime?.flushStorage()
     } finally {
+      session?.runtime?.cancelPlatformCalls()
       session?.runtime?.close()
       releaseAssets()
     }

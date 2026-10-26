@@ -1,0 +1,22 @@
+{
+  "spec": {
+    "id": "style-polish",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "active": true
+    },
+    "root": {
+      "type": "image",
+      "asset": "a",
+      "filter": {
+        "blur": 2
+      }
+    }
+  },
+  "expectedPath": "root.filter.blur",
+  "expectedMessage": "Unknown property"
+}

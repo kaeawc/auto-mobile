@@ -25,6 +25,8 @@ enum PrototypeStrictCapabilities {
             }
             var own = fields
             PrototypeRepeat.bindTextFields(&own) { text in textBinding(text); return text }
+            if PrototypeStylePolishV2.themedBorder(fields) { need("theme_modes") }
+            if PrototypeStylePolishV2.required(fields) { result.insert(PrototypeStylePolishV2.capability) }
             let type = fields["type"]?.stringValue ?? ""
             let types = [
                 "startTimer": "timers",
@@ -114,7 +116,9 @@ enum PrototypeStrictCapabilities {
                 if key == "data", child.stringValue != nil { need("data_model") }
                 if key == "light" || key == "dark", !field.isEmpty { need("theme_modes") }
                 // An effect's own `animate`, colours and params are not spec features of their own.
-                if key != "linkify" && key != "series" && key != "effects" { scan(child, field: key) }
+                if key == "linkify" {
+                    if let actions = child.objectFields?["onTap"] { scan(actions, field: "onTap") }
+                } else if key != "series", key != "effects" { scan(child, field: key) }
             }
         }
         if let root = spec["root"] { scan(root) }

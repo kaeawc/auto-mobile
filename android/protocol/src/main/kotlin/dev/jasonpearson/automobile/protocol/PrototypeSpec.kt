@@ -37,7 +37,8 @@ data class PrototypeCondition(
 @Serializable
 data class PrototypeBorder(
   val width: Double,
-  val color: PrototypeModeValue,
+  val color: PrototypeModeValue? = null,
+  val gradient: PrototypeGradient? = null,
 ) {
   constructor(width: Double, color: String) : this(width, PrototypeModeValue.Single(color))
 }
@@ -71,6 +72,8 @@ data class PrototypeStyle(
   val elevation: Double? = null,
   /** Hex or colour role tinting the `elevation` shadow; absent keeps the platform shadow colour. */
   val shadowColor: PrototypeModeValue? = null,
+  val shadows: List<PrototypeShadow>? = null,
+  val cornerStyle: String? = null,
   val gradient: PrototypeGradient? = null,
   val aspectRatio: Double? = null,
   /** A dp draw offset; it moves the drawn and touchable node without changing its layout slot. */
@@ -586,6 +589,7 @@ data class PrototypeImageNode(
   override val span: Int? = null,
   /** An uploaded image asset id, or a `{light, dark}` pair of ids (#11218). */
   val asset: PrototypeModeValue,
+  val filter: PrototypeImageFilter? = null,
   val contentScale: String = "fit",
   /** Pinch, double-tap and pan zoom up to `maxScale` (#14208). */
   val zoomable: PrototypeZoomable? = null,
@@ -1238,6 +1242,7 @@ data class PrototypeScrollNode(
   override val span: Int? = null,
   val axis: String = "vertical",
   val refresh: PrototypeScrollRefresh? = null,
+  val fadeEdges: PrototypeFadeEdges? = null,
   /** Chat lists (`prototype_chat_scroll_v1`, #14232): anchored at the end of its content. */
   val reverse: Boolean? = null,
   /** Follows rows appended while the scroll is at its end. */

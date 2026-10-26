@@ -126,6 +126,50 @@ object PrototypeRepeatTemplate {
       else -> binding
     }
 
+  /**
+   * Binds raw action fields with the same field visitor the repeat validator uses. Literal JSON and
+   * match bindings stay untouched until a link tap.
+   */
+  fun bindNodeFields(
+    node: JsonObject,
+    alias: String,
+    item: Map<String, JsonElement>,
+    index: Int,
+  ): JsonObject {
+    val replacements = mutableMapOf<String, JsonElement>()
+    PrototypeBindableFields.first<Unit>(node, "root") { value, path, kind ->
+      val bound =
+        when {
+          kind == PrototypeBindableKind.EMIT_BINDING && value is JsonObject ->
+            bindBinding(value, alias, item, index)
+          value is JsonPrimitive && value.isString -> {
+            val only = segments(value.content, alias).singleOrNull()
+            if (kind == PrototypeBindableKind.OPERAND && only is PrototypeRepeatSegment.Index)
+              JsonPrimitive(index)
+            else if (kind == PrototypeBindableKind.OPERAND && only is PrototypeRepeatSegment.Field)
+              item[only.name] ?: value
+            else JsonPrimitive(bind(value.content, alias, item, index))
+          }
+          else -> value
+        }
+      if (bound != null && bound != value) replacements[path] = bound
+      null
+    }
+    fun replace(value: JsonElement, path: String): JsonElement =
+      replacements[path]
+        ?: when (value) {
+          is JsonObject ->
+            JsonObject(
+              value.mapValues { (key, child) ->
+                replace(child, PrototypeBindableFields.memberPath(path, key))
+              },
+            )
+          is JsonArray -> JsonArray(value.mapIndexed { at, child -> replace(child, "$path[$at]") })
+          else -> value
+        }
+    return replace(node, "root") as JsonObject
+  }
+
   /** A data action path with each whole `{index}` segment bound to the row. */
   fun bindDataPath(path: String, index: Int): String =
     path.split('/').joinToString("/") { if (it == INDEX_SEGMENT) index.toString() else it }
@@ -512,6 +556,11 @@ internal object PrototypeBindableFields {
       if ((node["type"] as? JsonPrimitive)?.content == "text") {
         visitor.field(node, "text", path, PrototypeBindableKind.TEXT)?.let {
           return it
+        }
+        (node["linkify"] as? JsonObject)?.let { options ->
+          visitor.actions(options, "$path.linkify")?.let {
+            return it
+          }
         }
         for ((span, spanPath) in objects(node, "spans", path)) {
           (visitor.field(span, "text", spanPath, PrototypeBindableKind.TEXT)

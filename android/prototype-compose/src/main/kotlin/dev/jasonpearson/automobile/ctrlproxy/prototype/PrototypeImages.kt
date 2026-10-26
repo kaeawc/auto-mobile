@@ -232,8 +232,15 @@ private fun PrototypeImageBody(
     Image(
       rememberPrototypeImageBitmap(image, asset),
       contentDescription = null,
-      modifier = fillAuthoredAxes(node.style.source).prototypeZoomable(source.zoomable),
+      modifier =
+        fillAuthoredAxes(node.style.source)
+          .prototypeZoomable(source.zoomable)
+          .prototypeImageTint(prototypeThemedColor(null, source.filter?.tint)),
       contentScale = prototypeContentScale(source.contentScale),
+      colorFilter =
+        source.filter?.let {
+          prototypeImageColorFilter(it.saturation)
+        },
     )
   } else {
     Box(fillAuthoredAxes(node.style.source).background(background), Alignment.Center) {

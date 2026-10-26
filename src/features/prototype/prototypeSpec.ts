@@ -1,5 +1,6 @@
 import * as timers from "./prototypeTimerSchema";
 import { stackScreenActionSchema, stackTransitionSchema } from "./prototypeStackTransitions";
+import { createSwipeActionsShape } from "./prototypeSwipeActionsSchema";
 import { z } from "zod";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { PROTOTYPE_STACK_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
@@ -21,8 +22,9 @@ import { prototypeStaggerShape } from "./prototypeChoreographySchema";
 import { prototypeImageShape, prototypeMotionNodeShape } from "./prototypeMotionV2Schema";
 import { prototypeSpecNodeRoots, walkPrototypeNodes } from "./prototypeNodeChildren";
 import {
+  fadeEdgesSchema,
+  imageFilterSchema,
   anchorSchema,
-  colorTokenSchema,
   colorValueSchema,
   conditionSchema,
   detentSchema,
@@ -207,24 +209,7 @@ const containerShape = { ...repeatShape, ...prototypeStaggerShape };
 const boxBaseSchema = z
   .object({ ...commonNodeShape, ...gestureNodeShape, ...containerShape, type: z.enum(["box"]) })
   .strict();
-const swipeActionSchema = z
-  .object({
-    label: z.string().min(1),
-    icon: iconNameSchema.optional(),
-    role: z.enum(["default", "destructive"]).optional(),
-    color: colorTokenSchema.optional(),
-    onTap: z.array(actionSchema).min(1).max(32),
-  })
-  .strict();
-const swipeActionListSchema = z.array(swipeActionSchema).min(1).max(3);
-const swipeActionsSchema = z
-  .object({
-    start: swipeActionListSchema.optional(),
-    end: swipeActionListSchema.optional(),
-    fullSwipe: z.boolean().optional(),
-  })
-  .strict();
-const swipeActionsShape = { swipeActions: swipeActionsSchema.optional() };
+const swipeActionsShape = createSwipeActionsShape(actionSchema);
 const rowBaseSchema = z
   .object({
     ...commonNodeShape,
@@ -260,6 +245,7 @@ const textSpanSchema = z
   .object({
     text: z.string().min(1),
     style: styleSchema
+      .innerType()
       .pick({
         color: true,
         fontWeight: true,
@@ -296,7 +282,12 @@ const textBaseSchema = z
   })
   .strict();
 const imageBaseSchema = z
-  .object({ ...commonNodeShape, ...gestureNodeShape, ...prototypeImageShape })
+  .object({
+    ...commonNodeShape,
+    ...gestureNodeShape,
+    ...prototypeImageShape,
+    filter: imageFilterSchema.optional(),
+  })
   .strict();
 const iconBaseSchema = z
   .object({
@@ -591,6 +582,7 @@ const scrollBaseSchema = z
     type: z.enum(["scroll"]),
     axis: z.enum(["vertical", "horizontal"]).default("vertical"),
     refresh: scrollRefreshSchema.optional(),
+    fadeEdges: fadeEdgesSchema.optional(),
     // Chat lists (#14232): anchored at the end, following new rows, reporting the end position.
     reverse: z.boolean().optional(),
     stickToEnd: z.boolean().optional(),

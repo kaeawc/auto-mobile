@@ -1,0 +1,22 @@
+{
+  "spec": {
+    "id": "style-polish",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "active": true
+    },
+    "root": {
+      "type": "box",
+      "children": [],
+      "style": {
+        "cornerStyle": "smooth"
+      }
+    }
+  },
+  "expectedPath": "root.style.cornerStyle",
+  "expectedMessage": "Invalid enum value"
+}

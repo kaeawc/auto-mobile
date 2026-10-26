@@ -40,7 +40,8 @@ function nodeFields(node: Raw, path: string): string[] {
   const styleWhen = Array.isArray(node.styleWhen) ? node.styleWhen : [];
   return [
     ...(node.animate !== undefined ? [`${path}.animate`] : []),
-    ...((PROTOTYPE_MOTION_V2_TRANSITIONS as readonly unknown[]).includes(
+    ...(node.type !== "stack" &&
+    (PROTOTYPE_MOTION_V2_TRANSITIONS as readonly unknown[]).includes(
       prototypeTransitionType(node.transition),
     )
       ? [`${path}.transition`]

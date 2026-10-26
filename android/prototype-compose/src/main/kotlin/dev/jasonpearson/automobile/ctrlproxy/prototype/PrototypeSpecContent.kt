@@ -1395,21 +1395,35 @@ private fun prototypeNodeModifier(
           )
           .semantics {
             if (longPress != null) {
-              onLongClick(label = null) {
+              onLongClick(label = PROTOTYPE_LONG_PRESS_ACTION_LABEL) {
                 interact(PrototypeInteraction.Tap(longPress))
                 true
               }
             }
+            if (doubleTap != null) {
+              customActions =
+                listOf(prototypeDoubleTapAction { interact(PrototypeInteraction.Tap(doubleTap)) })
+            }
           }
       } else if (longPress != null || doubleTap != null) {
-        modifier.combinedClickable(
-          enabled = node.enabled,
-          interactionSource = presses,
-          indication = LocalIndication.current,
-          onClick = { gestureTaps.tap { interact(PrototypeInteraction.Tap(actions)) } },
-          onLongClick = longPress?.let { { interact(PrototypeInteraction.Tap(it)) } },
-          onDoubleClick = doubleTap?.let { { interact(PrototypeInteraction.Tap(it)) } },
-        )
+        modifier
+          .combinedClickable(
+            enabled = node.enabled,
+            interactionSource = presses,
+            indication = LocalIndication.current,
+            onClick = { gestureTaps.tap { interact(PrototypeInteraction.Tap(actions)) } },
+            onLongClickLabel = longPress?.let { PROTOTYPE_LONG_PRESS_ACTION_LABEL },
+            onLongClick = longPress?.let { { interact(PrototypeInteraction.Tap(it)) } },
+            onDoubleClick = doubleTap?.let { { interact(PrototypeInteraction.Tap(it)) } },
+          )
+          // combinedClickable exposes the long click to TalkBack but not the double click, whose
+          // gesture TalkBack's own double tap replaces (#15123).
+          .semantics {
+            if (doubleTap != null) {
+              customActions =
+                listOf(prototypeDoubleTapAction { interact(PrototypeInteraction.Tap(doubleTap)) })
+            }
+          }
       } else {
         modifier.clickable(
           enabled = node.enabled,

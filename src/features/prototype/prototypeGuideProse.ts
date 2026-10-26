@@ -12,6 +12,9 @@ Use \`tapOn\` with \`action: "longPress"|"doubleTap"\` and \`layer: "prototype"\
 by coordinate gesture; no new MCP tool is needed. Long-press uses the platform default threshold
 (about 0.5 s on iOS versus the Android long-press timeout, about 0.4 s); the double-tap window is
 the system's. The host refuses unsupported agents before sending a show.
+Each declared list is also a named accessibility action on both platforms, so TalkBack and
+VoiceOver users reach it without the touch gesture: \`Long press\` and \`Double tap\` (fixed English
+names). A single \`onTap\` is the default activation and adds none.
 
 ### Swipe actions
 

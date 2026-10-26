@@ -1113,7 +1113,7 @@ the native runtimes):
    failure. If it does not fit the data write limit, `headers` is dropped. The completion is atomic: if
    the body fits `/data` but no form of `__meta` fits beside it, `into` is left unchanged and the request
    is an error with `error.code` `invalid_response` (message `response and metadata exceed the data
-   limit`); its minimal metadata (duration and error) is still written if it fits, the status key
+limit`); its minimal metadata (duration and error) is still written if it fits, the status key
    becomes `error` and `onError` runs.
 4. `statusKey` becomes `"success"` or `"error"`, the request event is sent, then `onSuccess` or
    `onError` runs.
@@ -1407,7 +1407,7 @@ list is a `column` with `repeat` whose single child is the row template).
   item; one that is not fails at that item (`root.repeat.items[1]`, message
   `Bound state key "liked_b-c" is invalid`). A state-key
   placeholder outside every template fails at the key (`State key placeholder outside a
-  repeat template`). A bound key missing from `state` behaves exactly like a literal
+repeat template`). A bound key missing from `state` behaves exactly like a literal
   missing key: the type checks run once per item and fail at the key, naming the item
   (`Toggle requires a boolean state key (repeat item 1)`).
 - Limits count the expanded tree. `MAX_PROTOTYPE_NODES` and `MAX_PROTOTYPE_IMAGES` are
@@ -2180,6 +2180,12 @@ consume single taps: the nearest ancestor's `onTap` runs. All three lists may co
 single-tap delay applies only to nodes declaring `onDoubleTap`; `onTap` with only `onLongPress`
 fires immediately. Long-press uses the platform default
 (about 0.5 s on iOS versus the Android long-press timeout, about 0.4 s).
+
+Each list is also a named TalkBack action (#15123): `onLongPress` is the node's long-click action labelled
+`Long press` (on a node with `onTap` too, the labelled `combinedClickable` long click, never a second copy), and
+`onDoubleTap` a custom action `Double tap`, since TalkBack's own double tap activates `onTap`. The names are
+fixed English defaults. Whether `observe` reports custom actions is unchecked: the extractor maps only known
+action ids (`ViewHierarchyExtractor.kt`), so a device capture is owed before the guide promises it.
 
 `tapOn` with `action: "longPress"|"doubleTap"` and `layer: "prototype"` drives them by
 coordinate gesture; no new MCP tool is needed. Repeat and component action placeholders bind

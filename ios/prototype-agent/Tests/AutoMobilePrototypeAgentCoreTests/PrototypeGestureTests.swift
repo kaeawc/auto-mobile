@@ -14,6 +14,19 @@ final class PrototypeGestureTests: XCTestCase {
         try JSONDecoder().decode(PrototypeNode.self, from: Data(json.utf8))
     }
 
+    /// #15123: each declared gesture list names a VoiceOver action; the single tap does not.
+    func testGestureListsNameAccessibilityActionsAndTheSingleTapDoesNot() throws {
+        let list = try JSONDecoder().decode([PrototypeAction].self, from: Data(#"[{"type":"emit","name":"x"}]"#.utf8))
+        func actions(tap: [PrototypeAction]?, long: [PrototypeAction]?, double: [PrototypeAction]?) -> [String] {
+            PrototypeGesturePlan(onTap: tap, onLongPress: long, onDoubleTap: double).accessibilityActions.map(\.name)
+        }
+        XCTAssertEqual(actions(tap: list, long: nil, double: nil), [])
+        XCTAssertEqual(actions(tap: nil, long: list, double: nil), ["Long press"])
+        XCTAssertEqual(actions(tap: nil, long: nil, double: list), ["Double tap"])
+        XCTAssertEqual(actions(tap: list, long: list, double: list), ["Long press", "Double tap"])
+        XCTAssertEqual(actions(tap: list, long: [], double: []), [], "empty lists add no action")
+    }
+
     func testSharedGestureFixtureDecodesAllThreeLists() throws {
         let spec = try sharedFixture("gestures")
         XCTAssertEqual(spec.root.onTap?.map(\.type), ["emit"])

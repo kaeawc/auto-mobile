@@ -1702,3 +1702,17 @@ object PrototypeValidityKeysSerializer :
       is PrototypeValidityKeys.Multiple -> JsonArray(value.keys.map(::JsonPrimitive))
     }
 }
+
+@Serializable
+@SerialName("startTimer")
+data class PrototypeStartTimerAction(
+  val id: String,
+  val afterMs: Int,
+  val everyMs: Int? = null,
+  val maxRuns: Int? = null,
+  val actions: List<PrototypeAction>,
+) : PrototypeAction()
+
+@Serializable
+@SerialName("cancelTimer")
+data class PrototypeCancelTimerAction(val id: String) : PrototypeAction()

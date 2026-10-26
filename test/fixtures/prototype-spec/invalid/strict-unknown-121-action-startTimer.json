@@ -81,23 +81,6 @@
           ],
           "type": "button",
           "label": "Start"
-        },
-        {
-          "onTap": [
-            {
-              "type": "startTimer",
-              "id": "component",
-              "afterMs": 100,
-              "actions": [
-                {
-                  "type": "emit",
-                  "name": "tick"
-                }
-              ]
-            }
-          ],
-          "type": "button",
-          "label": "Start"
         }
       ]
     }

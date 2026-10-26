@@ -537,11 +537,17 @@ struct PrototypeAction: Decodable, Sendable {
     let statusKey: String?
     let via: String?
     let timeoutMs: Double?
+    let id: String?
+    let afterMs: Int?
+    let everyMs: Int?
+    let maxRuns: Int?
+    let actions: [PrototypeAction]?
     let onSuccess: [PrototypeAction]?
     let onError: [PrototypeAction]?
 
     private enum CodingKeys: String, CodingKey {
         case type, name, payload, context, pager, page, stack, screen, path, key, value
+        case id, afterMs, everyMs, maxRuns, actions
         case incrementAmount = "by"
         case requireValid, method, url, headers, query, body, into, statusKey, via, timeoutMs, onSuccess, onError
     }
@@ -552,8 +558,15 @@ struct PrototypeAction: Decodable, Sendable {
         by incrementAmount: Double?, requireValid: [String]?, method: String? = nil, url: String? = nil,
         headers: [String: JSONValue]? = nil, query: [String: JSONValue]? = nil, body: JSONValue? = nil,
         into: String? = nil, statusKey: String? = nil, via: String? = nil, timeoutMs: Double? = nil,
-        onSuccess: [PrototypeAction]? = nil, onError: [PrototypeAction]? = nil
+        onSuccess: [PrototypeAction]? = nil, onError: [PrototypeAction]? = nil,
+        id: String? = nil, afterMs: Int? = nil, everyMs: Int? = nil, maxRuns: Int? = nil,
+        actions: [PrototypeAction]? = nil
     ) {
+        self.id = id
+        self.afterMs = afterMs
+        self.everyMs = everyMs
+        self.maxRuns = maxRuns
+        self.actions = actions
         self.type = type
         self.name = name
         self.payload = payload
@@ -582,7 +595,7 @@ struct PrototypeAction: Decodable, Sendable {
 
     /// This action and every action nested in its `onSuccess` / `onError` lists, depth first.
     var flattened: [PrototypeAction] {
-        [self] + ((onSuccess ?? []) + (onError ?? [])).flatMap(\.flattened)
+        [self] + ((onSuccess ?? []) + (onError ?? []) + (actions ?? [])).flatMap(\.flattened)
     }
 }
 

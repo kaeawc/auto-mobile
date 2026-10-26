@@ -200,9 +200,15 @@ private fun EmbeddedLifetime(
 ) {
   DisposableEffect(owner, lifecycle) {
     val observer = LifecycleEventObserver { _, event ->
+      if (event == Lifecycle.Event.ON_START) {
+        scope.launch { interactions.withLock { owner.session?.runtime?.resumeTimers() } }
+      }
       if (event == Lifecycle.Event.ON_STOP) {
         scope.launch(NonCancellable, start = CoroutineStart.UNDISPATCHED) {
-          interactions.withLock { owner.session?.runtime?.flushStorage() }
+          interactions.withLock {
+            owner.session?.runtime?.pauseTimers()
+            owner.session?.runtime?.flushStorage()
+          }
         }
       }
     }

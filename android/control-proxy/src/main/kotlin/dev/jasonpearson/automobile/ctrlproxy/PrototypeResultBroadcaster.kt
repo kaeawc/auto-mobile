@@ -107,6 +107,9 @@ internal class PrototypeResultBroadcaster(
       )
     }
 
+  override suspend fun sendAdvanced(requestId: String?, fired: Int) =
+    emit(requestId) { prototypeResultFrame(requestId, true, null, fired = fired) }
+
   override suspend fun sendCleared(requestId: String?, cleared: Int) =
     emit(requestId) { prototypeClearedFrame(requestId, cleared) }
 

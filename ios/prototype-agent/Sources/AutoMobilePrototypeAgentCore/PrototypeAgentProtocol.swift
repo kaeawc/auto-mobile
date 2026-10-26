@@ -57,6 +57,8 @@ enum PrototypeAgentProtocol {
         bottomSheetDragCapability,
         clearStorageRequest,
         storageCapability,
+        timersCapability,
+        advanceClockRequest,
     ]
     /// A same-id `show_prototype` replaces the prototype in place keeping pager pages and stack paths, and
     /// `reset: true` starts it fresh. Same name as the CtrlProxy capability; the host refuses
@@ -161,6 +163,8 @@ enum PrototypeAgentProtocol {
     /// Wipes the values stored for `{id}`; the reply carries `cleared`, the number of keys removed. Listed
     /// beside `storageCapability` because the host checks request types against `capabilities`.
     static let clearStorageRequest = "clear_prototype_storage"
+    static let timersCapability = "prototype_timers_v1"
+    static let advanceClockRequest = "advance_prototype_clock"
     /// Atomic in-place `/data`, `/state` and `replaceNode` patches with revisions and state conflicts
     /// (#11675). Same name as the CtrlProxy capability; the host sends `patch_prototype` only to an agent
     /// that advertises it.

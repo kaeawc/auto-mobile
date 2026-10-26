@@ -18,6 +18,7 @@ public enum PrototypeSpecStrictValidator {
             try PrototypeLimits.guardRepeatPathCells(root, data: modelData)
             try PrototypeLimits.guardSubstitutedText(root, data: modelData)
             try repeats.expanded(root.objectFields ?? [:], path: "root")
+            try PrototypeTimerValidator.validate(context.actions)
             try PrototypeStrictSemantics.storage(fields)
             try PrototypeDataWrite.validate(actions: context.actions, data: modelData)
             try PrototypeStrictSemantics.vocabulary(context, data: modelData)

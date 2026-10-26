@@ -1,0 +1,6 @@
+E: network-security-config (line=8)
+    E: base-config (line=9)
+      A: cleartextTrafficPermitted=true
+        E: trust-anchors (line=10)
+            E: certificates (line=11)
+              A: src="system" (Raw: "system")

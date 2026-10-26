@@ -1,0 +1,11 @@
+  type xml id=10 entryCount=4
+    resource 0x7f100000 xml/accessibility_service_config
+      () (file) res/-N.xml type=XML
+      (v30) (file) res/ge.xml type=XML
+      (v31) (file) res/Kq.xml type=XML
+    resource 0x7f100001 xml/device_admin_policies
+      () (file) res/4D.xml type=XML
+    resource 0x7f100002 xml/method
+      () (file) res/aY.xml type=XML
+    resource 0x7f100003 xml/network_security_config
+      () (file) res/8G.xml type=XML

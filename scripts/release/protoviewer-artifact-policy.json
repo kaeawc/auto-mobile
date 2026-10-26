@@ -1,0 +1,45 @@
+{
+  "description": "Release-artifact policy for the standalone ProtoViewer apps (issue #14154). Checked by scripts/release/check-protoviewer-artifact-policy.ts against the built APK and iOS app/ipa, never against source manifests. Changing an allowlist is a security-posture change: review it as one.",
+  "advisory": {
+    "ios.privacyManifest": "#14151",
+    "ios.forbiddenSymbols": "#14150"
+  },
+  "android": {
+    "applicationId": "dev.jasonpearson.automobile.protoviewer",
+    "minTargetSdk": 36,
+    "permissions": ["android.permission.ACCESS_LOCAL_NETWORK", "android.permission.INTERNET"],
+    "declaredPermissions": [],
+    "exportedComponents": [
+      {
+        "kind": "activity",
+        "name": "dev.jasonpearson.automobile.protoviewer.LibraryActivity"
+      },
+      {
+        "kind": "activity",
+        "name": "dev.jasonpearson.automobile.protoviewer.ImportActivity"
+      },
+      {
+        "kind": "activity",
+        "name": "dev.jasonpearson.automobile.protoviewer.McpActivity",
+        "permission": "android.permission.DUMP"
+      },
+      {
+        "kind": "receiver",
+        "name": "androidx.profileinstaller.ProfileInstallReceiver",
+        "permission": "android.permission.DUMP"
+      }
+    ]
+  },
+  "ios": {
+    "bundleIdentifier": "dev.jasonpearson.automobile.protoviewer",
+    "allowedEntitlements": [
+      "application-identifier",
+      "beta-reports-active",
+      "com.apple.developer.team-identifier"
+    ],
+    "forbiddenEntitlements": ["get-task-allow"],
+    "forbiddenInfoPlistKeys": ["UIFileSharingEnabled"],
+    "forbiddenSymbols": ["PrototypeServer", "bootViewerHost"],
+    "privacyManifest": "PrivacyInfo.xcprivacy"
+  }
+}

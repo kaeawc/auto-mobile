@@ -1,0 +1,88 @@
+name: "Verify ProtoViewer Artifact Policy"
+
+# Release-artifact policy gate for the standalone ProtoViewer apps (#14154). It builds the
+# release-variant ProtoViewer artifacts and judges the BUILT outputs -- the compiled Android
+# manifest and the iOS app's Info.plist, entitlements and symbols -- against the allowlists in
+# scripts/release/protoviewer-artifact-policy.json, so a library manifest merge or convention
+# plugin that carries CtrlProxy's posture over cannot ship. Needs no signing secrets.
+on:
+  workflow_call:
+    inputs:
+      checkout-ref:
+        description: "Commit or tag to build; defaults to the caller SHA"
+        required: false
+        type: string
+        default: ""
+    secrets:
+      GRADLE_ENCRYPTION_KEY:
+        required: true
+
+jobs:
+  android:
+    name: "ProtoViewer Android artifact policy"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: "Checkout code"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+          ref: ${{ inputs.checkout-ref || github.sha }}
+          persist-credentials: false
+
+      - name: "Setup Bun"
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+
+      - name: "Install dependencies"
+        run: bash scripts/ci/install-bun-deps.sh
+
+      - uses: ./.github/actions/gradle-task-run
+        with:
+          gradle-tasks: ":protoviewer:assembleRelease"
+          gradle-project-directory: "android"
+          gradle-home-directory: "~/.gradle/verify-protoviewer-artifact-policy"
+          reuse-configuration-cache: true
+          gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+
+      # No --allow-snapshot: a release candidate must carry a release versionName.
+      - name: "Check the release APK against the artifact policy"
+        run: >-
+          bun scripts/release/check-protoviewer-artifact-policy.ts android
+          android/protoviewer/build/outputs/apk/release/protoviewer-release.apk
+
+  ios:
+    name: "ProtoViewer iOS artifact policy"
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - name: "Checkout code"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+          ref: ${{ inputs.checkout-ref || github.sha }}
+          persist-credentials: false
+
+      - name: "Select Xcode 26.5"
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "26.5"
+
+      - name: "Setup Bun"
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+
+      - name: "Install dependencies"
+        run: bash scripts/ci/install-bun-deps.sh
+
+      # The simulator app is the only iOS ProtoViewer artifact until the App Store archive
+      # (#14150) lands; switch --platform to iphoneos on the exported .ipa then.
+      - name: "Build the release-style ProtoViewer app (no dev cleartext opt-in)"
+        run: PROTOVIEWER_CLEARTEXT=0 bash scripts/ios/protoviewer-build.sh "$RUNNER_TEMP/protoviewer"
+
+      - name: "Check the app against the artifact policy"
+        run: >-
+          bun scripts/release/check-protoviewer-artifact-policy.ts ios
+          "$RUNNER_TEMP/protoviewer/ProtoViewer.app" --platform iphonesimulator

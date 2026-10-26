@@ -129,6 +129,9 @@ Import needs identical accept/reject behaviour on all three platforms.
 
 ### 3.4 iOS app
 
+- Both `Info.plist` files (ProtoViewer and the Viewer template) declare `UIDeviceFamily` `[1, 2]` and all four
+  iPad orientations, so the app runs natively on iPad instead of in iPhone compatibility mode. Multiple
+  scenes stay off. The artifact policy gate and privacy manifest do not constrain the device family.
 - SwiftUI `ProtoViewer`: `LibraryView` (SF Symbols only) and `PrototypeScreen` hosting
   `ViewerRenderer` with `PrototypeModel(mode: .standalone, storage: .fileBacked())` in a
   per-library-id namespace.

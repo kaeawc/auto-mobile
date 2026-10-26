@@ -225,7 +225,18 @@ export const tapOnResultSchema = z
     pinnedDisplay: pinnedDisplaySchema.optional(),
     displayInventory: displayInventoryUnavailableSchema.optional(),
     staleDisplay: staleDisplaySchema.optional(),
-    pressRecognized: z.boolean().optional(),
+    pressRecognized: z
+      .boolean()
+      .optional()
+      .describe(
+        "Long press heuristic: a context menu, text selection, or new window appeared. False means none was seen, not that a tap was sent",
+      ),
+    longClickAdvertised: z
+      .boolean()
+      .optional()
+      .describe(
+        "Android long press: whether the pressed node advertises a long-click action. False means it has no long-click handler, so the app handles the hold like a tap",
+      ),
     contextMenuOpened: z.boolean().optional(),
     selectionStarted: z.boolean().optional(),
     searchUntil: tapOnSearchUntilSchema.optional(),

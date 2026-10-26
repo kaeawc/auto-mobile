@@ -429,6 +429,11 @@ function writeObserveDiffBodyArtifact(
   if (fields !== undefined) {
     body.fields = fields;
   }
+  // The artifact is fetched on its own through tool-output resources, so imported prototype
+  // text in the body must carry the same untrusted-content notice as the inline shell.
+  if (inline.importedPrototypeContent !== undefined) {
+    body.importedPrototypeContent = inline.importedPrototypeContent;
+  }
   return { ...inline, ...writeObservationArtifact(ctx, body) };
 }
 

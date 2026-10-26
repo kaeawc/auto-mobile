@@ -209,6 +209,18 @@ jobs:
       upload-artifact: true
       artifact-retention-days: 90
 
+  # Policy gate (#14154): builds ProtoViewer's release artifacts and fails the release when the
+  # built manifest, Info.plist, entitlements or symbols break the allowlists. It needs no
+  # secrets beyond the Gradle cache key. finalize-release does not wait on it, but
+  # verify-prepared-release does, so a failure blocks promotion.
+  build-candidate-protoviewer-artifact-policy:
+    needs: prepare-version
+    uses: ./.github/workflows/verify-protoviewer-artifact-policy.yml
+    with:
+      checkout-ref: ${{ needs.prepare-version.outputs.release_commit }}
+    secrets:
+      GRADLE_ENCRYPTION_KEY: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+
   # The identity probe is a separately approved Network Extension bundle. Keep
   # it in the same signed/notarized candidate set as the other macOS helpers so
   # native isolation testing never consumes an unsigned local build.
@@ -370,6 +382,7 @@ jobs:
         build-candidate-screen-capture-helper,
         build-candidate-prototype-agent,
         build-candidate-prototype-viewer,
+        build-candidate-protoviewer-artifact-policy,
         build-candidate-network-filter-identity-probe,
         build-candidate-desktop-app-installers,
       ]

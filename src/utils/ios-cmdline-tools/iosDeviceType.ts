@@ -89,6 +89,18 @@ export function isIosUdid(deviceId: string): boolean {
   return isIosSimulatorUdid(deviceId) || isIosPhysicalUdid(deviceId);
 }
 
+/** Simulator device-type identifier suffix of the iPhone Duo (iOS 27.1+ runtimes). */
+export const IOS_DUO_DEVICE_TYPE_SUFFIX = ".iPhone-Duo";
+
+/**
+ * True for the iPhone Duo simulator device type. Xcode reports the Duo with
+ * `productFamily: "iPhone"`, so the device-type identifier is the one signal
+ * every catalog, inventory and display path can agree on.
+ */
+export function isIosDuoDeviceType(deviceTypeId: string | undefined | null): boolean {
+  return deviceTypeId?.endsWith(IOS_DUO_DEVICE_TYPE_SUFFIX) === true;
+}
+
 /**
  * Infer an iOS form factor from any Apple device-model string.
  *
@@ -96,11 +108,15 @@ export function isIosUdid(deviceId: string): boolean {
  * vocabularies: simulator device-type identifiers
  * (`com.apple.CoreSimulator.SimDeviceType.iPhone-15`) and the product types
  * physical devices report through devicectl (`iPhone16,1`, `iPad14,3`).
- * Anything else — Apple TV, Watch, Vision — has no form factor here.
+ * The iPhone Duo is `foldable`, not `phone`, even though its identifier names
+ * an iPhone. Anything else — Apple TV, Watch, Vision — has no form factor here.
  */
 export function inferIosFormFactor(deviceTypeId: string | undefined): FormFactor | undefined {
   if (!deviceTypeId) {
     return undefined;
+  }
+  if (isIosDuoDeviceType(deviceTypeId)) {
+    return "foldable";
   }
   const hint = deviceTypeId.includes("iPad")
     ? "tablet"

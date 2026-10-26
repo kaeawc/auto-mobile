@@ -317,6 +317,20 @@ describe("session broker daemon handlers", () => {
     expect(broker.prepareCalls).toHaveLength(2);
   });
 
+  test("capabilities advertise iOS Duo only when the running broker enables it", async () => {
+    const brokerState = { ...state, isSessionBrokerMode: () => true };
+    for (const enabled of [false, true]) {
+      const duo = spyOn(broker, "supportsIosDuo").mockReturnValue(enabled);
+      const response = await handleDaemonRequest(
+        { ...request(undefined), method: "daemon/capabilities" },
+        brokerState,
+      );
+      const advertised = (response.result as { capabilities: string[] }).capabilities;
+      expect(advertised.includes("session-broker/ios-duo/v1")).toBe(enabled);
+      duo.mockRestore();
+    }
+  });
+
   test("export socket methods dispatch proof and ack and leave the connection binding untouched", async () => {
     await seedExport();
     for (const method of ["daemon/getSessionExport", "daemon/acknowledgeSessionExport"]) {

@@ -311,6 +311,7 @@ export async function openSessionBrokerService(
         }
         return defaults;
       },
+      capabilities: options.config.capabilities,
       sessionDisposition: options.sessionDisposition,
       reuseCleanDevices: reuse.mode !== "off",
       reuseAndroidCleanDevices: options.config.reuseAndroidCleanDevices,

@@ -9,6 +9,8 @@ import type { BindingScopeIdentity } from "./registry/bindingRegistry";
 export const SESSION_BROKER_HOST_CONFIG_ENV = ENV_SPECS.SESSION_BROKER_CONFIG.name;
 export const SESSION_BROKER_EXPORT_CAPABILITY = "session-broker-export/v1";
 export const SESSION_BROKER_CAPABILITY = "session-broker/v1";
+/** Advertised only when the running broker's host configuration enables `capabilities.iosDuo`. */
+export const SESSION_BROKER_IOS_DUO_CAPABILITY = "session-broker/ios-duo/v1";
 
 /** One private allocation scope in the host-wide registry; no caller chooses these values. */
 export const SESSION_BROKER_SCOPE: BindingScopeIdentity = {
@@ -83,6 +85,16 @@ const androidDefaults = z
   })
   .strict();
 const cap = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+/**
+ * Recognized hardware this host may execute. Off by default: an unconfigured host keeps
+ * refusing Duo requests with a non-retryable `capability_disabled` failure.
+ */
+const capabilities = z
+  .object({
+    /** iPhone Duo simulators; the host needs an iOS 27.1+ runtime that supports them. */
+    iosDuo: z.boolean().default(false),
+  })
+  .strict();
 /** Keep-booted cleaning cannot revert everything, so every Nth release erases instead (#15017). */
 export const DEFAULT_IOS_KEEP_BOOTED_MAX_USES = 10;
 const iosReuse = z.discriminatedUnion("mode", [
@@ -136,6 +148,7 @@ const hostConfig = z
     androidKeepBootedMaxUses: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
     androidKeepBootedFallback: z.enum(["snapshot", "destroy"]).optional(),
     reuse: z.object({ ios: iosReuse }).strict().optional(),
+    capabilities: capabilities.default({}),
   })
   .strict()
   .refine((config) => config.defaults.ios !== undefined || config.defaults.android !== undefined, {
@@ -177,7 +190,11 @@ const hostConfig = z
     (config) =>
       config.defaults.ios !== undefined || !config.reuse || config.reuse.ios.mode === "off",
     { message: "iOS reuse requires an explicit defaults.ios policy" },
-  );
+  )
+  .refine((config) => config.defaults.ios !== undefined || !config.capabilities.iosDuo, {
+    path: ["capabilities", "iosDuo"],
+    message: "capabilities.iosDuo requires an explicit defaults.ios policy",
+  });
 
 export type SessionBrokerHostConfig = z.infer<typeof hostConfig>;
 

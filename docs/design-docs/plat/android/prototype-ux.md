@@ -371,11 +371,13 @@ effect, a separate issue). The contract is conservative, one closed choice per o
   field needs no `prototype_theme_modes_v1`.
 - Where blur is unavailable (Android below API 31, cross-window blur disabled by the device or
   battery saver, a window layer that cannot blur, iOS below the material's minimum) the device draws
-  a solid dim instead of nothing: `tint` at 85% alpha, else black at 50%.
+  a tonal fill instead of nothing: `tint` at 85% alpha, else the `surfaceContainer` role at 85%. On Android this is the only
+  path below API 31; from API 31 the blur is real (`RenderEffect`), and node-level `surface: "glass"`
+  (#15244, #15256) reuses that same blur and fallback.
 - The field needs `prototype_backdrop_v1`. A device without it would ignore the field and draw a
   plain window, so the host refuses the show (a placement `scrim` still dims what is behind).
   The capability is advertised by the renderer slices, not by the contract.
-- A successful show reports `lastResult.backdrop`: `blur`, or `fallback` when the solid dim was
+- A successful show reports `lastResult.backdrop`: `blur`, or `fallback` when the tonal fill was
   drawn. It is absent without `window.backdrop`, on dismiss, on a failed show and for adopted prototypes.
 
 ## Common node properties

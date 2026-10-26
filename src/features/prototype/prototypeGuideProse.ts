@@ -294,7 +294,7 @@ placement (not the prototype's own content). \`material\` is one of \`ultraThin\
 \`regular\`, \`thick\` or \`glass\` (Liquid Glass, iOS 26+ only). \`blur\` is an optional whole radius in
 dp (points on iOS), 0-150. \`tint\` is one hex or role colour, not a light/dark pair. The host refuses
 the show on a device without \`prototype_backdrop_v1\`. Where the platform cannot blur, the device
-draws a solid dim (\`tint\` at 85% alpha, else black at 50%) and \`lastResult.backdrop\` is
+draws a tonal fill (\`tint\` at 85% alpha, else the \`surfaceContainer\` role at 85%) and \`lastResult.backdrop\` is
 \`fallback\`; otherwise it is \`blur\`.
 
 

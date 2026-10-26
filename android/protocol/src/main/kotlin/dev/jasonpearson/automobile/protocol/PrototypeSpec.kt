@@ -1404,7 +1404,7 @@ data class PrototypeWindow(
   val persistence: String? = null,
   /** Fullscreen host chrome: `none` by default, or `bar`; device persistence defaults to `bar`. */
   val chrome: String? = null,
-  /** Blur or solid dim behind the window (`prototype_backdrop_v1`, #15126). */
+  /** Blur or tonal fill behind the window (`prototype_backdrop_v1`, #15126). */
   val backdrop: PrototypeBackdrop? = null,
 )
 

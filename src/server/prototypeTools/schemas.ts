@@ -606,7 +606,7 @@ const lastResultSchema = z.object({
     .enum(["blur", "fallback"])
     .optional()
     .describe(
-      "show of a spec with window.backdrop: blur when the device blurred what is behind the window, fallback when it drew the solid dim instead (blur unsupported or disabled). Absent without window.backdrop, on dismiss and on a failed show",
+      "show of a spec with window.backdrop: blur when the device blurred what is behind the window, fallback when it drew the tonal fill instead (blur unsupported or disabled). Absent without window.backdrop, on dismiss and on a failed show",
     ),
   appearance: appearanceSchema
     .optional()

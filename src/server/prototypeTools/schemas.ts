@@ -781,7 +781,7 @@ export const prototypeOutputSchema = z.object({
     .max(MAX_PROTOTYPE_ACCESSIBILITY_FINDINGS)
     .optional()
     .describe(
-      "Successful show or patch: advisory accessibility lint of the device spec (never refuses a show). rule is unlabeled-control, unlabeled-image, unlabeled-text-field, low-contrast (authored text colour vs. its resolved background, per light/dark mode, WCAG AA) or small-touch-target (authored size under 48dp); path is the node in the component-expanded device spec; value/minimum give the ratio or dp. Absent when nothing is found.",
+      "Successful show or patch: advisory accessibility lint of the device spec (never refuses a show). rule is unlabeled-control, unlabeled-image, unlabeled-text-field, low-contrast (authored text colour vs. its resolved background, per light/dark mode, WCAG AA), small-touch-target (authored size under 48dp) or transition-without-visible-when (a node transition with no visibleWhen, which never runs); path is the node in the component-expanded device spec; value/minimum give the ratio or dp. Absent when nothing is found.",
     ),
   accessibilityFindingsTotal: z
     .number()

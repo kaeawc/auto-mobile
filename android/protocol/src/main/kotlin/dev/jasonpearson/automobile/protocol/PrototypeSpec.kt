@@ -1399,6 +1399,20 @@ data class PrototypeWindow(
   val persistence: String? = null,
   /** Fullscreen host chrome: `none` by default, or `bar`; device persistence defaults to `bar`. */
   val chrome: String? = null,
+  /** Blur or solid dim behind the window (`prototype_backdrop_v1`, #15126). */
+  val backdrop: PrototypeBackdrop? = null,
+)
+
+/**
+ * `window.backdrop`: a closed [material], an optional whole-dp [blur] (0-150; absent uses the
+ * material's own radius) and an optional single-colour [tint] (hex or role) laid over the blur,
+ * which is also the solid fallback colour where blur is unavailable.
+ */
+@Serializable
+data class PrototypeBackdrop(
+  val material: String,
+  val blur: Int? = null,
+  val tint: String? = null,
 )
 
 /**

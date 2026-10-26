@@ -10,6 +10,8 @@ internal object PrototypeBundleCapabilities {
     val caps = linkedSetOf<String>()
     if ("data" in spec) caps.add("prototype_data_model_v1")
     if ("storage" in spec) caps.add("prototype_storage_v1")
+    if (((spec["window"] as? JsonObject)?.get("backdrop")) != null)
+      caps.add("prototype_backdrop_v1")
     val colors = (spec["theme"] as? JsonObject)?.get("colors") as? JsonObject
     val scrim = (((spec["window"] as? JsonObject)?.get("placement") as? JsonObject)?.get("scrim"))
     if (

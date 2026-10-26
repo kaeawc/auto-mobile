@@ -19037,7 +19037,7 @@
           ]
         },
         "spec": {
-          "description": "Full prototype spec: id, window, optional theme (mode light|dark|system, colors.seed hex or colors.source \"device\", plus optional per-role hex overrides in colors such as colors.primary or colors.surface applied over that scheme in light and dark, typography.scale 0.75-1.5 and fontFamily sans|serif|mono, shapes.corner none|small|medium|large|full; text style.textStyle names a Material type role such as titleLarge; style color, background and border.color take hex or a Material colour role such as primary, onSurface, surfaceContainer; style.cornerRadius takes dp, none|extraSmall|small|medium|large|extraLarge|full, or per-corner {topStart,topEnd,bottomEnd,bottomStart} dp), optional state, root. window.opacity is 0-100, default 100. window.chrome: none (default) or bar, fullscreen only: on a device advertising prototype_window_chrome_v1, none draws no host dismiss bar and fills the window including under the status bar (use safeAreaPadding on a top bar), and a two-finger long press (about 1 s) reveals a dismiss pill for 5 s; window.persistence: \"device\" defaults to bar. Without the capability the bar is kept, explicit none is refused, and lastResult.chrome says which was drawn. show always renders the whole spec; spec.state is authoritative. Use show for a new screen or a window, theme or root change; patch for content (/data), state (/state) or one node by id (replaceNode), requiring prototype_patch_v1. window.layer \"app\" and window.persistence \"device\" need a CtrlProxy advertising prototype_window_options_v1. Per-mode forms need a device advertising prototype_theme_modes_v1 and are refused otherwise: a colour field, gradient stop or scrim as {light, dark} (each hex or a role), a role name in a gradient stop or scrim, theme.colors.light / theme.colors.dark {role: hex} maps applied after the flat overrides for the resolved mode, and image.asset or a tabBar/bottomNav item image as {light, dark} asset ids. Stack {type:\"stack\",id,start,screens} requires prototype_stack_v1 and is refused otherwise. Data, repeat.items {path}, repeat.key, {data:/pointer} text and {data: pointer} conditions require prototype_data_model_v1. onLongPress/onDoubleTap on box/row/column/text/image/icon/card require prototype_gestures_v1. searchBar requires prototype_search_bar_v1 for show and patch. {data: pointer, empty: true|false} conditions (missing, [], {} or \"\" is empty) and style shimmer on box/row/column/card require prototype_loading_states_v1. Node animate {durationMs?,easing?}, style scale (0-4)/rotation (degrees), transition slideStart|slideEnd|scale and image zoomable {maxScale 1-8} (not with onDoubleTap) require prototype_motion_v2. transition as {type, delayMs?} (0-600 ms) or blurReplace, and box/row/column stagger {ms 0-100, order? forward|reverse|center} (every child's total delay at most 600 ms), require prototype_choreography_v1. Stack transition platform|slide|fade|none (default platform) and optional push/replace transition overrides require prototype_stack_transitions_v1; pop/popToRoot take no override. Stack transition controls screen navigation, not its own visibleWhen. chart {variant line|area|bar|ring, series:[{path,x?,y,label,color?}] (1-4, each a /data array of objects with a numeric y), yRange?, xLabels?, goal?} requires prototype_chart_v1. Text nodes take exactly one of text or spans (1–64 strict {text,style?,onTap?} entries with nonempty text and inline typography/color/background only); spans require prototype_rich_text_v1, resolved span texts concatenate without separators for observe, and span taps run actions without opening URLs. Input checks, validateOn, enabledWhen, {valid: key|keys} conditions and emit.requireValid require prototype_checks_v1; see the guide for checks and formats.",
+          "description": "Full prototype spec: id, window, optional theme (mode light|dark|system, colors.seed hex or colors.source \"device\", plus optional per-role hex overrides in colors such as colors.primary or colors.surface applied over that scheme in light and dark, typography.scale 0.75-1.5 and fontFamily sans|serif|mono, shapes.corner none|small|medium|large|full; text style.textStyle names a Material type role such as titleLarge; style color, background and border.color take hex or a Material colour role such as primary, onSurface, surfaceContainer; style.cornerRadius takes dp, none|extraSmall|small|medium|large|extraLarge|full, or per-corner {topStart,topEnd,bottomEnd,bottomStart} dp), optional state, root. window.opacity is 0-100, default 100. window.chrome: none (default) or bar, fullscreen only: on a device advertising prototype_window_chrome_v1, none draws no host dismiss bar and fills the window including under the status bar (use safeAreaPadding on a top bar), and a two-finger long press (about 1 s) reveals a dismiss pill for 5 s; window.persistence: \"device\" defaults to bar. Without the capability the bar is kept, explicit none is refused, and lastResult.chrome says which was drawn. window.backdrop {material ultraThin|thin|regular|thick|glass, blur? 0-150 dp, tint? one hex or role} blurs what is behind the window and needs prototype_backdrop_v1 (refused without it); lastResult.backdrop is blur or fallback (a solid dim where blur is unavailable). show always renders the whole spec; spec.state is authoritative. Use show for a new screen or a window, theme or root change; patch for content (/data), state (/state) or one node by id (replaceNode), requiring prototype_patch_v1. window.layer \"app\" and window.persistence \"device\" need a CtrlProxy advertising prototype_window_options_v1. Per-mode forms need a device advertising prototype_theme_modes_v1 and are refused otherwise: a colour field, gradient stop or scrim as {light, dark} (each hex or a role), a role name in a gradient stop or scrim, theme.colors.light / theme.colors.dark {role: hex} maps applied after the flat overrides for the resolved mode, and image.asset or a tabBar/bottomNav item image as {light, dark} asset ids. Stack {type:\"stack\",id,start,screens} requires prototype_stack_v1 and is refused otherwise. Data, repeat.items {path}, repeat.key, {data:/pointer} text and {data: pointer} conditions require prototype_data_model_v1. onLongPress/onDoubleTap on box/row/column/text/image/icon/card require prototype_gestures_v1. searchBar requires prototype_search_bar_v1 for show and patch. {data: pointer, empty: true|false} conditions (missing, [], {} or \"\" is empty) and style shimmer on box/row/column/card require prototype_loading_states_v1. Node animate {durationMs?,easing?}, style scale (0-4)/rotation (degrees), transition slideStart|slideEnd|scale and image zoomable {maxScale 1-8} (not with onDoubleTap) require prototype_motion_v2. transition as {type, delayMs?} (0-600 ms) or blurReplace, and box/row/column stagger {ms 0-100, order? forward|reverse|center} (every child's total delay at most 600 ms), require prototype_choreography_v1. Stack transition platform|slide|fade|none (default platform) and optional push/replace transition overrides require prototype_stack_transitions_v1; pop/popToRoot take no override. Stack transition controls screen navigation, not its own visibleWhen. chart {variant line|area|bar|ring, series:[{path,x?,y,label,color?}] (1-4, each a /data array of objects with a numeric y), yRange?, xLabels?, goal?} requires prototype_chart_v1. Text nodes take exactly one of text or spans (1–64 strict {text,style?,onTap?} entries with nonempty text and inline typography/color/background only); spans require prototype_rich_text_v1, resolved span texts concatenate without separators for observe, and span taps run actions without opening URLs. Input checks, validateOn, enabledWhen, {valid: key|keys} conditions and emit.requireValid require prototype_checks_v1; see the guide for checks and formats.",
           "type": "object",
           "properties": {
             "id": {
@@ -19230,6 +19230,29 @@
                       "additionalProperties": false
                     }
                   ]
+                },
+                "backdrop": {
+                  "type": "object",
+                  "properties": {
+                    "material": {
+                      "type": "string",
+                      "enum": ["ultraThin", "thin", "regular", "thick", "glass"],
+                      "description": "Frosted material behind the window: ultraThin, thin, regular, thick, or glass (Liquid Glass on iOS 26+; the fallback dim elsewhere)"
+                    },
+                    "blur": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 150,
+                      "description": "Blur radius in dp (points on iOS), 0-150; absent uses the material's own radius"
+                    },
+                    "tint": {
+                      "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim/anyOf/2/properties/light",
+                      "description": "One colour (hex or Material role, not a per-mode pair) laid over the blur, and the solid fallback where blur is unavailable"
+                    }
+                  },
+                  "required": ["material"],
+                  "additionalProperties": false,
+                  "description": "Blur what is behind the window (needs prototype_backdrop_v1). The show result reports backdrop blur or fallback; fallback is a solid dim (tint at 85% alpha, else black at 50%) where blur is unavailable"
                 },
                 "chrome": {
                   "type": "string",
@@ -24752,35 +24775,38 @@
               "chrome": {
                 "$ref": "#/$defs/__schema8"
               },
-              "appearance": {
+              "backdrop": {
                 "$ref": "#/$defs/__schema9"
               },
-              "storage": {
+              "appearance": {
                 "$ref": "#/$defs/__schema10"
               },
-              "timers": {
+              "storage": {
                 "$ref": "#/$defs/__schema11"
               },
-              "success": {
+              "timers": {
                 "$ref": "#/$defs/__schema12"
               },
-              "error": {
+              "success": {
                 "$ref": "#/$defs/__schema13"
               },
-              "totalTimeMs": {
+              "error": {
                 "$ref": "#/$defs/__schema14"
               },
-              "timestamp": {
+              "totalTimeMs": {
                 "$ref": "#/$defs/__schema15"
               },
-              "pendingCount": {
+              "timestamp": {
                 "$ref": "#/$defs/__schema16"
               },
-              "lastSequence": {
+              "pendingCount": {
                 "$ref": "#/$defs/__schema17"
               },
-              "droppedCount": {
+              "lastSequence": {
                 "$ref": "#/$defs/__schema18"
+              },
+              "droppedCount": {
+                "$ref": "#/$defs/__schema19"
               },
               "pages": {
                 "type": "object",
@@ -24846,14 +24872,14 @@
                   "type": "string"
                 },
                 "additionalProperties": {
-                  "$ref": "#/$defs/__schema19"
+                  "$ref": "#/$defs/__schema20"
                 }
               },
               "context": {
-                "$ref": "#/$defs/__schema20"
+                "$ref": "#/$defs/__schema21"
               },
               "contextTruncated": {
-                "$ref": "#/$defs/__schema22"
+                "$ref": "#/$defs/__schema23"
               },
               "lastKnown": {
                 "description": "Pages, stacks and state are the last reported device snapshot, not a live device query",
@@ -24895,26 +24921,29 @@
             "chrome": {
               "$ref": "#/$defs/__schema8"
             },
-            "appearance": {
+            "backdrop": {
               "$ref": "#/$defs/__schema9"
             },
-            "storage": {
+            "appearance": {
               "$ref": "#/$defs/__schema10"
             },
-            "timers": {
+            "storage": {
               "$ref": "#/$defs/__schema11"
             },
-            "success": {
+            "timers": {
               "$ref": "#/$defs/__schema12"
             },
-            "error": {
+            "success": {
               "$ref": "#/$defs/__schema13"
             },
-            "totalTimeMs": {
+            "error": {
               "$ref": "#/$defs/__schema14"
             },
-            "timestamp": {
+            "totalTimeMs": {
               "$ref": "#/$defs/__schema15"
+            },
+            "timestamp": {
+              "$ref": "#/$defs/__schema16"
             }
           },
           "required": ["lastAction", "success", "timestamp"],
@@ -25086,13 +25115,13 @@
               ]
             },
             "payload": {
-              "$ref": "#/$defs/__schema23"
+              "$ref": "#/$defs/__schema24"
             },
             "context": {
-              "$ref": "#/$defs/__schema20"
+              "$ref": "#/$defs/__schema21"
             },
             "contextTruncated": {
-              "$ref": "#/$defs/__schema22"
+              "$ref": "#/$defs/__schema23"
             },
             "state": {
               "type": "object",
@@ -25337,13 +25366,13 @@
           "maximum": 9007199254740991
         },
         "pendingCount": {
-          "$ref": "#/$defs/__schema16"
-        },
-        "lastSequence": {
           "$ref": "#/$defs/__schema17"
         },
-        "droppedCount": {
+        "lastSequence": {
           "$ref": "#/$defs/__schema18"
+        },
+        "droppedCount": {
+          "$ref": "#/$defs/__schema19"
         },
         "artifact": {
           "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -25421,6 +25450,11 @@
           "enum": ["none", "bar"]
         },
         "__schema9": {
+          "description": "show of a spec with window.backdrop: blur when the device blurred what is behind the window, fallback when it drew the solid dim instead (blur unsupported or disabled). Absent without window.backdrop, on dismiss and on a failed show",
+          "type": "string",
+          "enum": ["blur", "fallback"]
+        },
+        "__schema10": {
           "description": "The light or dark mode the prototype is drawn in, as the device last reported it: in lastResult what a successful show resolved to, and per prototype in inspect that value, and in status its mode and source as refreshed by inspect and by appearance_changed events (status never carries deviceDark; after a show crossed by an appearance_changed event, its status entry has no appearance until a later event or inspect states it). Absent when the device does not advertise prototype_appearance_v1, on dismiss and on a failed show",
           "type": "object",
           "properties": {
@@ -25441,7 +25475,7 @@
           "required": ["mode", "source"],
           "additionalProperties": false
         },
-        "__schema10": {
+        "__schema11": {
           "description": "inspect only: what the device has stored for this prototype's storage block (prototype_storage_v1), as the device last reported it. Absent when the device does not report it or the prototype has no storage block",
           "type": "object",
           "properties": {
@@ -25486,7 +25520,7 @@
           "required": ["version", "keys", "totalBytes"],
           "additionalProperties": false
         },
-        "__schema11": {
+        "__schema12": {
           "maxItems": 8,
           "type": "array",
           "items": {
@@ -25512,38 +25546,38 @@
             "additionalProperties": false
           }
         },
-        "__schema12": {
+        "__schema13": {
           "type": "boolean"
         },
-        "__schema13": {
+        "__schema14": {
           "type": "string"
         },
-        "__schema14": {
-          "type": "number"
-        },
         "__schema15": {
-          "description": "Host clock milliseconds when the request completed",
           "type": "number"
         },
         "__schema16": {
+          "description": "Host clock milliseconds when the request completed",
+          "type": "number"
+        },
+        "__schema17": {
           "description": "Unconsumed events, including events excluded by filters or cursor",
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
         },
-        "__schema17": {
+        "__schema18": {
           "description": "Highest sequence accepted for this prototype",
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
         },
-        "__schema18": {
+        "__schema19": {
           "description": "Cumulative events dropped by buffer overflow in this scope",
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
         },
-        "__schema19": {
+        "__schema20": {
           "anyOf": [
             {
               "type": "string"
@@ -25560,7 +25594,7 @@
             {
               "type": "array",
               "items": {
-                "$ref": "#/$defs/__schema19"
+                "$ref": "#/$defs/__schema20"
               }
             },
             {
@@ -25569,12 +25603,12 @@
                 "type": "string"
               },
               "additionalProperties": {
-                "$ref": "#/$defs/__schema19"
+                "$ref": "#/$defs/__schema20"
               }
             }
           ]
         },
-        "__schema20": {
+        "__schema21": {
           "allOf": [
             {
               "type": "object",
@@ -25582,13 +25616,13 @@
                 "type": "string"
               },
               "additionalProperties": {
-                "$ref": "#/$defs/__schema21"
+                "$ref": "#/$defs/__schema22"
               }
             },
             {}
           ]
         },
-        "__schema21": {
+        "__schema22": {
           "anyOf": [
             {
               "type": "string"
@@ -25605,7 +25639,7 @@
             {
               "type": "array",
               "items": {
-                "$ref": "#/$defs/__schema21"
+                "$ref": "#/$defs/__schema22"
               }
             },
             {
@@ -25614,16 +25648,16 @@
                 "type": "string"
               },
               "additionalProperties": {
-                "$ref": "#/$defs/__schema21"
+                "$ref": "#/$defs/__schema22"
               }
             }
           ]
         },
-        "__schema22": {
+        "__schema23": {
           "type": "boolean",
           "const": true
         },
-        "__schema23": {
+        "__schema24": {
           "anyOf": [
             {
               "type": "string"
@@ -25640,7 +25674,7 @@
             {
               "type": "array",
               "items": {
-                "$ref": "#/$defs/__schema23"
+                "$ref": "#/$defs/__schema24"
               }
             },
             {
@@ -25649,7 +25683,7 @@
                 "type": "string"
               },
               "additionalProperties": {
-                "$ref": "#/$defs/__schema23"
+                "$ref": "#/$defs/__schema24"
               }
             }
           ]

@@ -11,6 +11,7 @@ enum PrototypeBundleCapabilities {
         if spec["data"] != nil { need("data_model") }
         if spec["theme"] != nil { need("theme_modes") }
         if spec["storage"] != nil { need("storage") }
+        if spec["window"]?.objectFields?["backdrop"] != nil { need("backdrop") }
         if spec["platform"] != nil || spec["requires"] != nil { need("platform") }
         if case let .array(modules) = spec["requires"]?.objectFields?["platform"] {
             for module in modules {

@@ -337,6 +337,27 @@ and the host refuses explicit `none`; omitted chrome and `bar` succeed.
 on a successful fullscreen show and in subsequent host-local status, absent on
 sheet/floating windows, dismiss, failed show and adopted prototypes.
 
+### Frosted backdrop
+
+Optional `window.backdrop` (#15126) is `{material, blur?, tint?}` and blurs what is behind the
+window, on any placement and never the prototype's own content (that is the node-level `blur`
+effect, a separate issue). The contract is conservative, one closed choice per open question:
+
+- `material` is required and closed: `ultraThin`, `thin`, `regular`, `thick` or `glass`. `glass`
+  is Liquid Glass and exists on iOS 26+ only; every other platform draws the fallback for it.
+- `blur` is an optional whole-number radius in dp (points on iOS) from 0 to 150. Absent uses the
+  material's own radius. Larger values are refused, as are fractions and negatives.
+- `tint` is optional and one colour: a hex or a Material role, never a `{light, dark}` pair, so the
+  field needs no `prototype_theme_modes_v1`.
+- Where blur is unavailable (Android below API 31, cross-window blur disabled by the device or
+  battery saver, a window layer that cannot blur, iOS below the material's minimum) the device draws
+  a solid dim instead of nothing: `tint` at 85% alpha, else black at 50%.
+- The field needs `prototype_backdrop_v1`. A device without it would ignore the field and draw a
+  plain window, so the host refuses the show (a placement `scrim` still dims what is behind).
+  The capability is advertised by the renderer slices, not by the contract.
+- A successful show reports `lastResult.backdrop`: `blur`, or `fallback` when the solid dim was
+  drawn. It is absent without `window.backdrop`, on dismiss and on a failed show.
+
 ## Common node properties
 
 Every node has required `type`. All other common properties are optional:

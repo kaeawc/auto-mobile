@@ -180,6 +180,44 @@ describe("displayConfig accessibility display preferences (#14088)", () => {
     ).toEqual([]);
   });
 
+  test("factory reset forces defaults with no recorded baselines, as after a daemon restart (#15337)", async () => {
+    const adbFactory = seededAndroid();
+    const client = adbFactory.getFakeClient();
+    // Dark before the reset; the forced `night no` takes effect on the last read.
+    client.setCommandResultSequence("shell cmd uimode night", [
+      "Night mode: yes\n",
+      "Night mode: yes\n",
+      "Night mode: yes\n",
+      "Night mode: no\n",
+    ]);
+    client.setCommandResultSequence(CONTRAST_GET, ["1\n", "1\n", "null\n"]);
+    const themeBaselines = new Map<string, "light" | "dark">();
+    const accessibilityBaselines = new Map<string, AccessibilityDisplaySnapshot>();
+
+    const result = await displayConfig(androidEmulator, {
+      adbFactory,
+      themeBaselines,
+      accessibilityBaselines,
+    }).setConfig({ reset: true, factory: true });
+
+    const issued = commands(adbFactory);
+    expect(issued).toContain("shell cmd uimode night no");
+    expect(issued.some((command) => command.includes("high_text_contrast_enabled"))).toBe(true);
+    expect(result.message).toContain("Factory reset");
+    expect(result.previous?.theme).toBe("dark");
+    expect(themeBaselines.size).toBe(0);
+    expect(accessibilityBaselines.size).toBe(0);
+  });
+
+  test("a plain reset with no recorded baselines leaves night mode alone", async () => {
+    const adbFactory = seededAndroid();
+    adbFactory.getFakeClient().setCommandResult("shell cmd uimode night", "Night mode: yes\n");
+
+    await displayConfig(androidEmulator, { adbFactory }).setConfig({ reset: true });
+
+    expect(commands(adbFactory)).not.toContain("shell cmd uimode night no");
+  });
+
   test("rejects reset combined with a preference before touching the device", async () => {
     const adbFactory = seededAndroid();
 

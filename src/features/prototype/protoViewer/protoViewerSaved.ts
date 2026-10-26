@@ -89,7 +89,8 @@ export async function routeToProtoViewer(
   }
   const installed = await probeInstalled(deps, signal);
   if (!installed) {
-    logger.warn(
+    // The normal case for Android without ProtoViewer and for physical iOS devices.
+    logger.debug(
       "[protoviewer] ProtoViewer is unavailable for this target. Keeping the platform save path.",
     );
     return undefined;

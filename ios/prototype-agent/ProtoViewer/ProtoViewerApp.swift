@@ -34,7 +34,8 @@ struct ProtoViewerApp: App {
             Task {
                 do { try await mcp.ensureDirectories() }
                 catch {
-                    libraryLog.warning("Cannot create MCP directories: \(error.localizedDescription, privacy: .private)")
+                    libraryLog
+                        .warning("Cannot create MCP directories: \(error.localizedDescription, privacy: .private)")
                 }
             }
             return (store, imports, mcp)

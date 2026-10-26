@@ -23,6 +23,9 @@ import {
   type ProtoViewerResult,
 } from "./protoViewerContract";
 import { pollProtoViewerResult } from "./pollProtoViewerResult";
+/** A cold launch may use most of the budget; the result still gets this long (as on Android). */
+const PROTOVIEWER_MIN_RESULT_WAIT_MS = 1_000;
+
 export interface IosProtoViewerSimctl {
   installed(udid: string, signal?: AbortSignal): Promise<boolean>;
   dataContainer(udid: string, signal?: AbortSignal): Promise<string>;
@@ -70,6 +73,7 @@ export class IosProtoViewer implements ProtoViewerDevice {
     work: { bytes: Uint8Array; label?: string } | { libraryId: string },
   ): Promise<ProtoViewerResult> {
     signal?.throwIfAborted();
+    const started = this.deps.timer.now();
     const request = `mcp-${this.deps.ids.next().replace(/[^A-Za-z0-9_-]/g, "")}`.slice(0, 64);
     if (!PROTOVIEWER_REQUEST_ID.test(request)) {
       throw new ActionableError("Generated an unusable ProtoViewer request id.");
@@ -92,10 +96,15 @@ export class IosProtoViewer implements ProtoViewerDevice {
           ? protoViewerIosImportUrl(request, work.label)
           : protoViewerIosOpenUrl(request, work.libraryId);
       await this.deliver(url, timeoutMs, signal);
+      // One budget for delivery and polling, so a slow cold launch cannot double the wait.
+      const pollMs = Math.max(
+        timeoutMs - (this.deps.timer.now() - started),
+        Math.min(timeoutMs, PROTOVIEWER_MIN_RESULT_WAIT_MS),
+      );
       const result = await pollProtoViewerResult(
         () => this.deps.files.read(resultPath),
         this.deps.timer,
-        timeoutMs,
+        pollMs,
         signal,
       );
       if (result.request !== request) {

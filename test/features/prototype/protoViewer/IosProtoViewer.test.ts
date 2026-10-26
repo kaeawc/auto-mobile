@@ -171,3 +171,16 @@ test("physical iOS devices never probe simctl", async () => {
   const { viewer } = setup("00008110-001234567890001E");
   expect(await viewer.installed()).toBe(false);
 });
+test("iOS delivery and polling share one timeout budget", async () => {
+  const { viewer, files, simctl, timer } = setup();
+  files.pending = 10_000;
+  const started = timer.now();
+  simctl.onOpen = () => {
+    void timer.advanceTime(4000);
+  };
+  await expect(viewer.importBundle(new Uint8Array([1]), undefined, 5000)).rejects.toThrow(
+    "may still have saved",
+  );
+  // Not 4000 (delivery) plus another full 5000.
+  expect(timer.now() - started).toBeLessThan(7000);
+});

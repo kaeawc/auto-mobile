@@ -16,16 +16,19 @@ private struct McpFiles: PrototypeLibraryFileSystem, Sendable {
         try state.withLock { try $0.writeAtomic(p, bytes: bytes) }
         writes.withLock { $0 += 1 }
     }
+
     func excludeFromBackup(_ p: URL) throws { try state.withLock { try $0.excludeFromBackup(p) } }
     func assertRealDirectory(_ p: URL) throws { try state.withLock { try $0.assertRealDirectory(p) } }
     func assertAbsent(_ p: URL) throws { try state.withLock { try $0.assertAbsent(p) } }
     func makeStagingDirectory(parent: URL, mode: UInt16) throws -> URL {
         try state.withLock { try $0.makeStagingDirectory(parent: parent, mode: mode) }
     }
+
     func mkdir(_ p: URL, mode: UInt16) throws { try state.withLock { try $0.mkdir(p, mode: mode) } }
     func writeExclusiveNoFollow(_ p: URL, bytes: Data) throws {
         try state.withLock { try $0.writeExclusiveNoFollow(p, bytes: bytes) }
     }
+
     func rename(from: URL, to: URL) throws { try state.withLock { try $0.rename(from: from, to: to) } }
     func remove(_ p: URL) throws { try state.withLock { try $0.remove(p) } }
 }
@@ -39,6 +42,7 @@ final class PrototypeMcpInboxTests: XCTestCase {
             specSha256: String(repeating: "a", count: 64), requires: [], pinned: false
         )
     }
+
     private func result(_ files: McpFiles, request: String = "r") throws -> [String: String] {
         try JSONDecoder().decode(
             [String: String].self,
@@ -150,7 +154,7 @@ final class PrototypeMcpInboxTests: XCTestCase {
         )
         async let first = inbox.handle(.importBundle(request: "r", label: nil))
         async let second = inbox.handle(.importBundle(request: "r", label: nil))
-        _ = await (first, second)
+        _ = await(first, second)
         XCTAssertEqual(files.writes.withLock { $0 }, 1)
         XCTAssertEqual(try result(files)["status"], "imported")
     }

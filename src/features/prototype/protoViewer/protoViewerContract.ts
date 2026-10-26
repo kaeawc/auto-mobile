@@ -28,8 +28,12 @@ export const PROTOVIEWER_REQUEST_ID = /^[A-Za-z0-9_-]{1,64}$/;
 export const PROTOVIEWER_LIBRARY_ID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 export const PROTOVIEWER_MAX_LABEL_LENGTH = 120;
-/** Characters the app refuses in a label: controls, format (bidi) and line/paragraph separators. */
-const PROTOVIEWER_LABEL_FORBIDDEN = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
+/**
+ * Characters the app refuses in a label: controls, format (bidi) and line/paragraph separators.
+ * The host also refuses lone surrogates (`\p{Cs}`): they cannot be percent-encoded into the iOS
+ * launch URL, and a half emoji is never a usable label.
+ */
+const PROTOVIEWER_LABEL_FORBIDDEN = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Cs}]/u;
 /** Result path the app uses when a pushed bundle is missing or unreadable from its side. */
 export const PROTOVIEWER_INBOX_PATH = "inbox";
 /** Result path the app uses when the spec needs a capability this ProtoViewer build lacks. */
@@ -48,12 +52,23 @@ export function protoViewerLabelProblem(label: string): string | undefined {
 
 /** A ProtoViewer label from a spec id: forbidden characters dropped, trimmed and capped. */
 export function protoViewerDefaultLabel(specId: string): string | undefined {
-  const cleaned = specId
-    .replace(new RegExp(PROTOVIEWER_LABEL_FORBIDDEN.source, "gu"), "")
-    .trim()
-    .slice(0, PROTOVIEWER_MAX_LABEL_LENGTH)
-    .trim();
-  return cleaned.length > 0 ? cleaned : undefined;
+  const cleaned = specId.replace(new RegExp(PROTOVIEWER_LABEL_FORBIDDEN.source, "gu"), "").trim();
+  const capped = truncateWholeCharacters(cleaned, PROTOVIEWER_MAX_LABEL_LENGTH).trim();
+  return capped.length > 0 ? capped : undefined;
+}
+
+/** Cuts at a UTF-16 length without splitting a surrogate pair. */
+function truncateWholeCharacters(text: string, maxLength: number): string {
+  let length = 0;
+  let kept = "";
+  for (const character of text) {
+    length += character.length;
+    if (length > maxLength) {
+      break;
+    }
+    kept += character;
+  }
+  return kept;
 }
 
 /** `getExternalFilesDir(null)/mcp` for the given Android user, as adb shell sees it. */

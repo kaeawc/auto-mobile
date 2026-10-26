@@ -336,6 +336,19 @@ describe("ProtoViewer labels", () => {
     ]);
   });
 
+  test("a default label is cut between characters, and a lone surrogate label is refused", async () => {
+    const device = new FakeProtoViewerDevice();
+    const emojiId = { ...spec, id: `${"a".repeat(119)}\u{1F600}b` } as PrototypeSpec;
+    await routeToProtoViewer({ action: "save", spec: emojiId }, deps(device));
+    expect(device.imports[0].label).toBe("a".repeat(119));
+    const output = await routeToProtoViewer(
+      { action: "save", spec, label: "half\ud800" },
+      deps(device),
+    );
+    expect(output).toMatchObject({ success: false, errorCode: "invalid_label" });
+    expect(device.imports).toHaveLength(1);
+  });
+
   test("an app-side label refusal maps to invalid_label", async () => {
     const device = new FakeProtoViewerDevice();
     device.importResult = { status: "rejected", request: "r", path: "label", reason: "too long" };

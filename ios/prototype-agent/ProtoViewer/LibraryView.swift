@@ -166,10 +166,12 @@ struct LibraryView: View {
         }
         Task {
             if let entry = await mcpInbox.handle(command) {
-                if let previous = mcpOpen { await mcpInbox.reportOpenFailed(previous) }
+                // Swap before awaiting: overlapping opens each supersede exactly one predecessor.
+                let previous = mcpOpen
                 mcpOpen = command
                 path = NavigationPath()
                 path.append(McpDestination(entry: entry, command: command))
+                if let previous { await mcpInbox.reportOpenFailed(previous) }
             }
             refresh()
         }

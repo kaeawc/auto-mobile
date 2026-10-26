@@ -190,6 +190,7 @@ class PrototypeStateLogicTest {
         fontStyle = "italic",
         overflow = "ellipsis",
         fontFamily = PrototypeFontFamily.Named("serif"),
+        shader = PrototypeShader("effect", mapOf("strength" to 0.5)),
         textStyle = "titleLarge",
       )
     val on = eq("on", PrototypeScalar.BooleanValue(true))

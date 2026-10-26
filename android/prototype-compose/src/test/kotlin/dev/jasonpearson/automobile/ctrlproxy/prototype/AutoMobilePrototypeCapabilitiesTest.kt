@@ -33,8 +33,6 @@ class AutoMobilePrototypeCapabilitiesTest {
     setOf(
       // The test module is a placeholder no production runtime advertises.
       "prototype_platform_test_v1",
-      // #15131: slice 1 defines the contract; Kotlin runtime support arrives in slice 2.
-      "prototype_custom_shaders_v1",
     )
 
   @Test
@@ -47,7 +45,10 @@ class AutoMobilePrototypeCapabilitiesTest {
       "Remove exclusions once supported",
       exclusions.none { it in AutoMobilePrototype.capabilities },
     )
-    val missing = requiredCapabilities - AutoMobilePrototype.capabilities - exclusions
+    val missing =
+      requiredCapabilities -
+        (AutoMobilePrototype.capabilities + prototypeShaderCapabilities(33)) -
+        exclusions
     assertTrue("Renderer is missing spec capabilities: $missing", missing.isEmpty())
   }
 

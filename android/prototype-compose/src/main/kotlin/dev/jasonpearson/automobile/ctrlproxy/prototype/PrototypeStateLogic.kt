@@ -145,5 +145,6 @@ private fun PrototypeStyle.mergedOver(prototype: PrototypeStyle): PrototypeStyle
     fontStyle = prototype.fontStyle ?: fontStyle,
     overflow = prototype.overflow ?: overflow,
     fontFamily = prototype.fontFamily ?: fontFamily,
+    shader = prototype.shader ?: shader,
     textStyle = prototype.textStyle ?: textStyle,
   )

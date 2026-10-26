@@ -7781,6 +7781,12 @@
         "type": "list",
         "nullable": false,
         "hasDefault": true
+      },
+      {
+        "name": "shaderFailures",
+        "type": "map",
+        "nullable": false,
+        "hasDefault": true
       }
     ],
     "dev.jasonpearson.automobile.protocol.PrototypeStorageBlock": [

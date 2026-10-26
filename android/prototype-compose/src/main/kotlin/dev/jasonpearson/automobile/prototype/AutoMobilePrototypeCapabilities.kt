@@ -1,12 +1,18 @@
 package dev.jasonpearson.automobile.prototype
 
+import android.os.Build
+import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeShaderCapabilities
+
 /** Entry point for the embedded prototype renderer. */
 object AutoMobilePrototype {
   /**
    * The spec features this renderer supports. The embedding app checks a spec's required
    * capabilities against this set.
    */
-  val capabilities: Set<String> =
+  val capabilities: Set<String>
+    get() = (baseCapabilities + prototypeShaderCapabilities(Build.VERSION.SDK_INT)).sorted().toSet()
+
+  private val baseCapabilities: Set<String> =
     setOf(
       "prototype_carousel_v1",
       "prototype_chart_v1",

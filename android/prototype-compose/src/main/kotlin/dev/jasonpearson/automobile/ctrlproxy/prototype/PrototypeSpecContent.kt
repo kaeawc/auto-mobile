@@ -142,6 +142,8 @@ private fun prototypeAnnotatedText(
   }
 }
 
+internal val LocalPrototypeShaderSession = compositionLocalOf<PrototypeShaderSession?> { null }
+
 /** Compose owns gesture mechanics only; all authored state/actions go through the pure runtime. */
 @Composable
 @InternalAutoMobilePrototypeApi
@@ -178,6 +180,7 @@ fun PrototypeRuntimeContent(
         LocalPrototypeImageCache provides images,
         LocalPrototypeImageVersion provides imageVersion,
         LocalPrototypeFontCache provides fonts,
+        LocalPrototypeShaderSession provides runtime.shaderSession,
         LocalPrototypeMotion provides motion,
         LocalPrototypeMotionActivity provides runtime.motionActivity,
         LocalPrototypeStackRuntime provides runtime,
@@ -210,6 +213,8 @@ fun PrototypeSpecContent(
     val menuParents = remember(root) { prototypeMenuParents(root) }
     CompositionLocalProvider(
       LocalPrototypeAnchorLocals provides anchorLocals,
+      LocalPrototypeShaderSession provides
+        (LocalPrototypeShaderSession.current ?: remember { PrototypeShaderSession() }),
       LocalPrototypeGestureTaps provides remember { PrototypeGestureTaps() },
       LocalPrototypeMenuLayers provides menuLayers,
       LocalPrototypeRetainedSubtrees provides remember(root) { prototypeRetainedSubtrees(root) },
@@ -239,7 +244,7 @@ fun PrototypeSpecContent(
               val parent = menuParents[node.identity]
               RenderPrototypeMenu(
                 node,
-                prototypeNodeModifier(node, interact),
+                prototypeShaderModifier(node).then(prototypeNodeModifier(node, interact)),
                 parent?.let { menuLayers.bounds[it] } ?: menuLayers.windowBounds,
                 interact,
               )
@@ -399,7 +404,8 @@ private fun RenderPrototypeModal(
   val boundsModifier =
     if (node.children.any { it.role == "menu" }) Modifier.prototypeMenuBounds(node.identity, layers)
     else Modifier
-  val modifier = boundsModifier.then(prototypeNodeModifier(node, interact))
+  val modifier =
+    boundsModifier.then(prototypeShaderModifier(node)).then(prototypeNodeModifier(node, interact))
   when (node.role) {
     "dialog" ->
       RenderPrototypeDialog(node, modifier, interact) {
@@ -608,6 +614,7 @@ private fun RenderPrototypeNodeContent(
     (if (node.errorMessage != null && node.role != "textField") Modifier else parentModifier)
       .prototypeScrollAnchor(node.identity)
       .then(boundsModifier)
+      .then(prototypeShaderModifier(node))
       .then(prototypeNodeModifier(node, controlInteract, weightAxis, windowRoot))
       .then(focusModifier)
   // Inline layout containers with repeat or a direct visibleWhen child animate and clip their size.

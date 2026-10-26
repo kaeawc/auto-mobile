@@ -329,6 +329,9 @@ class WebSocketServer(
     // ORCHESTRATOR-CHOSEN: to be folded into the PROTOTYPE_SPEC_CAPABILITY_GATES registry.
     // show_prototype honours replaceOthers=false and addresses up to four independent surfaces.
     add("prototype_multi_surface_v1")
+    addAll(
+      dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeShaderCapabilities(options.sdkInt()),
+    )
     // Prototype specs honour window.layer and window.persistence. The request decoder ignores
     // unknown
     // spec fields, so an older device would silently show a session-scoped system-layer prototype.

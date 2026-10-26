@@ -608,6 +608,7 @@ const lastResultSchema = z.object({
       "The light or dark mode the prototype is drawn in, as the device last reported it: in lastResult what a successful show resolved to, and per prototype in inspect that value, and in status its mode and source as refreshed by inspect and by appearance_changed events (status never carries deviceDark; after a show crossed by an appearance_changed event, its status entry has no appearance until a later event or inspect states it). Absent when the device does not advertise prototype_appearance_v1, on dismiss and on a failed show",
     ),
   storage: prototypeStorageOutputField,
+  shaderFailures: z.record(z.string(), z.string()).optional(),
   timers: z
     .array(
       z.object({

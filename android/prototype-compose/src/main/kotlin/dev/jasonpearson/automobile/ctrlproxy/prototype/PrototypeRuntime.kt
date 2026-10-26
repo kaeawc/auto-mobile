@@ -169,6 +169,7 @@ class PrototypeRuntime(
   /** The device-wide cap on requests in flight; the controller shares one across its surfaces. */
   private val requestLimiter: PrototypeRequestLimiter = PrototypeRequestLimiter(),
   initialPlatformState: JsonObject = JsonObject(emptyMap()),
+  val shaderSession: PrototypeShaderSession = PrototypeShaderSession(),
 ) {
   @Volatile private var stateWriteValidator: PrototypeStateWriteValidator? = null
   internal var prepareStateWrites: (PrototypeSpec) -> PrototypeStateWriteValidator = {

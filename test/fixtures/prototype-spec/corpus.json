@@ -54,6 +54,10 @@
     "grid-adaptive-min-width.json",
     "grid-fixed-columns-span.json",
     "integer-json-spellings.json",
+    "linkify-repeat-binding.json",
+    "linkify-repeat-data-rows.json",
+    "linkify-repeat-empty.json",
+    "linkify-repeat-rows.json",
     "linkify-timeline.json",
     "loading-states.json",
     "material-app-bar-dialog-pickers.json",
@@ -479,7 +483,11 @@
     "linkify-match-outside.json",
     "linkify-match-unknown-field.json",
     "linkify-missing-ontap.json",
-    "linkify-repeat-binding.json",
+    "linkify-repeat-binding-outside.json",
+    "linkify-repeat-index-outside.json",
+    "linkify-repeat-invalid-key.json",
+    "linkify-repeat-item-outside.json",
+    "linkify-repeat-unknown-field.json",
     "linkify-unknown-kind.json",
     "linkify-with-spans.json",
     "list-item-empty-headline.json",
@@ -1131,8 +1139,29 @@
     "grid-adaptive-min-width.json": ["prototype_flow_grid_v1"],
     "grid-fixed-columns-span.json": ["prototype_flow_grid_v1"],
     "integer-json-spellings.json": [],
-    "linkify-timeline.json": [
+    "linkify-repeat-binding.json": ["prototype_emit_context_v1", "prototype_linkify_v1"],
+    "linkify-repeat-data-rows.json": [
+      "prototype_data_actions_v1",
       "prototype_data_model_v1",
+      "prototype_emit_context_v1",
+      "prototype_linkify_v1"
+    ],
+    "linkify-repeat-empty.json": [
+      "prototype_data_actions_v1",
+      "prototype_data_model_v1",
+      "prototype_emit_context_v1",
+      "prototype_linkify_v1"
+    ],
+    "linkify-repeat-rows.json": [
+      "prototype_data_actions_v1",
+      "prototype_data_model_v1",
+      "prototype_emit_context_v1",
+      "prototype_linkify_v1"
+    ],
+    "linkify-timeline.json": [
+      "prototype_data_actions_v1",
+      "prototype_data_model_v1",
+      "prototype_emit_context_v1",
       "prototype_linkify_v1",
       "prototype_stack_v1"
     ],

@@ -269,7 +269,9 @@ internal object PrototypeStrictPolicy {
         } else {
           fieldFeatures(key, child, field)
         }
-        if (key != "linkify" && key != "series") scan(child, key)
+        if (key == "linkify") {
+          (child as? JsonObject)?.get("onTap")?.let { scan(it, "onTap") }
+        } else if (key != "series") scan(child, key)
       }
     }
 

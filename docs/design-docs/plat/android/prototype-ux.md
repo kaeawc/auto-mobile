@@ -2346,8 +2346,10 @@ a hashtag is `#` and up to 100 letters, marks, digits or `_`, not all digits; a 
 `https://` up to the next whitespace with trailing `.,;:!?'")]}` removed. Inside `onTap` only,
 `{match: "text"}` reads the tapped match (`@ana`) and `{match: "kind"}` its kind: as a `setState`
 value, a `setData` / `appendData` value or an emit context entry, for example
-`setState profileHandle {match: "text"}` then `push profile`. `{match}` anywhere else is refused, as
-are repeat bindings inside `onTap`. A URL tap never opens a browser; that is the `links.open`
+`setState profileHandle {match: "text"}` then `push profile`. `{match}` anywhere else is refused.
+Inside a repeat, `onTap` also binds `{item: "field"}`, `{index: true}`, `{alias.field}` and `{index}`
+per row, including state keys such as `liked_{item.id}`. Repeat binding preserves `{match}` for
+tap-time resolution; emit payloads and `{value: ...}` literals remain opaque. A URL tap never opens a browser; that is the `links.open`
 platform call. Matches are links like tappable spans (Android `tapOn {accessibilityLink}`, iOS
 `tapAt`) and require `prototype_linkify_v1`.
 

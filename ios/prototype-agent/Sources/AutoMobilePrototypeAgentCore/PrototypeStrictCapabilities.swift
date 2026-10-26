@@ -112,7 +112,9 @@ enum PrototypeStrictCapabilities {
                 }
                 if key == "data", child.stringValue != nil { need("data_model") }
                 if key == "light" || key == "dark", !field.isEmpty { need("theme_modes") }
-                if key != "linkify" && key != "series" { scan(child, field: key) }
+                if key == "linkify" {
+                    if let actions = child.objectFields?["onTap"] { scan(actions, field: "onTap") }
+                } else if key != "series" { scan(child, field: key) }
             }
         }
         if let root = spec["root"] { scan(root) }

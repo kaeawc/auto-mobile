@@ -34,7 +34,9 @@ const admitted = async (gate: AndroidBootAdmissionGate): Promise<boolean> =>
       return true;
     })
     .catch((error: unknown) => {
-      if (error instanceof BootCapacityExhaustedError) return false;
+      if (error instanceof BootCapacityExhaustedError) {
+        return false;
+      }
       throw error;
     });
 

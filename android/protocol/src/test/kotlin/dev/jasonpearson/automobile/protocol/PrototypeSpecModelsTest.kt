@@ -224,17 +224,23 @@ class PrototypeSpecModelsTest {
     assertRoundTrip(
       "condition",
       PrototypeCondition(
-        all = listOf(
-          enabled,
-          PrototypeCondition(any = listOf(
-            PrototypeCondition(key = "count", gt = 1.0),
-            PrototypeCondition(key = "count", lt = 10.0),
-          )),
-          PrototypeCondition(not = PrototypeCondition(key = "name", notEquals = PrototypeScalar.Text("hidden"))),
-          PrototypeCondition(data = "/items", empty = true),
-          PrototypeCondition(valid = PrototypeValidityKeys.Multiple(listOf("name", "email"))),
-          PrototypeCondition(platform = "/os", equals = PrototypeScalar.Text("android")),
-        ),
+        all =
+          listOf(
+            enabled,
+            PrototypeCondition(
+              any =
+                listOf(
+                  PrototypeCondition(key = "count", gt = 1.0),
+                  PrototypeCondition(key = "count", lt = 10.0),
+                ),
+            ),
+            PrototypeCondition(
+              not = PrototypeCondition(key = "name", notEquals = PrototypeScalar.Text("hidden")),
+            ),
+            PrototypeCondition(data = "/items", empty = true),
+            PrototypeCondition(valid = PrototypeValidityKeys.Multiple(listOf("name", "email"))),
+            PrototypeCondition(platform = "/os", equals = PrototypeScalar.Text("android")),
+          ),
       ),
     )
   }
@@ -254,14 +260,25 @@ class PrototypeSpecModelsTest {
         maxHeight = 400.0,
         padding = PrototypePadding(top = 1.5, bottom = 2.5, start = 3.5, end = 4.5),
         background = PrototypeModeValue.Single("#112233"),
-        cornerRadius = PrototypeCornerRadius.Corners(topStart = 1.0, topEnd = 2.0, bottomStart = 3.0, bottomEnd = 4.0),
+        cornerRadius =
+          PrototypeCornerRadius.Corners(
+            topStart = 1.0,
+            topEnd = 2.0,
+            bottomStart = 3.0,
+            bottomEnd = 4.0,
+          ),
         border = PrototypeBorder(width = 2.5, color = "#112233"),
         elevation = 2.0,
         shadowColor = modes,
-        gradient = PrototypeLinearGradient(angle = 45.0, stops = listOf(
-          PrototypeGradientStop(color = "#112233", position = 0.0),
-          PrototypeGradientStop(color = modes, position = 1.0),
-        )),
+        gradient =
+          PrototypeLinearGradient(
+            angle = 45.0,
+            stops =
+              listOf(
+                PrototypeGradientStop(color = "#112233", position = 0.0),
+                PrototypeGradientStop(color = modes, position = 1.0),
+              ),
+          ),
         aspectRatio = 1.5,
         offset = PrototypeOffset(x = -12.5, y = 24.25),
         alpha = 0.8,

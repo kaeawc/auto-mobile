@@ -81,7 +81,11 @@ describe("AppPermissions", () => {
       "shell pm grant --user 0 'com.example.app' 'android.permission.READ_EXTERNAL_STORAGE'",
       "",
     );
-    client.setCommandResult("shell cmd notification set_enabled 'com.example.app' true", "");
+    client.setCommandResult(
+      "shell pm grant --user 0 'com.example.app' android.permission.POST_NOTIFICATIONS",
+      "",
+    );
+    client.setCommandResult("shell dumpsys package 'com.example.app'", egg);
     client.setCommandResult("shell cmd notification allow_dnd 'com.example.app'", "");
     client.setCommandResult(dumpsysNotification, policyListsApp);
     client.setCommandResult(currentUser, "0\n");
@@ -90,7 +94,11 @@ describe("AppPermissions", () => {
       "",
     );
 
-    client.setCommandResultSequence("shell dumpsys package 'com.example.app'", [egg, grantedEgg]);
+    client.setCommandResultSequence("shell dumpsys package 'com.example.app'", [
+      egg,
+      grantedEgg,
+      grantedEgg,
+    ]);
     const permissions = new AppPermissions(androidDevice, { adbFactory });
     const result = await permissions.setPermissions("com.example.app", {
       permissions: ["android.permission.READ_EXTERNAL_STORAGE"],
@@ -114,7 +122,9 @@ describe("AppPermissions", () => {
       ),
     ).toBe(true);
     expect(
-      client.wasCommandExecuted("shell cmd notification set_enabled 'com.example.app' true"),
+      client.wasCommandExecuted(
+        "shell pm grant --user 0 'com.example.app' android.permission.POST_NOTIFICATIONS",
+      ),
     ).toBe(true);
     expect(client.wasCommandExecuted("shell cmd notification allow_dnd 'com.example.app'")).toBe(
       true,
@@ -342,7 +352,7 @@ describe("AppPermissions", () => {
       "",
     );
     client.setCommandResult(
-      "shell cmd notification set_enabled 'com.example.app' false",
+      "shell pm revoke --user 0 'com.example.app' android.permission.POST_NOTIFICATIONS",
       "",
       "SecurityException: notification access denied",
     );
@@ -383,10 +393,17 @@ describe("AppPermissions", () => {
     expect(result.error).toContain("SecurityException");
   });
 
-  test("disables Android notifications independently of runtime permissions", async () => {
+  test("disables Android notifications through the runtime permission", async () => {
     const adbFactory = new FakeAdbClientFactory();
     const client = adbFactory.getFakeClient();
-    client.setCommandResult("shell cmd notification set_enabled 'com.example.app' false", "");
+    client.setCommandResult(
+      "shell pm revoke --user 0 'com.example.app' android.permission.POST_NOTIFICATIONS",
+      "",
+    );
+    client.setCommandResult(
+      "shell dumpsys package 'com.example.app'",
+      egg.replace("POST_NOTIFICATIONS: granted=true", "POST_NOTIFICATIONS: granted=false"),
+    );
 
     const permissions = new AppPermissions(androidDevice, { adbFactory });
     const result = await permissions.setPermissions("com.example.app", {
@@ -400,16 +417,61 @@ describe("AppPermissions", () => {
       "android_notifications_enabled",
     ]);
     expect(
-      client.wasCommandExecuted("shell cmd notification set_enabled 'com.example.app' false"),
+      client.wasCommandExecuted(
+        "shell pm revoke --user 0 'com.example.app' android.permission.POST_NOTIFICATIONS",
+      ),
     ).toBe(true);
+  });
+
+  test.each([true, false])("forwards notification userId (explicit=%s)", async (explicit) => {
+    const adbFactory = new FakeAdbClientFactory();
+    const client = adbFactory.getFakeClient();
+    client.setCommandResult("shell getprop ro.build.version.sdk", "37");
+    client.setForegroundApp({ packageName: "com.example.app", userId: 10 });
+    const user10 = egg.replace("User 0:", "User 10:");
+    client.setCommandResult("shell pm list packages --user 10", "package:com.example.app");
+    const denied10 = user10.replace(
+      "POST_NOTIFICATIONS: granted=true",
+      "POST_NOTIFICATIONS: granted=false",
+    );
+    client.setCommandResultSequence(
+      "shell dumpsys package 'com.example.app'",
+      explicit ? [denied10] : [user10, denied10],
+    );
+    const foreground = spyOn(client, "getForegroundApp")
+      .mockResolvedValueOnce({ packageName: "com.example.app", userId: 10 })
+      .mockResolvedValue(null);
+    const result = await new AppPermissions(androidDevice, { adbFactory }).setPermissions(
+      "com.example.app",
+      {
+        notificationsEnabled: false,
+        ...(explicit ? { userId: 10 } : { permissions: ["POST_NOTIFICATIONS"] }),
+      },
+    );
+    foreground.mockRestore();
+    expect(result.success).toBe(true);
+    // The runtime grant is already granted in this capture; only notification revoke writes.
+    expect(client.getAllCommands()).toContain(
+      "shell pm revoke --user 10 'com.example.app' android.permission.POST_NOTIFICATIONS",
+    );
+    expect(result.operations.map((operation) => operation.stepId)).toContain(
+      "android_notifications_enabled",
+    );
   });
 
   test("quotes notification package names before passing them to the device shell", async () => {
     const adbFactory = new FakeAdbClientFactory();
     const client = adbFactory.getFakeClient();
     const appId = "com.example.app; id #";
-    const command = "shell cmd notification set_enabled 'com.example.app; id #' false";
+    const command =
+      "shell pm revoke --user 0 'com.example.app; id #' android.permission.POST_NOTIFICATIONS";
     client.setCommandResult(command, "");
+    client.setCommandResult(
+      "shell dumpsys package 'com.example.app; id #'",
+      egg
+        .replaceAll("com.example.app", appId)
+        .replace("POST_NOTIFICATIONS: granted=true", "POST_NOTIFICATIONS: granted=false"),
+    );
 
     const permissions = new AppPermissions(androidDevice, { adbFactory });
     const result = await permissions.setPermissions(appId, {
@@ -446,7 +508,9 @@ describe("AppPermissions", () => {
     });
     expect(client.wasCommandExecuted("shell pm reset-permissions")).toBe(false);
     expect(
-      client.wasCommandExecuted("shell cmd notification set_enabled com.example.app false"),
+      client.wasCommandExecuted(
+        "shell pm revoke --user 0 'com.example.app' android.permission.POST_NOTIFICATIONS",
+      ),
     ).toBe(false);
   });
 

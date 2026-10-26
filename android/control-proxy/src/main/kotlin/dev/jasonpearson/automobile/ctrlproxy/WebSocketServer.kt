@@ -365,17 +365,15 @@ class WebSocketServer(
     // Prototype text fields honour labels, variants, keyboard/security, line limits and maxLength.
     // Older APKs reject these fields as unknown, so hosts require this flag before sending them.
     add("prototype_text_field_options_v1")
-    add("prototype_gestures_v1")
-    add("prototype_swipe_actions_v1")
-    add("prototype_text_field_actions_v1")
-    add("prototype_carousel_v1")
+    addAll(listOf("prototype_gestures_v1", "prototype_swipe_actions_v1"))
+    addAll(listOf("prototype_text_field_actions_v1", "prototype_carousel_v1"))
     add("prototype_text_field_leading_icon_v1")
     add("prototype_refresh_v1")
     // In-tree search fields support query edits, search actions and active-key result subtrees.
     add("prototype_search_bar_v1")
     add("prototype_rich_text_v1")
     // {data, empty} conditions and style shimmer for loading placeholders (#14207).
-    add("prototype_loading_states_v1")
+    addAll(listOf("prototype_loading_states_v1", "prototype_style_polish_v2"))
     // Node animate, style scale/rotation, slideStart/slideEnd/scale transitions, zoomable images.
     add("prototype_motion_v2")
     // Transition delayMs, container stagger and the blurReplace transition (#15247).

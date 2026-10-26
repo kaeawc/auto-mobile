@@ -1,0 +1,39 @@
+{
+  "spec": {
+    "id": "style-polish",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "active": true
+    },
+    "root": {
+      "type": "box",
+      "children": [],
+      "style": {
+        "shadows": [
+          {
+            "color": "#000000",
+            "radius": 20
+          },
+          {
+            "color": "#000000",
+            "radius": 20
+          },
+          {
+            "color": "#000000",
+            "radius": 20
+          },
+          {
+            "color": "#000000",
+            "radius": 20
+          }
+        ]
+      }
+    }
+  },
+  "expectedPath": "root.style.shadows",
+  "expectedMessage": "Array length out of range"
+}

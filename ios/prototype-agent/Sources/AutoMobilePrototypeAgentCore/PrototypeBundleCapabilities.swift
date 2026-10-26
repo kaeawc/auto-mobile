@@ -27,6 +27,8 @@ enum PrototypeBundleCapabilities {
             if let root = component.objectFields?["root"] { pending.append(root) }
         }
         while let node = pending.popLast()?.objectFields {
+            if PrototypeStylePolishV2.themedColors(node) { need("theme_modes") }
+            if PrototypeStylePolishV2.required(node) { names.insert(PrototypeStylePolishV2.capability) }
             let type = node["type"]?.stringValue ?? ""
             let featureTypes = [
                 "flow": "flow_grid",

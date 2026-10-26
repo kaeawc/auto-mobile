@@ -34,4 +34,9 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             advertised.filter { $0.hasPrefix("prototype_") }.sorted()
         )
     }
+
+    func testCapabilityIsAdvertised() {
+        XCTAssertTrue(PrototypeAgentProtocol.advertisedCapabilities().contains(PrototypeStylePolishV2.capability))
+        XCTAssertTrue(AutoMobilePrototypeCapabilities.supported.contains(PrototypeStylePolishV2.capability))
+    }
 }

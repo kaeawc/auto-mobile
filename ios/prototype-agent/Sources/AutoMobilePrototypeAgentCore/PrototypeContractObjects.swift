@@ -31,6 +31,8 @@ extension PrototypeContractValidator {
             if let child = data[key] { try walk(child, rule: childRule, path: childPath, depth: depth) }
             else if field["optional"] != .bool(true) { throw Self.invalid(childPath, "Required property") }
         }
+        let kind = ["style", "fadeEdges", "imageFilter"].first { rule == definitions[$0]?.objectFields } ?? ""
+        try PrototypeStylePolishV2.validateObject(data, kind: kind, path: path)
         try Self.constraints(data, rule: rule, path: path)
     }
 

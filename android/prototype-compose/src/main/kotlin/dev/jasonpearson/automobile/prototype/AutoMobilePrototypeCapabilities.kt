@@ -33,6 +33,7 @@ object AutoMobilePrototype {
       "prototype_stack_transitions_v1",
       "prototype_stack_v1",
       "prototype_storage_v1",
+      "prototype_style_polish_v2",
       "prototype_swipe_actions_v1",
       "prototype_text_field_actions_v1",
       "prototype_text_field_leading_icon_v1",

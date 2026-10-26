@@ -6,6 +6,12 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class PrototypeImageSelectionTest {
+  // These tests probe unknown icon names on a plain JVM, where android.util.Log is not mocked.
+  @org.junit.Before
+  fun silenceIconWarnings() {
+    prototypeIconWarning = {}
+  }
+
   private class StubImage : PrototypeDecodedImage {
     override val width = 1
     override val height = 1

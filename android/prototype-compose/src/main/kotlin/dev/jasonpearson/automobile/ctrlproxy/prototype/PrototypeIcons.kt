@@ -32,10 +32,12 @@ internal fun prototypeIcon(name: String?, variant: String? = null): ImageVector?
 
 private val WARNED = ConcurrentHashMap.newKeySet<String>()
 
+/** Where the once-per-name warning goes; plain-JVM tests that probe unknown names replace it. */
+internal var prototypeIconWarning: (String) -> Unit = { Log.w(TAG, it) }
+
 private fun warnUnresolvedOnce(style: IconStyle, name: String) {
   if (WARNED.add("${style.packageName}:$name")) {
-    Log.w(
-      TAG,
+    prototypeIconWarning(
       "Prototype icon '$name' resolved in no style; if the app shrinks with R8, keep " +
         "androidx.compose.material.icons.** (see the prototype embedding guide)",
     )

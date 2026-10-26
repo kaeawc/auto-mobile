@@ -598,6 +598,7 @@
     "repeat-unknown-emit-name-field.json",
     "repeat-unknown-text-field.json",
     "repeat-unknown-visible-when-field.json",
+    "reserved-test-tag.json",
     "root-text-wrong-type-before-sheet-height-over-max-first-error.json",
     "run-spacing-over-max.json",
     "safe-area-duplicate.json",

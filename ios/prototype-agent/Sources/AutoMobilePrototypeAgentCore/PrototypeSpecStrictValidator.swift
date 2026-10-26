@@ -27,6 +27,7 @@ public enum PrototypeSpecStrictValidator {
             let actions = repeats.bound(context.actions, actions: true)
             try PrototypeStrictBindings.validate(nodes: nodes, actions: actions, state: state)
             try PrototypeChecks.validate(nodes: nodes, actions: actions, state: state)
+            try PrototypePlatformValidator.validateTestTags(nodes: context.locatedNodes)
             try PrototypePlatformValidator.validate(
                 requires: fields["requires"],
                 handlers: fields["platform"],

@@ -40,8 +40,10 @@ import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.ViewCompositionStrategy
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.dismiss
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.setViewTreeLifecycleOwner
@@ -1115,6 +1117,8 @@ private fun PrototypeChromelessContent(
   // Keep dismiss semantics on an unfaded host wrapper, accessible even at opacity zero.
   Box(
     Modifier.fillMaxSize().semantics {
+      // The escape pill's tag is the resource id observe and tapOn see (#15120).
+      testTagsAsResourceId = true
       dismiss(label = "Dismiss AutoMobile prototype") {
         scope.launch { request.onHostDismiss() }
         true
@@ -1149,7 +1153,8 @@ private fun PrototypeChromelessContent(
         val colors = prototypeCloseColors(MaterialTheme.colorScheme)
         TextButton(
           onClick = { scope.launch { request.onHostDismiss() } },
-          modifier = Modifier.background(colors.background, CircleShape),
+          modifier =
+            Modifier.testTag(PROTOTYPE_DISMISS_TEST_TAG).background(colors.background, CircleShape),
           colors = ButtonDefaults.textButtonColors(contentColor = colors.content),
         ) {
           Text("Dismiss AutoMobile prototype", style = MaterialTheme.typography.labelMedium)

@@ -146,6 +146,18 @@ class PrototypeChromelessTest {
   }
 
   @Test
+  fun `revealed pill carries the shared dismiss id as its resource id`() {
+    show()
+    reveal()
+    val node = compose.onNodeWithTag(PROTOTYPE_DISMISS_TEST_TAG).assertIsDisplayed()
+    node.assertTextEquals(PROTOTYPE_DISMISS_LABEL)
+    assertEquals(
+      PROTOTYPE_DISMISS_TEST_TAG,
+      pill().fetchSemanticsNode().config.getOrNull(SemanticsProperties.TestTag),
+    )
+  }
+
+  @Test
   fun `second reveal restarts the five second timeout`() {
     show()
     reveal()

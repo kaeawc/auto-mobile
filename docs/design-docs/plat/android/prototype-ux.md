@@ -1099,7 +1099,7 @@ the native runtimes):
    failure. If it does not fit the data write limit, `headers` is dropped. The completion is atomic: if
    the body fits `/data` but no form of `__meta` fits beside it, `into` is left unchanged and the request
    is an error with `error.code` `invalid_response` (message `response and metadata exceed the data
-   limit`); its minimal metadata (duration and error) is still written if it fits, the status key
+limit`); its minimal metadata (duration and error) is still written if it fits, the status key
    becomes `error` and `onError` runs.
 4. `statusKey` becomes `"success"` or `"error"`, the request event is sent, then `onSuccess` or
    `onError` runs.
@@ -1393,7 +1393,7 @@ list is a `column` with `repeat` whose single child is the row template).
   item; one that is not fails at that item (`root.repeat.items[1]`, message
   `Bound state key "liked_b-c" is invalid`). A state-key
   placeholder outside every template fails at the key (`State key placeholder outside a
-  repeat template`). A bound key missing from `state` behaves exactly like a literal
+repeat template`). A bound key missing from `state` behaves exactly like a literal
   missing key: the type checks run once per item and fail at the key, naming the item
   (`Toggle requires a boolean state key (repeat item 1)`).
 - Limits count the expanded tree. `MAX_PROTOTYPE_NODES` and `MAX_PROTOTYPE_IMAGES` are
@@ -1774,7 +1774,9 @@ circular close chip (#15119), the twin of the iOS chip: a 32 dp opaque `prototyp
 Close glyph, no text label, a 48 dp hit target, and the shared host id `automobile-prototype-dismiss`
 (`testTag`, exposed as the resource id) with content description `Dismiss AutoMobile prototype`. The persistent
 chip sits top-end inside the system-bar and cutout insets; the bar keeps its inset-aware row. The brief
-chromeless escape pill keeps its text. Session-scoped sheets and floating windows still draw no host control
+chromeless escape pill keeps its text and carries the same id (#15120). The `automobile-` `testTag` prefix is
+reserved on every platform (the validators reject an authored tag with it), observe sees the controls by that id,
+and `tapOn` moves its point off them or fails naming the control that covers the whole target. Session-scoped sheets and floating windows still draw no host control
 (they end through the agent's `dismiss`, a replacing show, the TTL or a disconnect).
 
 A `persistence: "device"` prototype outlives its host session: it is not dismissed when the last client

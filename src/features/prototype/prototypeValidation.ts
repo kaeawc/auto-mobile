@@ -14,7 +14,7 @@ import { prototypeChoreographyError } from "./prototypeChoreography";
 import { prototypeMotionV2Error } from "./prototypeMotionV2";
 import { prototypeChartError } from "./prototypeChart";
 import { prototypeRequestsError } from "./prototypeRequest";
-import { prototypePlatformError } from "./prototypePlatform";
+import { prototypePlatformError, prototypeReservedTestTagError } from "./prototypePlatform";
 import { prototypeLinkifyError } from "./prototypeLinkify";
 import { prototypeChatScrollError } from "./prototypeChatScroll";
 import { BOUND_STATE_KEY_PATTERN } from "./prototypeTemplate";
@@ -785,6 +785,7 @@ function behaviourErrors(
     prototypeLoadingStatesError(context.nodes) ??
     prototypeMotionV2Error(context.nodes) ??
     prototypeChoreographyError(context.nodes) ??
+    prototypeReservedTestTagError(context.nodes) ??
     prototypePlatformError(value, context.actions, platformArgumentError) ??
     prototypeChartError(context.nodes, data.data) ??
     prototypeLinkifyError(value) ??

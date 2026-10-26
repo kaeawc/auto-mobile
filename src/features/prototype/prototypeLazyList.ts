@@ -10,59 +10,78 @@ interface ListError {
 }
 type Located = readonly { value: Raw; path: string }[];
 
+type Entry = Located[number];
+
+const axisOf = (value: Raw): unknown => value.axis ?? "vertical";
+
+/** Nesting restrictions of a list: row templates, headers and footers at any depth count. */
+function listNestingError(entry: Entry, ancestors: readonly Entry[]): ListError | undefined {
+  const { value, path } = entry;
+  if (ancestors.some((other) => other.value.type === "list")) {
+    return { path, message: "A list cannot sit inside another list" };
+  }
+  if (
+    ancestors.some(
+      (other) => other.value.repeat !== undefined && path.startsWith(`${other.path}.children[`),
+    )
+  ) {
+    return { path, message: "A list cannot sit inside a repeat template" };
+  }
+  if (
+    ancestors.some(
+      (other) => other.value.type === "scroll" && axisOf(other.value) === axisOf(value),
+    )
+  ) {
+    return { path, message: "A list cannot sit inside a scroll on the same axis" };
+  }
+  return undefined;
+}
+
+/** Field rules of one list: the end trigger options. */
+function listOptionsError({ value, path }: Entry): ListError | undefined {
+  if (value.endThreshold !== undefined && value.onEndReached === undefined) {
+    return { path: `${path}.endThreshold`, message: "endThreshold needs onEndReached" };
+  }
+  const threshold = typeof value.endThreshold === "number" ? value.endThreshold : 3;
+  if (
+    value.onEndReached !== undefined &&
+    typeof value.maxItems === "number" &&
+    value.maxItems <= threshold
+  ) {
+    return { path: `${path}.maxItems`, message: "maxItems must be greater than endThreshold" };
+  }
+  return undefined;
+}
+
 /** Ancestor restrictions include row templates, headers and footers at any depth. */
 export function prototypeLazyListError(nodes: Located): ListError | undefined {
   const containers = nodes.filter(
     ({ value }) => value.type === "list" || value.type === "scroll" || value.repeat !== undefined,
   );
-  for (const { value, path } of nodes) {
+  for (const entry of nodes) {
+    const { value, path } = entry;
     if (value.type !== "list" && value.type !== "scroll") {
       continue;
     }
-    const ancestors = containers.filter((entry) => path.startsWith(`${entry.path}.`));
-    if (value.type === "list") {
-      if (ancestors.some((entry) => entry.value.type === "list")) {
-        return { path, message: "A list cannot sit inside another list" };
-      }
-      if (
-        ancestors.some(
-          (entry) => entry.value.repeat !== undefined && path.startsWith(`${entry.path}.children[`),
-        )
-      ) {
-        return { path, message: "A list cannot sit inside a repeat template" };
-      }
-      if (
-        ancestors.some(
-          (entry) =>
-            entry.value.type === "scroll" &&
-            (entry.value.axis ?? "vertical") === (value.axis ?? "vertical"),
-        )
-      ) {
-        return { path, message: "A list cannot sit inside a scroll on the same axis" };
-      }
-      if (value.endThreshold !== undefined && value.onEndReached === undefined) {
-        return { path: `${path}.endThreshold`, message: "endThreshold needs onEndReached" };
-      }
-      if (
-        value.onEndReached !== undefined &&
-        typeof value.maxItems === "number" &&
-        value.maxItems <= (typeof value.endThreshold === "number" ? value.endThreshold : 3)
-      ) {
-        return { path: `${path}.maxItems`, message: "maxItems must be greater than endThreshold" };
-      }
-    }
-    if (
-      value.type === "scroll" &&
-      ancestors.some(
-        (entry) =>
-          entry.value.type === "list" &&
-          (entry.value.axis ?? "vertical") === (value.axis ?? "vertical"),
-      )
-    ) {
-      return { path, message: "A scroll cannot sit inside a list on the same axis" };
+    const ancestors = containers.filter((other) => path.startsWith(`${other.path}.`));
+    const error =
+      value.type === "list"
+        ? (listNestingError(entry, ancestors) ?? listOptionsError(entry))
+        : scrollInListError(entry, ancestors);
+    if (error) {
+      return error;
     }
   }
   return undefined;
+}
+
+function scrollInListError(entry: Entry, ancestors: readonly Entry[]): ListError | undefined {
+  const inList = ancestors.some(
+    (other) => other.value.type === "list" && axisOf(other.value) === axisOf(entry.value),
+  );
+  return inList
+    ? { path: entry.path, message: "A scroll cannot sit inside a list on the same axis" }
+    : undefined;
 }
 
 /** Prefer the list's source path over the generic data-array budget for oversized feeds. */

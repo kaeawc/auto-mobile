@@ -256,9 +256,6 @@ internal object PrototypeStrictPolicy {
     }
 
     private fun scanFields(fields: JsonObject, field: String) {
-      if (PrototypeStylePolishV2Rules.themedBorder(fields)) need("theme_modes")
-      if (PrototypeStylePolishV2Rules.required(fields))
-        result.add(PrototypeStylePolishV2Rules.CAPABILITY)
       val type = fields.text("type") ?: ""
       for ((key, child) in fields) {
         if (key == "payload" || (key == "value" && type !in listOf("setData", "appendData")))

@@ -32,15 +32,18 @@ internal object PrototypeStylePolishV2Rules {
       stops.any { PrototypeBundleNodeCapabilities.themed((it as? JsonObject)?.get("color")) }
     }
 
+  private val nonEmptyMessages =
+    mapOf(
+      "fadeEdges" to "At least one fade edge is required",
+      "imageFilter" to "At least one image filter field is required",
+    )
+
   fun objectError(data: JsonObject, kind: String, path: String): PrototypeSpecError? {
-    if (kind == "style" && "shadows" in data && ("elevation" in data || "shadowColor" in data))
+    val legacyShadow = "elevation" in data || "shadowColor" in data
+    if (kind == "style" && "shadows" in data && legacyShadow)
       return fail("$path.shadows", "shadows cannot be combined with elevation or shadowColor")
-    if (data.isEmpty() && kind in setOf("fadeEdges", "imageFilter"))
-      return fail(
-        path,
-        if (kind == "fadeEdges") "At least one fade edge is required"
-        else "At least one image filter field is required",
-      )
+    val emptyMessage = nonEmptyMessages[kind]
+    if (data.isEmpty() && emptyMessage != null) return fail(path, emptyMessage)
     return null
   }
 }

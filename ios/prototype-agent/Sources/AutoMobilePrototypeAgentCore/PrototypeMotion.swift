@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(UIKit)
+    import UIKit
+#endif
 
 /// A node's `transition` as authored: its type alone, or `{type, delayMs?}` (#15247). The agent
 /// keeps the type; delays, `stagger` and `blurReplace` need `prototype_choreography_v1`, which iOS
@@ -32,7 +35,34 @@ enum PrototypeMotionProfile: Equatable {
     case full, reduced, off
 }
 
-/// The spec can disable all animation; system Reduce Motion preserves fades and colors.
+/// The system accessibility settings that select the reduced profile (#15244). Injected so tests
+/// drive them without UIKit.
+protocol PrototypeAccessibilityProviding {
+    var isReduceMotionEnabled: Bool { get }
+    var prefersCrossFadeTransitions: Bool { get }
+}
+
+/// The live settings: `UIAccessibility.isReduceMotionEnabled` and `prefersCrossFadeTransitions`.
+struct PrototypeSystemAccessibility: PrototypeAccessibilityProviding {
+    var isReduceMotionEnabled: Bool {
+        #if canImport(UIKit)
+            return UIAccessibility.isReduceMotionEnabled
+        #else
+            return false
+        #endif
+    }
+
+    var prefersCrossFadeTransitions: Bool {
+        #if canImport(UIKit)
+            return UIAccessibility.prefersCrossFadeTransitions
+        #else
+            return false
+        #endif
+    }
+}
+
+/// The spec can disable all animation; system Reduce Motion and the cross-fade preference select
+/// the reduced profile, which preserves crossfades and colors. Neither selects `off`.
 struct PrototypeMotion: Equatable {
     let profile: PrototypeMotionProfile
     var enabled: Bool { profile != .off }
@@ -40,8 +70,13 @@ struct PrototypeMotion: Equatable {
     var fadeOnly: Bool { profile == .reduced }
     var fadeDuration: Double? { enabled ? 0.25 : nil }
 
-    init(specMotion: String?, reduceMotion: Bool) {
-        profile = specMotion == "none" ? .off : (specMotion == "reduced" || reduceMotion ? .reduced : .full)
+    init(
+        specMotion: String?, reduceMotion: Bool,
+        accessibility: PrototypeAccessibilityProviding = PrototypeSystemAccessibility()
+    ) {
+        let systemReduces = reduceMotion || accessibility.isReduceMotionEnabled
+            || accessibility.prefersCrossFadeTransitions
+        profile = specMotion == "none" ? .off : (specMotion == "reduced" || systemReduces ? .reduced : .full)
     }
 
     /// Nodes without `visibleWhen` have nothing to animate, so callers pass the transition only for

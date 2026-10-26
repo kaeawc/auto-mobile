@@ -326,4 +326,28 @@ final class PrototypeMotionTests: XCTestCase {
         XCTAssertEqual(offsets(["on": .bool(true)]), [0, 1, 4])
         XCTAssertEqual(offsets(["on": .bool(false)]), [0, 5])
     }
+
+    private struct FakeAccessibility: PrototypeAccessibilityProviding {
+        var isReduceMotionEnabled = false
+        var prefersCrossFadeTransitions = false
+    }
+
+    func testReduceMotionAndCrossFadePreferenceSelectReducedNeverOff() {
+        let cases: [(FakeAccessibility, PrototypeMotionProfile)] = [
+            (FakeAccessibility(), .full),
+            (FakeAccessibility(isReduceMotionEnabled: true), .reduced),
+            (FakeAccessibility(prefersCrossFadeTransitions: true), .reduced),
+            (FakeAccessibility(isReduceMotionEnabled: true, prefersCrossFadeTransitions: true), .reduced),
+        ]
+        for (accessibility, expected) in cases {
+            let motion = PrototypeMotion(specMotion: nil, reduceMotion: false, accessibility: accessibility)
+            XCTAssertEqual(motion.profile, expected)
+            XCTAssertTrue(motion.enabled)
+        }
+        let none = PrototypeMotion(
+            specMotion: "none", reduceMotion: false,
+            accessibility: FakeAccessibility(isReduceMotionEnabled: true, prefersCrossFadeTransitions: true)
+        )
+        XCTAssertEqual(none.profile, .off)
+    }
 }

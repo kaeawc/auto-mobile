@@ -399,8 +399,9 @@ transition as a real tap, including on part identifiers.
   animate size (`animateContentSize`) when a direct child appears, disappears or resolves a new
   width/height, scoped to `PrototypeNode.containerLayoutSignature` so typing does not animate. Motion runs
   in the three profiles of the Android design (`PrototypeMotion.profile`: `full`, `reduced`, `off`).
-  Spec `motion: "none"` is instant. System Reduce Motion and spec `motion: "reduced"` select
-  `reduced`: `visibleWhen` transitions other than `none` become crossfades, container size, press
+  Spec `motion: "none"` is instant. System Reduce Motion (`UIAccessibility.isReduceMotionEnabled`), the cross-fade preference
+  (`prefersCrossFadeTransitions`, iOS 14+) and spec `motion: "reduced"` select
+  `reduced`, never `off` (#15244; read through `PrototypeAccessibilityProviding`, faked in tests): `visibleWhen` transitions other than `none` become crossfades, container size, press
   scale and swipe-row settles snap, and progress indicators and shimmer rest, while alpha and color
   animations continue (`prototype_reduced_motion_v1`).
 - **Shared elements** (`prototype_shared_element_v1`, #15115): the two `visibleWhen` nodes sharing a

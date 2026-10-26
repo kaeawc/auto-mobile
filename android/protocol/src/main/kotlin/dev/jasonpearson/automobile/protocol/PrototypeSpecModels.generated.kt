@@ -56,6 +56,7 @@ data class PrototypeDecrementAction(
 data class PrototypePushAction(
   val stack: String,
   val screen: String,
+  val transition: String? = null,
 ) : PrototypeAction()
 
 @SerialName("pop")
@@ -71,6 +72,7 @@ data class PrototypePopToRootAction(val stack: String) : PrototypeAction()
 data class PrototypeReplaceAction(
   val stack: String,
   val screen: String,
+  val transition: String? = null,
 ) : PrototypeAction()
 
 /**

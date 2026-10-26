@@ -116,6 +116,17 @@ describe("chooseIosDeviceType newest hardware", () => {
     }
   });
 
+  test("the default phone choice never picks the Duo; the foldable family does", () => {
+    const types = [
+      synthetic("iPhone-18-Pro", { modelIdentifier: "iPhone18,1" }),
+      synthetic("iPhone-Duo", { name: "iPhone Duo", modelIdentifier: "iPhone19,1" }),
+    ];
+    expect(chooseIosDeviceType(ios, runtimes, types)).toBe(types[0].identifier);
+    expect(chooseIosDeviceType(ios, runtimes, types, "phone")).toBe(types[0].identifier);
+    expect(chooseIosDeviceType(ios, runtimes, types, "foldable")).toBe(types[1].identifier);
+    expect(chooseIosDeviceType(ios, runtimes, [types[1]])).toBeUndefined();
+  });
+
   test("supported tier beats newer hardware with unknown compatibility", () => {
     const types = [
       synthetic("iPhone-supported", { modelIdentifier: "iPhone15,2" }),

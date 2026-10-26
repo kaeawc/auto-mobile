@@ -25,6 +25,7 @@ import { DeepLinkManager } from "../../src/features/utility/DeepLinkManager";
 import { OpenURL } from "../../src/features/action/OpenURL";
 import { HandleIntentChooser } from "../../src/features/action/HandleIntentChooser";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { IosOpenAlertError } from "../../src/server/iosOpenAlert";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { displayInventoryOutcome } from "../../src/models/DeviceInfo";
 import { RealObserveScreen } from "../../src/features/observe/ObserveScreen";
@@ -410,6 +411,245 @@ describe("openLink iOS app-open alert acceptance", () => {
     delete interactionDeps.tapOnElementFactory;
   });
 
+  const autoTimer = (): FakeTimer => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    return timer;
+  };
+
+  const okTap =
+    (taps: unknown[]): InteractionToolDependencies["tapOnElementFactory"] =>
+    () => ({
+      execute: async (received) => {
+        taps.push(received);
+        return {
+          success: true,
+          action: "tap",
+          element: { bounds: { left: 0, top: 0, right: 1, bottom: 1 } },
+        } as TapOnElementResult;
+      },
+    });
+
+  /** Serves `frames` in order, repeating the last one. */
+  const framesOf = (frames: (ViewHierarchyResult | null)[]) => {
+    let calls = 0;
+    return {
+      refresh: async () => frames[Math.min(calls++, frames.length - 1)] ?? null,
+      calls: () => calls,
+    };
+  };
+
+  test("waits for an alert that appears late, then accepts it", async () => {
+    const timer = autoTimer();
+    const taps: unknown[] = [];
+    const frames = framesOf([
+      noAlertHierarchy,
+      noAlertHierarchy,
+      noAlertHierarchy,
+      appOpenAlertObservation.viewHierarchy ?? null,
+      noAlertHierarchy,
+    ]);
+
+    const result = await acceptIosAppOpenAlert(
+      iosDevice,
+      makeObservation("home"),
+      undefined,
+      undefined,
+      { tapOnElementFactory: okTap(taps), refreshHierarchy: frames.refresh, timer },
+    );
+
+    expect(result?.success).toBe(true);
+    expect(taps).toEqual([{ text: "Open", action: "tap" }]);
+    expect(timer.now()).toBeGreaterThanOrEqual(750);
+  });
+
+  test("gives up quietly once the bounded wait elapses without an alert", async () => {
+    const timer = autoTimer();
+    const frames = framesOf([noAlertHierarchy]);
+
+    const result = await acceptIosAppOpenAlert(
+      iosDevice,
+      makeObservation("home"),
+      undefined,
+      undefined,
+      { refreshHierarchy: frames.refresh, timer, waitTimeoutMs: 1000 },
+    );
+
+    expect(result).toBeNull();
+    expect(frames.calls()).toBe(5);
+    expect(timer.now()).toBe(1000);
+  });
+
+  test("honors a configured wait longer than the default window", async () => {
+    const timer = autoTimer();
+    const frames = framesOf([noAlertHierarchy]);
+
+    await acceptIosAppOpenAlert(iosDevice, makeObservation("home"), undefined, undefined, {
+      refreshHierarchy: frames.refresh,
+      timer,
+      waitTimeoutMs: 12_000,
+    });
+
+    expect(timer.now()).toBe(12_000);
+  });
+
+  test("taps the alert's last button by role when its label is not Open", async () => {
+    const taps: unknown[] = [];
+    const localized = treeOf(
+      treeNode({ className: "UIAlertController", text: "In „Slack Debug“ öffnen?" }, [
+        treeNode({ className: "UIButton", role: "button", text: "Abbrechen" }),
+        treeNode({ className: "UIButton", role: "button", text: "Öffnen" }),
+      ]),
+      "com.apple.springboard",
+    );
+
+    const result = await acceptIosAppOpenAlert(
+      iosDevice,
+      { ...makeObservation("de"), viewHierarchy: localized },
+      undefined,
+      undefined,
+      { tapOnElementFactory: okTap(taps) },
+    );
+
+    expect(result?.success).toBe(true);
+    expect(taps).toEqual([{ text: "Öffnen", action: "tap" }]);
+  });
+
+  test("resolves a SpringBoard-only dialog with no prompt text by its button identifier", async () => {
+    const taps: unknown[] = [];
+    const springboardOnly = treeOf(
+      treeNode({ className: "XCUIElementTypeAlert" }, [
+        treeNode({ className: "UIButton", "resource-id": "cancel-action" }),
+        treeNode({ className: "UIButton", "resource-id": "default-action" }),
+      ]),
+      "com.apple.springboard",
+    );
+
+    await acceptIosAppOpenAlert(
+      iosDevice,
+      { ...makeObservation("sb"), viewHierarchy: springboardOnly },
+      undefined,
+      undefined,
+      { tapOnElementFactory: okTap(taps) },
+    );
+
+    expect(taps).toEqual([{ elementId: "default-action", action: "tap" }]);
+  });
+
+  test("finds the buttons when the prompt label is a sibling of them", async () => {
+    const taps: unknown[] = [];
+    const sibling = treeOf(
+      treeNode({ className: "UIView" }, [
+        treeNode({ text: 'Open in "Slack Debug"?' }),
+        treeNode({ className: "UIButton", text: "Cancel" }),
+        treeNode({ className: "UIButton", text: "Open" }),
+      ]),
+    );
+
+    await acceptIosAppOpenAlert(
+      iosDevice,
+      { ...makeObservation("sib"), viewHierarchy: sibling },
+      undefined,
+      undefined,
+      { tapOnElementFactory: okTap(taps) },
+    );
+
+    expect(taps).toEqual([{ text: "Open", action: "tap" }]);
+  });
+
+  test("keeps polling while the dismissal animation outlasts one verify check", async () => {
+    const timer = autoTimer();
+    const alert = appOpenAlertObservation.viewHierarchy ?? null;
+    const frames = framesOf([alert, alert, alert, alert, noAlertHierarchy]);
+
+    const result = await acceptIosAppOpenAlert(
+      iosDevice,
+      makeObservation("home"),
+      undefined,
+      undefined,
+      { tapOnElementFactory: okTap([]), refreshHierarchy: frames.refresh, timer },
+    );
+
+    expect(result?.success).toBe(true);
+    expect(frames.calls()).toBe(5);
+  });
+
+  test("reports the verify phase and the button candidates when the dialog never leaves", async () => {
+    const alert = appOpenAlertObservation.viewHierarchy ?? null;
+    const frames = framesOf([alert]);
+
+    const failure = await acceptIosAppOpenAlert(
+      iosDevice,
+      makeObservation("home"),
+      undefined,
+      undefined,
+      {
+        tapOnElementFactory: okTap([]),
+        refreshHierarchy: frames.refresh,
+        timer: autoTimer(),
+        verifyTimeoutMs: 500,
+      },
+    ).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(IosOpenAlertError);
+    expect((failure as IosOpenAlertError).phase).toBe("verify");
+    expect((failure as IosOpenAlertError).candidates).toEqual(["Open"]);
+  });
+
+  test("reports the detect phase when the alert offers no accept button", async () => {
+    const unbuttoned = treeOf(treeNode({ text: 'Open in "Slack"?' }, [treeNode({ text: "Open" })]));
+    interactionDeps.tapOnElementFactory = () => ({
+      execute: async () =>
+        ({
+          success: false,
+          action: "tap",
+          error: "Element not found with provided text 'Open'",
+          element: { bounds: { left: 0, top: 0, right: 0, bottom: 0 } },
+        }) as TapOnElementResult,
+    });
+
+    const failure = await acceptIosAppOpenAlert(
+      iosDevice,
+      { ...makeObservation("nobutton"), viewHierarchy: unbuttoned },
+      undefined,
+      undefined,
+      { tapOnElementFactory: interactionDeps.tapOnElementFactory },
+    ).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(IosOpenAlertError);
+    expect((failure as IosOpenAlertError).phase).toBe("detect");
+    expect((failure as Error).message).toContain("offers no accept button");
+  });
+
+  test("falls back to the live system tap when the selected button cannot be tapped", async () => {
+    interactionDeps.tapOnElementFactory = () => ({
+      execute: async () =>
+        ({
+          success: false,
+          action: "tap",
+          error: "not hittable",
+          element: { bounds: { left: 0, top: 0, right: 0, bottom: 0 } },
+        }) as TapOnElementResult,
+    });
+    let liveTaps = 0;
+
+    const result = await acceptIosAppOpenAlert(
+      iosDevice,
+      appOpenAlertObservation,
+      undefined,
+      undefined,
+      {
+        tapOnElementFactory: interactionDeps.tapOnElementFactory,
+        // The first live tap (during the wait) misses; the post-failure one lands.
+        tapSystemAlert: async () => ({ success: ++liveTaps > 1 }),
+        timer: autoTimer(),
+      },
+    );
+
+    expect(result?.success).toBe(true);
+    expect(liveTaps).toBe(2);
+  });
+
   test("recognizes only an Open button inside an Open in app confirmation", () => {
     expect(isIosAppOpenAlert(appOpenAlertObservation)).toBe(true);
     expect(
@@ -467,6 +707,7 @@ describe("openLink iOS app-open alert acceptance", () => {
       undefined,
       {
         tapOnElementFactory: interactionDeps.tapOnElementFactory,
+        timer: autoTimer(),
         refreshHierarchy: async () => {
           refreshCalls += 1;
           return refreshCalls === 1
@@ -522,6 +763,7 @@ describe("openLink iOS app-open alert acceptance", () => {
       undefined,
       {
         tapOnElementFactory: interactionDeps.tapOnElementFactory,
+        timer: autoTimer(),
         refreshHierarchy: async () => {
           refreshCalls += 1;
           return refreshCalls === 1
@@ -553,6 +795,7 @@ describe("openLink iOS app-open alert acceptance", () => {
     await expect(
       acceptIosAppOpenAlert(iosDevice, appOpenAlertObservation, undefined, undefined, {
         tapOnElementFactory: interactionDeps.tapOnElementFactory,
+        timer: autoTimer(),
         refreshHierarchy: async () => null,
       }),
     ).rejects.toThrow("dialog remained visible");
@@ -579,6 +822,7 @@ describe("openLink iOS app-open alert acceptance", () => {
       undefined,
       {
         tapOnElementFactory: interactionDeps.tapOnElementFactory,
+        timer: autoTimer(),
         refreshHierarchy: async () => {
           refreshCalls += 1;
           return refreshCalls === 1
@@ -618,15 +862,17 @@ describe("openLink iOS app-open alert acceptance", () => {
         undefined,
         {
           tapOnElementFactory: interactionDeps.tapOnElementFactory,
+          timer: autoTimer(),
           refreshHierarchy: async () => {
             refreshCalls += 1;
             return localizedHierarchy;
           },
           tapSystemAlert: async () => ({ success: true }),
+          verifyTimeoutMs: 1000,
         },
       ),
     ).rejects.toThrow("dialog remained visible");
-    expect(refreshCalls).toBe(5);
+    expect(refreshCalls).toBe(6);
   });
 
   test("does nothing when the alert is absent", async () => {

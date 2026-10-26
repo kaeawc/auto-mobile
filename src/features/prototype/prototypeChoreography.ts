@@ -92,9 +92,11 @@ export function prototypeChoreographyError(
 }
 
 function nodeFields(node: Raw, path: string): string[] {
-  const objectForm = record(node.transition) !== undefined;
+  const objectForm = node.type !== "stack" && record(node.transition) !== undefined;
   return [
-    ...(objectForm || node.transition === "blurReplace" ? [`${path}.transition`] : []),
+    ...(objectForm || (node.type !== "stack" && node.transition === "blurReplace")
+      ? [`${path}.transition`]
+      : []),
     ...(node.stagger !== undefined ? [`${path}.stagger`] : []),
   ];
 }

@@ -3,6 +3,8 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import {
   dispatchIosCoordinateTap,
   dispatchIosDoubleTap,
+  indeterminateTapError,
+  tapFailureNeedsSearchDebugContext,
   type IosCoordinateTapClient,
 } from "../../../src/features/action/coordinateTapDispatch";
 import { TapAtCoordinate } from "../../../src/features/action/TapAtCoordinate";
@@ -14,6 +16,7 @@ import { displayTransitions } from "../../../src/features/observe/DisplayTransit
 import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
 import { ActionableError } from "../../../src/models/ActionableError";
 import type { BootedDevice } from "../../../src/models";
+import { logger } from "../../../src/utils/logger";
 import { DEFAULT_VISION_CONFIG } from "../../../src/vision";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -75,6 +78,28 @@ function scriptedClient(options: {
 }
 
 describe("dispatchIosCoordinateTap (#9971)", () => {
+  test("an unconfirmed tap logs the point, budget and that the runner may stay busy (#15296)", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const client = scriptedClient({
+        dispatch: true,
+        reply: { success: false, error: "Tap timed out after 5000ms", dispatched: true },
+      });
+      await expect(dispatchIosCoordinateTap(client, 202, 816, 50)).rejects.toThrow(INDETERMINATE);
+      const logged = warn.mock.calls.map((call) => String(call[0])).join("\n");
+      expect(logged).toContain("tap at (202, 816) unconfirmed after");
+      expect(logged).toContain("may stay busy");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("only an indeterminate tap skips the element-search debug context", () => {
+    expect(tapFailureNeedsSearchDebugContext(indeterminateTapError("timed out"))).toBe(false);
+    expect(tapFailureNeedsSearchDebugContext(new ActionableError("Element not found"))).toBe(true);
+    expect(tapFailureNeedsSearchDebugContext(new Error("boom"))).toBe(true);
+  });
+
   test("a dispatched tap that timed out is indeterminate, not a plain failure", async () => {
     const client = scriptedClient({
       dispatch: true,

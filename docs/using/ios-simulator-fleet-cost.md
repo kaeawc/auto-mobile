@@ -111,9 +111,11 @@ Set `AUTOMOBILE_IOS_PREBOOT_LEAN_PROFILE=none` to opt out of the profile, or
 `AUTOMOBILE_IOS_TEMPLATE_CLONE=1` (or `true`) to opt in to cloning. Explicit
 resource requests override the profile.
 
-### Known limitation: template clones share Safari and system-app data
+### Known limitation: template clones shared Safari and system-app data
 
-Template cloning is off by default for this release because a clone shares Safari and other
+Template cloning is off by default for this release because a clone used to share Safari and other
 system-app data with its template, so state (tabs, history, cookies, website data) written in one
-clone leaks to the template and to other clones (#15327, tracked under #15216). Enable it only when
-your tests do not depend on isolated system-app state, or reset that state yourself after provisioning.
+clone leaked to the template and to other clones (#15327, tracked under #15216). Clones are now
+rewritten after `simctl clone` so they own their system-app data; the default stays off until the next
+manual test confirms that on a release candidate. With `AUTOMOBILE_IOS_TEMPLATE_CLONE=1`, a clone whose
+rewrite fails is deleted and the simulator is created normally.

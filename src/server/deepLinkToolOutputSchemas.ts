@@ -75,6 +75,9 @@ export const setAppLinksResultSchema = z
         .passthrough(),
     ),
     unapplied: z.array(z.string()).optional(),
+    skipped: z
+      .array(z.object({ domain: z.string(), state: z.string(), reason: z.string() }).passthrough())
+      .optional(),
     appLinks: z.array(appLinkDomainStateSchema),
     appLinkHandlingAllowed: z.boolean().optional(),
     restore: z

@@ -7,7 +7,6 @@ import type {
 } from "../../utils/HostCommandExecutor";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
-import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import type { Timer } from "../../utils/SystemTimer";
 import type {
   PerformanceTraceRecorder,
@@ -25,8 +24,10 @@ import {
   parseXctraceToc,
   summarizeXctraceTable,
   XCTRACE_SUMMARY_SCHEMAS,
+  type XctraceToc,
 } from "./xctraceExport";
 import { waitForChildExit, waitForChildOutput } from "./childProcessWaits";
+import { traceArtifactBytes, waitForXctraceFinalization } from "./xctraceFinalization";
 
 export interface XctraceHost extends HostCommandExecutor {
   spawn(file: string, args: string[], options?: HostSpawnOptions): HostChildProcess;
@@ -45,12 +46,17 @@ export interface XctraceRecorderDependencies {
   timer: Timer;
   /** How long `xctrace record` may take to report that recording started. */
   startTimeoutMs?: number;
-  /** How long `xctrace` may take to finalize the `.trace` after SIGINT. */
+  /** Inactivity window while finalizing after SIGINT (default 60 seconds). */
   stopTimeoutMs?: number;
+  /** Hard cap on finalization, even with progress (default 180 seconds). */
+  stopMaxMs?: number;
+  /** Total artifact file bytes; missing paths return zero. */
+  artifactBytes?: (path: string) => Promise<number>;
 }
 
 const DEFAULT_START_TIMEOUT_MS = 60_000;
-const DEFAULT_STOP_TIMEOUT_MS = 20_000;
+const DEFAULT_STOP_TIMEOUT_MS = 60_000;
+const DEFAULT_STOP_MAX_MS = 180_000;
 const EXPORT_TIMEOUT_MS = 120_000;
 const EXPORT_MAX_BUFFER = 64 * 1024 * 1024;
 /** `xctrace record` prints this once the recorder is capturing. */
@@ -140,40 +146,21 @@ export class XctraceRecorder implements PerformanceTraceRecorder {
       artifactPath,
       warnings,
       stop: async () => {
-        if (child.exitCode === null && child.signalCode === null) {
-          child.kill("SIGINT");
+        if (child.exitCode !== null || child.signalCode !== null) {
+          return;
         }
-        const finished = await raceExit(exited, timer, stopTimeoutMs);
-        if (!finished) {
-          // A killed xctrace leaves a trace without run data (#14737); fail fast and typed
-          // rather than reporting a stopped recording whose artifact cannot be opened.
-          child.kill("SIGKILL");
-          throw new ActionableError(
-            `xctrace did not finish within ${stopTimeoutMs}ms after SIGINT; the trace at ${artifactPath} is incomplete and cannot be summarised.`,
-          );
-        }
+        const finalized = waitForXctraceFinalization(child, exited, {
+          timer,
+          artifactPath,
+          artifactBytes: this.deps.artifactBytes ?? traceArtifactBytes,
+          stopTimeoutMs,
+          stopMaxMs: this.deps.stopMaxMs ?? DEFAULT_STOP_MAX_MS,
+        });
+        child.kill("SIGINT");
+        await finalized;
       },
       summarize: (signal) => summarizeXctrace(host, artifactPath, template, signal),
     };
-  }
-}
-
-/** Whether the child exited within `timeoutMs`. */
-async function raceExit(exited: Promise<void>, timer: Timer, timeoutMs: number): Promise<boolean> {
-  const timedOut = new Error("xctrace finalize timed out");
-  try {
-    await raceWithDeadline(exited, {
-      timer,
-      timeoutMs,
-      label: "xctrace finalize",
-      timeoutError: () => timedOut,
-    });
-    return true;
-  } catch (error) {
-    if (error === timedOut) {
-      return false;
-    }
-    throw error;
   }
 }
 
@@ -189,6 +176,10 @@ async function exportXml(
       signal,
     })
   ).stdout;
+}
+
+function isEmptyRun(toc: XctraceToc): boolean {
+  return toc.durationMs === 0 && toc.schemas.length === 0;
 }
 
 /** Summarise a finished `.trace` through `xctrace export`: the TOC, then the template's table. */
@@ -211,6 +202,14 @@ export async function summarizeXctrace(
     return {
       summary: {},
       warnings: [`xctrace export --toc failed: ${errorMessage(error)}.${unreadable}`],
+    };
+  }
+  if (isEmptyRun(toc)) {
+    return {
+      summary: {},
+      warnings: [
+        "xctrace saved the trace without any recorded run data (0 s, no tables), so there is nothing to summarise. The recording did not capture; retry on a less loaded host, or open the .trace in Instruments.",
+      ],
     };
   }
   const summary: PerformanceTraceSummary = {

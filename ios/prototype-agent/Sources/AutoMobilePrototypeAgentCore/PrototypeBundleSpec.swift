@@ -5,7 +5,7 @@ struct PrototypeBundleReferences {
     var fonts: [PrototypeBundleID] = []
 
     init(_ bytes: Data) throws {
-        let json = try PrototypeBundleJSON(bytes, code: .specInvalidJSON, path: "spec.json")
+        let json = try PrototypeBundleJSON(bytes, code: .specInvalidJSON, path: "spec.json", valueFailure: .specInvalid)
         do {
             try PrototypeContractValidator.validate(data: json.data)
             _ = try JSONDecoder().decode(PrototypeSpec.self, from: json.data)

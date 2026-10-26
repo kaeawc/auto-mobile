@@ -75,7 +75,11 @@ export interface PlanSessionHunt {
   acquire(sessionUuid?: string): Promise<string>;
   /** What each `huntProbe` plan step does; the default succeeds at once. */
   setProbeStep(step: ProbeStep): void;
-  runPlan(planContent: string, signal?: AbortSignal): Promise<PlanRunResult>;
+  runPlan(
+    planContent: string,
+    signal?: AbortSignal,
+    extraArgs?: Record<string, unknown>,
+  ): Promise<PlanRunResult>;
   poolHolder(deviceId: string): string | undefined;
   tearDown(): void;
 }
@@ -197,7 +201,7 @@ export async function createPlanSessionHunt(devices: BootedDevice[]): Promise<Pl
     setProbeStep: (step) => {
       probeStep = step;
     },
-    runPlan: async (planContent, signal) => {
+    runPlan: async (planContent, signal, extraArgs) => {
       const response = await ToolRegistry.getTool("executePlan")!.handler(
         {
           planContent,
@@ -206,6 +210,7 @@ export async function createPlanSessionHunt(devices: BootedDevice[]): Promise<Pl
           sessionUuid: BASE,
           deviceAllocationTimeoutMs: 1_000,
           abortStrategy: "immediate",
+          ...extraArgs,
         },
         undefined,
         signal,

@@ -1,3 +1,4 @@
+import { registerDefaultForeignAndroidSerialSource } from "../devices/foreignAndroidSerialResolver";
 import type { ManagedExecutionReowner } from "./sessionBroker/provisioning/executionReowner";
 import { setDeviceAdmissionGate } from "../utils/deviceAdmissionGate";
 import type { ObserverSessionStore } from "./observerSessionRegistry";
@@ -27,6 +28,7 @@ export interface DaemonStateLike {
  */
 export class DaemonState implements DaemonStateLike {
   private static instance: DaemonState;
+  private unregisterForeignAndroidSerialSource: (() => void) | null = null;
   private observerSessionRegistry: ObserverSessionStore | null = null;
   private sessionManager: SessionManager | null = null;
   private devicePool: DevicePool | null = null;
@@ -75,7 +77,12 @@ export class DaemonState implements DaemonStateLike {
     if (observerSessionRegistry) {
       sessionManager.setObserverSessionRegistry(observerSessionRegistry);
     }
+    this.unregisterForeignAndroidSerialSource?.();
     this.devicePool = devicePool;
+    this.unregisterForeignAndroidSerialSource = registerDefaultForeignAndroidSerialSource({
+      foreignSerials: (serials, signal) =>
+        this.devicePool?.foreignSerials(serials, signal) ?? Promise.resolve(new Set<string>()),
+    });
     this.deviceSessionRegistry = deviceSessionRegistry;
     setDeviceAdmissionGate(devicePool);
     // The pool's incarnation counter is the only connection-epoch token in the
@@ -184,10 +191,18 @@ export class DaemonState implements DaemonStateLike {
     );
   }
 
-  /**
-   * Reset state (for testing or shutdown)
-   */
+  /** Retire only this daemon's registration; another daemon may already have replaced it. */
+  retireForeignAndroidSerialSource(devicePool: DevicePool): void {
+    if (this.devicePool === devicePool) {
+      this.unregisterForeignAndroidSerialSource?.();
+      this.unregisterForeignAndroidSerialSource = null;
+    }
+  }
+
+  /** Reset state for testing or shutdown. */
   reset(): void {
+    this.unregisterForeignAndroidSerialSource?.();
+    this.unregisterForeignAndroidSerialSource = null;
     this.observerSessionRegistry?.dispose();
     this.observerSessionRegistry = null;
     this.brokerExecutionReowner = null;

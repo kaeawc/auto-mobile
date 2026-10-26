@@ -8,7 +8,7 @@ import {
   ProtoViewerEntryPointMissingError,
   ProtoViewerStorageError,
   type ProtoViewerDevice,
-} from "../../../../src/features/prototype/protoViewer/AndroidProtoViewer";
+} from "../../../../src/features/prototype/protoViewer/protoViewerDevice";
 import type { ProtoViewerResult } from "../../../../src/features/prototype/protoViewer/protoViewerContract";
 import { readPrototypeBundle } from "../../../../src/features/prototype/prototypeBundle";
 import type { PrototypeSpec } from "../../../../src/features/prototype/prototypeSpec";
@@ -27,7 +27,7 @@ const png = Buffer.from(
 );
 
 class FakeProtoViewerDevice implements ProtoViewerDevice {
-  user: number | undefined | Error = 0;
+  available: boolean | Error = true;
   importResult: ProtoViewerResult | Error = {
     status: "imported",
     request: "r",
@@ -40,27 +40,35 @@ class FakeProtoViewerDevice implements ProtoViewerDevice {
     libraryId: LIBRARY_ID,
     label: "Demo",
   };
-  readonly imports: Array<{ userId: number; bytes: Uint8Array; label?: string }> = [];
-  readonly opens: Array<{ userId: number; libraryId: string }> = [];
-  async installedUser(): Promise<number | undefined> {
-    if (this.user instanceof Error) {
-      throw this.user;
+  readonly imports: Array<{ bytes: Uint8Array; label?: string }> = [];
+  readonly opens: Array<{ libraryId: string }> = [];
+  readonly budgets: Array<{ timeoutMs: number; signal?: AbortSignal }> = [];
+  async installed(): Promise<boolean> {
+    if (this.available instanceof Error) {
+      throw this.available;
     }
-    return this.user;
+    return this.available;
   }
   async importBundle(
-    userId: number,
     bytes: Uint8Array,
     label: string | undefined,
+    timeoutMs: number,
+    signal?: AbortSignal,
   ): Promise<ProtoViewerResult> {
-    this.imports.push({ userId, bytes, label });
+    this.imports.push({ bytes, label });
+    this.budgets.push({ timeoutMs, signal });
     if (this.importResult instanceof Error) {
       throw this.importResult;
     }
     return this.importResult;
   }
-  async open(userId: number, libraryId: string): Promise<ProtoViewerResult> {
-    this.opens.push({ userId, libraryId });
+  async open(
+    libraryId: string,
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<ProtoViewerResult> {
+    this.opens.push({ libraryId });
+    this.budgets.push({ timeoutMs, signal });
     if (this.openResult instanceof Error) {
       throw this.openResult;
     }
@@ -158,7 +166,7 @@ describe("save through ProtoViewer", () => {
 
   test("falls back to the CtrlProxy path when ProtoViewer is not installed", async () => {
     const device = new FakeProtoViewerDevice();
-    device.user = undefined;
+    device.available = false;
     expect(await routeToProtoViewer({ action: "save", spec }, deps(device))).toBeUndefined();
     expect(device.imports).toHaveLength(0);
   });
@@ -205,7 +213,7 @@ describe("open through ProtoViewer", () => {
   test("launches the library id and warns that the entry is imported", async () => {
     const device = new FakeProtoViewerDevice();
     const output = await routeToProtoViewer({ action: "open", id: LIBRARY_ID }, deps(device));
-    expect(device.opens).toEqual([{ userId: 0, libraryId: LIBRARY_ID }]);
+    expect(device.opens).toEqual([{ libraryId: LIBRARY_ID }]);
     expect(output).toEqual({
       success: true,
       viewer: { app: "protoviewer", libraryId: LIBRARY_ID, label: "Demo" },
@@ -229,7 +237,7 @@ describe("open through ProtoViewer", () => {
 
   test("open needs ProtoViewer installed", async () => {
     const device = new FakeProtoViewerDevice();
-    device.user = undefined;
+    device.available = false;
     const output = await routeToProtoViewer({ action: "open", id: LIBRARY_ID }, deps(device));
     expect(output).toMatchObject({ success: false, errorCode: "unsupported_capability" });
     expect(output?.error).toContain("ProtoViewer");
@@ -239,7 +247,7 @@ describe("open through ProtoViewer", () => {
 describe("ProtoViewer route degradation", () => {
   test("a probe that fails keeps the CtrlProxy path for save and fails open with a reason", async () => {
     const device = new FakeProtoViewerDevice();
-    device.user = new Error("adb: device offline");
+    device.available = new Error("adb: device offline");
     expect(await routeToProtoViewer({ action: "save", spec }, deps(device))).toBeUndefined();
     expect(device.imports).toHaveLength(0);
     expect(
@@ -251,7 +259,7 @@ describe("ProtoViewer route degradation", () => {
     const device = new FakeProtoViewerDevice();
     const controller = new AbortController();
     controller.abort();
-    device.user = new Error("cancelled");
+    device.available = new Error("cancelled");
     await expect(
       routeToProtoViewer({ action: "save", spec }, deps(device), controller.signal),
     ).rejects.toThrow("cancelled");
@@ -292,7 +300,7 @@ describe("ProtoViewer route degradation", () => {
 
   test("element anchors only matter once ProtoViewer takes the save", async () => {
     const device = new FakeProtoViewerDevice();
-    device.user = undefined;
+    device.available = false;
     const anchored = {
       ...spec,
       root: {
@@ -328,6 +336,19 @@ describe("ProtoViewer labels", () => {
     ]);
   });
 
+  test("a default label is cut between characters, and a lone surrogate label is refused", async () => {
+    const device = new FakeProtoViewerDevice();
+    const emojiId = { ...spec, id: `${"a".repeat(119)}\u{1F600}b` } as PrototypeSpec;
+    await routeToProtoViewer({ action: "save", spec: emojiId }, deps(device));
+    expect(device.imports[0].label).toBe("a".repeat(119));
+    const output = await routeToProtoViewer(
+      { action: "save", spec, label: "half\ud800" },
+      deps(device),
+    );
+    expect(output).toMatchObject({ success: false, errorCode: "invalid_label" });
+    expect(device.imports).toHaveLength(1);
+  });
+
   test("an app-side label refusal maps to invalid_label", async () => {
     const device = new FakeProtoViewerDevice();
     device.importResult = { status: "rejected", request: "r", path: "label", reason: "too long" };
@@ -336,4 +357,19 @@ describe("ProtoViewer labels", () => {
       errorCode: "invalid_label",
     });
   });
+});
+
+test("platform-neutral transport preserves save/open budgets and cancellation", async () => {
+  const device = new FakeProtoViewerDevice();
+  const controller = new AbortController();
+  await routeToProtoViewer(
+    { action: "save", spec, timeoutMs: 1200 },
+    deps(device),
+    controller.signal,
+  );
+  await routeToProtoViewer({ action: "open", id: LIBRARY_ID }, deps(device), controller.signal);
+  expect(device.budgets).toEqual([
+    { timeoutMs: 1200, signal: controller.signal },
+    { timeoutMs: 15000, signal: controller.signal },
+  ]);
 });

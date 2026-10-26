@@ -53,10 +53,11 @@ export async function readTeardownBootedDiscovery(
  * The booted scan target RESOLUTION reads, which for a forced teardown must not
  * be the name-aware one.
  *
- * Normal discovery enriches every attached emulator with `emu avd name`,
- * sequentially, budgeting 2s each. That happens BEFORE the forced branch in
+ * Normal discovery enriches unclaimed emulators with `emu avd name`, within
+ * a shared 2s scan budget. Foreign runtimes stay unnamed; named teardown resolves
+ * those separately before deletion. Discovery happens BEFORE the forced branch in
  * `AndroidEmulatorClient.killDevice` can skip its own probe, so three wedged
- * consoles spend 6s of a 5s forced teardown inside discovery and `emu kill` is
+ * consoles can consume the remaining forced-teardown deadline and `emu kill` is
  * never dispatched -- the flag times out in the exact state it exists for
  * ([#6874](https://github.com/kaeawc/auto-mobile/pull/6874) review). Forced, the
  * first scan therefore lists serials and asks nothing; the pool supplies the AVD

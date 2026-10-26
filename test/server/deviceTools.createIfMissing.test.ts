@@ -1,3 +1,4 @@
+import { FakeEmulatorProcessStopper } from "../fakes/FakeEmulatorProcessStopper";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { describe, it, expect, afterEach, spyOn } from "bun:test";
 import { logger } from "../../src/utils/logger";
@@ -60,6 +61,7 @@ describe("startDevice --create-if-missing wiring", () => {
     fakeMatcher.setImageResult(null);
 
     setDeviceToolsDependencies({
+      androidEmulatorProcessStopper: new FakeEmulatorProcessStopper(),
       deviceManagerFactory: () => fakeDeviceUtils,
       deviceMatcherFactory: () => fakeMatcher,
       notifyResourcesChanged: async () => {},

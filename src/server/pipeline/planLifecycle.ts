@@ -17,6 +17,7 @@ import {
   getDeviceLabelMap,
   releaseDeviceLabelSessions,
 } from "../deviceLabelMapping";
+import { clearPlanHeld, markPlanHeld, wasPlanHeld } from "../heldPlanSessions";
 import { deferHeldPlanAppCleanup, takeHeldPlanAppCleanup } from "../heldPlanAppCleanup";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import type { SessionToolSelectionService } from "../../features/toolSelection/SessionToolSelectionService";
@@ -48,6 +49,8 @@ export interface PlanLifecycleInput {
   device: BootedDevice | undefined;
   sessionUuid: string | undefined;
   shouldResolveDevice: boolean;
+  /** Preserve a base session the caller held before the plan acquired anything. */
+  callerHeldSession?: boolean;
   /** An enclosing plan owns cleanup and release for this invocation. */
   nestedInPlan?: boolean;
   /** The tool call returned a successful response (false when it failed or threw). */
@@ -344,6 +347,9 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
     const ownsPoolSession = wantsPoolSession && poolSessionManager !== undefined;
     const heldForRecovery =
       ownsPoolSession && this.holdsFailedPlanSessionForRecovery(input, lifecycleSessionUuid!);
+    if (heldForRecovery) {
+      markPlanHeld(poolSessionManager!, lifecycleSessionUuid!, input.callerHeldSession);
+    }
     // A cleanup deferred by an earlier failed run on this session (#11139) is superseded once
     // this run's own lifecycle cleans and releases it.
     const deferredCleanup =
@@ -358,8 +364,12 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
       deferredCleanup,
     });
 
-    if (ownsPoolSession && poolSessionManager && !heldForRecovery) {
-      await this.releasePlanSessions(input, poolSessionManager, lifecycleSessionUuid!);
+    if (ownsPoolSession && !heldForRecovery) {
+      try {
+        await this.releasePlanSessions(input, poolSessionManager, lifecycleSessionUuid!);
+      } finally {
+        clearPlanHeld(poolSessionManager, lifecycleSessionUuid!);
+      }
     }
   }
 
@@ -424,16 +434,27 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
     // derived session and the base are released independently, so one failed
     // release cannot leave the others holding their devices (#11091).
     const releasedSessionUuids = await releaseDeviceLabelSessions(releaseSessionUuid);
-    // A plan run owns the derived label sessions it created and its base session, with one
-    // exception: a managed connection's binding session belongs to the connection for its
-    // lifetime (#11421). Its broker grant is fixed and a `plan-auto-release` UUID is not reusable,
-    // so releasing it would strand the connection. A generic connection's base session is
-    // released whether or not it existed before the plan (docs: `holdSessionOnFailure`).
+    // A plan owns its derived label sessions and a base it acquired itself. A base the caller
+    // already held survives, but its run's label map must end with the derived sessions. A
+    // managed connection's binding session also belongs to the connection for its lifetime
+    // (#11421): releasing its fixed broker grant would strand the connection.
     if (defaultDaemonContext.brokerConnectionScopes()?.forGrantedSession(releaseSessionUuid)) {
       logger.info(
         `[PlanLifecycle] Keeping binding session ${releaseSessionUuid} and its device ` +
           "after executePlan: it belongs to its connection",
       );
+    } else if (input.callerHeldSession && !wasPlanHeld(sessionManager, releaseSessionUuid)) {
+      const labels = getDeviceLabelMap(releaseSessionUuid);
+      // End the run even when a label already disappeared during a device restart. Keep
+      // failed releases indexed so a later release of the caller's base can still cascade.
+      const remainingLabels = Object.fromEntries(
+        Object.entries(labels ?? {}).filter(
+          ([, uuid]) => uuid !== releaseSessionUuid && sessionManager.hasSession(uuid),
+        ),
+      );
+      sessionManager.takeDerivedLabelSessions(releaseSessionUuid);
+      sessionManager.setDeviceLabels(releaseSessionUuid, remainingLabels);
+      sessionManager.clearSessionCache(releaseSessionUuid, "deviceLabels");
     } else if (await this.releasePlanBaseSession(sessionManager, devicePool, releaseSessionUuid)) {
       releasedSessionUuids.push(releaseSessionUuid);
     }

@@ -34,6 +34,7 @@ import {
   multipleDevicesError,
   resolveSessionlessDeviceRead,
 } from "./readTarget";
+import { callerHeldPlanSession, refuseEndedPlanBase } from "../planSessionOwnership";
 import { getToolSelectionContext } from "../../features/toolSelection/toolSelectionContext";
 import {
   bindingAccessFor,
@@ -79,6 +80,8 @@ export interface ExecutionTargetContext {
   internalCall: boolean;
   sessionUuid: string | undefined;
   shouldResolveDevice: boolean;
+  /** The base was already live or resumable after device restart before this call acquired it. */
+  callerHeldSession?: boolean;
   /** Resolved through the read-only device path: the handler runs without recording or audit. */
   deviceRead?: SessionlessDeviceRead;
 }
@@ -89,15 +92,6 @@ export interface ExecutionTargetResolver {
 
 export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
   private readonly defaultDeviceRead: SessionlessDeviceRead;
-
-  private refuseEndedPlanBase(sessionUuid: string, executionId?: string): void {
-    const ended = defaultDaemonContext
-      .sessionManager()
-      ?.terminalAnswerForEndedSession(sessionUuid, executionId);
-    if (ended) {
-      throw ended;
-    }
-  }
 
   constructor(
     private readonly log: Logger = logger,
@@ -146,6 +140,8 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     if (state.shouldResolveDevice) {
       await this.resolveImplicitSession(state);
     }
+    const heldCheck = callerHeldPlanSession(input.name, state.baseSessionUuid ?? state.sessionUuid);
+    const callerHeldSession = typeof heldCheck === "boolean" ? heldCheck : await heldCheck;
     const sessionlessRead =
       (await this.admitReadOnlyCall(state)) ?? (await this.foreignDeviceReadTarget(state));
     if (sessionlessRead) {
@@ -166,6 +162,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       internalCall: state.internalCall,
       sessionUuid: state.sessionUuid,
       shouldResolveDevice: state.shouldResolveDevice,
+      callerHeldSession,
     };
   }
 
@@ -217,7 +214,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     }
     // The base's end ends its labels (#11640): a step whose base has ended, or is past its
     // idle deadline, fails with the base's terminal release, not as an unallocated label.
-    this.refuseEndedPlanBase(baseSessionUuid, state.execution?.executionId);
+    refuseEndedPlanBase(baseSessionUuid, state.execution?.executionId);
     throw new ActionableError(
       `Device label '${deviceLabel}' is not allocated. Provide a devices list to executePlan before using device labels.`,
     );

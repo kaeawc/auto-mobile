@@ -3,9 +3,17 @@ import UniformTypeIdentifiers
 
 @MainActor
 struct LibraryView: View {
+    private struct McpDestination: Hashable {
+        let entry: PrototypeLibraryEntry
+        let command: PrototypeMcpRequest
+    }
+
     let store: PrototypeLibraryStore
     let importService: PrototypeLibraryImportService
+    let mcpInbox: PrototypeMcpInbox
     let networkSwitch: PrototypeLibraryNetworkSwitch
+    @State private var path = NavigationPath()
+    @State private var mcpOpen: PrototypeMcpRequest?
     @State private var showsSettings = false
     @State private var importCount = 0
     @State private var entries: [PrototypeLibraryEntry] = []
@@ -21,7 +29,7 @@ struct LibraryView: View {
     @State private var sharesFile = false
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             Group {
                 if let error {
                     LibraryErrorView(error: error)
@@ -82,7 +90,7 @@ struct LibraryView: View {
                 case let .failure(error): report(error)
                 }
             }
-            .onOpenURL { receive($0, source: .share) }
+            .onOpenURL(perform: receiveURL)
             .alert("Prototype operation failed", isPresented: $showsError) {
                 Button("OK", role: .cancel) {}
             } message: {
@@ -118,6 +126,15 @@ struct LibraryView: View {
             .navigationDestination(for: PrototypeLibraryEntry.self) { entry in
                 PrototypeScreen(store: store, entry: entry, networkSwitch: networkSwitch)
             }
+            .navigationDestination(for: McpDestination.self) { destination in
+                PrototypeScreen(store: store, entry: destination.entry, networkSwitch: networkSwitch, onLoaded: {
+                    reportMcpOpen(destination.command, entry: destination.entry, success: true)
+                }, onLoadFailed: {
+                    reportMcpOpen(destination.command, entry: destination.entry, success: false)
+                })
+                .id(destination.command.request)
+                .onDisappear { reportMcpOpen(destination.command, entry: destination.entry, success: false) }
+            }
         }
     }
 
@@ -137,6 +154,35 @@ struct LibraryView: View {
         Button("Delete", systemImage: "trash", role: .destructive) {
             deletion = entry
             confirmsDelete = true
+        }
+    }
+
+    private func receiveURL(_ url: URL) {
+        guard url.scheme?.lowercased() == "automobile-proto" else { receive(url, source: .share); return }
+        // Even malformed MCP URLs are consumed: they must never enter the share-file alert path.
+        guard let command = PrototypeMcpRequest.parse(url) else {
+            libraryLog.warning("Ignoring MCP URL with unusable request id")
+            return
+        }
+        Task {
+            if let entry = await mcpInbox.handle(command) {
+                // Swap before awaiting: overlapping opens each supersede exactly one predecessor.
+                let previous = mcpOpen
+                mcpOpen = command
+                path = NavigationPath()
+                path.append(McpDestination(entry: entry, command: command))
+                if let previous { await mcpInbox.reportOpenFailed(previous) }
+            }
+            refresh()
+        }
+    }
+
+    private func reportMcpOpen(_ command: PrototypeMcpRequest, entry: PrototypeLibraryEntry, success: Bool) {
+        guard mcpOpen == command else { return }
+        mcpOpen = nil
+        Task {
+            if success { await mcpInbox.reportOpened(command, entry: entry) }
+            else { await mcpInbox.reportOpenFailed(command) }
         }
     }
 

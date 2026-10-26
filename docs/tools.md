@@ -135,7 +135,7 @@ A read never writes settings on a device another session holds. A sessionless re
 | 🔕 <code>getNotificationPolicy</code>       | Read app notification/DND policy state                                               |
 | 🔕 <code>setNotificationPolicy</code>       | Set app notification/DND policy state                                                |
 | 🛂 <code>getAppPermissions</code>           | Read app permission state                                                            |
-| 🛂 <code>setAppPermissions</code>           | userId grant/revoke; device-wide reset ['all']; no POST_NOTIFICATIONS                |
+| 🛂 <code>setAppPermissions</code>           | userId grant/revoke; device-wide reset ['all']; Android notification state           |
 | ☠️ <code>killProfile</code>                 | Simulate an OEM background-kill policy (Android)                                     |
 | 🏭 <code>manufacturerProfile</code>         | Approximate an OEM device (Android)                                                  |
 | ⚠️ <code>systemAlerts</code>                | Auto-answer OS permission and system alerts                                          |

@@ -1,3 +1,6 @@
+import { isAndroidEmulatorSerial } from "../../../utils/androidSerial";
+import { emulatorProcessEscapeHint } from "../../../utils/android-cmdline-tools/EmulatorStillRunningError";
+import { runWithinShutdownDeadline } from "../core/deadlines";
 import { defaultDaemonContext } from "../../../daemon/daemonContext";
 import {
   type BootedDeviceDiscovery,
@@ -71,6 +74,17 @@ export async function resolveAbsentTeardownTarget(
         "Cannot prove the target is absent because one or more platform inventories did not complete.",
       ),
     };
+  }
+  const runtimeRefusal = await refuseLiveStoppedAndroidTarget(context, {
+    device: {
+      platform: context.args.target.platform,
+      name: context.args.target.stableName ?? context.args.target.stableId,
+      isRunning: false,
+    },
+    wasBooted: false,
+  });
+  if (runtimeRefusal) {
+    return { response: runtimeRefusal };
   }
   const absentDevicePool = defaultDaemonContext.devicePool();
   const runtimeId = absentDevicePool
@@ -366,6 +380,65 @@ export function findStoppedTeardownPooledDevices(
           ? device.id === target.device.deviceId
           : (device.avdName ?? device.name) === target.device.name),
     );
+}
+
+/** A missing online row does not prove a stopped AVD: adb can still list it offline. */
+export async function refuseLiveStoppedAndroidTarget(
+  context: TeardownContext,
+  target: TeardownResolvedTarget,
+): Promise<TeardownToolResponse | undefined> {
+  if (target.device.platform !== "android") {
+    return undefined;
+  }
+  const pool = defaultDaemonContext.devicePool();
+  const serials = pool
+    ? findStoppedTeardownPooledDevices(pool, target).map((device) => device.id)
+    : [];
+  // Inventory and explicit target serials remain witnesses without a pooled incarnation.
+  for (const serial of [target.device.deviceId, context.args.target.stableId]) {
+    if (serial && isAndroidEmulatorSerial(serial)) {
+      serials.push(serial);
+    }
+  }
+  return await runWithinShutdownDeadline(
+    context.deadlineDevice,
+    context.dependencies.timer,
+    context.deadlineMs,
+    "Android stopped-image runtime check did not complete",
+    {
+      requestAbortSignal: context.requestAbortSignal,
+      timeoutMs: context.timeoutMs,
+      operation: async (signal, timeoutMs) => {
+        const states = await context.deviceManager.getAndroidListedDeviceStates?.(serials, {
+          signal,
+          timeoutMs,
+        });
+        const processes = await context.dependencies.androidEmulatorProcessStopper.describeAvd(
+          target.device.name,
+          { signal, deadlineMs: context.deadlineMs },
+        );
+        if (
+          (states?.size ?? 0) > 0 ||
+          processes.kind === "unreadable" ||
+          (processes.kind === "read" && processes.candidates.length > 0)
+        ) {
+          return createTeardownFailureResponse(
+            context.args,
+            "stop",
+            "runtime_stop_unproven",
+            `Cannot prove Android AVD '${target.device.name}' has stopped; retaining its image and pool ownership. ` +
+              emulatorProcessEscapeHint(
+                serials[0] ?? target.device.name,
+                processes.kind === "read" ? processes.candidates : [],
+                processes.kind === "unreadable" ? "unreadable" : undefined,
+              ),
+            target.device,
+          );
+        }
+        return undefined;
+      },
+    },
+  );
 }
 
 export async function retireStoppedTeardownOwnership(

@@ -1,5 +1,5 @@
 import { z as specZ, type ZodTypeAny } from "zod";
-import { PROTOVIEWER_DEFAULT_TIMEOUT_MS } from "../../features/prototype/protoViewer/AndroidProtoViewer";
+import { PROTOVIEWER_DEFAULT_TIMEOUT_MS } from "../../features/prototype/protoViewer/protoViewerDevice";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { z } from "zod/v4";
 import { deleteInternalToolParams } from "../../daemon/wire/constants";
@@ -634,7 +634,7 @@ export const prototypeOutputSchema = z.object({
     })
     .optional()
     .describe(
-      "save and open on Android with ProtoViewer installed: the ProtoViewer library entry. The entry is imported: ProtoViewer sets its source, keeps its network off until the user allows it, and it is not attached to this host.",
+      "save and open on Android or an iOS simulator with ProtoViewer installed: the ProtoViewer library entry. The entry is imported: ProtoViewer sets its source, keeps its network off until the user allows it, and it is not attached to this host.",
     ),
   savedPrototypes: z
     .array(

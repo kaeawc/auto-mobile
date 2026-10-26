@@ -21,4 +21,7 @@
   <string name="allow_network_explanation">Allow imported prototypes to contact internet and local-network (LAN) addresses. Device control and AutoMobile daemon addresses remain blocked.</string>
   <string name="local_network_denied">Local-network permission denied. Network access is off. Enable the switch to request permission again.</string>
   <string name="network_provenance">Imported prototype · Network enabled</string>
+  <string name="open_source_licenses">Open-source licenses</string>
+  <string name="licenses_error">Unable to read the open-source licenses.</string>
+  <string name="security_policy">Security policy</string>
 </resources>

@@ -28,7 +28,7 @@ describe("getLogs tool (#14082)", () => {
           warnings: [],
         }),
       }),
-      ios: () => ({ collect: async () => "" }),
+      ios: () => ({ collect: async () => ({ text: "", truncated: false }) }),
     }));
     const response = (await handler(ANDROID, {
       appId: "com.example",

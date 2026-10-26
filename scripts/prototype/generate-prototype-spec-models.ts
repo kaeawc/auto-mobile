@@ -1,9 +1,15 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import contract from "../../schemas/prototype-spec-contract.json";
 import type { Rule } from "../../src/features/prototype/prototypeBindingValidation";
-import { prototypeModelOverrides } from "./prototype-model-overrides";
+import { prototypeModelSelection } from "./prototype-model-selection";
 
-export type ModelSelection = Readonly<Record<string, Readonly<Record<string, "Int" | "Double">>>>;
+export type ModelLanguage = "kotlin" | "swift";
+export interface ModelOptions {
+  readonly languages?: readonly ModelLanguage[];
+  readonly swiftName?: string;
+  readonly doc?: string;
+}
+export type ModelSelection = Readonly<Record<string, ModelOptions>>;
 export interface ModelSources {
   kotlin: string;
   swift: string;
@@ -22,9 +28,9 @@ const header = [
 ];
 
 /**
- * Deliberately only plain objects with number fields. Rules still validate at the existing
- * contract boundary; models do not duplicate numeric bounds or add decoding error paths.
- * Everything else (including refs and nested objects) must remain hand-written for now.
+ * Plain objects whose fields are numbers, strings, booleans, enums (carried as strings, so models
+ * add no decoding error of their own) or arrays of those. Bounds, enum values and formats stay in
+ * the contract and are enforced by its interpreters. Refs and nested objects remain hand-written.
  */
 export function renderPrototypeSpecModels(
   source: { definitions: Readonly<Record<string, Rule>> },
@@ -37,7 +43,7 @@ export function renderPrototypeSpecModels(
     "import kotlinx.serialization.Serializable",
   ];
   const swift = [...header];
-  for (const [name, numbers] of Object.entries(selection)) {
+  for (const [name, options] of Object.entries(selection)) {
     const definition = source.definitions[name];
     if (!definition) {
       throw new Error(`Definition ${name}: not found`);
@@ -49,33 +55,72 @@ export function renderPrototypeSpecModels(
     if (!fields.length) {
       throw new Error(`Definition ${name}: empty objects are unsupported`);
     }
+    const languages = options.languages ?? ["kotlin", "swift"];
     const typeName = name.charAt(0).toUpperCase() + name.slice(1);
-    kotlin.push("", "@Serializable", `data class Prototype${typeName}(`);
-    swift.push("", `struct ${typeName}: Decodable, Encodable {`);
+    const kotlinFields: string[] = [];
+    const swiftFields: string[] = [];
     for (const [fieldName, field] of fields) {
-      if (!field || field.rule.kind !== "number") {
+      const types = field ? fieldTypes(field.rule) : undefined;
+      if (!field || !types) {
         throw new Error(
-          `Definition ${name}.${fieldName}: unsupported kind ${field?.rule.kind ?? "missing"}; expected number`,
+          `Definition ${name}.${fieldName}: unsupported kind ${field?.rule.kind ?? "missing"}`,
         );
       }
-      const kotlinType = numbers[fieldName];
-      if (kotlinType !== "Int" && kotlinType !== "Double") {
-        throw new Error(`Definition ${name}.${fieldName}: missing Kotlin Int/Double override`);
-      }
-      const swiftType = field.rule.integer ? "Int" : "Double";
-      kotlin.push(`  val ${fieldName}: ${kotlinType}${field.optional ? "? = null" : ""},`);
-      swift.push(`    let ${fieldName}: ${swiftType}${field.optional ? "?" : ""}`);
+      kotlinFields.push(`  val ${fieldName}: ${types.kotlin}${field.optional ? "? = null" : ""},`);
+      swiftFields.push(`    let ${fieldName}: ${types.swift}${field.optional ? "?" : ""}`);
     }
-    for (const fieldName of Object.keys(numbers)) {
-      if (!Object.hasOwn(definition.fields, fieldName)) {
-        throw new Error(`Definition ${name}.${fieldName}: unused Kotlin number override`);
-      }
+    if (languages.includes("kotlin")) {
+      kotlin.push(
+        "",
+        ...docLines(options.doc, "kotlin"),
+        "@Serializable",
+        `data class Prototype${typeName}(`,
+      );
+      kotlin.push(...kotlinFields, ")");
     }
-    kotlin.push(")");
-    swift.push("}");
+    if (languages.includes("swift")) {
+      swift.push(
+        "",
+        ...docLines(options.doc, "swift"),
+        `struct ${options.swiftName ?? typeName}: Codable, Equatable, Sendable {`,
+        ...swiftFields,
+        "}",
+      );
+    }
   }
   return { kotlin: kotlin.join("\n") + "\n", swift: swift.join("\n") + "\n" };
 }
+
+function docLines(doc: string | undefined, language: ModelLanguage): string[] {
+  if (!doc) {
+    return [];
+  }
+  return language === "kotlin" ? [`/** ${doc} */`] : [`/// ${doc}`];
+}
+
+function fieldTypes(rule: Rule): { kotlin: string; swift: string } | undefined {
+  switch (rule.kind) {
+    case "number":
+      return rule.integer ? { kotlin: "Int", swift: "Int" } : { kotlin: "Double", swift: "Double" };
+    case "boolean":
+      return { kotlin: "Boolean", swift: "Bool" };
+    case "enum":
+      return rule.values?.every((value) => typeof value === "string") ? stringTypes : undefined;
+    case "string":
+    case "key":
+    case "boundKey":
+    case "pointer":
+      return stringTypes;
+    case "array": {
+      const item = rule.item?.kind === "array" || !rule.item ? undefined : fieldTypes(rule.item);
+      return item && { kotlin: `List<${item.kotlin}>`, swift: `[${item.swift}]` };
+    }
+    default:
+      return undefined;
+  }
+}
+
+const stringTypes = { kotlin: "String", swift: "String" };
 
 /** Byte-for-byte comparison is shared by --check and fast, in-memory stale-output tests. */
 export function staleModelOutputs(
@@ -88,7 +133,7 @@ export function staleModelOutputs(
 }
 
 if (import.meta.main) {
-  const sources = renderPrototypeSpecModels(contract, prototypeModelOverrides);
+  const sources = renderPrototypeSpecModels(contract, prototypeModelSelection);
   const urls = {
     kotlin: new URL(`../../${modelOutputPaths.kotlin}`, import.meta.url),
     swift: new URL(`../../${modelOutputPaths.swift}`, import.meta.url),

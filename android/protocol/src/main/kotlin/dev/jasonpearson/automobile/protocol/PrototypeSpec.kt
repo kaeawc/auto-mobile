@@ -17,14 +17,6 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
 @Serializable
-data class PrototypeBounds(
-  val x: Double,
-  val y: Double,
-  val width: Double,
-  val height: Double,
-)
-
-@Serializable
 data class PrototypeContainer(
   val elementId: String? = null,
   val text: String? = null,
@@ -57,18 +49,6 @@ data class PrototypeCondition(
   val valid: PrototypeValidityKeys? = null,
   /** With [data]: holds when that value is missing, `[]`, `{}` or `""` (#14207). */
   val empty: Boolean? = null,
-)
-
-@Serializable
-data class PrototypeSheetCondition(
-  val key: String,
-  val equals: Boolean,
-)
-
-@Serializable
-data class PrototypeSafeAreaPadding(
-  val edges: List<String>,
-  val types: List<String>,
 )
 
 @Serializable
@@ -676,18 +656,6 @@ data class PrototypeImageNode(
   val zoomable: PrototypeZoomable? = null,
 ) : PrototypeNode()
 
-/** A node's style animation (#14208): [durationMs] 0..2000 (default 300) and [easing]. */
-@Serializable data class PrototypeAnimate(val durationMs: Int? = null, val easing: String? = null)
-
-/**
- * Container `stagger` (#15247): each `visibleWhen` child enters [ms] (0..100) after the previous
- * one, in [order] `forward` (default), `reverse` or `center`.
- */
-@Serializable data class PrototypeStagger(val ms: Int, val order: String? = null)
-
-/** An image's zoom range: 1 up to [maxScale] (1..8). */
-@Serializable data class PrototypeZoomable(val maxScale: Double)
-
 @SerialName("icon")
 @Serializable
 data class PrototypeIconNode(
@@ -851,8 +819,6 @@ data class PrototypeButtonNode(
   val icon: String? = null,
   val enabledWhen: PrototypeCondition? = null,
 ) : PrototypeNode()
-
-@Serializable data class PrototypeRadioOption(val value: String, val label: String)
 
 @SerialName("radioGroup")
 @Serializable
@@ -1246,9 +1212,6 @@ data class PrototypeChartSeries(
   val label: String,
   val color: PrototypeModeValue? = null,
 )
-
-/** A fixed y axis for a chart; [max] is above [min]. */
-@Serializable data class PrototypeChartRange(val min: Double, val max: Double)
 
 /**
  * A Material alert dialog, open while [openWhen] holds. Its buttons and scrim close it by writing

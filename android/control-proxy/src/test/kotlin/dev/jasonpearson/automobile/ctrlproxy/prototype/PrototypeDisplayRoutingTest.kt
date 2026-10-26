@@ -40,8 +40,9 @@ class PrototypeDisplayRoutingTest {
 
   @Test
   fun `a non-default display is allowed at and above the floor`() {
+    val present = ShadowDisplayManager.addDisplay("w800dp-h480dp")
     for (sdk in PrototypeDisplayRouting.DISPLAY_API..37) {
-      assertNull("API $sdk", displays(sdk).unsupportedReason(2))
+      assertNull("API $sdk", displays(sdk).unsupportedReason(present))
     }
   }
 

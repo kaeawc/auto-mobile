@@ -41,11 +41,7 @@ object PrototypeDisplayHotPlug {
   const val FIXED_API = 34
 
   fun error(displayId: Int, sdkInt: Int, boundDisplayIds: Set<Int>): String? =
-    if (
-      displayId != Display.DEFAULT_DISPLAY &&
-        sdkInt < FIXED_API &&
-        displayId !in boundDisplayIds
-    )
+    if (displayId != Display.DEFAULT_DISPLAY && sdkInt < FIXED_API && displayId !in boundDisplayIds)
       "Display $displayId was connected after the accessibility service started; " +
         "Android 12L and 13 give prototype windows no overlay token for it. " +
         "Disable and re-enable the AutoMobile accessibility service with the display attached, " +
@@ -88,7 +84,9 @@ class AndroidPrototypeDisplays(
 ) : PrototypeDisplayProvider, PrototypeDisplayWindows {
   @Volatile private var boundDisplayIds: Set<Int> = presentDisplayIds()
 
-  /** Re-read the displays the accessibility service holds overlay tokens for; call on each connect. */
+  /**
+   * Re-read the displays the accessibility service holds overlay tokens for; call on each connect.
+   */
   fun onServiceBound() {
     boundDisplayIds = presentDisplayIds()
   }

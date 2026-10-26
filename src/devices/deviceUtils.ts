@@ -1,3 +1,4 @@
+import { snapshotLaunchArguments } from "./snapshotLaunchArguments";
 import { ActionableError, BootedDevice, DeviceInfo, Platform, SomePlatform } from "../models";
 import { toActionableError } from "../models/ActionableError";
 import { DeviceAlreadyRunningError } from "../models/DeviceAlreadyRunningError";
@@ -79,11 +80,6 @@ export type { AndroidColdBootAdmitter };
 export { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
 
 export type { DeviceDiscoveryError };
-
-/** Launch arguments for the exit-snapshot policy (#15477). */
-function snapshotLaunchArguments(options: DeviceStartOptions): { extraArgs?: readonly string[] } {
-  return options.discardSnapshotOnExit ? { extraArgs: ["-no-snapshot-save"] } : {};
-}
 
 export class MultiPlatformDeviceManager implements PlatformDeviceManager {
   private foreignSource?: ForeignAndroidSerialSource;

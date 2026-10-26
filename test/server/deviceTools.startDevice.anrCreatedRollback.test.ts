@@ -1,3 +1,4 @@
+import { FakeEmulatorProcessStopper } from "../fakes/FakeEmulatorProcessStopper";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { describe, it, expect, beforeAll, afterEach, spyOn } from "bun:test";
 import {
@@ -57,6 +58,7 @@ describe("createIfMissing rollback after System UI recovery", () => {
     fakeMatcher.setImageResult(null);
 
     setDeviceToolsDependencies({
+      androidEmulatorProcessStopper: new FakeEmulatorProcessStopper(),
       deviceManagerFactory: () => fakeDeviceUtils,
       deviceMatcherFactory: () => fakeMatcher,
       notifyResourcesChanged: async () => {},

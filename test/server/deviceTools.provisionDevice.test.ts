@@ -1,3 +1,4 @@
+import { FakeEmulatorProcessStopper } from "../fakes/FakeEmulatorProcessStopper";
 import { fakeIosDeviceResourceHazards as hazards } from "../helpers/fakeIosDeviceResourceHazards";
 import { UnsafeDeviceResourceCombinationError } from "../../src/models/UnsafeDeviceResourceCombinationError";
 import { runAsBindingReconciler } from "../../src/daemon/sessionBroker/provisioning/exclusion";
@@ -431,6 +432,7 @@ describe("provisionDevice handler", () => {
     deviceManager = new FakeDeviceUtils();
     exactProvisioner = new FakeExactDeviceProvisioner();
     setDeviceToolsDependencies({
+      androidEmulatorProcessStopper: new FakeEmulatorProcessStopper(),
       env: autolockEnv,
       deviceResourceObserverFactory: () => resourceObserver,
       deviceManagerFactory: () => deviceManager,

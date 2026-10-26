@@ -1,3 +1,4 @@
+import { FakeEmulatorProcessStopper } from "../../../fakes/FakeEmulatorProcessStopper";
 import { afterAll, afterEach, beforeEach, describe, expect } from "bun:test";
 import { defaultBindingToolInvoker } from "../../../../src/daemon/sessionBroker/provisioning/daemonDeviceAcquisition";
 import { ToolBindingProvisioner } from "../../../../src/daemon/sessionBroker/provisioning/reconcilerPorts";
@@ -116,6 +117,7 @@ describe("binding reconciler ports over the real device tool handlers", () => {
       reason: "Not verified in fake",
     };
     setDeviceToolsDependencies({
+      androidEmulatorProcessStopper: new FakeEmulatorProcessStopper(),
       env,
       timer,
       lifecycleCoordinator: new InMemoryVirtualDeviceLifecycleCoordinator(timer),

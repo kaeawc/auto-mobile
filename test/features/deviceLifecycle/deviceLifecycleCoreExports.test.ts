@@ -147,6 +147,7 @@ test("preserves the device lifecycle core runtime exports", () => {
     "rebootAndroidAfterSystemUiAnr",
     "rebuildSameIdReplacement",
     "refreshResourcesAfterCommittedBoot",
+    "refuseLiveStoppedAndroidTarget",
     "releaseRecoveryReservations",
     "releaseShutdownSessionOwnership",
     "reserveInitialDeviceForReadiness",

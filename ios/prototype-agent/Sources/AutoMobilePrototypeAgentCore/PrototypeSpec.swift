@@ -445,6 +445,9 @@ struct Style: Decodable {
     let textStyle: String?
     /// A box, row, column or card placeholder whose background a highlight sweeps (#14207).
     let shimmer: Bool?
+    /// Paint-only looks applied in order (#15128): objects the structural contract has already
+    /// validated, kept raw until a renderer draws them. Gated by `prototype_effects_v1`.
+    var effects: [JSONValue]?
 
     /// Android's `mergedOver`: properties set on `prototype` win, unset ones keep this style's value.
     /// A present property replaces the base value as a whole (`padding` and `border` included).
@@ -484,7 +487,8 @@ struct Style: Decodable {
             fontStyle: prototype.fontStyle ?? fontStyle,
             overflow: prototype.overflow ?? overflow,
             textStyle: prototype.textStyle ?? textStyle,
-            shimmer: prototype.shimmer ?? shimmer
+            shimmer: prototype.shimmer ?? shimmer,
+            effects: prototype.effects ?? effects
         )
     }
 

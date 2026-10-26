@@ -121,6 +121,15 @@ extension PrototypeNode {
     )
         -> String
     {
+        if type == "button" || type == "fab" {
+            return interpolatePrototypeText(
+                label ?? "",
+                state: state,
+                pager: pager,
+                derived: derived,
+                derivedOnly: true
+            )
+        }
         if let spans {
             return spans.map { interpolatePrototypeText($0.text, state: state, pager: pager, derived: derived) }
                 .joined()

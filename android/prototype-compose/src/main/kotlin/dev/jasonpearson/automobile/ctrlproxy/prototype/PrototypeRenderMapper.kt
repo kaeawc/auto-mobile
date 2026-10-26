@@ -33,6 +33,9 @@ internal class PrototypeRenderMapper(
   private val formatter: PrototypeValueFormatter = AndroidPrototypeValueFormatter(),
 ) {
   private val lock = Any()
+  private val checked = PrototypeCheckedNodeCache(formatter)
+  private var locale: java.util.Locale? = null
+  private var zone: String? = null
   private var authoredSpec: PrototypeSpec? = null
   private var resolvedSpec: PrototypeSpec? = null
   private var sourceRoot: PrototypeNode? = null
@@ -60,6 +63,14 @@ internal class PrototypeRenderMapper(
     shownErrors: Set<String> = emptySet(),
   ): PrototypeRenderModel =
     synchronized(lock) {
+      val currentLocale = java.util.Locale.getDefault()
+      val currentZone = java.util.TimeZone.getDefault().id
+      if (locale != currentLocale || zone != currentZone) {
+        cache = null
+        previousModel = null
+        locale = currentLocale
+        zone = currentZone
+      }
       val resolved = resolveLocked(spec)
       previousModel?.let { model ->
         if (
@@ -85,7 +96,7 @@ internal class PrototypeRenderMapper(
             stacks = stacks,
             validity =
               prototypeValidity(
-                checkedPrototypeNodes(resolved.root, formatter),
+                checked.nodes(resolved),
                 resolved.state.orEmpty(),
               ),
             shownErrors = shownErrors,

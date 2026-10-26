@@ -100,9 +100,11 @@ private struct PrototypeSubstitutionGuard {
         if text {
             let dataSubstitution = PrototypeDataText.substitutionLength(authored, data: data)
             let spans = PrototypeDerivedText.spans(authored)
-            let length = spans
-                .reduce(dataSubstitution.length) { $0 + (derived?.resolve($1.name, state: state)?.utf16.count ?? 0) }
-            let substitution = (recognized: dataSubstitution.recognized || !spans.isEmpty, length: length)
+            // Derived values are bounded at render time; only their authored tokens count here.
+            let substitution = (
+                recognized: dataSubstitution.recognized || !spans.isEmpty,
+                length: dataSubstitution.length
+            )
             if substitution.length > PrototypeLimits.maxSubstitutedTextLength {
                 throw PrototypeLimits.violation(fieldPath, "Substituted text length limit exceeded")
             }

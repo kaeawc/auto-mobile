@@ -31,7 +31,9 @@ function epoch(input: unknown): number | undefined {
   }
   if (
     typeof input !== "string" ||
-    !/^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2}))?$/.test(input)
+    !/^\d{4}-\d{2}-\d{2}(?:T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2}))?$/.test(
+      input,
+    )
   ) {
     return undefined;
   }
@@ -57,13 +59,20 @@ function numeric(format: PrototypeFormat, input: unknown, locale: string): strin
   }
   let options: Intl.NumberFormatOptions;
   if ("number" in format) {
-    options = { ...fractionOptions(format.number), useGrouping: format.number.grouping ?? true };
+    options = {
+      ...fractionOptions(format.number),
+      useGrouping: format.number.grouping === false ? false : "auto",
+    };
   } else if ("compact" in format) {
-    options = { notation: "compact", compactDisplay: format.compact.style ?? "short" };
+    options = {
+      notation: "compact",
+      compactDisplay: format.compact.style ?? "short",
+      useGrouping: "auto",
+    };
   } else if ("currency" in format) {
-    options = { style: "currency", currency: format.currency.code };
+    options = { style: "currency", currency: format.currency.code, useGrouping: "auto" };
   } else if ("percent" in format) {
-    options = { style: "percent", ...fractionOptions(format.percent) };
+    options = { style: "percent", ...fractionOptions(format.percent), useGrouping: "auto" };
   } else {
     return undefined;
   }
@@ -73,13 +82,13 @@ function numeric(format: PrototypeFormat, input: unknown, locale: string): strin
 function relative(
   ms: number,
   style: Intl.RelativeTimeFormatStyle,
-  env: PrototypeFormatEnvironment,
+  formatting: PrototypeFormatEnvironment,
 ): string | undefined {
-  if (!Number.isFinite(env.nowMs)) {
+  if (!Number.isFinite(formatting.nowMs)) {
     return undefined;
   }
-  const diff = ms - env.nowMs;
-  const formatter = new Intl.RelativeTimeFormat(env.locale, {
+  const diff = ms - formatting.nowMs;
+  const formatter = new Intl.RelativeTimeFormat(formatting.locale, {
     style,
     numeric: Math.abs(diff) < 1000 ? "auto" : "always",
   });
@@ -90,14 +99,14 @@ function relative(
 function temporal(
   format: PrototypeFormat,
   input: unknown,
-  env: PrototypeFormatEnvironment,
+  formatting: PrototypeFormatEnvironment,
 ): string | undefined {
   const ms = epoch(input);
   if (ms === undefined) {
     return undefined;
   }
   if ("relative" in format) {
-    return relative(ms, format.relative.style ?? "long", env);
+    return relative(ms, format.relative.style ?? "long", formatting);
   }
   const options: Intl.DateTimeFormatOptions =
     "date" in format
@@ -105,18 +114,21 @@ function temporal(
       : "time" in format
         ? { timeStyle: format.time.style ?? "short" }
         : {};
-  return new Intl.DateTimeFormat(env.locale, { ...options, timeZone: env.timeZone }).format(ms);
+  return new Intl.DateTimeFormat(formatting.locale, {
+    ...options,
+    timeZone: formatting.timeZone,
+  }).format(ms);
 }
 
 export function formatPrototypeValue(
   format: PrototypeFormat,
   input: unknown,
-  env: PrototypeFormatEnvironment,
+  formatting: PrototypeFormatEnvironment,
 ): string | undefined {
   try {
     return "date" in format || "time" in format || "relative" in format
-      ? temporal(format, input, env)
-      : numeric(format, input, env.locale);
+      ? temporal(format, input, formatting)
+      : numeric(format, input, formatting.locale);
   } catch (error) {
     // Invalid Intl locales, zones and option combinations are expected authored-input failures.
     logger.debug(`Prototype formatter rejected input: ${String(error)}`);
@@ -126,9 +138,13 @@ export function formatPrototypeValue(
 
 function environment(
   entry: { locale?: string; timeZone?: string },
-  env: PrototypeFormatEnvironment,
+  formatting: PrototypeFormatEnvironment,
 ): PrototypeFormatEnvironment {
-  return { ...env, locale: entry.locale ?? env.locale, timeZone: entry.timeZone ?? env.timeZone };
+  return {
+    ...formatting,
+    locale: entry.locale ?? formatting.locale,
+    timeZone: entry.timeZone ?? formatting.timeZone,
+  };
 }
 
 export function resolvePrototypeDerived(
@@ -155,7 +171,7 @@ export function resolvePrototypeDerived(
 export function projectPrototypeDerivedItem(
   derive: Record<string, PrototypeRepeatDerivedEntry>,
   item: Record<string, unknown>,
-  env: PrototypeFormatEnvironment,
+  formatting: PrototypeFormatEnvironment,
 ): Record<string, unknown> {
   const projected = { ...item };
   for (const [name, entry] of Object.entries(derive)) {
@@ -166,7 +182,7 @@ export function projectPrototypeDerivedItem(
           ? item[entry.of.item]
           : undefined;
     Object.defineProperty(projected, name, {
-      value: formatPrototypeValue(entry.format, input, environment(entry, env)) ?? "",
+      value: formatPrototypeValue(entry.format, input, environment(entry, formatting)) ?? "",
       enumerable: true,
       configurable: true,
       writable: true,

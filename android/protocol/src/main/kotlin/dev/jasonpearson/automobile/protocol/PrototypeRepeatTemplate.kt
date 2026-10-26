@@ -421,8 +421,8 @@ internal object PrototypeBindableFields {
         "fab" -> visitor.field(node, "label", path, PrototypeBindableKind.TEXT)
         "menu" ->
           objects(node, "items", path).firstNotNullOfOrNull { (entry, entryPath) ->
-            part(entry, entryPath)
-              ?: visitor.field(entry, "trailingText", entryPath, PrototypeBindableKind.TEXT)
+            visitor.field(entry, "trailingText", entryPath, PrototypeBindableKind.TEXT)
+              ?: part(entry, entryPath)
           }
         "select" ->
           visitor.field(node, "label", path, PrototypeBindableKind.TEXT)

@@ -2425,7 +2425,11 @@ Optional `derive` maps up to 32 STATE_KEY names to strict
 `{data: "/pointer"}` (relative to data), `{state: "key"}`, or
 `{value: number|string}`. Every text field supporting `{data:/pointer}` also
 accepts `{derived:name}`; undeclared names are validation errors, unused entries
-are allowed, and malformed braces remain literal.
+are allowed, and malformed braces remain literal. Devices render these tokens in
+text node text, contentDescription, rich-text spans, button/FAB labels, topAppBar
+title, badge text, dialog title/text, and snackbar text. Other text-kind fields
+(request url/headers/body, check messages, select/segmented/menu/searchBar labels)
+validate unknown names but display the token literally on devices.
 
 `repeat.derive` maps at most 8 names to the same entry shape with `of` restricted
 to `{item: "field"}` or `{value: number|string}`. It projects strings onto each
@@ -2450,14 +2454,17 @@ are allowed and format as empty strings.
 
 minFraction must not exceed maxFraction when both are supplied. Omitted numeric
 fraction options use Intl/CLDR defaults (currency respects minor units, including
-zero for JPY). Locale defaults to the device locale; timeZone defaults to the
+zero for JPY). Number grouping true/default respects the locale's minimum grouping
+digits; false disables grouping entirely. Compact, currency, and percent also
+respect locale minimum grouping digits. Locale defaults to the device locale; timeZone defaults to the
 device zone. Overrides accept a simple BCP 47 tag of at most 35 characters and an
 IANA zone identifier of at most 128 characters. Shape validation does not prove
 that the current engine supports a locale or zone.
 
 Epoch milliseconds must be finite integers within the Date range. Strings are
 `YYYY-MM-DD` (midnight UTC) or `YYYY-MM-DDTHH:mm:ss[.fraction]Z` / a signed
-`hh:mm` offset. Invalid calendar dates, unzoned date-times, wrong types and
+`hh:mm` offset. Hours must be 00–23 and minutes/seconds 00–59; hour 24 and
+leap second 60 are rejected. Invalid calendar dates, unzoned date-times, wrong types and
 missing pointers display as the empty string. The host's pure formatter returns
 undefined for invalid inputs; its resolver converts that to an empty string.
 

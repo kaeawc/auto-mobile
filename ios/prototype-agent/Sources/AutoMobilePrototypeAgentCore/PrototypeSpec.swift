@@ -181,6 +181,9 @@ struct PrototypeSpec: Decodable {
         try PrototypeLimits.guardSubstitutedText(raw, data: data, derived: formatContext, state: menuState)
         let resolved = PrototypeDataResolver.resolveRoot(raw, data: data)
         try PrototypeLimits.guardTree(resolved)
+        try PrototypeRepeat.validateDerivedRows(
+            resolved, formatter: formatContext.formatter, environment: formatContext.environment
+        )
         let expanded = PrototypeRepeat.expand(
             resolved,
             formatter: formatContext.formatter,

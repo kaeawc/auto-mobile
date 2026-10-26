@@ -1192,11 +1192,10 @@ class PrototypeRuntime(
     )
   }
 
-  private fun checkedNodes(): List<PrototypeNode> =
-    checkedPrototypeNodes(
-      PrototypeDataResolver.resolve(current.spec).root,
-      AndroidPrototypeValueFormatter(clock = PrototypeClock(clock)),
-    )
+  private val checkedNodeCache =
+    PrototypeCheckedNodeCache(AndroidPrototypeValueFormatter(clock = PrototypeClock(clock)))
+
+  private fun checkedNodes(): List<PrototypeNode> = checkedNodeCache.nodes(current.spec)
 
   private fun validity(): Map<String, Boolean> = prototypeValidity(checkedNodes(), current.state)
 

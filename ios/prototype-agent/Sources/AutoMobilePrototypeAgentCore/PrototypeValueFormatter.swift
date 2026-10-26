@@ -26,7 +26,9 @@ struct PrototypeDerivedEntry: Codable, Sendable {
     let timeZone: String?
 
     func environment(_ defaults: PrototypeFormatEnvironment) -> PrototypeFormatEnvironment? {
-        guard timeZone == nil || TimeZone(identifier: timeZone ?? "") != nil else { return nil }
+        if format.date != nil || format.time != nil {
+            guard timeZone == nil || TimeZone(identifier: timeZone ?? "") != nil else { return nil }
+        }
         return PrototypeFormatEnvironment(
             locale: locale.map { Locale(identifier: $0) } ?? defaults.locale,
             timeZone: timeZone.flatMap(TimeZone.init(identifier:)) ?? defaults.timeZone,

@@ -990,7 +990,10 @@ On iOS nothing is reversed, and \`localhost\`, \`127.0.0.1\` and \`[::1]\` are r
 ## Value formatters (#14227)
 
 Use top-level \`derive: {priceText: {of: {data: "/price"}, format: {currency: {code: "USD"}}}}\`
-and read \`{derived:priceText}\` in any text field that accepts data placeholders.
+and read \`{derived:priceText}\` in text node text, contentDescription, rich-text spans,
+button/FAB labels, topAppBar title, badge text, dialog title/text, and snackbar text.
+Other text-kind fields (request url/headers/body, check messages, and
+select/segmented/menu/searchBar labels) validate unknown names but show tokens literally on devices.
 There are at most 32 names (state-key syntax); unknown reads fail validation.
 \`of\` chooses exactly one data pointer, state key or literal \`{value: number|string}\`.
 Inside a repeat, \`repeat.derive\` supports at most 8 names, with \`of: {item: "field"}\`
@@ -1002,7 +1005,9 @@ Host validation checks field references; device-dependent key and emit-name valu
 \`compact {style?:short|long}\`, \`currency {code:USD}\`, \`percent {minFraction?,maxFraction?}\`,
 \`date {style?:short|medium|long}\`, \`time {style?:short|medium|long}\`, or
 \`relative {style?:narrow|short|long}\`. Fraction digits are integers 0..20;
-min cannot exceed max. Grouping defaults true; compact defaults short, date medium,
+min cannot exceed max. Grouping true/default respects locale minimum grouping digits;
+false disables grouping entirely. Compact, currency, and percent respect locale minimum grouping digits.
+Compact defaults short, date medium,
 time short, relative long. Currency codes are three uppercase letters and use CLDR minor units.
 Number kinds require finite numbers; percent inputs are ratios (0.256 means 25.6%).
 Date/time/relative accept integer epoch milliseconds, YYYY-MM-DD (midnight UTC),

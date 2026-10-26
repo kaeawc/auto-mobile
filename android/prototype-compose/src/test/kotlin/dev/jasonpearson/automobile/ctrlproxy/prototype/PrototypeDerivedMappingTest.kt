@@ -32,6 +32,67 @@ class PrototypeDerivedMappingTest {
     )
 
   @Test
+  fun `checked rows reuse projections until root data or environment changes`() {
+    var calls = 0
+    val cache =
+      PrototypeCheckedNodeCache(
+        PrototypeValueFormatter { _, _ ->
+          calls++
+          "7"
+        },
+      )
+    val root =
+      PrototypeColumnNode(
+        children =
+          listOf(
+            PrototypeTextFieldNode(
+              stateKey = "input",
+              checks = listOf(PrototypeCheck.Required("Required")),
+            ),
+          ),
+        repeat =
+          PrototypeRepeat(
+            listOf(emptyMap()),
+            "row",
+            derive = mapOf("price" to entry("""{"value":7}""")),
+          ),
+      )
+    var spec = PrototypeSpec("cache", PrototypeWindow(PrototypeFullscreenPlacement()), root = root)
+    val first = cache.nodes(spec)
+    assertEquals(1, calls)
+    assertSame(first, cache.nodes(spec.copy(state = mapOf("input" to PrototypeScalar.Text("new")))))
+    assertEquals(1, calls)
+    spec = spec.copy(data = buildJsonObject { put("changed", true) })
+    cache.nodes(spec)
+    assertEquals(2, calls)
+    spec = spec.copy(root = root.copy(children = root.children.toList()))
+    cache.nodes(spec)
+    assertEquals(3, calls)
+    val original = java.util.Locale.getDefault()
+    try {
+      java.util.Locale.setDefault(
+        if (original == java.util.Locale.FRANCE) java.util.Locale.US else java.util.Locale.FRANCE,
+      )
+      cache.nodes(spec)
+      assertEquals(4, calls)
+      val zone = java.util.TimeZone.getDefault()
+      try {
+        java.util.TimeZone.setDefault(
+          java.util.TimeZone.getTimeZone(
+            if (zone.id == "Pacific/Honolulu") "UTC" else "Pacific/Honolulu",
+          ),
+        )
+        cache.nodes(spec)
+        assertEquals(5, calls)
+      } finally {
+        java.util.TimeZone.setDefault(zone)
+      }
+    } finally {
+      java.util.Locale.setDefault(original)
+    }
+  }
+
+  @Test
   fun `state and data changes update late text`() {
     fun mapped(value: Double, data: Int): PrototypeRenderNode =
       PrototypeNodeMapping(
@@ -142,7 +203,12 @@ class PrototypeDerivedMappingTest {
       PrototypeFormatTime.epoch(JsonPrimitive("2026-01-05T14:00:00+02:00")),
     )
     for (invalid in
-      listOf("2026-02-30", "2026-01-05T12:00:00", "2026-01-05T12:00:00+25:00")) assertNull(
+      listOf(
+        "2026-02-30",
+        "2026-01-05T12:00:00",
+        "2026-01-05T12:00:00+25:00",
+        "2026-01-05T24:00:00Z",
+      )) assertNull(
       PrototypeFormatTime.epoch(JsonPrimitive(invalid)),
     )
     assertNull(PrototypeFormatTime.epoch(JsonPrimitive(1.5)))

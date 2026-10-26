@@ -2,6 +2,19 @@
 import XCTest
 
 final class PrototypeValueFormatterTests: XCTestCase {
+    override static func setUp() {
+        super.setUp()
+        // Initialize Foundation formatting and spec-decoder caches outside individual test timings.
+        let json = #"""
+        {"id":"warmup","window":{"placement":{"type":"fullscreen"}},
+         "root":{"type":"column","repeat":{"as":"item","items":[{"n":1}],"key":"shown","derive":{
+          "shown":{"of":{"item":"n"},"format":{"number":{}},"locale":"en-US"}}},
+          "children":[{"type":"text","text":"{item.shown}"}]}}
+        """#
+        do { _ = try JSONDecoder().decode(PrototypeSpec.self, from: Data(json.utf8)) }
+        catch { XCTFail("Could not initialize formatter test environment: \(error)") }
+    }
+
     private struct Golden: Decodable {
         let environment: Environment
         let cases: [Case]
@@ -204,7 +217,11 @@ extension PrototypeValueFormatterTests {
         let text = interpolatePrototypeText("{s}{derived:x}", state: ["s": .string("a")], pager: nil, derived: context)
         XCTAssertEqual(text, "a{derived:x}")
         let root = try decode(JSONValue.self, #"{"type":"text","text":"{derived:x}{derived:x}"}"#)
-        XCTAssertThrowsError(try PrototypeLimits.guardSubstitutedText(root, data: nil, derived: context))
+        XCTAssertNoThrow(try PrototypeLimits.guardSubstitutedText(root, data: nil, derived: context))
+        XCTAssertEqual(
+            interpolatePrototypeText("{derived:x}{derived:x}", state: [:], pager: nil, derived: context),
+            String(repeating: "x", count: PrototypeLimits.maxSubstitutedTextLength) + "{derived:x}"
+        )
     }
 
     func testRepeatDerivedProjectionUsesOriginalRowAndAlias() throws {
@@ -309,5 +326,174 @@ extension PrototypeValueFormatterTests {
         """#
         XCTAssertNoThrow(try PrototypeSpecStrictValidator.validate(data: Data(json.utf8)))
         XCTAssertEqual(try decode(PrototypeSpec.self, json).root.children?.first?.stateKey, "s1")
+    }
+}
+
+extension PrototypeValueFormatterTests {
+    func testInvalidZoneOnlyBlanksDateAndTime() throws {
+        for kind in ["number", "compact", "currency", "percent", "relative", "date", "time"] {
+            let options = kind == "currency" ? #"{"code":"USD"}"# : "{}"
+            let entry = try decode(
+                PrototypeDerivedEntry.self,
+                """
+                {"of":{"value":5},"format":{"\(kind)":\(options)},"locale":"en-US","timeZone":"Mars/Olympus"}
+                """
+            )
+            let actual = PrototypeDerivedValues.resolve(
+                entry,
+                state: [:],
+                data: nil,
+                formatter: FoundationPrototypeValueFormatter(),
+                environment: environment
+            )
+            if ["date", "time"].contains(kind) { XCTAssertEqual(actual, "", kind) }
+            else { XCTAssertFalse(actual.isEmpty, kind) }
+            if kind == "number" { XCTAssertEqual(actual, "5") }
+            XCTAssertEqual(PrototypeDerivedValues.project(
+                [:],
+                derive: ["x": entry],
+                formatter: FoundationPrototypeValueFormatter(),
+                environment: environment
+            )["x"], .string(actual))
+        }
+    }
+
+    func testSpecBuildRejectsDerivedRepeatCollisionsAndInvalidBindings() throws {
+        for (key, child, expectedPath, message) in [
+            (
+                #","key":"dateText""#,
+                #"{"type":"checkbox","stateKey":"{item.dateText}"}"#,
+                "root.repeat.items[0]",
+                #"Bound state key "" is invalid"#
+            ),
+            (
+                "",
+                #"{"type":"checkbox","stateKey":"{item.dateText}"}"#,
+                "root.repeat.items[0]",
+                #"Bound state key "" is invalid"#
+            ),
+            (
+                "",
+                #"{"type":"button","label":"Go","onTap":[{"type":"emit","name":"{item.dateText}"}]}"#,
+                "root.children[0].onTap[0].name",
+                "Expanded emit name is empty for item 0"
+            ),
+            (
+                #","key":"dateText""#,
+                #"{"type":"text","text":"{item.dateText}"}"#,
+                "root.repeat.key",
+                #"Duplicate repeat key "" (items 0 and 1)"#
+            ),
+        ] {
+            let json = """
+            {"id":"derivedKeys","window":{"placement":{"type":"fullscreen"}},
+             "root":{"type":"column","repeat":{"as":"item","items":[{"n":1},{"n":2}]\(key),"derive":{
+              "dateText":{"of":{"item":"n"},"format":{"date":{}},"timeZone":"Mars/Olympus"}}},
+              "children":[\(child)]}}
+            """
+            XCTAssertThrowsError(try decode(PrototypeSpec.self, json)) { error in
+                XCTAssertEqual(error as? PrototypeLoadError, .invalidSpec(path: expectedPath, message: message))
+            }
+        }
+    }
+
+    func testButtonAndFabPlainLabelsResolveOnlyDerivedTokens() throws {
+        let entries = try decode(
+            [String: PrototypeDerivedEntry].self,
+            #"{"x":{"of":{"value":5},"format":{"number":{}}}}"#
+        )
+        let context = PrototypeDerivedContext(
+            entries: entries,
+            data: nil,
+            formatter: FakePrototypeValueFormatter(output: "five"),
+            environment: environment
+        )
+        for kind in ["button", "fab"] {
+            let node = try decode(
+                PrototypeNode.self,
+                """
+                {"type":"\(kind)","icon":"add","label":"{derived:x}/{s}/{data:/n}"}
+                """
+            )
+            XCTAssertEqual(
+                node.plainText(state: ["s": .string("state")], pager: nil, derived: context),
+                "five/{s}/{data:/n}"
+            )
+            XCTAssertEqual(node.accessibilityLabel(
+                state: ["s": .string("state")],
+                pager: nil,
+                tappable: true,
+                derived: context
+            ), "five/{s}/{data:/n}")
+        }
+    }
+}
+
+extension PrototypeValueFormatterTests {
+    func testDataRebuildRejectsFormattedRepeatKeyCollisions() throws {
+        let spec = try decode(PrototypeSpec.self, #"""
+        {"id":"keys","window":{"placement":{"type":"fullscreen"}},"data":{"rows":[{"n":1},{"n":2}]},
+         "root":{"type":"column","repeat":{"as":"item","items":{"path":"/rows"},"key":"shown","derive":{
+          "shown":{"of":{"item":"n"},"format":{"number":{}},"locale":"en-US"}}},
+          "children":[{"type":"text","text":"{item.shown}"}]}}
+        """#)
+        XCTAssertThrowsError(try spec.replacingData(["rows": .array([
+            .object(["n": .number(1)]), .object(["n": .number(1)]),
+        ])])) { error in
+            XCTAssertEqual(error as? PrototypeLoadError, .invalidSpec(
+                path: "root.repeat.key",
+                message: #"Duplicate repeat key "1" (items 0 and 1)"#
+            ))
+        }
+    }
+
+    func testDateRepeatIdentityCollisionsAndInvalidStateNames() throws {
+        let json = #"""
+        {"id":"dates","window":{"placement":{"type":"fullscreen"}},
+         "root":{"type":"column","repeat":{"as":"item","items":[{"n":1},{"n":2}],"key":"dateText","derive":{
+          "dateText":{"of":{"item":"n"},"format":{"date":{}},"locale":"en-US","timeZone":"UTC"}}},
+          "children":[{"type":"checkbox","stateKey":"{item.dateText}"}]}}
+        """#
+        XCTAssertThrowsError(try decode(PrototypeSpec.self, json)) { error in
+            XCTAssertEqual(error as? PrototypeLoadError, .invalidSpec(
+                path: "root.repeat.items[0]",
+                message: #"Bound state key "Jan 1, 1970" is invalid"#
+            ))
+        }
+        let textOnly = json.replacingOccurrences(
+            of: #"{"type":"checkbox","stateKey":"{item.dateText}"}"#,
+            with: #"{"type":"text","text":"{item.dateText}"}"#
+        )
+        XCTAssertThrowsError(try decode(PrototypeSpec.self, textOnly)) { error in
+            XCTAssertEqual(error as? PrototypeLoadError, .invalidSpec(
+                path: "root.repeat.key",
+                message: #"Duplicate repeat key "Jan 1, 1970" (items 0 and 1)"#
+            ))
+        }
+    }
+}
+
+extension PrototypeValueFormatterTests {
+    func testOversizedDerivedTokenDoesNotConsumeLaterTokenBudget() throws {
+        let entries = try decode(
+            [String: PrototypeDerivedEntry].self,
+            #"{"x":{"of":{"value":5},"format":{"number":{}}}}"#
+        )
+        let context = PrototypeDerivedContext(
+            entries: entries,
+            data: nil,
+            formatter: FakePrototypeValueFormatter(output: "five"),
+            environment: environment
+        )
+        let oversized = String(repeating: "x", count: PrototypeLimits.maxSubstitutedTextLength + 1)
+        XCTAssertEqual(
+            interpolatePrototypeText(
+                "{huge}{derived:x}{small}",
+                state: ["huge": .string(oversized), "small": .string("s")],
+                pager: nil,
+                derived: context
+            ),
+            "{huge}fives"
+        )
     }
 }

@@ -93,20 +93,35 @@ enum PrototypeRepeat {
            let derived = repeated["derive"]?.objectFields, !derived.isEmpty
         {
             let rows = instances(of: repeated, formatter: formatter, environment: environment)
-            if let key = repeated["key"]?.stringValue, derived[key] != nil {
-                var seen = Set<[UInt16]>()
-                for row in rows {
-                    guard let value = row.item[key], seen.insert(Array(value.displayString.utf16)).inserted else {
-                        throw PrototypeContractValidator.invalid(
-                            "\(path).repeat.key",
-                            "Unknown or duplicate repeat identity"
-                        )
-                    }
-                }
-            }
             for child in PrototypeStrictRepeats.children(fields, path: path) {
                 for row in rows {
-                    try derivedBindings(.object(child.value), path: child.path, row: row, names: Set(derived.keys))
+                    try derivedBindings(
+                        .object(child.value),
+                        path: child.path,
+                        repeatPath: path,
+                        row: row,
+                        names: Set(derived.keys)
+                    )
+                }
+            }
+            if let key = repeated["key"]?.stringValue, derived[key] != nil {
+                var seen: [[UInt16]: Int] = [:]
+                for row in rows {
+                    guard let value = row.item[key] else {
+                        throw PrototypeContractValidator.invalid(
+                            "\(path).repeat.key",
+                            "Unknown repeat field \(PrototypeContractValidator.quoted(key))"
+                        )
+                    }
+                    let text = value.displayString
+                    let identity = Array(text.utf16)
+                    if let first = seen[identity] {
+                        throw PrototypeContractValidator.invalid(
+                            "\(path).repeat.key",
+                            "Duplicate repeat key \(PrototypeContractValidator.quoted(text)) (items \(first) and \(row.index))"
+                        )
+                    }
+                    seen[identity] = row.index
                 }
             }
         }
@@ -121,13 +136,13 @@ enum PrototypeRepeat {
     }
 
     private static func derivedBindings(
-        _ value: JSONValue, path: String, row: PrototypeRepeatInstance, names: Set<String>
+        _ value: JSONValue, path: String, repeatPath: String, row: PrototypeRepeatInstance, names: Set<String>
     )
         throws
     {
         if case let .array(items) = value {
             for (index, item) in items.enumerated() {
-                try derivedBindings(item, path: "\(path)[\(index)]", row: row, names: names)
+                try derivedBindings(item, path: "\(path)[\(index)]", repeatPath: repeatPath, row: row, names: names)
             }
             return
         }
@@ -151,7 +166,10 @@ enum PrototypeRepeat {
             }) {
                 let bound = row.interpolate(text)
                 if keyFields.contains(key), !isFieldName(bound) {
-                    throw PrototypeContractValidator.invalid(fieldPath, "Invalid bound key")
+                    throw PrototypeContractValidator.invalid(
+                        "\(repeatPath).repeat.items[\(row.index)]",
+                        "Bound state key \(PrototypeContractValidator.quoted(bound)) is invalid"
+                    )
                 }
                 if key == "name", fields["type"] == .string("emit") {
                     if bound.isEmpty {
@@ -167,7 +185,7 @@ enum PrototypeRepeat {
                         )
                     }
                 }
-            } else { try derivedBindings(child, path: fieldPath, row: row, names: names) }
+            } else { try derivedBindings(child, path: fieldPath, repeatPath: repeatPath, row: row, names: names) }
         }
     }
 

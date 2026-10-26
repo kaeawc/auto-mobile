@@ -6,6 +6,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeCheckboxNode
 import dev.jasonpearson.automobile.protocol.PrototypeChecks
 import dev.jasonpearson.automobile.protocol.PrototypeChipNode
 import dev.jasonpearson.automobile.protocol.PrototypeCondition
+import dev.jasonpearson.automobile.protocol.PrototypeDataResolver
 import dev.jasonpearson.automobile.protocol.PrototypeDatePickerNode
 import dev.jasonpearson.automobile.protocol.PrototypeFabNode
 import dev.jasonpearson.automobile.protocol.PrototypeIconButtonNode
@@ -14,10 +15,14 @@ import dev.jasonpearson.automobile.protocol.PrototypeNode
 import dev.jasonpearson.automobile.protocol.PrototypeRadioGroupNode
 import dev.jasonpearson.automobile.protocol.PrototypeScalar
 import dev.jasonpearson.automobile.protocol.PrototypeSliderNode
+import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeSwitchNode
 import dev.jasonpearson.automobile.protocol.PrototypeTextFieldNode
 import dev.jasonpearson.automobile.protocol.PrototypeTimePickerNode
 import dev.jasonpearson.automobile.protocol.PrototypeValidateOn
+import java.util.Locale
+import java.util.TimeZone
+import kotlinx.serialization.json.JsonObject
 
 internal fun PrototypeNode.checks(): List<PrototypeCheck> =
   when (this) {
@@ -107,3 +112,28 @@ internal fun prototypeShownError(
       PrototypeChecks.evaluate(state[key], node.checks(), prototypeNodeRole(node))
         .firstFailingMessage
   }
+
+/** State changes do not alter repeat projections; relative values refresh with their source. */
+internal class PrototypeCheckedNodeCache(private val formatter: PrototypeValueFormatter) {
+  private var root: PrototypeNode? = null
+  private var data: JsonObject? = null
+  private var locale: Locale? = null
+  private var zone: String? = null
+  private var nodes: List<PrototypeNode> = emptyList()
+
+  fun nodes(spec: PrototypeSpec): List<PrototypeNode> {
+    val currentLocale = Locale.getDefault()
+    val currentZone = TimeZone.getDefault().id
+    val environmentChanged = locale != currentLocale || zone != currentZone
+    if (root !== spec.root || data !== spec.data || environmentChanged) {
+      val resolved = PrototypeDataResolver.resolve(spec)
+      val checked = checkedPrototypeNodes(resolved.root, formatter)
+      root = spec.root
+      data = spec.data
+      locale = currentLocale
+      zone = currentZone
+      nodes = checked
+    }
+    return nodes
+  }
+}

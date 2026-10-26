@@ -16,7 +16,8 @@ func interpolatePrototypeText(
     _ text: String,
     state: [String: JSONValue],
     pager: PagerPosition?,
-    derived: PrototypeDerivedContext? = nil
+    derived: PrototypeDerivedContext? = nil,
+    derivedOnly: Bool = false
 )
     -> String
 {
@@ -35,7 +36,7 @@ func interpolatePrototypeText(
         let value: String?
         if key.hasPrefix("derived:") {
             value = derived?.resolve(String(key.dropFirst(8)), state: state)
-        } else { value = resolveInterpolation(key: key, state: state, pager: pager) }
+        } else { value = derivedOnly ? nil : resolveInterpolation(key: key, state: state, pager: pager) }
         if let value, value.utf16.count <= PrototypeLimits.maxSubstitutedTextLength - substitutedLength {
             substitutedLength += value.utf16.count
             out.append(contentsOf: value.unicodeScalars)

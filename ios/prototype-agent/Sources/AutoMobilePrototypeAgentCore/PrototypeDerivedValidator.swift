@@ -34,6 +34,11 @@ enum PrototypeDerivedValidator {
         var textFields = fields
         PrototypeRepeat.bindTextFields(&textFields) { _ in "" }
         try reads(.object(fields), mapped: .object(textFields), path: path, entries: entries)
+        try requestReads(
+            .object(fields.filter { !["child", "children", "screens", "repeat"].contains($0.key) }),
+            path: path,
+            entries: entries
+        )
         if let repeated = fields["repeat"]?.objectFields, let derived = repeated["derive"]?.objectFields {
             let derivePath = "\(path).repeat.derive"
             try fractions(derived, path: derivePath)
@@ -55,6 +60,28 @@ enum PrototypeDerivedValidator {
         }
         for child in PrototypeStrictRepeats.children(fields, path: path) {
             try visit(.object(child.value), path: child.path, entries: entries, data: data)
+        }
+    }
+
+    /// Request URLs are render-time text too; opaque action values and payloads are not.
+    private static func requestReads(_ value: JSONValue, path: String, entries: [String: JSONValue]) throws {
+        switch value {
+        case let .array(items):
+            for (index, item) in items.enumerated() {
+                try requestReads(item, path: "\(path)[\(index)]", entries: entries)
+            }
+        case let .object(fields):
+            if fields["type"] == .string("request"), let url = fields["url"] {
+                try reads(url, mapped: .string(""), path: "\(path).url", entries: entries)
+            }
+            for key in PrototypeContractValidator.sorted(fields.keys)
+                where !["payload", "value", "context", "body", "headers", "query"].contains(key)
+            {
+                if let child = fields[key] {
+                    try requestReads(child, path: PrototypeContractValidator.keyPath(path, key), entries: entries)
+                }
+            }
+        default: break
         }
     }
 

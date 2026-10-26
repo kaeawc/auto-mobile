@@ -10,7 +10,7 @@ import {
 } from "../../../src/features/prototype/prototypeFormat";
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
 import { requiredPrototypeCapabilities } from "../../../src/features/prototype/prototypeCapabilityGates";
-const env = { locale: "en-US", timeZone: "UTC", nowMs: 1767268800000 };
+const context = { locale: "en-US", timeZone: "UTC", nowMs: 1767268800000 };
 const spec = (extra: Record<string, unknown> = {}) => ({
   id: "formats",
   window: { placement: { type: "fullscreen" } },
@@ -19,10 +19,12 @@ const spec = (extra: Record<string, unknown> = {}) => ({
   ...extra,
 });
 test("formats without consulting a real clock", () => {
-  expect(formatPrototypeValue({ currency: { code: "USD" } }, 1234.5, env)).toBe("$1,234.50");
-  expect(formatPrototypeValue({ relative: {} }, env.nowMs - 7200000, env)).toBe("2 hours ago");
-  expect(formatPrototypeValue({ number: {} }, "123", env)).toBeUndefined();
-  expect(formatPrototypeValue({ date: {} }, "2026-02-30", env)).toBeUndefined();
+  expect(formatPrototypeValue({ currency: { code: "USD" } }, 1234.5, context)).toBe("$1,234.50");
+  expect(formatPrototypeValue({ relative: {} }, context.nowMs - 7200000, context)).toBe(
+    "2 hours ago",
+  );
+  expect(formatPrototypeValue({ number: {} }, "123", context)).toBeUndefined();
+  expect(formatPrototypeValue({ date: {} }, "2026-02-30", context)).toBeUndefined();
 });
 test("resolves each source and projects repeat strings", () => {
   const source = {
@@ -32,15 +34,19 @@ test("resolves each source and projects repeat strings", () => {
     },
   };
   expect(
-    resolvePrototypeDerived(source, "price", { data: { price: 12 }, state: { n: 3 }, env }),
+    resolvePrototypeDerived(source, "price", {
+      data: { price: 12 },
+      state: { n: 3 },
+      env: context,
+    }),
   ).toBe("12");
-  expect(resolvePrototypeDerived(source, "state", { state: { n: 3 }, env })).toBe("3");
-  expect(resolvePrototypeDerived(source, "missing", { env })).toBe("");
+  expect(resolvePrototypeDerived(source, "state", { state: { n: 3 }, env: context })).toBe("3");
+  expect(resolvePrototypeDerived(source, "missing", { env: context })).toBe("");
   expect(
     projectPrototypeDerivedItem(
       { nText: { of: { item: "n" }, format: { number: {} } } },
       { n: 2 },
-      env,
+      context,
     ),
   ).toEqual({ n: 2, nText: "2" });
 });
@@ -67,17 +73,17 @@ test("validates derived reads and gates top-level and repeat derive", () => {
 
 test("invalid numeric inputs and unsupported Intl environments are empty", () => {
   for (const input of [undefined, null, true, NaN, Infinity, -Infinity, {}, []]) {
-    expect(formatPrototypeValue({ number: {} }, input, env)).toBeUndefined();
+    expect(formatPrototypeValue({ number: {} }, input, context)).toBeUndefined();
   }
   expect(
-    formatPrototypeValue({ date: {} }, 0, { ...env, timeZone: "Invalid/Zone" }),
+    formatPrototypeValue({ date: {} }, 0, { ...context, timeZone: "Invalid/Zone" }),
   ).toBeUndefined();
-  expect(formatPrototypeValue({ relative: {} }, 0, { ...env, nowMs: NaN })).toBeUndefined();
+  expect(formatPrototypeValue({ relative: {} }, 0, { ...context, nowMs: NaN })).toBeUndefined();
   expect(
     resolvePrototypeDerived(
       { derive: { x: { of: { data: "/missing" }, format: { number: {} } } } },
       "x",
-      { data: {}, env },
+      { data: {}, env: context },
     ),
   ).toBe("");
 });
@@ -122,7 +128,7 @@ test("repeat derived fields project for any alias and preserve source values", (
       missing: { of: { item: "absent" }, format: { date: {} } },
     },
     item,
-    env,
+    context,
   );
   expect(projected).toEqual({ ...item, price: "$12.00", missing: "" });
   expect(item).toEqual({ amount: 12, raw: "{derived:missing}" });
@@ -141,7 +147,7 @@ test("entry overrides determine the resolved date", () => {
         },
       },
       "d",
-      { env },
+      { env: context },
     ),
   ).toBe("4 Jan 2026");
 });
@@ -167,4 +173,42 @@ test("repeat derived strings can bind emit names and state keys without a device
       }),
     ).success,
   ).toBe(true);
+});
+
+test.each([
+  "2026-01-05T24:00:00Z",
+  "2026-01-05T24:00:00+01:00",
+  "2026-01-05T23:60:00Z",
+  "2026-01-05T23:59:60Z",
+])("rejects out-of-range ISO time components: %s", (input) => {
+  for (const format of [{ date: {} }, { time: {} }, { relative: {} }]) {
+    expect(formatPrototypeValue(format, input, context)).toBeUndefined();
+  }
+});
+
+test("accepts the ISO time component boundaries", () => {
+  expect(formatPrototypeValue({ time: { style: "medium" } }, "2026-01-05T00:00:00Z", context)).toBe(
+    "12:00:00 AM",
+  );
+  expect(formatPrototypeValue({ time: { style: "medium" } }, "2026-01-05T23:59:59Z", context)).toBe(
+    "11:59:59 PM",
+  );
+});
+
+test.each(["es-ES", "pl-PL"])("numeric grouping respects locale minimum digits: %s", (locale) => {
+  const formatting = { ...context, locale };
+  expect(formatPrototypeValue({ number: {} }, 1234, formatting)).toBe("1234");
+  expect(formatPrototypeValue({ number: { grouping: true } }, 1234, formatting)).toBe("1234");
+  expect(formatPrototypeValue({ number: { grouping: false } }, 12345, formatting)).toBe("12345");
+  expect(formatPrototypeValue({ number: {} }, 12345, formatting)).not.toBe("12345");
+  for (const [format, value, options] of [
+    [{ compact: {} }, 1234, { notation: "compact", compactDisplay: "short" }],
+    [{ currency: { code: "EUR" } }, 1234, { style: "currency", currency: "EUR" }],
+    [{ percent: {} }, 12.34, { style: "percent" }],
+  ] as const) {
+    const expected = new Intl.NumberFormat(locale, { ...options, useGrouping: "auto" }).format(
+      value,
+    );
+    expect(formatPrototypeValue(format, value, formatting)).toBe(expected);
+  }
 });

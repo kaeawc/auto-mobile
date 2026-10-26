@@ -14,7 +14,7 @@ internal object PrototypeDerivedRules {
     }
     for ((node, path) in context.nodes) {
       PrototypeBindableFields.first<PrototypeSpecError>(node, path) { value, at, kind ->
-          if (kind != PrototypeBindableKind.TEXT) null
+          if (kind != PrototypeBindableKind.TEXT && kind != PrototypeBindableKind.REQUEST_TEXT) null
           else
             (value as? JsonPrimitive)
               ?.takeIf { it.isString }

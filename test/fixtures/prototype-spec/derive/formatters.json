@@ -1,5 +1,5 @@
 {
-  "note": "Compare after normalizing U+202F and U+00A0 to plain space (CLDR 42 AM/PM spacing varies by ICU version). Known CLDR/engine divergence: en-GB foreign currency symbols (US$ vs $), narrow relative abbreviations/punctuation, zero relative now wording, and non-English locale data; these are structural cases, not verified Android/iOS overrides. Relative thresholds in milliseconds: second=1000, minute=60000, hour=3600000, day=86400000, month=2592000000 (30 days), year=31536000000 (365 days); choose the largest threshold <= abs(diff), truncate toward zero; abs(diff)<1000 uses localized now. No weeks or calendar arithmetic. engines overrides are reserved for measured platform differences.",
+  "note": "Compare after normalizing U+202F and U+00A0 to plain space (CLDR 42 AM/PM spacing varies by ICU version). Known CLDR/engine divergence: en-GB foreign currency symbols (US$ vs $), narrow relative abbreviations/punctuation, zero relative now wording, and non-English locale data; these are structural cases, not verified Android/iOS overrides. Relative thresholds in milliseconds: second=1000, minute=60000, hour=3600000, day=86400000, month=2592000000 (30 days), year=31536000000 (365 days); choose the largest threshold <= abs(diff), truncate toward zero; abs(diff)<1000 uses localized now. No weeks or calendar arithmetic. engines overrides are reserved for measured platform differences. Number grouping true/default respects locale minimum grouping digits; false disables grouping entirely. Compact, currency, and percent also respect locale minimum grouping digits.",
   "environment": {
     "locale": "en-US",
     "timeZone": "UTC",
@@ -2183,6 +2183,53 @@
         "date": {}
       },
       "of": "2026-01-05T12:00:00+25:00",
+      "expected": "",
+      "exact": true
+    },
+    {
+      "name": "es-ES minimum grouping digits",
+      "format": {
+        "number": {}
+      },
+      "of": 1234,
+      "locale": "es-ES",
+      "expected": "1234",
+      "exact": true
+    },
+    {
+      "name": "pl-PL minimum grouping digits",
+      "format": {
+        "number": {}
+      },
+      "of": 1234,
+      "locale": "pl-PL",
+      "expected": "1234",
+      "exact": true
+    },
+    {
+      "name": "invalid hour 24",
+      "format": {
+        "date": {}
+      },
+      "of": "2026-01-05T24:00:00Z",
+      "expected": "",
+      "exact": true
+    },
+    {
+      "name": "invalid minute 60",
+      "format": {
+        "date": {}
+      },
+      "of": "2026-01-05T23:60:00Z",
+      "expected": "",
+      "exact": true
+    },
+    {
+      "name": "invalid leap second",
+      "format": {
+        "date": {}
+      },
+      "of": "2026-01-05T23:59:60Z",
       "expected": "",
       "exact": true
     }

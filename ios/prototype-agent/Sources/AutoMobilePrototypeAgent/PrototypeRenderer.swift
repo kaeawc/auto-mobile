@@ -379,7 +379,12 @@
             case "iconButton":
                 PrototypeIconButtonView(node: node, model: model, style: style)
             case "fab":
-                PrototypeFabView(node: node, model: model, style: style)
+                PrototypeFabView(
+                    node: node,
+                    model: model,
+                    style: style,
+                    label: node.plainText(state: model.state, pager: pagerPosition, derived: derivedContext)
+                )
             case "segmentedButton":
                 PrototypeSegmentedButtonView(node: node, model: model)
             case "topAppBar":
@@ -697,7 +702,7 @@
                     buttonLabel
                 }
             }
-            .accessibilityLabel(node.label ?? "")
+            .accessibilityLabel(node.plainText(state: model.state, pager: pagerPosition, derived: derivedContext))
             // A button claims its label's width before its siblings shrink, so a tight row never cuts
             // "Save" to "Sa..." (#10899); a label wider than the row wraps rather than overflowing,
             // as on Android (#10912).
@@ -712,7 +717,7 @@
 
         /// Wraps onto more lines when the row is narrower than the label, never truncating.
         private var buttonLabel: some View {
-            Text(node.label ?? "")
+            Text(node.plainText(state: model.state, pager: pagerPosition, derived: derivedContext))
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
         }

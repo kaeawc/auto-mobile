@@ -42,6 +42,36 @@ data class PrototypeTooltipSpotlight(
 )
 
 @Serializable
+data class PrototypeIosNamespaceTab(
+  val role: String,
+)
+
+@Serializable
+data class PrototypeIosNamespaceSheet(
+  val sizing: String,
+)
+
+@Serializable
+data class PrototypeIosNamespace(
+  val buttonStyle: String? = null,
+  val tab: PrototypeIosNamespaceTab? = null,
+  val sheet: PrototypeIosNamespaceSheet? = null,
+  val hover: String? = null,
+  val navigationTitle: String? = null,
+)
+
+@Serializable
+data class PrototypeAndroidNamespacePredictiveBack(
+  val style: String,
+)
+
+@Serializable
+data class PrototypeAndroidNamespace(
+  val predictiveBack: PrototypeAndroidNamespacePredictiveBack? = null,
+  val indication: String? = null,
+)
+
+@Serializable
 data class PrototypeOffset(
   val x: Double,
   val y: Double,

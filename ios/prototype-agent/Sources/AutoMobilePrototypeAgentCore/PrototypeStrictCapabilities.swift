@@ -10,6 +10,11 @@ enum PrototypeStrictCapabilities {
             if spec["theme"] != nil { need("theme_modes") }
             if spec["window"]?.objectFields?["chrome"] != nil { need("window_chrome") }
         }
+        for key in ["window", "theme"] {
+            if let block = spec[key]?.objectFields, block["ios"] != nil || block["android"] != nil {
+                need("platform_namespace")
+            }
+        }
         if spec["data"] != nil { need("data_model") }
         if spec["storage"] != nil { need("storage") }
         if let colors = spec["theme"]?.objectFields?["colors"]?.objectFields,
@@ -44,6 +49,7 @@ enum PrototypeStrictCapabilities {
                 "scrollTo": "chat_scroll",
             ]
             if let feature = types[type] { need(feature) }
+            if fields["ios"] != nil || fields["android"] != nil { need("platform_namespace") }
             let navigation = ["stack", "push", "replace"].contains(type)
             if navigation, fields["transition"] != nil { need("stack_transitions") }
             if includeAgentGates, type == "icon",

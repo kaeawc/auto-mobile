@@ -1,0 +1,38 @@
+{
+  "spec": {
+    "id": "namespaces",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "ios": {
+        "sheet": {
+          "sizing": "form"
+        }
+      }
+    },
+    "theme": {
+      "ios": {
+        "navigationTitle": "large"
+      },
+      "android": {
+        "indication": "none"
+      }
+    },
+    "root": {
+      "type": "button",
+      "label": "Save",
+      "ios": {
+        "hover": "float"
+      },
+      "android": {
+        "predictiveBack": {
+          "style": "default"
+        },
+        "indication": "ripple"
+      }
+    }
+  },
+  "expectedPath": "root.ios.hover",
+  "expectedMessage": "Invalid enum value"
+}

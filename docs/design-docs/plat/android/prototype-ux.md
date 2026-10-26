@@ -2691,3 +2691,11 @@ Cross-field errors point to `.maxRuns` when everyMs is absent and to `.id` on th
 startTimer in contract document order. A cancelTimer id with no declaration produces a host-only
 show/patch warning. This asymmetry is deliberate: Kotlin and Swift accept it without a diagnostic
 and cancellation remains a runtime no-op.
+
+## Platform namespaces (#15257)
+
+Prefer portable fields, then `theme.design` when available, and reserve `ios`/`android`
+namespace objects on nodes, window and theme for native semantics. Each field has a
+`why` in the contract. Foreign blocks are ignored and reported in `platformNotes`.
+Own-platform blocks require `prototype_platform_namespace_v1`; current renderers
+ignore both blocks and do not advertise it.

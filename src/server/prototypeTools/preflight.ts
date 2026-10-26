@@ -158,7 +158,7 @@ export async function specCapabilityRefusal(
   signal: AbortSignal | undefined,
   iosMinimumOs: Readonly<Record<string, number>> = PROTOTYPE_IOS_MINIMUM_OS,
 ): Promise<PrototypeResult | undefined> {
-  for (const gate of prototypeRequiredCapabilities(spec)) {
+  for (const gate of prototypeRequiredCapabilities(spec, target.android ? "android" : "ios")) {
     const supported = target.android
       ? await target.android.supportsCommand(gate.capability)
       : target.ios?.supportsCapability(gate.capability) === true;

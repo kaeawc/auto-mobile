@@ -1,6 +1,7 @@
 export { PROTOTYPE_COLOR_ROLES } from "./prototypePresentationSchemas";
 import { themeSchema } from "./prototypeThemeSchema";
 import { buildTooltipDrawerSchemas, tooltipAnchorIssue } from "./prototypeTooltipDrawerSchema";
+import { prototypePlatformNamespaceShape } from "./prototypePlatformNamespaceSchema";
 import * as timers from "./prototypeTimerSchema";
 import { stackScreenActionSchema, stackTransitionSchema } from "./prototypeStackTransitions";
 import { createSwipeActionsShape } from "./prototypeSwipeActionsSchema";
@@ -172,6 +173,7 @@ const checksShape = {
   validateOn: z.enum(["change", "blur", "submit"]).optional(),
 };
 export const commonNodeShape = {
+  ...prototypePlatformNamespaceShape,
   span: z.number().finite().int().min(1).optional(),
   id: z.string().min(1).optional(),
   testTag: z.string().min(1).optional(),
@@ -807,6 +809,7 @@ export const prototypeNodeSchema: z.ZodType<PrototypeNode, z.ZodTypeDef, unknown
   });
 const windowSchema = z
   .object({
+    ...prototypePlatformNamespaceShape,
     placement: placementSchema,
     chrome: z
       .enum(["none", "bar"])

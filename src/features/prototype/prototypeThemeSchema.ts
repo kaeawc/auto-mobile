@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { prototypePlatformNamespaceShape } from "./prototypePlatformNamespaceSchema";
 import { hexColorSchema, PROTOTYPE_COLOR_ROLES } from "./prototypePresentationSchemas";
 
 /**
@@ -38,6 +39,7 @@ const themeShapesSchema = z
   .refine((value) => Object.keys(value).length > 0);
 export const themeSchema = z
   .object({
+    ...prototypePlatformNamespaceShape,
     mode: z.enum(["light", "dark", "system"]).optional(),
     colors: themeColorsSchema.optional(),
     typography: themeTypographySchema.optional(),

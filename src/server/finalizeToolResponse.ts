@@ -108,9 +108,7 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
     sanitizedPayload,
     envelopeView.textPart ? serialization.text(sanitizedPayload) : undefined,
   );
-  if (!ctx.internal) {
-    appendArtifactResourceLinks(envelopeView.envelope, sanitizedPayload);
-  }
+  appendArtifactResourceLinks(envelopeView.envelope, sanitizedPayload, ctx.internal === true);
   commitDeliveredActionMetadata(ctx, payload, sanitizedPayload);
   commitDeliveredBaseline(ctx, state.pendingBaselineUpdate, renderedDisplay);
 

@@ -20,14 +20,22 @@ interface UiNode {
 export function collectUiNodes(root: unknown): UiNode[] {
   const nodes: UiNode[] = [];
   const visit = (value: unknown): void => {
-    if (value === null || typeof value !== "object") return;
+    if (value === null || typeof value !== "object") {
+      return;
+    }
     const record = value as Record<string, unknown>;
     const attrs = record.$ as Record<string, string> | undefined;
     const label = attrs?.text || attrs?.["content-desc"];
-    if (attrs && label) nodes.push({ text: label, bounds: attrs.bounds ?? "" });
+    if (attrs && label) {
+      nodes.push({ text: label, bounds: attrs.bounds ?? "" });
+    }
     const children = record.node;
-    if (Array.isArray(children)) children.forEach(visit);
-    if (record.hierarchy) visit(record.hierarchy);
+    if (Array.isArray(children)) {
+      children.forEach(visit);
+    }
+    if (record.hierarchy) {
+      visit(record.hierarchy);
+    }
   };
   visit(root);
   return nodes;
@@ -35,7 +43,9 @@ export function collectUiNodes(root: unknown): UiNode[] {
 
 export function boundsCenter(bounds: string): { x: number; y: number } | undefined {
   const match = /^\[(\d+),(\d+)\]\[(\d+),(\d+)\]$/.exec(bounds);
-  if (!match) return undefined;
+  if (!match) {
+    return undefined;
+  }
   const [left, top, right, bottom] = match.slice(1).map(Number) as [number, number, number, number];
   return { x: Math.round((left + right) / 2), y: Math.round((top + bottom) / 2) };
 }
@@ -70,7 +80,9 @@ class AndroidScreens implements ScreenDriver {
   async tapText(text: string): Promise<boolean> {
     const node = (await this.nodes()).find((candidate) => candidate.text === text);
     const center = node ? boundsCenter(node.bounds) : undefined;
-    if (!center) return false;
+    if (!center) {
+      return false;
+    }
     await this.adb(["shell", "input", "tap", String(center.x), String(center.y)]);
     return true;
   }

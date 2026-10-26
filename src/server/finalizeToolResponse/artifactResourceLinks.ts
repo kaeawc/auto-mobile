@@ -45,8 +45,9 @@ export function artifactResourceLinks(payload: unknown): ResourceLinkBlock[] {
 export function appendArtifactResourceLinks(
   envelope: { content?: Array<Record<string, unknown>> },
   payload: unknown,
+  internal: boolean,
 ): void {
-  if (!Array.isArray(envelope.content)) {
+  if (internal || !Array.isArray(envelope.content)) {
     return;
   }
   const present = new Set(

@@ -232,7 +232,7 @@ Bundle limits (shared TS/Kotlin/Swift transport contract):
 - Each image is at most `MAX_PROTOTYPE_ASSET_BYTES = 4,194,304` bytes; each font is at most
   `MAX_PROTOTYPE_FONT_ASSET_BYTES = 2,097,152` bytes, from the asset contract.
 - `BUNDLE_MAX_EXPANDED_BYTES = MAX_PROTOTYPE_ASSET_TOTAL_BYTES + BUNDLE_MAX_SPEC_BYTES +
-  BUNDLE_MAX_MANIFEST_BYTES = 17,891,328`; `BUNDLE_MAX_COMPRESSED_BYTES` is the same value and
+BUNDLE_MAX_MANIFEST_BYTES = 17,891,328`; `BUNDLE_MAX_COMPRESSED_BYTES` is the same value and
   caps the entire archive file, including headers.
 - `BUNDLE_MAX_RATIO = 100`: actual total inflated bytes / total compressed entry data bytes;
   the known compressed-data total supplies a hard output budget during inflation. Header sizes
@@ -408,6 +408,52 @@ listing):
 - Android: a signed APK as a release asset next to CtrlProxy, with a pinned checksum.
 - iOS: dev-signed builds installed on the owner's iPhones (an Apple Developer team is configured).
   The simulator template remains available.
+
+### 8.1 Play-ready Android artifact (#14146)
+
+The Android module builds a Play-uploadable AAB next to the APK. The Gradle side is the
+`automobile.protoviewer-play-release` convention in `android/build-logic`; it replaces the shared
+`automobile.android-app-signing` for ProtoViewer, which falls back open to the debug key.
+
+**Dedicated keystore.** ProtoViewer has its own signing key, never CtrlProxy's `RELEASE_KEYSTORE_*`.
+Inputs are read from the environment (CI) or `gradle.properties` (local):
+
+| Input                                 | Purpose                                                   | CI secret                       |
+| ------------------------------------- | --------------------------------------------------------- | ------------------------------- |
+| `PROTOVIEWER_KEYSTORE_PATH`           | keystore file (relative paths resolve against `android/`) | `PROTOVIEWER_KEYSTORE_BASE64`   |
+| `PROTOVIEWER_KEYSTORE_PASSWORD`       | store password                                            | `PROTOVIEWER_KEYSTORE_PASSWORD` |
+| `PROTOVIEWER_KEY_ALIAS`               | key alias                                                 | `PROTOVIEWER_KEY_ALIAS`         |
+| `PROTOVIEWER_KEY_PASSWORD`            | key password                                              | `PROTOVIEWER_KEY_PASSWORD`      |
+| `PROTOVIEWER_RELEASE_VERSION`         | plain `MAJOR.MINOR.PATCH` of the release tag              | (workflow input)                |
+| `PROTOVIEWER_REQUIRE_RELEASE_SIGNING` | `true` in release workflows: fail closed                  | (workflow env)                  |
+
+The workflow decodes `PROTOVIEWER_KEYSTORE_BASE64` to a file and exports its path as
+`PROTOVIEWER_KEYSTORE_PATH`. Whether this key is the Play upload key or the app-signing key is
+decided at Play App Signing enrolment; record it next to the key.
+
+**Fail closed.** With `PROTOVIEWER_REQUIRE_RELEASE_SIGNING=true`, `verifyProtoViewerReleaseInputs`
+(a `preReleaseBuild` dependency, so it fails before compilation) rejects a missing signing input, a
+missing keystore file, a missing `PROTOVIEWER_RELEASE_VERSION`, or a `-SNAPSHOT`/suffixed version.
+Without it (local and pull-request builds) an incomplete keystore falls back to the debug key and
+the version code stays `1`. Debug builds always use the debug key, never the release key.
+
+**versionCode.** `major * 1_000_000 + minor * 1_000 + patch` of `PROTOVIEWER_RELEASE_VERSION`
+(`ProtoViewerVersioning`). It is strictly monotonic in version order, bounded under Play's
+2,100,000,000 cap (major <= 2099, minor and patch <= 999), and `0.0.89` gives `89`. The release
+`versionName` is the same plain version, so a published build never carries `-SNAPSHOT`.
+
+**AAB, R8 and mapping.** `:protoviewer:bundleRelease` writes
+`build/outputs/bundle/release/protoviewer-release.aab` and is finalized by
+`verifyProtoViewerReleaseAab` (required entries, jar signature present and not the Android debug
+certificate when signing is required, R8 mapping present) and, when R8 is on,
+`archiveProtoViewerReleaseMapping` (`build/outputs/release-archive/mapping-<versionCode>.txt`, to
+be kept as a release asset for as long as that version is supported). R8 is on for release (disable
+locally with `-Pautomobile.protoviewer.minifyRelease=false`); `verifyReleaseR8KeptClasses` asserts
+the manifest components, the saved-prototype `@Serializable` contract and the reflectively resolved
+icon set survive. Unused `:protocol` wire models are shrunk away.
+
+Not yet wired: the release workflow step that exports these inputs and uploads the AAB and mapping,
+`lintRelease` in CI, and the `bundletool build-apks` install smoke test on a device.
 
 ## 9. Phased plan
 

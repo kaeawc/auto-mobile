@@ -1049,7 +1049,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     ViewHierarchyExtractor(
       recompositionStore,
       workStats,
-      // Read once when this service instance starts, not on each hierarchy capture.
+      // Read once when this service instance starts, not on each hierarchy capture. On from API 30;
+      // the debug property overrides it (#13956).
       pruneBaselineWrappers = readBaselineWrapperPruningEnabled(),
       prototypeHiddenReason = { displayId, captured ->
         if (::prototypeController.isInitialized)

@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import { ActionableError } from "../../models/ActionableError";
 import type { IosSimulatorCreator } from "../../devices/deviceProvisioning";
 import type { SimulatorCreator } from "../../devices/SimulatorCreator";
@@ -25,6 +26,10 @@ import { CommandXcodeVersionReader } from "./XcodeVersionReader";
 import { SimulatorTemplateBuilder } from "./SimulatorTemplateBuilder";
 import { FleetSettleDetector } from "./SettleDetector";
 import { SimulatorTemplateCleanup } from "./SimulatorTemplateCleanup";
+import { SimulatorCloneRelocator } from "./SimulatorCloneRelocator";
+import { NodeCloneRelocationFileSystem } from "./NodeCloneRelocationFileSystem";
+import { BunSqliteWalCheckpointer } from "./BunSqliteWalCheckpointer";
+import { resolveDeviceSetRoot } from "../../utils/ios-cmdline-tools/SimulatorTccSqliteClient";
 const dependencies = new WeakMap<SimCtlClient, TemplateCreationDependencies>();
 const defaultXcode = new CommandXcodeVersionReader();
 let defaultClient: SimCtlClient | undefined;
@@ -74,6 +79,11 @@ export function getDefaultTemplateDependencies(
     builder: {
       build: (key, signal) => runWithAbortSignal(signal, () => builder.build(key, signal)),
     },
+    relocator: new SimulatorCloneRelocator({
+      fs: new NodeCloneRelocationFileSystem(),
+      checkpointer: new BunSqliteWalCheckpointer(),
+      deviceSetRoot: () => resolveDeviceSetRoot(homedir()),
+    }),
   };
   dependencies.set(simctl, deps);
   return deps;

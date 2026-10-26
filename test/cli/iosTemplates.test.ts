@@ -135,6 +135,7 @@ test("unknown maintenance device type fails before writing any manifest", async 
     profile: () => "none" as const,
     xcode: { readBuild: async () => "X1" },
     lock: { acquire: async () => undefined, acquireName: async () => undefined },
+    relocator: fake.relocator,
     builder: {
       build: async () => {
         throw new Error("unexpected build");

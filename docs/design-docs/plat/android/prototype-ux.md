@@ -1783,6 +1783,14 @@ fallback) a translucent host row stays above clipped authored content, independe
 opacity, and its height is excluded from the authored viewport. Both fullscreen modes keep window alpha at 1
 and fade only authored content and its scrim.
 
+The dismiss bar's button and the persistent (`persistence: "device"`) sheet and floating Close control are one
+circular close chip (#15119), the twin of the iOS chip: a 32 dp opaque `prototypeCloseColors` fill with a
+Close glyph, no text label, a 48 dp hit target, and the shared host id `automobile-prototype-dismiss`
+(`testTag`, exposed as the resource id) with content description `Dismiss AutoMobile prototype`. The persistent
+chip sits top-end inside the system-bar and cutout insets; the bar keeps its inset-aware row. The brief
+chromeless escape pill keeps its text. Session-scoped sheets and floating windows still draw no host control
+(they end through the agent's `dismiss`, a replacing show, the TTL or a disconnect).
+
 A `persistence: "device"` prototype outlives its host session: it is not dismissed when the last client
 disconnects (including a show queued after that edge), has no idle TTL, and keeps its assets until
 dismissal. Because nobody may be connected to remove it, sheet and floating windows carry an opaque "Close"

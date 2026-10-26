@@ -49,6 +49,7 @@ enum PrototypeAgentProtocol {
         searchBarCapability,
         richTextCapability,
         linkifyCapability,
+        "prototype_format_v1",
         menusCapability,
         stackCapability,
         emitContextCapability,

@@ -7,6 +7,7 @@ struct PrototypeStrictRepeats {
         let alias: String
         let items: [[String: JSONValue]]
         let pathBound: Bool
+        var derived: Set<String> = []
     }
 
     var scopes: [Scope] = []
@@ -61,7 +62,14 @@ struct PrototypeStrictRepeats {
                 ) }
                 items = resolved.map { PrototypeDataValues.project($0.objectFields ?? [:]) }
             } else { items = PrototypeStrictBindings.array(source) }
-            let created = Scope(path: path, alias: alias, items: items.compactMap(\.objectFields), pathBound: pathBound)
+            let derived = Set(spec["derive"]?.objectFields?.keys ?? [:].keys)
+            let projected = items.compactMap(\.objectFields).map { item in
+                item
+                    .merging(Dictionary(uniqueKeysWithValues: derived.map { ($0, JSONValue.string("")) })) { old, _ in
+                        old
+                    }
+            }
+            let created = Scope(path: path, alias: alias, items: projected, pathBound: pathBound, derived: derived)
             own = created
             scopes.append(created)
         }
@@ -70,7 +78,7 @@ struct PrototypeStrictRepeats {
         {
             try templates(child.value, path: child.path, scope: own ?? scope)
         }
-        if let own, let key = node["repeat"]?.objectFields?["key"]?.stringValue {
+        if let own, let key = node["repeat"]?.objectFields?["key"]?.stringValue, !own.derived.contains(key) {
             var seen = Set<[UInt16]>()
             for item in own.items {
                 guard let value = item[key], seen.insert(Array(value.displayString.utf16)).inserted else {
@@ -116,7 +124,12 @@ struct PrototypeStrictRepeats {
                             throw PrototypeContractValidator.invalid(at, "Unknown repeat field")
                         }
                     }
-                    if keyField {
+                    if keyField,
+                       !segments
+                       .contains(where: {
+                           if case let .field(name) = $0 { return scope.derived.contains(name) }; return false
+                       })
+                    {
                         for (index, item) in scope.items.enumerated() {
                             let bound = PrototypeRepeatInstance(alias: scope.alias, item: item, index: index)
                                 .interpolate(text)
@@ -189,6 +202,12 @@ struct PrototypeStrictRepeats {
             else { return [entry] }
             let keys = PrototypeStrictBindings.boundKeys(entry.value) + [entry.value["key"]?.stringValue]
                 .compactMap { $0 }
+            if keys.contains(where: { key in
+                PrototypeRepeat.segments(key, alias: scope.alias).contains {
+                    if case let .field(name) = $0 { return scope.derived.contains(name) }
+                    return false
+                }
+            }) { return [] }
             let operand = entry.value["value"]?.stringValue ?? ""
             let templated = PrototypeRepeat.segments(operand, alias: scope.alias)
                 .contains { if case .literal = $0 { return false }; return true }

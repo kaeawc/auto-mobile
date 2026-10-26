@@ -7018,6 +7018,32 @@
         "hasDefault": true
       }
     ],
+    "dev.jasonpearson.automobile.protocol.PrototypeDerivedEntry": [
+      {
+        "name": "of",
+        "type": "json",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "format",
+        "type": "json",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "locale",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "timeZone",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
     "dev.jasonpearson.automobile.protocol.PrototypeDialogButton": [
       {
         "name": "label",
@@ -7318,6 +7344,12 @@
       {
         "name": "data",
         "type": "json",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "derive",
+        "type": "map",
         "nullable": true,
         "hasDefault": true
       },

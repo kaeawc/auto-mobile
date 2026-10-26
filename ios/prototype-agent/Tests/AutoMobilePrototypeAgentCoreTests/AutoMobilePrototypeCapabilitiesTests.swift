@@ -19,7 +19,7 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
         // motion v2 (#14208) is Android-only until the SwiftUI side lands (#14684), and so is
         // transition choreography (#15247).
         let exclusions: Set<String> = [
-            "prototype_format_v1", "prototype_platform_v1", "prototype_platform_test_v1",
+            "prototype_platform_v1", "prototype_platform_test_v1",
             "prototype_chat_scroll_v1", "prototype_motion_v2", "prototype_choreography_v1",
         ]
         XCTAssertTrue(exclusions.isSubset(of: required), "Exclusions must name current spec gates")

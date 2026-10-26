@@ -11,6 +11,7 @@ enum PrototypeStrictCapabilities {
             if spec["window"]?.objectFields?["chrome"] != nil { need("window_chrome") }
         }
         if spec["data"] != nil { need("data_model") }
+        if spec["derive"] != nil { need("format") }
         if spec["storage"] != nil { need("storage") }
         if let colors = spec["theme"]?.objectFields?["colors"]?.objectFields,
            colors["light"] != nil || colors["dark"] != nil { need("theme_modes") }
@@ -81,6 +82,7 @@ enum PrototypeStrictCapabilities {
             for (key, child) in fields {
                 if key == "payload" || (key == "value" && !["setData", "appendData"].contains(type)) { continue }
                 if key == "repeat" {
+                    if child.objectFields?["derive"] != nil { need("format") }
                     if let repeatSpec = child.objectFields,
                        repeatSpec["items"]?
                        .objectFields != nil || repeatSpec["key"] != nil { need("data_model") }; continue

@@ -126,6 +126,7 @@ internal object PrototypeSpecInput {
     val error =
       walk(value, definitions.getValue("spec").jsonObject, "", context, 0)
         ?: gridSpanErrors(context)
+        ?: PrototypeDerivedRules.error(value, context)
         ?: PrototypeRepeatValidator.validate(value, repeats)
         ?: PrototypeStorageValidation.error(value.jsonObject)
         ?: dataActionErrors(context, value)
@@ -170,6 +171,8 @@ internal object PrototypeSpecInput {
           },
         )
       }
+      "map",
+      "record",
       "screenMap" ->
         JsonObject(
           (value as JsonObject).mapValues { (_, child) ->

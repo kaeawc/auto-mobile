@@ -87,6 +87,7 @@ struct PrototypeSpec: Decodable {
     let window: WindowSpec
     let state: [String: JSONValue]?
     let data: [String: JSONValue]?
+    let derive: [String: PrototypeDerivedEntry]?
     let theme: PrototypeTheme?
     /// `none` keeps every visibility and page change instant; `standard` (the default) animates them
     /// unless the system reduces motion (#10442). See `PrototypeMotion`.
@@ -100,7 +101,7 @@ struct PrototypeSpec: Decodable {
     let authoredRoot: JSONValue
 
     private enum CodingKeys: String, CodingKey {
-        case id, window, state, data, theme, motion, root, storage, requires, platform
+        case id, window, state, data, theme, motion, root, storage, requires, platform, derive
     }
 
     // Keep the root prefix in coding paths when decoding the resolved/expanded tree.
@@ -122,6 +123,7 @@ struct PrototypeSpec: Decodable {
             data = nil
         }
         if let data { try PrototypeLimits.guardData(data) }
+        derive = try container.decodeIfPresent([String: PrototypeDerivedEntry].self, forKey: .derive)
         id = try container.decode(String.self, forKey: .id)
         motion = try container.decodeIfPresent(String.self, forKey: .motion)
         // The host validator owns the strict shape; a malformed block means "no storage" here.
@@ -138,7 +140,7 @@ struct PrototypeSpec: Decodable {
             root: raw,
             state: menuState ?? [:]
         )
-        root = try Self.buildRoot(raw, data: data, menuState: menuState ?? [:])
+        root = try Self.buildRoot(raw, data: data, menuState: menuState ?? [:], derive: derive)
         state = try container.decodeIfPresent([String: JSONValue].self, forKey: .state)
         // Android's `PrototypeScalarSerializer` and the host schema accept only string, number and
         // boolean state values, so a null, array or object fails the show everywhere.
@@ -161,10 +163,13 @@ struct PrototypeSpec: Decodable {
     /// Everything between the authored root and the drawn one, in the order the host reports
     /// errors. It depends on `data` and the initial state only, so a data write reruns it.
     private static func buildRoot(
-        _ raw: JSONValue, data: [String: JSONValue]?, menuState: [String: JSONValue]
+        _ raw: JSONValue, data: [String: JSONValue]?, menuState: [String: JSONValue],
+        derive: [String: PrototypeDerivedEntry]? = nil
     )
         throws -> PrototypeNode
     {
+        let rawDerive = try derive.map { try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode($0)) }
+        try PrototypeDerivedValidator.validate(derive: rawDerive, root: raw, data: data)
         try PrototypeSizeBounds.validate(.object(["root": raw]))
         try PrototypeLimits.guardAuthoredTree(raw)
         try PrototypeRequestValidator.validate(raw, state: menuState)
@@ -172,10 +177,15 @@ struct PrototypeSpec: Decodable {
         try PrototypeMenus.validateAuthoredText(raw)
         try PrototypeLoadingStates.validate(raw)
         try PrototypeRepeat.validateEmitContexts(raw, data: data)
-        try PrototypeLimits.guardSubstitutedText(raw, data: data)
+        let formatContext = PrototypeDerivedContext(entries: derive ?? [:], data: data)
+        try PrototypeLimits.guardSubstitutedText(raw, data: data, derived: formatContext, state: menuState)
         let resolved = PrototypeDataResolver.resolveRoot(raw, data: data)
         try PrototypeLimits.guardTree(resolved)
-        let expanded = PrototypeRepeat.expand(resolved)
+        let expanded = PrototypeRepeat.expand(
+            resolved,
+            formatter: formatContext.formatter,
+            environment: formatContext.environment
+        )
         try PrototypePagerOptions.validate(expanded)
         try PrototypeSwipe.validate(expanded)
         try PrototypeCarousel.validate(expanded)
@@ -197,6 +207,7 @@ struct PrototypeSpec: Decodable {
         window = spec.window
         self.state = state ?? spec.state
         self.data = data
+        derive = spec.derive
         theme = spec.theme
         motion = spec.motion
         storage = spec.storage
@@ -213,7 +224,7 @@ struct PrototypeSpec: Decodable {
         throws -> PrototypeSpec
     {
         if let data { try PrototypeLimits.guardData(data) }
-        let rebuilt = try Self.buildRoot(raw, data: data, menuState: state ?? [:])
+        let rebuilt = try Self.buildRoot(raw, data: data, menuState: state ?? [:], derive: derive)
         try PrototypeStacks.validate(root: rebuilt)
         try PrototypeThemeModes.validate(placement: window.placement, root: rebuilt)
         return PrototypeSpec(replacing: self, data: data, root: rebuilt, authoredRoot: raw, state: state)
@@ -223,7 +234,7 @@ struct PrototypeSpec: Decodable {
     /// bindings, `repeat` rows and data conditions follow the write. Throws when the changed data
     /// breaks a limit the show enforces (for example more repeat cells than the tree allows).
     func replacingData(_ data: [String: JSONValue]) throws -> PrototypeSpec {
-        let rebuilt = try Self.buildRoot(authoredRoot, data: data, menuState: state ?? [:])
+        let rebuilt = try Self.buildRoot(authoredRoot, data: data, menuState: state ?? [:], derive: derive)
         try PrototypeStacks.validate(root: rebuilt)
         try PrototypeThemeModes.validate(placement: window.placement, root: rebuilt)
         return PrototypeSpec(replacing: self, data: data, root: rebuilt)

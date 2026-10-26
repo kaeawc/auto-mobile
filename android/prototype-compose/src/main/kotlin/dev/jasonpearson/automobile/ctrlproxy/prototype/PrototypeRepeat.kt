@@ -20,6 +20,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeColumnNode
 import dev.jasonpearson.automobile.protocol.PrototypeCondition
 import dev.jasonpearson.automobile.protocol.PrototypeDatePickerNode
 import dev.jasonpearson.automobile.protocol.PrototypeDecrementAction
+import dev.jasonpearson.automobile.protocol.PrototypeDerivedRows
 import dev.jasonpearson.automobile.protocol.PrototypeDialogButton
 import dev.jasonpearson.automobile.protocol.PrototypeDialogNode
 import dev.jasonpearson.automobile.protocol.PrototypeDividerNode
@@ -107,6 +108,7 @@ internal fun prototypeChildEntries(
   node: PrototypeNode,
   path: String,
   bind: Boolean = true,
+  formatter: PrototypeValueFormatter = AndroidPrototypeValueFormatter(),
 ): List<PrototypeChildEntry> {
   if (node is PrototypeStackNode)
     return node.screens.map { (name, child) ->
@@ -124,10 +126,11 @@ internal fun prototypeChildEntries(
       PrototypeChildEntry(child, if (single) "$path.child" else "$path.children[$index]")
     }
   }
-  return repeat.items.flatMapIndexed { itemIndex, item ->
-    val instance = RepeatInstance(repeat.`as`, item, itemIndex)
+  val rows = projectedRepeatRows(node, repeat, path, bind, formatter)
+  return rows.flatMapIndexed { itemIndex, projected ->
+    val instance = RepeatInstance(repeat.`as`, projected, itemIndex)
     val identity =
-      if (bind) repeat.key?.let { item[it]?.renderedText() } ?: itemIndex.toString()
+      if (bind) repeat.key?.let { projected[it]?.renderedText() } ?: itemIndex.toString()
       else itemIndex.toString()
     children.mapIndexed { index, child ->
       PrototypeChildEntry(
@@ -136,6 +139,34 @@ internal fun prototypeChildEntries(
       )
     }
   }
+}
+
+private fun projectedRepeatRows(
+  node: PrototypeNode,
+  repeat: PrototypeRepeat,
+  path: String,
+  bind: Boolean,
+  formatter: PrototypeValueFormatter,
+): List<Map<String, PrototypeScalar>> {
+  if (!bind || repeat.derive.isNullOrEmpty()) return repeat.items
+  val derive = repeat.derive.orEmpty()
+  // Relative strings are snapshots when this list is built, refreshed when its source changes.
+  val rows =
+    repeat.items.map { item ->
+      item +
+        derive.mapValues { (_, entry) ->
+          val input =
+            if ("value" in entry.of) entry.of["value"]
+            else
+              item[entry.of.getValue("item").jsonPrimitive.content]?.let(
+                EmitContextResolver::scalar,
+              )
+          PrototypeScalar.Text(formatter.format(entry, input))
+        }
+    }
+  val error = PrototypeDerivedRows.validate(node, rows)
+  require(error == null) { "$path${error?.path?.removePrefix("root")}: ${error?.message}" }
+  return rows
 }
 
 private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {

@@ -547,6 +547,7 @@ internal object PrototypeRepeatValidator {
     val alias: String,
     val items: List<JsonObject>,
     val pathBound: Boolean = false,
+    val derivedNames: Set<String> = emptySet(),
   )
 
   fun validate(
@@ -586,6 +587,13 @@ internal object PrototypeRepeatValidator {
     path: String,
   ): List<Pair<JsonObject, Int?>> {
     val scope = scopes.firstOrNull { path.startsWith("${it.path}.children[") }
+    if (
+      scope != null &&
+        checkedKeys(value).any { key ->
+          PrototypeRepeatTemplate.fieldReferences(key, scope.alias).any { it in scope.derivedNames }
+        }
+    )
+      return emptyList()
     if (scope == null || checkedKeys(value).none { hasPlaceholder(it, scope.alias) }) {
       return listOf(value to null)
     }

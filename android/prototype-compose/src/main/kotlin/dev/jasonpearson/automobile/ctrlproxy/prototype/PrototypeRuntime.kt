@@ -164,7 +164,8 @@ class PrototypeRuntime(
     PrototypeSpecValidator.prepareStateWrites(it, runtimeJson)
   }
 
-  private val renderMapper = PrototypeRenderMapper()
+  private val renderMapper =
+    PrototypeRenderMapper(AndroidPrototypeValueFormatter(clock = PrototypeClock(clock)))
 
   @InternalAutoMobilePrototypeApi
   fun renderModel(snapshot: PrototypeRuntimeSnapshot = current): PrototypeRenderModel =
@@ -292,7 +293,7 @@ class PrototypeRuntime(
     // runtime's resolve cache, cached model or renderMappingPasses before the snapshot is
     // committed.
     try {
-      PrototypeRenderMapper()
+      PrototypeRenderMapper(AndroidPrototypeValueFormatter(clock = PrototypeClock(clock)))
         .map(next.spec, next.pages, stacks = next.stacks, shownErrors = next.shownErrors)
     } catch (error: IllegalArgumentException) {
       return PatchResult.Rejected(error.message ?: "Invalid prototype patch", before.revision)
@@ -811,7 +812,7 @@ class PrototypeRuntime(
     // Rows added by the write must still fit the renderer's limits; a disposable mapper keeps a
     // rejected write from touching the runtime's own caches, as for a patch.
     return try {
-      PrototypeRenderMapper()
+      PrototypeRenderMapper(AndroidPrototypeValueFormatter(clock = PrototypeClock(clock)))
         .map(spec, before.pages, stacks = before.stacks, shownErrors = before.shownErrors)
       StagedWrite.Accepted(spec)
     } catch (error: IllegalArgumentException) {
@@ -1192,7 +1193,10 @@ class PrototypeRuntime(
   }
 
   private fun checkedNodes(): List<PrototypeNode> =
-    checkedPrototypeNodes(PrototypeDataResolver.resolve(current.spec).root)
+    checkedPrototypeNodes(
+      PrototypeDataResolver.resolve(current.spec).root,
+      AndroidPrototypeValueFormatter(clock = PrototypeClock(clock)),
+    )
 
   private fun validity(): Map<String, Boolean> = prototypeValidity(checkedNodes(), current.state)
 

@@ -9,6 +9,7 @@ enum PrototypeBundleCapabilities {
         var names = Set<String>()
         func need(_ feature: String) { names.insert("prototype_\(feature)_v1") }
         if spec["data"] != nil { need("data_model") }
+        if spec["derive"] != nil { need("format") }
         if spec["theme"] != nil { need("theme_modes") }
         if spec["storage"] != nil { need("storage") }
         if spec["platform"] != nil || spec["requires"] != nil { need("platform") }
@@ -41,6 +42,7 @@ enum PrototypeBundleCapabilities {
             if let feature = featureTypes[type] { need(feature) }
             if let repeated = node["repeat"]?.objectFields,
                repeated["items"]?.objectFields != nil || repeated["key"] != nil { need("data_model") }
+            if node["repeat"]?.objectFields?["derive"] != nil { need("format") }
             if node["span"] != nil { need("flow_grid") }
             if node["onLongPress"] != nil || node["onDoubleTap"] != nil { need("gestures") }
             if node["swipeActions"] != nil { need("swipe_actions") }

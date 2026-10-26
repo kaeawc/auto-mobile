@@ -136,7 +136,10 @@
       "of": 1200,
       "locale": "en-US",
       "expected": "1.2 thousand",
-      "exact": true
+      "exact": true,
+      "engines": {
+        "ios": "1.2K"
+      }
     },
     {
       "name": "en-US compact long 1500000",
@@ -148,7 +151,10 @@
       "of": 1500000,
       "locale": "en-US",
       "expected": "1.5 million",
-      "exact": true
+      "exact": true,
+      "engines": {
+        "ios": "1.5M"
+      }
     },
     {
       "name": "en-US currency USD",
@@ -346,7 +352,10 @@
       "locale": "en-US",
       "timeZone": "UTC",
       "expected": "6:34:56 PM UTC",
-      "exact": true
+      "exact": true,
+      "engines": {
+        "ios": "6:34:56 PM GMT"
+      }
     },
     {
       "name": "en-US time long America/New_York",
@@ -943,7 +952,10 @@
       "of": 1200,
       "locale": "en-GB",
       "expected": "1.2k",
-      "exact": true
+      "exact": true,
+      "engines": {
+        "android": "1.2K"
+      }
     },
     {
       "name": "en-GB compact short 1500000",
@@ -955,7 +967,10 @@
       "of": 1500000,
       "locale": "en-GB",
       "expected": "1.5m",
-      "exact": true
+      "exact": true,
+      "engines": {
+        "android": "1.5M"
+      }
     },
     {
       "name": "en-GB compact long 999",
@@ -979,7 +994,10 @@
       "of": 1200,
       "locale": "en-GB",
       "expected": "1.2 thousand",
-      "exact": true
+      "exact": true,
+      "engines": {
+        "ios": "1.2k"
+      }
     },
     {
       "name": "en-GB compact long 1500000",
@@ -991,7 +1009,10 @@
       "of": 1500000,
       "locale": "en-GB",
       "expected": "1.5 million",
-      "exact": true
+      "exact": true,
+      "engines": {
+        "ios": "1.5m"
+      }
     },
     {
       "name": "en-GB currency USD",
@@ -1192,7 +1213,10 @@
       "locale": "en-GB",
       "timeZone": "UTC",
       "expected": "18:34:56 UTC",
-      "exact": true
+      "exact": true,
+      "engines": {
+        "ios": "18:34:56 GMT"
+      }
     },
     {
       "name": "en-GB time long America/New_York",

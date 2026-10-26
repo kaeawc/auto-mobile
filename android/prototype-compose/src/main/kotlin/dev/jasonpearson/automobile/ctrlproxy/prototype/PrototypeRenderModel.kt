@@ -16,6 +16,7 @@ import kotlin.math.cos
 import kotlin.math.sin
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonPrimitive
 
 /** Immutable, device-free inputs for the Compose adapter. All numeric sizes remain dp. */
 @Immutable
@@ -146,6 +147,7 @@ fun mapPrototypeSpec(
             prototypeValidity(checkedPrototypeNodes(resolved.root), resolved.state.orEmpty()),
           shownErrors = shownErrors,
           data = resolved.data,
+          derive = resolved.derive.orEmpty(),
         )
         .map(resolved.root, "root"),
     )
@@ -173,7 +175,26 @@ internal class PrototypeNodeMapping(
   private val validity: Map<String, Boolean> = emptyMap(),
   private val shownErrors: Set<String> = emptySet(),
   private val data: JsonObject? = null,
+  private val derive: Map<String, PrototypeDerivedEntry> = emptyMap(),
+  private val formatter: PrototypeValueFormatter = AndroidPrototypeValueFormatter(),
 ) {
+  private val derivedState by lazy {
+    derive
+      .mapKeys { "derived:${it.key}" }
+      .mapValues { (_, entry) ->
+        val input =
+          when {
+            "value" in entry.of -> entry.of["value"]
+            "data" in entry.of ->
+              PrototypeDataPointer.resolve(data, entry.of.getValue("data").jsonPrimitive.content)
+            else ->
+              state[entry.of.getValue("state").jsonPrimitive.content]?.let(
+                EmitContextResolver::scalar,
+              )
+          }
+        PrototypeScalar.Text(formatter.format(entry, input))
+      }
+  }
   val nodes = mutableMapOf<String, PrototypeRenderNode>()
 
   fun map(
@@ -183,15 +204,17 @@ internal class PrototypeNodeMapping(
     staggerDelayMs: Int = 0,
   ): PrototypeRenderNode {
     val localState =
-      if (node is PrototypePagerNode)
-        state +
-          mapOf(
-            "page" to PrototypeScalar.Numeric(((pages[node.id] ?: 0) + 1).toDouble()),
-            "pageCount" to PrototypeScalar.Numeric(node.children.size.toDouble()),
-          )
-      else pagerState ?: state
+      derivedState +
+        (if (node is PrototypePagerNode)
+          state +
+            mapOf(
+              "page" to PrototypeScalar.Numeric(((pages[node.id] ?: 0) + 1).toDouble()),
+              "pageCount" to PrototypeScalar.Numeric(node.children.size.toDouble()),
+            )
+        else pagerState ?: state)
     val inPager = node is PrototypePagerNode || pagerState != null
-    val allEntries = cache?.children(node, path) ?: validatedPrototypeChildren(node, path)
+    val allEntries =
+      cache?.children(node, path) ?: validatedPrototypeChildren(node, path, formatter)
     // Hidden stack screens are never mapped into the rendered tree (including modal/anchor layers).
     val entries =
       if (node is PrototypeStackNode) {
@@ -249,7 +272,11 @@ internal class PrototypeNodeMapping(
         node.safeAreaPadding,
         prototypeNodeIconName(node),
         children,
-        node,
+        if (derive.isEmpty()) node
+        else
+          PrototypeDerivedText.bindNode(node) {
+            interpolatePrototypeText(it, derivedState)
+          },
         path,
         (node as? PrototypePagerNode)?.let { pages[it.id] } ?: 0,
         selected.coerceIn(0, (items.size - 1).coerceAtLeast(0)),
@@ -302,12 +329,13 @@ internal class PrototypeNodeMapping(
 internal fun validatedPrototypeChildren(
   node: PrototypeNode,
   path: String,
+  formatter: PrototypeValueFormatter = AndroidPrototypeValueFormatter(),
 ): List<PrototypeChildEntry> {
   requirePrototypeRenderSizes(node.style, path)
   node.styleWhen?.forEachIndexed { index, entry ->
     requirePrototypeRenderSizes(entry.style, "$path.styleWhen[$index]")
   }
-  return prototypeChildEntries(node, path)
+  return prototypeChildEntries(node, path, formatter = formatter)
 }
 
 internal fun prototypeNodeRole(node: PrototypeNode): String =
@@ -367,12 +395,14 @@ private fun prototypeNodeText(
     is PrototypeSearchBarNode -> (state[node.stateKey] as? PrototypeScalar.Text)?.value.orEmpty()
     is PrototypeSwitchNode -> node.label.orEmpty()
     is PrototypeCheckboxNode -> node.label.orEmpty()
-    is PrototypeButtonNode -> node.label
+    is PrototypeButtonNode ->
+      interpolatePrototypeText(node.label, localState, inPager, derivedOnly = true)
     is PrototypeListItemNode -> node.headline
     is PrototypeSliderNode -> node.label.orEmpty()
     is PrototypeChipNode -> node.label
     is PrototypeIconNode -> node.name
-    is PrototypeFabNode -> node.label.orEmpty()
+    is PrototypeFabNode ->
+      interpolatePrototypeText(node.label.orEmpty(), localState, inPager, derivedOnly = true)
     is PrototypeTopAppBarNode -> interpolatePrototypeText(node.title, localState, inPager)
     is PrototypeBadgeNode ->
       node.text?.let { interpolatePrototypeText(it, localState, inPager) }.orEmpty()
@@ -434,6 +464,7 @@ internal fun interpolatePrototypeText(
   text: String,
   state: Map<String, PrototypeScalar>,
   inPager: Boolean = false,
+  derivedOnly: Boolean = false,
 ): String {
   val out = StringBuilder(text.length)
   var substitutedLength = 0
@@ -445,7 +476,9 @@ internal fun interpolatePrototypeText(
       index++
     } else {
       val token = text.substring(index, end)
-      val value = resolveInterpolation(token, state, inPager)
+      val value =
+        if (derivedOnly && !token.startsWith("{derived:")) null
+        else resolveInterpolation(token, state, inPager)
       if (
         value != null &&
           value.length <=
@@ -466,6 +499,11 @@ internal fun interpolatePrototypeText(
  * Returns the index just past the `{key}` token starting at [start], or -1 if none starts there.
  */
 private fun interpolationTokenEnd(text: String, start: Int): Int {
+  PrototypeDerivedText.tokenEnd(text, start)
+    .takeIf { it >= 0 }
+    ?.let {
+      return it
+    }
   var index = start + 1
   val opensToken = text[start] == '{' && index < text.length && isInterpolationKeyStart(text[index])
   if (opensToken) {

@@ -73,10 +73,13 @@ internal fun PrototypeNode.checkedKeys(): List<String> =
   }
 
 /** Includes bound repeat instances and data-resolved nodes, in authored order. */
-internal fun checkedPrototypeNodes(root: PrototypeNode): List<PrototypeNode> = buildList {
+internal fun checkedPrototypeNodes(
+  root: PrototypeNode,
+  formatter: PrototypeValueFormatter = AndroidPrototypeValueFormatter(),
+): List<PrototypeNode> = buildList {
   fun visit(node: PrototypeNode, path: String) {
     if (node.checks().isNotEmpty()) add(node)
-    prototypeChildEntries(node, path).forEach { visit(it.node, it.path) }
+    prototypeChildEntries(node, path, formatter = formatter).forEach { visit(it.node, it.path) }
   }
   visit(root, "root")
 }

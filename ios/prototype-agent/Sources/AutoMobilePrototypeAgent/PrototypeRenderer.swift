@@ -163,6 +163,7 @@
         var stackAxis: PrototypeAxis?
         @FocusState private var controlFocused: Bool
         @Environment(\.pagerContext) private var pager
+        @Environment(\.locale) private var deviceLocale
         @Environment(\.prototypePalette) private var palette
         @Environment(\.prototypeTypography) private var typography
         @Environment(\.prototypeShapes) private var shapes
@@ -463,8 +464,14 @@
             interpolated(node.text)
         }
 
+        private var derivedContext: PrototypeDerivedContext {
+            // Reading SwiftUI's locale invalidates this view on a device language change.
+            _ = deviceLocale
+            return PrototypeDerivedContext(entries: model.spec?.derive ?? [:], data: model.spec?.data)
+        }
+
         private func interpolated(_ text: String?) -> String {
-            interpolatePrototypeText(text ?? "", state: model.state, pager: pagerPosition)
+            interpolatePrototypeText(text ?? "", state: model.state, pager: pagerPosition, derived: derivedContext)
         }
 
         @ViewBuilder private var iconView: some View {
@@ -502,7 +509,8 @@
             return node.accessibilityLabel(
                 state: model.state,
                 pager: pagerPosition,
-                tappable: node.isInteractive
+                tappable: node.isInteractive,
+                derived: derivedContext
             )
         }
 
@@ -538,7 +546,8 @@
                 font = .system(size: scaled, weight: weight, design: design)
             }
             let runs = PrototypeRichText.runs(
-                node: node, state: model.state, pager: pagerPosition, nodeKey: node.id ?? "text"
+                node: node, state: model.state, pager: pagerPosition, nodeKey: node.id ?? "text",
+                derived: derivedContext
             )
             var text = (runs.map { Text(attributedText($0)) } ?? Text(interpolatedText)).font(font)
             if runs == nil, style?.fontStyle == "italic" { text = text.italic() }

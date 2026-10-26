@@ -178,6 +178,7 @@ nav:
       - "Daemon": design-docs/mcp/daemon.md
       - "Push-stream backpressure": push-stream-backpressure.md
       - "MCP SDK v2 and stateless daemon": design-docs/mcp/sdk-v2-stateless-migration.md
+      - "Elicitation for an ambiguous device": design-docs/mcp/elicitation-ambiguous-device.md
       - "Session state record": design-docs/session-state-record.md
       - "Test runners": design-docs/plat/android/junit-runner/index.md
       - "InputConnection trace comparison": design-docs/plat/android/ime-trace-conformance.md

@@ -64,6 +64,16 @@ Other refusals you may meet, and what to do:
 | `device_owned_by_other_daemon` (retryable)           | Another AutoMobile daemon holds the device. Stop it there, wait, or choose another device.                              |
 | `device_assigned_to_binding`                         | A broker binding holds the device; use another device.                                                                  |
 
+### Choosing a device when a call is ambiguous
+
+If your MCP client declares the elicitation capability (form mode) and connects
+over stdio, an `ambiguous_device_target` refusal first becomes a question: the
+client shows the candidate devices and the call continues on the one you pick.
+If you decline or cancel, do not answer within about 20 seconds, or your client
+does not declare elicitation, you get the `ambiguous_device_target` refusal
+above, unchanged. Unattended agents are never held open. Pass `deviceId` on the
+call to skip the question.
+
 When a refusal carries `retryAfterMs`, wait that long before retrying.
 Refusals do not count as session use and do not extend the session's idle window.
 

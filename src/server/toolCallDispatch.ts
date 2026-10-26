@@ -2,6 +2,11 @@ import type { CallToolResult, McpServer, ServerContext } from "@modelcontextprot
 import { ActionableError } from "../models";
 import type { CreateTaskResult } from "../daemon/tasks/mcpTasksExtension";
 import { logger } from "../utils/logger";
+import {
+  deviceChoicePeerFor,
+  withAmbiguousDeviceElicitation,
+  type AmbiguousDeviceElicitationOptions,
+} from "./ambiguousDeviceElicitation";
 
 /**
  * The single MCP `tools/call` dispatch envelope (issue #6545).
@@ -151,10 +156,16 @@ export function toolCallExtraFromContext(ctx: ServerContext): McpToolCallExtra {
  * Installs {@link dispatchToolCall} as the server's one `tools/call` handler. A backend may
  * answer with a Tasks-extension `CreateTaskResult` (#4668), but only to a request that
  * declared the extension.
+ *
+ * `ambiguousDeviceElicitation` is passed only by servers with a stateful client connection (the
+ * stdio proxy and the direct stdio server): a stateless daemon request has no channel to ask on.
+ * It turns an `ambiguous_device_target` result into a device question for a client that declared
+ * elicitation (#13945).
  */
 export function installToolCallDispatcher(
   server: McpServer,
   backend: ToolCallBackend<ToolCallRequest, McpToolCallExtra, McpToolCallResult | CreateTaskResult>,
+  options: { ambiguousDeviceElicitation?: AmbiguousDeviceElicitationOptions } = {},
 ): void {
   server.server.setRequestHandler(
     "tools/call",
@@ -164,7 +175,13 @@ export function installToolCallDispatcher(
       (await dispatchToolCall(
         request,
         toolCallExtraFromContext(ctx),
-        backend,
+        options.ambiguousDeviceElicitation
+          ? withAmbiguousDeviceElicitation(
+              backend,
+              deviceChoicePeerFor(server, ctx),
+              options.ambiguousDeviceElicitation,
+            )
+          : backend,
       )) as McpToolCallResult,
   );
 }

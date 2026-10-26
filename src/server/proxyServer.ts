@@ -48,6 +48,7 @@ import {
   type ToolCall,
 } from "./toolCallDispatch";
 import { shapeToolCallError } from "../daemon/shapeToolCallError";
+import type { AmbiguousDeviceElicitationOptions } from "./ambiguousDeviceElicitation";
 import {
   DAEMON_STALLED_CODE,
   livenessHandoverPayload,
@@ -92,6 +93,8 @@ export interface ProxyMcpServerOptions {
   session?: SessionBrokerResult;
   /** Session context for tracking */
   sessionContext?: { sessionId?: string };
+  /** Overrides the timer and bound of the device question asked of an eliciting client (#13945). */
+  ambiguousDeviceElicitation?: AmbiguousDeviceElicitationOptions;
 }
 
 export function brokerSessionEndedPayload(
@@ -879,43 +882,47 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
 
   // Register tools/call handler - forward to daemon through the shared
   // dispatch envelope (#6545).
-  installToolCallDispatcher(server, {
-    progressFailureMessage: "[ProxyServer] Failed to relay progress notification",
-    execute: async ({ name, args, progressToken, progress, extra }) => {
-      const hasOutputSchema = advertisedToolOutputSchemas.get(name) ?? false;
+  installToolCallDispatcher(
+    server,
+    {
+      progressFailureMessage: "[ProxyServer] Failed to relay progress notification",
+      execute: async ({ name, args, progressToken, progress, extra }) => {
+        const hasOutputSchema = advertisedToolOutputSchemas.get(name) ?? false;
 
-      logger.info(`[ProxyServer] Forwarding tool call: ${name}`);
+        logger.info(`[ProxyServer] Forwarding tool call: ${name}`);
 
-      // Echo the CLIENT's own progress token through the daemon round trip
-      // (issue #6205) — the direct server (#6118) already refuses to fabricate
-      // one, and the proxy must not either: relay a tick only when the client
-      // asked, tagged with that SAME token. The relay is fire-and-forget; the
-      // shared echo logs a failed send instead of rejecting.
-      const onProgress = progress
-        ? (tick: number, total?: number, message?: string): void => {
-            void progress(tick, total, message);
+        // Echo the CLIENT's own progress token through the daemon round trip
+        // (issue #6205) — the direct server (#6118) already refuses to fabricate
+        // one, and the proxy must not either: relay a tick only when the client
+        // asked, tagged with that SAME token. The relay is fire-and-forget; the
+        // shared echo logs a failed send instead of rejecting.
+        const onProgress = progress
+          ? (tick: number, total?: number, message?: string): void => {
+              void progress(tick, total, message);
+            }
+          : undefined;
+
+        try {
+          return await callProxyTool(
+            proxy,
+            { name, args, progressToken, extra },
+            onProgress,
+            options,
+          );
+        } catch (error) {
+          // The SDK suppresses responses for aborted requests. Do not turn a
+          // cancellation into a tool error result while that request unwinds.
+          extra.signal.throwIfAborted();
+          const brokerEnded = localBrokerSessionEndedResult(error, options.session);
+          if (brokerEnded) {
+            return brokerEnded;
           }
-        : undefined;
-
-      try {
-        return await callProxyTool(
-          proxy,
-          { name, args, progressToken, extra },
-          onProgress,
-          options,
-        );
-      } catch (error) {
-        // The SDK suppresses responses for aborted requests. Do not turn a
-        // cancellation into a tool error result while that request unwinds.
-        extra.signal.throwIfAborted();
-        const brokerEnded = localBrokerSessionEndedResult(error, options.session);
-        if (brokerEnded) {
-          return brokerEnded;
+          return resolveCallToolErrorResult(error, name, hasOutputSchema);
         }
-        return resolveCallToolErrorResult(error, name, hasOutputSchema);
-      }
+      },
     },
-  });
+    { ambiguousDeviceElicitation: options.ambiguousDeviceElicitation ?? {} },
+  );
 
   registerProxyResourceHandlers(server, proxy);
   installTasksRelay(server, proxy);

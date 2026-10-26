@@ -4,6 +4,7 @@ import { createSdkMcpServer } from "./sdkMcpServer";
 import { installDefaultProvisionedDeviceTransportFence } from "../db/createDefaultProvisionedDeviceTransportFence";
 
 import { installToolCallDispatcher, type ToolCallRequest } from "./toolCallDispatch";
+import type { AmbiguousDeviceElicitationOptions } from "./ambiguousDeviceElicitation";
 
 import { formatToolParamError } from "./toolParamError";
 import { reviveNonFiniteArguments } from "../utils/nonFiniteJson";
@@ -110,6 +111,8 @@ export interface McpServerOptions {
   };
   planExecutionLock?: PlanExecutionLock;
   daemonMode?: boolean;
+  /** Overrides the timer and bound of the device question asked of an eliciting client (#13945). */
+  ambiguousDeviceElicitation?: AmbiguousDeviceElicitationOptions;
   /**
    * The request's session key (#4678): the `MCP_SESSION_KEY_HEADER` value the
    * daemon's HTTP endpoint read for this request. Session-tool bindings are keyed
@@ -528,11 +531,20 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     toolSelectionProfileRegistry,
     listSessionTools,
   });
-  installToolCallDispatcher(server, {
-    progressFailureMessage: "Failed to send progress notification",
-    prepare: prepareToolCallRequest,
-    execute: installTasks(server, options, executeToolCall),
-  });
+  installToolCallDispatcher(
+    server,
+    {
+      progressFailureMessage: "Failed to send progress notification",
+      prepare: prepareToolCallRequest,
+      execute: installTasks(server, options, executeToolCall),
+    },
+    {
+      // A daemon request is stateless, with no client connection to ask; only a direct server asks.
+      ...(daemonMode
+        ? {}
+        : { ambiguousDeviceElicitation: options.ambiguousDeviceElicitation ?? {} }),
+    },
+  );
   startupBenchmark.endPhase("serverHandlerRegistration");
 
   return server;

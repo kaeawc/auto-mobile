@@ -1514,6 +1514,13 @@
                 "kind": "string"
               },
               "optional": false
+            },
+            "transition": {
+              "rule": {
+                "kind": "ref",
+                "name": "stackTransition"
+              },
+              "optional": true
             }
           }
         },
@@ -1574,6 +1581,13 @@
                 "kind": "string"
               },
               "optional": false
+            },
+            "transition": {
+              "rule": {
+                "kind": "ref",
+                "name": "stackTransition"
+              },
+              "optional": true
             }
           }
         },
@@ -9564,52 +9578,8 @@
             },
             "transition": {
               "rule": {
-                "kind": "choice",
-                "options": [
-                  {
-                    "kind": "enum",
-                    "values": [
-                      "none",
-                      "fade",
-                      "expand",
-                      "slide",
-                      "slideStart",
-                      "slideEnd",
-                      "scale",
-                      "blurReplace"
-                    ]
-                  },
-                  {
-                    "kind": "object",
-                    "fields": {
-                      "type": {
-                        "rule": {
-                          "kind": "enum",
-                          "values": [
-                            "none",
-                            "fade",
-                            "expand",
-                            "slide",
-                            "slideStart",
-                            "slideEnd",
-                            "scale",
-                            "blurReplace"
-                          ]
-                        },
-                        "optional": false
-                      },
-                      "delayMs": {
-                        "rule": {
-                          "kind": "number",
-                          "integer": true,
-                          "min": 0,
-                          "max": 600
-                        },
-                        "optional": true
-                      }
-                    }
-                  }
-                ]
+                "kind": "ref",
+                "name": "stackTransition"
               },
               "optional": true
             },
@@ -13830,6 +13800,10 @@
           "optional": false
         }
       }
+    },
+    "stackTransition": {
+      "kind": "enum",
+      "values": ["platform", "slide", "fade", "none"]
     }
   },
   "eventKinds": [

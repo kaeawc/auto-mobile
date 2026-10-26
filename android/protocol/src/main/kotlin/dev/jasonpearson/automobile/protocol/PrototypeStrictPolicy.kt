@@ -268,7 +268,11 @@ internal object PrototypeStrictPolicy {
           repeatFeatures(child)
           continue
         }
-        fieldFeatures(key, child, field)
+        if (key == "transition" && type in setOf("stack", "push", "replace")) {
+          need("stack_transitions")
+        } else {
+          fieldFeatures(key, child, field)
+        }
         if (key != "linkify" && key != "series") scan(child, key)
       }
     }

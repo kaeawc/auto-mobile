@@ -1,3 +1,4 @@
+import type { SessionDeviceReboundEmitter } from "./sessionDeviceReboundBroadcast";
 import type { Session } from "./sessionManager/sessionTypes";
 
 import type * as Types from "./sessionManager/publicExports";
@@ -314,6 +315,7 @@ export class SessionManager extends SessionManagerForwarders {
       sessionSetupPromises: () => this.sessionSetupPromises,
       deviceCleanupQuarantine: () => this.deviceCleanupQuarantine,
       releaseCallbacks: () => this.releaseCallbacks,
+      sessionDeviceReboundEmitter: () => this.sessionDeviceReboundEmitter,
       deviceOwnershipCallbacks: () => this.deviceOwnershipCallbacks,
       createdCallbacks: () => this.createdCallbacks,
       deviceUnboundCallbacks: () => this.deviceUnboundCallbacks,
@@ -416,6 +418,7 @@ export class SessionManager extends SessionManagerForwarders {
   private timer: Timer;
   /** The clock every session timestamp is stamped and judged with (#11080); see {@link sessionNow}. */
   private readonly sessionClock: SteadyWallClock;
+  private sessionDeviceReboundEmitter: SessionDeviceReboundEmitter | undefined;
   private releaseCallbacks: Types.SessionReleaseCallback[] = [];
   private readonly restartReleasePersistence = new WeakMap<
     Types.SessionReleaseSnapshot,
@@ -609,6 +612,7 @@ export class SessionManager extends SessionManagerForwarders {
     });
 
     this.timer = timer;
+    this.sessionDeviceReboundEmitter = options.sessionDeviceReboundEmitter;
     this.sessionClock = new SteadyWallClock(timer);
     this.deviceCleanupQuarantine = construction.createDeviceCleanupQuarantine(timer);
     // Rows are read by other processes on their own session clocks: stamps cross as wall ms (#11162).

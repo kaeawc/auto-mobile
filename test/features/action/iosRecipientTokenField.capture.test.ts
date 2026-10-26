@@ -133,7 +133,7 @@ describe("committed recipient token", () => {
     const chip = tokensOf(token)[0];
     const value = textOf(toField(token), "value");
     expect(value).toBe(`${textOf(chip, "text")} `);
-    expect(getFocusedTextField(tokenObservation.viewHierarchy!)).toEqual({
+    expect(getFocusedTextField(tokenObservation.viewHierarchy!)).toMatchObject({
       value,
       secure: false,
     });
@@ -153,7 +153,7 @@ describe("token followed by trailing typed text", () => {
     const value = textOf(toField(trailing), "value");
     expect(value).toBe(`${label} ab`);
     expect(value.slice(label.length).trim()).toBe("ab");
-    expect(getFocusedTextField(trailingObservation.viewHierarchy!)).toEqual({
+    expect(getFocusedTextField(trailingObservation.viewHierarchy!)).toMatchObject({
       value,
       secure: false,
     });

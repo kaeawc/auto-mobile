@@ -1,0 +1,24 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Effect",
+      "style": {
+        "effects": [
+          {
+            "type": "glow",
+            "radius": 4
+          }
+        ]
+      }
+    }
+  },
+  "expectedPath": "root.style.effects[0].color",
+  "expectedMessage": "Required property"
+}

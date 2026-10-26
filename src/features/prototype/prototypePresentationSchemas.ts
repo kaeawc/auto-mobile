@@ -3,6 +3,7 @@ import { z } from "zod";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import { pointerSchema, stateKeySchema } from "./prototypeActionValues";
+import { createEffectSchema } from "./prototypeEffectsSchema";
 
 // Icon names are the closed list of Material icons the Android renderer bundles
 // (androidx material-icons-extended); the shared contract is the single source.
@@ -308,6 +309,8 @@ export const styleSchema = z
     shimmer: z.boolean().optional(),
     scale: z.number().finite().min(0).max(4).optional(),
     rotation: z.number().finite().min(-360).max(360).optional(),
+    // Paint-only looks, applied in order; gated by prototype_effects_v1 (#15128).
+    effects: z.array(createEffectSchema(colorValueSchema)).min(1).max(4).optional(),
     alignment: z
       .enum([
         "topStart",

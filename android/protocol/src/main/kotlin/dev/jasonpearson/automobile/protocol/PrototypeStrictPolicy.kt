@@ -206,6 +206,7 @@ internal object PrototypeStrictPolicy {
       "linkify" to "linkify",
       "empty" to "loading_states",
       "shimmer" to "loading_states",
+      "effects" to "effects",
     )
 
   private fun usesData(raw: JsonElement?, kind: PrototypeBindableKind): Boolean =
@@ -269,7 +270,8 @@ internal object PrototypeStrictPolicy {
         } else {
           fieldFeatures(key, child, field)
         }
-        if (key != "linkify" && key != "series") scan(child, key)
+        // An effect's own `animate`, colours and params are not spec features of their own.
+        if (key != "linkify" && key != "series" && key != "effects") scan(child, key)
       }
     }
 

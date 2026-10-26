@@ -602,7 +602,7 @@ final class PrototypeRequestTests: XCTestCase {
             ),
             (
                 #"[{"type":"request","url":"http://h","query":{"q":{"state":"a","data":"/b"}}}]"#,
-                "root.onTap[0].query.q: Expected one value binding: state, data, value, item or index"
+                "root.onTap[0].query.q: Expected one value binding: state, data, value, item, index, platform or event"
             ),
             (
                 #"[{"type":"request","url":"http://h","onSuccess":[]}]"#,

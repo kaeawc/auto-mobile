@@ -436,6 +436,7 @@ final class PrototypeAgent: NSObject {
         }
         let window = PassthroughWindow(windowScene: scene)
         window.model = model
+        model.nativePresentationActive = { [weak window] in window?.rootViewController?.presentedViewController != nil }
         window.windowLevel = .alert + 1
         let layers = PrototypeLayersViewController(model: model)
         window.rootViewController = layers

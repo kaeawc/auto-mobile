@@ -22,6 +22,23 @@ const rules = (value: unknown) =>
   lintPrototypeAccessibility(value).findings.map(({ rule, path }) => `${rule} ${path}`);
 
 describe("prototype accessibility lint (#14126)", () => {
+  test("a transition without visibleWhen is flagged; with visibleWhen or on a stack it is not", () => {
+    expect(
+      rules(
+        spec(
+          column(
+            { type: "text", text: "a", transition: "fade" },
+            { type: "text", text: "b", transition: "fade", visibleWhen: { key: "k", equals: "x" } },
+            { type: "text", text: "c" },
+          ),
+        ),
+      ),
+    ).toEqual(["transition-without-visible-when root.children[0]"]);
+    expect(
+      rules(spec({ type: "stack", id: "s", start: "a", transition: "slide", screens: {} })),
+    ).toEqual([]);
+  });
+
   test("an interactive node without any name is unlabeled-control", () => {
     expect(
       rules(

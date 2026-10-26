@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { readPrototypeBundle } from "../../src/features/prototype/prototypeBundle";
 import type { ProtoViewerDevice } from "../../src/features/prototype/protoViewer/protoViewerDevice";
 import type { ProtoViewerResult } from "../../src/features/prototype/protoViewer/protoViewerContract";
@@ -54,7 +54,9 @@ class FakeDriver implements SmokeDriver {
   async install(artifact: string): Promise<void> {
     this.installs.push(artifact);
     const wiped = this.reinstall && this.installs.length > 1;
-    if (wiped) this.viewer.library.clear();
+    if (wiped) {
+      this.viewer.library.clear();
+    }
     this.app = {
       version: this.versions[artifact] ?? "?",
       dataIdentity: wiped ? `t${this.installs.length}` : this.app.dataIdentity,
@@ -78,7 +80,9 @@ class FakeScreens implements ScreenDriver {
     return this.screen;
   }
   async tapText(text: string): Promise<boolean> {
-    if (!this.screen.includes(text)) return false;
+    if (!this.screen.includes(text)) {
+      return false;
+    }
     this.screen = this.licenses;
     return true;
   }
@@ -184,10 +188,15 @@ describe("Android driver parsing", () => {
 });
 
 describe("smoke bundles", () => {
+  // Building a bundle is real zip and validation work, so it stays out of the per-test budget.
+  let built: ReturnType<typeof smokeBundles>;
+  beforeAll(() => {
+    built = smokeBundles();
+  });
+
   test("both build into readable bundles with distinct labels", () => {
-    const { bundled, imported } = smokeBundles();
-    expect(bundled.label).not.toBe(imported.label);
-    for (const entry of [bundled, imported]) {
+    expect(built.bundled.label).not.toBe(built.imported.label);
+    for (const entry of [built.bundled, built.imported]) {
       expect(readPrototypeBundle(entry.bytes).ok).toBe(true);
     }
   });

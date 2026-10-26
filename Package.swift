@@ -45,7 +45,9 @@ let package = Package(
                 "AutoMobilePrototypeAgent/Loader.c",
                 "AutoMobilePrototypeAgent/PrototypeAgent.swift",
                 "AutoMobilePrototypeAgent/PrototypeServer.swift",
-            ]
+            ],
+            // Required-reason API declarations travel with the library so embedders inherit them (#14151).
+            resources: [.process("PrivacyInfo.xcprivacy")]
         ),
         .target(
             name: "AutoMobileHighlightCore",

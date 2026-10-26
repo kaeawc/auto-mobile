@@ -603,3 +603,25 @@ describe("managed family/model validation and fingerprint compatibility", () => 
     expect(phone).toEqual(plain);
   });
 });
+
+test("fold RAM override separates fingerprints and rejects a different AVD RAM size", async () => {
+  const spec = {
+    runtime: ANDROID,
+    deviceType: "pixel_9_pro_fold",
+  };
+  const displayCutout = classifyDisplayCutout("android", "pixel_9_pro_fold");
+  const overridden = { ...spec, configuration: { memoryMb: 4096 } };
+  expect(computeManagedSpecFingerprint("android", { ...spec, displayCutout })).not.toEqual(
+    computeManagedSpecFingerprint("android", { ...overridden, displayCutout }),
+  );
+  for (const ramSizeMb of [4096, 11674]) {
+    const matcher = new DefaultManagedSpecMatcher({
+      readConfig: async () => androidConfig(spec.deviceType, { ramSizeMb }),
+    });
+    const device = { ...ANDROID_DEVICE, deviceType: spec.deviceType };
+    expect(await matcher.matches(device, overridden)).toBe(
+      ramSizeMb === 4096 ? "match" : "mismatch",
+    );
+    expect(await matcher.matches(device, spec)).toBe("match");
+  }
+});

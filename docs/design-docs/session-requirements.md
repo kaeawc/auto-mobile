@@ -41,8 +41,18 @@ iOS hardware has four explicit selector kinds:
 - `archetype` is `phone`, `tablet`, or `duo`;
 - `omitted` requests the configured default archetype.
 
-Android hardware is `phone`, `tablet`, or `omitted`. Exact Android profiles,
-foldables, and other categories are not accepted at this boundary.
+Android hardware is `phone`, `tablet`, `foldable`, or `omitted`. Exact Android profiles
+and other categories are not accepted at this boundary. Hosts map each archetype through
+`defaults.android.hardware.profiles` and classify its installed profile in
+`androidProfileArchetypes`; a foldable never falls back to a phone. An unmapped or
+uninstalled foldable profile is refused with non-retryable `unsupported_hardware`.
+Each profile mapping may set `memoryMb` (an integer of at least 2048 MB), carried
+into AVD creation, binding fingerprints and pool matching. Fold profiles default
+to about 11.4 GiB, so a RAM override bounds guest memory on shared hosts. Omission
+preserves the existing unconstrained AVD RAM behavior; idle resources retain their
+override identity. Foldable release reset restores `opened` posture and a 180-degree
+hinge angle after the reset strategy and before final health verification; failure
+keeps the device out of the clean pool.
 
 An Android request may name an OEM manufacturer profile as `deviceProfile`
 (owner decision on #14058). It is a simulated effect, not a firmware guarantee:
@@ -121,7 +131,7 @@ requested iPad size matches exactly; an omitted size accepts any size in the
 requested iPad family.
 
 iOS releases carry runtime identifier and numeric OS version. Android catalogs
-carry classified phone/tablet profile identifiers and releases with system
+carry classified phone/tablet/foldable profile identifiers and releases with system
 image package, OS version, evidence precision, API level, ABI, and image
 flavor. ABI and flavor therefore remain explicit provider policy in the
 resolved profile.

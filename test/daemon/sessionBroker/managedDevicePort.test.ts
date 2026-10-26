@@ -439,50 +439,58 @@ describe("ManagedDevicePort preparation and release", () => {
     expect(prepared).toEqual({ sessionId: "session-1", profile: IOS.profile });
   });
 
-  test("maps the exact Android profile and rejects inconsistent API, ABI, or flavor metadata", async () => {
-    const configs: BrokerProvisionRequest[] = [];
-    const port = new ManagedDevicePort({
-      scope: SCOPE,
-      brokerDeviceAcquisition: acquisition(async (config) => {
-        configs.push(config);
-        return readyResult(config);
-      }),
-      brokerExecutionRelease: {
-        releaseExecution: async (sessionId) => releaseResult(sessionId),
-      },
-      registry: {} as never,
-      bindingJournal: {
-        owner: OWNER,
-        redriveBinding: async () => ({ kind: "clear", redriven: [] }),
-      },
-    });
-
-    expect(
-      await port.prepare(resource(ANDROID), { livenessOwnerToken: "consumer-liveness" }),
-    ).toMatchObject({ profile: ANDROID.profile });
-    expect(configs[0]?.requests[0]).toEqual({
-      bindingIndex: 7,
-      role: "session-broker-device",
-      platform: "android",
-      requestedSpec: {
-        runtime: ANDROID.profile.systemImagePackage,
-        deviceType: ANDROID.profile.profileId,
-      },
-    });
-
-    for (const profile of [
-      { ...ANDROID.profile, apiLevel: 36 },
-      { ...ANDROID.profile, abi: "x86_64" },
-      { ...ANDROID.profile, flavor: "google_apis_playstore" },
-    ]) {
-      await expect(
-        port.prepare(resource({ ...ANDROID, profile }), {
-          livenessOwnerToken: "consumer-liveness",
+  test.each([undefined, 4096])(
+    "maps Android profile RAM %s and rejects inconsistent metadata",
+    async (memoryMb) => {
+      const android = {
+        ...ANDROID,
+        profile: { ...ANDROID.profile, ...(memoryMb === undefined ? {} : { memoryMb }) },
+      };
+      const configs: BrokerProvisionRequest[] = [];
+      const port = new ManagedDevicePort({
+        scope: SCOPE,
+        brokerDeviceAcquisition: acquisition(async (config) => {
+          configs.push(config);
+          return readyResult(config);
         }),
-      ).rejects.toThrow("does not agree with its exact system-image package");
-    }
-    expect(configs).toHaveLength(1);
-  });
+        brokerExecutionRelease: {
+          releaseExecution: async (sessionId) => releaseResult(sessionId),
+        },
+        registry: {} as never,
+        bindingJournal: {
+          owner: OWNER,
+          redriveBinding: async () => ({ kind: "clear", redriven: [] }),
+        },
+      });
+
+      expect(
+        await port.prepare(resource(android), { livenessOwnerToken: "consumer-liveness" }),
+      ).toMatchObject({ profile: ANDROID.profile });
+      expect(configs[0]?.requests[0]).toEqual({
+        bindingIndex: 7,
+        role: "session-broker-device",
+        platform: "android",
+        requestedSpec: {
+          runtime: ANDROID.profile.systemImagePackage,
+          deviceType: ANDROID.profile.profileId,
+          ...(memoryMb === undefined ? {} : { configuration: { memoryMb } }),
+        },
+      });
+
+      for (const profile of [
+        { ...ANDROID.profile, apiLevel: 36 },
+        { ...ANDROID.profile, abi: "x86_64" },
+        { ...ANDROID.profile, flavor: "google_apis_playstore" },
+      ]) {
+        await expect(
+          port.prepare(resource({ ...ANDROID, profile }), {
+            livenessOwnerToken: "consumer-liveness",
+          }),
+        ).rejects.toThrow("does not agree with its exact system-image package");
+      }
+      expect(configs).toHaveLength(1);
+    },
+  );
 
   test("applies a requested manufacturer profile to the prepared session's device (#14058)", async () => {
     const applied: unknown[] = [];
@@ -1121,6 +1129,41 @@ describe("ManagedDevicePort destruction", () => {
       execOwner: { daemonId: FOREIGN_OWNER.daemonId, sessionUuid: "foreign-session" },
     });
   });
+
+  test.each([undefined, 4096, 11674])(
+    "Android RAM %s cannot own a differently configured resource",
+    async (memoryMb) => {
+      const rig = await destructionRig();
+      const assignment = (await rig.registry.getAssignment(rig.key))!;
+      const overridden = { ...ANDROID, profile: { ...ANDROID.profile, memoryMb: 4096 } };
+      const androidAssignment = {
+        ...assignment,
+        platform: "android" as const,
+        requestedSpec: {
+          runtime: ANDROID.profile.systemImagePackage,
+          deviceType: ANDROID.profile.profileId,
+          ...(memoryMb === undefined ? {} : { configuration: { memoryMb } }),
+        },
+      };
+      let journalCalls = 0;
+      const view = {
+        getAssignment: async () => androidAssignment,
+        listOpenBindingJournal: rig.registry.listOpenBindingJournal.bind(rig.registry),
+        openBindingJournal: async (...args: Parameters<BindingRegistry["openBindingJournal"]>) => {
+          journalCalls++;
+          return rig.registry.openBindingJournal(...args);
+        },
+      };
+      const port = destroyingPort(rig, async (id) => releaseResult(id), view);
+      // A matching assignment reaches the existing destruction fence; mismatched RAM is refused first.
+      const result = await port.destroy(resource(overridden, "destroying"));
+      expect(result).toBe("pending");
+      expect(journalCalls).toBe(memoryMb === 4096 ? 1 : 0);
+      if (memoryMb !== 4096) {
+        expect(rig.deleter.calls).toEqual([]);
+      }
+    },
+  );
 
   test("lets the registry and journal fence a definitively dead prior process owner", async () => {
     const rig = await destructionRig(() => false);

@@ -8,6 +8,7 @@ import { expandPrototypeComponents } from "./prototypeComponents";
 import { imageSlotUses, repeatErrors, repeatKeyInstances } from "./prototypeRepeat";
 import { isPrototypeDataPointer, PrototypeRepeatData } from "./prototypeData";
 import { prototypeDataActionsError } from "./prototypeDataActions";
+import { prototypeTimersError, prototypeTimerActions } from "./prototypeTimers";
 import { prototypeStorageError } from "./prototypeStorage";
 import { prototypeLoadingStatesError } from "./prototypeLoadingStates";
 import { prototypeChoreographyError } from "./prototypeChoreography";
@@ -772,19 +773,25 @@ function platformArgumentError(
   return walk(value, rule, path, context, 0);
 }
 
+/** Motion and choreography share one set of located nodes. */
+function motionErrors(nodes: Located[]): PrototypeValidationError | undefined {
+  return prototypeMotionV2Error(nodes) ?? prototypeChoreographyError(nodes);
+}
+
 /** Action, container and state checks, after the layout checks pass. */
 function behaviourErrors(
   value: unknown,
   context: Context,
   data: Record<string, unknown>,
   repeats: PrototypeRepeatData,
+  componentTimers: Located[],
 ): PrototypeValidationError | undefined {
   return (
     prototypeDataActionsError(context.actions, data.data, prototypeDataError) ??
+    prototypeTimersError([...context.actions, ...componentTimers]) ??
     prototypeRequestsError(context.actions) ??
     prototypeLoadingStatesError(context.nodes) ??
-    prototypeMotionV2Error(context.nodes) ??
-    prototypeChoreographyError(context.nodes) ??
+    motionErrors(context.nodes) ??
     prototypePlatformError(value, context.actions, platformArgumentError) ??
     prototypeChartError(context.nodes, data.data) ??
     prototypeLinkifyError(value) ??
@@ -795,7 +802,11 @@ function behaviourErrors(
   );
 }
 
-function validateValue(value: unknown, options: PrototypeStrictOptions): PrototypeValidationResult {
+function validateValue(
+  value: unknown,
+  options: PrototypeStrictOptions,
+  componentTimers: Located[] = [],
+): PrototypeValidationResult {
   const context: Context = {
     nodes: [],
     actions: [],
@@ -807,7 +818,7 @@ function validateValue(value: unknown, options: PrototypeStrictOptions): Prototy
   const error =
     walk(value, definitions.spec, "", context, 0) ??
     layoutErrors(value, context, repeats) ??
-    behaviourErrors(value, context, data, repeats);
+    behaviourErrors(value, context, data, repeats, componentTimers);
   if (error) {
     return { success: false, error };
   }
@@ -836,7 +847,17 @@ function validateExpanded(
   if (expansion.expanded && bytes(expansion.spec) > MAX_PROTOTYPE_SPEC_BYTES) {
     return { success: false, error: fail("$", "Expanded spec byte limit exceeded") };
   }
-  const result = validateValue(expansion.spec, options);
+  // Expanded contract order comes first; append authored definitions not represented there.
+  const components = object(object(value)?.components);
+  const result = validateValue(
+    expansion.spec,
+    options,
+    prototypeTimerActions({
+      components: Object.fromEntries(
+        Object.entries(components ?? {}).sort(([a], [b]) => a.localeCompare(b)),
+      ),
+    }),
+  );
   return result.success
     ? result
     : {

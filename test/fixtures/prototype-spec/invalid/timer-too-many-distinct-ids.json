@@ -1,0 +1,116 @@
+{
+  "spec": {
+    "id": "timers",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "button",
+      "label": "Start",
+      "onTap": [
+        {
+          "type": "startTimer",
+          "id": "0",
+          "afterMs": 100,
+          "actions": [
+            {
+              "type": "emit",
+              "name": "tick"
+            }
+          ]
+        },
+        {
+          "type": "startTimer",
+          "id": "1",
+          "afterMs": 100,
+          "actions": [
+            {
+              "type": "emit",
+              "name": "tick"
+            }
+          ]
+        },
+        {
+          "type": "startTimer",
+          "id": "2",
+          "afterMs": 100,
+          "actions": [
+            {
+              "type": "emit",
+              "name": "tick"
+            }
+          ]
+        },
+        {
+          "type": "startTimer",
+          "id": "3",
+          "afterMs": 100,
+          "actions": [
+            {
+              "type": "emit",
+              "name": "tick"
+            }
+          ]
+        },
+        {
+          "type": "startTimer",
+          "id": "4",
+          "afterMs": 100,
+          "actions": [
+            {
+              "type": "emit",
+              "name": "tick"
+            }
+          ]
+        },
+        {
+          "type": "startTimer",
+          "id": "5",
+          "afterMs": 100,
+          "actions": [
+            {
+              "type": "emit",
+              "name": "tick"
+            }
+          ]
+        },
+        {
+          "type": "startTimer",
+          "id": "6",
+          "afterMs": 100,
+          "actions": [
+            {
+              "type": "emit",
+              "name": "tick"
+            }
+          ]
+        },
+        {
+          "type": "startTimer",
+          "id": "7",
+          "afterMs": 100,
+          "actions": [
+            {
+              "type": "emit",
+              "name": "tick"
+            }
+          ]
+        },
+        {
+          "type": "startTimer",
+          "id": "8",
+          "afterMs": 100,
+          "actions": [
+            {
+              "type": "emit",
+              "name": "tick"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[8].id"
+}

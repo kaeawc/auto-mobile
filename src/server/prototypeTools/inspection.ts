@@ -1,3 +1,6 @@
+import { performPrototypeSimulate } from "../prototypeSimulateAction";
+import { PROTOTYPE_TIMERS_CAPABILITY } from "../../features/observe/android/ctrlProxyProtocol";
+import { parsePrototypeTimerReports } from "../../features/prototype/prototypeTimerSchema";
 import { z } from "zod/v4";
 import {
   parsePrototypeStacks,
@@ -52,6 +55,7 @@ const devicePrototypeEntrySchema = z.object({
   // Absent from a device without prototype_appearance_v1; a malformed one is dropped, not guessed.
   appearance: z.unknown().optional().transform(parsePrototypeAppearance),
   storage: z.unknown().optional().transform(parsePrototypeStorageReport),
+  timers: z.unknown().optional().transform(parsePrototypeTimerReports),
 });
 
 function parseReportedPrototypes(
@@ -104,8 +108,9 @@ function adoptReportedPrototypes(
   source: PrototypeEventSource,
   scope: PrototypeScope,
   prototypes: readonly unknown[] | undefined,
-  replayed: readonly PrototypeEvent[],
+  options: { replayed: readonly PrototypeEvent[]; timersSupported: boolean },
 ): void {
+  const { replayed, timersSupported } = options;
   const reported = parseReportedPrototypes(prototypes);
   const reportedIds = new Set(reported.map((entry) => entry.id));
   const history = groupByPrototype(replayed);
@@ -123,7 +128,11 @@ function adoptReportedPrototypes(
       events.adopt(scope, entry.id, source, [], entry.lastSequence);
     }
     if (!events.isDismissed(scope, entry.id)) {
-      store.adopt(scope, { ...entry, storage: parsePrototypeStorageReport(entry.storage) });
+      store.adopt(scope, {
+        ...entry,
+        storage: parsePrototypeStorageReport(entry.storage),
+        timers: timersSupported ? (parsePrototypeTimerReports(entry.timers) ?? []) : undefined,
+      });
     }
   }
 }
@@ -182,7 +191,7 @@ async function inspectDevice(
     prototypeEventSource(target.transport),
     scope,
     result.prototypes,
-    replayed,
+    { replayed, timersSupported: await client.supportsCommand(PROTOTYPE_TIMERS_CAPABILITY) },
   );
   return {
     success: true,
@@ -192,8 +201,10 @@ async function inspectDevice(
 }
 
 /** inspect and clearStorage: one request to the resolved target, with no spec or assets. */
-export function isDeviceRequestAction(action: string): action is "inspect" | "clearStorage" {
-  return action === "inspect" || action === "clearStorage";
+export function isDeviceRequestAction(
+  action: string,
+): action is "inspect" | "clearStorage" | "simulate" {
+  return action === "inspect" || action === "clearStorage" || action === "simulate";
 }
 
 export async function deviceRequestAction(
@@ -204,6 +215,9 @@ export async function deviceRequestAction(
   scope: PrototypeScope,
   signal: AbortSignal | undefined,
 ): Promise<PrototypeOutput> {
+  if (args.action === "simulate") {
+    return performPrototypeSimulate(target, args);
+  }
   if (args.action === "clearStorage") {
     return performPrototypeClearStorage(target, args, host.store, device.deviceId);
   }
@@ -223,6 +237,7 @@ const iosAgentStatusSchema = z.object({
   // agent without prototype_appearance_v1.
   appearance: z.unknown().optional().transform(parsePrototypeAppearance),
   storage: z.unknown().optional().transform(parsePrototypeStorageReport),
+  timers: z.unknown().optional().transform(parsePrototypeTimerReports),
 });
 
 /**
@@ -265,19 +280,29 @@ async function inspectIosAgent(
       error: "Prototype inspect failed: the agent returned a malformed status.",
     };
   }
-  const { shown, id, pages, stacks, state, data, lastSequence, appearance, storage } = status.data;
+  const { shown, id, pages, stacks, state, data, lastSequence, appearance, storage, timers } =
+    status.data;
   const reported =
     shown && id !== null
-      ? [{ id, persistent: false, state, data, pages, stacks, lastSequence, appearance, storage }]
+      ? [
+          {
+            id,
+            persistent: false,
+            state,
+            data,
+            pages,
+            stacks,
+            lastSequence,
+            appearance,
+            storage,
+            timers,
+          },
+        ]
       : [];
-  adoptReportedPrototypes(
-    store,
-    events,
-    prototypeEventSource(target.transport),
-    scope,
-    reported,
-    [],
-  );
+  adoptReportedPrototypes(store, events, prototypeEventSource(target.transport), scope, reported, {
+    replayed: [],
+    timersSupported: ios.supportsCapability(PROTOTYPE_TIMERS_CAPABILITY),
+  });
   return { success: true, ...statusOutput(store, events, scope, { deviceDark: "fresh" }) };
 }
 

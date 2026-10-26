@@ -163,7 +163,14 @@ export interface RemovePrototypeAssetMessage {
   id: string;
 }
 
+export interface AdvancePrototypeClockMessage {
+  type: "advance_prototype_clock";
+  requestId: string;
+  id: string;
+  advanceTimeMs: number;
+}
 export interface PrototypeResult {
+  fired?: number;
   saved?: SavedPrototypeInfo;
   pin?: SavedPrototypePinInfo;
   savedPrototypes?: SavedPrototypeEntry[];
@@ -214,6 +221,7 @@ export interface PrototypeStatusEntry {
   appearance?: PrototypeAppearance;
   /** Device-reported `storage` block state (prototype_storage_v1, #12522); parsePrototypeStorageReport validates it. */
   storage?: unknown;
+  timers?: unknown;
 }
 
 /**

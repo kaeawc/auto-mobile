@@ -1,0 +1,106 @@
+{
+  "spec": {
+    "id": "timers",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "opacity": 100
+    },
+    "requires": {
+      "platform": ["test"]
+    },
+    "platform": {
+      "on": {
+        "test.tick": [
+          {
+            "type": "startTimer",
+            "id": "handler",
+            "afterMs": 100,
+            "actions": [
+              {
+                "type": "emit",
+                "name": "handler"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "onTap": [
+            {
+              "type": "startTimer",
+              "id": "tick",
+              "afterMs": 100,
+              "everyMs": 3600000,
+              "maxRuns": 10000,
+              "actions": [
+                {
+                  "type": "emit",
+                  "name": "tick"
+                },
+                {
+                  "type": "startTimer",
+                  "id": "nested",
+                  "afterMs": 3600000,
+                  "actions": [
+                    {
+                      "type": "emit",
+                      "name": "tick"
+                    }
+                  ]
+                }
+              ],
+              "zzzUnknown": true
+            },
+            {
+              "type": "cancelTimer",
+              "id": "tick"
+            },
+            {
+              "type": "request",
+              "url": "https://example.com",
+              "onSuccess": [
+                {
+                  "type": "startTimer",
+                  "id": "request",
+                  "afterMs": 100,
+                  "actions": [
+                    {
+                      "type": "emit",
+                      "name": "tick"
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "type": "button",
+          "label": "Start"
+        },
+        {
+          "onTap": [
+            {
+              "type": "startTimer",
+              "id": "component",
+              "afterMs": 100,
+              "actions": [
+                {
+                  "type": "emit",
+                  "name": "tick"
+                }
+              ]
+            }
+          ],
+          "type": "button",
+          "label": "Start"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].onTap[0].zzzUnknown"
+}

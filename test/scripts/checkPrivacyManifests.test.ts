@@ -52,6 +52,31 @@ describe("stripSwiftNonCode", () => {
       "UserDefaults",
     );
   });
+
+  test("keeps code inside string interpolation and blanks the literal text", () => {
+    const single = stripSwiftNonCode(
+      'print("systemUptime \\(ProcessInfo.processInfo.systemUptime) x")',
+    );
+    expect(single).toContain("ProcessInfo.processInfo.systemUptime");
+    expect(single.replace("ProcessInfo.processInfo.systemUptime", "")).not.toContain(
+      "systemUptime",
+    );
+    const multi = stripSwiftNonCode(
+      'let s = """\nUserDefaults \\(f("a)b", UserDefaults.standard))\n"""\nlet t = 2',
+    );
+    expect(multi).toContain("UserDefaults.standard");
+    expect(multi).not.toContain("a)b");
+    expect(multi).toContain("let t = 2");
+    expect(multi.split("\n")).toHaveLength(4);
+  });
+
+  test("an API used only inside interpolation is found", () => {
+    const usages = findApiUsages(
+      "A.swift",
+      'print("up: \\(ProcessInfo.processInfo.systemUptime)")',
+    );
+    expect(usages.map((u) => u.category)).toEqual(["SystemBootTime"]);
+  });
 });
 
 describe("findApiUsages", () => {

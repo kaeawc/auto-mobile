@@ -97,6 +97,47 @@ export interface ApiUsage {
   readonly line: number;
 }
 
+/**
+ * Appends one string literal starting at `start` to `out`, blanking the literal text but keeping
+ * the code inside `\( ... )` interpolations (recursively stripped). Returns the index after it.
+ */
+function stripSwiftString(
+  source: string,
+  start: number,
+  multiline: boolean,
+  out: string[],
+): number {
+  const blank = (text: string) => text.replace(/[^\n]/g, " ");
+  const open = multiline ? 3 : 1;
+  out.push(blank(source.slice(start, start + open)));
+  let i = start + open;
+  while (i < source.length) {
+    if (multiline ? source.startsWith('"""', i) : source[i] === '"' || source[i] === "\n") {
+      const closeLength = multiline || source[i] === '"' ? open : 0;
+      out.push(blank(source.slice(i, i + closeLength)));
+      return i + closeLength;
+    }
+    if (source[i] === "\\" && source[i + 1] === "(") {
+      let depth = 1;
+      let j = i + 2;
+      while (j < source.length && depth > 0) {
+        if (source[j] === "(") depth += 1;
+        else if (source[j] === ")") depth -= 1;
+        j += 1;
+      }
+      out.push("  ");
+      out.push(stripSwiftNonCode(source.slice(i + 2, depth === 0 ? j - 1 : j)));
+      out.push(depth === 0 ? " " : "");
+      i = j;
+    } else {
+      const width = source[i] === "\\" ? 2 : 1;
+      out.push(blank(source.slice(i, i + width)));
+      i += width;
+    }
+  }
+  return i;
+}
+
 /** Replaces comments and string-literal contents with spaces, keeping newlines for line numbers. */
 export function stripSwiftNonCode(source: string): string {
   const out: string[] = [];
@@ -127,18 +168,9 @@ export function stripSwiftNonCode(source: string): string {
       const stop = end === -1 ? source.length : end;
       out.push(blank(source.slice(i, stop)));
       i = stop;
-    } else if (rest === '"""') {
-      const end = source.indexOf('"""', i + 3);
-      const stop = end === -1 ? source.length : end + 3;
-      out.push(blank(source.slice(i, stop)));
-      i = stop;
-    } else if (source[i] === '"') {
-      let j = i + 1;
-      while (j < source.length && source[j] !== '"' && source[j] !== "\n") {
-        j += source[j] === "\\" ? 2 : 1;
-      }
-      const stop = Math.min(j + 1, source.length);
-      out.push(blank(source.slice(i, stop)));
+    } else if (rest === '"""' || source[i] === '"') {
+      const multiline = rest === '"""';
+      const stop = stripSwiftString(source, i, multiline, out);
       i = stop;
     } else {
       out.push(source[i]);

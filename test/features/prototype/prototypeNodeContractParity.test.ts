@@ -264,3 +264,27 @@ test("emit context Zod and record contract agree on binding forms and entry limi
     expect(validatePrototypeSpec(candidate(context)).success).toBe(false);
   }
 });
+
+test("list path-only keyed repeat, row count and defaults agree in both validators", () => {
+  const root = {
+    type: "list",
+    repeat: { items: { path: "/rows" }, as: "row", key: "id" },
+    children: [{ type: "text", text: "{row.id}" }],
+  };
+  const candidate = { ...spec(root), data: { rows: [] } };
+  const parsed = prototypeSpecSchema.safeParse(candidate);
+  expect(parsed.success && parsed.data.root.type === "list" && parsed.data.root.axis).toBe(
+    "vertical",
+  );
+  expect(validatePrototypeSpec(candidate).success).toBe(true);
+  for (const invalidRoot of [
+    { ...root, repeat: { items: [{ id: 1 }], as: "row", key: "id" } },
+    { ...root, repeat: { items: { path: "/rows" }, as: "row" } },
+    { ...root, children: [] },
+    { ...root, children: [...root.children, ...root.children] },
+  ]) {
+    const invalid = { ...candidate, root: invalidRoot };
+    expect(prototypeSpecSchema.safeParse(invalid).success).toBe(false);
+    expect(validatePrototypeSpec(invalid).success).toBe(false);
+  }
+});

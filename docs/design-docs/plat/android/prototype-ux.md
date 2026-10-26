@@ -49,14 +49,15 @@ keys) match `[A-Za-z_][A-Za-z0-9_]{0,63}`. No nested state, arrays, or nulls.
 Prototype IDs, pager IDs, tags, event names, and asset IDs are opaque nonempty
 strings; they do not share the state-key restriction.
 
-| Constant                             | Value           | Counting rule                                                                                      |
-| ------------------------------------ | --------------- | -------------------------------------------------------------------------------------------------- |
-| `MAX_PROTOTYPE_NODES`                | 2000            | Includes root and every child/page/sheet child; `repeat` templates count once per instance.        |
-| `MAX_PROTOTYPE_DEPTH`                | 24              | Root has depth 1; only node nesting counts.                                                        |
-| `MAX_PROTOTYPE_IMAGES`               | 32              | Counts image nodes and nav item image uses, including hidden ones; repeated asset IDs count again. |
-| `MAX_PROTOTYPE_SPEC_BYTES`           | 1048576 (1 MiB) | UTF-8 bytes of raw JSON, including whitespace.                                                     |
-| `MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES` | 16              | Maximum named bindings per emit.context.                                                           |
-| `MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES`   | 4096 (4 KiB)    | Conservative compact JSON byte budget for each emit payload; numbers reserve 32 bytes.             |
+| Constant                             | Value           | Counting rule                                                                                                                                                                                           |
+| ------------------------------------ | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MAX_PROTOTYPE_NODES`                | 2000            | Includes root and every child/page/sheet child; `repeat` templates count once per instance, except lazy `list` row templates, which count once (including when empty); list headers/footers count once. |
+| `MAX_PROTOTYPE_LIST_ITEMS`           | 500             | Maximum rows per lazy list, read from its data path; ordinary path repeats remain capped at 128.                                                                                                        |
+| `MAX_PROTOTYPE_DEPTH`                | 24              | Root has depth 1; only node nesting counts.                                                                                                                                                             |
+| `MAX_PROTOTYPE_IMAGES`               | 32              | Counts image nodes and nav item image uses, including hidden ones; repeated asset IDs count again; lazy list row templates, headers and footers count once.                                             |
+| `MAX_PROTOTYPE_SPEC_BYTES`           | 1048576 (1 MiB) | UTF-8 bytes of raw JSON, including whitespace.                                                                                                                                                          |
+| `MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES` | 16              | Maximum named bindings per emit.context.                                                                                                                                                                |
+| `MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES`   | 4096 (4 KiB)    | Conservative compact JSON byte budget for each emit payload; numbers reserve 32 bytes.                                                                                                                  |
 
 Navigation item `image` uses count toward `MAX_PROTOTYPE_IMAGES`. Assets have separate transport and
 decoded-memory limits (Asset transport). Emit payload nesting is bounded by
@@ -2417,3 +2418,157 @@ prototype id; tapping it opens `SavedPrototypeActivity`, which needs no host.
 - Pinning from the accessibility service while no CtrlProxy activity is visible, launcher dialog
   shapes, badges and `clear-shortcuts` behaviour on the workspace are unverified on a device
   (#12261).
+
+## Lazy lists (`prototype_lazy_list_v1`, #14182, not device-verified)
+
+A `list` is its own scrolling container. Its row template is composed lazily in data order;
+only composed rows appear in `observe`. Use `swipeOn` on the list to reach later rows. The
+container preserves authored `testTag` / `contentDescription` and exposes a scrollable collection
+to accessibility (Android LazyColumn/LazyRow collection info and scroll actions; iOS ScrollView).
+Both the list node and `request.append` require `prototype_lazy_list_v1` together with
+`prototype_data_model_v1`.
+
+| Field                          | Contract                                                                                                                                              |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `repeat`                       | Required `{items:{path}, as, key}`; path resolves relative to `data` to an array of objects. Literal items are forbidden.                             |
+| `children`                     | Exactly one row template; `{index}`, `{<as>.<field>}`, state/data bindings and ordinary repeat projection rules apply.                                |
+| `axis`                         | `vertical` (default) or `horizontal`.                                                                                                                 |
+| `header`, `footer`             | Optional single ordinary nodes inside the scrolling content, outside the row repeat scope.                                                            |
+| `spacing`, `contentPadding`    | Nonnegative dp; gap between rows/header/footer and padding inside the scroll bounds.                                                                  |
+| `onEndReached`, `endThreshold` | Ordinary action list; threshold 1–50 (default 3), permitted only with `onEndReached`.                                                                 |
+| `refresh`                      | `{stateKey,onRefresh}` as on scroll: declared boolean state key, set true before actions run. Vertical lists only; also needs `prototype_refresh_v1`. |
+| `maxItems`                     | Optional integer 1–500. Initial data must fit. Appends trim the oldest rows from the start in the same write.                                         |
+
+`repeat.key` must name a projected scalar field present in every item, with unique rendered
+values. Keys preserve row identity across appends, trims and reorders. Empty lists and several
+independent lists in one spec are valid. Lists cannot appear inside another list or a repeat
+template, including expanded components. A list and an ancestor/descendant scroll cannot share
+an axis; cross-axis scrolling is allowed. The row template cannot contain another repeat or pager
+(the existing repeat-template restrictions apply).
+
+The row template counts once against node/image limits, even for zero rows; header/footer count
+once each. Per-item field, state-key, action, substitution and repeat-path-cell budgets still
+apply. List paths accept up to `MAX_PROTOTYPE_LIST_ITEMS` (500), with overflow reported at
+`<list>.repeat.items.path` as `Repeat path resolves to more than 500 items`. A source longer than
+`maxItems` fails there with `List data has more items than maxItems`. Ordinary repeats keep their
+128-item cap and count expanded instances.
+
+The edge trigger is per list path and resets on a new show. It fires for a nonempty list when
+`lastVisibleIndex >= rowCount - endThreshold`, once per `(rowCount,lastRowKey)` signature.
+Recomposition preserves the signature. A page adding no rows does not retrigger; a sliding
+`maxItems` window can retrigger at unchanged length when its final key changes. A list fitting
+on screen fires once and again as new pages arrive to fill the viewport. It runs ordinary actions
+without an extra interaction event. Header/footer do not contribute to row counts.
+
+`request.append:{from,to}` reads an array at the RFC 6901 `from` pointer in the JSON response,
+removes that object member from the remaining response, and extends the existing array at the
+`/data/...` target `to`. `from` must have an object parent, not an array parent. Optional `into`
+receives the remaining response and must not overlap `to` in either direction. A literal `to`
+that already resolves to a non-array is invalid; whole `{index}` segments follow `into` rules
+inside repeats. Response validation, extend, `into` and metadata writes are atomic: a missing or
+non-array source/target, unsupported parent or data-limit failure rolls everything back and
+reports `invalid_response`. The result reports `appended`, the number of response rows added.
+
+Both `appendData` and request append use the smallest `maxItems` among lists whose exact data
+path matches the write target. The shared writer supports `append` (one value) and `extend`
+(array values), with optional `maxItems`; it trims from the start before checking final
+array/byte/depth limits, and reports `trimmed` (0 when none). Without a cap, the ordinary 500-item
+data-array limit applies after concatenation. `extend` rejects a non-array value with
+`invalid_value`, a missing target with `not_found`, and a non-array target with `not_array`.
+
+A device change event names the target `/data/...` path and carries
+`{op:"append"|"extend",value,maxItems?,revision}`. The host replays it through the same writer;
+malformed extend values or noninteger/nonpositive `maxItems` are dropped. Request success emits
+the extend event first, then `into`, `into__meta`, status key, `prototype_request` and `onSuccess`.
+
+```json
+{
+  "id": "feed",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "data": {
+    "feed": {
+      "items": [
+        {
+          "id": 1,
+          "title": "One"
+        },
+        {
+          "id": 2,
+          "title": "Two"
+        }
+      ]
+    },
+    "page": {
+      "next": "p2"
+    }
+  },
+  "state": {
+    "refreshing": false,
+    "feedStatus": "idle"
+  },
+  "root": {
+    "type": "list",
+    "repeat": {
+      "items": {
+        "path": "/feed/items"
+      },
+      "as": "post",
+      "key": "id"
+    },
+    "children": [
+      {
+        "type": "text",
+        "text": "{index}: {post.title}"
+      }
+    ],
+    "id": "feed-list",
+    "header": {
+      "type": "text",
+      "text": "Feed"
+    },
+    "footer": {
+      "type": "text",
+      "text": "End"
+    },
+    "spacing": 8,
+    "contentPadding": 12,
+    "endThreshold": 2,
+    "maxItems": 100,
+    "onEndReached": [
+      {
+        "type": "request",
+        "url": "http://localhost:8080/feed?after={data:/page/next}",
+        "into": "/data/page",
+        "append": {
+          "from": "/items",
+          "to": "/data/feed/items"
+        },
+        "statusKey": "feedStatus"
+      }
+    ],
+    "refresh": {
+      "stateKey": "refreshing",
+      "onRefresh": [
+        {
+          "type": "request",
+          "url": "http://localhost:8080/feed",
+          "into": "/data/feed",
+          "onSuccess": [
+            {
+              "type": "setState",
+              "key": "refreshing",
+              "value": false
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
+```
+
+`prependData`, per-stack-entry scroll state (#14189), benchmark qualification and device acceptance are not yet supported.

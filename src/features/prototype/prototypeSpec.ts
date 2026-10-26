@@ -1,3 +1,4 @@
+import type { PrototypeLazyListSlots } from "./prototypeLazyListSchema";
 import { z } from "zod";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { PROTOTYPE_STACK_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
@@ -14,6 +15,7 @@ import {
   prototypeJsonSchema,
   type PrototypeJson,
 } from "./prototypeJson";
+import { prototypeLazyListShape, prototypeLazyListChildren } from "./prototypeLazyListSchema";
 import { prototypeChartShape } from "./prototypeChartSchema";
 import { prototypeStaggerShape } from "./prototypeChoreographySchema";
 import { prototypeImageShape, prototypeMotionNodeShape } from "./prototypeMotionV2Schema";
@@ -584,6 +586,9 @@ const datePickerBaseSchema = z
 const scrollRefreshSchema = z
   .object({ stateKey: stateKeySchema, onRefresh: z.array(actionSchema).min(1).max(32) })
   .strict();
+const listBaseSchema = z
+  .object({ ...commonNodeShape, ...prototypeLazyListShape(actionSchema, scrollRefreshSchema) })
+  .strict();
 const scrollBaseSchema = z
   .object({
     ...commonNodeShape,
@@ -703,6 +708,7 @@ export type PrototypeNode =
   | z.infer<typeof snackbarBaseSchema>
   | z.infer<typeof timePickerBaseSchema>
   | z.infer<typeof datePickerBaseSchema>
+  | (z.infer<typeof listBaseSchema> & PrototypeLazyListSlots<PrototypeNode>)
   | (z.infer<typeof scrollBaseSchema> & { child: PrototypeNode })
   | (z.infer<typeof pagerBaseSchema> & { children: PrototypeNode[] })
   | z.infer<typeof tabBarBaseSchema>
@@ -780,6 +786,7 @@ const prototypeNodeBaseSchema: z.ZodType<PrototypeNode, z.ZodTypeDef, unknown> =
       snackbarBaseSchema,
       timePickerBaseSchema,
       datePickerBaseSchema,
+      listBaseSchema.extend(prototypeLazyListChildren(z.lazy(() => prototypeNodeSchema))),
       scrollBaseSchema.extend({ child: z.lazy(() => prototypeNodeSchema) }),
       pagerBaseSchema.extend({ children: z.array(z.lazy(() => prototypeNodeSchema)).min(1) }),
       stackBaseSchema.extend({
@@ -937,6 +944,7 @@ export const PROTOTYPE_NODE_TYPES = [
   "snackbar",
   "timePicker",
   "datePicker",
+  "list",
   "scroll",
   "pager",
   "stack",

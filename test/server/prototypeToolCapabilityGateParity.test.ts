@@ -107,6 +107,27 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
   prototype_motion_v2: fixture({ ...label, animate: { durationMs: 300 } }),
   prototype_choreography_v1: fixture({ ...label, transition: { type: "fade", delayMs: 100 } }),
   // A chart reads a /data array, so the spec carries data and the data capability is advertised.
+  prototype_lazy_list_v1: {
+    minimalSpec: {
+      ...fixture({
+        type: "list",
+        id: "label",
+        repeat: { items: { path: "/rows" }, as: "row", key: "id" },
+        children: [{ type: "text", text: "{row.id}" }],
+      }).minimalSpec,
+      data: { rows: [{ id: 1 }] },
+    },
+    ops: [
+      { op: "add", path: "/data", value: { rows: [{ id: 1 }] } },
+      ...fixture({
+        type: "list",
+        id: "label",
+        repeat: { items: { path: "/rows" }, as: "row", key: "id" },
+        children: [{ type: "text", text: "{row.id}" }],
+      }).ops,
+    ],
+    with: ["prototype_data_model_v1"],
+  },
   prototype_chart_v1: {
     minimalSpec: { ...fixture(chart).minimalSpec, data: chartData },
     ops: [{ op: "add", path: "/data", value: chartData }, ...fixture(chart).ops],

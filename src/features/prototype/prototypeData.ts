@@ -199,7 +199,10 @@ export class PrototypeRepeatData {
         (option) => option.kind === "array",
       )?.max ?? Infinity;
     let cells = 0;
-    for (const item of objects.slice(0, maximum)) {
+    for (const item of objects.slice(
+      0,
+      Math.max(maximum, contract.limits.MAX_PROTOTYPE_LIST_ITEMS),
+    )) {
       let members = 0;
       for (const [key, value] of Object.entries(item)) {
         if (projectableMember(key, value)) {
@@ -294,7 +297,7 @@ function nodeFields(value: unknown, path: string): string[] {
     const children = prototypeNodeChildren(node);
     const next: typeof pending = [];
     for (const [key, child] of Object.entries(node)) {
-      if (["child", "children", "screens"].includes(key)) {
+      if (["child", "children", "screens", "header", "footer"].includes(key)) {
         next.push(
           ...children
             .filter((entry) => entry.suffix === `.${key}` || entry.suffix.startsWith(`.${key}[`))

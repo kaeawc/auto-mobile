@@ -97,6 +97,8 @@ export const PROTOTYPE_LOADING_STATES_CAPABILITY = "prototype_loading_states_v1"
 export const PROTOTYPE_MOTION_V2_CAPABILITY = "prototype_motion_v2";
 /** Transition `delayMs`, container `stagger` and the `blurReplace` transition (#15247). */
 export const PROTOTYPE_CHOREOGRAPHY_CAPABILITY = "prototype_choreography_v1";
+/** Lazy list nodes and request.append; advertised together with the data model capability. */
+export const PROTOTYPE_LAZY_LIST_CAPABILITY = "prototype_lazy_list_v1";
 /** The `chart` node (#14209): line, area, bar and ring charts over `/data` arrays. */
 export const PROTOTYPE_CHART_CAPABILITY = "prototype_chart_v1";
 /** Chat-list scroll options and the `scrollTo` action (#14232); see prototypeChatScroll.ts. */

@@ -254,3 +254,97 @@ describe("patch action", () => {
     expect(prototypePatchDataPaths(undefined)).toEqual([]);
   });
 });
+
+test("extend event round trip mirrors trimming and records a conflicting write", () => {
+  const shown = tracked();
+  const wire = dataWrite(1, CART, {
+    op: "extend",
+    value: [{ sku: "b" }, { sku: "c" }],
+    maxItems: 2,
+    revision: 4,
+  });
+  const decoded = decodePrototypeEvent(wire, "test");
+  expect<unknown>(decoded).toEqual(wire);
+  const write = prototypeDataWriteOf(decoded!);
+  expect(write).toEqual({
+    path: CART,
+    op: "extend",
+    value: [{ sku: "b" }, { sku: "c" }],
+    maxItems: 2,
+    revision: 4,
+  });
+  expect(shown.recordDeviceDataWrite("d", "shop", write!)).toEqual({
+    kind: "mirrored",
+    data: { cart: [{ sku: "b" }, { sku: "c" }], note: "hi" },
+  });
+  expect(shown.dataPatchGuard("d", "shop", [DATA_ROOT], 3)).toMatchObject({
+    kind: "conflict",
+    paths: [CART],
+  });
+});
+
+test.each([
+  { op: "extend", value: 1, revision: 1 },
+  { op: "extend", revision: 1 },
+  ...[0, -1, 1.5, "2"].map((maxItems) => ({ op: "append", value: 1, maxItems, revision: 1 })),
+])("malformed lazy write is dropped: %j", (payload) => {
+  expect(decodePrototypeEvent(dataWrite(1, CART, payload), "test")).toBeUndefined();
+});
+
+test("an append event followed by a stale whole-data patch preserves the device write", async () => {
+  const store = new InMemoryPrototypeStatusStore(new FakeTimer());
+  store.shownSpecs.endShow("d", store.shownSpecs.beginShow("d"), { id: "shop", spec });
+  store.recordEvent(
+    { deviceId: "d" },
+    decodePrototypeEvent(
+      dataWrite(1, CART, {
+        op: "append",
+        value: { sku: "b" },
+        maxItems: 1,
+        revision: 4,
+      }),
+      "test",
+    )!,
+  );
+  const sent: unknown[] = [];
+  const result = await performPrototypePatch(
+    {
+      store,
+      transport: {
+        patch: async (request: unknown) => {
+          sent.push(request);
+          return { success: true, delivery: "answered" as const, revision: 5 };
+        },
+      },
+      supportsPatch: async () => true,
+      platform: "android",
+      queue: createPrototypePatchQueue(),
+      retire: () => {},
+    },
+    "d",
+    {
+      id: "shop",
+      baseRevision: 3,
+      ops: [{ op: "replace", path: DATA_ROOT, value: { cart: [] } }],
+    },
+  );
+  expect(result).toMatchObject({ success: false, conflict: { revision: 4, data: [CART] } });
+  expect(sent).toEqual([]);
+  expect(dataOf(store.shownSpecs)).toEqual({ cart: [{ sku: "b" }], note: "hi" });
+});
+
+test("status snapshot replays extend and maxItems", () => {
+  const store = new InMemoryPrototypeStatusStore(new FakeTimer());
+  const scope = { deviceId: "d" };
+  store.record(scope, "show", { id: "shop" }, { success: true }, undefined, {
+    data: { cart: [{ sku: "a" }] },
+  });
+  store.recordEvent(
+    scope,
+    decodePrototypeEvent(
+      dataWrite(1, CART, { op: "extend", value: [{ sku: "b" }], maxItems: 1, revision: 4 }),
+      "test",
+    )!,
+  );
+  expect(store.status(scope).prototypes[0]?.data).toEqual({ cart: [{ sku: "b" }] });
+});

@@ -5,6 +5,7 @@ import { prototypeCheckErrors } from "./prototypeCheckValidation";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { logger } from "../../utils/logger";
 import { expandPrototypeComponents } from "./prototypeComponents";
+import { prototypeLazyListError, prototypeLazyListLimitError } from "./prototypeLazyList";
 import { imageSlotUses, repeatErrors, repeatKeyInstances } from "./prototypeRepeat";
 import { isPrototypeDataPointer, PrototypeRepeatData } from "./prototypeData";
 import { prototypeDataActionsError } from "./prototypeDataActions";
@@ -752,6 +753,7 @@ function layoutErrors(
   return (
     gridSpanErrors(context) ??
     swipeActionsErrors(context) ??
+    prototypeLazyListError(context.nodes) ??
     repeatErrors(value, repeats) ??
     prototypeStorageError(value)
   );
@@ -781,7 +783,7 @@ function behaviourErrors(
 ): PrototypeValidationError | undefined {
   return (
     prototypeDataActionsError(context.actions, data.data, prototypeDataError) ??
-    prototypeRequestsError(context.actions) ??
+    prototypeRequestsError(context.actions, data.data) ??
     prototypeLoadingStatesError(context.nodes) ??
     prototypeMotionV2Error(context.nodes) ??
     prototypeChoreographyError(context.nodes) ??
@@ -805,6 +807,7 @@ function validateValue(value: unknown, options: PrototypeStrictOptions): Prototy
   const data = object(value) ?? {};
   const repeats = new PrototypeRepeatData(data.data);
   const error =
+    prototypeLazyListLimitError(value) ??
     walk(value, definitions.spec, "", context, 0) ??
     layoutErrors(value, context, repeats) ??
     behaviourErrors(value, context, data, repeats);

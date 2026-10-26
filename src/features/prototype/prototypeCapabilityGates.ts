@@ -15,6 +15,7 @@ import {
   PROTOTYPE_MOTION_V2_CAPABILITY,
   PROTOTYPE_CHOREOGRAPHY_CAPABILITY,
   PROTOTYPE_CHART_CAPABILITY,
+  PROTOTYPE_LAZY_LIST_CAPABILITY,
   PROTOTYPE_CHAT_SCROLL_CAPABILITY,
   PROTOTYPE_RICH_TEXT_CAPABILITY,
   PROTOTYPE_LINKIFY_CAPABILITY,
@@ -86,6 +87,7 @@ import {
   prototypeChoreographyUnsupportedMessage,
 } from "./prototypeChoreography";
 import { prototypeMotionV2Fields, prototypeMotionV2UnsupportedMessage } from "./prototypeMotionV2";
+import { prototypeLazyListFields, prototypeLazyListUnsupportedMessage } from "./prototypeLazyList";
 import { prototypeChartFields, prototypeChartUnsupportedMessage } from "./prototypeChart";
 import { prototypeRichTextFields, prototypeRichTextUnsupportedMessage } from "./prototypeRichText";
 import { prototypeLinkifyFields, prototypeLinkifyUnsupportedMessage } from "./prototypeLinkify";
@@ -118,7 +120,9 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
   },
   {
     capability: PROTOTYPE_DATA_MODEL_CAPABILITY,
-    fields: prototypeDataModelFields,
+    fields: (spec) => [
+      ...new Set([...prototypeDataModelFields(spec), ...prototypeLazyListFields(spec)]),
+    ],
     unsupportedMessage: prototypeDataModelUnsupportedMessage,
   },
   {
@@ -185,6 +189,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_CHOREOGRAPHY_CAPABILITY,
     fields: prototypeChoreographyFields,
     unsupportedMessage: prototypeChoreographyUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_LAZY_LIST_CAPABILITY,
+    fields: prototypeLazyListFields,
+    unsupportedMessage: prototypeLazyListUnsupportedMessage,
   },
   {
     capability: PROTOTYPE_CHART_CAPABILITY,

@@ -5,7 +5,7 @@ import { PROTOTYPE_REFRESH_CAPABILITY } from "../observe/android/ctrlProxyProtoc
 export function prototypeRefreshFields(spec: unknown): string[] {
   const fields: string[] = [];
   walkPrototypeNodes(spec, (node, path) => {
-    if (node.type === "scroll" && Object.hasOwn(node, "refresh")) {
+    if ((node.type === "scroll" || node.type === "list") && Object.hasOwn(node, "refresh")) {
       fields.push(`${path}.refresh`);
     }
   });

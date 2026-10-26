@@ -46,7 +46,8 @@
     "MAX_PROTOTYPE_PLATFORM_HANDLERS": 32,
     "MAX_PROTOTYPE_PLATFORM_ARGS": 16,
     "MAX_PROTOTYPE_CHECK_QUANTIFIER_BOUND": 100,
-    "MAX_PROTOTYPE_CHECK_VARIABLE_QUANTIFIERS": 2
+    "MAX_PROTOTYPE_CHECK_VARIABLE_QUANTIFIERS": 2,
+    "MAX_PROTOTYPE_LIST_ITEMS": 500
   },
   "definitions": {
     "offset": {
@@ -2068,6 +2069,27 @@
                 "item": {
                   "kind": "ref",
                   "name": "action"
+                }
+              },
+              "optional": true
+            },
+            "append": {
+              "rule": {
+                "kind": "object",
+                "fields": {
+                  "from": {
+                    "rule": {
+                      "kind": "pointer"
+                    },
+                    "optional": false
+                  },
+                  "to": {
+                    "rule": {
+                      "kind": "string",
+                      "max": 261
+                    },
+                    "optional": false
+                  }
                 }
               },
               "optional": true
@@ -9748,6 +9770,250 @@
               "optional": true
             }
           }
+        },
+        "list": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["list"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "contentDescription": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "style": {
+              "rule": {
+                "kind": "ref",
+                "name": "style"
+              },
+              "optional": true
+            },
+            "styleWhen": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "styleWhenEntry"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
+              },
+              "optional": true
+            },
+            "visibleWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "transition": {
+              "rule": {
+                "kind": "choice",
+                "options": [
+                  {
+                    "kind": "enum",
+                    "values": [
+                      "none",
+                      "fade",
+                      "expand",
+                      "slide",
+                      "slideStart",
+                      "slideEnd",
+                      "scale",
+                      "blurReplace"
+                    ]
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "type": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": [
+                            "none",
+                            "fade",
+                            "expand",
+                            "slide",
+                            "slideStart",
+                            "slideEnd",
+                            "scale",
+                            "blurReplace"
+                          ]
+                        },
+                        "optional": false
+                      },
+                      "delayMs": {
+                        "rule": {
+                          "kind": "number",
+                          "integer": true,
+                          "min": 0,
+                          "max": 600
+                        },
+                        "optional": true
+                      }
+                    }
+                  }
+                ]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
+              },
+              "optional": true
+            },
+            "anchor": {
+              "rule": {
+                "kind": "ref",
+                "name": "anchor"
+              },
+              "optional": true
+            },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
+            "safeAreaPadding": {
+              "rule": {
+                "kind": "ref",
+                "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "axis": {
+              "rule": {
+                "kind": "enum",
+                "values": ["vertical", "horizontal"]
+              },
+              "optional": true
+            },
+            "refresh": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollRefresh"
+              },
+              "optional": true
+            },
+            "repeat": {
+              "rule": {
+                "kind": "ref",
+                "name": "listRepeat"
+              },
+              "optional": false
+            },
+            "children": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "node"
+                },
+                "min": 1,
+                "max": 1,
+                "unique": false
+              },
+              "optional": false
+            },
+            "header": {
+              "rule": {
+                "kind": "ref",
+                "name": "node"
+              },
+              "optional": true
+            },
+            "footer": {
+              "rule": {
+                "kind": "ref",
+                "name": "node"
+              },
+              "optional": true
+            },
+            "spacing": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0
+              },
+              "optional": true
+            },
+            "contentPadding": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0
+              },
+              "optional": true
+            },
+            "onEndReached": {
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              },
+              "optional": true
+            },
+            "endThreshold": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1,
+                "max": 50
+              },
+              "optional": true
+            },
+            "maxItems": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1,
+                "max": 500
+              },
+              "optional": true
+            }
+          }
         }
       }
     },
@@ -13449,6 +13715,37 @@
             "values": ["forward", "reverse", "center"]
           },
           "optional": true
+        }
+      }
+    },
+    "listRepeat": {
+      "kind": "object",
+      "fields": {
+        "items": {
+          "rule": {
+            "kind": "object",
+            "fields": {
+              "path": {
+                "rule": {
+                  "kind": "pointer"
+                },
+                "optional": false
+              }
+            }
+          },
+          "optional": false
+        },
+        "as": {
+          "rule": {
+            "kind": "key"
+          },
+          "optional": false
+        },
+        "key": {
+          "rule": {
+            "kind": "key"
+          },
+          "optional": false
         }
       }
     }

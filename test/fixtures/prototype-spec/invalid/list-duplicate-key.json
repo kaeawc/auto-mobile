@@ -1,0 +1,49 @@
+{
+  "spec": {
+    "id": "feed",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "feed": {
+        "items": [
+          {
+            "id": 1,
+            "title": "One"
+          },
+          {
+            "id": 1,
+            "title": "Two"
+          }
+        ]
+      },
+      "page": {
+        "next": "p2"
+      }
+    },
+    "state": {
+      "refreshing": false,
+      "feedStatus": "idle"
+    },
+    "root": {
+      "type": "list",
+      "repeat": {
+        "items": {
+          "path": "/feed/items"
+        },
+        "as": "post",
+        "key": "id"
+      },
+      "children": [
+        {
+          "type": "text",
+          "text": "{post.title}"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.repeat.key",
+  "expectedMessage": "Duplicate repeat key \"1\" (items 0 and 1)"
+}

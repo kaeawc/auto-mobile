@@ -259,6 +259,13 @@ export interface ViewHierarchyWindowInfo {
    * window and only from an APK advertising `prototype_appearance_v1`; absent otherwise.
    */
   prototypeAppearance?: PrototypeWindowAppearance;
+  /**
+   * The animations running in that prototype window (#15114). `active` settles (fades, slides,
+   * style animations, page scrolls) and `observe(waitFor: stable)` waits for it to reach zero;
+   * `loops` are intentional infinite animations and are ignored. Only on the prototype window and
+   * only from an APK advertising `prototype_window_metadata_v1`; absent reads as settled.
+   */
+  prototypeMotion?: { active: number; loops: number };
   hierarchy?: ViewHierarchyNode;
   /** Per-window truncation attribution; absent from older runners and complete windows. */
   truncationReasons?: string[] | null;

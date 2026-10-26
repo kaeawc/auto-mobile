@@ -39,6 +39,12 @@ data class PrototypeWindowMetadata(
   val opaque: Boolean,
   /** The mode the window is drawn in; null when it was not derived from a controller show. */
   val appearance: PrototypeAppearance? = null,
+  /**
+   * The animations running in the window (#15114): [PrototypeMotionState.active] settles,
+   * [PrototypeMotionState.loops] never does. Null when the metadata was derived from a render model
+   * alone, with no live window to count.
+   */
+  val motion: PrototypeMotionState? = null,
 )
 
 /**

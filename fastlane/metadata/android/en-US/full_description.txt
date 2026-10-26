@@ -1,0 +1,21 @@
+ProtoViewer is a viewer for the design prototypes you author with AutoMobile. Keep every prototype in one library, open any of them in a tap, and carry them with you without a network connection.
+
+What you can do
+
+- Browse a library of prototypes with their names and when you last opened them.
+- Switch between prototypes in one tap, relaunch one from the start, or reset it to clear its saved values.
+- Import a prototype from a file, or open one shared with you.
+- Share a prototype as a single .automobile-proto bundle through the system share sheet.
+- Review a prototype exactly as the spec describes it: layout, motion, theme, saved values and data, rendered on your device.
+
+Works on its own
+
+A bundled sample gallery gives you something to open on the first launch, so ProtoViewer is useful before you connect anything. Prototypes are declarative documents, not programs: the renderer's features are fixed in the app, and a prototype cannot install or run code.
+
+Private by default
+
+ProtoViewer needs no account and shows no ads. Prototypes stay on your device. Network access for imported prototypes is off until you turn it on in the library settings.
+
+Made for designers and developers
+
+Author a prototype with the AutoMobile tools, save it to your library, and review it on a real phone. ProtoViewer is open source under the Apache License 2.0.

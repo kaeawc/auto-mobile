@@ -200,11 +200,12 @@ class PrototypeController(
       // Opacity follows the mode the window is drawn in, not every mode the spec could reach.
       val shown = surface.theme.value
       prototypeWindowMetadata(
-        runtime.renderModel(current),
-        dismissBarDrawn = prototypeHostChrome(surface.request).dismissVisible,
-        palettes = listOf(prototypeShownPalette(shown)),
-        appearance = shown.appearance,
-      )
+          runtime.renderModel(current),
+          dismissBarDrawn = prototypeHostChrome(surface.request).dismissVisible,
+          palettes = listOf(prototypeShownPalette(shown)),
+          appearance = shown.appearance,
+        )
+        .copy(motion = runtime.motionActivity.snapshot())
     } catch (error: Exception) {
       Log.w("PrototypeController", "Prototype window metadata unavailable", error)
       null

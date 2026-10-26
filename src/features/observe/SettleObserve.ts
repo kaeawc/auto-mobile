@@ -3,6 +3,7 @@ import type { SettleObserve, SettleOptions, SettleResult } from "./interfaces/Se
 import { diffObserveResult, isSameObservationScreen } from "./output/ObserveResultOutput";
 import type { ObserveDiff } from "./output/ObserveResultOutput";
 import { pollObserveUntil } from "./ObservePoll";
+import { prototypeMotionActive } from "./prototypeMotion";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import type { ObserveResult } from "../../models";
 
@@ -57,6 +58,9 @@ export class RealSettleObserve implements SettleObserve {
 
     // Length of the current run of consecutive structurally-equal snapshots.
     let equalRun = 0;
+    // The next poll must read the device, not serve the cached capture that reported motion: an
+    // animation ending changes no node and fires no event, so a cache would stay "active" (#15114).
+    let motionPending = false;
 
     const outcome = await pollObserveUntil(
       this.observeScreen,
@@ -68,12 +72,21 @@ export class RealSettleObserve implements SettleObserve {
         signal: options.signal,
         initialMinTimestampMs: options.initialMinTimestampMs,
         skipWaitForFresh: options.skipWaitForFresh,
-        requireFreshExtraction: options.requireFreshExtraction,
+        get requireFreshExtraction() {
+          return motionPending || options.requireFreshExtraction;
+        },
         resumeOnTerminalMismatch: options.resumeOnTerminalMismatch,
         skipPerformanceAudit: options.skipPerformanceAudit,
         skipRecompositionTracking: options.skipRecompositionTracking,
       },
       (observation, previous) => {
+        // A prototype fade or slide changes no node, so two identical trees prove nothing while the
+        // device still reports animations settling (#15114); the timeout bounds the wait.
+        motionPending = prototypeMotionActive(observation.viewHierarchy) > 0;
+        if (motionPending) {
+          equalRun = 0;
+          return false;
+        }
         if (previous === undefined) {
           equalRun = 1;
           return equalRun >= stableReads;

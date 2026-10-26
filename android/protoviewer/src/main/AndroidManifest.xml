@@ -39,6 +39,7 @@
       android:exported="false" android:grantUriPermissions="true">
       <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/export_paths" />
     </provider>
+    <activity android:name=".LicensesActivity" android:exported="false" />
     <activity android:name=".ViewerActivity" android:documentLaunchMode="always" android:exported="false" />
     <!-- MCP host entry (#13621): explicit adb launches only. DUMP is held by the shell, never by apps. -->
     <activity android:name=".McpActivity" android:exported="true"

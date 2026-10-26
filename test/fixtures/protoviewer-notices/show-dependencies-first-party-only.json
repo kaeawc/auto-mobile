@@ -1,0 +1,9 @@
+{
+  "identity": "prototype-agent",
+  "name": "AutoMobilePrototypeAgent",
+  "url": "/work/repo/ios/prototype-agent",
+  "version": "unspecified",
+  "path": "/work/repo/ios/prototype-agent",
+  "traits": ["default"],
+  "dependencies": []
+}

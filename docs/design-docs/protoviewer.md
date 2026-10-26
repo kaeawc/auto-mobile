@@ -141,6 +141,37 @@ Import needs identical accept/reject behaviour on all three platforms.
 - Network: requests go through a pin-capable transport, not `URLSession`; App Transport Security is
   relaxed only in the simulator and dev build; see section 6.
 
+### 3.5 Open-source notices (#14158)
+
+Both apps list the licenses of everything they ship under Settings, "Open-source licenses", and
+link `SECURITY.md` beside it. The lists are generated, never hand-maintained.
+
+- **Android**: the AboutLibraries Gradle plugin (`com.mikepenz.aboutlibraries.plugin.android`,
+  version in `libs.versions.toml`) collects the release runtime classpath at build time into
+  `res/raw/aboutlibraries.json`. Only the plugin is applied: `LicensesActivity` parses the JSON with
+  the existing kotlinx.serialization dependency, so the app links no extra runtime library. The
+  plugin runs offline, so the full Apache-2.0 text comes from
+  `android/protoviewer/license-config/licenses/Apache-2.0.json` (a test pins it to the repository
+  `LICENSE`). Strict mode fails the build for any license outside the allow-list, and a unit test
+  fails when a bundled dependency has no license entry or no license text. Alternatives checked:
+  Google's `oss-licenses-plugin` (its UI is the Play services `play-services-oss-licenses` runtime
+  library, which an unprivileged offline app should not link), and licensee (validates licenses but
+  is not a notice generator). No such plugin existed in the build before.
+- **iOS**: `scripts/ios/protoviewer-notices.ts` reads the SwiftPM graph of `ios/prototype-agent`
+  (`swift package show-dependencies --format json`, so transitive packages and resolved versions are
+  covered), adds each package's license text from
+  `ios/prototype-agent/ProtoViewer/third-party-licenses/<identity>.txt`, and writes
+  `ProtoViewer/Acknowledgements.generated.swift`, which the viewer build compiles in. Today the graph
+  is first party only, so the list holds the AutoMobile Apache-2.0 notice. When a package is added:
+  commit its license text, run `bun scripts/ios/protoviewer-notices.ts`, and add the package
+  directory to `.github/dependabot.yml`. A missing text, or a text for a package no longer linked,
+  fails the script.
+- **Drift check**: `scripts/prepush-ios.sh` and the `protoviewer-notices` Fast Validation check run
+  the script with `--check`. On macOS it rebuilds the output from SwiftPM and fails when the
+  committed Swift file differs. Elsewhere, where the pinned Swift toolchain may be absent, the
+  generated header records a digest of `Package.swift`, `LICENSE` and the license texts, and the
+  check fails when the digest no longer matches, so any manifest edit needs a regeneration on macOS.
+
 ## 4. Data model and formats
 
 **The store layout stays untouched.** Per-platform manifests (`manifest.json`, formatVersion 1) do

@@ -23,6 +23,12 @@ class ManifestTest {
     )
     val viewer =
       context.packageManager.getActivityInfo(ComponentName(context, ViewerActivity::class.java), 0)
+    val licenses =
+      context.packageManager.getActivityInfo(
+        ComponentName(context, LicensesActivity::class.java),
+        0,
+      )
+    assertFalse(licenses.exported)
     val importer =
       context.packageManager.getActivityInfo(ComponentName(context, ImportActivity::class.java), 0)
     assertTrue(importer.exported)

@@ -1,0 +1,28 @@
+{
+  "identity": "pkg",
+  "name": "Demo",
+  "url": "/work/pkg",
+  "version": "unspecified",
+  "path": "/work/pkg",
+  "traits": ["default"],
+  "dependencies": [
+    {
+      "identity": "swift-argument-parser",
+      "name": "swift-argument-parser",
+      "url": "https://github.com/apple/swift-argument-parser.git",
+      "version": "1.5.0",
+      "path": "/work/pkg/.build/checkouts/swift-argument-parser",
+      "traits": ["default"],
+      "dependencies": []
+    },
+    {
+      "identity": "swift-log",
+      "name": "swift-log",
+      "url": "https://github.com/apple/swift-log.git",
+      "version": "unspecified",
+      "path": "/work/pkg/.build/checkouts/swift-log",
+      "traits": [],
+      "dependencies": []
+    }
+  ]
+}

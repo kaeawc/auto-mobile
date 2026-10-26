@@ -1352,8 +1352,9 @@
                 let heights = prototypeSheetHeights(detents: node.detents ?? [], containerHeight: containerHeight)
                 let current = settledHeight ?? heights.first
                 ZStack(alignment: .bottom) {
-                    if let scrim = palette.scrim(node.scrim).map({ Color($0) }) {
+                    if let scrim = palette.sheetScrim(node.scrim).map({ Color($0) }) {
                         scrim
+                            .ignoresSafeArea()
                             .contentShape(Rectangle())
                             .onTapGesture { model.closeModal(node) }
                             .accessibilityHidden(true)

@@ -2,7 +2,12 @@ import type { ObserveResult } from "../../../models";
 import { FieldTypeDetector } from "../FieldTypeDetector";
 import { DefaultElementParser } from "../../utility/ElementParser";
 import { toSearchable } from "../../utility/SearchableNode";
-import { getFocusedTextField, getFocusedTextLength, hasFocusedTextInput } from "../ClearText";
+import {
+  getFocusedTextField,
+  getFocusedTextFieldIdentity,
+  getFocusedTextLength,
+  hasFocusedTextInput,
+} from "../ClearText";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import type { Timer } from "../../../utils/SystemTimer";
@@ -21,6 +26,47 @@ export function checkAbort(signal?: AbortSignal, error?: unknown): void {
   if (error instanceof Error && error.name === "AbortError") {
     throw error;
   }
+}
+
+/**
+ * One post-Enter read. `unavailable` is a stale or errored observation, which says nothing about
+ * the field; `field` is a fresh observation whose focused snapshot or identity may be absent
+ * because focus left the editable field.
+ */
+export type EnterFieldState =
+  | { kind: "unavailable" }
+  | {
+      kind: "field";
+      snapshot: { text: string; length: number } | undefined;
+      identity: string | undefined;
+    };
+
+/**
+ * Whether the Enter key reached the field the baseline was read from. Unavailable reads never
+ * confirm. A different focused field confirms regardless of its text; otherwise the key landed
+ * when a line was added or the text no longer extends the baseline (a submit that cleared the
+ * field) or focus left every readable field.
+ */
+export function isEnterConfirmed(
+  baseline: { text: string; identity: string | undefined },
+  state: EnterFieldState,
+): boolean {
+  if (state.kind === "unavailable") {
+    return false;
+  }
+  if (
+    state.identity !== undefined &&
+    baseline.identity !== undefined &&
+    state.identity !== baseline.identity
+  ) {
+    return true;
+  }
+  const { snapshot } = state;
+  return (
+    snapshot === undefined ||
+    snapshot.text.split("\n").length > baseline.text.split("\n").length ||
+    !snapshot.text.startsWith(baseline.text)
+  );
 }
 
 export interface FocusedTextClearVerifierDeps {
@@ -157,6 +203,19 @@ export class FocusedTextClearVerifier {
     });
     checkAbort(signal);
     return observation;
+  }
+
+  /** Classify a post-Enter observation without conflating "unavailable" with "focus left". */
+  readEnterFieldState(observation: ObserveResult): EnterFieldState {
+    const hierarchy = observation.viewHierarchy;
+    if (observation.freshness?.isFresh === false || !hierarchy || hierarchy.hierarchy.error) {
+      return { kind: "unavailable" };
+    }
+    return {
+      kind: "field",
+      snapshot: this.readFocusedTextSnapshot(observation),
+      identity: getFocusedTextFieldIdentity(hierarchy),
+    };
   }
 
   /** Hint-aware length plus the text; undefined when the field cannot be read. */

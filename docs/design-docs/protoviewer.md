@@ -409,6 +409,80 @@ listing):
 - iOS: dev-signed builds installed on the owner's iPhones (an Apple Developer team is configured).
   The simulator template remains available.
 
+### 8.1 Release-artifact policy gate (#14154)
+
+The hardening promises above are checked on the **built artifact**, not the source manifests, by
+`scripts/release/check-protoviewer-artifact-policy.ts` against the checked-in allowlists in
+`scripts/release/protoviewer-artifact-policy.json`:
+
+- **Android** (`aapt2 dump xmltree` of the APK's merged manifest): permissions equal the allowlist
+  (`INTERNET`, `ACCESS_LOCAL_NETWORK`) with no declared permissions; no `debuggable`;
+  `allowBackup=false` and `dataExtractionRules`; no cleartext (`usesCleartextTraffic` or a network
+  security config that permits it); the exported components equal the allowlist (the launcher,
+  `ImportActivity`, and the two `DUMP`-protected entries); `targetSdk` at the Play floor; no
+  `-SNAPSHOT` `versionName` (local and PR builds pass `--allow-snapshot`).
+- **iOS** (`plutil`, `codesign -d --entitlements`, `nm`): no ATS relaxation, no
+  `UIFileSharingEnabled`, `CFBundleSupportedPlatforms` matches `--platform`, entitlements within the
+  allowlist and never a `get-task-allow` that is not `false` (simulator builds keep entitlements in the
+  executable, so `codesign` reports none and these rules bite on the device `.ipa`), no `.dSYM` in the bundle and no debug map left in the
+  executable. The `PrivacyInfo.xcprivacy` check is enforced (#14151, #15387). The
+  forbidden-symbol check (`PrototypeServer`, `bootViewerHost`) is **advisory** (reported as a warning,
+  table `advisory` in the policy file) until the App Store archive (#14150) lands; delete the table
+  entry then to enforce it.
+
+It runs in the pull-request Android build, in `prepare-release.yml` through
+`verify-protoviewer-artifact-policy.yml` (which `verify-prepared-release` waits on), and locally with
+`scripts/release/protoviewer-artifact-policy.sh`. Fixtures are real tool output captured by
+`scripts/release/capture-protoviewer-policy-fixtures.sh`; CtrlProxy's release APK is the
+deliberately failing Android case. The upgrade-in-place and minified-smoke tests from the issue
+remain open.
+
+### 8.2 Play-ready Android artifact (#14146)
+
+The Android module builds a Play-uploadable AAB next to the APK. The Gradle side is the
+`automobile.protoviewer-play-release` convention in `android/build-logic`; it replaces the shared
+`automobile.android-app-signing` for ProtoViewer, which falls back open to the debug key.
+
+**Dedicated keystore.** ProtoViewer has its own signing key, never CtrlProxy's `RELEASE_KEYSTORE_*`.
+Inputs are read from the environment (CI) or `gradle.properties` (local):
+
+| Input                                 | Purpose                                                   | CI secret                       |
+| ------------------------------------- | --------------------------------------------------------- | ------------------------------- |
+| `PROTOVIEWER_KEYSTORE_PATH`           | keystore file (relative paths resolve against `android/`) | `PROTOVIEWER_KEYSTORE_BASE64`   |
+| `PROTOVIEWER_KEYSTORE_PASSWORD`       | store password                                            | `PROTOVIEWER_KEYSTORE_PASSWORD` |
+| `PROTOVIEWER_KEY_ALIAS`               | key alias                                                 | `PROTOVIEWER_KEY_ALIAS`         |
+| `PROTOVIEWER_KEY_PASSWORD`            | key password                                              | `PROTOVIEWER_KEY_PASSWORD`      |
+| `PROTOVIEWER_RELEASE_VERSION`         | plain `MAJOR.MINOR.PATCH` of the release tag              | (workflow input)                |
+| `PROTOVIEWER_REQUIRE_RELEASE_SIGNING` | `true` in release workflows: fail closed                  | (workflow env)                  |
+
+The workflow decodes `PROTOVIEWER_KEYSTORE_BASE64` to a file and exports its path as
+`PROTOVIEWER_KEYSTORE_PATH`. Whether this key is the Play upload key or the app-signing key is
+decided at Play App Signing enrolment; record it next to the key.
+
+**Fail closed.** With `PROTOVIEWER_REQUIRE_RELEASE_SIGNING=true`, `verifyProtoViewerReleaseInputs`
+(a `preReleaseBuild` dependency, so it fails before compilation) rejects a missing signing input, a
+missing keystore file, a missing `PROTOVIEWER_RELEASE_VERSION`, or a `-SNAPSHOT`/suffixed version.
+Without it (local and pull-request builds) an incomplete keystore falls back to the debug key and
+the version code stays `1`. Debug builds always use the debug key, never the release key.
+
+**versionCode.** `major * 1_000_000 + minor * 1_000 + patch` of `PROTOVIEWER_RELEASE_VERSION`
+(`ProtoViewerVersioning`). It is strictly monotonic in version order, bounded under Play's
+2,100,000,000 cap (major <= 2099, minor and patch <= 999), and `0.0.89` gives `89`. The release
+`versionName` is the same plain version, so a published build never carries `-SNAPSHOT`.
+
+**AAB, R8 and mapping.** `:protoviewer:bundleRelease` writes
+`build/outputs/bundle/release/protoviewer-release.aab` and is finalized by
+`verifyProtoViewerReleaseAab` (required entries, jar signature present and not the Android debug
+certificate when signing is required, R8 mapping present) and, when R8 is on,
+`archiveProtoViewerReleaseMapping` (`build/outputs/release-archive/mapping-<versionCode>.txt`, to
+be kept as a release asset for as long as that version is supported). R8 is on for release (disable
+locally with `-Pautomobile.protoviewer.minifyRelease=false`); `verifyReleaseR8KeptClasses` asserts
+the manifest components, the saved-prototype `@Serializable` contract and the reflectively resolved
+icon set survive. Unused `:protocol` wire models are shrunk away.
+
+Not yet wired: the release workflow step that exports these inputs and uploads the AAB and mapping,
+`lintRelease` in CI, and the `bundletool build-apks` install smoke test on a device.
+
 ## 9. Phased plan
 
 **First release.** Library list; open/switch; relaunch/reset; delete; share a clean bundle; import by

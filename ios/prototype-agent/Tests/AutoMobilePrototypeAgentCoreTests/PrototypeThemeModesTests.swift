@@ -326,6 +326,19 @@ final class PrototypeThemeModesTests: XCTestCase {
         XCTAssertEqual(session.state["open"], .bool(false))
     }
 
+    /// #15117: a sheet with no authored `scrim` resolves the `scrim` role at 40% like Android's
+    /// default; an authored hex, role or pair wins over the fallback.
+    func testASheetWithoutAScrimDrawsTheDefaultScrimRoleInBothModes() throws {
+        let dim = PrototypeRGBA(red: 0, green: 0, blue: 0, alpha: 0.4)
+        XCTAssertEqual(light.sheetScrim(nil), dim)
+        XCTAssertEqual(dark.sheetScrim(nil), dim)
+        try XCTAssertEqual(light.sheetScrim("#52000000"), hex("#52000000"))
+        try XCTAssertEqual(light.sheetScrim(.modes(light: "#52000000", dark: "scrim")), hex("#52000000"))
+        XCTAssertEqual(dark.sheetScrim(.modes(light: "#52000000", dark: "scrim")), dim)
+        XCTAssertEqual(dark.sheetScrim("scrim"), dim)
+        XCTAssertNil(light.scrim(nil), "only a sheet falls back; other scrim slots stay undrawn")
+    }
+
     // MARK: Scrim resolution
 
     /// Owner decision 2026-10-10: only the `scrim` role is given an alpha when it is a scrim.

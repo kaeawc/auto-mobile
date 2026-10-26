@@ -154,8 +154,11 @@ function hangsSummary(rows: Row[]): PerformanceTraceSummary["hangs"] {
 
 function leafFunctions(rows: Row[]): string[] {
   return rows.flatMap((row) => {
-    const frame = row.resolve(child(row("backtrace"), "frame"));
-    const name = frame?.$?.name;
+    const backtrace = row("backtrace") ?? row.resolve(child(row("tagged-backtrace"), "backtrace"));
+    // Use the first symbolicated frame when the leaf is an Instruments placeholder.
+    const name = children(backtrace, "frame")
+      .map((frame) => row.resolve(frame)?.$?.name)
+      .find((name) => name && name !== "<deduplicated_symbol>");
     return name ? [name] : [];
   });
 }

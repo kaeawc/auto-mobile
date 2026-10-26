@@ -9,12 +9,16 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.core.content.IntentCompat
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
@@ -28,14 +32,13 @@ class ImportActivity : ComponentActivity() {
     super.onCreate(savedInstanceState)
     setContent {
       ProtoViewerTheme {
-        Column(Modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
-          Text(rejection?.let { "${it.path}: ${it.reason}" } ?: getString(R.string.loading))
-          TextButton(onClick = { finish() }) { Text(getString(R.string.back)) }
+        ImportStatus(rejection?.let { "${it.path}: ${it.reason}" } ?: stringResource(R.string.loading)) {
+          finish()
         }
       }
     }
     if (savedInstanceState != null) {
-      rejection = LibraryImportResult.Rejected("content", "Import interrupted; open the file again")
+      rejection = LibraryImportResult.Rejected("content", getString(R.string.import_interrupted))
       return
     }
     val action =
@@ -61,8 +64,17 @@ class ImportActivity : ComponentActivity() {
           finish()
         }
         is LibraryImportResult.Rejected -> rejection = result
-        null -> rejection = LibraryImportResult.Rejected("library", "Import unavailable")
+        null ->
+          rejection = LibraryImportResult.Rejected("library", getString(R.string.import_unavailable))
       }
     }
+  }
+}
+
+@Composable
+internal fun ImportStatus(text: String, back: () -> Unit) {
+  Column(Modifier.windowInsetsPadding(WindowInsets.safeDrawing).verticalScroll(rememberScrollState())) {
+    Text(text)
+    TextButton(onClick = back) { Text(stringResource(R.string.back)) }
   }
 }

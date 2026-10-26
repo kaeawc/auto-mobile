@@ -12,6 +12,7 @@ setup() {
     "${FIXTURE}/ios/prototype-agent/ProtoViewer" "${FIXTURE}/ios/prototype-agent/Viewer"
   cp "${REPO_ROOT}/scripts/ios/protoviewer-build.sh" "${FIXTURE}/scripts/ios/"
   cp "${REPO_ROOT}/ios/prototype-agent/ProtoViewer/Info.plist" "${FIXTURE}/ios/prototype-agent/ProtoViewer/"
+  cp "${REPO_ROOT}/ios/prototype-agent/ProtoViewer/"*.xcstrings "${FIXTURE}/ios/prototype-agent/ProtoViewer/"
   touch "${FIXTURE}/ios/prototype-agent/ProtoViewer/ProtoViewerApp.swift" \
     "${FIXTURE}/ios/prototype-agent/Viewer/ViewerApp.swift" \
     "${FIXTURE}/ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/Core.swift" \
@@ -23,6 +24,10 @@ set -euo pipefail
 printf '%s\n' "$*" >> "$BUILD_LOG"
 if [[ "$*" == '--sdk iphonesimulator --show-sdk-path' ]]; then
   echo /fake/sdk
+elif [[ "$1 ${2:-}" == 'xcstringstool compile' ]]; then
+  [[ -s "$3" && "$4" == --output-directory ]]
+  mkdir -p "$5/en.lproj"
+  touch "$5/en.lproj/$(basename "$3" .xcstrings).strings"
 elif [[ "$3" == swiftc ]]; then
   [[ "$*" == *'-swift-version 6 -warnings-as-errors'* ]]
   [[ "$*" == *'/ProtoViewer/ProtoViewerApp.swift'* ]]
@@ -164,4 +169,31 @@ PY
   run cat "$BUILD_LOG"
   [[ "$output" == *' swiftc '* ]]
   [[ "$output" != *'PROTOVIEWER_ALLOW_CLEARTEXT'* ]]
+}
+
+@test "compiles both string catalogs into localized bundle resources" {
+  run bash "$SCRIPT" "$OUT"
+  [ "$status" -eq 0 ]
+  [ -f "$OUT/ProtoViewer.app/en.lproj/Localizable.strings" ]
+  [ -f "$OUT/ProtoViewer.app/en.lproj/InfoPlist.strings" ]
+  run cat "$BUILD_LOG"
+  [[ "$output" == *'xcstringstool compile '*'Localizable.xcstrings --output-directory'* ]]
+  [[ "$output" == *'xcstringstool compile '*'InfoPlist.xcstrings --output-directory'* ]]
+}
+
+@test "rejects stray root InfoPlist strings and compiled assets" {
+  mkdir -p "$OUT/ProtoViewer.app"
+  touch "$OUT/ProtoViewer.app/InfoPlist.strings"
+  run bash "$SCRIPT" "$OUT"
+  [ "$status" -ne 0 ]
+  rm "$OUT/ProtoViewer.app/InfoPlist.strings"
+  mkdir -p "$OUT/ProtoViewer.app/stray"
+  touch "$OUT/ProtoViewer.app/stray/InfoPlist.strings"
+  run bash "$SCRIPT" "$OUT"
+  [ "$status" -ne 0 ]
+  rm "$OUT/ProtoViewer.app/stray/InfoPlist.strings"
+  mkdir -p "$OUT/ProtoViewer.app/en.lproj"
+  touch "$OUT/ProtoViewer.app/en.lproj/Assets.car"
+  run bash "$SCRIPT" "$OUT"
+  [ "$status" -ne 0 ]
 }

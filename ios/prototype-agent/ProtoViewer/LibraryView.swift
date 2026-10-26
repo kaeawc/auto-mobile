@@ -12,6 +12,7 @@ struct LibraryView: View {
     let importService: PrototypeLibraryImportService
     let mcpInbox: PrototypeMcpInbox
     let networkSwitch: PrototypeLibraryNetworkSwitch
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var path = NavigationPath()
     @State private var mcpOpen: PrototypeMcpRequest?
     @State private var showsSettings = false
@@ -45,7 +46,10 @@ struct LibraryView: View {
                             NavigationLink(value: entry) {
                                 VStack(alignment: .leading, spacing: 6) {
                                     Text(entry.label).font(.headline)
-                                    HStack {
+                                    let layout = dynamicTypeSize.isAccessibilitySize
+                                        ? AnyLayout(VStackLayout(alignment: .leading))
+                                        : AnyLayout(HStackLayout())
+                                    layout {
                                         Text(
                                             Date(timeIntervalSince1970: Double(entry.lastOpenedAt) / 1000),
                                             style: .relative
@@ -56,6 +60,7 @@ struct LibraryView: View {
                                     .foregroundStyle(.secondary)
                                 }
                             }
+                            .accessibilityElement(children: .combine)
                             .buttonStyle(.plain)
                             .swipeActions(allowsFullSwipe: false) { actions(entry) }
                             .contextMenu { actions(entry) }
@@ -94,10 +99,16 @@ struct LibraryView: View {
             .alert("Prototype operation failed", isPresented: $showsError) {
                 Button("OK", role: .cancel) {}
             } message: {
-                Text(actionError ?? "Unknown error")
+                Text(actionError ?? String(
+                    localized: "Unknown error",
+                    comment: "Fallback when a library operation fails without details."
+                ))
             }
             .confirmationDialog(
-                "Delete \(deletion?.label ?? "prototype")?",
+                String(
+                    localized: "Delete \(deletionLabel)?",
+                    comment: "Delete confirmation title; placeholder is the prototype name."
+                ),
                 isPresented: $confirmsDelete,
                 titleVisibility: .visible
             ) {
@@ -138,14 +149,24 @@ struct LibraryView: View {
         }
     }
 
+    private var deletionLabel: String {
+        deletion?.label ?? String(localized: "prototype", comment: "Fallback name in the delete confirmation.")
+    }
+
     private var exporter: PrototypeLibraryExporter { PrototypeLibraryExporter(store: store) }
 
     private var preflightMessage: String {
         guard let export, !export.warnings.isEmpty else {
-            return "Shares the spec and its referenced assets. Stored values and library metadata are excluded."
+            return String(
+                localized: "Shares the spec and its referenced assets. Stored values and library metadata are excluded.",
+                comment: "Share confirmation describing exported contents."
+            )
         }
         let details = export.warnings.map { "\($0.code.rawValue): \($0.path)" }.joined(separator: "\n")
-        return "This spec may contain credentials or private addresses. Review before sharing.\n\(details)"
+        return String(
+            localized: "This spec may contain credentials or private addresses. Review before sharing.\n\(details)",
+            comment: "Share warning; placeholder contains technical warning codes and paths."
+        )
     }
 
     @ViewBuilder

@@ -42,12 +42,17 @@ struct PrototypeScreen: View {
     var body: some View {
         VStack(spacing: 0) {
             if networkSwitch.enabled {
-                Label("Network on", systemImage: "network")
-                    .font(.footnote)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal)
-                    .padding(.vertical, 8)
-                    .background(.bar)
+                Label {
+                    Text("Network on")
+                } icon: {
+                    Image(systemName: "network").accessibilityHidden(true)
+                }
+                .accessibilityLabel("Network is enabled for imported prototypes")
+                .font(.footnote)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+                .background(.bar)
             }
             prototypeContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -142,7 +147,13 @@ struct PrototypeScreen: View {
             content = loaded
             watchdog.start {
                 // No first content within the budget: show the error state; Back and Close stay available.
-                error = PrototypeLibraryFailure(path: entry.label, message: "Prototype did not render in time")
+                error = PrototypeLibraryFailure(
+                    path: entry.label,
+                    message: String(
+                        localized: "Prototype did not render in time",
+                        comment: "Error when the prototype fails to produce its first render before the deadline."
+                    )
+                )
                 content = nil
                 onLoadFailed()
             }

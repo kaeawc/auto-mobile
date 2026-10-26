@@ -16,6 +16,7 @@ android {
     applicationId = "dev.jasonpearson.automobile.protoviewer"
     versionCode = 1
   }
+  buildTypes { getByName("debug") { isPseudoLocalesEnabled = true } }
   buildFeatures { compose = true }
   testOptions { unitTests.isIncludeAndroidResources = true }
 }

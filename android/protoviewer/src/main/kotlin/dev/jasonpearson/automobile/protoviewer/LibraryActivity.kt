@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -35,7 +37,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
@@ -194,7 +199,7 @@ class LibraryActivity : ComponentActivity() {
         Intent(Intent.ACTION_SEND).apply {
           type = PROTOTYPE_BUNDLE_MIME
           putExtra(Intent.EXTRA_STREAM, uri)
-          clipData = ClipData.newRawUri("Prototype", uri)
+          clipData = ClipData.newRawUri(getString(R.string.app_name), uri)
           addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
       shareLauncher.launch(Intent.createChooser(send, getString(R.string.share)))
@@ -245,34 +250,34 @@ internal fun LibraryScreen(
   localNetworkDenied: Boolean = false,
   setAllowNetwork: (Boolean) -> Unit = {},
 ) {
-  Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).padding(16.dp)) {
-    Text(stringResource(R.string.app_name))
-    val networkLabel = stringResource(R.string.allow_network)
-    ListItem(
-      headlineContent = { Text(networkLabel) },
-      supportingContent = { Text(stringResource(R.string.allow_network_explanation)) },
-      trailingContent = {
-        Switch(
-          checked = allowNetwork,
-          onCheckedChange = setAllowNetwork,
-          modifier =
-            Modifier.testTag("allow-network").semantics {
-              contentDescription = networkLabel
-            },
-        )
-      },
-    )
-    if (localNetworkDenied) Text(stringResource(R.string.local_network_denied))
-    if (actionFailed) Text(stringResource(R.string.action_error))
+  LazyColumn(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).padding(16.dp)) {
+    item {
+      Text(stringResource(R.string.app_name), Modifier.semantics { heading() })
+      val networkLabel = stringResource(R.string.allow_network)
+      ListItem(
+        headlineContent = { Text(networkLabel) },
+        supportingContent = { Text(stringResource(R.string.allow_network_explanation)) },
+        trailingContent = {
+          Switch(
+            checked = allowNetwork,
+            onCheckedChange = setAllowNetwork,
+            modifier =
+              Modifier.testTag("allow-network").semantics {
+                contentDescription = networkLabel
+              },
+          )
+        },
+      )
+    }
+    if (localNetworkDenied) item { Text(stringResource(R.string.local_network_denied)) }
+    if (actionFailed) item { Text(stringResource(R.string.action_error)) }
     when (result) {
-      null -> Text(stringResource(R.string.loading))
-      is LibraryResult.Failure -> Text(stringResource(R.string.library_error))
+      null -> item { Text(stringResource(R.string.loading)) }
+      is LibraryResult.Failure -> item { Text(stringResource(R.string.library_error)) }
       is LibraryResult.Success -> {
-        if (result.value.isEmpty()) Text(stringResource(R.string.empty_library))
-        LazyColumn {
-          items(result.value, key = { it.libraryId }) { entry ->
-            LibraryRow(entry, open, share, delete)
-          }
+        if (result.value.isEmpty()) item { Text(stringResource(R.string.empty_library)) }
+        items(result.value, key = { it.libraryId }) { entry ->
+          LibraryRow(entry, open, share, delete)
         }
       }
     }
@@ -288,12 +293,14 @@ private fun LibraryRow(
 ) {
   var confirm by remember { mutableStateOf(false) }
   var confirmDelete by remember { mutableStateOf(false) }
+  val openLabel = stringResource(R.string.open_prototype, entry.label)
   ListItem(
     headlineContent = { Text(entry.label) },
     modifier =
-      Modifier.fillMaxWidth().testTag("library-${entry.libraryId}").clickable {
-        open(entry, false, false)
-      },
+      Modifier.fillMaxWidth().testTag("library-${entry.libraryId}").clickable(
+        role = Role.Button,
+        onClickLabel = openLabel,
+      ) { open(entry, false, false) },
     trailingContent = {
       LibraryEntryMenu(entry, open, share, { confirm = true }, { confirmDelete = true })
     },
@@ -303,7 +310,11 @@ private fun LibraryRow(
     AlertDialog(
       onDismissRequest = { confirmDelete = false },
       title = { Text(stringResource(R.string.delete_title)) },
-      text = { Text(stringResource(R.string.delete_body)) },
+      text = {
+        Column(Modifier.verticalScroll(rememberScrollState())) {
+          Text(stringResource(R.string.delete_body))
+        }
+      },
       confirmButton = {
         TextButton(
           modifier = Modifier.testTag("confirm-delete"),
@@ -341,7 +352,7 @@ private fun LibraryEntryMenu(
       onClick = { expanded = true },
       modifier = Modifier.semantics { contentDescription = description },
     ) {
-      Text("⋮")
+      Text("⋮", Modifier.clearAndSetSemantics {})
     }
     DropdownMenu(expanded, onDismissRequest = { expanded = false }) {
       DropdownMenuItem(

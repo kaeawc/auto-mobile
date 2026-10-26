@@ -59,7 +59,7 @@ struct LibraryErrorView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Unable to open prototype").font(.headline)
+                Text("Unable to open prototype").font(.headline).accessibilityAddTraits(.isHeader)
                 if let failure = error as? PrototypeLibraryFailure {
                     Text(failure.path).font(.system(.body, design: .monospaced))
                     Text(failure.message)

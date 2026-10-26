@@ -55,6 +55,11 @@ cp "${viewer_root}/Info.plist" "${app}/Info.plist"
 plutil -replace MinimumOSVersion -string "${min_ios}" "${app}/Info.plist"
 plutil -lint "${app}/Info.plist"
 
+# Compile both app chrome and system permission/display-name translations.
+for catalog in Localizable InfoPlist; do
+  xcrun xcstringstool compile "${viewer_root}/${catalog}.xcstrings" --output-directory "${app}"
+done
+
 # Native host APIs generate loose placeholder PNGs, with no committed binary assets.
 # Also inspect the plist structurally: a CFBundleIconName anywhere would break stamping.
 cat > "${out_dir}/viewer-icons.swift" <<'SWIFT'
@@ -102,8 +107,9 @@ for (scale, size) in [(2, 120), (3, 180)] {
 }
 SWIFT
 xcrun --sdk macosx swift -swift-version 6 -warnings-as-errors "${out_dir}/viewer-icons.swift" "${app}"
-if [[ -n "$(find "${app}" \( -name Assets.car -o -name InfoPlist.strings \) -print -quit)" ]]; then
-  echo "Viewer template must not contain Assets.car or InfoPlist.strings" >&2
+if [[ -n "$(find "${app}" \( -name Assets.car -o \
+  \( -name InfoPlist.strings ! -path "${app}/*.lproj/InfoPlist.strings" \) \) -print -quit)" ]]; then
+  echo "Viewer template must not contain Assets.car or unlocalized InfoPlist.strings" >&2
   exit 1
 fi
 codesign --force --sign - "${app}" > /dev/null

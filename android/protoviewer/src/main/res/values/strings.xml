@@ -1,24 +1,56 @@
 <resources>
+  <!-- App title shown at the top of the prototype library. -->
   <string name="app_name">ProtoViewer</string>
+  <!-- Empty state in the library when no prototypes have been imported. -->
   <string name="empty_library">Your prototype library is empty.</string>
+  <!-- Loading status in the library, viewer and import screen. -->
   <string name="loading">Loading…</string>
+  <!-- Library screen error when saved prototypes cannot be read. -->
   <string name="library_error">Unable to read the prototype library.</string>
+  <!-- Viewer error when the requested prototype is missing. -->
   <string name="not_found">Prototype not found.</string>
+  <!-- Viewer error when a prototype cannot be opened or rendered. -->
   <string name="corrupt">This prototype could not be opened.</string>
+  <!-- Viewer error when the saved format requires a newer app. -->
   <string name="unsupported">This prototype needs a newer ProtoViewer.</string>
-  <string name="relaunch">Relaunch</string><string name="reset">Reset</string>
-  <string name="back">Back</string><string name="cancel">Cancel</string>
+  <!-- Action in the viewer toolbar and library menu to restart a prototype. -->
+  <string name="relaunch">Relaunch</string>
+  <!-- Action in the viewer toolbar, library menu and reset confirmation dialog. -->
+  <string name="reset">Reset</string>
+  <!-- Button returning from the import screen or a viewer error. -->
+  <string name="back">Back</string>
+  <!-- Dismiss action in confirmation dialogs. -->
+  <string name="cancel">Cancel</string>
+  <!-- Accessible name of a library entry menu button; %1$s is the prototype label. -->
   <string name="more">More options for %1$s</string>
+  <!-- Title of the reset confirmation dialog. -->
   <string name="reset_title">Reset prototype?</string>
+  <!-- Explanation in the reset confirmation dialog. -->
   <string name="reset_body">Clear this prototype’s saved values and start again?</string>
+  <!-- Error shown in the library or viewer after a prototype action fails. -->
   <string name="action_error">Unable to complete this prototype action.</string>
+  <!-- Action in the library menu, share warning dialog and system share chooser. -->
   <string name="share">Share</string>
+  <!-- Title of the dialog warning about sensitive data before sharing. -->
   <string name="share_warning_title">Review sensitive prototype data</string>
+  <!-- Destructive action in the library menu and delete confirmation dialog. -->
   <string name="delete">Delete</string>
+  <!-- Title of the delete confirmation dialog. -->
   <string name="delete_title">Delete prototype?</string>
+  <!-- Explanation in the delete confirmation dialog. -->
   <string name="delete_body">Permanently remove this prototype, its assets and saved values?</string>
+  <!-- Library settings switch label and its accessible name. -->
   <string name="allow_network">Allow network for imported prototypes</string>
+  <!-- Library settings explanation below the network switch label; LAN means local area network. -->
   <string name="allow_network_explanation">Allow imported prototypes to contact internet and local-network (LAN) addresses. Device control and AutoMobile daemon addresses remain blocked.</string>
+  <!-- Library settings error after local network permission is denied. -->
   <string name="local_network_denied">Local-network permission denied. Network access is off. Enable the switch to request permission again.</string>
+  <!-- Viewer band identifying imported content with network access enabled. -->
   <string name="network_provenance">Imported prototype · Network enabled</string>
+  <!-- Accessible click action on a library row; %1$s is the prototype label. -->
+  <string name="open_prototype">Open %1$s</string>
+  <!-- Import screen error after an interrupted import is restored. -->
+  <string name="import_interrupted">Import interrupted; open the file again</string>
+  <!-- Import screen error when the import service is unavailable. -->
+  <string name="import_unavailable">Import unavailable</string>
 </resources>

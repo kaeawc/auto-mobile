@@ -1,0 +1,28 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "NSLocalNetworkUsageDescription": {
+      "comment": "System permission prompt explaining local network use for imported prototypes.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Used only when you allow network for imported prototypes, to reach devices on your local network."
+          }
+        }
+      }
+    },
+    "CFBundleDisplayName": {
+      "comment": "Home Screen app name. ProtoViewer is a brand; keep unchanged.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ProtoViewer"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

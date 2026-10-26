@@ -6,12 +6,15 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -25,6 +28,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.lifecycle.lifecycleScope
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpClient
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpRequest
@@ -98,21 +103,14 @@ class ViewerActivity : ComponentActivity() {
   private fun ViewerScreen() {
     Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
       // The renderer is measured only in the remaining space; specs cannot cover these actions.
-      Row(Modifier.fillMaxWidth().testTag("viewer-actions")) {
-        TextButton(onClick = { lifecycleScope.launch { relaunch(false) } }, enabled = !restarting) {
-          Text(stringResource(R.string.relaunch))
-        }
-        TextButton(onClick = { confirmReset = true }, enabled = !restarting) {
-          Text(stringResource(R.string.reset))
-        }
-      }
       val allowNetwork by services.settings.allowNetwork.collectAsState()
-      if (allowNetwork)
-        Text(
-          stringResource(R.string.network_provenance),
-          modifier = Modifier.fillMaxWidth().testTag("network-provenance"),
-        )
-      if (restartFailed) Text(stringResource(R.string.action_error))
+      ViewerChrome(
+        allowNetwork,
+        restartFailed,
+        restarting,
+        { lifecycleScope.launch { relaunch(false) } },
+        { confirmReset = true },
+      )
       // Spec dialogs, menus, dropdowns, sheets and anchored overlays are all in-window renderer
       // layers. Clip that whole surface, including its scrims, below the app-owned provenance.
       Box(Modifier.weight(1f).fillMaxWidth().clipToBounds().testTag("viewer-content")) {
@@ -264,7 +262,7 @@ private class ViewerContent(
 
 @Composable
 internal fun ViewerStatus(state: ViewerScreenState, back: () -> Unit) {
-  Column(Modifier.fillMaxSize()) {
+  Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
     val error = state as? ViewerScreenState.Error
     val title =
       when (error?.reason) {
@@ -273,7 +271,33 @@ internal fun ViewerStatus(state: ViewerScreenState, back: () -> Unit) {
         null -> R.string.loading
         else -> R.string.corrupt
       }
-    Text(stringResource(title), modifier = Modifier.testTag("viewer-status"))
+    Text(stringResource(title), modifier = Modifier.testTag("viewer-status").semantics { heading() })
     if (error != null) Button(onClick = back) { Text(stringResource(R.string.back)) }
   }
+}
+
+/** App-owned chrome only; prototype text is rendered separately without localization. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun ViewerChrome(
+  allowNetwork: Boolean,
+  actionFailed: Boolean,
+  restarting: Boolean,
+  relaunch: () -> Unit,
+  reset: () -> Unit,
+) {
+  FlowRow(Modifier.fillMaxWidth().testTag("viewer-actions")) {
+    TextButton(onClick = relaunch, enabled = !restarting) {
+      Text(stringResource(R.string.relaunch))
+    }
+    TextButton(onClick = reset, enabled = !restarting) {
+      Text(stringResource(R.string.reset))
+    }
+  }
+  if (allowNetwork)
+    Text(
+      stringResource(R.string.network_provenance),
+      modifier = Modifier.fillMaxWidth().testTag("network-provenance"),
+    )
+  if (actionFailed) Text(stringResource(R.string.action_error))
 }

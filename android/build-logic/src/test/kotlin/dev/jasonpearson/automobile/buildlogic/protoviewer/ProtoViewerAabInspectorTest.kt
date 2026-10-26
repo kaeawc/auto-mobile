@@ -48,6 +48,21 @@ class ProtoViewerAabInspectorTest {
   }
 
   @Test
+  fun rejectsUnsignedEntriesInAPartiallySignedBundle() {
+    val result =
+      ProtoViewerAabInspector.violations(
+        AabContents(
+          goodEntries,
+          listOf("CN=ProtoViewer,O=AutoMobile"),
+          listOf("base/dex/classes2.dex"),
+        ),
+        true,
+        true,
+      )
+    assertEquals(listOf("bundle has unsigned entries: [base/dex/classes2.dex]"), result)
+  }
+
+  @Test
   fun allowsDebugSignatureWhenNotRequired() {
     val debug = contents(signers = listOf("CN=Android Debug"))
     assertTrue(ProtoViewerAabInspector.violations(debug, false, true).isEmpty())

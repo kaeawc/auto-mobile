@@ -9,6 +9,8 @@ data class AabContents(
   val entryNames: Set<String>,
   /** Subject DNs of the certificates that signed every verified entry. */
   val signerSubjects: List<String>,
+  /** Payload entries (outside `META-INF/`) that carry no verified signature. */
+  val unsignedEntries: List<String> = emptyList(),
 )
 
 /** Checks a ProtoViewer app bundle is what Play will accept (#14146). */
@@ -35,8 +37,13 @@ object ProtoViewerAabInspector {
     if (requireReleaseSignature) {
       if (contents.signerSubjects.isEmpty()) {
         violations.add("bundle is not signed")
-      } else if (contents.signerSubjects.any { it.contains(DEBUG_SUBJECT_MARKER) }) {
-        violations.add("bundle is signed with the Android debug certificate")
+      } else {
+        if (contents.signerSubjects.any { it.contains(DEBUG_SUBJECT_MARKER) }) {
+          violations.add("bundle is signed with the Android debug certificate")
+        }
+        if (contents.unsignedEntries.isNotEmpty()) {
+          violations.add("bundle has unsigned entries: ${contents.unsignedEntries.sorted()}")
+        }
       }
     }
     return violations
@@ -49,16 +56,22 @@ object ProtoViewerAabInspector {
     JarFile(bundle, true).use { jar ->
       val names = mutableSetOf<String>()
       val subjects = sortedSetOf<String>()
+      val unsigned = sortedSetOf<String>()
       for (entry in jar.entries().asSequence().filterNot { it.isDirectory }) {
         names.add(entry.name)
         jar.getInputStream(entry).use { it.copyTo(java.io.OutputStream.nullOutputStream()) }
         if (!entry.name.startsWith("META-INF/")) {
-          entry.codeSigners
-            ?.flatMap { it.signerCertPath.certificates }
-            ?.filterIsInstance<X509Certificate>()
-            ?.forEach { subjects.add(it.subjectX500Principal.name) }
+          val signers = entry.codeSigners
+          if (signers == null) {
+            unsigned.add(entry.name)
+          } else {
+            signers
+              .flatMap { it.signerCertPath.certificates }
+              .filterIsInstance<X509Certificate>()
+              .forEach { subjects.add(it.subjectX500Principal.name) }
+          }
         }
       }
-      AabContents(names, subjects.toList())
+      AabContents(names, subjects.toList(), unsigned.toList())
     }
 }

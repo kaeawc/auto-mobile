@@ -14,6 +14,7 @@ import org.gradle.api.tasks.Classpath
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.InputFile
 import org.gradle.api.tasks.InputFiles
+import org.gradle.api.tasks.Optional
 import org.gradle.api.tasks.OutputFile
 import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
@@ -41,7 +42,7 @@ abstract class VerifyR8KeptClassesTask : DefaultTask() {
   @get:Input abstract val requiredMembers: ListProperty<String>
 
   /** Slash-form prefixes whose @Serializable classes must stay unrenamed; defaults to all owned. */
-  @get:Input abstract val keptSerializablePrefixes: ListProperty<String>
+  @get:Optional @get:Input abstract val keptSerializablePrefixes: ListProperty<String>
 
   @get:OutputFile abstract val reportFile: RegularFileProperty
 

@@ -310,7 +310,9 @@ Per-host consent is later work. MCP-direct `show` keeps today's behaviour. When 
   when an entry is imported; host attach is off by default for imported prototypes.
 - Limits: 200 prototypes and 100 MiB per library, enforced at commit and on load, plus a render
   watchdog. Android allows 10 seconds for loading and the first successful content composition;
-  timeout or composition failure shows the corrupt state with Back. Android sets `allowBackup=false` and allows no cleartext outside the dev flavor. iOS
+  timeout or composition failure shows the corrupt state with Back. iOS allows the same 10 seconds
+  from mount to the first laid-out content (`PrototypeRenderWatchdog`, cancelled by the renderer's
+  first layout in a window) and then shows the error state; a blocked main thread is not caught. Android sets `allowBackup=false` and allows no cleartext outside the dev flavor. iOS
   distributed (non-simulator) builds carry no App Transport Security exception.
 
 The shared request-policy and storage work is tracked in #13622.

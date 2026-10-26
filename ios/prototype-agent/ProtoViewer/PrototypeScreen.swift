@@ -15,6 +15,7 @@ struct PrototypeScreen: View {
     @State private var storage: URL?
     @State private var error: Error?
     @State private var confirmsReset = false
+    @State private var watchdog = PrototypeRenderWatchdog(clock: SystemPrototypeClock())
 
     private let network: PrototypeNetworkConfiguration
 
@@ -68,6 +69,7 @@ struct PrototypeScreen: View {
             Button("Reset and relaunch", role: .destructive) { relaunch(.reset) }
         }
         .onAppear(perform: load)
+        .onDisappear { watchdog.cancel() }
     }
 
     private var prototypeContent: some View {
@@ -79,10 +81,12 @@ struct PrototypeScreen: View {
                     spec: content.spec, assets: content.assets, storage: .directory(storage), network: network,
                     onDismiss: { _ in dismiss() },
                     onLoadError: {
+                        watchdog.cancel()
                         error = $0
                         self.content = nil
                     }
                 )
+                .onFirstRender { watchdog.cancel() }
                 .onStopped {
                     PrototypeAssetRegistrar.releaseProcessFonts()
                     rendererActive = false
@@ -97,6 +101,7 @@ struct PrototypeScreen: View {
 
     private func relaunch(_ action: Action) {
         pending = action
+        watchdog.cancel()
         content = nil // Unmount first; the renderer's onStopped callback follows its final flush.
         if !rendererActive { finishRelaunch() }
     }
@@ -120,6 +125,11 @@ struct PrototypeScreen: View {
             storage = directory
             rendererActive = true
             content = loaded
+            watchdog.start {
+                // No first content within the budget: show the error state; Back and Close stay available.
+                error = PrototypeLibraryFailure(path: entry.label, message: "Prototype did not render in time")
+                content = nil
+            }
         } catch { self.error = error }
     }
 }

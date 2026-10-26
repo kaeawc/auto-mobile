@@ -36,6 +36,13 @@
             return view
         }
 
+        /// Internal seam for app hosts that bound the time to first content (ProtoViewer's render watchdog).
+        func onFirstRender(_ action: @escaping @MainActor () -> Void) -> Self {
+            var view = self
+            view.renderer.onFirstRender = action
+            return view
+        }
+
         /// The embedded renderer or a diagnostic covering the entire presentation.
         public var body: some View {
             renderer.id(identity)
@@ -66,6 +73,7 @@
         let onDismiss: @MainActor (PrototypeDismissReason) -> Void
         let onLoadError: @MainActor (PrototypeLoadError) -> Void
         var onStop: @MainActor () -> Void = {}
+        var onFirstRender: (@MainActor () -> Void)?
 
         @MainActor
         final class Coordinator {
@@ -76,10 +84,12 @@
         func makeCoordinator() -> Coordinator { Coordinator(onStop: onStop) }
 
         func makeUIViewController(context _: Context) -> PrototypeEmbeddedController {
-            PrototypeEmbeddedController(
+            let controller = PrototypeEmbeddedController(
                 spec: spec, assets: assets, storage: storage, network: network,
                 onEvent: onEvent, onDismiss: onDismiss, onLoadError: onLoadError
             )
+            controller.onFirstRender = onFirstRender
+            return controller
         }
 
         func updateUIViewController(_ controller: PrototypeEmbeddedController, context: Context) {

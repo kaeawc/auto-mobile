@@ -512,7 +512,9 @@ The detail names its queue position when queued, or says the runner is still
 starting in the background. Any captured screenshot is kept. The start continues
 for up to 60 seconds from the moment its launch leaves the queue (waiting in the
 queue is bounded separately, at 5 minutes), and a retry joins that same start.
-Retry the observe shortly.
+The same typing applies to a `readiness: none` observe whose read lapses with a
+timeout, setup failure, or recovery reason while the device's launch is queued
+or holding a launch slot (#15291). Retry the observe shortly.
 
 ## iOS builds and signing
 

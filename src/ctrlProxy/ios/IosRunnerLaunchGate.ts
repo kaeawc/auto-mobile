@@ -30,6 +30,8 @@ export interface IosRunnerLaunchQueueObserver {
 
 export interface IosRunnerLaunchQueueView {
   queueStatus(owner: string): IosRunnerLaunchQueueStatus | undefined;
+  /** True while `owner` holds a launch slot, i.e. its runner launch is admitted and still starting. */
+  isLaunching(owner: string): boolean;
   /** Observe the queue transitions of `owner`'s launches; returns the unsubscribe function. */
   watchQueue(owner: string, observer: IosRunnerLaunchQueueObserver): () => void;
 }
@@ -51,6 +53,7 @@ export class DefaultIosRunnerLaunchGate implements IosRunnerLaunchGate, IosRunne
   private held = 0;
   private readonly waiters: LaunchWaiter[] = [];
   private readonly observers = new Map<string, Set<IosRunnerLaunchQueueObserver>>();
+  private readonly launching = new Map<string, number>();
 
   constructor(private readonly limit = resolveIosRunnerLaunchConcurrency()) {
     if (!Number.isSafeInteger(limit) || limit < 1) {
@@ -63,6 +66,22 @@ export class DefaultIosRunnerLaunchGate implements IosRunnerLaunchGate, IosRunne
     return index < 0
       ? undefined
       : { position: index + 1, ahead: this.held + index, limit: this.limit };
+  }
+
+  isLaunching(owner: string): boolean {
+    return (this.launching.get(owner) ?? 0) > 0;
+  }
+
+  private markLaunching(owner: string | undefined, delta: 1 | -1): void {
+    if (owner === undefined) {
+      return;
+    }
+    const next = (this.launching.get(owner) ?? 0) + delta;
+    if (next > 0) {
+      this.launching.set(owner, next);
+    } else {
+      this.launching.delete(owner);
+    }
   }
 
   watchQueue(owner: string, observer: IosRunnerLaunchQueueObserver): () => void {
@@ -106,6 +125,7 @@ export class DefaultIosRunnerLaunchGate implements IosRunnerLaunchGate, IosRunne
         grant: () => {
           signal?.removeEventListener("abort", onAbort);
           this.held++;
+          this.markLaunching(owner, 1);
           let released = false;
           resolve({
             release: () => {
@@ -114,6 +134,7 @@ export class DefaultIosRunnerLaunchGate implements IosRunnerLaunchGate, IosRunne
               }
               released = true;
               this.held--;
+              this.markLaunching(owner, -1);
               this.waiters.shift()?.grant();
             },
           });

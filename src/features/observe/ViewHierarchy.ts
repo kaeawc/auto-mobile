@@ -1,3 +1,7 @@
+import {
+  getSharedIosRunnerLaunchQueueView,
+  type IosRunnerLaunchQueueView,
+} from "../../ctrlProxy/ios/IosRunnerLaunchGate";
 import { androidCtrlProxyClientForPlatform } from "./android/androidCtrlProxyClientFor";
 import {
   BootedDevice,
@@ -49,7 +53,11 @@ import {
   androidNullHierarchyFailure,
   annotateAndroidHierarchyAvailability,
 } from "./ViewHierarchyAndroidAvailability";
-import { iosHierarchyUnavailable, type RecoveryReadContext } from "./ViewHierarchyRecovery";
+import {
+  iosHierarchyUnavailable,
+  typeQueuedRunnerLaunch,
+  type RecoveryReadContext,
+} from "./ViewHierarchyRecovery";
 
 /**
  * Maximum number of direct children the raw-element-search filter walks per node.
@@ -69,6 +77,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
   private adbFactory: AdbClientFactory;
   private timer: Timer;
   private observeAccessibilityManagerFactory: ObserveAccessibilityManagerFactory;
+  private launchQueue: IosRunnerLaunchQueueView;
 
   /**
    * Create a ViewHierarchy instance
@@ -82,6 +91,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     accessibilityServiceClient: ViewHierarchyAndroidCtrlProxy | null = null,
     timer: Timer = defaultTimer,
     observeAccessibilityManagerFactory: ObserveAccessibilityManagerFactory = defaultObserveAccessibilityManagerFactory,
+    launchQueue: IosRunnerLaunchQueueView = getSharedIosRunnerLaunchQueueView(),
   ) {
     this.device = device;
     this.parser = new DefaultElementParser();
@@ -92,6 +102,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     this.adbFactory = adbFactory;
     this.timer = timer;
     this.observeAccessibilityManagerFactory = observeAccessibilityManagerFactory;
+    this.launchQueue = launchQueue;
   }
 
   async configureRecompositionTracking(
@@ -167,7 +178,9 @@ export class ViewHierarchy implements ViewHierarchyInterface {
             signal,
             readOptions,
           );
-    return this.retryAfterTransportRecovery(result, {
+    // Before recovery, so a healthy queued launch never triggers a runner restart (#15291).
+    this.typePendingIosLaunch(result);
+    const recovered = await this.retryAfterTransportRecovery(result, {
       queryOptions,
       perf,
       skipWaitForFresh,
@@ -177,6 +190,14 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       requireFreshExtraction:
         typeof readOptions === "object" ? readOptions.requireFreshExtraction : undefined,
     });
+    this.typePendingIosLaunch(recovered);
+    return recovered;
+  }
+
+  private typePendingIosLaunch(result: ViewHierarchyResult): void {
+    if (this.device.platform === "ios") {
+      typeQueuedRunnerLaunch(result, this.device.deviceId, this.launchQueue);
+    }
   }
 
   private async retryAfterTransportRecovery(

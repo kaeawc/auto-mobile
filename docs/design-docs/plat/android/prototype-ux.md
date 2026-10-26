@@ -376,7 +376,13 @@ effect, a separate issue). The contract is conservative, one closed choice per o
   (#15244, #15256) reuses that same blur and fallback.
 - The field needs `prototype_backdrop_v1`. A device without it would ignore the field and draw a
   plain window, so the host refuses the show (a placement `scrim` still dims what is behind).
-  The capability is advertised by the renderer slices, not by the contract.
+  CtrlProxy advertises it (Android slice, #15126); the iOS agent follows in its own slice.
+- Android: from API 31 the window asks for blur-behind (`FLAG_BLUR_BEHIND`, radius = `blur` or the
+  material's: ultraThin 8, thin 16, regular 24, thick 40 dp) when `WindowManager.isCrossWindowBlurEnabled`
+  is true, with `tint` laid over it at 35% alpha. Otherwise, and always for `glass`, it draws the
+  tonal fill. The reusable pieces (`PrototypeBackdrops.plan`, `Modifier.prototypeRenderBlur`, the
+  tonal fallback) are what node-level `surface: "glass"` (#15244, #15256) builds on, so glass waits
+  on this slice. The system layer blurring behind it has not been verified on a device yet.
 - A successful show reports `lastResult.backdrop`: `blur`, or `fallback` when the tonal fill was
   drawn. It is absent without `window.backdrop`, on dismiss, on a failed show and for adopted prototypes.
 

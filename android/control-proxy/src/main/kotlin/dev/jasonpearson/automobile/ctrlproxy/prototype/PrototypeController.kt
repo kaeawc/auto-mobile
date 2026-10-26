@@ -112,6 +112,12 @@ fun interface PrototypeResultSink : PrototypeReplySink {
   ) = sendShown(requestId, missingAssets, appearance, hiddenReason)
 
   /** The reply to `clear_prototype_storage`. Sinks that predate it answer a bare success. */
+  /**
+   * What a show with `window.backdrop` drew (`prototype_backdrop_v1`), called just before the show
+   * reply so the sink can attach it. Sinks that predate it drop it.
+   */
+  fun noteShownBackdrop(requestId: String?, backdrop: String) {}
+
   suspend fun sendCleared(requestId: String?, cleared: Int) = send(requestId, true, null)
 
   suspend fun sendAdvanced(requestId: String?, fired: Int) = send(requestId, true, null)
@@ -173,6 +179,9 @@ class PrototypeController(
   /** The device's light or dark setting and dynamic-colour palette, read at every resolve. */
   private val deviceAppearance: PrototypeDeviceAppearance = NoPrototypeDeviceAppearance,
   private val windowOnScreen: PrototypeWindowOnScreen = PrototypeWindowOnScreen { null },
+  /** Whether the device can blur behind a window right now (`window.backdrop`, #15126). */
+  private val backdropSupport: PrototypeBackdropSupport = PrototypeBackdropSupport { false },
+  private val sdkInt: Int = android.os.Build.VERSION.SDK_INT,
   private val settle: suspend (Long) -> Unit = { delay(it) },
   /** The supplied host handles the first surface; additional surfaces need independent hosts. */
   private val hostFactory: () -> PrototypeHost = { host },
@@ -367,6 +376,7 @@ class PrototypeController(
           hiddenReason = shownHiddenReason(shown),
           pages = shown.runtime.current.pages,
           stacks = shown.runtime.current.stacks,
+          backdrop = shown.request.backdrop?.mode?.wire,
         )
     }
 
@@ -429,6 +439,7 @@ class PrototypeController(
     val hiddenReason: PrototypeHiddenReason? = null,
     val pages: Map<String, Int>? = null,
     val stacks: Map<String, PrototypeStackSnapshot>? = null,
+    val backdrop: String? = null,
   )
 
   private fun validate(spec: JsonObject): PrototypeSpec =
@@ -539,6 +550,10 @@ class PrototypeController(
           displayId = displayId,
           chrome = prototypeWindowChrome(validated),
           surfaceId = validated.id,
+          backdrop =
+            validated.window.backdrop?.let {
+              PrototypeBackdrops.plan(it, sdkInt, backdropSupport.blurEnabled())
+            },
         )
     requireDisplayAvailable(displayId)
     requireLayerPermitted(request.layer)
@@ -593,8 +608,10 @@ class PrototypeController(
         onHostDismiss = { interact(runtime, PrototypeInteraction.HostDismiss) },
         onHostBack = { interact(runtime, PrototypeInteraction.Back) },
         content = {
-          PrototypeRuntimeContent(runtime, images, fonts) { interaction ->
-            interact(runtime, interaction)
+          PrototypeBackdropLayer(request.backdrop) {
+            PrototypeRuntimeContent(runtime, images, fonts) { interaction ->
+              interact(runtime, interaction)
+            }
           }
         },
       )
@@ -870,7 +887,8 @@ class PrototypeController(
       val revision =
         outcome.revision ?: surfaces[patchId]?.runtime?.current?.takeIf { it.active }?.revision
       sink.sendPatched(requestId, error == null, error, revision, outcome.conflict)
-    } else if (error == null && appearance != null)
+    } else if (error == null && appearance != null) {
+      outcome.backdrop?.let { sink.noteShownBackdrop(requestId, it) }
       sink.sendShownNavigation(
         requestId,
         missing,
@@ -879,7 +897,7 @@ class PrototypeController(
         outcome.stacks.orEmpty(),
         outcome.hiddenReason,
       )
-    else if (missing.isEmpty()) sink.send(requestId, error == null, error)
+    } else if (missing.isEmpty()) sink.send(requestId, error == null, error)
     else sink.sendWithMissingAssets(requestId, error == null, error, missing)
   }
 

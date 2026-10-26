@@ -272,6 +272,11 @@ export interface TeardownInitialAndroidScan {
   pooledEntries: PooledDevice[];
 }
 
+/** Private lifecycle evidence; never accepted by the public deleteDevice schema. */
+export interface InternalTeardownOptions {
+  unlaunchedCreatedAvd?: { stableId: string };
+}
+
 export interface TeardownContext {
   args: TeardownDeviceArgs;
   dependencies: DeviceToolsDependencies;
@@ -282,6 +287,10 @@ export interface TeardownContext {
   timeoutMs: number;
   cancelOnRequestAbort: boolean;
   lifecycleLease?: VirtualDeviceLifecycleLease;
+  /** Request-created Android image whose provisioning request never attempted boot; requires the matching lease. */
+  unlaunchedCreatedAvd?: InternalTeardownOptions["unlaunchedCreatedAvd"];
+  /** A local unnamed runtime veto was bypassed using never-launched proof; process evidence must prove absence. */
+  localSiblingVetoSkipped?: boolean;
   /** Android runtime and pool state captured by the first teardown booted scan. */
   initialScan: TeardownInitialAndroidScan;
   /**

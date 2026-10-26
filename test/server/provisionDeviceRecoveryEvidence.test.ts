@@ -79,6 +79,19 @@ describe("buildProvisionDeviceRecoveryEvidence", () => {
     });
   });
 
+  test.each([true, false])("intact retained device with retryable=%s", (retryable) => {
+    const evidence = build({
+      boundary: "cleanup_failure",
+      deviceIntact: true,
+      retryable,
+      lifecycle: lifecycle("retained", { cleanup: { status: "failed" } }),
+    });
+    expect(evidence.nextAction).toMatchObject({
+      action: retryable ? "reacquire_retained_device" : "perform_cleanup",
+      automaticRetrySafe: retryable,
+    });
+  });
+
   test("pending cleanup waits before a retry; a destroy that reported success is not verified absence", () => {
     const pending = build({ lifecycle: lifecycle("cleanup_in_progress"), retryAfterMs: 5_000 });
     expect(pending.cleanup.status).toBe("pending");

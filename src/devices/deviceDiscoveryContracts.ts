@@ -456,3 +456,14 @@ export type DeviceManagerSimCtl = Pick<
   | "killSimulator"
   | "waitForSimulatorReady"
 >;
+
+/** The Android launcher options a start request maps to: poster and the exit-snapshot policy (#15477). */
+export function androidLaunchOptions(options: DeviceStartOptions): {
+  cameraPosterPath: string | undefined;
+  extraArgs?: readonly string[];
+} {
+  return {
+    cameraPosterPath: options.cameraPosterPath,
+    ...(options.discardSnapshotOnExit ? { extraArgs: ["-no-snapshot-save"] } : {}),
+  };
+}

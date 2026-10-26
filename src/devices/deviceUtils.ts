@@ -1,4 +1,3 @@
-import { snapshotLaunchArguments } from "./snapshotLaunchArguments";
 import { ActionableError, BootedDevice, DeviceInfo, Platform, SomePlatform } from "../models";
 import { toActionableError } from "../models/ActionableError";
 import { DeviceAlreadyRunningError } from "../models/DeviceAlreadyRunningError";
@@ -43,6 +42,7 @@ import {
   type DeviceShutdownOptions,
   type DeviceStartOptions,
   type DeviceStartResult,
+  androidLaunchOptions,
   PHYSICAL_IOS_SCAN_BUDGET_MS,
   type PlatformDeviceManager,
   androidDiscoveryErrorCode,
@@ -878,8 +878,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
           avdName: device.name,
           deviceId: device.deviceId,
           signal,
-          cameraPosterPath: options.cameraPosterPath,
-          ...snapshotLaunchArguments(options),
+          ...androidLaunchOptions(options),
           ...(admitter
             ? {
                 admitColdBoot: () => admitter.admit({ timeoutMs, signal, avdName: device.name }),

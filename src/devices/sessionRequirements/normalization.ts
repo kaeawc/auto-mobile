@@ -228,9 +228,13 @@ function normalizeAndroid(
   defaults: Extract<SessionRequirementDefaults, { platform: "android" }>,
   catalog: Extract<SessionDeviceCatalog, { platform: "android" }>,
 ): RequirementResult<NormalizedAndroidSessionDeviceRequirement> {
-  if (defaults.hardware.omitted !== "phone" && defaults.hardware.omitted !== "tablet") {
+  if (
+    defaults.hardware.omitted !== "phone" &&
+    defaults.hardware.omitted !== "tablet" &&
+    defaults.hardware.omitted !== "foldable"
+  ) {
     return invalidConfig(
-      "The omitted Android hardware default must be phone or tablet.",
+      "The omitted Android hardware default must be phone, tablet or foldable.",
       "defaults.hardware.omitted",
     );
   }

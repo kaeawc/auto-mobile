@@ -7,6 +7,7 @@ import {
 import { failure, success } from "./result";
 import type {
   AndroidCatalogProfile,
+  AndroidProfileDefault,
   AndroidCatalogRelease,
   AndroidSessionRequirementDefaults,
   EffectiveOsSelector,
@@ -41,6 +42,7 @@ interface ResolvedIosHardware {
 }
 
 interface ResolvedAndroidHardware {
+  memoryMb?: number;
   profile: AndroidCatalogProfile;
   path: readonly string[];
 }
@@ -156,17 +158,35 @@ function resolveIosHardware(
     : model;
 }
 
+/** The host's profile mapping for the effective archetype; a foldable without one is refused. */
+export function androidProfileDefault(
+  requirement: NormalizedAndroidSessionDeviceRequirement,
+  defaults: AndroidSessionRequirementDefaults,
+): RequirementResult<AndroidProfileDefault> {
+  const archetype = requirement.effective.hardware.archetype;
+  if (
+    archetype === "foldable" &&
+    !defaults.hardware.profiles.some((entry) => entry.archetype === archetype)
+  ) {
+    return failure(
+      "unsupported_hardware",
+      "This host has no foldable profile mapped. Configure defaults.android.hardware.profiles with a foldable profileId and classify it in androidProfileArchetypes.",
+    );
+  }
+  return findUnique(
+    defaults.hardware.profiles,
+    (entry) => entry.archetype === archetype,
+    `Android ${archetype} profile default`,
+  );
+}
+
 function resolveAndroidHardware(
   requirement: NormalizedAndroidSessionDeviceRequirement,
   defaults: AndroidSessionRequirementDefaults,
   catalog: Extract<SessionDeviceCatalog, { platform: "android" }>,
 ): RequirementResult<ResolvedAndroidHardware> {
   const archetype = requirement.effective.hardware.archetype;
-  const configured = findUnique(
-    defaults.hardware.profiles,
-    (entry) => entry.archetype === archetype,
-    `Android ${archetype} profile default`,
-  );
+  const configured = androidProfileDefault(requirement, defaults);
   if (!configured.ok) {
     return configured;
   }
@@ -176,7 +196,7 @@ function resolveAndroidHardware(
   if (profiles.length === 0) {
     return failure(
       "unsupported_hardware",
-      `Configured Android profile '${configured.value.profileId}' is not installed.`,
+      `Configured Android ${archetype} profile '${configured.value.profileId}' is not installed. Install it and configure defaults.android.hardware.profiles.`,
       { field: "defaults.hardware.profiles" },
     );
   }
@@ -195,11 +215,15 @@ function resolveAndroidHardware(
   }
   if (profile.archetype !== archetype) {
     return invalidConfig(
-      `Configured Android profile '${profile.profileId}' is ${profile.archetype}, not ${archetype}.`,
+      `Configured Android profile '${profile.profileId}' is ${profile.archetype}, not ${archetype}. Configure defaults.android.hardware.profiles with an installed ${archetype} profile and check androidProfileArchetypes.`,
       "defaults.hardware.profiles",
     );
   }
-  return success({ profile, path: [archetype, profile.profileId] });
+  return success({
+    profile,
+    path: [archetype, profile.profileId],
+    ...(configured.value.memoryMb === undefined ? {} : { memoryMb: configured.value.memoryMb }),
+  });
 }
 
 function validIosReleases(
@@ -570,6 +594,7 @@ function resolveAndroid(
     platform: "android",
     metadataState: "current",
     profileId: hardware.value.profile.profileId,
+    ...(hardware.value.memoryMb === undefined ? {} : { memoryMb: hardware.value.memoryMb }),
     archetype: hardware.value.profile.archetype ?? requirement.effective.hardware.archetype,
     systemImagePackage: release.systemImagePackage,
     osVersion: release.osVersion,

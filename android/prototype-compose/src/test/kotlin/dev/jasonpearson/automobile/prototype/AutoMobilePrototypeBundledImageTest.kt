@@ -29,7 +29,9 @@ class AutoMobilePrototypeBundledImageTest {
   private fun redPng(): ByteArray {
     val bitmap = Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888)
     bitmap.eraseColor(Color.rgb(220, 30, 30))
-    return ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
+    return ByteArrayOutputStream()
+      .also { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+      .toByteArray()
   }
 
   @Test

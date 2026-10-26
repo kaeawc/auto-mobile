@@ -102,7 +102,9 @@ Hypotheses to test, each with a basis and an expected direction, none measured h
 2. **The boot gate's CPU budget disagrees with the AVD vCPU count** (#15476). Two cores per device
    against four vCPUs. Needs a device run to choose between creating AVDs with two vCPUs and
    budgeting four.
-3. **Quick-boot snapshots accumulate and are written at every exit** (#15477). 74.6 GiB of
+3. **Quick-boot snapshots accumulate and are written at every exit** (#15477). Broker-provisioned emulators now launch with
+   `-no-snapshot-save` when the host config sets no `androidResetMode` (released emulators are destroyed);
+   `snapshot` and `keep-booted` hosts, user AVDs and `startDevice` keep the default. 74.6 GiB of
    snapshots on this host, including for AVD kinds the broker destroys. Needs a device run for the
    saving and a check against `deviceSnapshot` and the keep-booted baseline (#14363).
 

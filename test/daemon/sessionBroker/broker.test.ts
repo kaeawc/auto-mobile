@@ -1,6 +1,7 @@
 import { InMemoryMutationRecordingGaps } from "../../../src/daemon/sessionBroker/mutations/recordingGaps";
 import { isSessionBrokerDeviceName } from "../../../src/daemon/sessionBroker/deviceNaming";
 import { FakeNativePort } from "../../helpers/fakeSessionBrokerDevicePort";
+import { nativeProfile } from "../../../src/daemon/sessionBroker/profile";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { SessionBroker, type SessionBrokerOptions } from "../../../src/daemon/sessionBroker/broker";
 import { BootCapacityExhaustedError } from "../../../src/models/BootCapacityExhaustedError";
@@ -20,7 +21,7 @@ import { parseSessionConfig, type SessionConfig } from "../../../src/devices/ses
 import { logger } from "../../../src/utils/logger";
 import type { SessionBrokerReleaseResult } from "../../../src/devices/sessionBrokerResult";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
-import { iosCatalog, iosDefaults } from "../../devices/sessionRequirements/fixtures";
+import { IOS_DUO, iosCatalog, iosDefaults } from "../../devices/sessionRequirements/fixtures";
 
 const OWNER: BindingProcessIdentity = {
   daemonId: "broker-daemon",
@@ -763,6 +764,32 @@ describe("session-only broker lifecycle", () => {
       state: "failed",
       errorCode: "capability_disabled",
       resourceId: null,
+    });
+  });
+
+  test("an enabled Duo capability admits an exact Duo request and advertises support", async () => {
+    expect(broker.supportsIosDuo()).toBe(false);
+    await broker.close();
+    broker = new SessionBroker({
+      ...options,
+      limits: { totalDeviceCap: 2, sessionCap: 2, idlePoolCap: 0 },
+      capabilities: { iosDuo: true },
+    });
+    expect(broker.supportsIosDuo()).toBe(true);
+    const request = config("duo-enabled");
+    request.device.hardware = {
+      kind: "exact-model",
+      model: { namespace: "simulator-device-type", value: IOS_DUO.simulatorDeviceTypeIdentifier },
+    };
+    request.device.os = { kind: "exact", version: "28" };
+
+    const result = await broker.prepare(request, "owner-token");
+
+    expect(result.outcome).toBe("ready");
+    expect(nativeProfile(devices.sessions.get(result.sessionUuid!)!)).toMatchObject({
+      platform: "ios",
+      simulatorDeviceTypeIdentifier: IOS_DUO.simulatorDeviceTypeIdentifier,
+      archetype: "duo",
     });
   });
 

@@ -185,6 +185,20 @@ describe("iOS native session catalog adapter", () => {
     });
   });
 
+  test("classifies a renamed Duo by its device-type identifier suffix", () => {
+    const renamed = deviceType(
+      "iPhone Duo (2nd generation)",
+      "com.apple.CoreSimulator.SimDeviceType.iPhone-Duo",
+      "iPhone",
+    );
+    const [model] = adaptIosSessionDeviceCatalog([renamed], []).models;
+
+    expect(model).toMatchObject({
+      archetype: "duo",
+      modelType: { family: "duo", variant: "duo" },
+    });
+  });
+
   test("preserves native Duo and iPad evidence against contradictory overrides", () => {
     const duo = TYPES.find((entry) => entry.name === "iPhone Duo")!;
     const ipad = TYPES.find((entry) => entry.name === "iPad Air 13-inch (M4)")!;

@@ -12,7 +12,10 @@ import {
 } from "../../../devices/exactDeviceProvisioning";
 import { androidProfileFormFactor } from "../../../models/formFactor";
 import type { BindingDeviceFamily } from "../../../utils/provisionDeviceSpecSchemas";
-import { inferIosFormFactor } from "../../../utils/ios-cmdline-tools/iosDeviceType";
+import {
+  inferIosFormFactor,
+  isIosDuoDeviceType,
+} from "../../../utils/ios-cmdline-tools/iosDeviceType";
 import { evaluateRuntimeCompatibility } from "../../../utils/ios-cmdline-tools/runtimeCompatibility";
 import type {
   AppleDeviceRuntime,
@@ -522,11 +525,11 @@ function refused(
 }
 
 /**
- * The model "any model" creates for an iOS runtime: a supported iPhone (excluding iPods),
- * else one with unknown runtime compatibility (simctl stays the authority). An explicit family
- * selects that family's types instead. Within each tier, parseable iPhone/iPad model identifiers
- * outrank unparseable ones: highest major generation, then lowest minor variant, then shortest
- * name, then ascending identifier wins. Unparseable entries retain last-in-catalog selection.
+ * The model "any model" creates for an iOS runtime: a supported iPhone (excluding iPods and the
+ * foldable Duo), else one with unknown runtime compatibility (simctl stays the authority). An
+ * explicit family selects that family's types instead. Within each tier, parseable iPhone/iPad
+ * model identifiers outrank unparseable ones: highest major generation, then lowest minor
+ * variant, then shortest name, then ascending identifier wins. Unparseable entries retain last-in-catalog selection.
  * Undefined when the runtime is missing or unavailable, or no selected-family type fits.
  */
 export function chooseIosDeviceType(
@@ -541,7 +544,9 @@ export function chooseIosDeviceType(
   }
   const candidates = deviceTypes.filter((entry) =>
     family === undefined
-      ? entry.productFamily === "iPhone" && !entry.modelIdentifier?.startsWith("iPod")
+      ? entry.productFamily === "iPhone" &&
+        !entry.modelIdentifier?.startsWith("iPod") &&
+        !isIosDuoDeviceType(entry.identifier)
       : inferIosFormFactor(entry.identifier) === family,
   );
   const statusOf = (entry: AppleDeviceType) =>

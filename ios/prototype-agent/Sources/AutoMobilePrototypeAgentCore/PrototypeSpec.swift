@@ -686,11 +686,6 @@ enum Detent: Decodable, Equatable {
     }
 }
 
-struct SafeAreaPadding: Decodable {
-    let edges: [String]
-    let types: [String]
-}
-
 struct NavItem: Decodable {
     let label: String
     let icon: String?

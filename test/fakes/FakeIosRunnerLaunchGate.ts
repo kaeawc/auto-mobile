@@ -12,6 +12,12 @@ export class FakeIosRunnerLaunchGate implements IosRunnerLaunchGate, IosRunnerLa
   queueStatus(owner: string): IosRunnerLaunchQueueStatus | undefined {
     return this.queued.get(owner);
   }
+  launching = new Set<string>();
+
+  isLaunching(owner: string): boolean {
+    return this.launching.has(owner);
+  }
+
   private readonly observers = new Map<string, Set<IosRunnerLaunchQueueObserver>>();
 
   watchQueue(owner: string, observer: IosRunnerLaunchQueueObserver): () => void {

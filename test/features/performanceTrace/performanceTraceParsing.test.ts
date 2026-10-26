@@ -91,6 +91,66 @@ describe("xctrace export parsing (#14102)", () => {
     });
   });
 
+  test("reads the real host TOC", async () => {
+    const toc = await parseXctraceToc(fixture("xctrace-toc-time-profiler-macos-host.xml"));
+    expect(toc.durationMs).toBe(2995);
+    expect(toc.endReason).toBe("Time limit reached");
+    expect(toc.schemas).toEqual([
+      "tick",
+      "life-cycle-period",
+      "tick",
+      "device-thermal-state-intervals",
+      "os-log",
+      "os-signpost",
+      "os-signpost",
+      "os-log",
+      "hang-risks",
+      "potential-hangs",
+      "global-poi-layout",
+      "time-profile",
+      "kdebug-signpost",
+      "kdebug-strings",
+      "process-info",
+      "dyld-library-load",
+      "kdebug-strings",
+      "kdebug",
+      "kdebug",
+      "region-of-interest",
+      "kdebug",
+      "kdebug",
+      "kdebug",
+      "kdebug",
+      "kdebug",
+      "global-roi-layout",
+      "os-log-arg",
+      "kdebug",
+      "kdebug",
+      "kdebug",
+      "kdebug",
+      "kdebug",
+      "kdebug",
+      "kdebug",
+      "gcd-perf-event",
+      "thread-info",
+      "runloop-events",
+      "roi-metadata",
+      "time-sample",
+      "os-signpost-arg",
+    ]);
+  });
+
+  test("reads tagged backtraces from the real host export, skipping placeholder frames", async () => {
+    const rows = await parseXctraceTable(fixture("xctrace-time-profile-macos-host.xml"));
+    expect(summarizeXctraceTable("timeProfiler", rows)).toEqual({
+      topFunctions: [
+        {
+          name: "invocation function for block in mach_o::UnsafeHeader::forEachSegment(void (mach_o::UnsafeHeader::SegmentInfo const&, bool&) block_pointer) const",
+          samples: 1,
+        },
+      ],
+    });
+  });
+
   test("summarises hangs longest first, resolving ref cells", async () => {
     const rows = await parseXctraceTable(fixture("xctrace-potential-hangs.xml"));
     expect(summarizeXctraceTable("hangs", rows)).toEqual({

@@ -1278,6 +1278,135 @@ describe("deleteDevice handler", () => {
     expect(resolveDirectSessionDevice("direct-session")).toBeUndefined();
   });
 
+  test.each([true, false])(
+    "refuses a live unpooled AVD even when image exists=%s",
+    async (imageExists) => {
+      const image: DeviceInfo = { platform: "android", name: "Pixel_8_API_35", isRunning: false };
+      manager.setBootedDevices("android", []);
+      manager.setDeviceImages("android", imageExists ? [image] : []);
+      const stopper = new FakeEmulatorProcessStopper();
+      stopper.avdCandidates = [{ pid: 4242, command: "qemu-system-aarch64 -avd Pixel_8_API_35" }];
+      setDeviceToolsDependencies({ androidEmulatorProcessStopper: stopper });
+      const response = await teardownTool().handler(
+        request("android", imageExists ? image.name : "emulator-5556", image.name),
+      );
+      expect(responseBody(response)).toMatchObject({
+        state: "failed",
+        failure: { phase: "stop", code: "runtime_stop_unproven" },
+      });
+      expect(manager.destroyRequests).toHaveLength(0);
+      expect(stopper.describeAvdCalls[0]?.[0]).toBe(image.name);
+      expect(responseBody(response).error).toContain("kill 4242");
+    },
+  );
+
+  test.each([true, false])(
+    "unsupported process table falls back to adb (image exists=%s)",
+    async (imageExists) => {
+      const image: DeviceInfo = { platform: "android", name: "Pixel_8_API_35", isRunning: false };
+      manager.setDeviceImages("android", imageExists ? [image] : []);
+      const stopper = new FakeEmulatorProcessStopper();
+      stopper.avdDescription = {
+        kind: "unsupported",
+        detail: "Host platform has no ps process table",
+      };
+      setDeviceToolsDependencies({ androidEmulatorProcessStopper: stopper });
+      const response = await teardownTool().handler(request("android", image.name, image.name));
+      expect(responseBody(response).state).toBe(imageExists ? "destroyed" : "already_absent");
+      expect(stopper.describeAvdCalls.every(([name]) => name === image.name)).toBe(true);
+    },
+  );
+
+  test.each([true, false])(
+    "unsupported table still checks an unpooled explicit serial (image exists=%s)",
+    async (imageExists) => {
+      const image: DeviceInfo = { platform: "android", name: "Pixel_8_API_35", isRunning: false };
+      manager.setDeviceImages("android", imageExists ? [image] : []);
+      const stopper = new FakeEmulatorProcessStopper();
+      stopper.avdDescription = { kind: "unsupported", detail: "platform" };
+      const probedSerials: string[][] = [];
+      manager.getAndroidListedDeviceStates = async (serials) => {
+        const ids = [...serials];
+        probedSerials.push(ids);
+        return new Map(
+          ids.filter((id) => id === "emulator-5556").map((id) => [id, "unauthorized"]),
+        );
+      };
+      setDeviceToolsDependencies({ androidEmulatorProcessStopper: stopper });
+      const response = await teardownTool().handler(
+        request("android", "emulator-5556", image.name),
+      );
+      expect(responseBody(response)).toMatchObject({
+        state: "failed",
+        failure: { phase: "stop", code: "runtime_stop_unproven" },
+      });
+      expect(probedSerials[0]).toContain("emulator-5556");
+      expect(manager.destroyRequests).toHaveLength(0);
+    },
+  );
+
+  test("unsupported table checks the inventory serial when deletion is requested by AVD name", async () => {
+    const image: DeviceInfo = {
+      platform: "android",
+      name: "Pixel_8_API_35",
+      deviceId: "emulator-5556",
+      isRunning: false,
+    };
+    manager.setDeviceImages("android", [image]);
+    const stopper = new FakeEmulatorProcessStopper();
+    stopper.avdDescription = { kind: "unsupported", detail: "platform" };
+    manager.getAndroidListedDeviceStates = async (serials) =>
+      new Map([...serials].filter((id) => id === image.deviceId).map((id) => [id, "offline"]));
+    setDeviceToolsDependencies({ androidEmulatorProcessStopper: stopper });
+    const response = await teardownTool().handler(request("android", image.name, image.name));
+    expect(responseBody(response)).toMatchObject({
+      state: "failed",
+      failure: { phase: "stop", code: "runtime_stop_unproven" },
+    });
+    expect(manager.destroyRequests).toHaveLength(0);
+  });
+
+  test.each(["offline", "unsupported-offline", "process", "unreadable"])(
+    "refuses stopped-image deletion before retiring ownership when runtime is %s",
+    async (evidence) => {
+      const timer = new FakeTimer();
+      const sessionManager = new SessionManager(timer, new FakeDeviceSessionRepository());
+      const pool = makePool(sessionManager, "daemon-session", { timer, deviceManager: manager });
+      const image: DeviceInfo = { platform: "android", name: "Pixel_8_API_35", isRunning: false };
+      const runtime: BootedDevice = {
+        platform: "android",
+        name: image.name,
+        deviceId: "emulator-5556",
+      };
+      await pool.addDevice(runtime, image);
+      DaemonState.getInstance().initialize(sessionManager, pool);
+      manager.setBootedDevices("android", []);
+      manager.setDeviceImages("android", [image]);
+      manager.getAndroidListedDeviceStates = async () =>
+        new Map(evidence.includes("offline") ? [[runtime.deviceId, "offline"]] : []);
+      const stopper = new FakeEmulatorProcessStopper();
+      stopper.avdCandidates =
+        evidence === "process"
+          ? [{ pid: 4242, command: "qemu-system-aarch64 -avd Pixel_8_API_35 -port 5556" }]
+          : [];
+      if (evidence === "unsupported-offline") {
+        stopper.avdDescription = { kind: "unsupported", detail: "platform" };
+      }
+      if (evidence === "unreadable") {
+        stopper.avdDescription = { kind: "unreadable", detail: "ps unavailable" };
+      }
+      setDeviceToolsDependencies({ androidEmulatorProcessStopper: stopper });
+
+      const response = await teardownTool().handler(request("android", image.name, image.name));
+      expect(responseBody(response)).toMatchObject({
+        state: "failed",
+        failure: { phase: "stop", code: "runtime_stop_unproven" },
+      });
+      expect(manager.destroyRequests).toHaveLength(0);
+      expect(pool.getDevice(runtime.deviceId)).not.toBeNull();
+    },
+  );
+
   test("retires every stale pooled Android incarnation before reporting an absent AVD", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionRepository());

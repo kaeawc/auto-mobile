@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { BootedDevice, ExecResult } from "../../../src/models";
+import { ActionableError, type BootedDevice, type ExecResult } from "../../../src/models";
 import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { HostCommandOptions } from "../../../src/utils/HostCommandExecutor";
 import {
@@ -12,7 +14,10 @@ import type { PerfettoTraceProcessor } from "../../../src/features/performanceTr
 import {
   XctraceRecorder,
   type XctraceHost,
+  type XctraceRecorderDependencies,
 } from "../../../src/features/performanceTrace/XctraceRecorder";
+import { traceArtifactBytes } from "../../../src/features/performanceTrace/xctraceFinalization";
+import { PerformanceTraceStopTimeoutError } from "../../../src/features/performanceTrace/PerformanceTraceStopTimeoutError";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -204,7 +209,7 @@ class FakeXctraceHost implements XctraceHost {
   }
 }
 
-function xctrace(pid: number | null = 4321) {
+function xctrace(pid: number | null = 4321, options: Partial<XctraceRecorderDependencies> = {}) {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const host = new FakeXctraceHost(timer);
@@ -214,6 +219,8 @@ function xctrace(pid: number | null = 4321) {
     timer,
     startTimeoutMs: 5_000,
     stopTimeoutMs: 5_000,
+    artifactBytes: async () => 0,
+    ...options,
   });
   return { host, recorder, timer };
 }
@@ -244,11 +251,16 @@ describe("xctrace recorder (#14102)", () => {
   test("does not signal an xctrace that already ended at its time limit (#14737)", async () => {
     const { host, recorder } = xctrace();
     const recording = await recorder.start(iosRequest);
-    host.spawned[0]!.child.emit("exit", 0, null);
+    const child = host.spawned[0]!.child;
+    child.exitCode = 0;
+    child.emit("exit", 0, null);
+    const signals: Array<string | number | undefined> = [];
+    child.kill = (signal) => (signals.push(signal), true);
 
     await recording.stop();
 
-    expect(host.spawned[0]!.child.signalCode).toBeNull();
+    expect(signals).toEqual([]);
+    expect(child.signalCode).toBeNull();
   });
 
   test("fails typed and kills xctrace when it will not finalize after SIGINT (#14737)", async () => {
@@ -258,21 +270,133 @@ describe("xctrace recorder (#14102)", () => {
     const signals: Array<string | number | undefined> = [];
     child.kill = (signal) => (signals.push(signal), true);
 
-    await expect(recording.stop()).rejects.toThrow("did not finish within 5000ms");
+    await expect(recording.stop()).rejects.toThrow(
+      "did not finish finalising the trace within 5000 ms",
+    );
     expect(signals).toEqual(["SIGINT", "SIGKILL"]);
   });
 
-  test("flags a malformed trace as unreadable (#14737)", async () => {
+  test.each(["xctrace-export-malformed.stderr.txt", "xctrace-export-missing-template.stderr.txt"])(
+    "flags real export failure %s as unreadable",
+    async (name) => {
+      const { host, recorder } = xctrace();
+      const recording = await recorder.start(iosRequest);
+      await recording.stop();
+      host.executeCommand = async () => {
+        throw new Error(fixture(name));
+      };
+
+      const { warnings } = await recording.summarize();
+
+      expect(warnings[0]).toContain("unreadable");
+    },
+  );
+
+  test("reports an empty run without a misleading duration or missing-table warning", async () => {
     const { host, recorder } = xctrace();
-    const recording = await recorder.start(iosRequest);
-    await recording.stop();
-    host.executeCommand = async () => {
-      throw new Error("Trace is malformed - run data is missing");
+    const recording = await recorder.start({ ...iosRequest, template: "hitches" });
+    const exported: string[][] = [];
+    host.executeCommand = async (_file, args = []) => {
+      exported.push(args);
+      return execResult(fixture("xctrace-toc-empty-unfinalized-hitches-ios27.xml"));
     };
+    expect(await recording.summarize()).toEqual({
+      summary: {},
+      warnings: [
+        "xctrace saved the trace without any recorded run data (0 s, no tables), so there is nothing to summarise. The recording did not capture; retry on a less loaded host, or open the .trace in Instruments.",
+      ],
+    });
+    expect(exported).toHaveLength(1);
+    expect(exported[0]).toContain("--toc");
+  });
 
-    const { warnings } = await recording.summarize();
+  test.each(["stdout", "stderr"] as const)(
+    "extends finalisation while %s remains active",
+    async (stream) => {
+      const { host, recorder, timer } = xctrace();
+      const recording = await recorder.start(iosRequest);
+      const child = host.spawned[0]!.child;
+      child.kill = () => true;
+      const started = timer.now();
+      timer.setTimeout(() => child[stream].emit("data", "Saving output file..."), 4000);
+      timer.setTimeout(() => child.emit("exit", 0, null), 8000);
+      await recording.stop();
+      expect(timer.now() - started).toBe(8000);
+      expect(child[stream].listenerCount("data")).toBe(0);
+    },
+  );
 
-    expect(warnings[0]).toContain("unreadable");
+  test("extends finalisation while the artifact grows", async () => {
+    let bytes = 0;
+    const { host, recorder, timer } = xctrace(4321, { artifactBytes: async () => ++bytes });
+    const recording = await recorder.start(iosRequest);
+    host.spawned[0]!.child.kill = () => true;
+    timer.setTimeout(() => host.spawned[0]!.child.emit("exit", 0, null), 12000);
+    await recording.stop();
+    expect(bytes).toBeGreaterThan(3);
+  });
+
+  test("hard cap bounds continuous progress and carries timeout metadata", async () => {
+    let bytes = 0;
+    const { host, recorder, timer } = xctrace(4321, {
+      artifactBytes: async () => ++bytes,
+      stopMaxMs: 10000,
+    });
+    const recording = await recorder.start(iosRequest);
+    const signals: Array<string | number | undefined> = [];
+    host.spawned[0]!.child.kill = (signal) => (signals.push(signal), true);
+    const started = timer.now();
+    await expect(recording.stop()).rejects.toMatchObject({
+      name: "PerformanceTraceStopTimeoutError",
+      artifactPath: recording.artifactPath,
+      waitedMs: 10000,
+      lastActivityMs: started + 8000,
+    });
+    expect(signals).toEqual(["SIGINT", "SIGKILL"]);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("times out after progress stops, carrying the last activity timestamp", async () => {
+    const { host, recorder, timer } = xctrace();
+    const recording = await recorder.start(iosRequest);
+    const child = host.spawned[0]!.child;
+    child.kill = () => true;
+    const started = timer.now();
+    timer.setTimeout(() => child.stderr.emit("data", "Saving output file..."), 4000);
+    await expect(recording.stop()).rejects.toMatchObject({
+      waitedMs: 9000,
+      lastActivityMs: started + 4000,
+    });
+    expect(child.stderr.listenerCount("data")).toBe(0);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("uses the default 60 second inactivity window and a typed actionable error", async () => {
+    const { host, recorder } = xctrace(4321, { stopTimeoutMs: undefined });
+    const recording = await recorder.start(iosRequest);
+    host.spawned[0]!.child.kill = () => true;
+    const failure = recording.stop();
+    await expect(failure).rejects.toBeInstanceOf(PerformanceTraceStopTimeoutError);
+    await expect(failure).rejects.toBeInstanceOf(ActionableError);
+    await expect(failure).rejects.toMatchObject({ waitedMs: 60000, lastActivityMs: undefined });
+  });
+
+  test("uses the default 180 second cap even with continuous artifact growth", async () => {
+    let bytes = 0;
+    const { host, recorder } = xctrace(4321, {
+      stopTimeoutMs: undefined,
+      artifactBytes: async () => ++bytes,
+    });
+    const recording = await recorder.start(iosRequest);
+    host.spawned[0]!.child.kill = () => true;
+    await expect(recording.stop()).rejects.toMatchObject({ waitedMs: 180000 });
+  });
+
+  test("an unresponsive artifact probe cannot hold up the stop deadline", async () => {
+    const { host, recorder } = xctrace(4321, { artifactBytes: () => new Promise(() => {}) });
+    const recording = await recorder.start(iosRequest);
+    host.spawned[0]!.child.kill = () => true;
+    await expect(recording.stop()).rejects.toMatchObject({ waitedMs: 5000 });
   });
 
   test("summarises the template table from xctrace export", async () => {
@@ -324,5 +448,22 @@ describe("xctrace recorder (#14102)", () => {
       return child;
     };
     await expect(recorder.start(iosRequest)).rejects.toThrow("Device not found");
+  });
+});
+
+describe("trace artifact byte measurement", () => {
+  test("sums nested file bytes, observes growth, and treats a missing bundle as zero", async () => {
+    const root = await mkdtemp(join(tmpdir(), "trace-size-"));
+    try {
+      expect(await traceArtifactBytes(join(root, "missing.trace"))).toBe(0);
+      await mkdir(join(root, "run"));
+      await writeFile(join(root, "toc"), "123");
+      await writeFile(join(root, "run", "data"), "12345");
+      expect(await traceArtifactBytes(root)).toBe(8);
+      await writeFile(join(root, "run", "data"), "1234567");
+      expect(await traceArtifactBytes(root)).toBe(10);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

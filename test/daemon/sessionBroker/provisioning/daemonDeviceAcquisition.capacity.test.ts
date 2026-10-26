@@ -1,3 +1,4 @@
+import { FakeEmulatorProcessStopper } from "../../../fakes/FakeEmulatorProcessStopper";
 import { afterAll, afterEach, beforeEach, describe, expect } from "bun:test";
 import { createDaemonBrokerDeviceAcquisition } from "../../../../src/daemon/sessionBroker/provisioning/daemonDeviceAcquisition";
 import type { BrokerDeviceAcquisitionSessions } from "../../../../src/daemon/sessionBroker/provisioning/deviceAcquisition";
@@ -119,6 +120,7 @@ describe("daemon binding wiring: replacing a binding's device against boot capac
     };
     const resourceObserver = new FakeDeviceResourceObserver();
     setDeviceToolsDependencies({
+      androidEmulatorProcessStopper: new FakeEmulatorProcessStopper(),
       env,
       timer,
       lifecycleCoordinator: new InMemoryVirtualDeviceLifecycleCoordinator(timer),

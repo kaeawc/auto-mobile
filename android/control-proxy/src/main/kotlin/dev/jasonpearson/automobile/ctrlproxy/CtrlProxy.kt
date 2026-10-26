@@ -1812,9 +1812,15 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     gestureController.startThread()
   }
 
+  // Lazy: needs the service context, and the controller built below outlives reconnects.
+  private val prototypeDisplays by lazy { AndroidPrototypeDisplays(this) }
+
   override fun onServiceConnected() {
     super.onServiceConnected()
     Log.d(TAG, "onServiceConnected")
+    // Overlay tokens exist only for displays present now; displays added later cannot host
+    // prototype windows on Android 12L/13 (#15318).
+    prototypeDisplays.onServiceBound()
 
     // Subscribe to SUBSCRIBED_EVENT_TYPES_MASK (the handled set plus the framework cache-coherence
     // set) instead of TYPES_ALL_MASK, so the OS stops delivering high-frequency events we only drop
@@ -1862,7 +1868,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         OverlayManager(this, viewFactory = { HighlightOverlayView(it, overlayDrawer) })
       overlayDrawer.attachOverlayManager(overlayManager)
       if (!::prototypeController.isInitialized) {
-        val prototypeDisplays = AndroidPrototypeDisplays(this)
         // Locks are shared safety facts; foreground suspension is request-local per surface.
         val prototypeWindowBlocked = {
           val keyguard = getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager

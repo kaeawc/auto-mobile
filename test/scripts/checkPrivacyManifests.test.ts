@@ -75,7 +75,7 @@ describe("stripSwiftNonCode", () => {
       "A.swift",
       'print("up: \\(ProcessInfo.processInfo.systemUptime)")',
     );
-    expect(usages.map((u) => u.category)).toEqual(["SystemBootTime"]);
+    expect(usages.map((u) => u.category)).toEqual(["NSPrivacyAccessedAPICategorySystemBootTime"]);
   });
 });
 

@@ -121,8 +121,11 @@ function stripSwiftString(
       let depth = 1;
       let j = i + 2;
       while (j < source.length && depth > 0) {
-        if (source[j] === "(") depth += 1;
-        else if (source[j] === ")") depth -= 1;
+        if (source[j] === "(") {
+          depth += 1;
+        } else if (source[j] === ")") {
+          depth -= 1;
+        }
         j += 1;
       }
       out.push("  ");

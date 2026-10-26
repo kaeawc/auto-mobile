@@ -101,6 +101,7 @@ export interface ObserveDiffNodeChange {
  * current state text).
  */
 export interface ObserveDiff {
+  importedPrototypeContent?: ObserveResult["importedPrototypeContent"];
   keyboard?: ObserveResult["keyboard"];
   isDiff: true;
   /**

@@ -366,6 +366,7 @@ export async function bootExactProvisionedDevice(
         : START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
     );
     admitRestartReservedProvision(args, provisioned.device.deviceId);
+    settlementState.bootAttempted = true;
     boot = await bootService.boot({
       operationName: "provisionDevice",
       platform: args.device.platform,

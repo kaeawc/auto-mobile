@@ -1,3 +1,7 @@
+import type { TeardownDeviceArgs } from "../../src/features/deviceLifecycle/core/contracts";
+import { createLifecycleHandlers } from "../../src/server/deviceToolsLifecycle";
+import { resolveTeardownTarget } from "../../src/features/deviceLifecycle/teardown/teardownResolution";
+import type { TeardownContext } from "../../src/features/deviceLifecycle/teardown/teardownContracts";
 import { makePool } from "../helpers/makePool";
 import { FakeEmulatorProcessStopper } from "../fakes/FakeEmulatorProcessStopper";
 import { warmedTests } from "../helpers/warmedTests";
@@ -270,7 +274,7 @@ function request(
     mode: "destroy",
     verifyAbsence: true,
     timeoutMs: 60_000,
-  };
+  } satisfies TeardownDeviceArgs;
 }
 
 describe("deleteDevice handler", () => {
@@ -3030,6 +3034,206 @@ describe("deleteDevice handler", () => {
     expect(body.state).toBe("failed");
     expect(body.failure).toEqual(expect.objectContaining({ code: "target_identity_unresolved" }));
     expect(manager.destroyRequests).toEqual([]);
+  });
+
+  describe("never-launched created AVD rollback proof", () => {
+    const target = "request-created-avd";
+    const arrange = () => {
+      manager.setDeviceImages("android", [{ platform: "android", name: target, isRunning: false }]);
+      manager.setBootedDevices("android", [
+        { platform: "android", name: "Unknown (emulator-5556)", deviceId: "emulator-5556" },
+      ]);
+    };
+
+    test("deletes under the matching lease without probing the local sibling", async () => {
+      arrange();
+      const deps = getDeviceToolsDependencies();
+      const lease = await deps.lifecycleCoordinator.reserve(
+        { kind: "stable", platform: "android", stableId: target },
+        { operation: "provision", deadlineMs: deps.timer.now() + 60_000 },
+      );
+      lease.transitionToTeardown();
+      const response = await createLifecycleHandlers().executeDeleteDevice(
+        request("android", target, target),
+        deps,
+        undefined,
+        getDeviceTeardownService(deps),
+        lease,
+        undefined,
+        { unlaunchedCreatedAvd: { stableId: target } },
+      );
+      expect(responseBody(response).state).toBe("destroyed");
+      expect(manager.destroyRequests).toHaveLength(1);
+      expect(runtimeAvdNameProbes).toEqual([]);
+    });
+
+    test("probes foreign siblings and only records those serials as foreign-cleared", async () => {
+      arrange();
+      manager.setBootedDevices("android", [
+        { platform: "android", name: "Unknown (emulator-5556)", deviceId: "emulator-5556" },
+        {
+          platform: "android",
+          name: "Unknown (emulator-5610)",
+          deviceId: "emulator-5610",
+          foreignOwned: true,
+        },
+      ]);
+      runtimeAvdNames.set("emulator-5610", "other-avd");
+      const deps = getDeviceToolsDependencies();
+      const lease = await deps.lifecycleCoordinator.reserve(
+        { kind: "stable", platform: "android", stableId: target },
+        { operation: "provision", deadlineMs: deps.timer.now() + 60_000 },
+      );
+      const context: TeardownContext = {
+        args: request("android", target, target),
+        dependencies: deps,
+        deviceManager: manager,
+        requestAbortSignal: undefined,
+        deadlineDevice: { platform: "android", name: target, deviceId: target },
+        deadlineMs: deps.timer.now() + 60_000,
+        timeoutMs: 60_000,
+        cancelOnRequestAbort: false,
+        lifecycleLease: lease,
+        mode: "named",
+        initialScan: { serials: new Set(), pooledEntries: [] },
+        unlaunchedCreatedAvd: { stableId: target },
+      };
+      try {
+        const resolution = await resolveTeardownTarget(context);
+        expect("target" in resolution).toBe(true);
+        expect(runtimeAvdNameProbes).toEqual(["emulator-5610"]);
+        expect(context.clearedForeignSerials).toEqual(new Set(["emulator-5610"]));
+      } finally {
+        lease.release();
+      }
+    });
+
+    test.each(["candidate", "unsupported-with-sibling", "unsupported-without-sibling"] as const)(
+      "independent process evidence: %s",
+      async (variant) => {
+        arrange();
+        const hasSibling = variant !== "unsupported-without-sibling";
+        if (!hasSibling) {
+          manager.setBootedDevices("android", []);
+        }
+        const stopper = new FakeEmulatorProcessStopper();
+        if (variant === "candidate") {
+          stopper.avdCandidates = [{ pid: 456, command: `qemu-system-x86_64 -avd ${target}` }];
+        } else {
+          stopper.avdDescription = { kind: "unsupported", detail: "process scan unsupported" };
+        }
+        setDeviceToolsDependencies({ androidEmulatorProcessStopper: stopper });
+        const deps = getDeviceToolsDependencies();
+        const lease = await deps.lifecycleCoordinator.reserve(
+          { kind: "stable", platform: "android", stableId: target },
+          { operation: "provision", deadlineMs: deps.timer.now() + 60_000 },
+        );
+        lease.transitionToTeardown();
+        const response = await createLifecycleHandlers().executeDeleteDevice(
+          request("android", target, target),
+          deps,
+          undefined,
+          getDeviceTeardownService(deps),
+          lease,
+          undefined,
+          { unlaunchedCreatedAvd: { stableId: target } },
+        );
+        if (hasSibling) {
+          expect(responseBody(response).failure).toMatchObject({ code: "runtime_stop_unproven" });
+          expect(manager.destroyRequests).toEqual([]);
+        } else {
+          expect(responseBody(response).state).toBe("destroyed");
+          expect(manager.destroyRequests).toHaveLength(1);
+        }
+        expect(stopper.describeAvdCalls.length).toBeGreaterThan(0);
+        expect(runtimeAvdNameProbes).toEqual([]);
+      },
+    );
+
+    test("still refuses when the independent process scan cannot prove the image stopped", async () => {
+      arrange();
+      const stopper = new FakeEmulatorProcessStopper();
+      stopper.avdDescription = { kind: "unreadable", detail: "process scan unavailable" };
+      setDeviceToolsDependencies({ androidEmulatorProcessStopper: stopper });
+      const deps = getDeviceToolsDependencies();
+      const lease = await deps.lifecycleCoordinator.reserve(
+        { kind: "stable", platform: "android", stableId: target },
+        { operation: "provision", deadlineMs: deps.timer.now() + 60_000 },
+      );
+      lease.transitionToTeardown();
+      const response = await createLifecycleHandlers().executeDeleteDevice(
+        request("android", target, target),
+        deps,
+        undefined,
+        getDeviceTeardownService(deps),
+        lease,
+        undefined,
+        { unlaunchedCreatedAvd: { stableId: target } },
+      );
+      expect(responseBody(response).failure).toMatchObject({ code: "runtime_stop_unproven" });
+      expect(stopper.describeAvdCalls).toHaveLength(1);
+      expect(manager.destroyRequests).toEqual([]);
+      expect(runtimeAvdNameProbes).toEqual([]);
+    });
+
+    test.each([
+      "no-proof",
+      "no-lease",
+      "wrong-proof",
+      "wrong-lease",
+      "selector-lease",
+      "force",
+      "aborted-lease",
+    ])("keeps the veto for %s", async (variant) => {
+      arrange();
+      const deps = getDeviceToolsDependencies();
+      const lease =
+        variant === "no-lease"
+          ? undefined
+          : await deps.lifecycleCoordinator.reserve(
+              variant === "selector-lease"
+                ? { kind: "selector", platform: "android", selector: target }
+                : {
+                    kind: "stable",
+                    platform: "android",
+                    stableId: variant === "wrong-lease" ? "other-avd" : target,
+                  },
+              { operation: "provision", deadlineMs: deps.timer.now() + 60_000 },
+            );
+      const context: TeardownContext = {
+        args: {
+          ...request("android", target, target),
+          ...(variant === "force" ? { force: true } : {}),
+        },
+        dependencies: deps,
+        deviceManager: manager,
+        requestAbortSignal: undefined,
+        deadlineDevice: { platform: "android", name: target, deviceId: target },
+        deadlineMs: deps.timer.now() + 60_000,
+        timeoutMs: 60_000,
+        cancelOnRequestAbort: false,
+        lifecycleLease:
+          variant === "aborted-lease" && lease ? { ...lease, signal: AbortSignal.abort() } : lease,
+        mode: variant === "force" ? "serial-only" : "named",
+        initialScan: { serials: new Set(), pooledEntries: [] },
+        unlaunchedCreatedAvd:
+          variant === "no-proof"
+            ? undefined
+            : { stableId: variant === "wrong-proof" ? "other-avd" : target },
+      };
+      try {
+        const resolution = await resolveTeardownTarget(context);
+        expect("response" in resolution && responseBody(resolution.response).failure).toMatchObject(
+          {
+            code: "target_identity_unresolved",
+          },
+        );
+        expect(manager.destroyRequests).toEqual([]);
+        expect(runtimeAvdNameProbes).toEqual([]);
+      } finally {
+        lease?.release();
+      }
+    });
   });
 
   // #15213: another daemon's emulator is listed without a name on purpose (discovery skips the

@@ -178,6 +178,12 @@ AutoMobile does not launch these, so edit the scheme (Run > Arguments > Environm
   each pager's page; `reset: true` starts fresh (`prototype_show_in_place_v1`; host refuses `reset` on
   older agents). For a variant carousel, compose the spec yourself.
 - No `display`, no `persistence: "device"`; `layer: "app"` ignored.
+- Owner decisions of 2026-10-26 (#15244, full list in `prototype-ux.md`, Owner decisions): `theme.design`
+  defaults to `platform` (native SwiftUI controls where covered; segmented `Picker`, `TabView` and `Menu`
+  keep the custom drawing because they lose per-item identifiers); an `android: {...}` namespace block is
+  ignored with a `platformNotes` entry; system Reduce Motion and `prefersCrossFadeTransitions` map to the
+  reduced motion profile (crossfades), superseding the "instant" wording in Motion; iOS reports only the
+  horizontal size class (compact, regular).
 - `inspect` reports the single prototype, with no `suspended` and no `deviceDroppedEvents`.
 - SwiftUI in the app's process rather than Compose in CtrlProxy; no accessibility service.
 - Android reaches any app through CtrlProxy; iOS only apps launched with the agent.

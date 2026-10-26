@@ -368,6 +368,12 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .literal(true)
         .optional()
         .describe("save only: requires pin; accepts the launcher dialog, verifies the pin"),
+      restartLauncher: z
+        .literal(false)
+        .optional()
+        .describe(
+          "save only (Android): false skips the automatic default-launcher restart that runs when a pinned or updated shortcut is not visible on the home screen",
+        ),
       removeIcon: z
         .literal(true)
         .optional()
@@ -427,6 +433,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     "icon",
     "pin",
     "autoConfirm",
+    "restartLauncher",
     "removeIcon",
   ] as const;
   const allowed: Record<typeof value.action, readonly string[]> = {
@@ -441,7 +448,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
       "pseudoLocale",
     ],
     patch: ["id", "ops", "baseRevision"],
-    save: ["spec", "assets", "label", "icon", "pin", "autoConfirm"],
+    save: ["spec", "assets", "label", "icon", "pin", "autoConfirm", "restartLauncher"],
     listSaved: [],
     deleteSaved: ["id", "removeIcon"],
     open: ["id"],
@@ -719,6 +726,16 @@ export const prototypeOutputSchema = z.object({
     )
     .optional(),
   pinned: z.enum(["pinned", "pending", "unsupported"]).optional(),
+  launcherRestarted: z
+    .boolean()
+    .optional()
+    .describe(
+      "Android save with pin: true when the default launcher was restarted to show the shortcut.",
+    ),
+  shortcutVisible: z
+    .boolean()
+    .optional()
+    .describe("Android: whether the shortcut was seen on the home screen after a pin or update."),
   errorCode: z
     .enum([...SAVED_PROTOTYPE_ERROR_CODES, "unsupported_capability", "unsupported_platform"])
     .optional(),

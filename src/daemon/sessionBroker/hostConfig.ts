@@ -234,3 +234,14 @@ export async function readSessionBrokerHostConfig(path: string): Promise<Session
     throw toActionableError(error, `Cannot load session broker host configuration at ${path}`);
   }
 }
+
+/**
+ * Whether a booted Android emulator should skip the quick-boot snapshot save at exit (#15477):
+ * only when the host config is read and configures no warm reuse, so released emulators are
+ * destroyed. Snapshot and keep-booted resets, and an unread config, keep the default.
+ */
+export function discardsAndroidSnapshotOnExit(
+  config: SessionBrokerHostConfig | undefined,
+): boolean {
+  return config !== undefined && config.androidResetMode === undefined;
+}

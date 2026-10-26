@@ -306,7 +306,7 @@ async function reserveReadinessWithinDeadline(
 
 export async function bootExactProvisionedDevice(
   ctx: ProvisioningContext,
-  args: ProvisionDeviceArgs,
+  args: InternalProvisionDeviceArgs,
   deps: DeviceToolsDependencies,
   deviceManager: PlatformDeviceManager,
   deviceCreationGate: DeviceCreationGate,
@@ -379,6 +379,7 @@ export async function bootExactProvisionedDevice(
       // already-running adopted exact device never reaches the cold-boot path,
       // so the flag is a no-op there and needs no extra guard here.
       freshProvision: provisioned.created === true,
+      ...(args.discardSnapshotOnExit === true ? { discardSnapshotOnExit: true } : {}),
     });
     perf.endOperation("bootDevice");
     assertProvisionIosBootIdentity(args, provisioned, boot);

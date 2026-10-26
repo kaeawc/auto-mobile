@@ -183,6 +183,11 @@ export interface BindingProvisionPortDependencies {
   timer: Pick<Timer, "now">;
   /** Release a session the reconciler obtained but could not publish (device kept). */
   releaseSession: (sessionUuid: string) => Promise<void>;
+  /**
+   * Whether a newly booted Android emulator should skip the quick-boot snapshot save at exit:
+   * true when the host destroys released emulators instead of reusing them warm (#15477).
+   */
+  discardAndroidSnapshotOnExit?: () => boolean;
 }
 
 /** The `provisionDevice` path with `readiness: "automation"`. */
@@ -248,6 +253,9 @@ export class ToolBindingProvisioner implements BindingDeviceProvisioner {
       },
       boot: true,
       readiness: "automation",
+      ...(request.platform === "android" && this.deps.discardAndroidSnapshotOnExit?.() === true
+        ? { discardSnapshotOnExit: true }
+        : {}),
       ...(request.platform === "ios" && request.mode === "create"
         ? { rollbackOnRetryableReadiness: false }
         : {}),

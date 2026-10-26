@@ -24,6 +24,26 @@ The 2026-10-04 decisions supersede the issue's earlier proposals:
 - A `sheet` window and a modal `bottomSheet` node are separate concepts.
 - Built-in icons come from a closed list (the bundled Material icon set); other artwork uses image assets.
 
+The 2026-10-26 decisions (#15244) fix the native-look and motion-profile work:
+
+1. **Default look.** `theme.design` defaults to `platform`. iOS prototypes look native by default
+   and the iOS screenshot baselines are re-recorded with it. On Android `platform` is still Material.
+   `material` stays available to force today's drawing on both platforms.
+2. **Other-platform namespaces.** A renderer ignores the other platform's namespace block (`ios: {...}`
+   on Android, `android: {...}` on iOS) and adds a `platformNotes` entry; it does not refuse the spec,
+   so one spec runs on both. This matches iOS ignoring `window.layer: "app"`.
+3. **iOS Reduce Motion** maps to the _reduced_ profile (crossfades), not to _off_. The system
+   setting `UIAccessibility.prefersCrossFadeTransitions` maps to _reduced_ as well.
+4. **Native controls without per-item identifiers** (segmented `Picker`, `TabView`, `Menu`) keep the
+   custom-drawn fallback. Each control is revisited after #15462.
+5. **`surface: "glass"` on Android** waits for real backdrop blur (API 31+ `RenderEffect`, after the
+   #15126 spike). Below API 31 it uses only a tonal fallback.
+6. **Width classes** are native per platform. Android reports the Material window size classes
+   (compact, medium, expanded); iOS reports only its horizontal size class (compact, regular). Specs
+   branch per platform.
+7. **Xcode 27.** An advisory (non-required) Xcode 27 iOS build runs on the self-hosted Macs now. The
+   required jobs switch after a green week. #15261 proceeds behind `#available`.
+
 Earlier decisions still apply: the renderer is Compose; sizes and positions use
 dp; prototype opacity is a percentage; app-element anchoring is supported; observe
 includes prototype nodes by default; existing tap/text tools target prototype nodes;
@@ -2492,6 +2512,14 @@ prototype id; tapping it opens `SavedPrototypeActivity`, which needs no host.
   fresh pin is reported `pending`. Declining delivers no callback. `autoConfirm` taps the dialog's accept
   button by label and reports `pinned` only after `listSaved` confirms (#12266, device-verification
   work: launcher dialogs differ).
+- A launcher caches its workspace, so a new or updated shortcut can stay invisible (#14887). After a
+  `pinned` result, or a save whose shortcut was `updated`, the host looks for the label on the home
+  screen. If it is missing, it resolves the default launcher (`cmd package resolve-activity`), and
+  when that package is a known launcher runs `am force-stop` plus a HOME intent once, waits for the
+  launcher's tree to go quiet, and looks again. The result reports `launcherRestarted` and
+  `shortcutVisible`; an unknown launcher is left alone with a warning. It is on by default on
+  emulators and physical devices; `restartLauncher:false` opts out. It never runs on a pending pin
+  (no shortcut exists yet) and runs at most once per call.
 - An unsupported launcher keeps the save and reports `pinned:"unsupported"`. A locked or
   screen-off device reports `device_locked`; the save remains and a retry is safe.
 - The app cannot remove a pinned icon: `deleteSaved` disables the shortcut. `removeIcon:true`

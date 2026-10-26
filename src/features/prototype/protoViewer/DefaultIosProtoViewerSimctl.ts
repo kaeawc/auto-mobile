@@ -30,6 +30,9 @@ export class DefaultIosProtoViewerSimctl implements IosProtoViewerSimctl {
       throw error;
     }
   }
+  async launch(udid: string, timeoutMs: number, signal?: AbortSignal): Promise<void> {
+    await this.client.executeCommandArgs(["launch", udid, PROTOVIEWER_PACKAGE], timeoutMs, signal);
+  }
   async openurl(args: readonly string[], timeoutMs: number, signal?: AbortSignal): Promise<void> {
     await this.client.executeCommandArgs([...args], timeoutMs, signal);
   }

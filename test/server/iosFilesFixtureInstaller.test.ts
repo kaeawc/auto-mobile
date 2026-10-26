@@ -168,7 +168,7 @@ describe("managed iOS Files fixture installer (#15404)", () => {
     });
 
     expect(installs).toEqual([device.deviceId]);
-    expect(result.effects.map((effect) => effect.type)).toEqual([
+    expect(result.effects?.map((effect) => effect.type)).toEqual([
       "provider_install",
       "host_stage",
       "document_picker",

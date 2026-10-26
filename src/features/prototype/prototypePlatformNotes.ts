@@ -220,7 +220,7 @@ export const PROTOTYPE_PLATFORM_DIFFERENCES: readonly (PlatformDifference & {
     platform: "ios",
     effect: "substituted",
     detail:
-      "iOS pops a stack with the left-edge swipe (no system back button chrome); Android uses system Back above depth 1.",
+      "iOS pops a stack with the left-edge swipe (no system back button chrome); Android uses system Back above depth 1. Explicit stack or push/replace transitions require prototype_stack_transitions_v1.",
     occurrencePath: ({ node, path }) => (node?.type === "stack" ? path : undefined),
   },
   {

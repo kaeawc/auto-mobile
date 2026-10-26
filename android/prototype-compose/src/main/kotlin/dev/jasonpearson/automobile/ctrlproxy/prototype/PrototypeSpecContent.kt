@@ -17,7 +17,6 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerScope
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActionScope
 import androidx.compose.foundation.text.KeyboardActions
@@ -175,7 +174,10 @@ fun PrototypeRuntimeContent(
             Unit
           }
         }
+      val scrollStores = remember { PrototypeStackScrollStores() }
+      scrollStores.retain(snapshot.stacks.mapValues { it.value.path })
       CompositionLocalProvider(
+        LocalPrototypeStackScrollStores provides scrollStores,
         LocalPrototypeTextEpochs provides snapshot.textEpochs,
         LocalPrototypeScrollRequests provides snapshot.scrollRequests,
         LocalPrototypeImageCache provides images,
@@ -183,6 +185,8 @@ fun PrototypeRuntimeContent(
         LocalPrototypeFontCache provides fonts,
         LocalPrototypeMotion provides motion,
         LocalPrototypeMotionActivity provides runtime.motionActivity,
+        LocalPrototypeStackRuntime provides runtime,
+        LocalPrototypeStackSnapshot provides snapshot,
         LocalPrototypeSwipeCoordinator provides
           (LocalPrototypeSwipeCoordinator.current ?: remember { SwipeCoordinator() }),
       ) {
@@ -444,7 +448,7 @@ internal fun Modifier.boundedScrollViewport(vertical: Boolean): Modifier =
   }
 
 @Composable
-private fun RenderPrototypeNode(
+internal fun RenderPrototypeNode(
   node: PrototypeRenderNode,
   interact: (PrototypeInteraction) -> Unit,
   parentModifier: Modifier = Modifier,
@@ -458,7 +462,8 @@ private fun RenderPrototypeNode(
     return
   }
   if (
-    node.source?.visibleWhen != null &&
+    node.role != "stack" &&
+      node.source?.visibleWhen != null &&
       (node.source.transition?.type == "fade" || node.source.transition?.type == "none")
   ) {
     RenderPrototypeVisibility(node, interact, parentModifier, weightAxis, windowRoot)
@@ -466,23 +471,24 @@ private fun RenderPrototypeNode(
   }
   // Only `visibleWhen` nodes animate; wrapping every node would add a layout to each one.
   if (LocalPrototypeMotion.current && node.source?.visibleWhen != null) {
+    // A stack transition controls navigation only; its own visibility uses the defaults.
+    val visibilityTransition = node.source.transition?.type.takeUnless { node.role == "stack" }
     // The row/column weight rides on the animated container: it is the Row/Column's direct child.
     AnimatedVisibility(
       visible = node.visible,
       modifier = parentModifier,
-      enter =
-        prototypeEnterTransition(node.source.transition?.type, prototypeRtl(), node.enterDelayMs),
-      exit = prototypeExitTransition(node.source.transition?.type, prototypeRtl()),
+      enter = prototypeEnterTransition(visibilityTransition, prototypeRtl(), node.enterDelayMs),
+      exit = prototypeExitTransition(visibilityTransition, prototypeRtl()),
     ) {
       ReportPrototypeMotion { transition.isRunning }
       ProvideAnchorFade(
-        none = node.source.transition?.type == "none",
+        none = visibilityTransition == "none",
         enterDelayMs = node.enterDelayMs,
       ) {
         RenderPrototypeNodeContent(
           node,
           interact,
-          Modifier.prototypeBlurReplace(this, node.source.transition?.type, node.enterDelayMs),
+          Modifier.prototypeBlurReplace(this, visibilityTransition, node.enterDelayMs),
           weightAxis,
           windowRoot,
         )
@@ -779,7 +785,7 @@ private fun RenderPrototypeNodeContent(
     }
     "image" -> PrototypeImageContent(node, modifier)
     "scroll" -> {
-      val scroll = key(LocalPrototypeShowEpoch.current) { rememberScrollState() }
+      val scroll = key(LocalPrototypeShowEpoch.current) { rememberStackScrollState(node.identity) }
       val source = node.source as? PrototypeScrollNode
       val refresh = source?.refresh?.takeIf { source.axis != "horizontal" }
       // A vertical scroll may be a chat list (#14232); reverse anchors it at its end.
@@ -811,11 +817,7 @@ private fun RenderPrototypeNodeContent(
         }
       } else Box(scrolling, content = content)
     }
-    "stack" ->
-      Box(modifier, contentAlignment = node.style.alignment) {
-        // Only the runtime's top screen exists here; navigation has no transition in this slice.
-        node.children.forEach { key(it.identity) { RenderPrototypeNode(it, interact) } }
-      }
+    "stack" -> PrototypeStackContent(node, modifier, interact)
     "pager" -> RenderPrototypePager(node, modifier, interact)
     "tabBar",
     "bottomNav" -> RenderPrototypeNavigation(node, modifier, interact)

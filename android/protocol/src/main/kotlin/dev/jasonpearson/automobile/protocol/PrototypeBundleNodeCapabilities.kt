@@ -35,7 +35,8 @@ internal object PrototypeBundleNodeCapabilities {
     mark("swipe_actions_v1", type in setOf("row", "listItem") && "swipeActions" in n)
     mark("rich_text_v1", type == "text" && "spans" in n)
     mark("linkify_v1", type == "text" && "linkify" in n)
-    val transition = n["transition"]
+    mark("stack_transitions_v1", type == "stack" && "transition" in n)
+    val transition = if (type == "stack") null else n["transition"]
     val transitionType = (transition as? JsonObject)?.let { text(it["type"]) } ?: text(transition)
     mark("motion_v2", "animate" in n || transitionType in setOf("slideStart", "slideEnd", "scale"))
     mark(

@@ -204,6 +204,7 @@ internal enum class PrototypeBindableKind {
  */
 internal object PrototypeBindableFields {
   private val contextNamePattern = Regex("^[A-Za-z_][A-Za-z0-9_]*$")
+  private val followUpLists = listOf("onSuccess", "onError")
 
   /** A member path as the TypeScript validator spells it: `.name`, or `["name"]` if not a name. */
   fun memberPath(path: String, name: String): String =
@@ -223,6 +224,22 @@ internal object PrototypeBindableFields {
     (data[key] as? JsonArray).orEmpty().mapIndexedNotNull { index, entry ->
       (entry as? JsonObject)?.let { it to "$path.$key[$index]" }
     }
+
+  /** The first hit inside the action lists [names] of [action]: follow-ups, timer actions. */
+  private fun <T : Any> Visitor<T>.actionLists(
+    action: JsonObject,
+    names: List<String>,
+    path: String,
+  ): T? {
+    for (name in names) {
+      for ((entry, entryPath) in objects(action, name, path)) {
+        action(entry, entryPath)?.let {
+          return it
+        }
+      }
+    }
+    return null
+  }
 
   private class Visitor<T : Any>(
     val visit: (JsonElement?, String, PrototypeBindableKind) -> T?,
@@ -286,20 +303,11 @@ internal object PrototypeBindableFields {
           field(action, "path", path, PrototypeBindableKind.DATA_PATH)
             ?: binding(action["value"], "$path.value")
         "removeData" -> field(action, "path", path, PrototypeBindableKind.DATA_PATH)
-        "startTimer" -> timer(action, path)
+        "startTimer" -> actionLists(action, listOf("actions"), path)
         "request" -> request(action, path)
         "platform" -> platform(action, path)
         else -> null
       }
-
-    private fun timer(value: JsonObject, path: String): T? {
-      for ((entry, at) in objects(value, "actions", path)) {
-        action(entry, at)?.let {
-          return it
-        }
-      }
-      return null
-    }
 
     /** Mirrors `mapPlatformAction` (#14294): argument bindings, into, statusKey, follow-ups. */
     fun platform(action: JsonObject, path: String): T? {
@@ -314,14 +322,7 @@ internal object PrototypeBindableFields {
       field(action, "statusKey", path, PrototypeBindableKind.KEY)?.let {
         return it
       }
-      for (name in listOf("onSuccess", "onError")) {
-        for ((entry, entryPath) in objects(action, name, path)) {
-          action(entry, entryPath)?.let {
-            return it
-          }
-        }
-      }
-      return null
+      return actionLists(action, followUpLists, path)
     }
 
     /** Mirrors `mapRequestAction`: url, headers, query, body, into, statusKey, then follow-ups. */
@@ -343,14 +344,7 @@ internal object PrototypeBindableFields {
       field(action, "statusKey", path, PrototypeBindableKind.KEY)?.let {
         return it
       }
-      for (name in listOf("onSuccess", "onError")) {
-        for ((entry, entryPath) in objects(action, name, path)) {
-          action(entry, entryPath)?.let {
-            return it
-          }
-        }
-      }
-      return null
+      return actionLists(action, followUpLists, path)
     }
 
     /** A header or query entry: a literal string is text, an object is a value binding. */

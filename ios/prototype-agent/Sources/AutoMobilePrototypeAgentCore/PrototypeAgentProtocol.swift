@@ -53,6 +53,7 @@ enum PrototypeAgentProtocol {
         linkifyCapability,
         menusCapability,
         stackCapability,
+        "prototype_stack_transitions_v1",
         emitContextCapability,
         checksCapability,
         identifierTestTagOnlyCapability,

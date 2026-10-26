@@ -187,7 +187,11 @@ data class PrototypeSetPageAction(
 
 @SerialName("push")
 @Serializable
-data class PrototypePushAction(val stack: String, val screen: String) : PrototypeAction()
+data class PrototypePushAction(
+  val stack: String,
+  val screen: String,
+  val transition: PrototypeStackTransition? = null,
+) : PrototypeAction()
 
 @SerialName("pop")
 @Serializable
@@ -199,7 +203,11 @@ data class PrototypePopToRootAction(val stack: String) : PrototypeAction()
 
 @SerialName("replace")
 @Serializable
-data class PrototypeReplaceAction(val stack: String, val screen: String) : PrototypeAction()
+data class PrototypeReplaceAction(
+  val stack: String,
+  val screen: String,
+  val transition: PrototypeStackTransition? = null,
+) : PrototypeAction()
 
 @SerialName("setState")
 @Serializable
@@ -1342,7 +1350,11 @@ data class PrototypeStackNode(
   override val span: Int? = null,
   val start: String,
   val screens: Map<String, PrototypeNode>,
-) : PrototypeNode()
+) : PrototypeNode() {
+  /** Typed navigation transition; [transition] remains the shared wire slot. */
+  val stackTransition: PrototypeStackTransition?
+    get() = transition?.type?.let(PrototypeStackTransition::fromValue)
+}
 
 @SerialName("tabBar")
 @Serializable

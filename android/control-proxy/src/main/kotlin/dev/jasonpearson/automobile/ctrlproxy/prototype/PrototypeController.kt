@@ -36,7 +36,11 @@ fun interface PrototypeWindowOnScreen {
   fun isOnScreen(displayId: Int): Boolean?
 }
 
-fun interface PrototypeResultSink {
+/**
+ * The base `prototype_result` reply and the saved-prototype replies, which default to it. Sinks
+ * that predate a saved-prototype reply answer a bare success or refusal.
+ */
+interface PrototypeReplySink {
   suspend fun send(requestId: String?, success: Boolean, error: String?)
 
   suspend fun sendPinned(
@@ -59,7 +63,10 @@ fun interface PrototypeResultSink {
     code: dev.jasonpearson.automobile.protocol.SavedPrototypeErrorCode,
     error: String,
   ) = send(requestId, false, error)
+}
 
+/** Every reply the prototype controllers send; the rest default to the base reply. */
+fun interface PrototypeResultSink : PrototypeReplySink {
   /**
    * A successful `show_prototype` that references assets the device does not have: a warning
    * carried by the same single `prototype_result`, so the host can re-upload. Sinks that predate it

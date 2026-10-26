@@ -376,6 +376,12 @@ export class SessionRebinding {
       ...session,
       mutationRecorder: undefined,
       assignedDevice,
+      ...(assignedDevice !== session.assignedDevice
+        ? {
+            deviceGeneration: (session.deviceGeneration ?? 0) + 1,
+            previousDeviceId: session.assignedDevice,
+          }
+        : {}),
       stableDeviceId,
       platform,
       cacheData:

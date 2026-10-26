@@ -138,9 +138,24 @@ the windows with the variables in
   same UUID for 180 seconds; other sessions cannot take that device meanwhile
   (a start naming it is refused with a retry hint). If the window passes without
   a resume the session ends with `session_ownership_lost`.
-- **Device killed or lost.** The session ends with `session_ownership_lost`;
-  while a kill is running, calls get `session_terminal_release_in_progress`
-  (`retryable: false`). Acquire the device again under a new session.
+- **Device killed or lost.** An explicit kill ends the session with
+  `session_ownership_lost`; while it runs, calls get
+  `session_terminal_release_in_progress` (`retryable: false`). Acquire again
+  under a new session. With session continuity enabled, a connection loss can
+  instead return `device_lost` while the session is retained. Its `deviceId`
+  names the lost serial; `replacementDeviceId`, when present, names the live
+  replacement. `retry.sameSession: true` and `requiresNewSession: false` mean
+  retry using the same `sessionUuid`. `recovery.status: "pending"` means recovery
+  is still settling, even if a replacement serial is already known; wait and
+  retry. `"recovered"` means recovery completed, and `recovery.attempts` counts
+  recorded attempts (zero when only live-session evidence is available). An
+  exhausted or unattempted recovery retains its reported status; follow
+  `sessionState` and `retry` to decide whether to reacquire. Without a retained
+  session or incident, no retry guidance is inferred. Verify continuity using
+  the [binding metadata and liveness notification](environment-variables.md#session-heartbeat-timeout). The generation counter is valid only within one daemon
+  lifetime and restarts at zero after a daemon restart. `session_device_rebound`
+  is sent at `info` level, so a client that raised its log level above `info`
+  will not see it; read `session-info` instead.
 - **Plan labels.** A multi-device plan runs its extra labels on derived
   `<base>:<label>` sessions that live only as long as the plan run and end with
   the base session. The next plan run mints them again; do not create

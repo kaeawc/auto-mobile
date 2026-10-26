@@ -88,6 +88,9 @@ export interface Session {
   sessionId: string; // UUID provided by JUnitRunner
   assignedDevice: string; // Device ID this session is using
   stableDeviceId?: string; // Durable identity: Android AVD name or iOS simulator UDID
+  /** In-memory serial changes observed by this daemon; absent means zero. */
+  deviceGeneration?: number;
+  previousDeviceId?: string;
   platform: Platform; // Device platform
   createdAt: number; // Timestamp when session was created
   lastUsedAt: number; // Last activity timestamp

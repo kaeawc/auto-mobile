@@ -137,6 +137,7 @@ export class SocketServerRuntime {
   pendingSessionReleaseWrites: Set<Promise<void>> = new Set();
   listChangedUnsubscribe: (() => void) | null = null;
   sessionReleaseUnsubscribe: (() => void) | null = null;
+  sessionDeviceReboundUnsubscribe: (() => void) | null = null;
   socketPath: string;
   daemonState: SocketDaemonStateAccess;
   readonly clearConnectionDevicePin: ((connectionId: string) => void) | undefined;

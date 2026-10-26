@@ -498,6 +498,7 @@
     "list-items-exceed-maxItems.json",
     "list-items-over-500.json",
     "list-literal-items.json",
+    "list-max-items-not-above-threshold.json",
     "list-missing-key.json",
     "list-refresh-undeclared.json",
     "list-repeat-in-row.json",

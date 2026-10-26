@@ -71,6 +71,17 @@ describe("data write change events", () => {
     const wire = { ...event(1, "shop", "change", "/data/a"), payload };
     expect(decodePrototypeEvent(wire, "test")).toBeUndefined();
   });
+  test("an extend whose page did not travel decodes without a value", () => {
+    const wire = {
+      ...event(1, "shop", "change", "/data/a"),
+      payload: { op: "extend", revision: 2 },
+    };
+    expect(prototypeDataWriteOf(decodePrototypeEvent(wire, "test")!)).toEqual({
+      path: "/data/a",
+      op: "extend",
+      revision: 2,
+    });
+  });
   test("a validity change is not a data write", () => {
     const wire = { ...event(1, "shop", "change", "email"), validity: { email: true } };
     expect(prototypeDataWriteOf(decodePrototypeEvent(wire, "test")!)).toBeUndefined();
@@ -94,6 +105,7 @@ describe("the host mirror follows device data writes", () => {
   test("a write the mirror cannot apply makes the host stop tracking the spec", () => {
     for (const write of [
       { path: "/data/cart", op: "append" as const, revision: 3 },
+      { path: "/data/cart", op: "extend" as const, revision: 3 },
       { path: "/data/missing/x", op: "set" as const, value: 1, revision: 3 },
     ]) {
       const shown = tracked();
@@ -285,7 +297,6 @@ test("extend event round trip mirrors trimming and records a conflicting write",
 
 test.each([
   { op: "extend", value: 1, revision: 1 },
-  { op: "extend", revision: 1 },
   ...[0, -1, 1.5, "2"].map((maxItems) => ({ op: "append", value: 1, maxItems, revision: 1 })),
 ])("malformed lazy write is dropped: %j", (payload) => {
   expect(decodePrototypeEvent(dataWrite(1, CART, payload), "test")).toBeUndefined();

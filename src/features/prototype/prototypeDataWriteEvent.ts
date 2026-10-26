@@ -30,7 +30,8 @@ const payloadSchema = z.union([
   z
     .object({
       op: z.literal("extend"),
-      value: z.array(prototypeJsonSchema),
+      // Absent when the page did not fit the emit byte budget; the host then stops tracking.
+      value: z.array(prototypeJsonSchema).optional(),
       maxItems: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
       revision: revisionSchema,
     })

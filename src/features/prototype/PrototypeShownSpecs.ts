@@ -198,7 +198,7 @@ export class PrototypeShownSpecs {
         : write.value === undefined
           ? undefined
           : write.op === "extend"
-            ? applyPrototypeDataWrite(spec.data, write)
+            ? applyPrototypeDataWrite(spec.data, { ...write, value: write.value })
             : applyPrototypeDataWrite(spec.data, { ...write, value: write.value });
     if (!applied?.success) {
       this.forget(deviceId, id);

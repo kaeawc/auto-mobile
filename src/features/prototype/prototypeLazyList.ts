@@ -43,6 +43,13 @@ export function prototypeLazyListError(nodes: Located): ListError | undefined {
       if (value.endThreshold !== undefined && value.onEndReached === undefined) {
         return { path: `${path}.endThreshold`, message: "endThreshold needs onEndReached" };
       }
+      if (
+        value.onEndReached !== undefined &&
+        typeof value.maxItems === "number" &&
+        value.maxItems <= (typeof value.endThreshold === "number" ? value.endThreshold : 3)
+      ) {
+        return { path: `${path}.maxItems`, message: "maxItems must be greater than endThreshold" };
+      }
     }
     if (
       value.type === "scroll" &&

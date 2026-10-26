@@ -258,6 +258,39 @@ describe("Android keep-booted strategy", () => {
     expect(result.fallbackReason).toContain("sendBroadcast");
   });
 
+  test("a journaled posture change stays clean when the reset restores the fold posture", async () => {
+    const { port, strategy, journal } = await rig();
+    await journal.record(SCOPE, {
+      kind: "opaque",
+      key: opaqueIntentKey("setDeviceState", "posture"),
+      priorValue: { state: "unobservable" },
+      toolName: "setPosture",
+    });
+    const result = await strategy.reset(ANDROID_RESET_DEVICE, new Set(), async () => {}, {
+      ...SESSION,
+      foldPostureRestored: true,
+    });
+    expect(port.cleanCount).toBe(1);
+    expect(result).toMatchObject({ outcome: "clean", mode: "keep-booted" });
+  });
+
+  test("a posture change with a display preset still escalates despite the fold restore", async () => {
+    const { port, strategy, journal } = await rig();
+    await journal.record(SCOPE, {
+      kind: "opaque",
+      key: opaqueIntentKey("setDeviceState", "posture", "displayPreset"),
+      priorValue: { state: "unobservable" },
+      toolName: "setPosture",
+    });
+    await expect(
+      strategy.reset(ANDROID_RESET_DEVICE, new Set(), async () => {}, {
+        ...SESSION,
+        foldPostureRestored: true,
+      }),
+    ).rejects.toThrow("fallback or destruction");
+    expect(port.cleanCount).toBe(0);
+  });
+
   test("a best-effort opaque journal row keeps the booted clean", async () => {
     const { port, strategy, journal } = await rig();
     await journal.record(SCOPE, {

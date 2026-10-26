@@ -16390,7 +16390,7 @@
       "type": "object",
       "properties": {
         "action": {
-          "description": "start a recorder, or stop one by traceId",
+          "description": "start a recorder, or stop one by traceId. iOS stop waits for finalisation: 60 seconds without output or artifact growth, at most 180 seconds total; a timeout reports an incomplete trace that cannot be summarised. Retry with a shorter timeLimitMs or on a quieter host.",
           "type": "string",
           "enum": ["start", "stop"]
         },

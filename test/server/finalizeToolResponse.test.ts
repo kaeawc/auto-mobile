@@ -40,6 +40,10 @@ import { z } from "zod/v4";
 import realTapOns from "../fixtures/android-action-compact/tapon-consecutive-emulator-5600.json";
 import { settleEmbeddedObservationInResponse } from "../../src/server/embeddedObservationSettle";
 import { RealSettleObserve } from "../../src/features/observe/SettleObserve";
+import {
+  ANDROID_PROTOVIEWER_PACKAGE,
+  IMPORTED_PROTOTYPE_CONTENT,
+} from "../../src/features/observe/importedPrototypeContent";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeScreenshotStateStore } from "../fakes/FakeScreenshotStateStore";
@@ -3566,6 +3570,48 @@ describe("finalizeToolResponse", () => {
       expect(writer.writes[0].data).toMatchObject({
         isDiff: true,
         changed: expect.any(Array),
+      });
+    });
+
+    test("skeleton diff body artifact carries the imported-prototype untrusted marker", () => {
+      serverConfig.setActionsDiffObserveEnabled(true);
+      const { store } = makeStore();
+      const prototype = (): ObserveResult => {
+        const observation = sameScreenObserve();
+        observation.activeWindow = {
+          appId: ANDROID_PROTOVIEWER_PACKAGE,
+          activityName: ".Main",
+          layoutSeqSum: 1,
+        };
+        observation.viewHierarchy!.packageName = ANDROID_PROTOVIEWER_PACKAGE;
+        return observation;
+      };
+      finalizeToolResponse(createStructuredToolResponse(prototype()), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
+      const next = prototype();
+      flatNode(next.viewHierarchy!.hierarchy.node).node = [
+        { "resource-id": "com.example:id/added", bounds: { left: 5, top: 6, right: 7, bottom: 8 } },
+      ];
+      const writer = new FakeObservationArtifactWriter();
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: next }),
+        {
+          name: "tapOn",
+          defaultsToSkeletonObservation: true,
+          sessionUuid: "s1",
+          baselineStore: store,
+          artifactWriter: writer,
+        },
+      );
+      expect(writer.writes[0].data).toMatchObject({
+        isDiff: true,
+        importedPrototypeContent: IMPORTED_PROTOTYPE_CONTENT,
+      });
+      expect(structuredPayload(finalized).observation).toMatchObject({
+        importedPrototypeContent: IMPORTED_PROTOTYPE_CONTENT,
       });
     });
 

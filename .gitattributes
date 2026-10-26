@@ -241,3 +241,4 @@ test/fixtures/android-setuistate-hint/*.md text eol=lf
 test/fixtures/ios-templates/*.csv text eol=lf
 test/fixtures/performanceTrace/*.xml text eol=lf
 test/fixtures/performanceTrace/*.txt text eol=lf
+test/fixtures/protoviewer-artifact-policy/** text eol=lf

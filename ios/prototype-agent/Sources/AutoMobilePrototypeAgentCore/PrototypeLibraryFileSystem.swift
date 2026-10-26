@@ -6,6 +6,8 @@ protocol PrototypeLibraryFileSystem: PrototypeBundleCommitFileSystem {
     func children(_ path: URL) throws -> [String]
     func read(_ path: URL, cap: Int) throws -> Data
     func byteCount(_ path: URL) throws -> Int
+    /// The last modification time of a regular file, nil for anything else or a missing path.
+    func modifiedAt(_ path: URL) -> Date?
     func createDirectory(_ path: URL) throws
     func writeAtomic(_ path: URL, bytes: Data) throws
     func excludeFromBackup(_ path: URL) throws
@@ -31,6 +33,13 @@ struct PrototypeLibraryDiskFileSystem: PrototypeLibraryFileSystem {
     func writeExclusiveNoFollow(_ path: URL, bytes: Data) throws { try disk.writeExclusiveNoFollow(path, bytes: bytes) }
     func rename(from: URL, to destination: URL) throws { try disk.rename(from: from, to: destination) }
     func remove(_ path: URL) throws { try disk.remove(path) }
+
+    func modifiedAt(_ path: URL) -> Date? {
+        guard let attributes = try? files.attributesOfItem(atPath: path.path),
+              attributes[.type] as? FileAttributeType == .typeRegular
+        else { return nil }
+        return attributes[.modificationDate] as? Date
+    }
 
     func children(_ path: URL) throws -> [String] {
         try assertRealDirectory(path)

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key><string>dev.jasonpearson.automobile.FilesFixture</string>
+    <key>CFBundleExecutable</key><string>FilesFixture</string>
+    <key>CFBundleName</key><string>AutoMobile Files</string>
+    <key>CFBundleDisplayName</key><string>AutoMobile Files</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <!-- Replaced at build time with a numeric digest of this source, the plist and the SDK. -->
+    <key>CFBundleVersion</key><string>__BUNDLE_VERSION__</string>
+    <key>CFBundleShortVersionString</key><string>1.0</string>
+    <key>MinimumOSVersion</key><string>17.0</string>
+    <key>LSRequiresIPhoneOS</key><true/>
+    <key>UIDeviceFamily</key><array><integer>1</integer><integer>2</integer></array>
+    <key>UILaunchScreen</key><dict/>
+    <key>UIFileSharingEnabled</key><true/>
+    <key>LSSupportsOpeningDocumentsInPlace</key><true/>
+</dict>
+</plist>

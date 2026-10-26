@@ -68,6 +68,7 @@ import { registerDatabaseResources } from "./databaseResources";
 import { registerFailuresResources } from "./failuresResources";
 import { registerStorageResources } from "./storageResources";
 import { registerStorageCapabilityResources } from "./storageCapabilityResources";
+import { getIosFilesFixtureInstaller } from "./IosFilesFixtureInstaller";
 import { registerSdkCapabilityResources } from "./sdkCapabilityResources";
 import { registerDataStoreResources } from "./dataStoreResources";
 import { registerAppFileResources } from "./appFileResources";
@@ -245,7 +246,7 @@ function registerAllResources(iosDependencies: IosDoctorDependencies): void {
   registerDatabaseResources();
   registerFailuresResources();
   registerStorageResources();
-  registerStorageCapabilityResources();
+  registerStorageCapabilityResources({ iosFilesFixtureProbe: getIosFilesFixtureInstaller() });
   registerSdkCapabilityResources();
   registerDataStoreResources();
   registerAppFileResources();

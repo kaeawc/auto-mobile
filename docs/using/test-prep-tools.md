@@ -34,11 +34,16 @@ or is relaunched. The warning is omitted when running state is unknown or the
 app is not running, and for `user_files` and `media_library` writes.
 
 `user_files` on an iOS Simulator stages files through the managed Files fixture
-app `dev.jasonpearson.automobile.FilesFixture`. Writes go only to
-`Documents/automobile/<namespace>`, and reset deletes only that namespace. If the
-fixture app is not installed, the call returns guidance on installing it. Staging a
-file does not guarantee it shows up in a document picker. Physical iOS devices and
-listing or reading user files on iOS are not supported.
+app `dev.jasonpearson.automobile.FilesFixture`. AutoMobile builds the app with the
+Xcode toolchain on first use and installs it on the simulator before writing, so
+no manual install is needed; it reinstalls after a simulator erase and updates a
+stale copy in place (staged namespaces survive an update). The first write on a
+simulator reports a `provider_install` effect; later writes omit it. Writes go
+only to `Documents/automobile/<namespace>`, and reset deletes only that
+namespace. If Xcode's simulator toolchain is missing or the install fails, the
+call returns an error naming the cause. Staging a file does not guarantee it
+shows up in a document picker. Physical iOS devices and listing or reading user
+files on iOS are not supported.
 
 On Android, `putAppFile` accepts an optional `userId` (a non-negative integer) to
 target a work or secondary profile. When you omit it, AutoMobile uses the only user

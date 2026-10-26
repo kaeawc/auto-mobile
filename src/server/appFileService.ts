@@ -44,6 +44,10 @@ import {
   type IosFilesFixtureContainer,
 } from "./IosSimulatorUserFilesProvider";
 import {
+  getIosFilesFixtureInstaller,
+  type IosFilesFixtureInstaller,
+} from "./IosFilesFixtureInstaller";
+import {
   batchWarning,
   findBootedDevice,
   nodeAppFileFileSystem,
@@ -188,6 +192,8 @@ export interface AppFileServiceDependencies {
   sharedStorageService?: SharedStorageService;
   iosSimulatorMediaClient?: IosSimulatorMediaClient;
   iosFilesFixtureContainer?: IosFilesFixtureContainer;
+  /** Production wires the swiftc-backed installer; tests stay hermetic unless they inject one. */
+  iosFilesFixtureInstaller?: IosFilesFixtureInstaller;
   documentPickerVisibilityVerifier?: DocumentPickerVisibilityVerifier;
 }
 
@@ -205,7 +211,9 @@ let appFileService: AppFileService | null = null;
 export function getAppFileService(): AppFileService {
   if (!appFileService) {
     appFileService = new DefaultAppFileService(
-      createDefaultProviders(defaultDependencies),
+      createDefaultProviders(defaultDependencies, {
+        iosFilesFixtureInstaller: getIosFilesFixtureInstaller(),
+      }),
       defaultDependencies.deviceResolver,
       defaultDependencies.fileSystem,
     );
@@ -248,6 +256,7 @@ function createDefaultProviders(
     | "iosSimulatorMediaClient"
     | "foregroundAppLookup"
     | "iosFilesFixtureContainer"
+    | "iosFilesFixtureInstaller"
     | "documentPickerVisibilityVerifier"
   > = {},
 ): AppFileProvider[] {
@@ -272,6 +281,7 @@ function createDefaultProviders(
           options.containerOwnership,
         ),
       options.documentPickerVisibilityVerifier,
+      options.iosFilesFixtureInstaller,
     ),
     new IosSimulatorMediaLibraryProvider(
       options.iosSimulatorMediaClient ?? new SimctlIosSimulatorMediaClient(deps.simctlFactory),

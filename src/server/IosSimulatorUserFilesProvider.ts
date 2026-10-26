@@ -4,6 +4,7 @@ import {
   type PutAppFileProviderRequest,
 } from "./appFileService";
 import { ActionableError, BootedDevice } from "../models";
+import type { IosFilesFixtureInstaller } from "./IosFilesFixtureInstaller";
 import {
   PutAppFileTarget,
   UserFilesTarget,
@@ -15,7 +16,7 @@ import { win32 } from "node:path";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 
-/** The managed fixture app is a follow-up; no provider auto-install occurs here. */
+/** Installed on demand by the {@link IosFilesFixtureInstaller} before the first write. */
 export const IOS_FILES_FIXTURE_BUNDLE_ID = "dev.jasonpearson.automobile.FilesFixture";
 
 /** Host staging only; completion makes no assertion about document-picker visibility. */
@@ -82,6 +83,7 @@ export class IosSimulatorUserFilesProvider implements AppFileWriteProvider {
   constructor(
     private readonly container: IosFilesFixtureContainer,
     private readonly verifier: DocumentPickerVisibilityVerifier = unverifiedDocumentPicker,
+    private readonly installer?: IosFilesFixtureInstaller,
   ) {}
 
   async putFile(request: PutAppFileProviderRequest): Promise<AppFileProviderWriteResult> {
@@ -90,8 +92,11 @@ export class IosSimulatorUserFilesProvider implements AppFileWriteProvider {
 
   async putFiles(requests: PutAppFileProviderRequest[]): Promise<AppFileProviderWriteResult[]> {
     const normalized = requests.map(normalizeIosFilesRequest);
+    const installs = await this.ensureFixtureInstalled(normalized);
     await this.container.stageFiles(normalized);
     const results: AppFileProviderWriteResult[] = [];
+    // `delete` reports each install once, on the first result for that device.
+    const unreported = installs;
     for (const request of normalized) {
       let visibility: Awaited<ReturnType<DocumentPickerVisibilityVerifier["verify"]>>;
       try {
@@ -113,11 +118,31 @@ export class IosSimulatorUserFilesProvider implements AppFileWriteProvider {
       }
       results.push({
         effects: [
+          ...(unreported.delete(request.device.deviceId)
+            ? [{ type: "provider_install", status: "completed" as const }]
+            : []),
           { type: "host_stage", status: "completed" },
           { type: "document_picker", ...visibility },
         ],
       });
     }
     return results;
+  }
+
+  /** Device ids whose fixture app this call had to install or update. */
+  private async ensureFixtureInstalled(
+    requests: readonly PutAppFileProviderRequest[],
+  ): Promise<Set<string>> {
+    const changed = new Set<string>();
+    if (!this.installer) {
+      return changed;
+    }
+    const devices = new Map(requests.map((request) => [request.device.deviceId, request]));
+    for (const { device, signal } of devices.values()) {
+      if ((await this.installer.ensureInstalled(device, signal)) !== "current") {
+        changed.add(device.deviceId);
+      }
+    }
+    return changed;
   }
 }

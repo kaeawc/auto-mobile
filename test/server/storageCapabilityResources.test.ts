@@ -408,6 +408,65 @@ describe("storageCapabilityResources", () => {
     expect(body.context.iosFilesFixtureInstalled).toBeUndefined();
   });
 
+  test("iOS Simulator user_files writes are available once the Files fixture is installed", async () => {
+    const simulator = { ...iosPhysical, deviceId: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE" };
+    const probed: string[] = [];
+    setDevices([simulator], {
+      iosFilesFixtureProbe: {
+        isInstalled: async (device) => {
+          probed.push(device.deviceId);
+          return true;
+        },
+      },
+    });
+    const body = JSON.parse(
+      (await readResource(`automobile:devices/${simulator.deviceId}/storage/capabilities`)).text ??
+        "{}",
+    );
+    const userFiles = body.domains.find(
+      (domain: { domain: string }) => domain.domain === "user_files",
+    );
+    expect(body.context.iosFilesFixtureInstalled).toBe(true);
+    expect(userFiles.operations.map((op: { state: string }) => op.state)).toEqual([
+      "supported",
+      "supported",
+      "supported",
+      "supported",
+      "unsupported",
+    ]);
+    expect(probed).toEqual([simulator.deviceId]);
+  });
+
+  test("a missing or unprobed Files fixture leaves writes pending, not unavailable", async () => {
+    const simulator = { ...iosPhysical, deviceId: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE" };
+    for (const installed of [false, undefined]) {
+      setDevices([simulator], { iosFilesFixtureProbe: { isInstalled: async () => installed } });
+      const body = JSON.parse(
+        (await readResource(`automobile:devices/${simulator.deviceId}/storage/capabilities`))
+          .text ?? "{}",
+      );
+      expect(body.context.iosFilesFixtureInstalled).toBeUndefined();
+      const userFiles = body.domains.find(
+        (domain: { domain: string }) => domain.domain === "user_files",
+      );
+      expect(userFiles.operations[2].state).toBe("partial");
+    }
+  });
+
+  test("the Files fixture probe is skipped for physical iOS devices", async () => {
+    let probed = false;
+    setDevices([iosPhysical], {
+      iosFilesFixtureProbe: {
+        isInstalled: async () => {
+          probed = true;
+          return true;
+        },
+      },
+    });
+    await readResource(`automobile:devices/${iosPhysical.deviceId}/storage/capabilities`);
+    expect(probed).toBe(false);
+  });
+
   test("iOS Simulator reads remain registered independently of write providers", async () => {
     const simulator = { ...iosPhysical, deviceId: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE" };
     setDevices([simulator], { appFileCoverage: { describeProviderCoverage: () => [] } });

@@ -38,6 +38,7 @@ import {
   type UserTargetRequest,
 } from "../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { encodeUriSegment } from "../utils/encodeUriSegment";
+import type { IosFilesFixtureInstaller } from "./IosFilesFixtureInstaller";
 
 // Single RFC 6570 template; the optional {?appId} query variant matches both the
 // bare capabilities URI and the app-scoped form (issue #4933 ordering note: a
@@ -77,6 +78,8 @@ export interface StorageCapabilityDependencies {
   probeDebuggableBuild?: (adb: AdbExecutor, appId: string) => Promise<boolean | undefined>;
   createKeystoreDiscovery?: (device: BootedDevice) => KeystoreDiscovery;
   createUserResolver?: (adb: AdbExecutor) => StorageCapabilityUserResolver;
+  /** Read-only install probe for the iOS Files fixture; server startup supplies it. */
+  iosFilesFixtureProbe?: Pick<IosFilesFixtureInstaller, "isInstalled">;
 }
 
 /** Build the context from device configuration and the probed prerequisite signals. */
@@ -239,6 +242,14 @@ export async function getStorageCapabilitiesResource(
       device.platform,
       "media_library",
     );
+    if (device.platform === "ios" && context.deviceType === "simulator") {
+      // Only a positive install is reported: a missing fixture is installed on the first
+      // write, so an absent or unprobed app leaves the prerequisite pending, not failed.
+      const installed = await dependencies.iosFilesFixtureProbe?.isInstalled(device);
+      if (installed) {
+        context.iosFilesFixtureInstalled = true;
+      }
+    }
     if (device.platform === "android" && appId && context.embeddedSdk) {
       context.keystore = await resolveKeystoreDiscovery(device, appId, dependencies);
     }

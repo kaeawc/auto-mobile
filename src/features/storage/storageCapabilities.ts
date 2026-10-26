@@ -100,7 +100,7 @@ export interface StorageCapabilityContext {
    * Without it, iOS physical file behavior is unsupported.
    */
   iosFileIntegration?: boolean;
-  /** Verified managed fixture container availability; omission is pending verification. */
+  /** Fixture app observed installed; omission means not yet installed or unprobed (it is installed on the first write). */
   iosFilesFixtureInstalled?: boolean;
   /** Optional app scope the report was computed for. */
   appId?: string;
@@ -311,7 +311,7 @@ function userFilesDomain(ctx: StorageCapabilityContext): DomainCapability {
       domain: "user_files",
       portable: false,
       platformScope: "cross-platform",
-      note: "iOS Simulator only: managed fixture-app Documents/automobile namespaces. The fixture app is not shipped in this repo. Writes require its installed container; picker visibility is reported separately and unavailable unless verified. Physical iOS is unsupported. Canonical user_files resources list/read only these managed namespaces.",
+      note: "iOS Simulator only: managed fixture-app Documents/automobile namespaces. AutoMobile builds and installs the fixture app on the first write. Writes use its installed container; picker visibility is reported separately and unavailable unless verified. Physical iOS is unsupported. Canonical user_files resources list/read only these managed namespaces.",
       operations: [
         physicalReason
           ? deriveOperation("list", physicalReason, [])
@@ -493,7 +493,7 @@ function extensionPoints(): StorageExtensionPoint[] {
       domain: "user_files",
       platform: "ios",
       description:
-        "iOS Simulator staging requires an installed managed Files fixture app; picker visibility requires separate verification. Physical iOS is unsupported; this is not portable storage.",
+        "iOS Simulator staging uses the managed Files fixture app, installed on the first write; picker visibility requires separate verification. Physical iOS is unsupported; this is not portable storage.",
     },
     {
       domain: "app_containers",

@@ -2,8 +2,8 @@
 
 Status: accepted for implementation in #5807. This decision records the
 research and simulator experiment from #5806. The TypeScript staging provider
-is implemented; the managed fixture app and production picker verifier are not
-yet shipped in this repo. Unit tests use injected fakes; no new device-backed
+and the managed fixture app (`ios/FilesFixture`) are implemented; the production
+picker verifier is not yet shipped in this repo. Unit tests use injected fakes; no new device-backed
 verification is claimed here.
 
 ## Decision
@@ -27,6 +27,18 @@ delete only that resolved `automobile/<namespace>` directory after checking the
 resolved target remains below the provider's `Documents/automobile` root. It
 must not reset Files, `Documents`, another namespace, or a caller-supplied host
 path.
+
+The daemon builds the fixture on first use with
+`xcrun --sdk iphonesimulator swiftc`, caching the signed bundle under the AutoMobile data
+directory by a digest of the sources, plist, simulator SDK version and host architecture. That digest is
+also the app's numeric `CFBundleVersion`, so `simctl listapps` shows whether the
+installed copy is current. Before a write, the installer installs or updates the
+app (`simctl install` over an existing bundle keeps its data container) and the
+write reports a `provider_install` effect only when it changed something. The
+Swift sources and plist are inlined into the daemon bundle, so no checkout is
+needed. Builder and installer failures are `IosFilesFixtureUnavailableError`
+(`toolchain_unavailable`, `build_failed`, `install_failed`) and a physical UDID is
+rejected before either runs.
 
 The Playground configuration and `PlaygroundFilesPickerUITests` are an
 experiment harness. #5807 must use a dedicated, internally owned fixture app
@@ -61,10 +73,10 @@ app-container resources remain scoped to an explicit app id and container; they
 are not a Files-provider browsing API. The completion payload and the
 document-picker verifier are the observation surfaces for this domain.
 
-The registered provider permits iOS Simulator write/reset capabilities only
-when the managed fixture app is installed and its container is verified. The
-capability resource leaves this prerequisite unverified (partial); a known
-missing fixture or provider makes writes unavailable. Physical iOS remains
+The capability resource reports the prerequisite satisfied (write and reset
+supported) once the fixture app is observed installed. A missing or unprobed
+fixture leaves it pending (partial) because the first write installs it; only an
+absent provider makes writes unavailable. Physical iOS remains
 unsupported regardless of `iosFileIntegration`. Picker visibility is still a
 separate effect, unavailable unless observed.
 

@@ -83,7 +83,7 @@
   [ "$status" -eq 0 ]
 
   local artifact_name
-  for artifact_name in control-proxy-apk ctrl-proxy-ios-ipa video-server-jar screen-capture-helper prototype-agent prototype-viewer network-filter; do
+  for artifact_name in control-proxy-apk protoviewer-apk ctrl-proxy-ios-ipa video-server-jar screen-capture-helper prototype-agent prototype-viewer network-filter; do
     [[ "$output" == *"${artifact_name}"$'\t''${{ inputs.prepare_run_id }}'$'\t''${{ secrets.GITHUB_TOKEN }}'$'\t''${{ github.repository }}'* ]]
   done
 
@@ -96,7 +96,9 @@
 
   run yq -r '.jobs."verify-and-release".steps[] | select(.run != null) | .run' "$workflow"
   [ "$status" -eq 0 ]
-  [[ "$output" != *"verify-artifact-sha256.sh"* ]]
+  # Release re-checks only the ProtoViewer APK against the prepared registry entry (#15301);
+  # every other artifact is verified once, in prepare-release.
+  [[ "$(grep -v 'verify-artifact-sha256.sh /tmp/automobile-protoviewer.apk protoviewerapk' <<<"$output")" != *"verify-artifact-sha256.sh"* ]]
   [[ "$output" != *"verify-release-integrity.sh"* ]]
 }
 
@@ -136,7 +138,7 @@
   wiring_requires_yq
   local workflow=".github/workflows/prepare-release.yml"
   local builder
-  for builder in build-candidate-ctrl-proxy-ios-ipa build-candidate-control-proxy-apk build-candidate-video-server-jar build-candidate-screen-capture-helper build-candidate-prototype-agent build-candidate-prototype-viewer; do
+  for builder in build-candidate-ctrl-proxy-ios-ipa build-candidate-control-proxy-apk build-candidate-protoviewer-apk build-candidate-video-server-jar build-candidate-screen-capture-helper build-candidate-prototype-agent build-candidate-prototype-viewer; do
     run yq -r ".jobs.\"$builder\".needs" "$workflow"
     [ "$status" -eq 0 ]
     [[ "$output" == *"prepare-version"* ]]
@@ -305,6 +307,7 @@
   for workflow in \
     .github/workflows/build-ctrl-proxy-ios-ipa.yml \
     .github/workflows/build-control-proxy-apk.yml \
+    .github/workflows/build-protoviewer-apk.yml \
     .github/workflows/build-video-server-jar.yml \
     .github/workflows/build-screen-capture-helper.yml \
     .github/workflows/build-prototype-agent.yml \
@@ -884,4 +887,62 @@ wiring_requires_yq() {
   grep -Fq "path: /tmp/AutoMobilePrototypeViewer.zip" "$workflow"
   ! grep -Fq "secrets." "$workflow"
   ! grep -Fq "notarytool" "$workflow"
+}
+@test "ProtoViewer APK builder is release-key signed, fail-closed and uploads protoviewer-apk (#15301)" {
+  wiring_requires_yq
+  local workflow=".github/workflows/build-protoviewer-apk.yml"
+
+  run yq -r '.jobs.build.steps[] | select(.uses == "./.github/actions/gradle-task-run") | .with."gradle-tasks"' "$workflow"
+  [ "$status" -eq 0 ]
+  [ "$output" = ":protoviewer:assembleRelease" ]
+
+  run yq -r '.jobs.build.env.PROTOVIEWER_REQUIRE_RELEASE_SIGNING' "$workflow"
+  [ "$status" -eq 0 ]
+  [ "$output" = "true" ]
+
+  local secret
+  for secret in RELEASE_KEYSTORE_BASE64 RELEASE_KEYSTORE_PASSWORD RELEASE_KEY_ALIAS RELEASE_KEY_PASSWORD; do
+    [ "$(yq -r ".on.workflow_call.secrets.${secret}.required" "$workflow")" = "true" ]
+  done
+
+  grep -Fq "verify-apk-release-signature.sh" "$workflow"
+  grep -Fq "android/protoviewer/build/outputs/apk/release/protoviewer-release.apk" "$workflow"
+  grep -Fq "name: protoviewer-apk" "$workflow"
+  grep -Fq "path: /tmp/automobile-protoviewer.apk" "$workflow"
+}
+
+@test "prepare-release builds, pins and checksum-verifies the ProtoViewer APK (#15301)" {
+  wiring_requires_yq
+  local workflow=".github/workflows/prepare-release.yml"
+  [ "$(yq -r '.jobs."build-candidate-protoviewer-apk".uses' "$workflow")" = "./.github/workflows/build-protoviewer-apk.yml" ]
+  grep -Fq 'PROTOVIEWER_APK_SHA256: ${{ needs.build-candidate-protoviewer-apk.outputs.sha256 }}' "$workflow"
+  grep -Fq "automobile-protoviewer.apk protoviewerapk" "$workflow"
+  run yq -r '.jobs."finalize-release".needs[]' "$workflow"
+  [[ "$output" == *"build-candidate-protoviewer-apk"* ]]
+  run yq -r '.jobs."verify-prepared-release".needs[]' "$workflow"
+  [[ "$output" == *"build-candidate-protoviewer-apk"* ]]
+  # The iOS simulator template viewer stays a separate artifact and registry field.
+  grep -Fq "prototype-viewer" "$workflow"
+}
+
+@test "release refuses a ProtoViewer APK that is missing or differs from the prepared checksum, then attaches it with a .sha256 (#15301)" {
+  wiring_requires_yq
+  local workflow=".github/workflows/release.yml"
+  grep -Fq "protoviewer_apk: entry.protoViewerApkSha256" "$workflow"
+  grep -Fq "verify-artifact-sha256.sh /tmp/automobile-protoviewer.apk protoviewerapk" "$workflow"
+  grep -Fq "verify-apk-release-signature.sh /tmp/automobile-protoviewer.apk" "$workflow"
+  grep -Fq 'protoviewer_apk="/tmp/automobile-protoviewer-${VERSION}.apk"' "$workflow"
+  grep -Fq 'write-asset-checksum.sh "$protoviewer_apk"' "$workflow"
+  grep -Fq '"$protoviewer_apk.sha256"' "$workflow"
+  grep -Fq "PROTOVIEWER_APK_CHECKSUM:" "$workflow"
+  # Verification runs before anything is published.
+  local verify_line publish_line
+  verify_line="$(grep -n 'verify-artifact-sha256.sh /tmp/automobile-protoviewer.apk' "$workflow" | head -1 | cut -d: -f1)"
+  publish_line="$(grep -n 'name: Create GitHub Release' "$workflow" | head -1 | cut -d: -f1)"
+  [ "$verify_line" -lt "$publish_line" ]
+}
+
+@test "release provenance lists the ProtoViewer APK in prepare-release and release.yml (#15301)" {
+  grep -Fq '"control-proxy-apk", "protoviewer-apk", "ctrl-proxy-ios-ipa"' .github/workflows/prepare-release.yml
+  grep -Fq '"control-proxy-apk", "protoviewer-apk", "ctrl-proxy-ios-ipa"' .github/workflows/release.yml
 }

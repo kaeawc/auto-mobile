@@ -1,0 +1,98 @@
+name: "Build ProtoViewer APK"
+
+# Release candidate build of the standalone ProtoViewer Android app (#15301,
+# #13623). Distinct from build-prototype-viewer.yml, which builds the iOS
+# simulator template viewer. The APK is signed with the shared release keystore
+# (the same one CtrlProxy uses) and the build fails closed: a missing keystore
+# input fails Gradle, and the post-build gate rejects a debug-signed APK.
+
+on:
+  workflow_call:
+    inputs:
+      checkout-ref:
+        description: "Commit or tag to build; defaults to the caller SHA"
+        required: false
+        type: string
+        default: ""
+      upload-artifact:
+        description: "Whether to upload the built APK as a workflow artifact"
+        required: false
+        type: boolean
+        default: true
+      artifact-retention-days:
+        description: "How long to retain the uploaded APK artifact"
+        required: false
+        type: number
+        default: 7
+    secrets:
+      GRADLE_ENCRYPTION_KEY:
+        required: true
+      RELEASE_KEYSTORE_BASE64:
+        required: true
+      RELEASE_KEYSTORE_PASSWORD:
+        required: true
+      RELEASE_KEY_ALIAS:
+        required: true
+      RELEASE_KEY_PASSWORD:
+        required: true
+    outputs:
+      sha256:
+        description: "SHA256 checksum of the built ProtoViewer APK"
+        value: ${{ jobs.build.outputs.sha256 }}
+
+jobs:
+  build:
+    name: "Build ProtoViewer APK"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Makes :protoviewer fail instead of falling back to the debug key.
+      PROTOVIEWER_REQUIRE_RELEASE_SIGNING: "true"
+    outputs:
+      sha256: ${{ steps.checksum.outputs.sha256 }}
+    steps:
+      - name: "Checkout code"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+          ref: ${{ inputs.checkout-ref || github.sha }}
+          persist-credentials: false
+
+      - uses: ./.github/actions/gradle-task-run
+        with:
+          gradle-tasks: ":protoviewer:assembleRelease"
+          gradle-project-directory: "android"
+          gradle-home-directory: "~/.gradle/build-protoviewer-apk"
+          reuse-configuration-cache: true
+          gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+          release-keystore-base64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          release-keystore-password: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          release-key-alias: ${{ secrets.RELEASE_KEY_ALIAS }}
+          release-key-password: ${{ secrets.RELEASE_KEY_PASSWORD }}
+
+      - name: "Verify APK is release-key signed"
+        run: |
+          set -euo pipefail
+          bash scripts/ci/verify-apk-release-signature.sh \
+            android/protoviewer/build/outputs/apk/release/protoviewer-release.apk
+
+      - name: "Calculate APK SHA256"
+        id: checksum
+        run: |
+          # pipefail so a failing sha256sum is not masked by a succeeding cut (#4684).
+          set -euo pipefail
+          APK_PATH="android/protoviewer/build/outputs/apk/release/protoviewer-release.apk"
+          SHA256=$(sha256sum "$APK_PATH" | cut -d' ' -f1)
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+          echo "APK SHA256: $SHA256"
+
+      - name: "Copy APK to /tmp"
+        run: cp android/protoviewer/build/outputs/apk/release/protoviewer-release.apk /tmp/automobile-protoviewer.apk
+
+      - name: "Upload ProtoViewer APK"
+        if: ${{ inputs.upload-artifact }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: protoviewer-apk
+          path: /tmp/automobile-protoviewer.apk
+          retention-days: ${{ inputs.artifact-retention-days }}

@@ -374,7 +374,10 @@ The shared request-policy and storage work is tracked in #13622.
 Both platforms ship in the first release, from **GitHub releases only** (no Play Store or App Store
 listing):
 
-- Android: a signed APK as a release asset next to CtrlProxy, with a pinned checksum.
+- Android: a signed APK as a release asset next to CtrlProxy, with a pinned checksum. Prepare Release
+  builds it (`build-protoviewer-apk.yml`, release keystore, fail-closed signing), pins it as
+  `protoViewerApkSha256` and Release re-verifies and attaches `automobile-protoviewer-<version>.apk`
+  plus a `.sha256`; see [Installing ProtoViewer](../using/protoviewer-install.md).
 - iOS: dev-signed builds installed on the owner's iPhones (an Apple Developer team is configured).
   The simulator template remains available.
 

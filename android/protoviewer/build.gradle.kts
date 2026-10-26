@@ -1,3 +1,4 @@
+import dev.jasonpearson.automobile.buildlogic.signing.ReleaseSigningGuard
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 
 plugins {
@@ -85,3 +86,33 @@ val verifyProtoViewerDependencies =
   }
 
 tasks.named("check") { dependsOn(verifyProtoViewerDependencies) }
+
+// Fail closed for the published artifact (#15301). The shared signing convention falls back to
+// the debug key when any keystore input is missing, which is right for local and fork-PR builds
+// but must never produce a release asset. The release workflow sets
+// PROTOVIEWER_REQUIRE_RELEASE_SIGNING=true; then building the release variant without the
+// release signing config fails (before any compilation) instead of shipping a debug-signed APK.
+val requireProtoViewerReleaseSigning =
+  providers
+    .environmentVariable("PROTOVIEWER_REQUIRE_RELEASE_SIGNING")
+    .orElse(providers.gradleProperty("PROTOVIEWER_REQUIRE_RELEASE_SIGNING"))
+    .map { it.equals("true", ignoreCase = true) }
+    .orElse(false)
+
+val releaseSigningConfigName =
+  providers.provider { android.buildTypes.getByName("release").signingConfig?.name.orEmpty() }
+
+val verifyProtoViewerReleaseSigning =
+  tasks.register("verifyProtoViewerReleaseSigning") {
+    group = "verification"
+    description = "Fails when a required ProtoViewer release build is not release-key signed."
+    val required = requireProtoViewerReleaseSigning
+    val configName = releaseSigningConfigName
+    doLast {
+      ReleaseSigningGuard.violation(required.get(), configName.get())?.let { error(it) }
+    }
+  }
+
+tasks.configureEach {
+  if (name == "preReleaseBuild") dependsOn(verifyProtoViewerReleaseSigning)
+}

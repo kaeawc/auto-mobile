@@ -9,6 +9,7 @@ IPA_SHA="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 RUNNER_SHA="cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 VIDEO_JAR_SHA="dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
 VIEWER_SHA="2222222222222222222222222222222222222222222222222222222222222222"
+PV_APK_SHA="3333333333333333333333333333333333333333333333333333333333333333"
 PROTOTYPE_SHA="1111111111111111111111111111111111111111111111111111111111111111"
 HELPER_SHA="eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 FILTER_SHA="ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
@@ -34,6 +35,7 @@ teardown() {
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
     PROTOTYPE_AGENT_SHA256="$PROTOTYPE_SHA" \
     PROTOTYPE_VIEWER_SHA256="$VIEWER_SHA" \
+    PROTOVIEWER_APK_SHA256="$PV_APK_SHA" \
     NETWORK_FILTER_SHA256="$FILTER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
@@ -48,6 +50,7 @@ teardown() {
   grep -q 'runnerSha256Target: "xctest"' "${TEST_ROOT}/src/constants/release.ts"
   grep -q "screenCaptureHelperSha256: \"${HELPER_SHA}\"" "${TEST_ROOT}/src/constants/release.ts"
   grep -q "prototypeViewerSha256: \"${VIEWER_SHA}\"" "${TEST_ROOT}/src/constants/release.ts"
+  grep -q "protoViewerApkSha256: \"${PV_APK_SHA}\"" "${TEST_ROOT}/src/constants/release.ts"
   grep -q "prototypeAgentSha256: \"${PROTOTYPE_SHA}\"" "${TEST_ROOT}/src/constants/release.ts"
 }
 
@@ -60,6 +63,7 @@ teardown() {
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
     PROTOTYPE_AGENT_SHA256="$PROTOTYPE_SHA" \
     PROTOTYPE_VIEWER_SHA256="$VIEWER_SHA" \
+    PROTOVIEWER_APK_SHA256="$PV_APK_SHA" \
     NETWORK_FILTER_SHA256="$FILTER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
@@ -152,6 +156,7 @@ read_field_for_version() {
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
     PROTOTYPE_AGENT_SHA256="$PROTOTYPE_SHA" \
     PROTOTYPE_VIEWER_SHA256="$VIEWER_SHA" \
+    PROTOVIEWER_APK_SHA256="$PV_APK_SHA" \
     NETWORK_FILTER_SHA256="$FILTER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
   [ "$status" -eq 0 ]
@@ -166,6 +171,7 @@ read_field_for_version() {
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
     PROTOTYPE_AGENT_SHA256="$PROTOTYPE_SHA" \
     PROTOTYPE_VIEWER_SHA256="$VIEWER_SHA" \
+    PROTOVIEWER_APK_SHA256="$PV_APK_SHA" \
     NETWORK_FILTER_SHA256="$FILTER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
   [ "$status" -eq 0 ]
@@ -211,6 +217,7 @@ PY
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
     PROTOTYPE_AGENT_SHA256="$PROTOTYPE_SHA" \
     PROTOTYPE_VIEWER_SHA256="$VIEWER_SHA" \
+    PROTOVIEWER_APK_SHA256="$PV_APK_SHA" \
     NETWORK_FILTER_SHA256="$FILTER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
@@ -248,6 +255,7 @@ PY
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
     PROTOTYPE_AGENT_SHA256="$PROTOTYPE_SHA" \
     PROTOTYPE_VIEWER_SHA256="$VIEWER_SHA" \
+    PROTOVIEWER_APK_SHA256="$PV_APK_SHA" \
     NETWORK_FILTER_SHA256="$FILTER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
@@ -302,6 +310,7 @@ PY
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
     PROTOTYPE_AGENT_SHA256="$PROTOTYPE_SHA" \
     PROTOTYPE_VIEWER_SHA256="$VIEWER_SHA" \
+    PROTOVIEWER_APK_SHA256="$PV_APK_SHA" \
     NETWORK_FILTER_SHA256="$FILTER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
@@ -360,6 +369,7 @@ PY
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
     PROTOTYPE_AGENT_SHA256="$PROTOTYPE_SHA" \
     PROTOTYPE_VIEWER_SHA256="$VIEWER_SHA" \
+    PROTOVIEWER_APK_SHA256="$PV_APK_SHA" \
     NETWORK_FILTER_SHA256="$FILTER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
@@ -382,6 +392,7 @@ PY
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
     PROTOTYPE_AGENT_SHA256="$PROTOTYPE_SHA" \
     PROTOTYPE_VIEWER_SHA256="$VIEWER_SHA" \
+    PROTOVIEWER_APK_SHA256="$PV_APK_SHA" \
     NETWORK_FILTER_SHA256="$FILTER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
@@ -395,6 +406,7 @@ PY
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
     PROTOTYPE_AGENT_SHA256="$PROTOTYPE_SHA" \
     PROTOTYPE_VIEWER_SHA256="$VIEWER_SHA" \
+    PROTOVIEWER_APK_SHA256="$PV_APK_SHA" \
     NETWORK_FILTER_SHA256="$FILTER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
@@ -424,6 +436,7 @@ PY
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
     PROTOTYPE_AGENT_SHA256="$PROTOTYPE_SHA" \
     PROTOTYPE_VIEWER_SHA256="$VIEWER_SHA" \
+    PROTOVIEWER_APK_SHA256="$PV_APK_SHA" \
     NETWORK_FILTER_SHA256="$FILTER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
@@ -450,6 +463,7 @@ PY
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
     PROTOTYPE_AGENT_SHA256="$PROTOTYPE_SHA" \
     PROTOTYPE_VIEWER_SHA256="$VIEWER_SHA" \
+    PROTOVIEWER_APK_SHA256="$PV_APK_SHA" \
     NETWORK_FILTER_SHA256="$FILTER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
@@ -466,6 +480,7 @@ PY
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
     PROTOTYPE_AGENT_SHA256="$PROTOTYPE_SHA" \
     PROTOTYPE_VIEWER_SHA256="$VIEWER_SHA" \
+    PROTOVIEWER_APK_SHA256="$PV_APK_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
   [ "$status" -ne 0 ]
@@ -518,6 +533,7 @@ PY
   run env \
     PROTOTYPE_AGENT_SHA256="$PROTOTYPE_SHA" \
     PROTOTYPE_VIEWER_SHA256="$VIEWER_SHA" \
+    PROTOVIEWER_APK_SHA256="$PV_APK_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
   [ "$status" -eq 0 ]
@@ -533,6 +549,7 @@ PY
     NETWORK_FILTER_SHA256="$FILTER_SHA" \
     PROTOTYPE_AGENT_SHA256="$PROTOTYPE_SHA" \
     PROTOTYPE_VIEWER_SHA256="$VIEWER_SHA" \
+    PROTOVIEWER_APK_SHA256="$PV_APK_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
   [ "$status" -eq 0 ]
@@ -564,6 +581,7 @@ PY
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
     PROTOTYPE_AGENT_SHA256="$PROTOTYPE_SHA" \
     PROTOTYPE_VIEWER_SHA256="$VIEWER_SHA" \
+    PROTOVIEWER_APK_SHA256="$PV_APK_SHA" \
     NETWORK_FILTER_SHA256="$FILTER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
@@ -605,6 +623,7 @@ PY
 @test "writes NIGHTLY_CHECKSUM_ENTRY prototypeViewerSha256 in checksum-only mode" {
   run env \
     PROTOTYPE_VIEWER_SHA256="$VIEWER_SHA" \
+    PROTOVIEWER_APK_SHA256="$PV_APK_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
   [ "$status" -eq 0 ]
@@ -620,8 +639,63 @@ PY
     NETWORK_FILTER_SHA256="$FILTER_SHA" \
     PROTOTYPE_AGENT_SHA256="$PROTOTYPE_SHA" \
     PROTOTYPE_VIEWER_SHA256="$VIEWER_SHA" \
+    PROTOVIEWER_APK_SHA256="$PV_APK_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
   [ "$status" -eq 0 ]
   [ "$(read_field_for_version 0.0.46 prototypeViewerSha256 "${TEST_ROOT}/src/constants/release.ts")" = "$VIEWER_SHA" ]
+}
+
+@test "release mode requires PROTOVIEWER_APK_SHA256 (#15301)" {
+  run env \
+    RELEASE_VERSION="99.99.99" \
+    APK_SHA256_CHECKSUM="$APK_SHA" \
+    IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
+    IOS_CTRL_PROXY_RUNNER_SHA256="$RUNNER_SHA" \
+    SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
+    PROTOTYPE_AGENT_SHA256="$PROTOTYPE_SHA" \
+    PROTOTYPE_VIEWER_SHA256="$VIEWER_SHA" \
+    NETWORK_FILTER_SHA256="$FILTER_SHA" \
+    bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"PROTOVIEWER_APK_SHA256"* ]]
+}
+
+@test "rejects a malformed PROTOVIEWER_APK_SHA256 (#15301)" {
+  run env \
+    PROTOVIEWER_APK_SHA256="not-a-sha" \
+    bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"PROTOVIEWER_APK_SHA256 must be a valid SHA256"* ]]
+}
+
+@test "refreshes protoViewerApkSha256 for an already-registered version, leaving other entries (#15301)" {
+  before_older="$(read_field_for_version 0.0.88 apkSha256 "${TEST_ROOT}/src/constants/release.ts")"
+  run env \
+    RELEASE_VERSION="99.99.99" \
+    APK_SHA256_CHECKSUM="$APK_SHA" \
+    IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
+    IOS_CTRL_PROXY_RUNNER_SHA256="$RUNNER_SHA" \
+    SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
+    PROTOTYPE_AGENT_SHA256="$PROTOTYPE_SHA" \
+    PROTOTYPE_VIEWER_SHA256="$VIEWER_SHA" \
+    PROTOVIEWER_APK_SHA256="$PV_APK_SHA" \
+    NETWORK_FILTER_SHA256="$FILTER_SHA" \
+    bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
+  [ "$status" -eq 0 ]
+  run env \
+    RELEASE_VERSION="99.99.99" \
+    APK_SHA256_CHECKSUM="$APK_SHA" \
+    IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
+    SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
+    PROTOTYPE_AGENT_SHA256="$PROTOTYPE_SHA" \
+    PROTOTYPE_VIEWER_SHA256="$VIEWER_SHA" \
+    PROTOVIEWER_APK_SHA256="4444444444444444444444444444444444444444444444444444444444444444" \
+    NETWORK_FILTER_SHA256="$FILTER_SHA" \
+    bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
+  [ "$status" -eq 0 ]
+  [ "$(read_field_for_version 99.99.99 protoViewerApkSha256 "${TEST_ROOT}/src/constants/release.ts")" = "4444444444444444444444444444444444444444444444444444444444444444" ]
+  [ "$(read_field_for_version 0.0.88 apkSha256 "${TEST_ROOT}/src/constants/release.ts")" = "$before_older" ]
 }

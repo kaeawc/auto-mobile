@@ -71,6 +71,14 @@ export interface ReleaseChecksumEntry {
    */
   prototypeViewerSha256?: string;
   /**
+   * SHA-256 of the release-key-signed standalone ProtoViewer Android APK
+   * (`automobile-protoviewer-<version>.apk`, #15301/#13623). Not the iOS
+   * simulator template viewer (`prototypeViewerSha256`). Optional so releases
+   * that predate it stay valid; filled by release automation
+   * (scripts/generate-release-constants.sh), never by hand.
+   */
+  protoViewerApkSha256?: string;
+  /**
    * SHA-256 of the signed, notarized universal macOS Network Filter app archive
    * (`automobile-network-filter-macos-universal.zip`, packed with
    * `ditto -c -k --keepParent` so the nested system extension keeps its

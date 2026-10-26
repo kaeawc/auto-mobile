@@ -3807,6 +3807,12 @@
           "type": "int",
           "nullable": true,
           "hasDefault": true
+        },
+        {
+          "name": "backdrop",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
         }
       ]
     },
@@ -6863,6 +6869,26 @@
         "hasDefault": false
       }
     ],
+    "dev.jasonpearson.automobile.protocol.PrototypeBackdrop": [
+      {
+        "name": "material",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "blur",
+        "type": "int",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "tint",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
     "dev.jasonpearson.automobile.protocol.PrototypeBorder": [
       {
         "name": "width",
@@ -8335,6 +8361,12 @@
       {
         "name": "chrome",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "backdrop",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeBackdrop",
         "nullable": true,
         "hasDefault": true
       }

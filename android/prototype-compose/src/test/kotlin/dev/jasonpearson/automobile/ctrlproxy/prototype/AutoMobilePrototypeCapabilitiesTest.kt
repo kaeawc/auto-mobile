@@ -29,8 +29,11 @@ class AutoMobilePrototypeCapabilitiesTest {
     }
   }
 
-  /** The test module is a placeholder no production runtime advertises. */
-  private val exclusions = setOf("prototype_platform_test_v1")
+  /**
+   * The test module is a placeholder no production runtime advertises. `window.backdrop` (#15126)
+   * validates but is drawn by no renderer until the Kotlin slice lands.
+   */
+  private val exclusions = setOf("prototype_platform_test_v1", "prototype_backdrop_v1")
 
   @Test
   fun `shared spec capabilities are supported`() {

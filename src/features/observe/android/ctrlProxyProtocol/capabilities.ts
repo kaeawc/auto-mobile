@@ -94,6 +94,12 @@ export const PROTOTYPE_PLATFORM_CAPABILITY = "prototype_platform_v1";
 export const PROTOTYPE_SEARCH_BAR_CAPABILITY = "prototype_search_bar_v1";
 /** `{data, empty}` conditions and style `shimmer` (#14207). */
 export const PROTOTYPE_LOADING_STATES_CAPABILITY = "prototype_loading_states_v1";
+/**
+ * Spec `window.backdrop` {material, blur?, tint?} (#15126): blurs what is behind the prototype
+ * window, or draws a solid tint dim where the platform cannot. A device without it would ignore the
+ * field and draw a plain window, so the host refuses the show.
+ */
+export const PROTOTYPE_BACKDROP_CAPABILITY = "prototype_backdrop_v1";
 /** Node `animate`, style `scale`/`rotation`, horizontal and scale transitions, zoomable images (#14208). */
 export const PROTOTYPE_MOTION_V2_CAPABILITY = "prototype_motion_v2";
 /** Transition `delayMs`, container `stagger` and the `blurReplace` transition (#15247). */

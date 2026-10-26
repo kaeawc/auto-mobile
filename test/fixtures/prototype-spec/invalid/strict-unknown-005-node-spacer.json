@@ -1,22 +1,18 @@
 {
   "spec": {
-    "id": "size-bounds",
+    "id": "strict",
     "window": {
       "placement": {
         "type": "fullscreen"
       },
+      "backdrop": {
+        "material": "ultraThin",
+        "blur": 0,
+        "tint": "scrim"
+      },
       "opacity": 100
     },
     "root": {
-      "anchor": {
-        "type": "bounds",
-        "bounds": {
-          "x": -10000,
-          "y": 10000,
-          "width": 10000,
-          "height": 10000
-        }
-      },
       "type": "spacer",
       "zzzUnknown": true
     }

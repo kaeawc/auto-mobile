@@ -16,10 +16,12 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
         // when supported. The `test` module is a placeholder no production runtime advertises.
         // Chat-list scrolls (#14232) are drawn on Android only so far (#14671);
         // motion v2 (#14208) is Android-only until the SwiftUI side lands (#14684), and so is
-        // transition choreography (#15247).
+        // transition choreography (#15247). `window.backdrop` (#15126) validates here but is drawn
+        // by neither renderer until the Kotlin and Swift slices land.
         let exclusions: Set<String> = [
             "prototype_platform_test_v1",
             "prototype_chat_scroll_v1", "prototype_motion_v2", "prototype_choreography_v1",
+            "prototype_backdrop_v1",
         ]
         XCTAssertTrue(exclusions.isSubset(of: required), "Exclusions must name current spec gates")
         XCTAssertTrue(exclusions.isDisjoint(with: supported), "Remove exclusions once supported")

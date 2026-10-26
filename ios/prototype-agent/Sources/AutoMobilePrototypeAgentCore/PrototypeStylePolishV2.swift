@@ -2,7 +2,7 @@ import Foundation
 
 /// Cross-field validation and capability detection over authored nodes.
 enum PrototypeStylePolishV2 {
-    static let capability = "prototype_style_polish_v2"
+    static let capability = PrototypeAgentProtocol.stylePolishV2Capability
 
     static func styles(_ node: [String: JSONValue]) -> [[String: JSONValue]] {
         let conditional: [JSONValue]

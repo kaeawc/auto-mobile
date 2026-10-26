@@ -785,6 +785,17 @@ function motionErrors(nodes: Located[]): PrototypeValidationError | undefined {
   return prototypeMotionV2Error(nodes) ?? prototypeChoreographyError(nodes);
 }
 
+/** String tables first, then platform calls: the order the shared fixtures pin. */
+function stringsAndPlatformErrors(
+  value: unknown,
+  context: Context,
+): PrototypeValidationError | undefined {
+  return (
+    prototypeStringsError(value, context.nodes) ??
+    prototypePlatformError(value, context.actions, platformArgumentError)
+  );
+}
+
 function behaviourErrors(
   value: unknown,
   context: Context,
@@ -795,8 +806,7 @@ function behaviourErrors(
   return (
     prototypeDataActionsError(context.actions, data.data, prototypeDataError) ??
     prototypeRequestsError(context.actions) ??
-    prototypeStringsError(value, context.nodes) ??
-    prototypePlatformError(value, context.actions, platformArgumentError) ??
+    stringsAndPlatformErrors(value, context) ??
     prototypeTimersError([...context.actions, ...componentTimers]) ??
     prototypeLoadingStatesError(context.nodes) ??
     motionErrors(context.nodes) ??

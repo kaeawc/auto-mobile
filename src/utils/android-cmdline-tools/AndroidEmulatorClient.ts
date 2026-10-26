@@ -291,6 +291,7 @@ const execAsync = async (
 
 import { getFallbackEmulatorPath, locateEmulatorPath } from "./emulatorBinaryLocator";
 import { resolveRunningAvdNameOnce, type RunningAvdNameResult } from "./runningAvdName";
+import { createForeignAndroidSerialResolver } from "../../devices/foreignAndroidSerialResolver";
 export { AndroidEmulatorUnavailableError } from "./AndroidEmulatorUnavailableError";
 export { AndroidOfflineProbeError } from "./AndroidOfflineProbeError";
 import {
@@ -386,10 +387,13 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
   private readonly runningAvdAdvertisementReader: RunningAvdAdvertisementReader;
   private readonly consoleBusyRegistry: EmulatorConsoleBusyRegistry;
   private readonly reservations: EmulatorPortReservations;
-  private foreignInventoryResolver?: BootedDeviceScanOptions["resolveForeignSerials"];
+  // Discovery respects daemon claims even for clients outside the pool's own manager.
+  // Explicit single-serial lifecycle identity reads intentionally bypass this scan resolver.
+  private foreignInventoryResolver: BootedDeviceScanOptions["resolveForeignSerials"] =
+    createForeignAndroidSerialResolver(() => undefined);
 
   withForeignInventoryResolver(resolver: BootedDeviceScanOptions["resolveForeignSerials"]): void {
-    this.foreignInventoryResolver = resolver;
+    this.foreignInventoryResolver = resolver ?? createForeignAndroidSerialResolver(() => undefined);
   }
 
   private readonly inventory: AndroidDeviceInventoryScanner;

@@ -69,6 +69,7 @@ import {
   resolveKillDeviceStableTarget,
   resolveTeardownTarget,
   retireStoppedTeardownOwnership,
+  refuseLiveStoppedAndroidTarget,
   shutdownTimeoutError,
   stopSegmentedVideoRecordingsBeforeDestroy,
   teardownDeadlineDevice,
@@ -463,6 +464,19 @@ async function verifyDeleteDeviceTarget(
   return response;
 }
 
+async function prepareStoppedTeardownTarget(
+  context: TeardownContext,
+  target: TeardownResolvedTarget,
+): Promise<TeardownToolResponse | undefined> {
+  const refusal = await refuseLiveStoppedAndroidTarget(context, target);
+  if (refusal) {
+    return refusal;
+  }
+  await stopSegmentedVideoRecordingsBeforeDestroy(context, target);
+  await retireStoppedTeardownOwnership(context, target);
+  return undefined;
+}
+
 function createDeleteDeviceWorkflow(
   args: TeardownDeviceArgs,
   deps: DeviceToolsDependencies,
@@ -562,14 +576,9 @@ function createDeleteDeviceWorkflow(
         );
         stop = stopped.alreadyStoppedMessage ? "not_required" : "accepted";
       } else {
-        await stopSegmentedVideoRecordingsBeforeDestroy(context, target);
-        await retireStoppedTeardownOwnership(context, target);
+        state.earlyResponse = await prepareStoppedTeardownTarget(context, target);
       }
-
-      const restarted = await checkForRestartedTeardownTarget(context, target, "stop");
-      if (restarted) {
-        state.earlyResponse = restarted;
-      }
+      state.earlyResponse ??= await checkForRestartedTeardownTarget(context, target, "stop");
       return stop;
     },
     destroy: async (state, _requestAbortSignal, retainLeaseUntil) =>

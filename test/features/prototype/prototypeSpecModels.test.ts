@@ -6,11 +6,15 @@ import {
   renderPrototypeSpecModels,
   staleModelOutputs,
 } from "../../../scripts/prototype/generate-prototype-spec-models";
-import { prototypeModelOverrides } from "../../../scripts/prototype/prototype-model-overrides";
+import { prototypeModelSelection } from "../../../scripts/prototype/prototype-model-selection";
 import {
+  boundsSchema,
   offsetSchema,
   paddingSchema,
+  safeAreaPaddingSchema,
+  sheetConditionSchema,
 } from "../../../src/features/prototype/prototypePresentationSchemas";
+import type { Rule } from "../../../src/features/prototype/prototypeBindingValidation";
 import fixture from "../../fixtures/prototype-spec/models.json";
 
 const tinyContract = {
@@ -25,7 +29,7 @@ const tinyContract = {
     unselected: { kind: "tagged" },
   },
 };
-const selection = { point: { count: "Int", distance: "Double" } } as const;
+const selection = { point: {} } as const;
 const header = `// Generated from schemas/prototype-spec-contract.json; do not edit.
 // Regenerate: bun scripts/prototype/generate-prototype-spec-models.ts
 `;
@@ -44,7 +48,7 @@ data class PrototypePoint(
 )
 `,
       swift: `${header}
-struct Point: Decodable, Encodable {
+struct Point: Codable, Equatable, Sendable {
     let count: Int
     let distance: Double?
 }
@@ -52,27 +56,73 @@ struct Point: Decodable, Encodable {
     });
   });
 
-  test("Kotlin numeric representation comes only from the explicit override", () => {
-    const result = renderPrototypeSpecModels(tinyContract, {
-      point: { count: "Double", distance: "Double" },
-    });
-    expect(result.kotlin).toContain("val count: Double,");
+  test("number representation follows the contract's integer flag in both languages", () => {
+    const result = renderPrototypeSpecModels(tinyContract, selection);
+    expect(result.kotlin).toContain("val count: Int,");
+    expect(result.kotlin).toContain("val distance: Double? = null,");
     expect(result.swift).toContain("let count: Int");
+  });
+
+  test("maps strings, booleans, enums and arrays of those", () => {
+    const rich = {
+      definitions: {
+        mixed: {
+          kind: "object",
+          fields: {
+            name: { rule: { kind: "string" }, optional: false },
+            key: { rule: { kind: "boundKey" }, optional: true },
+            on: { rule: { kind: "boolean" }, optional: false },
+            mode: { rule: { kind: "enum", values: ["a", "b"] }, optional: true },
+            tags: { rule: { kind: "array", item: { kind: "string" } }, optional: false },
+            edges: {
+              rule: { kind: "array", item: { kind: "enum", values: ["top"] }, min: 1 },
+              optional: false,
+            },
+          },
+        },
+      },
+    };
+    const result = renderPrototypeSpecModels(rich, { mixed: { doc: "Mixed." } });
+    expect(result.kotlin).toContain(`/** Mixed. */
+@Serializable
+data class PrototypeMixed(
+  val name: String,
+  val key: String? = null,
+  val on: Boolean,
+  val mode: String? = null,
+  val tags: List<String>,
+  val edges: List<String>,
+)`);
+    expect(result.swift).toContain(`/// Mixed.
+struct Mixed: Codable, Equatable, Sendable {
+    let name: String
+    let key: String?
+    let on: Bool
+    let mode: String?
+    let tags: [String]
+    let edges: [String]
+}`);
+  });
+
+  test("languages and swiftName restrict and rename the emitted models", () => {
+    const kotlinOnly = renderPrototypeSpecModels(tinyContract, {
+      point: { languages: ["kotlin"] },
+    });
+    expect(kotlinOnly.kotlin).toContain("data class PrototypePoint(");
+    expect(kotlinOnly.swift).not.toContain("Point");
+    const swiftOnly = renderPrototypeSpecModels(tinyContract, {
+      point: { languages: ["swift"], swiftName: "PrototypePoint" },
+    });
+    expect(swiftOnly.kotlin).not.toContain("Point");
+    expect(swiftOnly.swift).toContain("struct PrototypePoint: Codable");
   });
 
   test.each([
     "ref",
-    "enum",
-    "string",
     "object",
-    "array",
     "color",
-    "boundKey",
     "choice",
     "tagged",
-    "boolean",
-    "pointer",
-    "key",
     "json",
     "scalar",
     "record",
@@ -93,6 +143,23 @@ struct Point: Decodable, Encodable {
     ).toThrow(`Definition point.value: unsupported kind ${kind}`);
   });
 
+  test("refuses enums with non-string values and arrays of unsupported items", () => {
+    const field = (rule: Rule) => ({
+      definitions: { point: { kind: "object", fields: { value: { rule, optional: false } } } },
+    });
+    expect(() =>
+      renderPrototypeSpecModels(field({ kind: "enum", values: [true, false] }), { point: {} }),
+    ).toThrow("Definition point.value: unsupported kind enum");
+    expect(() =>
+      renderPrototypeSpecModels(field({ kind: "array", item: { kind: "ref", name: "x" } }), {
+        point: {},
+      }),
+    ).toThrow("Definition point.value: unsupported kind array");
+    expect(() =>
+      renderPrototypeSpecModels(field({ kind: "array", item: { kind: "array" } }), { point: {} }),
+    ).toThrow("Definition point.value: unsupported kind array");
+  });
+
   test("refuses selected non-object definitions and absent definitions", () => {
     expect(() => renderPrototypeSpecModels(tinyContract, { unselected: {} })).toThrow(
       "Definition unselected: unsupported kind tagged",
@@ -106,15 +173,6 @@ struct Point: Decodable, Encodable {
         { point: {} },
       ),
     ).toThrow("Definition point: empty objects are unsupported");
-  });
-
-  test("refuses missing and stale number overrides instead of guessing", () => {
-    expect(() => renderPrototypeSpecModels(tinyContract, { point: {} })).toThrow(
-      "Definition point.count: missing Kotlin Int/Double override",
-    );
-    expect(() =>
-      renderPrototypeSpecModels(tinyContract, { point: { ...selection.point, stale: "Int" } }),
-    ).toThrow("Definition point.stale: unused Kotlin number override");
   });
 
   test("drift check detects stale, missing, and individually changed outputs", () => {
@@ -133,7 +191,7 @@ struct Point: Decodable, Encodable {
   });
 
   test("checked-in outputs equal the canonical contract rendering", () => {
-    const expected = renderPrototypeSpecModels(contract, prototypeModelOverrides);
+    const expected = renderPrototypeSpecModels(contract, prototypeModelSelection);
     const read = (path: string) =>
       readFileSync(new URL(`../../../${path}`, import.meta.url), "utf8");
     expect(
@@ -148,8 +206,18 @@ struct Point: Decodable, Encodable {
     const decoded = {
       offset: offsetSchema.parse(fixture.offset),
       padding: paddingSchema.parse(fixture.padding),
+      bounds: boundsSchema.parse(fixture.bounds),
+      sheetCondition: sheetConditionSchema.parse(fixture.sheetCondition),
+      safeAreaPadding: safeAreaPaddingSchema.parse(fixture.safeAreaPadding),
     };
-    expect(JSON.parse(JSON.stringify(decoded))).toEqual(fixture);
+    const { offset, padding, bounds, sheetCondition, safeAreaPadding } = fixture;
+    expect(JSON.parse(JSON.stringify(decoded))).toEqual({
+      offset,
+      padding,
+      bounds,
+      sheetCondition,
+      safeAreaPadding,
+    });
     expect(offsetSchema.safeParse({ ...fixture.offset, unknown: 1 }).success).toBe(false);
     expect(paddingSchema.safeParse({ ...fixture.padding, unknown: 1 }).success).toBe(false);
     expect(paddingSchema.parse({})).toEqual({});

@@ -128,11 +128,14 @@ describe("GetLogs", () => {
     const ios: IosUnifiedLogSource = {
       collect: async (...args) => {
         calls.push(args.slice(0, 3));
-        return [
-          "Timestamp               Ty Process[PID:TID]",
-          "2026-10-21 08:15:30.123 Df Playground[12:34] [com.example:net] request failed",
-          "2026-10-21 08:15:31.000 I  Playground[12:34] [com.example:ui] shown",
-        ].join("\n");
+        return {
+          truncated: false,
+          text: [
+            "Timestamp               Ty Process[PID:TID]",
+            "2026-10-21 08:15:30.123 Df Playground[12:34] [com.example:net] request failed",
+            "2026-10-21 08:15:31.000 I  Playground[12:34] [com.example:ui] shown",
+          ].join("\n"),
+        };
       },
     };
     const result = await new GetLogs({
@@ -165,7 +168,7 @@ describe("GetLogs", () => {
       resolveProcessName: async () => "Preferences",
       collect: async (...args) => {
         calls.push([args[0], args[4]]);
-        return "";
+        return { text: "", truncated: false };
       },
     };
     const result = await new GetLogs({
@@ -184,7 +187,10 @@ describe("GetLogs", () => {
       resolveProcessName: async () => {
         throw new Error("listapps timed out");
       },
-      collect: async () => "2026-10-21 08:15:30.123 I  App[1:2] [com.example:ui] shown",
+      collect: async () => ({
+        text: "2026-10-21 08:15:30.123 I  App[1:2] [com.example:ui] shown",
+        truncated: false,
+      }),
     };
     const result = await new GetLogs({
       clock: clock(),
@@ -217,7 +223,7 @@ describe("GetLogs", () => {
       new GetLogs({
         clock: clock(),
         android: () => new RecordingAndroid(),
-        ios: () => ({ collect: async () => "" }),
+        ios: () => ({ collect: async () => ({ text: "", truncated: false }) }),
       }).execute(SIMULATOR, {}),
     ).rejects.toThrow("getLogs on iOS needs appId");
   });
@@ -228,3 +234,27 @@ describe("GetLogs", () => {
     ]);
   });
 });
+
+for (const maxLines of [1, 100]) {
+  test(`iOS default window preserves source byte truncation with maxLines ${maxLines}`, async () => {
+    const result = await new GetLogs({
+      clock: clock(),
+      android: () => new RecordingAndroid(),
+      ios: () => ({
+        collect: async (_appId, seconds) => {
+          expect(seconds).toBe(300);
+          return {
+            text: "2026-10-21 08:15:30.123 I App[1:2] older\n2026-10-21 08:15:31.123 I App[1:2] newest\n",
+            truncated: true,
+          };
+        },
+      }),
+    }).execute(SIMULATOR, { appId: "com.example", maxLines });
+    expect(result.truncated).toBe(true);
+    expect(result.lines.at(-1)?.message).toContain("newest");
+    expect(result.lines).toHaveLength(Math.min(maxLines, 2));
+    expect(result.warnings).toContain(
+      "The unified log window exceeded the byte bound; only the newest lines were read.",
+    );
+  });
+}

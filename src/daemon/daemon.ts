@@ -604,8 +604,12 @@ export class Daemon {
       },
     } as const;
   }
-  stop(...args: Parameters<DaemonShutdown["stop"]>) {
-    return this.shutdown.stop(...args);
+  async stop(...args: Parameters<DaemonShutdown["stop"]>) {
+    try {
+      return await this.shutdown.stop(...args);
+    } finally {
+      this.daemonState.retireForeignAndroidSerialSource(this.devicePool);
+    }
   }
 
   /**

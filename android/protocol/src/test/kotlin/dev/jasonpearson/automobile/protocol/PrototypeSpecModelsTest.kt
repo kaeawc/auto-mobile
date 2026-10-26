@@ -27,6 +27,29 @@ class PrototypeSpecModelsTest {
   }
 
   @Test
+  fun `generated scalar, enum and array models round trip every filled field`() {
+    assertRoundTrip("bounds", PrototypeBounds(-1.5, 2.5, 300.25, 400.5))
+    assertRoundTrip("sheetCondition", PrototypeSheetCondition("sheetOpen", true))
+    assertRoundTrip(
+      "safeAreaPadding",
+      PrototypeSafeAreaPadding(listOf("top", "start"), listOf("systemBars", "ime")),
+    )
+    assertRoundTrip("animate", PrototypeAnimate(450, "spring"))
+    assertRoundTrip("stagger", PrototypeStagger(40, "center"))
+    assertRoundTrip("zoomable", PrototypeZoomable(4.5))
+    assertRoundTrip("radioOption", PrototypeRadioOption("small", "Small"))
+    assertRoundTrip("chartRange", PrototypeChartRange(-2.5, 10.5))
+    assertEquals(PrototypeAnimate(), Json.decodeFromString<PrototypeAnimate>("{}"))
+    assertEquals(PrototypeStagger(0), Json.decodeFromString<PrototypeStagger>("""{"ms":0}"""))
+  }
+
+  private inline fun <reified T> assertRoundTrip(name: String, expected: T) {
+    val element = fixture.getValue(name)
+    assertEquals(expected, Json.decodeFromJsonElement<T>(element))
+    assertEquals(element, Json.encodeToJsonElement(expected))
+  }
+
+  @Test
   fun `generated leaves retain strict unknown key rejection`() {
     val offset = JsonObject(fixture.getValue("offset").jsonObject + ("unknown" to JsonPrimitive(1)))
     assertThrows(SerializationException::class.java) {

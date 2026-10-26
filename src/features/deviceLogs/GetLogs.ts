@@ -68,7 +68,7 @@ export interface IosUnifiedLogSource {
     level: UnifiedLogLevel,
     signal?: AbortSignal,
     processName?: string,
-  ): Promise<string>;
+  ): Promise<{ text: string; truncated: boolean }>;
   /** The app's executable name (CFBundleExecutable), or undefined when it cannot be resolved. */
   resolveProcessName?(appId: string, signal?: AbortSignal): Promise<string | undefined>;
 }
@@ -218,14 +218,19 @@ export class GetLogs {
     const grep = compileGrep(request.grep);
     const source = this.deps.ios();
     const processName = await resolveProcessName(source, request.appId, warnings, signal);
-    const text = await source.collect(
+    const collected = await source.collect(
       request.appId,
       sinceSeconds,
       unifiedLogLevel(minPriority),
       signal,
       processName,
     );
-    const lines = parseUnifiedCompact(text).filter(
+    if (collected.truncated) {
+      warnings.push(
+        "The unified log window exceeded the byte bound; only the newest lines were read.",
+      );
+    }
+    const lines = parseUnifiedCompact(collected.text).filter(
       (line) => grep === undefined || grep.test(line.message),
     );
     const bounded = boundLines(lines, maxLines);
@@ -234,7 +239,7 @@ export class GetLogs {
       appId: request.appId,
       sinceSeconds,
       lines: bounded.lines,
-      truncated: bounded.truncated,
+      truncated: collected.truncated || bounded.truncated,
       pids: [],
       attribution: processName ? "process" : "subsystem",
       warnings:

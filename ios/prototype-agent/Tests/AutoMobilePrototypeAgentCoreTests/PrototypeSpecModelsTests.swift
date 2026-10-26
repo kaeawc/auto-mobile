@@ -5,6 +5,8 @@ final class PrototypeSpecModelsTests: XCTestCase {
     private struct Models: Decodable, Encodable {
         let offset: Offset
         let padding: Padding
+        let safeAreaPadding: SafeAreaPadding
+        let chartRange: PrototypeChartRange
     }
 
     func testFilledFixtureRoundTripsEveryField() throws {
@@ -20,10 +22,18 @@ final class PrototypeSpecModelsTests: XCTestCase {
         XCTAssertEqual(models.padding.bottom, 2.5)
         XCTAssertEqual(models.padding.start, 3.5)
         XCTAssertEqual(models.padding.end, 4.5)
-        XCTAssertEqual(
-            try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(models)),
-            try JSONDecoder().decode(JSONValue.self, from: data)
-        )
+        XCTAssertEqual(models.safeAreaPadding.edges, ["top", "start"])
+        XCTAssertEqual(models.safeAreaPadding.types, ["systemBars", "ime"])
+        XCTAssertEqual(models.chartRange, PrototypeChartRange(min: -2.5, max: 10.5))
+        let encoded = try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(models))
+        guard case let .object(source) = try JSONDecoder().decode(JSONValue.self, from: data) else {
+            return XCTFail("fixture is not an object")
+        }
+        // The fixture also carries Kotlin-only models; Swift emits only those it consumes.
+        guard case let .object(round) = encoded else { return XCTFail("models did not encode") }
+        for name in ["offset", "padding", "safeAreaPadding", "chartRange"] {
+            XCTAssertEqual(round[name], source[name], name)
+        }
     }
 
     func testOptionalAndRequiredFieldsRetainDecodingBehavior() throws {

@@ -1,3 +1,4 @@
+import type { HostChildProcess, HostSpawnOptions } from "../utils/HostCommandExecutor";
 import type { SimulatorContainerOwnershipOptions } from "../utils/ios-cmdline-tools/simulatorOwnContainer";
 import { ActionableError, type BootedDevice, type ExecResult, type Platform } from "../models";
 import type { AdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
@@ -26,8 +27,9 @@ import type {
 import { SessionLogSourceError } from "./SessionLogSourceError";
 import { SessionLogTimeoutError } from "./SessionLogTimeoutError";
 
-/** The narrow simctl surface the iOS provider needs: one argv exec and one shell-string exec. */
+/** The narrow simctl surface for container commands and streaming log collection. */
 export interface SessionLogSimctl {
+  startCommandArgs(args: string[], options?: HostSpawnOptions): Promise<HostChildProcess>;
   executeCommand(command: string, timeoutMs?: number, signal?: AbortSignal): Promise<ExecResult>;
   executeCommandArgs(args: string[], timeoutMs?: number, signal?: AbortSignal): Promise<ExecResult>;
 }

@@ -22,7 +22,7 @@ enum PrototypeLibraryImportFailure: Error, Equatable, LocalizedError {
 }
 
 struct PrototypeLibraryImporter {
-    enum Source: String, Sendable { case file, share, paste }
+    enum Source: String, Sendable { case mcp, file, share, paste }
     static let maxImagePixels = 16_000_000
     static let maxTotalImagePixels = 64_000_000
     let store: PrototypeLibraryStore
@@ -31,7 +31,7 @@ struct PrototypeLibraryImporter {
 
     /// Bytes alone choose the format; provenance is chosen by the app's receiving route.
     @discardableResult
-    func importData(_ bytes: Data, source: Source) throws -> PrototypeLibraryEntry {
+    func importData(_ bytes: Data, source: Source, label: String? = nil) throws -> PrototypeLibraryEntry {
         do {
             let zip = Self.isZIP(bytes)
             let cap = zip ? PrototypeBundle.maxCompressedBytes : PrototypeBundle.maxSpecBytes
@@ -56,10 +56,11 @@ struct PrototypeLibraryImporter {
                 [String: JSONValue].self,
                 from: PrototypeStrictJSON.prepare(bundle.spec)
             )
-            let label = fields["id"]?.stringValue ?? fields["window"]?.objectFields?["title"]?.stringValue
+            let label = label ?? fields["id"]?.stringValue ?? fields["window"]?.objectFields?["title"]?.stringValue
                 ?? "Imported prototype"
             let provenance: PrototypeLibraryEntry.Source
             switch source {
+            case .mcp: provenance = .mcp
             case .file: provenance = .file
             case .share: provenance = .share
             case .paste: provenance = .paste

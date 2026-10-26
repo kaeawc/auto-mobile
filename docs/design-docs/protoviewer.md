@@ -189,9 +189,9 @@ is a zip, MIME `application/vnd.automobile.prototype+zip`, iOS UTI
 - Importing a prototype whose `spec.id` already exists creates a new entry with its own library id
   and empty storage. Replace and keep-both are later work.
 - Not in the first release: user-facing URL import, universal links, compact `?spec=` links, QR. The
-  one custom URL scheme in the first release is the internal launch scheme `automobile-proto://open`
-  (section 7): the iOS app registers it, and it only opens an entry that is already in the library.
-  It never fetches, imports or carries spec bytes.
+  one custom URL scheme in the first release is the internal launch scheme `automobile-proto://`
+  (section 7): it imports a host-staged inbox bundle or opens an existing library entry.
+  The scheme never fetches or carries spec bytes.
 
 Bundle limits (shared TS/Kotlin/Swift transport contract):
 
@@ -342,18 +342,31 @@ The shared request-policy and storage work is tracked in #13622.
   folders cannot be prepared, the push is refused, or the app answers `rejected` at `inbox` (it
   cannot see the pushed file), nothing was imported and the host keeps the CtrlProxy save path
   with a logged warning instead of failing the call.
-  iOS (simulator and dev-signed devices) uses `simctl` or `devicectl` file copy into the app's
-  inbox plus the internal launch scheme `automobile-proto://open`, which the iOS app registers in
-  the first release (section 4). Opening the scheme with an unknown id or an inbox name that does
-  not pass the same import checks shows an error and changes nothing. The iOS route is a separate
-  slice of #13621; until it lands, iOS `save` keeps the template path and `open` is refused.
-- `prototype save`: on Android, when ProtoViewer is installed for the current user, build a
+- iOS simulators use the host filesystem and `simctl openurl`, without a new socket or broadcast.
+  The host resolves the app's own data container and creates
+  `Library/Application Support/ProtoViewer/mcp/inbox/` and `results/` (same host uid as the app);
+  the app also creates them idempotently on start and never purges this inbox at launch.
+  Import writes `inbox/<request>.automobile-proto.tmp` then renames it, and delivers
+  `automobile-proto://import?request=<request>&label=<percent-encoded-label>` (label optional).
+  Open delivers `automobile-proto://open?request=<request>&id=<libraryId>`.
+  Request ids match `[A-Za-z0-9_-]{1,64}`. The scheme carries no spec bytes. The app validates the
+  full import, sets `source: mcp` itself, removes the inbox file after every attempt, and atomically
+  publishes `results/<request>.json` using the same result shapes as Android. Rejections are
+  reported in that file rather than an alert. Open reports `opened` only after the viewer loads.
+  Host polling treats a missing result as pending until the timer deadline; finally it removes
+  results and leftover inbox files even after cancellation, with an independent cleanup timeout.
+  An absent app, unresolved container, unusable inbox, or nonzero `openurl` exit keeps the template
+  save path with a logged warning. Command timeout or result deadline after delivery is a hard
+  failure: the save may still have landed, so check ProtoViewer before retrying.
+  Physical devices keep the template path's existing behavior; `open` needs an iOS simulator.
+  `devicectl` delivery to dev-signed physical devices remains later work.
+- `prototype save`: on Android (for the current user) or an iOS simulator, when ProtoViewer is installed, build a
   canonical bundle (#13616) and route it as above; otherwise the CtrlProxy or template path is
   unchanged. `pin` and `icon` describe CtrlProxy launcher shortcuts, which ProtoViewer has not, so
-  a save with either keeps the CtrlProxy path. The output gains `viewer` `{app, libraryId, label}`
+  a save with either keeps the platform save path. The output gains `viewer` `{app, libraryId, label}`
   and a warning that the entry is imported.
 - `prototype open` (new action) launches a library id (`viewer.libraryId`) through the same
-  activity with action `….mcp.OPEN`, and returns the same warning.
+  activity with action `….mcp.OPEN` on Android or the iOS simulator URL route, and returns the same warning.
 - Not in the first release: MCP `export` and `import` actions, a `listSaved` merge, live attach.
 
 ## 8. Distribution
@@ -397,7 +410,7 @@ localhost request blocked and LAN request allowed with the switch on.
 1. Swift validator parity is the critical path (mitigated by reject-only scope and the corpus).
 2. Library network policy differs from #12518's "no allowlist"; MCP-direct `show` is unchanged.
 3. The extraction touches CtrlProxy (one mechanical change plus existing suites).
-4. The adb-based MCP channel is Android-specific; iOS uses `simctl`/`devicectl`.
+4. The adb-based MCP channel is Android-specific; iOS simulators use the filesystem and `simctl openurl`; physical-device delivery is later work.
 5. With no `specVersion`, older apps reject newer specs; `requires` and capability messages soften this.
 
 ## 12. Decisions

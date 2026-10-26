@@ -38,7 +38,7 @@ import { ActionableError, toActionableError } from "../models/ActionableError";
 import { outputLooksLikeShellFailure } from "../utils/android-cmdline-tools/shellOutputHeuristics";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
-import type { ProtoViewerDevice } from "../features/prototype/protoViewer/AndroidProtoViewer";
+import type { ProtoViewerDevice } from "../features/prototype/protoViewer/protoViewerDevice";
 import {
   protoViewerHandles,
   routeToProtoViewer,
@@ -466,12 +466,12 @@ interface IosSavedDependencies {
   installer?: IosSavedPrototypeInstaller;
   assetFileReader: PrototypeAssetFileReader;
   observationScreenshotReader: PrototypeObservationScreenshotReader;
-  /** ProtoViewer on an Android device (#13621); absent means saves keep the CtrlProxy path. */
+  /** ProtoViewer on Android or an iOS simulator; absent means saves keep the platform path. */
   protoViewer?: (device: BootedDevice) => ProtoViewerDevice;
 }
 
-const OPEN_NEEDS_ANDROID_PROTOVIEWER =
-  "open needs ProtoViewer on an Android device; the iOS ProtoViewer route is not available yet.";
+const OPEN_NEEDS_PROTOVIEWER =
+  "open needs ProtoViewer installed on an Android device or iOS simulator.";
 
 /**
  * Intercept saved iOS actions and ProtoViewer-routed Android ones, otherwise retain the existing
@@ -492,25 +492,44 @@ export function createPrototypeSavedPlatformDispatch(dependencies: IosSavedDepen
     if (error) {
       return prototypePlatformFailure(error);
     }
-    if (device.platform === "android" && dependencies.protoViewer && protoViewerHandles(args)) {
+    if (
+      device.platform === "ios" &&
+      args.action === "open" &&
+      resolveIosDeviceKind(device) !== "simulator"
+    ) {
+      return {
+        success: false,
+        errorCode: "unsupported_platform",
+        error: "open needs an iOS simulator. Target one with deviceId or sessionUuid.",
+      };
+    }
+    if (
+      (device.platform === "android" || device.platform === "ios") &&
+      dependencies.protoViewer &&
+      protoViewerHandles(args)
+    ) {
       return routeToProtoViewer(
         args,
         { ...dependencies, device: dependencies.protoViewer(device) },
         signal,
-      );
+      ).then((output) => {
+        if (output || device.platform !== "ios" || !isPrototypeSavedAction(args.action)) {
+          return output;
+        }
+        return performIosSavedAction(
+          backend,
+          device,
+          { ...args, action: args.action },
+          dependencies,
+          signal,
+        );
+      });
     }
-    if (device.platform === "android" && args.action === "open" && !dependencies.protoViewer) {
+    if (args.action === "open") {
       return {
         success: false,
         errorCode: "unsupported_capability",
-        error: OPEN_NEEDS_ANDROID_PROTOVIEWER,
-      };
-    }
-    if (device.platform === "ios" && args.action === "open") {
-      return {
-        success: false,
-        errorCode: "unsupported_platform",
-        error: OPEN_NEEDS_ANDROID_PROTOVIEWER,
+        error: OPEN_NEEDS_PROTOVIEWER,
       };
     }
     if (device.platform !== "ios" || !isPrototypeSavedAction(args.action)) {
@@ -672,7 +691,7 @@ export function dispatchPrototypeSavedAction<T>(
     return Promise.resolve({
       success: false,
       errorCode: "unsupported_capability",
-      error: OPEN_NEEDS_ANDROID_PROTOVIEWER,
+      error: OPEN_NEEDS_PROTOVIEWER,
     });
   }
   if (isPrototypeSavedAction(args.action)) {

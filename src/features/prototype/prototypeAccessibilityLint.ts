@@ -21,6 +21,7 @@ export const PROTOTYPE_ACCESSIBILITY_RULES = [
   "unlabeled-text-field",
   "low-contrast",
   "small-touch-target",
+  "transition-without-visible-when",
 ] as const;
 export type PrototypeAccessibilityRule = (typeof PROTOTYPE_ACCESSIBILITY_RULES)[number];
 
@@ -149,6 +150,27 @@ function nodeFindings(visit: Visit, context: LintContext): PrototypeAccessibilit
     ...labelFindings(visit.node, visit.path),
     ...touchTargetFindings(visit.node, visit.path),
     ...contrastFindings(visit, context),
+    ...transitionFindings(visit.node, visit.path),
+  ];
+}
+
+/**
+ * A node `transition` only animates the `visibleWhen` enter/exit, so one without `visibleWhen`
+ * never runs (#15112). A stack's `transition` animates screen navigation instead.
+ */
+function transitionFindings(
+  node: Record<string, unknown>,
+  path: string,
+): PrototypeAccessibilityFinding[] {
+  if (node.transition === undefined || node.type === "stack" || node.visibleWhen !== undefined) {
+    return [];
+  }
+  return [
+    {
+      rule: "transition-without-visible-when",
+      path,
+      detail: `This ${String(node.type)} has a transition but no visibleWhen, so nothing ever enters or exits and the transition has no effect. Add visibleWhen, or remove the transition.`,
+    },
   ];
 }
 

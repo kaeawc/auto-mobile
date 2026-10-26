@@ -189,6 +189,7 @@ fun PrototypeRuntimeContent(
         val traceSink = PrototypeTrace.sink
         val traceEnabled = traceSink.isEnabled()
         if (traceEnabled) traceSink.begin(PrototypeTrace.COMPOSE)
+        ObservePrototypeDevice(send)
         PrototypeSpecContent(runtime.renderModel(snapshot).root, snapshot.spec.theme, send)
         if (traceEnabled) traceSink.end()
       }

@@ -293,3 +293,81 @@ describe("platform events", () => {
     expect(prototypePlatformDeliveredEventOf(event)).toBeUndefined();
   });
 });
+
+describe("device platform module", () => {
+  const device = PROTOTYPE_PLATFORM_MODULES.device!;
+  const read = (pointer: string, requires: string[] = ["device"]) =>
+    validatePrototypeSpec(
+      spec(
+        { requires: { platform: requires } },
+        { type: "spacer", visibleWhen: { platform: pointer, equals: "x" } },
+      ),
+    );
+
+  test("is a production module with no calls and a debounced changed event", () => {
+    expect(device.placeholder).toBeUndefined();
+    expect(device.capability).toBe("prototype_platform_device_v1");
+    expect(Object.keys(device.calls)).toEqual([]);
+    expect(device.events.changed).toEqual({ sensitive: false, debounceMs: 250 });
+    expect(prototypePlatformEventModule("device.changed")).toBe("device");
+  });
+
+  test("width classes are Android-only and the raw size class is iOS-only", () => {
+    const state = device.state!;
+    expect(state.widthClass?.platforms).toEqual(["android"]);
+    expect(state.heightClass?.platforms).toEqual(["android"]);
+    expect(state.posture?.platforms).toEqual(["android"]);
+    expect(state.sizeClass?.platforms).toEqual(["ios"]);
+    expect(state.widthClass?.breakpoints).toEqual([600, 840]);
+    expect(state.heightClass?.breakpoints).toEqual([480, 900]);
+    for (const key of ["os", "osVersion", "idiom", "windowWidth", "windowHeight", "pointer"]) {
+      expect(state[key]?.platforms).toEqual(["android", "ios"]);
+    }
+  });
+
+  test("every state key reads", () => {
+    for (const key of Object.keys(device.state!)) {
+      expect(read(`/device/${key}`).success).toBe(true);
+    }
+  });
+
+  test("a pointer that is not exactly one state key is refused", () => {
+    for (const pointer of ["/device/orientation", "/device/widthClass/x", "/device"]) {
+      const result = read(pointer);
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error).toEqual({
+          path: "root.visibleWhen.platform",
+          message: `Unknown platform state ${pointer}`,
+        });
+      }
+    }
+  });
+
+  test("a read without requires.platform names the module", () => {
+    const result = read("/device/widthClass", []);
+    expect(result.success).toBe(false);
+  });
+
+  test("the placeholder module still accepts any pointer", () => {
+    expect(
+      validatePrototypeSpec(
+        spec(
+          { requires: { platform: ["test"] } },
+          { type: "text", text: "{platform:/test/a/b/c}" },
+        ),
+      ).success,
+    ).toBe(true);
+  });
+
+  test("a device read needs prototype_platform_device_v1 and the vocabulary gate", () => {
+    const used = spec(
+      { requires: { platform: ["device"] } },
+      { type: "text", text: "{platform:/device/os}" },
+    );
+    expect(requiredPrototypeCapabilities(used)).toEqual([
+      "prototype_platform_device_v1",
+      PROTOTYPE_PLATFORM_CAPABILITY,
+    ]);
+  });
+});

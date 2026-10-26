@@ -59,10 +59,11 @@ export class IosSessionLogProvider implements SessionLogProvider {
     request: UnifiedLogWindowRequest,
     maxBytes: number,
     signal?: AbortSignal,
+    retain: "head" | "tail" = "head",
   ): Promise<UnifiedLogWindowResult> {
     return this.isPhysical(device)
       ? this.physical.collectUnifiedLog(device, appId, request, maxBytes, signal)
-      : this.simulator.collectUnifiedLog(device, appId, request, maxBytes, signal);
+      : this.simulator.collectUnifiedLog(device, appId, request, maxBytes, signal, retain);
   }
 
   private isPhysical(device: BootedDevice): boolean {

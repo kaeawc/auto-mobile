@@ -49,14 +49,35 @@ export function unifiedLogWindowResult(
   const buffer = Buffer.from(stdout, "utf8");
   const bounded = buffer.byteLength > maxBytes ? buffer.subarray(0, maxBytes) : buffer;
   return {
+    ...streamedUnifiedLogWindowResult(
+      request,
+      { text: bounded.toString("utf8"), totalBytes: buffer.byteLength },
+      details,
+    ),
+    truncated: bounded.byteLength < buffer.byteLength,
+  };
+}
+
+/** Build metadata from output that has already been bounded during streaming. */
+export function streamedUnifiedLogWindowResult(
+  request: UnifiedLogWindowRequest,
+  output: { text: string; totalBytes: number },
+  details: {
+    predicate: string;
+    mechanism: UnifiedLogMechanism;
+    collectionMs: number;
+    timeoutMs: number;
+  },
+): UnifiedLogWindowResult {
+  return {
     lastSeconds: request.lastSeconds,
     level: request.level,
     predicate: details.predicate,
     mechanism: details.mechanism,
     collectionMs: details.collectionMs,
     timeoutMs: details.timeoutMs,
-    byteCount: buffer.byteLength,
-    truncated: bounded.byteLength < buffer.byteLength,
-    text: bounded.toString("utf8"),
+    byteCount: output.totalBytes,
+    truncated: Buffer.byteLength(output.text) < output.totalBytes,
+    text: output.text,
   };
 }

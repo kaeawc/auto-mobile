@@ -10,6 +10,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowDisplayManager
 
 /** The non-default-display floor for prototypes, per API level (#9934 item 4). */
 @RunWith(RobolectricTestRunner::class)
@@ -48,5 +49,32 @@ class PrototypeDisplayRoutingTest {
   fun `API 30 and 31 are below the floor`() {
     assertEquals(true, PrototypeDisplayRouting.error(1, 30) != null)
     assertEquals(true, PrototypeDisplayRouting.error(2, 31) != null)
+  }
+
+  @Test
+  fun `a display hot-plugged after the service bound is refused below API 34 until it rebinds`() {
+    val provider = displays(32)
+    val hotPlugged = ShadowDisplayManager.addDisplay("w800dp-h480dp")
+    val reason = provider.unsupportedReason(hotPlugged)
+    assertTrue(reason.orEmpty().contains("connected after the accessibility service started"))
+    assertNull(provider.unsupportedReason(0))
+    provider.onServiceBound()
+    assertNull(provider.unsupportedReason(hotPlugged))
+  }
+
+  @Test
+  fun `a display present when the service bound is allowed and API 34 is unchanged`() {
+    val present = ShadowDisplayManager.addDisplay("w800dp-h480dp")
+    assertNull(displays(32).unsupportedReason(present))
+    val later = ShadowDisplayManager.addDisplay("w800dp-h480dp")
+    assertNull(displays(PrototypeDisplayHotPlug.FIXED_API).unsupportedReason(later))
+  }
+
+  @Test
+  fun `the hot-plug check is a pure function of the bound display set`() {
+    assertNull(PrototypeDisplayHotPlug.error(0, 32, emptySet()))
+    assertNull(PrototypeDisplayHotPlug.error(3, 33, setOf(0, 3)))
+    assertNotNull(PrototypeDisplayHotPlug.error(3, 33, setOf(0)))
+    assertNull(PrototypeDisplayHotPlug.error(3, 34, setOf(0)))
   }
 }

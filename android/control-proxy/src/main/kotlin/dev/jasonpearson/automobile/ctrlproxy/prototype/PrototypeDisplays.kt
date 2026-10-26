@@ -32,6 +32,28 @@ object PrototypeDisplayRouting {
 }
 
 /**
+ * Displays hot-plugged after the accessibility service connected get a null overlay token on
+ * Android 12L and 13, so adding a window there throws BadTokenException although the capability is
+ * advertised (#15318: API 32 displays 3-5 and API 33 displays 3-6 failed 7 of 7 while displays
+ * present at bind succeeded). API 34 and newer are unverified and left unchanged.
+ */
+object PrototypeDisplayHotPlug {
+  const val FIXED_API = 34
+
+  fun error(displayId: Int, sdkInt: Int, boundDisplayIds: Set<Int>): String? =
+    if (
+      displayId != Display.DEFAULT_DISPLAY &&
+        sdkInt < FIXED_API &&
+        displayId !in boundDisplayIds
+    )
+      "Display $displayId was connected after the accessibility service started; " +
+        "Android 12L and 13 give prototype windows no overlay token for it. " +
+        "Disable and re-enable the AutoMobile accessibility service with the display attached, " +
+        "or use a display that was present at that point"
+    else null
+}
+
+/**
  * Everything the host needs to attach a window to one display: a display-specific context (also
  * used to inflate the content, so density and insets are the display's own), its WindowManager, and
  * a density read taken afresh at every layout. [navigationBarBottomPx] is the visible navigation
@@ -64,6 +86,20 @@ class AndroidPrototypeDisplays(
   private val service: Context,
   private val sdkInt: Int = Build.VERSION.SDK_INT,
 ) : PrototypeDisplayProvider, PrototypeDisplayWindows {
+  @Volatile private var boundDisplayIds: Set<Int> = presentDisplayIds()
+
+  /** Re-read the displays the accessibility service holds overlay tokens for; call on each connect. */
+  fun onServiceBound() {
+    boundDisplayIds = presentDisplayIds()
+  }
+
+  private fun presentDisplayIds(): Set<Int> =
+    (service.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager)
+      ?.displays
+      ?.map { it.displayId }
+      ?.toSet()
+      .orEmpty()
+
   private fun display(displayId: Int): Display? =
     (service.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager)?.getDisplay(displayId)
 
@@ -72,6 +108,7 @@ class AndroidPrototypeDisplays(
 
   override fun unsupportedReason(displayId: Int): String? =
     PrototypeDisplayRouting.error(displayId, sdkInt)
+      ?: PrototypeDisplayHotPlug.error(displayId, sdkInt, boundDisplayIds)
 
   @TargetApi(Build.VERSION_CODES.R)
   override fun open(displayId: Int, layer: PrototypeWindowLayer): PrototypeDisplayWindow? {

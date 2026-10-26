@@ -7,6 +7,7 @@ import type { BootedDevice } from "../../src/models";
 import { InMemoryPrototypeStatusStore } from "../../src/features/prototype/PrototypeStatusStore";
 import { prototypeOutputSchema, registerPrototypeTools } from "../../src/server/prototypeTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { FakePrototypeAssetCache } from "../fakes/FakePrototypeAssetCache";
 import { FakeCtrlProxy } from "../fakes/FakeCtrlProxy";
 import {
   FakePrototypeAgentClient,
@@ -246,7 +247,9 @@ let agent: FakePrototypeAgentClient;
 let store: InMemoryPrototypeStatusStore;
 let restore: () => void;
 let unsubscribe: () => void;
+let env: NodeJS.ProcessEnv;
 function setup() {
+  env = {};
   const timer = new FakeTimer();
   proxy = new FakeCtrlProxy(timer);
   proxy.setSupportedCommands(["prototype_patch_v1"]);
@@ -262,6 +265,12 @@ function setup() {
   });
   store = new InMemoryPrototypeStatusStore(timer);
   unsubscribe = registerPrototypeTools({
+    env,
+    shaderAssetCache: new FakePrototypeAssetCache(),
+    assetFileReader: {
+      stat: async () => ({ isFile: () => true, size: 23 }),
+      readFile: async () => Buffer.from("uniform float strength;"),
+    },
     clientFactory: () => proxy,
     agentConnections: { get: () => agent },
     store,
@@ -319,7 +328,11 @@ test.each(cases)(
     advertise(...(others ?? []));
     const refusedShow = await show(device, minimalSpec);
     expect(refusedShow.success).toBe(false);
-    expect(refusedShow.error).toContain(capability);
+    expect(refusedShow.error).toContain(
+      capability === "prototype_custom_shaders_v1" && device.platform === "ios"
+        ? "Android only"
+        : capability,
+    );
     expect(proxy.getPrototypeHistory()).toEqual([]);
     expect(agent.requests).toEqual([]);
     expect((await show(device, base)).success).toBe(true);
@@ -330,7 +343,11 @@ test.each(cases)(
     const sent = agent.requests.length;
     const refusedPatch = await patch(device, ops);
     expect(refusedPatch.success).toBe(false);
-    expect(refusedPatch.error).toContain(capability);
+    expect(refusedPatch.error).toContain(
+      capability === "prototype_custom_shaders_v1" && device.platform === "ios"
+        ? "Android only"
+        : capability,
+    );
     expect(refusedPatch.error).toBe(refusedShow.error);
     expect(requests(device)).toEqual([]);
     expect(proxy.getPrototypeHistory()).toHaveLength(device.platform === "android" ? 1 : 0);
@@ -352,7 +369,9 @@ test.each(cases)(
     if (capability === "prototype_custom_shaders_v1") {
       const refused = await show(device, minimalSpec);
       expect(refused.success).toBe(false);
-      expect(refused.error).toContain("AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS=1");
+      expect(refused.error).toContain(
+        device.platform === "ios" ? "Android only" : "AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS=1",
+      );
       return;
     }
     expect((await show(device, minimalSpec)).success).toBe(true);
@@ -443,4 +462,73 @@ test("shader opt-in refusal also covers host-only screenMap and save specs", asy
     expect(refused.error).toContain("AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS=1");
   }
   expect(proxy.getPrototypeHistory()).toEqual([]);
+});
+
+test("Android shader gate accepts env-on show, assets and patch with capability advertised", async () => {
+  env.AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS = "1";
+  advertise("prototype_custom_shaders_v1");
+  const device: BootedDevice = { platform: "android", deviceId: "parity-android", name: "Fake" };
+  const { minimalSpec, ops } = fixtures.prototype_custom_shaders_v1;
+  expect(
+    (
+      await call(device, {
+        action: "show",
+        spec: minimalSpec,
+        assets: [{ id: "effect", path: "/effect.agsl" }],
+      })
+    ).success,
+  ).toBe(true);
+  expect(proxy.getPrototypeHistory()).toHaveLength(1);
+  expect(
+    await patch(device, [{ op: "replace", path: "/state/liked", value: true }], {
+      baseRevision: 1,
+    }),
+  ).toMatchObject({ success: true });
+  expect((await show(device, base)).success).toBe(true);
+  expect((await patch(device, ops)).success).toBe(true);
+});
+
+test("iOS shader refusal wins with env-on and capability advertised, including patches", async () => {
+  env.AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS = "1";
+  advertise("prototype_custom_shaders_v1");
+  const device: BootedDevice = { platform: "ios", deviceId: "parity-ios", name: "Fake" };
+  const { minimalSpec, ops } = fixtures.prototype_custom_shaders_v1;
+  for (const action of ["show", "save", "screenMap"]) {
+    const refused = await call(device, {
+      action,
+      spec: minimalSpec,
+      ...(action === "save" ? { label: "Effect" } : {}),
+    });
+    expect(refused.success).toBe(false);
+    expect(refused.error).toContain("Android only");
+  }
+  expect((await show(device, base)).success).toBe(true);
+  const refused = await patch(device, ops);
+  expect(refused.success).toBe(false);
+  expect(refused.error).toContain("Android only");
+  expect(agent.patchRequests).toEqual([]);
+});
+
+test("Android shader capability is required even with host opt-in enabled", async () => {
+  env.AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS = "1";
+  const device: BootedDevice = { platform: "android", deviceId: "parity-android", name: "Fake" };
+  const refused = await show(device, fixtures.prototype_custom_shaders_v1.minimalSpec);
+  expect(refused.success).toBe(false);
+  expect(refused.error).toContain("does not advertise prototype_custom_shaders_v1");
+  expect(proxy.getPrototypeHistory()).toEqual([]);
+});
+
+test("Android shader asset repair retains the injected opt-in environment", async () => {
+  env.AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS = "1";
+  advertise("prototype_custom_shaders_v1");
+  proxy.queuePrototypeResults({ success: true, missingAssets: ["effect"] }, { success: true });
+  const device: BootedDevice = { platform: "android", deviceId: "parity-android", name: "Fake" };
+  const accepted = await call(device, {
+    action: "show",
+    spec: fixtures.prototype_custom_shaders_v1.minimalSpec,
+    assets: [{ id: "effect", path: "/effect.agsl" }],
+  });
+  expect(accepted.success).toBe(true);
+  expect(proxy.getPrototypeAssetHistory()).toHaveLength(2);
+  expect(proxy.getPrototypeHistory()).toHaveLength(2);
 });

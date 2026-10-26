@@ -30,6 +30,7 @@ interface PrototypeAssetFiles {
 data class PrototypeAssetLimits(
   val maxAssetBytes: Int = PrototypeAssetContract.MAX_PROTOTYPE_ASSET_BYTES,
   val maxFontBytes: Int = PrototypeAssetContract.MAX_PROTOTYPE_FONT_ASSET_BYTES,
+  val maxShaderBytes: Int = PrototypeAssetContract.MAX_PROTOTYPE_SHADER_ASSET_BYTES,
   val maxCount: Int = PrototypeAssetContract.MAX_PROTOTYPE_ASSET_COUNT,
   val maxTotalBytes: Int = PrototypeAssetContract.MAX_PROTOTYPE_ASSET_TOTAL_BYTES,
   val maxIdLength: Int = PrototypeAssetContract.MAX_PROTOTYPE_ASSET_ID_LENGTH,
@@ -403,6 +404,11 @@ class PrototypeAssetStore(
           PrototypeAssetRejection.TOO_LARGE,
           "Prototype asset is ${bytes.size} bytes; the limit is ${maxBytesFor(mimeType)}.",
         )
+      mimeType == "application/vnd.automobile.agsl" ->
+        rejected(
+          PrototypeAssetRejection.UNSUPPORTED_MIME_TYPE,
+          "Custom AGSL shaders are not supported by this runtime yet; no shader was stored.",
+        )
       !matchesSignature(mimeType, bytes) ->
         rejected(
           PrototypeAssetRejection.CONTENT_MISMATCH,
@@ -412,8 +418,12 @@ class PrototypeAssetStore(
     }
 
   private fun maxBytesFor(mimeType: String) =
-    if (isFontMimeType(mimeType)) minOf(limits.maxFontBytes, limits.maxAssetBytes)
-    else limits.maxAssetBytes
+    when {
+      mimeType == "application/vnd.automobile.agsl" ->
+        minOf(limits.maxShaderBytes, limits.maxAssetBytes)
+      isFontMimeType(mimeType) -> minOf(limits.maxFontBytes, limits.maxAssetBytes)
+      else -> limits.maxAssetBytes
+    }
 
   private fun rejected(reason: PrototypeAssetRejection, message: String) =
     PrototypeAssetPutResult.Rejected(reason, message)

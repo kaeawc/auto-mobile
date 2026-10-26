@@ -148,7 +148,7 @@ export async function performPrototypeAction(
             : target.ios?.supportsCapability(PROTOTYPE_PATCH_CAPABILITY) === true,
         // A patched node may add or drop a via "device" localhost request (#12530): staged here.
         specRefusal: async (spec) =>
-          (await specCapabilityRefusal(target, spec, signal))?.error ??
+          (await specCapabilityRefusal(target, spec, signal, undefined, dependencies.env))?.error ??
           (await cachedPrototypeShaderAssetProblem(
             spec,
             device.deviceId,
@@ -180,7 +180,6 @@ async function performMutation(
   const source = prototypeEventSource(prototypeTarget.transport);
   // The device holds one active prototype, so presence is device-wide, not per session.
   const shown = shownOnDevice(store, scope, target);
-  const previouslyShown = shown !== undefined;
   const inPlace = args.action === "show" && shown !== undefined && args.reset !== true;
   // An older CtrlProxy re-shows a same-id prototype fresh on the display it is sent, so its pages
   // restart. It still validates before replacing, so a refused show leaves the old prototype and its
@@ -233,6 +232,7 @@ async function performMutation(
       ordering,
       undefined,
       sendPrototype(prototypeTarget, sendArgs, stage, signal, displayId, {
+        env: dependencies.env,
         superseded: () => isSuperseded(commits, scope, target, generation),
         beforeSend: async () => {
           // Last abort check before the grant, the event epoch and the device send.
@@ -278,7 +278,7 @@ async function performMutation(
         all: sendArgs.all,
       },
     );
-    await reversing.settle(result.success, previouslyShown, isIndeterminate(result));
+    await reversing.settle(result.success, shown !== undefined, isIndeterminate(result));
     const placed = {
       ...placedDisplay(args, shown, comparable, result.success),
       chrome: resolved.chrome,
@@ -291,7 +291,7 @@ async function performMutation(
           result,
           placed,
           inPlace,
-          previouslyShown,
+          previouslyShown: shown !== undefined,
           startedFreshEvents: ordering.startedFreshEvents,
         });
     const { warning: visibilityWarning, ...visibility } = await prototypeAppLayerVisibilityOutput({

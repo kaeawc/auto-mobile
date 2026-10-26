@@ -11,6 +11,7 @@ import { PROTOVIEWER_IMPORTED_WARNING } from "../../src/features/prototype/proto
 import { prototypeOutputSchema, registerPrototypeTools } from "../../src/server/prototypeTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { BootedDevice } from "../../src/models";
+import { FakeHierarchyCapture } from "../fakes/FakeHierarchyCapture";
 import { FakeCtrlProxy } from "../fakes/FakeCtrlProxy";
 import { FakePrototypeAssetFileReader } from "../fakes/FakePrototypeAssetFileReader";
 import { FakeDeviceWindowCacheInvalidator } from "../fakes/FakeDeviceWindowCacheInvalidator";
@@ -80,6 +81,8 @@ describe("prototype save and open through ProtoViewer", () => {
     dispose = registerPrototypeTools({
       clientFactory: () => proxy,
       adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
+      anchorHierarchyCaptureFactory: () =>
+        new FakeHierarchyCapture(() => ({ hierarchy: {} }), "android", timer),
       protoViewerFactory: () => fake,
       iosSavedPrototypeInstaller: {
         install: async (input) => {

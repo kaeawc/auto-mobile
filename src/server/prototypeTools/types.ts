@@ -47,6 +47,8 @@ export interface PrototypeTarget {
   >;
 }
 export interface PrototypeToolDependencies {
+  /** Host feature gates; tests supply an isolated environment. */
+  env?: NodeJS.ProcessEnv;
   shaderAssetCache?: Pick<
     import("../../features/prototype/prototypeAssetCache").PrototypeAssetCache,
     "get"
@@ -95,6 +97,7 @@ export interface AssetStage {
 }
 
 export interface AssetReaders {
+  env?: NodeJS.ProcessEnv;
   assetFileReader: PrototypeAssetFileReader;
   observationScreenshotReader: PrototypeObservationScreenshotReader;
 }
@@ -111,6 +114,10 @@ export type PrototypeHandlerDependencies = {
   timer?: Timer;
 } & Pick<
   PrototypeToolDependencies,
-  "adbFactory" | "lastRenderedObservation" | "anchorHierarchyCaptureFactory" | "shaderAssetCache"
+  | "adbFactory"
+  | "lastRenderedObservation"
+  | "anchorHierarchyCaptureFactory"
+  | "shaderAssetCache"
+  | "env"
 >;
 export type PrototypeOutput = z.infer<typeof prototypeOutputSchema>;

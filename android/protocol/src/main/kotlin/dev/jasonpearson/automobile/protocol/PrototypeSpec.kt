@@ -553,7 +553,6 @@ data class PrototypeTextSpanStyle(
   val textSize: Double? = null,
   val letterSpacing: Double? = null,
   val fontFamily: PrototypeFontFamily? = null,
-  val shader: PrototypeShader? = null,
   val background: PrototypeModeValue? = null,
 )
 

@@ -19,7 +19,10 @@ import {
   type PrototypeStatusStore,
 } from "../../features/prototype/PrototypeStatusStore";
 import type { PrototypeShownSpecs } from "../../features/prototype/PrototypeShownSpecs";
-import { prototypeShaderOptInProblem } from "../../features/prototype/prototypeShaders";
+import {
+  prototypeShaderOptInProblem,
+  prototypeIosShaderProblem,
+} from "../../features/prototype/prototypeShaders";
 import { prototypeEventSource } from "../../features/prototype/PrototypeTransport";
 import { AndroidPrototypeTransport } from "../../features/prototype/androidPrototypeTransport";
 import {
@@ -142,6 +145,10 @@ function prototypePlatformError(
     return new ActionableError(
       "Prototypes need an Android device or an iOS simulator. Target one with deviceId or sessionUuid.",
     );
+  }
+  const shaderProblem = prototypeIosShaderProblem(args.spec, args.assets);
+  if (shaderProblem) {
+    return new ActionableError(shaderProblem);
   }
   if (args.display !== undefined) {
     return new ActionableError("display is Android only; omit display on iOS.");
@@ -382,12 +389,14 @@ async function withSpecFromPath(
 /** Keep expansion and the host opt-in ahead of every spec-consuming route, including save. */
 function expandedPrototypeInput(
   loaded: Awaited<ReturnType<typeof withSpecFromPath>>,
+  device: BootedDevice,
+  env: NodeJS.ProcessEnv | undefined,
 ): Awaited<ReturnType<typeof withSpecFromPath>> {
   if ("error" in loaded) {
     return loaded;
   }
   const args = withExpandedSpec(loaded.args);
-  const error = prototypeShaderOptInProblem(args.spec);
+  const error = device.platform === "ios" ? undefined : prototypeShaderOptInProblem(args.spec, env);
   return error ? { error } : { args };
 }
 
@@ -423,6 +432,7 @@ export function registerPrototypeTools(dependencies: PrototypeToolDependencies =
     dependencies.cacheInvalidator ?? new DefaultDeviceWindowCacheInvalidator();
   const clock = prototypeClock(dependencies);
   const assetReaders: AssetReaders = {
+    env: dependencies.env,
     assetFileReader: dependencies.assetFileReader ?? nodePrototypeAssetFileReader,
     observationScreenshotReader:
       dependencies.observationScreenshotReader ?? readObservationScreenshotBytes,
@@ -450,7 +460,7 @@ export function registerPrototypeTools(dependencies: PrototypeToolDependencies =
     const loaded = readsSpecFile(parsed.data)
       ? await withSpecFromPath(parsed.data, assetReaders.assetFileReader, signal)
       : { args: parsed.data };
-    const prepared = expandedPrototypeInput(loaded);
+    const prepared = expandedPrototypeInput(loaded, device, dependencies.env);
     if ("error" in prepared) {
       return responseFor({ success: false, error: prepared.error });
     }
@@ -511,6 +521,7 @@ export function registerPrototypeTools(dependencies: PrototypeToolDependencies =
       lastRenderedObservation: dependencies.lastRenderedObservation,
       anchorHierarchyCaptureFactory: dependencies.anchorHierarchyCaptureFactory,
       shaderAssetCache: dependencies.shaderAssetCache,
+      env: dependencies.env,
     };
     const dispatched = await withSavedReverses(handlerDependencies, device, args, () =>
       dispatchPrototypeSavedAction(

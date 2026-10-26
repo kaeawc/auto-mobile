@@ -23,6 +23,13 @@ class PrototypeCustomShaderTest {
   }
 
   @Test
+  fun `rich text span styles do not accept shaders`() {
+    val richText =
+      """{"id":"shader","window":{"placement":{"type":"fullscreen"}},"root":{"type":"text","spans":[{"text":"Effect","style":{"shader":{"asset":"effect"}}}]}}"""
+    assertIs<PrototypeSpecValidation.Failure>(PrototypeSpecValidator.validate(richText))
+  }
+
+  @Test
   fun `bundle path explicitly refuses shader spec and MIME`() {
     val failure =
       org.junit.jupiter.api.assertThrows<PrototypeBundleFailure> {

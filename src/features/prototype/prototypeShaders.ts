@@ -1,9 +1,24 @@
+import { extname } from "node:path";
 import { boundedPrototypeError } from "./prototypeErrors";
 import { ENV, readEnvRaw } from "../../config/env";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
 import { record } from "./prototypeTemplate";
 import type { PrototypeAssetUpload } from "./prototypeAssets";
 import { PROTOTYPE_SHADER_MIME_TYPE, validatePrototypeShaderSource } from "./prototypeShaderSource";
+
+export const PROTOTYPE_SHADERS_ANDROID_ONLY_ERROR =
+  "Custom AGSL shaders (style.shader and .agsl assets) are Android only; remove them on iOS.";
+
+/** Shared tool/installer boundary: refuse even unreferenced AGSL file uploads on iOS. */
+export function prototypeIosShaderProblem(
+  spec: unknown,
+  assets: readonly { path?: string }[] = [],
+): string | undefined {
+  return prototypeShaderFields(spec).length ||
+    assets.some(({ path }) => path && extname(path).toLowerCase() === ".agsl")
+    ? PROTOTYPE_SHADERS_ANDROID_ONLY_ERROR
+    : undefined;
+}
 
 export const PROTOTYPE_SHADERS_OPT_IN_ERROR =
   "Custom prototype shaders are off by default. Set AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS=1 in the host environment, then restart the daemon; use an Android device advertising prototype_custom_shaders_v1.";

@@ -29,8 +29,13 @@ class AutoMobilePrototypeCapabilitiesTest {
     }
   }
 
-  /** The test module is a placeholder no production runtime advertises. */
-  private val exclusions = setOf("prototype_platform_test_v1")
+  private val exclusions =
+    setOf(
+      // The test module is a placeholder no production runtime advertises.
+      "prototype_platform_test_v1",
+      // #15131: slice 1 defines the contract; Kotlin runtime support arrives in slice 2.
+      "prototype_custom_shaders_v1",
+    )
 
   @Test
   fun `shared spec capabilities are supported`() {

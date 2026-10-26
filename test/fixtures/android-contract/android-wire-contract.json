@@ -8197,12 +8197,6 @@
         "hasDefault": true
       },
       {
-        "name": "shader",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShader",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "background",
         "type": "object:PrototypeModeValue",
         "nullable": true,

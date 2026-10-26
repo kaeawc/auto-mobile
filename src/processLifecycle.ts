@@ -95,6 +95,7 @@ export class ProcessLifecycleHandlers {
   private shutdownInProgress = false;
   private readonly shutdownStarted = Promise.withResolvers<void>();
   private shutdownHandler: ProcessShutdownHandler | undefined;
+  private shutdownExitCode: number | undefined;
   private shutdownTimeoutHandler: ProcessShutdownTimeoutHandler | undefined;
   private fatalProcessHandler: FatalProcessHandler | undefined;
 
@@ -134,6 +135,11 @@ export class ProcessLifecycleHandlers {
 
   setFatalProcessHandler(handler: FatalProcessHandler): void {
     this.fatalProcessHandler = handler;
+  }
+
+  /** Exit code once the shutdown handler completes in time; defaults to 0 (a timeout is 1). */
+  setShutdownExitCode(code: number): void {
+    this.shutdownExitCode = code;
   }
 
   /**
@@ -246,7 +252,7 @@ export class ProcessLifecycleHandlers {
 
     try {
       const shutdownCompleted = await this.runShutdownHandler(signal);
-      let exitCode = 0;
+      let exitCode = this.shutdownExitCode ?? 0;
       if (!shutdownCompleted) {
         writeEmergencyLog(`Shutdown timed out after ${this.shutdownTimeoutMs}ms; forcing exit`);
         exitCode = (await this.runShutdownTimeoutHandler())?.exitCode ?? 1;
@@ -371,6 +377,11 @@ export function setProcessShutdownHandler(
   timeoutHandler?: ProcessShutdownTimeoutHandler,
 ): void {
   processLifecycleHandlers.setShutdownHandler(handler, timeoutHandler);
+}
+
+/** Make an orderly shutdown exit non-zero, e.g. 130 for an interrupted command (#15312). */
+export function setProcessShutdownExitCode(code: number): void {
+  processLifecycleHandlers.setShutdownExitCode(code);
 }
 
 export function setFatalProcessHandler(handler: FatalProcessHandler): void {

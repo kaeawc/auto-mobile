@@ -7,7 +7,7 @@ import type { Timer } from "../../utils/SystemTimer";
 import { SimCtlClient, type SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { readHostProcessTable } from "../../devices/bootAdmission/readHostProcessTable";
 import { SIMCTL_LIST_DEVICES_ARGS, parseSimctlInventory } from "./simctlInventory";
-import { readHostFootprints, withFootprints } from "./footprintSnapshot";
+import { CachedFootprintReader, withFootprints, type FootprintReader } from "./footprintSnapshot";
 import type {
   HostProcessRow,
   HostResources,
@@ -64,6 +64,8 @@ export class CommandFleetHostSource implements FleetHostSource {
     private readonly os: HostOsInfo = nodeHostOsInfo,
     /** The canonical simctl reader; the inventory is read through it, not a second `xcrun` path. */
     private readonly simctl: Pick<SimCtl, "executeCommandArgs"> = new SimCtlClient(null),
+    /** Footprints come from one shared, cached `top` run, never one per snapshot (#15307). */
+    private readonly footprintReader: FootprintReader = new CachedFootprintReader(executor, timer),
   ) {}
 
   async readHostSnapshot(options: FleetReadOptions = {}): Promise<HostSnapshot> {
@@ -90,7 +92,7 @@ export class CommandFleetHostSource implements FleetHostSource {
   ): Promise<{ processes: HostProcessRow[]; processesError?: string; footprintError?: string }> {
     const [table, footprints] = await Promise.allSettled([
       readHostProcessTable(this.executor, options),
-      readHostFootprints(this.executor, options),
+      this.footprintReader.read(options),
     ]);
     if (table.status === "rejected") {
       logger.warn(`host process table read failed: ${errorMessage(table.reason)}`, table.reason);

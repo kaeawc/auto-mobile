@@ -3,11 +3,13 @@ import { readFileSync } from "node:fs";
 import {
   AndroidProtoViewer,
   PROTOVIEWER_PREPARE_TIMEOUT_MS,
+} from "../../../../src/features/prototype/protoViewer/AndroidProtoViewer";
+import {
   PROTOVIEWER_RESULT_POLL_MS,
   ProtoViewerEntryPointMissingError,
   ProtoViewerStorageError,
   type ProtoViewerTempFiles,
-} from "../../../../src/features/prototype/protoViewer/AndroidProtoViewer";
+} from "../../../../src/features/prototype/protoViewer/protoViewerDevice";
 import { ActionableError } from "../../../../src/models/ActionableError";
 import type { ExecResult } from "../../../../src/models";
 import type { AdbExecuteOptions } from "../../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -191,7 +193,7 @@ describe("AndroidProtoViewer", () => {
   const shellCommands = () =>
     adb.getExecutedCommands().filter((command) => command.startsWith("shell"));
 
-  beforeEach(() => {
+  beforeEach(async () => {
     adb = new ScriptedProtoViewerAdb();
     timer = new FakeTimer();
     timer.enableAutoAdvance();
@@ -203,13 +205,16 @@ describe("AndroidProtoViewer", () => {
       tempFiles: temp,
     });
     adb.setCommandResponse("am get-current-user", exec("0\n"));
+    adb.setCommandResponse("pm list packages --user 0", exec(`package:${PACKAGE}\n`));
+    expect(await viewer.installed()).toBe(true);
+    adb.clearHistory();
   });
 
-  test("reports the current user only when ProtoViewer is installed for it", async () => {
+  test("reports whether ProtoViewer is installed for the current user", async () => {
     adb.setCommandResponse("pm list packages --user 0", exec(`package:${PACKAGE}\n`));
-    expect(await viewer.installedUser()).toBe(0);
+    expect(await viewer.installed()).toBe(true);
     adb.setCommandResponse("pm list packages --user 0", exec("package:com.example\n"));
-    expect(await viewer.installedUser()).toBeUndefined();
+    expect(await viewer.installed()).toBe(false);
   });
 
   test("the captured API 37 failure: a remote cat of a missing result exits 1 and adb throws", async () => {
@@ -228,7 +233,7 @@ describe("AndroidProtoViewer", () => {
         adb.appWritesResult(request, imported("It's mine"));
       }
     });
-    const result = await viewer.importBundle(0, new Uint8Array([1, 2, 3]), "It's mine", 5000);
+    const result = await viewer.importBundle(new Uint8Array([1, 2, 3]), "It's mine", 5000);
 
     expect(result).toEqual(imported("It's mine"));
     expect(temp.written).toEqual([new Uint8Array([1, 2, 3])]);
@@ -259,7 +264,7 @@ describe("AndroidProtoViewer", () => {
   test("folders the app already made are not prepared again", async () => {
     adb.appCreatesFolders();
     adb.whenLaunched(({ request }) => adb.appWritesResult(request, imported()));
-    await viewer.importBundle(0, new Uint8Array([1]), undefined, 5000);
+    await viewer.importBundle(new Uint8Array([1]), undefined, 5000);
     expect(shellCommands()).toEqual([
       READY_PROBE,
       `${START} -a ${PACKAGE}.mcp.IMPORT --es request ${REQUEST}`,
@@ -278,7 +283,7 @@ describe("AndroidProtoViewer", () => {
         2,
       ),
     );
-    const result = await viewer.importBundle(0, new Uint8Array([1]), undefined, 5000);
+    const result = await viewer.importBundle(new Uint8Array([1]), undefined, 5000);
     expect(result).toEqual({
       status: "rejected",
       request: REQUEST,
@@ -294,7 +299,7 @@ describe("AndroidProtoViewer", () => {
 
   test("gives up at the deadline, says the save may have landed, and still removes its files", async () => {
     adb.appCreatesFolders();
-    await expect(viewer.importBundle(0, new Uint8Array([1]), undefined, 1000)).rejects.toThrow(
+    await expect(viewer.importBundle(new Uint8Array([1]), undefined, 1000)).rejects.toThrow(
       "may still have saved the prototype",
     );
     expect(timer.getSleepCallCount()).toBe(1000 / PROTOVIEWER_RESULT_POLL_MS);
@@ -308,7 +313,7 @@ describe("AndroidProtoViewer", () => {
     // Cancelled while waiting for the app, after the bundle was pushed.
     adb.abortAfterCommand("if [ -f ", controller);
     await expect(
-      viewer.importBundle(0, new Uint8Array([1]), undefined, 5000, controller.signal),
+      viewer.importBundle(new Uint8Array([1]), undefined, 5000, controller.signal),
     ).rejects.toBeDefined();
     const cleanup = adb.getCommandCalls().find((call) => call.command.startsWith("shell rm -f"));
     expect(cleanup?.command).toContain(`${ROOT}/inbox/${REQUEST}.automobile-proto`);
@@ -324,17 +329,17 @@ describe("AndroidProtoViewer", () => {
         "Error type 3\nError: Activity class {dev.jasonpearson.automobile.protoviewer/dev.jasonpearson.automobile.protoviewer.McpActivity} does not exist.",
       ),
     );
-    await expect(
-      viewer.importBundle(0, new Uint8Array([1]), undefined, 1000),
-    ).rejects.toBeInstanceOf(ProtoViewerEntryPointMissingError);
+    await expect(viewer.importBundle(new Uint8Array([1]), undefined, 1000)).rejects.toBeInstanceOf(
+      ProtoViewerEntryPointMissingError,
+    );
     expect(adb.wasCommandExecuted("if [ -f ")).toBe(false);
   });
 
   test("the missing entry point is not hidden as a storage problem while preparing", async () => {
     adb.setCommandResponse("am start", exec("Error type 3\nError: Activity class does not exist."));
-    await expect(
-      viewer.importBundle(0, new Uint8Array([1]), undefined, 1000),
-    ).rejects.toBeInstanceOf(ProtoViewerEntryPointMissingError);
+    await expect(viewer.importBundle(new Uint8Array([1]), undefined, 1000)).rejects.toBeInstanceOf(
+      ProtoViewerEntryPointMissingError,
+    );
   });
 
   test("a launch the system dropped fails at once instead of waiting for the deadline", async () => {
@@ -343,7 +348,7 @@ describe("AndroidProtoViewer", () => {
       "am start",
       exec("Warning: Activity not started, its current task has been brought to the front"),
     );
-    await expect(viewer.importBundle(0, new Uint8Array([1]), undefined, 1000)).rejects.toThrow(
+    await expect(viewer.importBundle(new Uint8Array([1]), undefined, 1000)).rejects.toThrow(
       "Could not start ProtoViewer",
     );
     expect(adb.wasCommandExecuted("if [ -f ")).toBe(false);
@@ -362,7 +367,7 @@ describe("AndroidProtoViewer", () => {
         adb.appWritesResult(request, imported());
       }
     });
-    expect((await viewer.importBundle(0, new Uint8Array([1]), undefined, 5000)).status).toBe(
+    expect((await viewer.importBundle(new Uint8Array([1]), undefined, 5000)).status).toBe(
       "imported",
     );
     expect(shellCommands().slice(0, 3)).toEqual([
@@ -375,7 +380,7 @@ describe("AndroidProtoViewer", () => {
   test("an app that cannot create its folders (shell-owned) is a storage error before any push", async () => {
     // No answer to PREPARE: the app cannot write a result into a folder the shell owns.
     await expect(
-      viewer.importBundle(0, new Uint8Array([1]), undefined, 15_000),
+      viewer.importBundle(new Uint8Array([1]), undefined, 15_000),
     ).rejects.toBeInstanceOf(ProtoViewerStorageError);
     expect(adb.getExecutedArgv()).toEqual([]);
     expect(temp.written).toEqual([]);
@@ -389,7 +394,7 @@ describe("AndroidProtoViewer", () => {
     adb.whenLaunched(({ request }) =>
       adb.appWritesResult(request, { status: "prepared", request }),
     );
-    await expect(viewer.importBundle(0, new Uint8Array([1]), undefined, 5000)).rejects.toThrow(
+    await expect(viewer.importBundle(new Uint8Array([1]), undefined, 5000)).rejects.toThrow(
       "folders are not there",
     );
   });
@@ -399,9 +404,9 @@ describe("AndroidProtoViewer", () => {
     adb.refusePushWith(
       "adb: error: failed to copy: remote couldn't create file: Permission denied",
     );
-    await expect(
-      viewer.importBundle(0, new Uint8Array([1]), undefined, 5000),
-    ).rejects.toBeInstanceOf(ProtoViewerStorageError);
+    await expect(viewer.importBundle(new Uint8Array([1]), undefined, 5000)).rejects.toBeInstanceOf(
+      ProtoViewerStorageError,
+    );
     expect(temp.disposed).toBe(1);
     expect(adb.wasCommandExecuted("am start")).toBe(false);
   });
@@ -411,7 +416,7 @@ describe("AndroidProtoViewer", () => {
     adb.whenLaunched(({ request }) =>
       adb.appWritesResult(request, { ...JSON.parse(NO_PUSHED_PROTOTYPE), request }),
     );
-    const failure = viewer.importBundle(0, new Uint8Array([1]), undefined, 5000);
+    const failure = viewer.importBundle(new Uint8Array([1]), undefined, 5000);
     await expect(failure).rejects.toBeInstanceOf(ProtoViewerStorageError);
     await expect(failure).rejects.toThrow("No pushed prototype for this request");
     expect(adb.wasCommandExecuted(`shell rm -f '${ROOT}/results/${REQUEST}.json'`)).toBe(true);
@@ -422,9 +427,9 @@ describe("AndroidProtoViewer", () => {
     adb.whenLaunched(() =>
       adb.appWritesResult(REQUEST, { ...imported("x"), request: "mcp-stale" }),
     );
-    await expect(
-      viewer.importBundle(0, new Uint8Array([1]), undefined, 1000),
-    ).rejects.toBeInstanceOf(ActionableError);
+    await expect(viewer.importBundle(new Uint8Array([1]), undefined, 1000)).rejects.toBeInstanceOf(
+      ActionableError,
+    );
   });
 
   test("a malformed result is an error, while extra fields from a newer app are ignored", async () => {
@@ -432,13 +437,13 @@ describe("AndroidProtoViewer", () => {
     adb.whenLaunched(({ request }) =>
       adb.appWritesResult(request, { status: "imported", request }),
     );
-    await expect(viewer.importBundle(0, new Uint8Array([1]), undefined, 1000)).rejects.toThrow(
+    await expect(viewer.importBundle(new Uint8Array([1]), undefined, 1000)).rejects.toThrow(
       "unexpected result",
     );
     adb.whenLaunched(({ request }) =>
       adb.appWritesResult(request, { ...imported("x"), status: "opened", request, code: 7 }),
     );
-    expect((await viewer.open(0, LIBRARY_ID, 1000)).status).toBe("opened");
+    expect((await viewer.open(LIBRARY_ID, 1000)).status).toBe("opened");
   });
 
   test("an import answered with a prepare result is refused", async () => {
@@ -446,17 +451,21 @@ describe("AndroidProtoViewer", () => {
     adb.whenLaunched(({ request }) =>
       adb.appWritesResult(request, { status: "prepared", request }),
     );
-    await expect(viewer.importBundle(0, new Uint8Array([1]), undefined, 1000)).rejects.toThrow(
+    await expect(viewer.importBundle(new Uint8Array([1]), undefined, 1000)).rejects.toThrow(
       "prepare result",
     );
   });
 
   test("open starts the guarded activity with the library id for the given user", async () => {
+    adb.setCommandResponse("am get-current-user", exec("10\n"));
+    adb.setCommandResponse("pm list packages --user 10", exec(`package:${PACKAGE}\n`));
+    expect(await viewer.installed()).toBe(true);
+    adb.clearHistory();
     const root10 = `/storage/emulated/10/Android/data/${PACKAGE}/files/mcp`;
     adb.whenLaunched(({ request }) =>
       adb.appWritesResult(request, { ...imported("Demo"), status: "opened" }, 0, root10),
     );
-    const result = await viewer.open(10, LIBRARY_ID, 5000);
+    const result = await viewer.open(LIBRARY_ID, 5000);
     expect(result.status).toBe("opened");
     expect(adb.getExecutedCommands()).toEqual([
       `shell am start -W --activity-multiple-task --user 10 -n ${PACKAGE}/.McpActivity -a ${PACKAGE}.mcp.OPEN --es request ${REQUEST} --es libraryId '${LIBRARY_ID}'`,

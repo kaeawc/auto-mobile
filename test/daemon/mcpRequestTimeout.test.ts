@@ -22,7 +22,7 @@ import {
   DEFAULT_PROTOTYPE_EVENT_TIMEOUT_MS,
   MAX_PROTOTYPE_EVENT_TIMEOUT_MS,
 } from "../../src/features/prototype/prototypeEventTimeout";
-import { PROTOVIEWER_DEFAULT_TIMEOUT_MS } from "../../src/features/prototype/protoViewer/AndroidProtoViewer";
+import { PROTOVIEWER_DEFAULT_TIMEOUT_MS } from "../../src/features/prototype/protoViewer/protoViewerDevice";
 import {
   DEFAULT_PROTOTYPE_ASSET_TIMEOUT_MS,
   MAX_PROTOTYPE_ASSET_COUNT,

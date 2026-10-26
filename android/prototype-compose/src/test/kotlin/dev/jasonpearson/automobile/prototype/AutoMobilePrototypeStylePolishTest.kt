@@ -54,13 +54,15 @@ class AutoMobilePrototypeStylePolishTest {
 
   @Test
   fun `style polish corpus fixture renders without crashing`() {
-    val input = fixtureFile("prototype-spec/valid").resolve("theme-modes-style-polish-v2.json").readText()
+    val input =
+      fixtureFile("prototype-spec/valid").resolve("theme-modes-style-polish-v2.json").readText()
     render(input)
   }
 
   @Test
   fun `base style renders continuous corners and extreme shadow layers`() {
-    val input = fixtureFile("prototype-spec/valid").resolve("theme-modes-style-polish-v2.json").readText()
+    val input =
+      fixtureFile("prototype-spec/valid").resolve("theme-modes-style-polish-v2.json").readText()
     val document = Json.parseToJsonElement(input).jsonObject
     render(
       JsonObject(document + ("state" to JsonObject(mapOf("active" to JsonPrimitive(false)))))

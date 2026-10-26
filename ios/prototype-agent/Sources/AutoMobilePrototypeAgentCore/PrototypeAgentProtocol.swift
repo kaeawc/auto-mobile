@@ -52,6 +52,7 @@ enum PrototypeAgentProtocol {
         "prototype_format_v1",
         menusCapability,
         stackCapability,
+        "prototype_stack_transitions_v1",
         emitContextCapability,
         checksCapability,
         identifierTestTagOnlyCapability,

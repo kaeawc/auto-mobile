@@ -515,6 +515,7 @@ struct PrototypeAction: Decodable, Sendable {
     let page: JSONValue?
     let stack: String?
     let screen: String?
+    let transition: PrototypeStackTransition?
     /// `setData`/`appendData`/`removeData`: `/data/<pointer>`, a whole `{index}` segment bound per
     /// repeat row at expansion (#12519).
     let path: String?
@@ -546,7 +547,7 @@ struct PrototypeAction: Decodable, Sendable {
     let onError: [PrototypeAction]?
 
     private enum CodingKeys: String, CodingKey {
-        case type, name, payload, context, pager, page, stack, screen, path, key, value
+        case type, name, payload, context, pager, page, stack, screen, transition, path, key, value
         case id, afterMs, everyMs, maxRuns, actions
         case incrementAmount = "by"
         case requireValid, method, url, headers, query, body, into, statusKey, via, timeoutMs, onSuccess, onError
@@ -560,7 +561,7 @@ struct PrototypeAction: Decodable, Sendable {
         into: String? = nil, statusKey: String? = nil, via: String? = nil, timeoutMs: Double? = nil,
         onSuccess: [PrototypeAction]? = nil, onError: [PrototypeAction]? = nil,
         id: String? = nil, afterMs: Int? = nil, everyMs: Int? = nil, maxRuns: Int? = nil,
-        actions: [PrototypeAction]? = nil
+        actions: [PrototypeAction]? = nil, transition: PrototypeStackTransition? = nil
     ) {
         self.id = id
         self.afterMs = afterMs
@@ -575,6 +576,7 @@ struct PrototypeAction: Decodable, Sendable {
         self.page = page
         self.stack = stack
         self.screen = screen
+        self.transition = transition
         self.path = path
         self.key = key
         self.value = value
@@ -726,7 +728,8 @@ final class PrototypeNode: Decodable {
     let enabledWhen: Condition?
     let checks: [PrototypeCheck]?
     let validateOn: PrototypeValidateOn?
-    /// The `visibleWhen` enter/exit: `none`, `fade`, `expand` or `slide`; absent is fade + expand.
+    /// Stack navigation, or other nodes' `visibleWhen` enter/exit (`none`, `fade`, `expand`, `slide`).
+    /// Absent visibility transitions use fade + expand; stacks always use that visibility default.
     let transition: String?
     let safeAreaPadding: SafeAreaPadding?
     /// Screen placement resolved by the host (#9316); see `PrototypeAnchor`.
@@ -740,6 +743,8 @@ final class PrototypeNode: Decodable {
     let child: PrototypeNode?
     let start: String?
     let screens: [String: PrototypeNode]?
+    /// Structured screen definitions distinguish content edits from an unchanged navigation rebuild.
+    let screenDefinitions: JSONValue?
     let text: String?
     let spans: [PrototypeTextSpan]?
     /// Mentions, hashtags and URLs in `text` as links (#14233).
@@ -928,6 +933,7 @@ final class PrototypeNode: Decodable {
         span = try container.decodeIfPresent(Int.self, forKey: .span)
         start = try container.decodeIfPresent(String.self, forKey: .start)
         screens = try container.decodeIfPresent([String: PrototypeNode].self, forKey: .screens)
+        screenDefinitions = try container.decodeIfPresent(JSONValue.self, forKey: .screens)
         spans = try container.decodeIfPresent([PrototypeTextSpan].self, forKey: .spans)
         linkify = try container.decodeIfPresent(PrototypeLinkifyOptions.self, forKey: .linkify)
         activeKey = try container.decodeIfPresent(String.self, forKey: .activeKey)

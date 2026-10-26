@@ -50,6 +50,7 @@ final class PrototypeThemeModesTests: XCTestCase {
             "prototype_chart_v1",
             "prototype_lazy_list_v1",
             "prototype_loading_states_v1",
+            "prototype_style_polish_v2",
             "prototype_text_field_leading_icon_v1",
             "prototype_refresh_v1",
             "prototype_search_bar_v1",

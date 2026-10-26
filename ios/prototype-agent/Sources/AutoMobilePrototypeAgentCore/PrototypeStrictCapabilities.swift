@@ -25,6 +25,8 @@ enum PrototypeStrictCapabilities {
             }
             var own = fields
             PrototypeRepeat.bindTextFields(&own) { text in textBinding(text); return text }
+            if PrototypeStylePolishV2.themedBorder(fields) { need("theme_modes") }
+            if PrototypeStylePolishV2.required(fields) { result.insert(PrototypeStylePolishV2.capability) }
             let type = fields["type"]?.stringValue ?? ""
             let types = [
                 "startTimer": "timers",

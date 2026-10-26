@@ -22,6 +22,7 @@ const deviceRead = { ...label, visibleWhen: { platform: "/device/os", equals: "a
 // editing the server test outside this lane's permitted paths. No gate/container exceptions:
 // every current gate can be activated by a node, including theme and data via inline values.
 const fixtures: Record<string, Node> = {
+  prototype_style_polish_v2: { ...label, style: { cornerStyle: "continuous" } },
   prototype_theme_modes_v1: {
     ...label,
     style: { background: { light: "#FFFFFF", dark: "#000000" } },

@@ -1,3 +1,4 @@
+import { prototypeStylePolishV2ObjectError } from "./prototypeStylePolishV2";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import { prototypeStrictPolicyError, type PrototypeStrictOptions } from "./prototypeStrictPolicy";
 import { prototypeStrictJson } from "./prototypeStrictJson";
@@ -261,7 +262,8 @@ function objectConstraint(
   if (rule.atLeastOne && Object.keys(data).length === 0) {
     return fail(path, "At least one selector field is required");
   }
-  return undefined;
+  const kind = ["style", "fadeEdges", "imageFilter"].find((name) => rule === definitions[name]);
+  return prototypeStylePolishV2ObjectError(data, kind ?? "", path);
 }
 /** `exactlyOne` picks one form of a union-like object; `dependents` ties optional fields to a trigger. */
 function formConstraint(

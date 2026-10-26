@@ -60,6 +60,7 @@ class CommandAdvertisementTest {
       "prototype_search_bar_v1",
       "prototype_rich_text_v1",
       "prototype_loading_states_v1",
+      "prototype_style_polish_v2",
       "prototype_motion_v2",
       "prototype_choreography_v1",
       "prototype_stack_transitions_v1",
@@ -170,6 +171,7 @@ class CommandAdvertisementTest {
     assertTrue(commands.contains("prototype_chat_scroll_v1"))
     assertTrue(commands.contains("prototype_emit_context_v1"))
     assertTrue(commands.contains("prototype_checks_v1"))
+    assertTrue(commands.contains("prototype_style_polish_v2"))
     assertTrue(commands.contains("prototype_appearance_v1"))
     assertTrue(commands.contains("prototype_persistence_replay_v1"))
     assertTrue(commands.contains("prototype_saved_v1"))

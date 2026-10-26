@@ -1,3 +1,8 @@
+import {
+  prototypeStylePolishV2Fields,
+  prototypeStylePolishV2UnsupportedMessage,
+} from "./prototypeStylePolishV2";
+import { PROTOTYPE_STYLE_POLISH_V2_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import { prototypeTimerFields, prototypeTimersUnsupportedMessage } from "./prototypeTimers";
 import {
   prototypeStackTransitionFields,
@@ -120,6 +125,11 @@ interface PrototypeSpecCapabilityGate {
 
 /** Spec-introduced features must be checked on both show and the complete patch result. */
 export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGate[] = [
+  {
+    capability: PROTOTYPE_STYLE_POLISH_V2_CAPABILITY,
+    fields: prototypeStylePolishV2Fields,
+    unsupportedMessage: prototypeStylePolishV2UnsupportedMessage,
+  },
   {
     capability: PROTOTYPE_THEME_MODES_CAPABILITY,
     fields: prototypeThemeModeFields,

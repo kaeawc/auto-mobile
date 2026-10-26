@@ -438,6 +438,8 @@ struct Style: Decodable {
     let fontFamily: FontFamily?
     let elevation: Double?
     let shadowColor: PrototypeModeValue?
+    var shadows: [Shadow]? = nil
+    var cornerStyle: String? = nil
     let offset: Offset?
     let lineHeight: Double?
     let letterSpacing: Double?
@@ -480,6 +482,8 @@ struct Style: Decodable {
             fontFamily: prototype.fontFamily ?? fontFamily,
             elevation: prototype.elevation ?? elevation,
             shadowColor: prototype.shadowColor ?? shadowColor,
+            shadows: prototype.shadows ?? shadows,
+            cornerStyle: prototype.cornerStyle ?? cornerStyle,
             offset: prototype.offset ?? offset,
             lineHeight: prototype.lineHeight ?? lineHeight,
             letterSpacing: prototype.letterSpacing ?? letterSpacing,
@@ -762,6 +766,8 @@ final class PrototypeNode: Decodable {
     let contentDescription: String?
     /// An uploaded image asset id, or a `{light, dark}` pair of ids (#11218).
     let asset: PrototypeModeValue?
+    let filter: ImageFilter?
+    let fadeEdges: FadeEdges?
     let contentScale: String?
     let name: String?
     /// `button`/`chip`/extended `fab` text, and the optional `switch`/`checkbox`/`slider` label.
@@ -878,6 +884,7 @@ final class PrototypeNode: Decodable {
              activeKey, trailingActions, onSubmit, pageSpacing, peek, pageSize, indicator, itemWidth, itemSpacing,
              dismissOnSwipe, supportingText, keyboardType, secure, multiline, minLines, maxLength, trailingIcon,
              imeAction, yRange, xLabels, goal
+        case filter, fadeEdges
         case chartSeries = "series"
     }
 
@@ -903,6 +910,8 @@ final class PrototypeNode: Decodable {
         text = try container.decodeIfPresent(String.self, forKey: .text)
         contentDescription = try container.decodeIfPresent(String.self, forKey: .contentDescription)
         asset = try container.decodeIfPresent(PrototypeModeValue.self, forKey: .asset)
+        filter = try container.decodeIfPresent(ImageFilter.self, forKey: .filter)
+        fadeEdges = try container.decodeIfPresent(FadeEdges.self, forKey: .fadeEdges)
         contentScale = try container.decodeIfPresent(String.self, forKey: .contentScale)
         name = try container.decodeIfPresent(String.self, forKey: .name)
         label = try container.decodeIfPresent(String.self, forKey: .label)

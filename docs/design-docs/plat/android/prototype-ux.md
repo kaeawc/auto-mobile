@@ -569,6 +569,38 @@ this slice does not redact it.
 
 ## Style
 
+`prototype_style_polish_v2` gates layered `style.shadows`, `style.cornerStyle`,
+`style.border.gradient`, `scroll.fadeEdges` and `image.filter`. A renderer must advertise
+this capability before a host sends these fields.
+
+- `shadows` is 1–3 strict `{color, radius, spread?, offset?, inner?}` entries. Radius is
+  0–1000 dp, spread and each offset axis are -1000–1000 dp. Omitted spread is 0,
+  omitted offset is `{x:0,y:0}`, and omitted inner is false. Layers paint in array
+  order within the outer and inner groups: first is bottom-most, later layers sit on top.
+  Blur radius `b` uses Gaussian sigma `b/2` (CSS-like blur). Android adapts this to
+  the platform blur filter, whose minimum nonzero sigma is approximately 0.5 px.
+  `color` takes the same hex, role or `{light,dark}` forms as `shadowColor`. `shadows` excludes both
+  `elevation` and `shadowColor`, including explicit zero elevation.
+- `cornerStyle` is `circular` (default) or `continuous`, including with `cornerRadius: "full"`.
+  Continuous corners use dependency-free cubic smoothing (approximately 0.6), tapering
+  to circular at half the short side so full radii remain valid pills/circles.
+- A border is strict `{width, color?, gradient?}`, with exactly one of `color` or
+  `gradient`. Gradient reuses the linear/radial background-gradient contract.
+- A scroll node's `fadeEdges` is strict `{top?, bottom?, start?, end?}`, with at least
+  one edge, each 0–1000 dp. Fades draw only on edges that can still scroll; start/end
+  mirror in RTL. Top/bottom apply only to vertical scrolling, start/end only to horizontal
+  scrolling. Each fade is capped to its viewport dimension.
+- An image node's `filter` is strict `{saturation?, tint?}`, with at least one field.
+  Saturation is 0–2 and tint is a colour value. Saturation applies first, then tint
+  multiplies the image channels (including alpha). Other node types cannot set filter.
+
+Pairs in shadows and image tint, and pairs or role names in border gradient stops,
+also require `prototype_theme_modes_v1`.
+
+Rendering order: transform, press scale, size, alpha, drop shadows (`shadows`/`elevation`
+draw before the clip), clip (`cornerRadius` + `cornerStyle`), background, gradient,
+shimmer, border (color or gradient), inner shadows.
+
 All properties are optional. Sizes, padding, offsets, radii, and spacing use dp.
 Numeric lengths are capped at 10000, including fixed dimensions, bounds x/y/width/height,
 size constraints, padding, corner radii, border width, spacing, sheet height and fixed detents.
@@ -588,7 +620,7 @@ height which must be positive. Positive values use a minimum of 0.000001.
 | `padding`                                        | Strict `{top?, bottom?, start?, end?}`, each nonnegative dp; omitted edges are zero.                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `background`, `color`                            | Strict hex color, or a Material 3 color role name (see below).                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `cornerRadius`                                   | Nonnegative dp, a Shapes token (`none`, `extraSmall`, `small`, `medium`, `large`, `extraLarge`, `full`), or strict per-corner `{topStart?, topEnd?, bottomEnd?, bottomStart?}` of nonnegative dp where an omitted corner is square. Start and end follow the layout direction.                                                                                                                                                                                                                                     |
-| `border`                                         | `{width, color}`; nonnegative dp width; `color` takes hex or a color role name.                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `border`                                         | `{width, color?, gradient?}`; nonnegative dp width; exactly one paint source, a colour value or a linear/radial gradient.                                                                                                                                                                                                                                                                                                                                                                                          |
 | `elevation`                                      | Nonnegative dp. Draws a shadow in the node's corner shape, behind its clip, background and border.                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `shadowColor`                                    | Hex color or color role name tinting the `elevation` shadow (ambient and spot). Without `elevation` it draws nothing; absent, the platform shadow color applies.                                                                                                                                                                                                                                                                                                                                                   |
 | `gradient`                                       | `{type: "linear", angle, stops}` or `{type: "radial", stops}`. `angle` is a finite number of degrees clockwise from left-to-right (0 = left to right, 90 = top to bottom). `stops` is 2–4 `{color, position?}` with a hex color and an optional 0–1 `position`; positions apply only when every stop has one (a position below the previous stop's is raised to it), otherwise stops are evenly spaced. Radial gradients are centered and reach the corners. Painted over `background` in the node's corner shape. |

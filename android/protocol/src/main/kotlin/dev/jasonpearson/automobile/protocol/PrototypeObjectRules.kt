@@ -37,7 +37,9 @@ internal object PrototypeObjectRules {
     walkFields(data, fields, path, context, depth)?.let {
       return it
     }
-    return objectConstraint(data, rule, path)
+    val kind = listOf("style", "fadeEdges", "imageFilter").firstOrNull { rule === definitions[it] }
+    return PrototypeStylePolishV2Rules.objectError(data, kind ?: "", path)
+      ?: objectConstraint(data, rule, path)
   }
 
   private fun walkFields(

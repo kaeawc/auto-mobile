@@ -413,9 +413,17 @@
             "kind": "ref",
             "name": "colorValue"
           },
-          "optional": false
+          "optional": true
+        },
+        "gradient": {
+          "rule": {
+            "kind": "ref",
+            "name": "gradient"
+          },
+          "optional": true
         }
-      }
+      },
+      "exactlyOne": ["color", "gradient"]
     },
     "gradientStop": {
       "kind": "object",
@@ -996,6 +1004,25 @@
             "integer": false,
             "min": -360,
             "max": 360
+          },
+          "optional": true
+        },
+        "shadows": {
+          "rule": {
+            "kind": "array",
+            "item": {
+              "kind": "ref",
+              "name": "shadow"
+            },
+            "min": 1,
+            "max": 3
+          },
+          "optional": true
+        },
+        "cornerStyle": {
+          "rule": {
+            "kind": "enum",
+            "values": ["circular", "continuous"]
           },
           "optional": true
         }
@@ -3894,6 +3921,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "zoomable"
+              },
+              "optional": true
+            },
+            "filter": {
+              "rule": {
+                "kind": "ref",
+                "name": "imageFilter"
               },
               "optional": true
             }
@@ -8523,6 +8557,13 @@
                 "name": "node"
               },
               "optional": false
+            },
+            "fadeEdges": {
+              "rule": {
+                "kind": "ref",
+                "name": "fadeEdges"
+              },
+              "optional": true
             }
           }
         },
@@ -13804,6 +13845,130 @@
     "stackTransition": {
       "kind": "enum",
       "values": ["platform", "slide", "fade", "none"]
+    },
+    "shadow": {
+      "kind": "object",
+      "fields": {
+        "color": {
+          "rule": {
+            "kind": "ref",
+            "name": "colorValue"
+          },
+          "optional": false
+        },
+        "radius": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0,
+            "max": 1000
+          },
+          "optional": false
+        },
+        "spread": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": -1000,
+            "max": 1000
+          },
+          "optional": true
+        },
+        "offset": {
+          "rule": {
+            "kind": "object",
+            "fields": {
+              "x": {
+                "rule": {
+                  "kind": "number",
+                  "integer": false,
+                  "min": -1000,
+                  "max": 1000
+                },
+                "optional": false
+              },
+              "y": {
+                "rule": {
+                  "kind": "number",
+                  "integer": false,
+                  "min": -1000,
+                  "max": 1000
+                },
+                "optional": false
+              }
+            }
+          },
+          "optional": true
+        },
+        "inner": {
+          "rule": {
+            "kind": "boolean"
+          },
+          "optional": true
+        }
+      }
+    },
+    "fadeEdges": {
+      "kind": "object",
+      "fields": {
+        "top": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0,
+            "max": 1000
+          },
+          "optional": true
+        },
+        "bottom": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0,
+            "max": 1000
+          },
+          "optional": true
+        },
+        "start": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0,
+            "max": 1000
+          },
+          "optional": true
+        },
+        "end": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0,
+            "max": 1000
+          },
+          "optional": true
+        }
+      }
+    },
+    "imageFilter": {
+      "kind": "object",
+      "fields": {
+        "saturation": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0,
+            "max": 2
+          },
+          "optional": true
+        },
+        "tint": {
+          "rule": {
+            "kind": "ref",
+            "name": "colorValue"
+          },
+          "optional": true
+        }
+      }
     }
   },
   "eventKinds": [

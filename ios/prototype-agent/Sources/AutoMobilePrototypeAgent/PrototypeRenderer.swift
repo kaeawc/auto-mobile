@@ -84,29 +84,31 @@
         let gradient: PrototypeGradient
         let palette: PrototypePalette
 
+        func paint(in size: CGSize) -> AnyShapeStyle {
+            let width = Double(size.width)
+            let height = Double(size.height)
+            let stops = gradient.colorStops(palette: palette).map {
+                Gradient.Stop(color: Color($0.color), location: CGFloat($0.location))
+            }
+            switch gradient {
+            case let .linear(angle, _):
+                let line = PrototypeGradient.linearLine(angle: angle, width: width, height: height)
+                return AnyShapeStyle(LinearGradient(
+                    stops: stops,
+                    startPoint: UnitPoint(x: line.start.x, y: line.start.y),
+                    endPoint: UnitPoint(x: line.end.x, y: line.end.y)
+                ))
+            case .radial:
+                return AnyShapeStyle(RadialGradient(
+                    stops: stops, center: .center, startRadius: 0,
+                    endRadius: CGFloat(PrototypeGradient.radialRadius(width: width, height: height))
+                ))
+            }
+        }
+
         var body: some View {
             GeometryReader { proxy in
-                let width = Double(proxy.size.width)
-                let height = Double(proxy.size.height)
-                let stops = gradient.colorStops(palette: palette).map {
-                    Gradient.Stop(color: Color($0.color), location: CGFloat($0.location))
-                }
-                switch gradient {
-                case let .linear(angle, _):
-                    let line = PrototypeGradient.linearLine(angle: angle, width: width, height: height)
-                    Rectangle().fill(LinearGradient(
-                        stops: stops,
-                        startPoint: UnitPoint(x: line.start.x, y: line.start.y),
-                        endPoint: UnitPoint(x: line.end.x, y: line.end.y)
-                    ))
-                case .radial:
-                    Rectangle().fill(RadialGradient(
-                        stops: stops,
-                        center: .center,
-                        startRadius: 0,
-                        endRadius: CGFloat(PrototypeGradient.radialRadius(width: width, height: height))
-                    ))
-                }
+                Rectangle().fill(paint(in: proxy.size))
             }
             .accessibilityHidden(true)
         }
@@ -328,7 +330,9 @@
             case "text":
                 textView
             case "image":
-                imageView
+                imageView.modifier(PrototypeImageFilterModifier(
+                    parameters: PrototypeImageFilter(node.filter, palette: palette)
+                ))
             case "icon":
                 // Decorative unless it has an authored description or is tappable; the decorative
                 // case is a text glyph (see `PrototypeGlyph`) so no image element is exposed.
@@ -351,7 +355,7 @@
                 if node.axis != "horizontal", let refresh = node.refresh {
                     PrototypeRefreshableScroll(node: node, refresh: refresh, model: model)
                 } else {
-                    ScrollView(node.axis == "horizontal" ? .horizontal : .vertical) {
+                    PrototypeFadingScroll(axis: node.axis, spec: node.fadeEdges) {
                         if let child = node.child { NodeView(node: child, model: model) }
                     }
                 }
@@ -775,21 +779,11 @@
 
         // MARK: Style
 
-        private var cornerShape: UnevenRoundedRectangle {
-            switch style?.cornerRadius.map(shapes.resolve) {
-            case let .uniform(radius)?:
-                UnevenRoundedRectangle(cornerRadii: RectangleCornerRadii(
-                    topLeading: radius, bottomLeading: radius, bottomTrailing: radius, topTrailing: radius
-                ))
-            case .token?:
-                UnevenRoundedRectangle(cornerRadii: RectangleCornerRadii())
-            case let .corners(topStart, topEnd, bottomEnd, bottomStart)?:
-                UnevenRoundedRectangle(cornerRadii: RectangleCornerRadii(
-                    topLeading: topStart, bottomLeading: bottomStart, bottomTrailing: bottomEnd, topTrailing: topEnd
-                ))
-            case nil:
-                UnevenRoundedRectangle(cornerRadii: RectangleCornerRadii())
-            }
+        private var cornerShape: PrototypeStyleShape {
+            PrototypeStyleShape(
+                radius: style?.cornerRadius.map(shapes.resolve),
+                continuous: style?.cornerStyle == "continuous"
+            )
         }
 
         private func styled(_ view: some View) -> some View {
@@ -812,27 +806,10 @@
                     ),
                     alignment: contentAlignment
                 ))
-                // The gradient is painted over the background colour, as on Android.
-                .background {
-                    if let gradient = style?.gradient {
-                        PrototypeGradientFill(gradient: gradient, palette: palette)
-                    }
-                }
-                .background(palette.color(style?.background) ?? .clear)
-                .modifier(PrototypeShimmerModifier(
-                    enabled: style?.shimmer == true,
-                    animated: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion).enabled,
-                    shape: shape
+                .modifier(PrototypeStylePaintModifier(
+                    style: style, shape: shape, palette: palette,
+                    shimmerAnimated: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion).enabled
                 ))
-                .clipShape(shape)
-                .overlay(
-                    shape.stroke(palette.color(style?.border?.color) ?? .clear, lineWidth: style?.border?.width ?? 0)
-                )
-                .shadow(
-                    color: (style?.elevation ?? 0) > 0 ? palette.color(style?.shadowColor) ?? .black
-                        .opacity(0.25) : .clear,
-                    radius: style?.elevation ?? 0
-                )
                 .offset(x: style?.offset?.x ?? 0, y: style?.offset?.y ?? 0)
                 .opacity(style?.alpha ?? 1)
                 .modifier(PrototypeMenuBoundsReporter(node: node, model: model))
@@ -1492,7 +1469,7 @@
         private var refreshing: Bool { model.state[refresh.stateKey]?.boolValue == true }
 
         var body: some View {
-            ScrollView(.vertical) {
+            PrototypeFadingScroll(axis: "vertical", spec: node.fadeEdges) {
                 if let child = node.child { NodeView(node: child, model: model) }
             }
             .refreshable {

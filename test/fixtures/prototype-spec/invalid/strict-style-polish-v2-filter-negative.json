@@ -1,0 +1,22 @@
+{
+  "spec": {
+    "id": "style-polish",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "active": true
+    },
+    "root": {
+      "type": "image",
+      "asset": "a",
+      "filter": {
+        "saturation": -0.1
+      }
+    }
+  },
+  "expectedPath": "root.filter.saturation",
+  "expectedMessage": "Invalid number value"
+}

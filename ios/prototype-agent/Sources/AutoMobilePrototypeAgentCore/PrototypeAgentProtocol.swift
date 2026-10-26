@@ -59,6 +59,8 @@ enum PrototypeAgentProtocol {
         clearStorageRequest,
         storageCapability,
         timersCapability,
+        "prototype_platform_v1",
+        "prototype_platform_device_v1",
         advanceClockRequest,
     ]
     /// A same-id `show_prototype` replaces the prototype in place keeping pager pages and stack paths, and

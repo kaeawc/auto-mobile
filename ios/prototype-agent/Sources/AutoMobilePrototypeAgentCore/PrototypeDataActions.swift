@@ -78,6 +78,13 @@ enum PrototypeDataWrite {
                 ))
             }
             return .success(value)
+        case let (kind, pointer?) where kind == "platform" || kind == "event":
+            guard let pointer = pointer.stringValue,
+                  let value = kind == "platform" ? inputs.platform(pointer) : inputs.event(pointer)
+            else {
+                return .failure(.init(code: .notFound, message: "Binding pointer does not exist"))
+            }
+            return .success(value)
         default:
             return .failure(.init(code: .invalidValue, message: "A data write value cannot use \(kind) here"))
         }

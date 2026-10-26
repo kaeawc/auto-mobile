@@ -188,6 +188,7 @@ fun PrototypeRuntimeContent(
         val traceSink = PrototypeTrace.sink
         val traceEnabled = traceSink.isEnabled()
         if (traceEnabled) traceSink.begin(PrototypeTrace.COMPOSE)
+        ObservePrototypeDevice(send)
         PrototypeSpecContent(runtime.renderModel(snapshot).root, snapshot.spec.theme, send)
         if (traceEnabled) traceSink.end()
       }
@@ -459,7 +460,11 @@ internal fun RenderPrototypeNode(
   if (
     node.role != "stack" &&
       node.source?.visibleWhen != null &&
-      (node.source.transition?.type == "fade" || node.source.transition?.type == "none")
+      when (node.source.transition?.type) {
+        "fade",
+        "none" -> true
+        else -> false
+      }
   ) {
     RenderPrototypeVisibility(node, interact, parentModifier, weightAxis, windowRoot)
     return

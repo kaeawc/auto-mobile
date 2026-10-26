@@ -95,6 +95,7 @@ export interface PlanEndDaemonContext {
 export type DaemonStateWrites = Pick<
   DaemonState,
   | "initialize"
+  | "retireForeignAndroidSerialSource"
   | "isInitialized"
   | "setSessionBrokerMode"
   | "setBrokerExecutionReowner"
@@ -181,6 +182,8 @@ export const defaultDaemonContext: DaemonContext = {
 /** The daemon lifecycle writes, resolved on every call so a reset singleton is never held stale. */
 export const defaultDaemonStateWrites: DaemonStateWrites = {
   initialize: (...args) => currentDaemon().initialize(...args),
+  retireForeignAndroidSerialSource: (pool) =>
+    currentDaemon().retireForeignAndroidSerialSource(pool),
   isInitialized: () => currentDaemon().isInitialized(),
   setSessionBrokerMode: (enabled) => currentDaemon().setSessionBrokerMode(enabled),
   setBrokerExecutionReowner: (reowner) => currentDaemon().setBrokerExecutionReowner(reowner),

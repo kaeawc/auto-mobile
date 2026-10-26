@@ -20,7 +20,32 @@ test("ready shutdown template clones with a new UDID", async () => {
   const fake = new SimulatorTemplatesHarness();
   fake.ready();
   expect(await fake.service().create(fake.request)).toEqual({ udid: "cloned", source: "clone" });
-  expect(fake.events).toEqual(["clone:11111111-1111-1111-1111-111111111111:work"]);
+  expect(fake.events).toEqual([
+    "clone:11111111-1111-1111-1111-111111111111:work",
+    "relocate:11111111-1111-1111-1111-111111111111:cloned",
+  ]);
+});
+test("a clone whose relocation fails is deleted and falls back to plain create", async () => {
+  const fake = new SimulatorTemplatesHarness();
+  fake.ready();
+  fake.relocateFails = true;
+  const template = Object.values((await fake.client.listSimulators()).devices).flat()[0]!;
+  const clone = { ...template, udid: "cloned", name: "work" };
+  const clonedRows = { devices: { ios: [template, clone] } };
+  const clonePlainly = fake.client.cloneSimulator;
+  fake.client.cloneSimulator = async (udid, name, signal) => {
+    const created = await clonePlainly(udid, name, signal);
+    fake.rows = clonedRows;
+    return created;
+  };
+  expect(await fake.service().create(fake.request)).toEqual({ udid: "created", source: "create" });
+  expect(fake.events).toEqual([
+    "clone:11111111-1111-1111-1111-111111111111:work",
+    "relocate:11111111-1111-1111-1111-111111111111:cloned",
+    "delete:cloned",
+    "create:work",
+  ]);
+  expect(fake.manifest?.state).toBe("ready");
 });
 test("second consecutive clone failure invalidates and creates", async () => {
   const fake = new SimulatorTemplatesHarness();
@@ -152,6 +177,7 @@ test("shutdown cancels the detached background flight and waits for its cleanup"
       profile: () => "none",
       xcode: { readBuild: async () => "X1" },
       lock: { acquire: async () => undefined, acquireName: async () => undefined },
+      relocator: fake.relocator,
       builder: {
         build: async (_key, active) => {
           expect(getPerfTracker()).not.toBe(requestTracker);

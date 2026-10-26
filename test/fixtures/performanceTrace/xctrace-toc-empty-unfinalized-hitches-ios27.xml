@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+
+<trace-toc>
+    <run number="1">
+        <info>
+            <target>
+                <device platform="macOS" model="MacBook Pro" name="host" os-version="26.6.2 (25G83)" uuid="00000000-0000-0000-0000-000000000000"/>
+                <all-processes/>
+            </target>
+            <summary>
+                <start-date/>
+                <end-date/>
+                <duration>0.000000</duration>
+                <instruments-version/>
+                <recording-mode/>
+            </summary>
+        </info>
+        <processes/>
+        <data/>
+        <tracks/>
+    </run>
+</trace-toc>

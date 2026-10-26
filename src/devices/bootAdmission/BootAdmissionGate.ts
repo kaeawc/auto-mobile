@@ -115,6 +115,8 @@ export interface BootAdmissionOptions<S, D extends { outcome: string }> {
   label: string;
   /** Bound on the one capacity sample; defaults to {@link DEFAULT_SAMPLE_TIMEOUT_MS}. */
   sampleTimeoutMs?: number;
+  /** Wait hint carried by the retryable error a timed-out sample throws (iOS only; #15307). */
+  timeoutRetryAfterMs?: number;
   /** One fresh capacity sample. */
   sample: () => Promise<S>;
   /** The ledger whose in-flight boots the sample may not yet reflect. */
@@ -176,7 +178,8 @@ async function sampleWithin<S, D extends { outcome: string }>(
     timeoutMs,
     signal: options.signal,
     label: `Collecting ${options.label}`,
-    timeoutError: () => sampleTimeoutError(options.platform, timeoutMs, options.label),
+    timeoutError: () =>
+      sampleTimeoutError(options.platform, timeoutMs, options.label, options.timeoutRetryAfterMs),
   });
 }
 
@@ -188,6 +191,7 @@ export function sampleTimeoutError(
   platform: Platform,
   timeoutMs: number,
   label: string,
+  retryAfterMs?: number,
 ): BootedDeviceDiscoveryIncompleteError {
   const discoveryError = {
     code: "timeout",
@@ -196,7 +200,7 @@ export function sampleTimeoutError(
   } as const;
   return platform === "android"
     ? new AndroidBootedDeviceDiscoveryIncompleteError(discoveryError)
-    : new BootedDeviceDiscoveryIncompleteError(platform, discoveryError);
+    : new BootedDeviceDiscoveryIncompleteError(platform, discoveryError, undefined, retryAfterMs);
 }
 
 /** Throws the typed retryable {@link BootCapacityExhaustedError} when the boot was refused. */

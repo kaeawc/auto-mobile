@@ -1,10 +1,15 @@
+import { GetLogs } from "../../src/features/deviceLogs/GetLogs";
+import { readFileSync } from "node:fs";
+import type { SpawnOptions } from "node:child_process";
+import { StreamingChildProcess } from "../fakes/StreamingChildProcess";
+import { SessionLogTimeoutError } from "../../src/server/SessionLogTimeoutError";
 import { join } from "node:path";
 import { IosSimulatorSessionLogProvider } from "../../src/server/IosSimulatorSessionLogProvider";
 import { SimulatorContainerOwnershipError } from "../../src/utils/ios-cmdline-tools/simulatorOwnContainer";
 import { cloneContainerFixture } from "../helpers/simulatorContainerFixture";
 import { simulatorOwnership, simulatorDataContainer } from "../helpers/simulatorContainerFixture";
 import { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
-import { drainUntil, drainUntilQuiescent } from "../helpers/fakeTimerStepping";
+import { drainUntil } from "../helpers/fakeTimerStepping";
 import { describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice, ExecResult } from "../../src/models";
 import type { AppFileFileSystem, AppFileStats } from "../../src/server/appFileService";
@@ -44,6 +49,7 @@ function base64Read(content: string, byteCount = Buffer.byteLength(content)): st
 }
 
 class RecordingSimctl implements SessionLogSimctl {
+  readonly children: StreamingChildProcess[] = [];
   readonly commands: string[] = [];
   readonly argv: string[][] = [];
   readonly signals: Array<AbortSignal | undefined> = [];
@@ -56,6 +62,24 @@ class RecordingSimctl implements SessionLogSimctl {
 
   onArgs(result: ExecResult | Error | (() => Promise<ExecResult>)): void {
     this.argvResult = result;
+  }
+
+  async startCommandArgs(args: string[], options?: SpawnOptions): Promise<StreamingChildProcess> {
+    const child = new StreamingChildProcess();
+    this.children.push(child);
+    void this.executeCommandArgs(args, undefined, options?.signal).then(
+      (result) =>
+        queueMicrotask(() => {
+          const bytes = Buffer.from(result.stdout);
+          for (let offset = 0; offset < bytes.length; offset += 65536) {
+            child.stdout.write(bytes.subarray(offset, offset + 65536));
+          }
+          child.stderr.write(result.stderr);
+          child.finish();
+        }),
+      (error: Error) => queueMicrotask(() => child.emit("error", error)),
+    );
+    return child;
   }
 
   async executeCommand(command: string): Promise<ExecResult> {
@@ -575,48 +599,37 @@ describe("SessionLogService (#7006)", () => {
       expect(simctl.argv[1]!.slice(-1)).toEqual(["--info"]);
     });
 
-    test("preserves timedOut classification with the real simctl deadline wrapper", async () => {
+    test("preserves typed timeout with the real simctl spawn wrapper and an inert child", async () => {
       const timer = new FakeTimer();
+      const child = new StreamingChildProcess();
       let childSignal: AbortSignal | undefined;
-      const simctl = new SimCtlClient(
-        simulator,
-        async (_file, _args, _buffer, signal) => {
-          childSignal = signal;
-          return new Promise<ExecResult>(() => {});
-        },
-        { timer },
-      );
-      const service = createSessionLogService({
-        containerOwnership: simulatorOwnership,
-        adbFactory: {
-          create: () => {
-            throw new Error("ADB must not be used");
-          },
-        },
-        simctlFactory: () => simctl,
-        fileSystem: new MemoryFileSystem(),
+      const simctl = new SimCtlClient(simulator, null, {
         timer,
-        unifiedLogTimeoutMs: 120_000,
-      });
-      const pending = service.collect({
-        sessionUuid: "s",
-        device: simulator,
-        request: {
-          appId: "com.example.app",
-          maxBytes: 100,
-          unifiedLog: { lastSeconds: 10, level: "default" },
+        spawnProcess: (_file, _args, options) => {
+          childSignal = options?.signal;
+          return child;
         },
       });
-      await drainUntil(() => childSignal !== undefined, { description: "unified log child" });
-      expect(timer.getPendingTimeouts()).toEqual([120_000, 120_000]);
-      timer.advanceTime(60_000);
-      expect(childSignal?.aborted).toBe(false);
-      await timer.advanceTimeAsync(60_000, () => drainUntilQuiescent(timer));
-      expect((await pending).unifiedLog).toEqual({
-        status: "timedOut",
-        reason: expect.stringContaining("timed out after 120000ms"),
+      const provider = new IosSimulatorSessionLogProvider(
+        () => simctl,
+        new MemoryFileSystem(),
+        timer,
+        120_000,
+      );
+      const pending = provider.collectUnifiedLog(
+        simulator,
+        "com.example.app",
+        { lastSeconds: 300, level: "default" },
+        100,
+      );
+      await drainUntil(() => child.stdout.listenerCount("data") > 0, {
+        description: "stream collector",
       });
-      expect(childSignal?.aborted).toBe(true);
+      expect(timer.getPendingTimeouts()).toEqual([120_000]);
+      timer.advanceTime(120_000);
+      await expect(pending).rejects.toBeInstanceOf(SessionLogTimeoutError);
+      expect(childSignal).toBeUndefined();
+      expect(child.killSignals).toEqual(["SIGTERM"]);
       expect(timer.getPendingTimeouts()).toEqual([]);
     });
 
@@ -642,7 +655,7 @@ describe("SessionLogService (#7006)", () => {
         status: "timedOut",
         reason: expect.stringContaining("timed out after 2000ms"),
       });
-      expect(simctl.signals[0]?.aborted).toBe(true);
+      expect(simctl.children[0]?.killSignals).toEqual(["SIGTERM"]);
       expect(timer.getPendingTimeouts()).toHaveLength(0);
     });
 
@@ -822,3 +835,115 @@ for (const proven of [true, false]) {
     }
   });
 }
+
+const capturedLog = readFileSync(
+  new URL("../fixtures/ios-simctl/log-show-compact-mobilesafari-ios27.txt", import.meta.url),
+  "utf8",
+);
+const oversizedLog =
+  "first line\n" +
+  capturedLog.repeat(Math.ceil(5_500_000 / Buffer.byteLength(capturedLog))) +
+  "last line\n";
+for (const retain of ["head", "tail"] as const) {
+  test(`simulator streams over 5 MB retaining ${retain} without execFile buffering`, async () => {
+    const simctl = new RecordingSimctl();
+    simctl.onArgs(execResult(oversizedLog));
+    const provider = new IosSimulatorSessionLogProvider(
+      () => simctl,
+      new MemoryFileSystem(),
+      new FakeTimer(),
+      5000,
+    );
+    const result = await provider.collectUnifiedLog(
+      simulator,
+      "com.apple.mobilesafari",
+      { lastSeconds: 300, level: "debug" },
+      4 * 1024 * 1024,
+      undefined,
+      retain,
+    );
+    expect(simctl.children).toHaveLength(1);
+    expect(result.truncated).toBe(true);
+    expect(result.byteCount).toBe(Buffer.byteLength(oversizedLog));
+    expect(Buffer.byteLength(result.text)).toBeLessThanOrEqual(4 * 1024 * 1024);
+    if (retain === "head") {
+      expect(result.text.startsWith("first line\n")).toBe(true);
+    } else {
+      expect(result.text.endsWith("last line\n")).toBe(true);
+      expect(oversizedLog.endsWith(result.text)).toBe(true);
+      expect(result.text.startsWith("first line\n")).toBe(false);
+    }
+  });
+}
+
+test("simulator caller cancellation kills the streamed child and preserves reason", async () => {
+  const child = new StreamingChildProcess();
+  const timer = new FakeTimer();
+  const simctl = new SimCtlClient(simulator, null, { timer, spawnProcess: () => child });
+  const provider = new IosSimulatorSessionLogProvider(
+    () => simctl,
+    new MemoryFileSystem(),
+    timer,
+    5000,
+  );
+  const controller = new AbortController();
+  const reason = new Error("caller stopped log read");
+  const pending = provider.collectUnifiedLog(
+    simulator,
+    "com.example.app",
+    { lastSeconds: 300, level: "default" },
+    100,
+    controller.signal,
+    "tail",
+  );
+  await drainUntil(() => child.stdout.listenerCount("data") > 0, {
+    description: "collector attached",
+  });
+  controller.abort(reason);
+  await expect(pending).rejects.toBe(reason);
+  expect(child.killSignals).toEqual(["SIGTERM"]);
+  expect(timer.getPendingTimeouts()).toEqual([]);
+});
+
+test("getLogs default 300s window reads newest lines from an oversized streamed source", async () => {
+  const simctl = new RecordingSimctl();
+  simctl.onArgs(
+    execResult(oversizedLog + "2026-10-25 17:53:10.000 I MobileSafari[15900:1] newest marker\n"),
+  );
+  const timer = new FakeTimer();
+  const provider = new IosSimulatorSessionLogProvider(
+    () => simctl,
+    new MemoryFileSystem(),
+    timer,
+    5000,
+  );
+  const result = await new GetLogs({
+    clock: {
+      now: () => timer.now(),
+      lastActionStartMs: () => undefined,
+      sessionStartMs: () => undefined,
+    },
+    android: () => {
+      throw new Error("Android must not be used");
+    },
+    ios: () => ({
+      collect: (appId, lastSeconds, level, signal, processName) =>
+        provider.collectUnifiedLog(
+          simulator,
+          appId,
+          { lastSeconds, level, processName },
+          4 * 1024 * 1024,
+          signal,
+          "tail",
+        ),
+    }),
+  }).execute(simulator, { appId: "com.apple.mobilesafari", maxLines: 2 });
+  expect(result.sinceSeconds).toBe(300);
+  expect(simctl.argv[0]).toContain("300");
+  expect(result.lines).toHaveLength(2);
+  expect(result.lines.at(-1)?.message).toContain("newest marker");
+  expect(result.truncated).toBe(true);
+  expect(result.warnings).toContain(
+    "The unified log window exceeded the byte bound; only the newest lines were read.",
+  );
+});

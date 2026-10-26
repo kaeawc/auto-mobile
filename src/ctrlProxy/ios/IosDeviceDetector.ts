@@ -32,12 +32,18 @@ export interface IosDeviceDetectorOptions {
 }
 
 /** Decides whether the iOS device a CtrlProxy manager targets is still attached. */
+/** Pseudo-state of a simulator that a complete `simctl list` no longer shows (deleted). */
+export const SIMULATOR_STATE_ABSENT = "Absent";
+
 export class IosDeviceDetector {
   private warnedIdeviceIdUnavailable = false;
 
   constructor(private readonly options: IosDeviceDetectorOptions) {}
 
-  /** Unknown listings never establish a simulator state. */
+  /**
+   * Unknown listings never establish a simulator state. A complete, non-empty listing that does
+   * not name this simulator proves it was deleted: {@link SIMULATOR_STATE_ABSENT} (#15309).
+   */
   async getSimulatorState(): Promise<string | undefined> {
     try {
       let stdout: string;
@@ -60,11 +66,13 @@ export class IosDeviceDetector {
       if (!listing.devices || Array.isArray(listing.devices)) {
         return undefined;
       }
-      const device = Object.values(listing.devices)
-        .filter(Array.isArray)
-        .flat()
-        .find((device) => device?.udid === this.options.deviceId);
-      return typeof device?.state === "string" && device.state.trim() ? device.state : undefined;
+      const listed = Object.values(listing.devices).filter(Array.isArray).flat();
+      const device = listed.find((device) => device?.udid === this.options.deviceId);
+      if (!device) {
+        // An empty listing is a CoreSimulator hiccup as often as an empty fleet: not evidence.
+        return listed.length > 0 ? SIMULATOR_STATE_ABSENT : undefined;
+      }
+      return typeof device.state === "string" && device.state.trim() ? device.state : undefined;
     } catch (error) {
       // Unknown simulator state cannot justify blocking a launch or retiring a runner.
       logger.debug(`[IOSCtrlProxy] Simulator state probe failed: ${errorMessage(error)}`, error);
@@ -72,10 +80,10 @@ export class IosDeviceDetector {
     }
   }
 
-  /** Only a positive shutdown listing may prevent a runner launch. */
+  /** Only a positive shutdown or deletion listing may prevent a runner launch. */
   async isSimulatorShutDown(): Promise<boolean> {
     const state = await this.getSimulatorState();
-    return state === "Shutdown" || state === "Shutting Down";
+    return state === "Shutdown" || state === "Shutting Down" || state === SIMULATOR_STATE_ABSENT;
   }
 
   async isDeviceDetected(): Promise<boolean> {

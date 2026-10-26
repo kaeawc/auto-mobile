@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
 import { SessionReleaseBroadcaster } from "../../src/daemon/sessionReleaseBroadcast";
+import { PerformanceTraceStopTimeoutError } from "../../src/features/performanceTrace/PerformanceTraceStopTimeoutError";
 import { PerformanceTraceManager } from "../../src/features/performanceTrace/PerformanceTraceManager";
 import type { PerformanceTraceRecorder } from "../../src/features/performanceTrace/PerformanceTraceRecorder";
 import {
@@ -18,7 +19,7 @@ isolateToolRegistry();
 
 const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };
 
-function fakeManager() {
+function fakeManager(stopError?: Error) {
   const stops: string[] = [];
   const recorder: PerformanceTraceRecorder = {
     start: async (request) => ({
@@ -26,6 +27,9 @@ function fakeManager() {
       warnings: [],
       stop: async () => {
         stops.push(request.traceId);
+        if (stopError) {
+          throw stopError;
+        }
       },
       summarize: async () => ({ summary: { durationMs: 900 }, warnings: [] }),
     }),
@@ -94,6 +98,15 @@ describe("performanceTrace tool (#14102)", () => {
       artifactPath: "/artifacts/trace-t-1.perfetto-trace",
       summary: { durationMs: 900 },
     });
+  });
+
+  test("surfaces the typed stop failure through the manager and handler", async () => {
+    const error = new PerformanceTraceStopTimeoutError("/artifacts/incomplete.trace", 60000);
+    const { manager } = fakeManager(error);
+    await call(manager, { action: "start", template: "timeProfiler" });
+    await expect(call(manager, { action: "stop", traceId: "trace-t-1" })).rejects.toBe(error);
+    expect(manager.activeTraceIds()).toEqual([]);
+    expect(manager.lookup("trace-t-1")).toBeUndefined();
   });
 
   test("a session release stops the traces that session started", async () => {

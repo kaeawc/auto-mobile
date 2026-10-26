@@ -173,7 +173,7 @@ function rethrowShutdownFailure(
   if (error instanceof ActionableError || requestAbortSignal?.aborted) {
     throw error;
   }
-  throw new ActionableError(`Failed to kill ${device.platform} device: ${error}`);
+  throw new ActionableError(`Failed to kill ${device.platform} device: ${error}`, { cause: error });
 }
 
 async function runPostShutdownStep(

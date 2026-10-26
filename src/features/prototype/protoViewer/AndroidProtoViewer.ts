@@ -24,51 +24,22 @@ import {
   protoViewerMcpRoot,
   protoViewerResultPath,
   protoViewerResultsDir,
-  protoViewerWireResultSchema,
   type ProtoViewerResult,
   type ProtoViewerWireResult,
 } from "./protoViewerContract";
 import { ProtoViewerEntryPointMissingError } from "./ProtoViewerEntryPointMissingError";
 import { ProtoViewerStorageError } from "./ProtoViewerStorageError";
 
-export { ProtoViewerEntryPointMissingError, ProtoViewerStorageError };
+import {
+  type ProtoViewerDevice,
+  type ProtoViewerTempFiles,
+  PROTOVIEWER_CLEANUP_TIMEOUT_MS,
+} from "./protoViewerDevice";
+import { pollProtoViewerResult } from "./pollProtoViewerResult";
 
-/** Host temp file holding the bundle for `adb push`; disposed after the push either way. */
-export interface ProtoViewerTempFile {
-  readonly path: string;
-  dispose(): Promise<void>;
-}
-export interface ProtoViewerTempFiles {
-  write(bytes: Uint8Array): Promise<ProtoViewerTempFile>;
-}
-
-/** What the saved-action router needs from a device; the adb implementation is below. */
-export interface ProtoViewerDevice {
-  /** The current Android user when ProtoViewer is installed for it, otherwise undefined. */
-  installedUser(signal?: AbortSignal): Promise<number | undefined>;
-  importBundle(
-    userId: number,
-    bytes: Uint8Array,
-    label: string | undefined,
-    timeoutMs: number,
-    signal?: AbortSignal,
-  ): Promise<ProtoViewerResult>;
-  open(
-    userId: number,
-    libraryId: string,
-    timeoutMs: number,
-    signal?: AbortSignal,
-  ): Promise<ProtoViewerResult>;
-}
-
-export const PROTOVIEWER_RESULT_POLL_MS = 250;
-export const PROTOVIEWER_DEFAULT_TIMEOUT_MS = 15_000;
 /** The app only creates three folders; a longer wait means it cannot (shell-owned folders). */
 export const PROTOVIEWER_PREPARE_TIMEOUT_MS = 8_000;
 const PROTOVIEWER_MIN_IMPORT_WAIT_MS = 1_000;
-/** Cleanup runs even after the caller's signal fired, but only this long. */
-const PROTOVIEWER_CLEANUP_TIMEOUT_MS = 5_000;
-
 interface AndroidProtoViewerDependencies {
   adb: AdbExecutor;
   timer: Timer;
@@ -81,9 +52,11 @@ interface AndroidProtoViewerDependencies {
  * MCP activity, and read back the one result file it writes atomically (no socket, no broadcast).
  */
 export class AndroidProtoViewer implements ProtoViewerDevice {
+  private userId: number | undefined;
+
   constructor(private readonly deps: AndroidProtoViewerDependencies) {}
 
-  async installedUser(signal?: AbortSignal): Promise<number | undefined> {
+  async installed(signal?: AbortSignal): Promise<boolean> {
     const { userId } = await new AndroidUserTargetResolver(this.deps.adb).resolve({
       currentUser: true,
       signal,
@@ -95,16 +68,17 @@ export class AndroidProtoViewer implements ProtoViewerDevice {
       undefined,
       signal,
     );
-    return installed ? userId : undefined;
+    this.userId = installed ? userId : undefined;
+    return installed;
   }
 
   async importBundle(
-    userId: number,
     bytes: Uint8Array,
     label: string | undefined,
     timeoutMs: number,
     signal?: AbortSignal,
   ): Promise<ProtoViewerResult> {
+    const userId = await this.requireUser(signal);
     const started = this.deps.timer.now();
     const request = this.requestId();
     const inbox = protoViewerInboxPath(userId, request);
@@ -146,11 +120,11 @@ export class AndroidProtoViewer implements ProtoViewerDevice {
   }
 
   async open(
-    userId: number,
     libraryId: string,
     timeoutMs: number,
     signal?: AbortSignal,
   ): Promise<ProtoViewerResult> {
+    const userId = await this.requireUser(signal);
     const request = this.requestId();
     const extras = [
       `--es ${PROTOVIEWER_EXTRA_REQUEST} ${request}`,
@@ -161,6 +135,13 @@ export class AndroidProtoViewer implements ProtoViewerDevice {
       signal,
       cleanup: [],
     });
+  }
+
+  private async requireUser(signal?: AbortSignal): Promise<number> {
+    if (this.userId === undefined && !(await this.installed(signal))) {
+      throw new ActionableError("ProtoViewer is not installed for the current Android user.");
+    }
+    return this.userId!;
   }
 
   /** adb exits non-zero when the device refuses the push, which the executor throws. */
@@ -291,7 +272,16 @@ export class AndroidProtoViewer implements ProtoViewerDevice {
         options.signal,
       );
       throwIfStartFailed(started);
-      const result = await this.awaitResult(resultPath, options.timeoutMs, options.signal);
+      const result = await pollProtoViewerResult(
+        () =>
+          this.shell(
+            `if [ -f ${shellQuote(resultPath)} ]; then cat ${shellQuote(resultPath)}; fi`,
+            options.signal,
+          ),
+        this.deps.timer,
+        options.timeoutMs,
+        options.signal,
+      );
       if (result.request !== request) {
         throw new ActionableError(
           `ProtoViewer answered request ${result.request}, not ${request}; retry the call.`,
@@ -301,33 +291,6 @@ export class AndroidProtoViewer implements ProtoViewerDevice {
     } finally {
       await this.removeQuietly([resultPath, ...options.cleanup]);
     }
-  }
-
-  private async awaitResult(
-    path: string,
-    timeoutMs: number,
-    signal?: AbortSignal,
-  ): Promise<ProtoViewerWireResult> {
-    // A deadline, not an attempt count: each read is an adb round trip of its own.
-    const deadline = this.deps.timer.now() + timeoutMs;
-    do {
-      signal?.throwIfAborted();
-      // The app renames a finished file into place, so a non-empty read is a whole result. A bare
-      // `cat` of a file that is not there yet exits 1, which adb turns into a thrown error and the
-      // call would fail on its first poll (#15174); `if` keeps "not yet" an empty read.
-      const read = await this.shell(
-        `if [ -f ${shellQuote(path)} ]; then cat ${shellQuote(path)}; fi`,
-        signal,
-      );
-      const text = read.trim();
-      if (text.length > 0) {
-        return parseResult(text);
-      }
-      await this.deps.timer.sleep(PROTOVIEWER_RESULT_POLL_MS);
-    } while (this.deps.timer.now() < deadline);
-    throw new ActionableError(
-      `ProtoViewer did not answer within ${timeoutMs} ms. It may still have saved the prototype: check ProtoViewer before retrying, and unlock the device if it is locked.`,
-    );
   }
 
   /** Runs without the caller's signal, so a cancelled call still removes its own files. */
@@ -368,20 +331,4 @@ function throwIfStartFailed(output: string): void {
   if (/(^|\n)\s*Error( type \d+)?:|Exception|Permission Denial|Activity not started/.test(output)) {
     throw new ActionableError(`Could not start ProtoViewer: ${output.trim()}`);
   }
-}
-
-function parseResult(text: string): ProtoViewerWireResult {
-  let json: unknown;
-  try {
-    json = JSON.parse(text);
-  } catch (error) {
-    throw new ActionableError(`ProtoViewer wrote an unreadable result: ${errorMessage(error)}`, {
-      cause: error,
-    });
-  }
-  const parsed = protoViewerWireResultSchema.safeParse(json);
-  if (!parsed.success) {
-    throw new ActionableError(`ProtoViewer wrote an unexpected result: ${parsed.error.message}`);
-  }
-  return parsed.data;
 }

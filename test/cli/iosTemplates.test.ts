@@ -28,6 +28,7 @@ test("build and clean dispatch only explicit maintenance actions", async () => {
   const calls: string[] = [];
   const deps = {
     platform: "darwin" as const,
+    onInterrupt: () => {},
     write: (line: string) => {
       calls.push(line);
     },
@@ -51,6 +52,7 @@ test("help prints usage successfully without resolving maintenance dependencies"
   const lines: string[] = [];
   const deps = {
     platform: "linux" as const,
+    onInterrupt: () => {},
     write: (line: string) => {
       lines.push(line);
     },
@@ -69,24 +71,60 @@ test("help prints usage successfully without resolving maintenance dependencies"
   expect(parseIosTemplatesArgs(["clean", "--stale"]).stale).toBe(true);
   expect(parseIosTemplatesArgs(["clean", "--runtime", "ios"]).runtime).toBe("ios");
 });
-test("SIGINT aborts an explicit build and permits cleanup before returning", async () => {
-  let cleaned = false;
+test("SIGINT aborts an explicit build, finishes its cleanup, and exits 130 (#15312)", async () => {
+  const lines: string[] = [];
+  const order: string[] = [];
+  let interrupt: (() => Promise<void>) | undefined;
+  let building: (() => void) | undefined;
   const deps = {
     platform: "darwin" as const,
-    write: () => {},
+    onInterrupt: (listener: () => Promise<void>) => {
+      interrupt = listener;
+    },
+    write: (line: string) => {
+      lines.push(line);
+    },
     resolveKey: async () => key,
     clean: async () => {},
     build: async (_key: typeof key, signal?: AbortSignal) => {
-      process.emit("SIGINT");
+      await new Promise<void>((resolve) => {
+        building = resolve;
+        signal?.addEventListener("abort", () => resolve(), { once: true });
+      });
       expect(signal?.aborted).toBe(true);
-      cleaned = true;
+      // Stands in for removing the partial simulator and releasing the lock.
+      await Promise.resolve();
+      order.push("cleaned");
       return "failed";
     },
+  };
+  const command = runIosTemplatesCommand(
+    ["build", "--runtime", "ios", "--device-type", "phone"],
+    deps,
+  );
+  while (!building) {
+    await Promise.resolve();
+  }
+
+  await interrupt!();
+  order.push("interrupt listener returned");
+
+  expect(order).toEqual(["cleaned", "interrupt listener returned"]);
+  expect(await command).toBe(130);
+  expect(lines).toEqual([JSON.stringify({ result: "interrupted" })]);
+});
+test("a build that finishes without an interrupt keeps its ordinary exit code", async () => {
+  const deps = {
+    platform: "darwin" as const,
+    onInterrupt: () => {},
+    write: () => {},
+    resolveKey: async () => key,
+    clean: async () => {},
+    build: async () => "failed",
   };
   expect(
     await runIosTemplatesCommand(["build", "--runtime", "ios", "--device-type", "phone"], deps),
   ).toBe(1);
-  expect(cleaned).toBe(true);
 });
 test("unknown maintenance device type fails before writing any manifest", async () => {
   const fake = new SimulatorTemplatesHarness();
@@ -97,6 +135,7 @@ test("unknown maintenance device type fails before writing any manifest", async 
     profile: () => "none" as const,
     xcode: { readBuild: async () => "X1" },
     lock: { acquire: async () => undefined, acquireName: async () => undefined },
+    relocator: fake.relocator,
     builder: {
       build: async () => {
         throw new Error("unexpected build");

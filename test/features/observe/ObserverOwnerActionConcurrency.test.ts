@@ -120,7 +120,7 @@ const ownerCommands = [
   "shell pm clear com.example",
   "shell pm grant com.example android.permission.CAMERA",
   "install /fake/app.apk",
-  "shell cmd notification set_enabled com.example true",
+  "shell pm grant --user 0 'com.example' android.permission.POST_NOTIFICATIONS",
   "shell settings put system accelerometer_rotation 0",
   "shell cmd device_state state 1",
   "shell ime set com.example/.Ime",

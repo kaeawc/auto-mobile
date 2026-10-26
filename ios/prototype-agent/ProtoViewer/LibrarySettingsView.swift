@@ -28,8 +28,7 @@ struct LibrarySettingsView: View {
                     }
                 } footer: {
                     Text(
-                        "Off by default. When enabled, private LAN addresses are allowed. " +
-                            "Loopback, link-local addresses, and AutoMobile daemon ports on LAN addresses are blocked."
+                        "Off by default. When enabled, private LAN addresses are allowed. Loopback, link-local addresses, and AutoMobile daemon ports on LAN addresses are blocked."
                     )
                 }
                 Section {

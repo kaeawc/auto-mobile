@@ -23,6 +23,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
@@ -51,7 +54,7 @@ class LicensesActivity : ComponentActivity() {
 @Composable
 internal fun LicensesScreen(document: LicenseDocument?, failed: Boolean) {
   Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).padding(16.dp)) {
-    Text(stringResource(R.string.open_source_licenses))
+    Text(stringResource(R.string.open_source_licenses), Modifier.semantics { heading() })
     when {
       failed -> Text(stringResource(R.string.licenses_error))
       document == null -> Text(stringResource(R.string.loading))
@@ -84,7 +87,9 @@ private fun LicenseRow(library: LicensedLibrary, document: LicenseDocument) {
         )
       },
       modifier =
-        Modifier.fillMaxWidth().testTag("license-${library.uniqueId}").clickable {
+        Modifier.fillMaxWidth().testTag("license-${library.uniqueId}").clickable(
+          role = Role.Button,
+        ) {
           expanded = !expanded
         },
     )

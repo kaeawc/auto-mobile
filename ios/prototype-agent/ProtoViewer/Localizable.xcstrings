@@ -1,0 +1,502 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "Network on": {
+      "comment": "PrototypeScreen chrome: Label, message, or action in this screen.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Network on"
+          }
+        }
+      }
+    },
+    "Network is enabled for imported prototypes": {
+      "comment": "PrototypeScreen chrome: Label, message, or action in this screen.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Network is enabled for imported prototypes"
+          }
+        }
+      }
+    },
+    "Settings": {
+      "comment": "LibraryView chrome: Label, message, or action in this screen.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Settings"
+          }
+        }
+      }
+    },
+    "Relaunch": {
+      "comment": "PrototypeScreen chrome: Label, message, or action in this screen.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Relaunch"
+          }
+        }
+      }
+    },
+    "Reset": {
+      "comment": "PrototypeScreen chrome: Label, message, or action in this screen.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reset"
+          }
+        }
+      }
+    },
+    "Close": {
+      "comment": "PrototypeScreen chrome: Label, message, or action in this screen.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Close"
+          }
+        }
+      }
+    },
+    "Prototype actions": {
+      "comment": "PrototypeScreen chrome: Label, message, or action in this screen.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prototype actions"
+          }
+        }
+      }
+    },
+    "Reset stored values for this prototype?": {
+      "comment": "PrototypeScreen chrome: Label, message, or action in this screen.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reset stored values for this prototype?"
+          }
+        }
+      }
+    },
+    "Reset and relaunch": {
+      "comment": "PrototypeScreen chrome: Label, message, or action in this screen.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reset and relaunch"
+          }
+        }
+      }
+    },
+    "Prototype did not render in time": {
+      "comment": "PrototypeScreen chrome: Label, message, or action in this screen.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prototype did not render in time"
+          }
+        }
+      }
+    },
+    "Allow network for imported prototypes": {
+      "comment": "LibrarySettingsView chrome: Label, message, or action in this screen.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allow network for imported prototypes"
+          }
+        }
+      }
+    },
+    "Local network access was not granted, so network is off. Allow ProtoViewer under Settings > Privacy & Security > Local Network, then turn this on again.": {
+      "comment": "LibrarySettingsView chrome: Label, message, or action in this screen.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Local network access was not granted, so network is off. Allow ProtoViewer under Settings > Privacy & Security > Local Network, then turn this on again."
+          }
+        }
+      }
+    },
+    "Off by default. When enabled, private LAN addresses are allowed. Loopback, link-local addresses, and AutoMobile daemon ports on LAN addresses are blocked.": {
+      "comment": "LibrarySettingsView chrome: Label, message, or action in this screen.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Off by default. When enabled, private LAN addresses are allowed. Loopback, link-local addresses, and AutoMobile daemon ports on LAN addresses are blocked."
+          }
+        }
+      }
+    },
+    "Done": {
+      "comment": "LibrarySettingsView chrome: Label, message, or action in this screen.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Done"
+          }
+        }
+      }
+    },
+    "Allow network for imported prototypes?": {
+      "comment": "LibrarySettingsView chrome: Label, message, or action in this screen.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allow network for imported prototypes?"
+          }
+        }
+      }
+    },
+    "Allow network": {
+      "comment": "LibrarySettingsView chrome: Label, message, or action in this screen.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allow network"
+          }
+        }
+      }
+    },
+    "Cancel": {
+      "comment": "LibraryView chrome: Label, message, or action in this screen.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel"
+          }
+        }
+      }
+    },
+    "Imported prototypes will be able to send requests to the internet and devices on your LAN.": {
+      "comment": "LibrarySettingsView chrome: Label, message, or action in this screen.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Imported prototypes will be able to send requests to the internet and devices on your LAN."
+          }
+        }
+      }
+    },
+    "No prototypes": {
+      "comment": "LibraryView chrome: Label, message, or action in this screen.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No prototypes"
+          }
+        }
+      }
+    },
+    "Imported prototypes appear here.": {
+      "comment": "LibraryView chrome: Label, message, or action in this screen.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Imported prototypes appear here."
+          }
+        }
+      }
+    },
+    "Imported": {
+      "comment": "LibraryView chrome: Label, message, or action in this screen.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Imported"
+          }
+        }
+      }
+    },
+    "%lld unavailable entries skipped": {
+      "comment": "LibraryView chrome: placeholders are counts or format versions.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld unavailable entry skipped"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld unavailable entries skipped"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "ProtoViewer": {
+      "comment": "LibraryView chrome: Shown to the user; ProtoViewer is a brand name.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ProtoViewer"
+          }
+        }
+      }
+    },
+    "Importing prototype…": {
+      "comment": "LibraryView chrome: Label, message, or action in this screen.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Importing prototype…"
+          }
+        }
+      }
+    },
+    "Import": {
+      "comment": "LibraryView chrome: Label, message, or action in this screen.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Import"
+          }
+        }
+      }
+    },
+    "Prototype operation failed": {
+      "comment": "LibraryView chrome: Label, message, or action in this screen.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prototype operation failed"
+          }
+        }
+      }
+    },
+    "OK": {
+      "comment": "LibraryView chrome: Label, message, or action in this screen.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OK"
+          }
+        }
+      }
+    },
+    "Unknown error": {
+      "comment": "LibraryView chrome: Label, message, or action in this screen.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unknown error"
+          }
+        }
+      }
+    },
+    "Delete %@?": {
+      "comment": "LibraryView chrome: placeholder is the prototype name or technical warning details.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete %@?"
+          }
+        }
+      }
+    },
+    "Delete": {
+      "comment": "LibraryView chrome: Label, message, or action in this screen.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete"
+          }
+        }
+      }
+    },
+    "The prototype and its stored values will be removed.": {
+      "comment": "LibraryView chrome: Label, message, or action in this screen.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The prototype and its stored values will be removed."
+          }
+        }
+      }
+    },
+    "Share prototype?": {
+      "comment": "LibraryView chrome: Label, message, or action in this screen.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Share prototype?"
+          }
+        }
+      }
+    },
+    "Share": {
+      "comment": "LibraryView chrome: Label, message, or action in this screen.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Share"
+          }
+        }
+      }
+    },
+    "Shares the spec and its referenced assets. Stored values and library metadata are excluded.": {
+      "comment": "LibraryView chrome: Label, message, or action in this screen.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shares the spec and its referenced assets. Stored values and library metadata are excluded."
+          }
+        }
+      }
+    },
+    "This spec may contain credentials or private addresses. Review before sharing.\n%@": {
+      "comment": "LibraryView chrome: placeholder is the prototype name or technical warning details.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This spec may contain credentials or private addresses. Review before sharing.\n%@"
+          }
+        }
+      }
+    },
+    "Unable to open prototype": {
+      "comment": "ProtoViewerApp chrome: Label, message, or action in this screen.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unable to open prototype"
+          }
+        }
+      }
+    },
+    "No prototype saved": {
+      "comment": "ViewerApp chrome: Label, message, or action in this screen.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No prototype saved"
+          }
+        }
+      }
+    },
+    "Invalid prototype": {
+      "comment": "ViewerApp chrome: Label, message, or action in this screen.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Invalid prototype"
+          }
+        }
+      }
+    },
+    "Unsupported prototype format": {
+      "comment": "ViewerApp chrome: Label, message, or action in this screen.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unsupported prototype format"
+          }
+        }
+      }
+    },
+    "Version %lld; expected %lld": {
+      "comment": "ViewerApp chrome: placeholders are counts or format versions.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Version %lld; expected %lld"
+          }
+        }
+      }
+    },
+    "Prototype data is corrupt": {
+      "comment": "ViewerApp chrome: Label, message, or action in this screen.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prototype data is corrupt"
+          }
+        }
+      }
+    },
+    "prototype": {
+      "comment": "Fallback prototype name in the delete confirmation.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "prototype"
+          }
+        }
+      }
+    },
+    "Open-source licenses": {
+      "comment": "LibrarySettingsView row and LicensesView title: opens the list of bundled third-party licenses.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open-source licenses"
+          }
+        }
+      }
+    },
+    "Security policy": {
+      "comment": "LibrarySettingsView row: opens the project security policy in the browser.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Security policy"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

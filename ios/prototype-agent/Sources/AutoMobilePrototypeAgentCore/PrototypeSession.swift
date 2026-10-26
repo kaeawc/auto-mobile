@@ -97,6 +97,10 @@ struct PrototypeSession {
     private(set) var structureRevision = 0
     private(set) var pages: [String: Int] = [:]
     private(set) var stacks: [String: PrototypeStackSnapshot] = [:]
+    private(set) var stackChanges: [String: PrototypeStackChange] = [:]
+    private(set) var stackEntries: [String: [PrototypeStackEntry]] = [:]
+    private var stackRevision = 0
+    private var nextStackEntry = 0
     private var stackNodes: [String: PrototypeNode] = [:]
     private(set) var pageCounts: [String: Int] = [:]
     /// Keys whose errors have been revealed by change, blur or a failed guard.
@@ -111,6 +115,13 @@ struct PrototypeSession {
     /// `request` actions in flight (#12529) and the commands for the driver that runs them; see
     /// `takeRequestCommands`.
     private(set) var requests = PrototypeRequestLedger()
+    private var timerCommands: [PrototypeTimerCommand] = []
+
+    mutating func takeTimerCommands() -> [PrototypeTimerCommand] {
+        defer { timerCommands = [] }
+        return timerCommands
+    }
+
     /// The shown prototype's `appearance` from its show request.
     /// The shown spec's size outside its `state`, for the spec byte cap (#11562); see
     /// `PrototypeStateValidator.stateBytes`.
@@ -157,6 +168,7 @@ struct PrototypeSession {
         specBytes: Int? = nil,
         restoredState: [String: JSONValue]? = nil
     ) {
+        timerCommands.append(.cancelAll)
         appearanceOverride = appearance
         // The agent keeps no raw spec, so the request's own size (when the caller has it) less the
         // state it carried is what the cap adds every later state to; without it only state counts.
@@ -193,12 +205,36 @@ struct PrototypeSession {
         keepingPages previous: [String: Int],
         keepingStacks previousStacks: [String: PrototypeStackSnapshot]
     ) {
+        let previousNodes = stackNodes
+        let previousEntries = stackEntries
+        let previousChanges = stackChanges
         stackNodes = [:]
         root.collectStacks(into: &stackNodes)
         stacks = stackNodes.mapValues { node in
             let path = (node.id.flatMap { previousStacks[$0]?.path } ?? [])
                 .filter { node.screens?[$0] != nil }.prefix(PrototypeLimits.maxStackDepth)
             return PrototypeStackSnapshot(path: path.isEmpty ? [node.start ?? ""] : Array(path))
+        }
+        stackChanges = [:]
+        stackEntries = [:]
+        for (id, snapshot) in stacks {
+            let before = previousStacks[id]?.path ?? []
+            let retained = zip(before, snapshot.path).prefix(while: { $0.0 == $0.1 }).count
+            var entries = Array((previousEntries[id] ?? []).prefix(retained))
+            for screen in snapshot.path.dropFirst(entries.count) {
+                nextStackEntry += 1
+                entries.append(PrototypeStackEntry(id: nextStackEntry, screen: screen))
+            }
+            stackEntries[id] = entries
+            if before == snapshot.path,
+               previousNodes[id]?.screenDefinitions == stackNodes[id]?.screenDefinitions,
+               let change = previousChanges[id]
+            {
+                stackChanges[id] = change
+            } else {
+                stackRevision += 1
+                stackChanges[id] = PrototypeStackChange(direction: .reset, transition: .none, revision: stackRevision)
+            }
         }
         pageCounts = root.pagerCounts()
         pages = pageCounts.reduce(into: [:]) { result, entry in
@@ -367,6 +403,10 @@ struct PrototypeSession {
                 events += runSetPage(action)
             case "setData", "appendData", "removeData":
                 events += runDataWrite(action)
+            case "startTimer":
+                timerCommands.append(.start(action))
+            case "cancelTimer":
+                if let id = action.id { timerCommands.append(.cancel(id)) }
             case "request":
                 events += runRequest(action)
             case "dismiss":
@@ -581,14 +621,23 @@ struct PrototypeSession {
         return PrototypeStacks.popTarget(root: spec.root, state: state, pages: pages, stacks: stacks)
     }
 
+    func stackTransition(_ id: String) -> PrototypeStackTransition {
+        PrototypeStackTransition(rawValue: stackNodes[id]?.transition ?? "") ?? .platform
+    }
+
     mutating func popTopmostStack() -> [PrototypeEvent] {
         guard let id = stackPopTarget else { return [] }
-        return changeStack(id) { _, path in Array(path.dropLast()) }
+        return changeStack(id, direction: .pop) { _, path in Array(path.dropLast()) }
     }
 
     private mutating func runStack(_ action: PrototypeAction) -> [PrototypeEvent] {
         guard let id = action.stack else { return [] }
-        return changeStack(id) { node, path in
+        let direction: PrototypeStackChange.Direction = switch action.type {
+        case "push": .push
+        case "replace": .replace
+        default: .pop
+        }
+        return changeStack(id, direction: direction, override: action.transition) { node, path in
             switch action.type {
             case "push":
                 guard path.count < PrototypeLimits.maxStackDepth, let screen = action.screen,
@@ -608,7 +657,8 @@ struct PrototypeSession {
     }
 
     private mutating func changeStack(
-        _ id: String, transform: (PrototypeNode, [String]) -> [String]
+        _ id: String, direction: PrototypeStackChange.Direction, override: PrototypeStackTransition? = nil,
+        transform: (PrototypeNode, [String]) -> [String]
     )
         -> [PrototypeEvent]
     {
@@ -617,6 +667,19 @@ struct PrototypeSession {
         guard path != before.path, let screen = path.last else { return [] }
         let next = PrototypeStackSnapshot(path: path)
         stacks[id] = next
+        stackRevision += 1
+        stackChanges[id] = PrototypeStackChange(
+            direction: direction,
+            transition: override ?? PrototypeStackTransition(rawValue: node.transition ?? "") ?? .platform,
+            revision: stackRevision
+        )
+        let retained = zip(before.path, path).prefix(while: { $0.0 == $0.1 }).count
+        var entries = Array((stackEntries[id] ?? []).prefix(retained))
+        for screen in path.dropFirst(entries.count) {
+            nextStackEntry += 1
+            entries.append(PrototypeStackEntry(id: nextStackEntry, screen: screen))
+        }
+        stackEntries[id] = entries
         // popToRoot can change a depth-one replacement back to start; repeated pushes of the
         // same screen change depth. Both are real changes, just as on Android.
         guard before.path.last != screen || before.depth != next.depth else { return [] }
@@ -664,6 +727,7 @@ struct PrototypeSession {
         guard isShown else { return [] }
         let events = emit(kind: "dismissed", name: nil, payload: .object(["reason": .string(reason.rawValue)]))
         requests.cancelAll()
+        timerCommands.append(.cancelAll)
         spec = nil
         return events
     }

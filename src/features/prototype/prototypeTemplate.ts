@@ -147,7 +147,9 @@ export type FieldKind =
   | "requestInto"
   | "request"
   | "deviceRequest"
-  | "scrollTo";
+  | "scrollTo"
+  | "timer"
+  | "stackTransition";
 
 /** True for the kinds holding a `/data/...` path with `{index}` segments. */
 export const isDataPathKind = (kind: FieldKind): boolean =>
@@ -247,6 +249,16 @@ function mapDataAction(action: Raw, path: string, visit: FieldVisitor): void {
   }
 }
 
+function mapTimerAction(action: Raw, path: string, visit: FieldVisitor): void {
+  if (action.type !== "startTimer" && action.type !== "cancelTimer") {
+    return;
+  }
+  visit(action, path, "timer");
+  if (action.type === "startTimer") {
+    mapList(action, "actions", path, (entry, at) => mapAction(entry, at, visit));
+  }
+}
+
 function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
   switch (action.type) {
     case "setState":
@@ -277,9 +289,17 @@ function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
       visit(action, path, "scrollTo");
       break;
     default:
+      mapTimerAction(action, path, visit);
+      mapNavigationTransition(action, path, visit);
       break;
   }
   return action;
+}
+
+function mapNavigationTransition(action: Raw, path: string, visit: FieldVisitor): void {
+  if (action.type === "push" || action.type === "replace") {
+    mapField(action, "transition", path, "stackTransition", visit);
+  }
 }
 
 const memberPath = (path: string, name: string): string =>
@@ -540,4 +560,21 @@ export function bindCheckedKeys(value: Raw, instance: Instance): Raw {
     copy.refresh = { ...refresh, stateKey: bind(refresh.stateKey) };
   }
   return copy;
+}
+
+/** Visit root platform handler actions, in the contract's sorted event-name order. */
+export function visitPrototypeHandlerFields(spec: unknown, visit: FieldVisitor): void {
+  const handlers = record(record(record(spec)?.platform)?.on);
+  for (const name of Object.keys(handlers ?? {}).sort()) {
+    const actions = handlers![name];
+    if (!Array.isArray(actions)) {
+      continue;
+    }
+    actions.forEach((action, index) => {
+      const value = record(action);
+      if (value) {
+        mapAction(value, `platform.on[${JSON.stringify(name)}][${index}]`, visit);
+      }
+    });
+  }
 }

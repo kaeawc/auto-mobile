@@ -78,8 +78,15 @@ existing screen. Actions \`push {stack, screen}\`, \`pop {stack}\`, \`popToRoot 
 Push is ignored at depth 32; pop at depth 1 does nothing. \`screen_changed\` has name = stack id
 and payload \`{screen, depth}\`, emitted only when the top screen or depth changes. Requires
 \`prototype_stack_v1\`; every screen counts toward node limits, including hidden screens.
-Android Back and the iOS edge swipe pop a stack above depth 1. No transitions yet; per-screen
-scroll position is not restored. A stack cannot appear inside a repeat template.
+Android Back and the iOS edge swipe pop a stack above depth 1. A stack's optional
+\`transition: "platform" | "slide" | "fade" | "none"\` selects screen navigation animation
+(default \`platform\`); \`push\` and \`replace\` can override it with their own \`transition\`.
+Any explicit value needs \`prototype_stack_transitions_v1\`; pop/popToRoot take no override.
+Transitions honour \`motion: "none"\`, animator scale 0 and system reduced motion. A stack's
+\`transition\` accepts only those four values and no longer animates the stack's own visibility
+(earlier specs using \`expand\`, \`scale\`, \`slideStart\`, \`slideEnd\` or \`blurReplace\` on a stack
+are now refused): wrap the stack in a \`box\` with \`visibleWhen\` and a visibility transition for
+that. Each entry's scroll position is restored on pop. A stack cannot appear inside a repeat template.
 
 On Android, \`show replaceOthers: false\` retains other prototype windows, up to four distinct ids
 (requires \`prototype_multi_surface_v1\`); a fifth is refused listing the shown ids. A same-id show
@@ -181,7 +188,7 @@ accessibility zoom actions; it cannot also have \`onDoubleTap\`. Everything snap
 
 ## Choreography
 
-(needs \`prototype_choreography_v1\`) \`transition\` also takes \`{type, delayMs?}\` (\`delayMs\` 0-600 ms, the wait
+(needs \`prototype_choreography_v1\`) On nodes other than stacks, \`transition\` also takes \`{type, delayMs?}\` (\`delayMs\` 0-600 ms, the wait
 before the enter starts) besides the plain names, and \`blurReplace\`: a blur-and-fade enter and exit
 (iOS \`.blurReplace\`; Android 12 and later blur, Android 11 and earlier fade only). A \`box\`, \`row\` or \`column\` takes \`stagger: {ms, order?}\` (\`ms\` 0-100 per child;
 \`order\` \`forward\` (default), \`reverse\` or \`center\`): its direct children with \`visibleWhen\`
@@ -849,6 +856,8 @@ export const GUIDE_ERRORS = `## Common validation errors
 | \`Unknown repeat field "x"\` | Every item needs the field the placeholder names. |
 | \`Missing component prop "x"\` / \`Unused component prop\` | Pass exactly the props the component's \`{props.*}\` placeholders name. |
 | \`Expanded node limit exceeded\` | Fewer items or a smaller template; the limit counts every instance. |
+| \`maxRuns requires everyMs\` | Supply everyMs or remove maxRuns. |
+| \`Too many distinct timer ids\` | Use at most eight distinct startTimer ids, including nested actions and components. |
 | a \`stateKey\` rejected | The key must be initialised in \`state\` with the type the node binds (string, boolean, number). |
 | an unknown property | Nodes and actions are strict: only the fields listed above are accepted. |
 
@@ -985,4 +994,33 @@ known when the request runs. \`inspect\` lists such URLs as \`unreversiblePorts\
 those requests. A saved prototype launched with no host connected gets no reverse either.
 On iOS nothing is reversed, and \`localhost\`, \`127.0.0.1\` and \`[::1]\` are refused as
 \`blocked_destination\` for \`via: "device"\`: call a Mac-local service by the Mac's LAN address instead.
+`;
+
+export const GUIDE_TIMERS = `### Timers
+
+Both timer actions require \`prototype_timers_v1\`. Start a timer from any action list:
+\`{type:"startTimer",id:"tick",afterMs:100,everyMs:1000,maxRuns:10,actions:[{type:"emit",name:"tick"}]}\`.
+\`afterMs\` is required; it and optional \`everyMs\` are integers 100..3600000 ms.
+\`maxRuns\` is 1..10000 total fires, including the first, and requires \`everyMs\`.
+Without maxRuns, repeats continue until cancelled or dismissed. Actions contain 1..32 entries,
+with the same validation and nesting limit as request follow-ups. IDs are literal strings of
+1..64 characters, never repeat-bound; at most eight distinct startTimer ids per spec.
+\`{type:"cancelTimer",id:"tick"}\` removes a timer; unknown ids are no-ops. The host warns
+on show and patch if no startTimer declares the cancelled id; devices do not validate that advisory.
+
+Starting a live id replaces its schedule and resets runs. Each fire is one atomic interaction:
+invalid planned writes drop the whole fire but count the run; a net state change emits one change.
+Self-cancellation stops repeats, and a replacement started during a fire wins. Repeats schedule
+from planned fire time without drift. Timers pause while hidden or inactive, retaining remaining
+time (screenshot capture does not pause); dismiss, teardown and any replacing show cancel them.
+Patch preserves them. Fires never restart idle TTL.
+
+\`prototype {action:"simulate",id,advanceTimeMs:1000}\` advances without waiting (integer
+1..3600000), requiring the same capability. It returns \`fired\`; paused timers fire zero times.
+Due timers run chronologically, ties by start order, including timers started during advancement.
+Exactly 10000 due fires succeed. If another fire is still due, advance stops at the last fire with
+an error and fired=10000, keeping pending timers for the next call. Real scheduling continues from the shifted clock.
+Inspect reports \`timers:[{id,nextFireInMs,runs}]\`, ordered by remaining time then start order;
+remaining time is nonnegative and frozen while paused. A capable device yields an empty array
+when no timers are live.
 `;

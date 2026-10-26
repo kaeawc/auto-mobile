@@ -1,3 +1,4 @@
+import { logger } from "../../../utils/logger";
 import { isAndroidEmulatorSerial } from "../../../utils/androidSerial";
 import { emulatorProcessEscapeHint } from "../../../utils/android-cmdline-tools/EmulatorStillRunningError";
 import { runWithinShutdownDeadline } from "../core/deadlines";
@@ -228,11 +229,32 @@ export async function finalizeIosNameResolvedTeardownTarget(
   return { target };
 }
 
+function hasUnlaunchedCreatedAvdLease(context: TeardownContext): boolean {
+  const proof = context.unlaunchedCreatedAvd;
+  const leaseIdentity = context.lifecycleLease?.identity;
+  return (
+    proof !== undefined &&
+    context.lifecycleLease !== undefined &&
+    !context.lifecycleLease.signal.aborted &&
+    leaseIdentity?.kind === "stable" &&
+    leaseIdentity.platform === "android" &&
+    context.args.target.platform === "android" &&
+    context.mode === "named" &&
+    leaseIdentity.stableId === context.args.target.stableId &&
+    proof.stableId === context.args.target.stableId
+  );
+}
+
 /**
  * Refuse the stopped-image path while a booted emulator that could not name itself might be the
  * AVD about to be destroyed (#6863).
  *
- * An emulator another daemon owns is the one exception that can be settled without trusting a
+ * A request-created, never-launched Android AVD under its matching stable lifecycle lease cannot
+ * be an existing unnamed local sibling, so that private rollback proof skips local siblings.
+ * Process/listed-state checks in prepareStoppedTeardownTarget still prove it stopped, and
+ * checkForRestartedTeardownTarget still refuses a newly appeared unnamed runtime.
+ *
+ * An emulator another daemon owns can instead be settled without trusting a
  * cache: its name was deliberately not read by discovery (the foreign-serial skip), so the
  * placeholder says nothing about the runtime. Left as an unconditional veto, one such emulator
  * stalled every broker destruction until its owner shut it down (#15213). A `named` teardown asks
@@ -244,6 +266,7 @@ async function refuseUnresolvedAndroidRuntime(
   context: TeardownContext,
   booted: BootedDeviceDiscovery,
 ): Promise<TeardownToolResponse | undefined> {
+  const skipLocalSiblings = hasUnlaunchedCreatedAvdLease(context);
   const unresolvedRuntimes = booted.devices.filter(
     (device) =>
       device.platform === "android" &&
@@ -257,15 +280,24 @@ async function refuseUnresolvedAndroidRuntime(
       "target_identity_unresolved",
       `Android emulator runtime '${runtime.deviceId}' has no resolvable AVD name; refusing deletion.`,
     );
+  if (skipLocalSiblings && unresolvedRuntimes.some((runtime) => !runtime.foreignOwned)) {
+    context.localSiblingVetoSkipped = true;
+    logger.info(
+      `Deleting never-launched request-created AVD '${context.args.target.stableId}' under its lifecycle lease; unrelated unnamed local siblings do not veto rollback.`,
+    );
+  }
+  const runtimesToResolve = skipLocalSiblings
+    ? unresolvedRuntimes.filter((runtime) => runtime.foreignOwned)
+    : unresolvedRuntimes;
   // A runtime this daemon could have read, or any runtime of a `force` teardown, stays a veto
   // without spending a probe on the others.
-  const unprobeable = unresolvedRuntimes.find(
+  const unprobeable = runtimesToResolve.find(
     (runtime) => !runtime.foreignOwned || context.mode !== "named",
   );
   if (unprobeable) {
     return unresolvedRefusal(unprobeable);
   }
-  const probe = await probeForeignUnnamedRuntimes(context, unresolvedRuntimes);
+  const probe = await probeForeignUnnamedRuntimes(context, runtimesToResolve);
   if (probe.kind === "unresolved") {
     return unresolvedRefusal(probe.runtime);
   }
@@ -278,7 +310,7 @@ async function refuseUnresolvedAndroidRuntime(
         "another AutoMobile daemon owns; refusing deletion.",
     );
   }
-  context.clearedForeignSerials = new Set(unresolvedRuntimes.map((runtime) => runtime.deviceId));
+  context.clearedForeignSerials = new Set(runtimesToResolve.map((runtime) => runtime.deviceId));
   return undefined;
 }
 
@@ -417,11 +449,19 @@ export async function refuseLiveStoppedAndroidTarget(
           target.device.name,
           { signal, deadlineMs: context.deadlineMs },
         );
-        if (
-          (states?.size ?? 0) > 0 ||
-          processes.kind === "unreadable" ||
-          (processes.kind === "read" && processes.candidates.length > 0)
-        ) {
+        let processesUnproven: boolean;
+        switch (processes.kind) {
+          case "read":
+            processesUnproven = processes.candidates.length > 0;
+            break;
+          case "unreadable":
+            processesUnproven = true;
+            break;
+          case "unsupported":
+            processesUnproven = context.localSiblingVetoSkipped === true;
+            break;
+        }
+        if ((states?.size ?? 0) > 0 || processesUnproven) {
           return createTeardownFailureResponse(
             context.args,
             "stop",

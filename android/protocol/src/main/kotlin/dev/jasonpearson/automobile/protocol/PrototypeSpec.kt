@@ -187,7 +187,11 @@ data class PrototypeSetPageAction(
 
 @SerialName("push")
 @Serializable
-data class PrototypePushAction(val stack: String, val screen: String) : PrototypeAction()
+data class PrototypePushAction(
+  val stack: String,
+  val screen: String,
+  val transition: PrototypeStackTransition? = null,
+) : PrototypeAction()
 
 @SerialName("pop")
 @Serializable
@@ -199,7 +203,11 @@ data class PrototypePopToRootAction(val stack: String) : PrototypeAction()
 
 @SerialName("replace")
 @Serializable
-data class PrototypeReplaceAction(val stack: String, val screen: String) : PrototypeAction()
+data class PrototypeReplaceAction(
+  val stack: String,
+  val screen: String,
+  val transition: PrototypeStackTransition? = null,
+) : PrototypeAction()
 
 @SerialName("setState")
 @Serializable
@@ -1304,7 +1312,11 @@ data class PrototypeStackNode(
   override val span: Int? = null,
   val start: String,
   val screens: Map<String, PrototypeNode>,
-) : PrototypeNode()
+) : PrototypeNode() {
+  /** Typed navigation transition; [transition] remains the shared wire slot. */
+  val stackTransition: PrototypeStackTransition?
+    get() = transition?.type?.let(PrototypeStackTransition::fromValue)
+}
 
 @SerialName("tabBar")
 @Serializable
@@ -1588,3 +1600,17 @@ object PrototypeValidityKeysSerializer :
       is PrototypeValidityKeys.Multiple -> JsonArray(value.keys.map(::JsonPrimitive))
     }
 }
+
+@Serializable
+@SerialName("startTimer")
+data class PrototypeStartTimerAction(
+  val id: String,
+  val afterMs: Int,
+  val everyMs: Int? = null,
+  val maxRuns: Int? = null,
+  val actions: List<PrototypeAction>,
+) : PrototypeAction()
+
+@Serializable
+@SerialName("cancelTimer")
+data class PrototypeCancelTimerAction(val id: String) : PrototypeAction()

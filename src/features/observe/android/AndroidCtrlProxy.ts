@@ -78,6 +78,7 @@ export type AndroidCtrlProxyClientSurface = Pick<
   | "listPreferenceFiles"
   | "notifyRecordingStopped"
   | "onDisplayTransition"
+  | "requestAdvancePrototypeClock"
   | "requestClearPrototypeStorage"
   | "requestDeviceInfo"
   | "requestDrag"
@@ -356,6 +357,12 @@ export interface AndroidCtrlProxy
   ): Promise<PrototypeResult>;
   requestDeleteSavedPrototype(
     id: string,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<PrototypeResult>;
+  requestAdvancePrototypeClock(
+    id: string,
+    advanceTimeMs: number,
     timeoutMs?: number,
     perf?: PerformanceTracker,
   ): Promise<PrototypeResult>;

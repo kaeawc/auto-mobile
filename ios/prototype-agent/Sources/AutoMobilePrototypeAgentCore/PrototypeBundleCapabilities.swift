@@ -72,14 +72,16 @@ enum PrototypeBundleCapabilities {
                     .contains(where: { node[$0] != nil }) { need("pager_options") }
                 if node["indicator"] != nil { need("carousel") }
             }
-            let transitionType = node["transition"]?.objectFields?["type"]?.stringValue
-                ?? node["transition"]?.stringValue ?? ""
+            if type == "stack", node["transition"] != nil { need("stack_transitions") }
+            let transition = type == "stack" ? nil : node["transition"]
+            let transitionType = transition?.objectFields?["type"]?.stringValue
+                ?? transition?.stringValue ?? ""
             if node["animate"] != nil || (type == "image" && node["zoomable"] != nil) ||
                 ["slideStart", "slideEnd", "scale"].contains(transitionType)
             {
                 names.insert("prototype_motion_v2")
             }
-            if node["stagger"] != nil || node["transition"]?.objectFields != nil || transitionType == "blurReplace" {
+            if node["stagger"] != nil || transition?.objectFields != nil || transitionType == "blurReplace" {
                 names.insert("prototype_choreography_v1")
             }
             scanSlots(.object(node), names: &names)
@@ -96,6 +98,7 @@ enum PrototypeBundleCapabilities {
         }; return }
         guard let fields = value.objectFields else { return }
         let type = fields["type"]?.stringValue
+        if type == "startTimer" || type == "cancelTimer" { names.insert("prototype_timers_v1") }
         if type == "request" {
             names.insert("prototype_network_v1")
             if fields["via"]?.stringValue == "device" { names.insert("prototype_network_device_v1") }
@@ -104,6 +107,9 @@ enum PrototypeBundleCapabilities {
         if type == "emit", fields["context"] != nil { names.insert("prototype_emit_context_v1") }
         if type == "requireValid" { names.insert("prototype_checks_v1") }
         if type == "scrollTo" { names.insert("prototype_chat_scroll_v1") }
+        if ["push", "replace"].contains(type ?? ""), fields["transition"] != nil {
+            names.insert("prototype_stack_transitions_v1")
+        }
         if type == nil, fields["data"]?.stringValue != nil { names.insert("prototype_data_model_v1") }
         if type == "platform", let method = fields["call"]?.stringValue {
             names.insert("prototype_platform_v1")

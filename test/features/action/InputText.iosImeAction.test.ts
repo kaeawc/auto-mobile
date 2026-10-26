@@ -226,7 +226,10 @@ describe("InputText iOS IME action", () => {
           { imeAction: "done" },
           { signal: controller.signal },
         );
-        expect(result).toMatchObject({ success: false, error, retryable: false });
+        expect(result).toMatchObject({ success: false, retryable: false });
+        // The guidance is kept verbatim; the bounded read-back appends what was committed.
+        expect(result.error?.startsWith(error)).toBe(true);
+        expect(result.error).toContain("Observed afterwards:");
         expect(setText).toHaveBeenCalledTimes(1);
         expect(imeActionSpy).not.toHaveBeenCalled();
       } finally {

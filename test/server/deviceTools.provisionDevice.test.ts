@@ -1,3 +1,7 @@
+import {
+  ProvisionDeviceRollbackError,
+  type ProvisionDeviceCleanup,
+} from "../../src/features/deviceLifecycle/provisioning/provisioning";
 import { FakeEmulatorProcessStopper } from "../fakes/FakeEmulatorProcessStopper";
 import { fakeIosDeviceResourceHazards as hazards } from "../helpers/fakeIosDeviceResourceHazards";
 import { UnsafeDeviceResourceCombinationError } from "../../src/models/UnsafeDeviceResourceCombinationError";
@@ -43,7 +47,15 @@ import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { warmedTests } from "../helpers/warmedTests";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
-import { afterAll, afterEach, beforeEach, describe, expect, spyOn } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test as unitTest,
+} from "bun:test";
 import { z } from "zod/v4";
 import {
   provisionDeviceSchema,
@@ -727,6 +739,102 @@ describe("provisionDevice handler", () => {
     expect(deviceManager.wasMethodCalled("waitForDeviceReady")).toBe(false);
     expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
   });
+
+  test("rolls back a never-launched created AVD despite a local unnamed sibling", async () => {
+    const created = provisionedTestDevice("android", true);
+    const failDiscovery = configurePostCreateAndroidDiscoveryFailure(deviceManager);
+    exactProvisioner.provision = async (request) => {
+      request.onBeforeCreate?.();
+      deviceManager.setDeviceImages("android", [created.device]);
+      deviceManager.setBootedDevices("android", [
+        { platform: "android", name: "Unknown (emulator-5556)", deviceId: "emulator-5556" },
+      ]);
+      failDiscovery();
+      return created;
+    };
+    setDeviceToolsDependencies({ timer: new FakeTimer() });
+
+    const response = JSON.parse(await provisionResponseText(provisionTestArgs("android")));
+
+    expect(response).toMatchObject({
+      error: { code: "discovery_incomplete", retryable: true },
+      cleanup: { status: "succeeded" },
+      lifecycle: { state: "removed", device: { stableId: created.device.name } },
+    });
+    expect(deviceManager.wasMethodCalled("destroyDevice")).toBe(true);
+    expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
+  });
+
+  test("an adopted AVD keeps the full unnamed-sibling rollback veto", async () => {
+    const adopted = provisionedTestDevice("android", false);
+    const failDiscovery = configurePostCreateAndroidDiscoveryFailure(deviceManager);
+    exactProvisioner.provision = async (request) => {
+      // A creation attempt can discover a concurrent winner and adopt its image.
+      request.onBeforeCreate?.();
+      deviceManager.setDeviceImages("android", [adopted.device]);
+      deviceManager.setBootedDevices("android", [
+        { platform: "android", name: "Unknown (emulator-5556)", deviceId: "emulator-5556" },
+      ]);
+      failDiscovery();
+      return adopted;
+    };
+    setDeviceToolsDependencies({ timer: new FakeTimer() });
+
+    const response = JSON.parse(await provisionResponseText(provisionTestArgs("android")));
+
+    expect(response).toMatchObject({
+      error: { code: "cleanup_failed" },
+      cleanup: {
+        status: "failed",
+        failure: { code: "target_identity_unresolved", phase: "precondition" },
+      },
+    });
+    expect(deviceManager.wasMethodCalled("destroyDevice")).toBe(false);
+    expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
+  });
+
+  test.each([true, false])(
+    "a rollback refused after a boot attempt preserves original retryable=%s",
+    async (retryable) => {
+      const created = provisionedTestDevice("android", true);
+      exactProvisioner.provision = async (request) => {
+        request.onBeforeCreate?.();
+        deviceManager.setDeviceImages("android", [created.device]);
+        return created;
+      };
+      deviceManager.startDevice = async () => {
+        deviceManager.setBootedDevices("android", [
+          { platform: "android", name: "Unknown (emulator-5556)", deviceId: "emulator-5556" },
+        ]);
+        throw new ProvisionDeviceError(
+          "timeout",
+          "launch failed before producing a runtime",
+          retryable,
+        );
+      };
+      setDeviceToolsDependencies({ timer: new FakeTimer() });
+
+      const response = JSON.parse(await provisionResponseText(provisionTestArgs("android")));
+
+      expect(response).toMatchObject({
+        error: { code: "cleanup_failed", retryable },
+        cleanup: {
+          status: "failed",
+          failure: { code: "target_identity_unresolved", phase: "precondition" },
+        },
+        lifecycle: { state: "retained", device: { stableId: created.device.name } },
+        recovery: {
+          cleanup: { status: "failed_device_retained" },
+          nextAction: {
+            action: retryable ? "reacquire_retained_device" : "perform_cleanup",
+            automaticRetrySafe: retryable,
+          },
+        },
+      });
+      expect(deviceManager.wasMethodCalled("destroyDevice")).toBe(false);
+      expect(response.error.retainedDevice).toBeUndefined();
+    },
+  );
 
   test("boots a newly created AVD despite an unresolved sibling emulator", async () => {
     const timer = new FakeTimer();
@@ -5861,4 +5969,38 @@ describe("provisionDevice handler", () => {
 
     expect(provisionDeadlineMs).toBe(80_000);
   });
+});
+
+describe("ProvisionDeviceRollbackError intact refusal retryability", () => {
+  for (const retryable of [true, false]) {
+    for (const status of ["failed", "succeeded"] as const) {
+      for (const retained of [true, false]) {
+        unitTest(`original=${retryable} cleanup=${status} retained=${retained}`, () => {
+          const original = new ProvisionDeviceError("timeout", "original failure", retryable, {
+            retryAfterMs: 123,
+          });
+          const retainedDevice = {
+            platform: "android" as const,
+            stableId: "new-avd",
+            name: "new-avd",
+          };
+          const cleanup: ProvisionDeviceCleanup = {
+            status,
+            target: { platform: "android", isVirtual: true, stableId: "new-avd" },
+          };
+          const error = new ProvisionDeviceRollbackError(
+            original,
+            cleanup,
+            retained ? { retainedDevice } : undefined,
+          );
+          expect(error.retryable).toBe(status === "failed" && !retained ? false : retryable);
+          expect(error.code).toBe(status === "failed" ? "cleanup_failed" : "timeout");
+          expect(error.diagnostics.retryAfterMs).toBe(123);
+          expect(error.diagnostics.retainedDevice).toEqual(
+            status === "failed" && retained ? retainedDevice : undefined,
+          );
+        });
+      }
+    }
+  }
 });

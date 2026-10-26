@@ -60,6 +60,10 @@ const fixtures: Record<string, Node> = {
   },
   prototype_loading_states_v1: { type: "box", style: { shimmer: true }, children: [label] },
   prototype_motion_v2: { ...label, animate: { durationMs: 300 } },
+  prototype_stack_transitions_v1: {
+    ...label,
+    onTap: [{ type: "push", stack: "nav", screen: "home", transition: "slide" }],
+  },
   prototype_choreography_v1: { ...label, transition: { type: "fade", delayMs: 100 } },
   prototype_chart_v1: {
     type: "chart",
@@ -71,6 +75,12 @@ const fixtures: Record<string, Node> = {
     type: "text",
     text: "@ana",
     linkify: { kinds: ["mention"], onTap: [{ type: "emit", name: "link" }] },
+  },
+  prototype_timers_v1: {
+    ...label,
+    onTap: [
+      { type: "startTimer", id: "tick", afterMs: 100, actions: [{ type: "emit", name: "tick" }] },
+    ],
   },
   prototype_chat_scroll_v1: { type: "scroll", reverse: true, child: label },
   prototype_menus_v1: {

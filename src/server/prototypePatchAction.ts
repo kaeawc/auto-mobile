@@ -1,3 +1,4 @@
+import { prototypeTimerWarnings } from "../features/prototype/prototypeTimers";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import { logger } from "../utils/logger";
 import {
@@ -185,8 +186,13 @@ async function finishPatch(
     deps.store.recordPatchedData(deviceId, args.id, applied.validated.data);
   }
   deps.retire(result);
+  const output = successfulPatchOutput(fields.revision, committed, args.id);
+  const warning = [output.warning, ...prototypeTimerWarnings(applied.spec)]
+    .filter(Boolean)
+    .join(" ");
   return {
-    ...successfulPatchOutput(fields.revision, committed, args.id),
+    ...output,
+    ...(warning ? { warning } : {}),
     ...prototypeAccessibilityOutput(applied.spec),
   };
 }

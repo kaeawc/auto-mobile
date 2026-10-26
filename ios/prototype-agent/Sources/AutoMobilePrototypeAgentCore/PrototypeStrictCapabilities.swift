@@ -27,6 +27,8 @@ enum PrototypeStrictCapabilities {
             PrototypeRepeat.bindTextFields(&own) { text in textBinding(text); return text }
             let type = fields["type"]?.stringValue ?? ""
             let types = [
+                "startTimer": "timers",
+                "cancelTimer": "timers",
                 "stack": "stack",
                 "flow": "flow_grid",
                 "grid": "flow_grid",
@@ -38,6 +40,8 @@ enum PrototypeStrictCapabilities {
                 "scrollTo": "chat_scroll",
             ]
             if let feature = types[type] { need(feature) }
+            let navigation = ["stack", "push", "replace"].contains(type)
+            if navigation, fields["transition"] != nil { need("stack_transitions") }
             if includeAgentGates, type == "icon",
                ["rounded", "sharp", "twoTone"].contains(fields["variant"]?.stringValue ?? "") { need("icon_variant") }
             if type == "text", fields["spans"] != nil { need("rich_text") }
@@ -94,12 +98,15 @@ enum PrototypeStrictCapabilities {
                 let transitionType = child.objectFields?["type"]?.stringValue ?? child.stringValue ?? ""
                 if ["animate", "scale", "rotation", "zoomable"]
                     .contains(key) ||
-                    (key == "transition" && ["slideStart", "slideEnd", "scale"].contains(transitionType))
+                    (key == "transition" && !navigation && ["slideStart", "slideEnd", "scale"].contains(transitionType))
                 {
                     result.insert("prototype_motion_v2")
                 }
                 if key == "stagger" ||
-                    (key == "transition" && (child.objectFields != nil || transitionType == "blurReplace"))
+                    (
+                        key == "transition" && !navigation &&
+                            (child.objectFields != nil || transitionType == "blurReplace")
+                    )
                 {
                     need("choreography")
                 }
@@ -109,6 +116,7 @@ enum PrototypeStrictCapabilities {
             }
         }
         if let root = spec["root"] { scan(root) }
+        if let handlers = spec["platform"] { scan(handlers) }
         if let scrim = spec["window"]?.objectFields?["placement"]?.objectFields?["scrim"],
            scrim.objectFields != nil { need("theme_modes") }
         if let requires = spec["requires"]?.objectFields {

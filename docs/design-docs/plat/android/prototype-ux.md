@@ -350,7 +350,7 @@ Every node has required `type`. All other common properties are optional:
 | `style`              | Strict style object below.                                                                                                                   |
 | `styleWhen`          | Conditional style overrides (see Conditional style below). One to 8 entries.                                                                 |
 | `visibleWhen`        | Condition (see Conditions below). A false condition, or a missing key, means hidden.                                                         |
-| `transition`         | Optional `none`, `fade`, `expand` or `slide`: the `visibleWhen` enter/exit. See Motion.                                                      |
+| `transition`         | Except on stacks (see Stack transitions), optional `none`, `fade`, `expand` or `slide`: the `visibleWhen` enter/exit. See Motion.            |
 | `anchor`             | Bounds or app-element anchor below.                                                                                                          |
 | `safeAreaPadding`    | Explicit inset selection below.                                                                                                              |
 
@@ -736,7 +736,7 @@ appear, disappear or change (`animateContentSize`), gated by the same
 motion-enabled check, so a sibling slides into the freed space instead of
 jumping.
 
-A node's optional `transition` picks the `visibleWhen` enter/exit: `none`
+A non-stack node's optional `transition` picks the `visibleWhen` enter/exit: `none`
 (instant), `fade`, `expand` (grow/shrink) or `slide` (vertical slide with a
 fade). Absent keeps the default fade + expand. It has no effect on nodes
 without `visibleWhen`, or when motion is off.
@@ -758,6 +758,36 @@ intentional infinite animations (today only the shimmer) and is ignored by hosts
 `observe(waitFor: stable)` and the launcher/SystemUI quiet-tree wait do not settle
 while `active` is positive and stay bounded by their usual timeout. The count is
 zero after a single frame under `motion: "none"` or animator scale 0.
+
+### Stack transitions
+
+`prototype_stack_transitions_v1` gates every explicit stack `transition` and push/replace
+`transition` override. Omission means `platform`; pop/popToRoot have no override. The contract
+is validated by both agents, and both advertise the capability.
+
+| Value      | Platform behaviour                         |
+| ---------- | ------------------------------------------ |
+| `platform` | Native navigation animation (default).     |
+| `slide`    | Directional screen slide, reversed on pop. |
+| `fade`     | Screen crossfade.                          |
+| `none`     | Instant screen change.                     |
+
+Android slides enter from the end edge with 30% outgoing parallax, mirrored in RTL; pop and
+popToRoot reverse that direction. Platform replace crossfades. Animations finish within 300 ms.
+`motion: "none"` and animator duration scale 0 snap immediately. The reduced-motion composition
+hook changes slides to crossfades; system preference wiring is deferred to #15115.
+
+Activity hosts scrub the pop with predictive back on API 34+, settle on commit, and restore the
+current screen on cancellation. Earlier APIs pop with the ordinary animation. Overlay windows
+and authored actions use ordinary transitions. Each path entry owns its scroll offsets, retained
+while covered and discarded on pop, replacement or removal. Settled screen containers expose
+`paneTitle`; outgoing content leaves composition and semantics after the animation.
+
+Stack transitions, including a predictive-back scrub, count in the motion-active window signal
+(#15114), so `observe(waitFor: stable)` waits them out.
+
+A stack's `transition` is the screen navigation animation only. The stack's own `visibleWhen`
+uses the default visibility animation; wrap the stack in a box to give that a custom transition.
 
 ### Motion v2 (#14208, `prototype_motion_v2`, not device-verified)
 
@@ -2439,3 +2469,37 @@ prototype id; tapping it opens `SavedPrototypeActivity`, which needs no host.
 - Pinning from the accessibility service while no CtrlProxy activity is visible, launcher dialog
   shapes, badges and `clear-shortcuts` behaviour on the workspace are unverified on a device
   (#12261).
+
+### Timers
+
+`startTimer {id, afterMs, everyMs?, maxRuns?, actions}` and `cancelTimer {id}` require
+`prototype_timers_v1`. IDs are literal strings of 1..64 characters and never repeat-bound.
+Delays are integers 100..3600000 ms; maxRuns is 1..10000 total fires including the first and
+requires everyMs. A list contains 1..32 actions and shares the request follow-up depth limit.
+The whole spec, including components and platform handlers, may declare eight distinct timer ids.
+
+Each prototype has a ledger of at most eight live timers. Starting a live id replaces it and resets
+runs. Cancelling an unknown id is a no-op. Each fire uses the same atomic interaction as a tap:
+requireValid and all planned writes are validated together; rejection drops state changes and events
+but counts the run. One change event follows a net state change. Dismiss cancels every timer.
+A timer may cancel itself; replacing its own id during a fire wins over the old timer's reschedule.
+Repeats advance from the planned fire time, without drift, until maxRuns or cancellation.
+Fires never restart idle TTL. Hidden/inactive prototypes freeze remaining time and restore it on
+resume; transient screenshot hides do not pause. Dismiss (including TTL, disconnect or teardown)
+and replacing show cancel timers; patch preserves them.
+
+The injected clock/scheduler drives real scheduling. `prototype {action:"simulate",id,advanceTimeMs}`
+advances 1..3600000 ms without waiting and returns optional `fired`, refusing before sending unless
+the capability is advertised. `advance_prototype_clock {id,advanceTimeMs}` fires due timers in
+chronological order, ties by start order, including newly started timers due in the window.
+Paused advancement fires zero times. Exactly 10000 due fires succeed; if an additional fire is
+still due, advancement stops at the last fire with an error and fired=10000, retaining pending timers
+for the next call. Real scheduling continues from shifted time. Inspect reports `timers:[{id,nextFireInMs,runs}]` sorted by remaining
+time then start order, with nonnegative remaining time frozen while paused. Devices omit the field
+when empty; the host returns an array for capable devices, including an empty array when absent,
+and omits malformed timer reports.
+
+Cross-field errors point to `.maxRuns` when everyMs is absent and to `.id` on the ninth distinct
+startTimer in contract document order. A cancelTimer id with no declaration produces a host-only
+show/patch warning. This asymmetry is deliberate: Kotlin and Swift accept it without a diagnostic
+and cancellation remains a runtime no-op.

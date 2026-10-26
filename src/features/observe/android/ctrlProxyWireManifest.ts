@@ -448,6 +448,7 @@ export const CTRL_PROXY_RESPONSE_FIELDS: {
     droppedEvents: "optional",
     appearance: "optional",
     cleared: "optional",
+    fired: "optional",
   },
   remove_preference_result: {
     packageName: "optional",

@@ -18,6 +18,7 @@ import type { WakeAndUnlock } from "../../features/action/WakeAndUnlock";
 import type { SetPosture } from "../../features/device/SetPosture";
 import type { RealObserveScreen } from "../../features/observe/ObserveScreen";
 import type { BootedDevice, ObserveResult } from "../../models";
+import type { Timer } from "../../utils/SystemTimer";
 import type { WaitForObservationOutcome } from "../observeTools";
 import type { AndroidCtrlProxy } from "../../features/observe/android";
 import type { KeyboardProfileRestoreRegistry } from "../../features/utility/KeyboardProfileRestore";
@@ -111,6 +112,12 @@ export interface AcceptIosAppOpenAlertOptions {
   refreshHierarchy?: OpenAlertHierarchyRefresh;
   tapSystemAlert?: SystemAlertTap;
   tapOnElementFactory?: InteractionToolDependencies["tapOnElementFactory"];
+  /** Clock for the alert wait and dismissal polling; tests inject a FakeTimer. */
+  timer?: Timer;
+  /** Bound on waiting for the alert to appear after openurl. */
+  waitTimeoutMs?: number;
+  /** Bound on waiting for the alert to dismiss after the accept tap. */
+  verifyTimeoutMs?: number;
 }
 
 // Injection seam for the tapAny handler (mirrors the tapOn factory seam above).

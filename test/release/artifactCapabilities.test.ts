@@ -8,6 +8,9 @@ import {
   findGaps,
   findStaleExemptions,
   formatGaps,
+  gatedBySources,
+  gatesAddedAfter,
+  gatesExistingAt,
   parseAndroidAdvertised,
   parseIosRunnerAdvertised,
   parseManifest,
@@ -150,7 +153,9 @@ describe("findGaps", () => {
       { artifact: "android-ctrlproxy-apk", capability: "multi_finger_gesture_v1" },
       { artifact: "ios-runner", capability: "path_gesture_v1" },
     ]);
-    expect(formatGaps("0.0.9", gaps)).toContain("- ios-runner: path_gesture_v1");
+    const message = formatGaps("Pinned release 0.0.9", gaps);
+    expect(message).toContain("- ios-runner: path_gesture_v1");
+    expect(message.startsWith("Pinned release 0.0.9 does not advertise 2 capability")).toBe(true);
   });
 
   test("no gaps when every gate is advertised", () => {
@@ -160,6 +165,62 @@ describe("findGaps", () => {
   test("an artifact's capabilities do not satisfy another artifact's gate", () => {
     const gaps = findGaps(advertised, { ...noGates, "ios-runner": ["tap_double_v1"] });
     expect(gaps).toHaveLength(1);
+  });
+});
+
+describe("gates added after a release", () => {
+  const atRelease: ArtifactCapabilities = {
+    ...noGates,
+    "prototype-agent-dylib": ["prototype_inspect_v1", "prototype_platform_v1"],
+  };
+  const current = {
+    ...noGates,
+    "prototype-agent-dylib": ["prototype_inspect_v1", "prototype_timers_v1"],
+  };
+
+  test("a capability gated only after the release is not held against that release", () => {
+    const pinnedGates = gatesExistingAt(current, atRelease);
+    expect(pinnedGates["prototype-agent-dylib"]).toEqual(["prototype_inspect_v1"]);
+    expect(findGaps(advertised, pinnedGates)).toEqual([]);
+    // Without the narrowing the same release would fail on the newer gate.
+    expect(findGaps(advertised, current)).toEqual([
+      { artifact: "prototype-agent-dylib", capability: "prototype_timers_v1" },
+    ]);
+  });
+
+  test("a gate that existed at the release still fails when the release lacks it", () => {
+    const lacking: ArtifactCapabilities = { ...advertised, "prototype-agent-dylib": [] };
+    const gaps = findGaps(lacking, gatesExistingAt(current, atRelease));
+    expect(gaps).toEqual([
+      { artifact: "prototype-agent-dylib", capability: "prototype_inspect_v1" },
+    ]);
+  });
+
+  test("the candidate comparison (every current gate) still catches the new gate", () => {
+    expect(findGaps(advertised, current)).toHaveLength(1);
+    const advertisesIt: ArtifactCapabilities = {
+      ...advertised,
+      "prototype-agent-dylib": ["prototype_inspect_v1", "prototype_timers_v1"],
+    };
+    expect(findGaps(advertisesIt, current)).toEqual([]);
+  });
+
+  test("lists the gates that wait for the next release", () => {
+    expect(gatesAddedAfter(current, atRelease)).toEqual([
+      { artifact: "prototype-agent-dylib", capability: "prototype_timers_v1" },
+    ]);
+  });
+});
+
+describe("gatedBySources", () => {
+  test("a constant declared in one artifact's source gates another artifact that references it", () => {
+    const gated = gatedBySources({
+      "ios-runner": [],
+      "android-ctrlproxy-apk": [`export const TIMERS = "prototype_timers_v1";`],
+      "prototype-agent-dylib": [`supports(TIMERS); features.includes("prototype_inspect_v1");`],
+    });
+    expect(gated["prototype-agent-dylib"]).toEqual(["prototype_inspect_v1", "prototype_timers_v1"]);
+    expect(gated["android-ctrlproxy-apk"]).toEqual([]);
   });
 });
 
@@ -221,6 +282,16 @@ describe("manifest", () => {
     const manifest = parseManifest(JSON.stringify(manifestJson));
     expect(Object.keys(manifest.releases)).toContain(RELEASE_CHECKSUM_REGISTRY[0].version);
   });
+
+  test("checked-in manifest records the host gates of the newest pinned release", () => {
+    const manifest = parseManifest(JSON.stringify(manifestJson));
+    expect(Object.keys(manifest.hostGates ?? {})).toContain(RELEASE_CHECKSUM_REGISTRY[0].version);
+  });
+
+  test("rejects host gates missing an artifact", () => {
+    const raw = JSON.stringify({ releases: {}, hostGates: { "1.0.0": { "ios-runner": [] } } });
+    expect(() => parseManifest(raw)).toThrow("missing artifact");
+  });
 });
 
 describe("recordRelease", () => {
@@ -230,8 +301,10 @@ describe("recordRelease", () => {
       description: "Test releases",
       releases: { "1.0.0": advertised, "0.9.0": stale },
     };
-    const next = recordRelease(manifest, "0.9.0", advertised);
+    const gates: ArtifactCapabilities = { ...noGates, "ios-runner": ["double_tap_v1"] };
+    const next = recordRelease(manifest, "0.9.0", advertised, gates);
     expect(next.releases["0.9.0"]).toEqual(advertised);
+    expect(next.hostGates?.["0.9.0"]).toEqual(gates);
     expect(Object.keys(next.releases)).toEqual(["0.9.0", "1.0.0"]);
   });
 });

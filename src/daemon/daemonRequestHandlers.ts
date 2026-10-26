@@ -3,6 +3,7 @@ import { holderOf } from "./deviceBinding";
 import {
   SESSION_BROKER_CAPABILITY,
   SESSION_BROKER_EXPORT_CAPABILITY,
+  SESSION_BROKER_IOS_DUO_CAPABILITY,
 } from "./sessionBroker/hostConfig";
 import { BROKER_DAEMON_METHOD_HANDLERS } from "./sessionBroker/handlers";
 import { BootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";
@@ -125,6 +126,10 @@ export async function handleDaemonRequest(
           DAEMON_REGISTER_SESSION_METHOD,
           ...(state.isSessionBrokerMode?.()
             ? [SESSION_BROKER_CAPABILITY, SESSION_BROKER_EXPORT_CAPABILITY]
+            : []),
+          ...(state.isSessionBrokerMode?.() &&
+          state.getSessionBrokerService?.()?.broker.supportsIosDuo()
+            ? [SESSION_BROKER_IOS_DUO_CAPABILITY]
             : []),
         ],
       },

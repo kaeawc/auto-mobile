@@ -1143,7 +1143,7 @@ the native runtimes):
    failure. If it does not fit the data write limit, `headers` is dropped. The completion is atomic: if
    the body fits `/data` but no form of `__meta` fits beside it, `into` is left unchanged and the request
    is an error with `error.code` `invalid_response` (message `response and metadata exceed the data
-   limit`); its minimal metadata (duration and error) is still written if it fits, the status key
+limit`); its minimal metadata (duration and error) is still written if it fits, the status key
    becomes `error` and `onError` runs.
 4. `statusKey` becomes `"success"` or `"error"`, the request event is sent, then `onSuccess` or
    `onError` runs.
@@ -1437,7 +1437,7 @@ list is a `column` with `repeat` whose single child is the row template).
   item; one that is not fails at that item (`root.repeat.items[1]`, message
   `Bound state key "liked_b-c" is invalid`). A state-key
   placeholder outside every template fails at the key (`State key placeholder outside a
-  repeat template`). A bound key missing from `state` behaves exactly like a literal
+repeat template`). A bound key missing from `state` behaves exactly like a literal
   missing key: the type checks run once per item and fail at the key, naming the item
   (`Toggle requires a boolean state key (repeat item 1)`).
 - Limits count the expanded tree. `MAX_PROTOTYPE_NODES` and `MAX_PROTOTYPE_IMAGES` are

@@ -68,7 +68,7 @@ never run `testRunService` (it waits forever). `HierarchyIntegrationTests` is
   closes the lost-update race instead.
 - **`CommandHandler` is a `Sendable` POD router, not `@MainActor`**, or its blocking SDK HTTP/DB
   calls would freeze XCUITest and starve `/health` (#5374). `handle` is `async -> any
-  WebSocketResponsePayload` (`Sendable & Encodable`); it `await`s the `@MainActor` UI collaborators
+WebSocketResponsePayload` (`Sendable & Encodable`); it `await`s the `@MainActor` UI collaborators
   and async SDK clients and calls lock-confined ones synchronously. `encodeResponse` keeps the
   `WebSocketResponse`/`HierarchyUpdateResponse` downcasts for `perfTiming` injection.
 - **Command dispatch is a serial `Task` chain**: `commandTail` (an
@@ -86,7 +86,7 @@ never run `testRunService` (it waits forever). `HierarchyIntegrationTests` is
   no-ops. The scope is `@unchecked Sendable`, justified by single-task-serial mutation.
   Completed roots are snapshotted to immutable `PerfTiming` before entering the pool, and `flush()`
   drains the whole pool so command and polling timings report together. Injected `any
-  PerfTracking`; the coordinator owns the one instance (no singleton).
+PerfTracking`; the coordinator owns the one instance (no singleton).
 - **`performContextCheckedGesture` = one `MainActor.run` turn inside a FRESH `perf.withScope`.**
   Frame-context validation and the gesture run in one turn (atomic, no suspension between the
   generation read and the gesture). The reference's thread-local perf split a gesture-nested

@@ -56,6 +56,8 @@ export interface ProtoViewerInput {
   id?: string;
   timeoutMs?: number;
   assets?: readonly PrototypeAssetSource[];
+  /** Panel key, role or `active` the caller asked for; ProtoViewer cannot choose one, only report it. */
+  display?: string;
 }
 
 export interface ProtoViewerRouteDependencies {
@@ -158,6 +160,7 @@ async function saveInProtoViewer(
       return undefined;
     },
     deps.displays,
+    args.display,
   );
 }
 
@@ -204,6 +207,7 @@ async function openInProtoViewer(
     () => deps.device.open(libraryId, args.timeoutMs ?? PROTOVIEWER_DEFAULT_TIMEOUT_MS, signal),
     (error) => failure("unsupported_capability", error.message),
     deps.displays,
+    args.display,
   );
   return opened ?? failure("unsupported_capability", "ProtoViewer could not open the entry.");
 }
@@ -254,6 +258,7 @@ async function deviceCall(
     error: ProtoViewerEntryPointMissingError | ProtoViewerStorageError,
   ) => ProtoViewerOutput | undefined,
   displays: DeviceDisplays | undefined,
+  requestedDisplay?: string,
 ): Promise<ProtoViewerOutput | undefined> {
   let result: ProtoViewerResult;
   try {
@@ -268,12 +273,13 @@ async function deviceCall(
     logger.warn(`[protoviewer] request failed: ${errorMessage(error)}`, error);
     return { success: false, error: `ProtoViewer request failed: ${errorMessage(error)}` };
   }
-  return outputFor(result, displays);
+  return outputFor(result, displays, requestedDisplay);
 }
 
 function outputFor(
   result: ProtoViewerResult,
   displays: DeviceDisplays | undefined,
+  requestedDisplay?: string,
 ): ProtoViewerOutput {
   switch (result.status) {
     case "imported":
@@ -287,7 +293,9 @@ function outputFor(
           label: result.label,
           ...(display ? { display } : {}),
         },
-        warning: PROTOVIEWER_IMPORTED_WARNING,
+        warning: [PROTOVIEWER_IMPORTED_WARNING, displayMismatchWarning(requestedDisplay, display)]
+          .filter((part) => part !== undefined)
+          .join(" "),
       };
     }
     case "rejected":
@@ -315,4 +323,25 @@ function rejectionOutput(path: string, reason: string): ProtoViewerOutput {
 
 function failure(errorCode: ProtoViewerErrorCode, error: string): ProtoViewerOutput {
   return { success: false, errorCode, error };
+}
+
+/**
+ * ProtoViewer opens on whichever panel is in front when the URL is handled, so a requested `display`
+ * is honoured only by coincidence. Say so when the reported panel is not the requested one, or
+ * cannot be told, instead of silently ignoring the argument.
+ */
+export function displayMismatchWarning(
+  requested: string | undefined,
+  landed: ProtoViewerDisplay | undefined,
+): string | undefined {
+  if (requested === undefined || requested === "active") {
+    return undefined;
+  }
+  if (landed === undefined) {
+    return `display "${requested}" was not applied: ProtoViewer opens on the panel in front and this device did not report which one that was.`;
+  }
+  if (requested === landed.key || requested === landed.role) {
+    return undefined;
+  }
+  return `display "${requested}" was not applied: ProtoViewer cannot choose a panel and opened on the ${landed.role} panel (${landed.key}). Fold or unfold the device to the panel you want and open again.`;
 }

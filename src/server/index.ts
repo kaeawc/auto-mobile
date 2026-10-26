@@ -386,7 +386,8 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       version: getMcpServerVersion(),
     },
     {
-      resources: { subscribe: true, listChanged: true },
+      // A modern request has no notification stream until subscriptions/listen is wired (#13947).
+      resources: options.era === "modern" ? {} : { subscribe: true, listChanged: true },
       tools: {},
       prompts: {},
       ...(options.era === "modern" && { extensions: { [TASKS_EXTENSION_ID]: {} } }),

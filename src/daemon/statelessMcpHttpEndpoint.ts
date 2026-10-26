@@ -3,6 +3,7 @@ import {
   classifyInboundRequest,
   createMcpHandler,
   McpServer,
+  PROTOCOL_VERSION_META_KEY,
   type McpServerFactory,
   type CreateMcpHandlerOptions,
   type McpHttpHandler,
@@ -221,6 +222,17 @@ async function writeModernResponse(response: Response, res: McpHttpResponseLike)
   }
 }
 
+const MODERN_ERA_PROTOCOL_VERSION = "2026-07-28";
+
+/** Whether a request names a 2026-era protocol version in its header or per-request envelope. */
+function claimsModernEra(protocolVersionHeader: string | undefined, body: unknown): boolean {
+  const params = (body as { params?: { _meta?: Record<string, unknown> } } | null)?.params;
+  const envelope = params?._meta?.[PROTOCOL_VERSION_META_KEY];
+  return [protocolVersionHeader, envelope].some(
+    (version) => typeof version === "string" && version >= MODERN_ERA_PROTOCOL_VERSION,
+  );
+}
+
 export class StatelessMcpHttpEndpoint<
   Req extends McpHttpRequestLike = IncomingMessage,
   Res extends McpHttpResponseLike = ServerResponse,
@@ -231,9 +243,10 @@ export class StatelessMcpHttpEndpoint<
   // Scope ids per cancel key, oldest first: keyless requests may share a JSON-RPC id.
   private readonly byCancelKey = new Map<string, string[]>();
   private accepting = true;
+  /** Handed to the handler's factory once; cleared there so a long-lived task does not pin `req`. */
   private readonly modernScope = new AsyncLocalStorage<{
-    req: Req;
-    scope: StatelessMcpRequestScope;
+    req?: Req;
+    scope?: StatelessMcpRequestScope;
   }>();
   private readonly root = rootAsyncScope("auto-mobile-mcp-http-root");
 
@@ -357,14 +370,19 @@ export class StatelessMcpHttpEndpoint<
       const value = req.headers[name];
       return typeof value === "string" ? value : undefined;
     };
+    const protocolVersionHeader = header("mcp-protocol-version");
+    const outcome = (this.deps.modern?.classify ?? classifyInboundRequest)({
+      httpMethod: req.method ?? "POST",
+      protocolVersionHeader,
+      mcpMethodHeader: header("mcp-method"),
+      mcpNameHeader: header("mcp-name"),
+      body: parsedBody,
+    });
+    // A rejection of a request that claims the modern era belongs to the modern handler, which
+    // owns those error answers; a malformed 2025 body keeps today's answer.
     return (
-      (this.deps.modern?.classify ?? classifyInboundRequest)({
-        httpMethod: req.method ?? "POST",
-        protocolVersionHeader: header("mcp-protocol-version"),
-        mcpMethodHeader: header("mcp-method"),
-        mcpNameHeader: header("mcp-name"),
-        body: parsedBody,
-      }).kind === "modern"
+      outcome.kind === "modern" ||
+      (outcome.kind === "reject" && claimsModernEra(protocolVersionHeader, parsedBody))
     );
   }
 
@@ -381,10 +399,13 @@ export class StatelessMcpHttpEndpoint<
     const handler = (this.deps.modern?.createHandler ?? createMcpHandler)(
       (ctx) => {
         const current = this.modernScope.getStore();
-        if (!current) {
+        const { req: scopedReq, scope: scopedScope } = current ?? {};
+        if (!current || !scopedReq || !scopedScope) {
           throw new ActionableError("Modern MCP request scope is missing");
         }
-        const server = this.deps.createServer(current.req, { ...current.scope, era: ctx.era });
+        current.req = undefined;
+        current.scope = undefined;
+        const server = this.deps.createServer(scopedReq, { ...scopedScope, era: ctx.era });
         if (!(server instanceof McpServer)) {
           throw new ActionableError("Modern MCP serving requires an SDK McpServer");
         }

@@ -61,6 +61,10 @@ const modernBody = {
   },
 };
 
+function claimedInput(body: unknown) {
+  return { httpMethod: "POST", body } as Parameters<typeof classifyInboundRequest>[0];
+}
+
 function harness(flag?: string, block = false) {
   const env = flag === undefined ? {} : { [ENV.MCP_MODERN_ERA.name]: flag };
   const timer = new FakeTimer();
@@ -242,6 +246,22 @@ describe("opt-in modern HTTP routing", () => {
     expect(h.classify).toHaveBeenCalledTimes(2);
     expect(h.createHandler).not.toHaveBeenCalled();
     expect(h.legacyHandle).toHaveBeenCalledTimes(2);
+    await Promise.all(h.endpoint.inFlightRequests().map((r) => r.close()));
+  });
+
+  test("a rejected request that claims the modern era is answered by the modern handler", async () => {
+    const h = harness("1");
+    const claimed = {
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/list",
+      params: { _meta: { "io.modelcontextprotocol/protocolVersion": "2026-07-28" } },
+    };
+    expect(h.classify(claimedInput(claimed)).kind).toBe("reject");
+    h.classify.mockClear();
+    await h.endpoint.handle(h.request(), new FakeResponse(), claimed, h.error);
+    expect(h.createHandler).toHaveBeenCalledTimes(1);
+    expect(h.legacyHandle).not.toHaveBeenCalled();
     await Promise.all(h.endpoint.inFlightRequests().map((r) => r.close()));
   });
 

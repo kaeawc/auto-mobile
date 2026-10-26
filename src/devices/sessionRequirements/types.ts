@@ -1,7 +1,7 @@
 import type { DeviceProfileSelector } from "../../models/ManufacturerProfileIds";
 
 export type IosArchetype = "phone" | "tablet" | "duo";
-export type AndroidArchetype = "phone" | "tablet";
+export type AndroidArchetype = "phone" | "tablet" | "foldable";
 
 export type IosModelType =
   | {
@@ -178,6 +178,7 @@ export interface IosHardwareDefaults {
 }
 
 export interface AndroidProfileDefault {
+  memoryMb?: number;
   archetype: AndroidArchetype;
   profileId: string;
 }
@@ -260,6 +261,7 @@ export interface IosSessionDeviceProfile {
 }
 
 export interface AndroidSessionDeviceProfile {
+  memoryMb?: number;
   platform: "android";
   metadataState: CatalogMetadataState;
   profileId?: string;
@@ -310,6 +312,7 @@ export interface ResolvedIosSessionDeviceProfile {
 }
 
 export interface ResolvedAndroidSessionDeviceProfile {
+  memoryMb?: number;
   platform: "android";
   metadataState: "current";
   profileId: string;

@@ -2,6 +2,7 @@ import { ENV as ENV_SPECS } from "../../config/env";
 import { readFile } from "node:fs/promises";
 import { MAX_SETTIMEOUT_DELAY_MS } from "../../utils/SystemTimer";
 import { z } from "zod";
+import { MIN_AVD_RAM_MB } from "../../utils/android-cmdline-tools/AvdConfigReader";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import type { BindingScopeIdentity } from "./registry/bindingRegistry";
 
@@ -42,7 +43,7 @@ const modelReference = z
   })
   .strict();
 const archetype = z.enum(["phone", "tablet", "duo"]);
-const androidArchetype = z.enum(["phone", "tablet"]);
+const androidArchetype = z.enum(["phone", "tablet", "foldable"]);
 const version = z.string().regex(/^\d+(?:\.\d+)*$/);
 const osSelector = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("exact"), version }).strict(),
@@ -77,7 +78,17 @@ const androidDefaults = z
       .object({
         omitted: androidArchetype,
         profiles: z.array(
-          z.object({ archetype: androidArchetype, profileId: z.string().min(1) }).strict(),
+          z
+            .object({
+              archetype: androidArchetype,
+              profileId: z.string().min(1),
+              memoryMb: z
+                .number()
+                .int()
+                .min(MIN_AVD_RAM_MB, `memoryMb must be at least ${MIN_AVD_RAM_MB} MB`)
+                .optional(),
+            })
+            .strict(),
         ),
       })
       .strict(),

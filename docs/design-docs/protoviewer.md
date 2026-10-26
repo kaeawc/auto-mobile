@@ -405,6 +405,16 @@ Kotlin and Swift (accept/reject plus error path only). Device (manual-test skill
 re-import across platforms; adb push plus VIEW import; invalid-spec error; offline with stored values;
 localhost request blocked and LAN request allowed with the switch on.
 
+Import fuzzing (#14159): `scripts/prototype/bundleFuzz.ts` holds seeded generators (byte mutation, hostile
+ZIP structure, hostile `bundle.json`/`spec.json`, DEFLATE bombs). They feed fast-check property tests in
+TS (`prototypeBundleFuzz.property.test.ts`, unit budget) and a wider sweep (`.integration.test.ts`, safe
+tier). `test/fixtures/prototype-bundle/fuzz-corpus.json` is the shared differential corpus: TS records the
+verdict (accept, or code plus path) and the Kotlin (`PrototypeBundleFuzzTest`) and Swift
+(`PrototypeBundleFuzzTests`) readers must reproduce it, alongside seeded per-platform mutation sweeps that
+assert only typed rejections. Regenerate with `bun scripts/prototype/generate-bundle-fuzz-corpus.ts
+--write`; a minimized finding becomes a fixture in `corpus.json`. Coverage-guided Jazzer/libFuzzer
+harnesses and a nightly CI job remain future work.
+
 ## 11. Risks
 
 1. Swift validator parity is the critical path (mitigated by reject-only scope and the corpus).

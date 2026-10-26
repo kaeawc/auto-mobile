@@ -236,6 +236,7 @@ enum PrototypePlatformValidator {
             if fields["type"] == nil {
                 if case let .string(pointer)? = fields["platform"] {
                     try read(pointer, path: "\(path).platform", declared: declared)
+                    try comparison(fields, pointer: pointer, path: path)
                 }
                 if case .string(_)? = fields["event"], !inHandler {
                     throw fail("\(path).event", "{event} is only available inside a platform.on handler")
@@ -277,6 +278,25 @@ enum PrototypePlatformValidator {
             let tokens = PrototypeDataPointer.tokens(pointer)
             guard tokens.count == 2, state.contains(tokens[1]) else {
                 throw fail(path, "Unknown platform state \(pointer)")
+            }
+        }
+    }
+
+    /// Portable specs can branch on device.os; these validators have no target-platform input.
+    private static func comparison(_ fields: [String: JSONValue], pointer: String, path: String) throws {
+        let tokens = PrototypeDataPointer.tokens(pointer)
+        guard tokens.count == 2,
+              let entry = PrototypeContractValidator.platformModules[tokens[0]]?.objectFields?["state"]?
+              .objectFields?[tokens[1]]?.objectFields,
+              let overrides = entry["valueByPlatform"]?.objectFields, let base = entry["value"]
+        else { return }
+        let rule = JSONValue.object(["kind": .string("choice"), "options": .array([base] + Array(overrides.values))])
+        for operation in ["equals", "notEquals"] {
+            guard let literal = fields[operation] else { continue }
+            do {
+                try PrototypeContractValidator.validateValue(literal, rule: rule, path: "\(path).\(operation)")
+            } catch let PrototypeLoadError.invalidSpec(path, message) {
+                throw fail(path, message)
             }
         }
     }

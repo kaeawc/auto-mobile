@@ -115,8 +115,31 @@ internal object PrototypePlatformRules {
         val tokens = PrototypeDataPointer.tokens(use.pointer)
         tokens.size != 2 || tokens[1] !in state
       } == true -> fail(use.path, "Unknown platform state ${use.pointer}")
-      else -> null
+      else -> comparisonError(use)
     }
+  }
+
+  private fun comparisonError(use: Use.Read): PrototypeSpecError? {
+    val tokens = PrototypeDataPointer.tokens(use.pointer)
+    val entry =
+      module(tokens.firstOrNull().orEmpty())?.member("state")?.member(tokens.lastOrNull().orEmpty())
+        ?: return null
+    val overrides = entry.member("valueByPlatform") ?: return null
+    // A portable spec may branch on device.os; validation has no target platform.
+    val rule =
+      JsonObject(
+        mapOf(
+          "kind" to JsonPrimitive("choice"),
+          "options" to JsonArray(listOf(entry.getValue("value")) + overrides.values),
+        ),
+      )
+    for (op in listOf("equals", "notEquals")) {
+      val literal = use.condition?.get(op) ?: continue
+      walk(literal, rule, use.path.removeSuffix(".platform") + ".$op", Context(), 0)?.let {
+        return it
+      }
+    }
+    return null
   }
 
   private fun callError(action: JsonObject, path: String, declared: Declared): PrototypeSpecError? {

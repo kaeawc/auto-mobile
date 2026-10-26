@@ -68,6 +68,13 @@ struct PrototypeContractValidator {
         return validator
     }
 
+    /// Interpret a module state rule with the same definitions and limits as the spec walk.
+    static func validateValue(_ value: JSONValue, rule: JSONValue, path: String) throws {
+        guard let contract else { throw invalid(path, "Embedded structural contract is unavailable") }
+        var validator = Self(definitions: contract.definitions, limits: contract.limits)
+        try validator.walk(value, rule: rule, path: path, depth: 0)
+    }
+
     static func invalid(_ path: String, _ message: String) -> PrototypeLoadError {
         .invalidSpec(path: path.isEmpty ? "$" : path, message: message)
     }

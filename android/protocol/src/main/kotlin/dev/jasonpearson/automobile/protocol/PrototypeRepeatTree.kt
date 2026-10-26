@@ -15,7 +15,12 @@ import kotlinx.serialization.json.jsonPrimitive
 internal object PrototypeRepeatTree {
   data class Child(val node: JsonObject, val path: String)
 
-  class Budget(var nodes: Int = 0, var images: Int = 0)
+  class Budget(
+    var nodes: Int = 0,
+    var images: Int = 0,
+    var effects: Int = 0,
+    var animatedEffects: Int = 0,
+  )
 
   fun childrenOf(node: JsonObject, path: String): List<Child> {
     (node["child"] as? JsonObject)?.let {
@@ -140,6 +145,9 @@ internal object PrototypeRepeatTree {
     budget.images += imageUses(node)
     if (budget.images > PrototypeSpecValidator.MAX_PROTOTYPE_IMAGES)
       return fail(at, "Expanded image limit exceeded")
+    PrototypeEffectRules.chargeExpanded(node, at, budget)?.let {
+      return it
+    }
     val scope = scopeOf(node, path, data)
     val nestedPath = if (scope != null) "$path.repeat" else repeatPath
     repeat(scope?.items?.size ?: 1) {

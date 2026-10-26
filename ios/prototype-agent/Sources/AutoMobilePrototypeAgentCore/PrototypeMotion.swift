@@ -43,22 +43,21 @@ protocol PrototypeAccessibilityProviding {
 }
 
 /// The live settings: `UIAccessibility.isReduceMotionEnabled` and `prefersCrossFadeTransitions`.
+/// UIKit isolates them to the main actor, so reads from another thread hop to it.
 struct PrototypeSystemAccessibility: PrototypeAccessibilityProviding {
-    var isReduceMotionEnabled: Bool {
-        #if canImport(UIKit)
-            return UIAccessibility.isReduceMotionEnabled
-        #else
-            return false
-        #endif
-    }
+    #if canImport(UIKit)
+        var isReduceMotionEnabled: Bool { onMain { UIAccessibility.isReduceMotionEnabled } }
 
-    var prefersCrossFadeTransitions: Bool {
-        #if canImport(UIKit)
-            return UIAccessibility.prefersCrossFadeTransitions
-        #else
-            return false
-        #endif
-    }
+        var prefersCrossFadeTransitions: Bool { onMain { UIAccessibility.prefersCrossFadeTransitions } }
+
+        private func onMain(_ read: @MainActor () -> Bool) -> Bool {
+            if Thread.isMainThread { return MainActor.assumeIsolated(read) }
+            return DispatchQueue.main.sync { MainActor.assumeIsolated(read) }
+        }
+    #else
+        var isReduceMotionEnabled: Bool { false }
+        var prefersCrossFadeTransitions: Bool { false }
+    #endif
 }
 
 /// The spec can disable all animation; system Reduce Motion and the cross-fade preference select

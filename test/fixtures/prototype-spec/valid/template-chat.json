@@ -1,0 +1,302 @@
+{
+  "id": "template-chat",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "atEnd": true,
+    "draft": ""
+  },
+  "data": {
+    "messages": [
+      {
+        "id": "m1",
+        "from": "Ana",
+        "text": "Are we still on for the demo?"
+      },
+      {
+        "id": "m2",
+        "from": "me",
+        "text": "Yes, 3 pm in the main hall."
+      },
+      {
+        "id": "m3",
+        "from": "Ana",
+        "text": "Great, I will bring the cable."
+      }
+    ]
+  },
+  "root": {
+    "type": "stack",
+    "id": "nav",
+    "start": "inbox",
+    "style": {
+      "width": "fill",
+      "height": "fill"
+    },
+    "screens": {
+      "inbox": {
+        "type": "column",
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "inbox_bar",
+            "title": "Messages"
+          },
+          {
+            "type": "column",
+            "repeat": {
+              "items": [
+                {
+                  "name": "Ana",
+                  "last": "Great, I will bring the cable."
+                },
+                {
+                  "name": "Ben",
+                  "last": "Lunch at noon?"
+                }
+              ],
+              "as": "chat"
+            },
+            "children": [
+              {
+                "type": "listItem",
+                "testTag": "conversation_row",
+                "headline": "{chat.name}",
+                "supporting": "{chat.last}",
+                "leadingIcon": "account_circle",
+                "onTap": [
+                  {
+                    "type": "push",
+                    "stack": "nav",
+                    "screen": "conversation"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "conversation": {
+        "type": "column",
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "conversation_bar",
+            "title": "Ana",
+            "navigationIcon": {
+              "icon": "arrow_back",
+              "label": "Back",
+              "onTap": [
+                {
+                  "type": "pop",
+                  "stack": "nav"
+                }
+              ]
+            }
+          },
+          {
+            "type": "scroll",
+            "id": "chat",
+            "testTag": "chat_list",
+            "style": {
+              "weight": 1
+            },
+            "reverse": true,
+            "stickToEnd": true,
+            "atEndKey": "atEnd",
+            "onStartReached": [
+              {
+                "type": "emit",
+                "name": "load_older"
+              }
+            ],
+            "child": {
+              "type": "column",
+              "children": [
+                {
+                  "type": "column",
+                  "repeat": {
+                    "items": {
+                      "path": "/messages"
+                    },
+                    "as": "msg",
+                    "key": "id"
+                  },
+                  "children": [
+                    {
+                      "type": "column",
+                      "children": [
+                        {
+                          "type": "text",
+                          "text": "{msg.from}",
+                          "style": {
+                            "textStyle": "labelSmall"
+                          }
+                        },
+                        {
+                          "type": "text",
+                          "text": "{msg.text}",
+                          "style": {
+                            "textStyle": "bodyLarge"
+                          }
+                        }
+                      ],
+                      "style": {
+                        "padding": {
+                          "start": 16,
+                          "end": 16,
+                          "top": 6,
+                          "bottom": 6
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "type": "button",
+            "label": "New messages",
+            "testTag": "new_messages",
+            "onTap": [
+              {
+                "type": "scrollTo",
+                "scroll": "chat",
+                "to": "end",
+                "animated": true
+              }
+            ],
+            "variant": "tonal",
+            "visibleWhen": {
+              "key": "atEnd",
+              "equals": false
+            }
+          },
+          {
+            "type": "row",
+            "children": [
+              {
+                "type": "chip",
+                "testTag": "quick_reply_1",
+                "label": "On my way",
+                "variant": "suggestion",
+                "onTap": [
+                  {
+                    "type": "appendData",
+                    "path": "/data/messages",
+                    "value": {
+                      "value": {
+                        "id": "q1",
+                        "from": "me",
+                        "text": "On my way!"
+                      }
+                    }
+                  },
+                  {
+                    "type": "scrollTo",
+                    "scroll": "chat",
+                    "to": {
+                      "key": "q1"
+                    },
+                    "animated": true
+                  }
+                ]
+              },
+              {
+                "type": "chip",
+                "testTag": "quick_reply_2",
+                "label": "Thanks",
+                "variant": "suggestion",
+                "onTap": [
+                  {
+                    "type": "appendData",
+                    "path": "/data/messages",
+                    "value": {
+                      "value": {
+                        "id": "q2",
+                        "from": "me",
+                        "text": "Thanks!"
+                      }
+                    }
+                  },
+                  {
+                    "type": "scrollTo",
+                    "scroll": "chat",
+                    "to": {
+                      "key": "q2"
+                    },
+                    "animated": true
+                  }
+                ]
+              }
+            ],
+            "style": {
+              "spacing": 8
+            }
+          },
+          {
+            "type": "row",
+            "children": [
+              {
+                "type": "textField",
+                "testTag": "composer",
+                "stateKey": "draft",
+                "placeholder": "Message",
+                "imeAction": "send",
+                "style": {
+                  "weight": 1
+                },
+                "onSubmit": [
+                  {
+                    "type": "emit",
+                    "name": "message_sent",
+                    "context": {
+                      "text": {
+                        "state": "draft"
+                      }
+                    }
+                  },
+                  {
+                    "type": "setState",
+                    "key": "draft",
+                    "value": ""
+                  }
+                ]
+              },
+              {
+                "type": "iconButton",
+                "testTag": "send_button",
+                "icon": "send",
+                "contentDescription": "Send",
+                "onTap": [
+                  {
+                    "type": "emit",
+                    "name": "message_sent",
+                    "context": {
+                      "text": {
+                        "state": "draft"
+                      }
+                    }
+                  },
+                  {
+                    "type": "setState",
+                    "key": "draft",
+                    "value": ""
+                  }
+                ]
+              }
+            ],
+            "safeAreaPadding": {
+              "edges": ["bottom"],
+              "types": ["ime", "systemBars"]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

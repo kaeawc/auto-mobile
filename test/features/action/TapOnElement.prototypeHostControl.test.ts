@@ -43,9 +43,10 @@ function createCommand(control: ElementBounds | undefined) {
   hierarchy.screenHeight = 2400;
   if (control) {
     // The host control is a sibling of the captured controls, drawn over part of the target.
-    hierarchy.hierarchy.node = [hierarchy.hierarchy.node, dismissControl(control)]
-      .flat()
-      .filter((node): node is ViewHierarchyNode => node !== undefined);
+    const captured = hierarchy.hierarchy.node;
+    hierarchy.hierarchy.node = {
+      node: captured ? [captured, dismissControl(control)] : [dismissControl(control)],
+    };
   }
   const timer = new FakeTimer();
   timer.enableAutoAdvance();

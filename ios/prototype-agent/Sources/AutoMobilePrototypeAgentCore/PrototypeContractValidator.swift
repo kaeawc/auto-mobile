@@ -26,6 +26,7 @@ struct PrototypeContractValidator {
     }
 
     static func limit(_ name: String) -> Int { contract?.limits[name] ?? 0 }
+    static func definition(_ name: String) -> JSONValue? { contract?.definitions[name] }
     static let checkPatternMaxLength = Int(
         contract?.definitions["check"]?.objectFields?["fields"]?
             .objectFields?["pattern"]?.objectFields?["rule"]?.objectFields?["max"]?.numberValue ?? 0
@@ -40,6 +41,7 @@ struct PrototypeContractValidator {
     var actions: [PrototypeLocatedValue] = []
     var nodes = 0
     var images = 0
+    var effects = PrototypeEffectUses()
     var referenceDepth: [String: Int] = [:]
 
     static func validate(data: Data) throws { _ = try inspect(data: data) }
@@ -141,6 +143,13 @@ struct PrototypeContractValidator {
             if depth + 1 > PrototypeLimits.maxDepth { throw Self.invalid(path, "Tree depth limit exceeded") }
             if node["type"] == .string("image") { images += max(1, Self.imageUses(node["asset"])) }
             if images > (limits["MAX_PROTOTYPE_IMAGES"] ?? 0) { throw Self.invalid(path, "Image limit exceeded") }
+            effects.add(PrototypeEffectUses(node: node))
+            if effects.total > (limits["MAX_PROTOTYPE_EFFECTS"] ?? 0) {
+                throw Self.invalid(path, "Effect limit exceeded")
+            }
+            if effects.animated > (limits["MAX_PROTOTYPE_ANIMATED_EFFECTS"] ?? 0) {
+                throw Self.invalid(path, "Animated effect limit exceeded")
+            }
         }
         try walk(value, rule: target, path: path, depth: depth + (name == "node" ? 1 : 0))
     }

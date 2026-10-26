@@ -356,8 +356,14 @@ export class SessionRecoveryPublication {
    * A session force-released while its rebind was in flight is gone: announcing a move after its
    * release would tell clients a dead session is live on the new serial.
    */
-  private publishReboundIfLive(sessionId: string, existing: Session, previousDevice: string): void {
-    if (this.host.sessions.get(sessionId) !== existing) {
+  private publishReboundIfLive(
+    sessionId: string,
+    existing: Session,
+    previousDevice: string,
+    recovery: boolean | undefined,
+  ): void {
+    // Only a recovery announces itself: a client-chosen move is not news to its own client (#15456).
+    if (recovery !== true || this.host.sessions.get(sessionId) !== existing) {
       return;
     }
     publishSessionDeviceRebound(this.host.sessionDeviceReboundEmitter, existing, previousDevice);
@@ -369,7 +375,7 @@ export class SessionRecoveryPublication {
     platform: Platform,
     stableDeviceId: string | undefined,
     deferCleanup?: (cleanup: DeferredRebindCleanup) => void,
-    recovery = false,
+    recovery?: boolean,
   ): Promise<Session> {
     const activeSetups = Array.from(this.host.sessionSetupPromises, (setup) =>
       setup.session === existing ? setup.promise : null,
@@ -498,9 +504,7 @@ export class SessionRecoveryPublication {
     if (assignedDevice !== previousDevice) {
       // Full: the replacement (including the same AVD on another serial) has its own screen.
       this.host.notifyDeviceOwnershipChange(assignedDevice, "full");
-      if (recovery) {
-        this.publishReboundIfLive(sessionId, existing, previousDevice);
-      }
+      this.publishReboundIfLive(sessionId, existing, previousDevice, recovery);
     }
     if (!replacementFence) {
       this.host.notifySessionDeviceUnbound(existing.sessionId, previousDevice, {

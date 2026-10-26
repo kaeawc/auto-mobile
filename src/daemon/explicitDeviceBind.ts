@@ -209,6 +209,11 @@ function creatorPersistenceSource(
     : undefined;
 }
 
+/** Only an Android loss recovery names the serial it expects to replace (#15456). */
+function recoveryRebindFlag(expectedExistingSessionDeviceId: string | undefined): true | undefined {
+  return expectedExistingSessionDeviceId === undefined ? undefined : true;
+}
+
 function isAnonymousCaller(caller: AutolockClient | undefined): boolean {
   return caller?.oneShotCli === true || caller?.mcpSessionId === undefined;
 }
@@ -541,7 +546,7 @@ export class ExplicitDeviceBind {
             expectedExistingSessionDeviceId,
           ),
           recoveryTarget: options.recoveryTarget,
-          recovery: expectedExistingSessionDeviceId === undefined ? undefined : true,
+          recovery: recoveryRebindFlag(expectedExistingSessionDeviceId),
           signal: options.signal,
         },
       ),

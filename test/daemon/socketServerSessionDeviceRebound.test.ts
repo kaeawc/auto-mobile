@@ -49,6 +49,7 @@ function harness(ownedBy: ReadonlySet<string>) {
 
 /** The socket's recorded route, as a routed call leaves it. */
 function bind(server: ReturnType<typeof harness>["server"], socketId: string, sessionUuid: string) {
+  // oxlint-disable-next-line auto-mobile/no-unknown-cast -- the route map is protected runtime state with no test hook
   const runtime = server as unknown as {
     runtime: {
       boundMcpClientKeysBySocketSession: Map<string, { clientKey: string; sessionUuid: string }>;
@@ -58,7 +59,9 @@ function bind(server: ReturnType<typeof harness>["server"], socketId: string, se
 }
 
 const flush = async () => {
-  for (let turn = 0; turn < 5; turn++) await Promise.resolve();
+  for (let turn = 0; turn < 5; turn++) {
+    await Promise.resolve();
+  }
 };
 
 const rebounds = (frames: Map<string, DaemonNotification[]>, id: string) =>
@@ -90,6 +93,8 @@ describe("session_device_rebound reaches only sockets that hold the session (#15
     bind(server, "A", "t");
     server.testHooks.transport.broadcastSessionDeviceRebound(EVENT);
     await flush();
-    for (const id of ["A", "B", "C"]) expect(rebounds(frames, id)).toHaveLength(0);
+    for (const id of ["A", "B", "C"]) {
+      expect(rebounds(frames, id)).toHaveLength(0);
+    }
   });
 });

@@ -170,7 +170,6 @@ describe("explicit rebind release caller ordering", () => {
         clear(...args);
       });
       restores.push(() => cleared.mockRestore());
-      const oldDevice = pool.getDevice("old")!;
       const freed = spyOn(pool, "releaseDevice").mockImplementation(async (...args) => {
         events.push(["pool.releaseDevice", ...args]);
       });

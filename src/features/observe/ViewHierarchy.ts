@@ -43,7 +43,7 @@ import type {
   HierarchyReadOptions,
   ViewHierarchy as ViewHierarchyInterface,
 } from "./interfaces/ViewHierarchy";
-import { IOSCtrlProxyClient, type IosCtrlProxy } from "./ios";
+import { IOSCtrlProxyClient } from "./ios";
 import { IosRunnerStalledError } from "./ios/IosRunnerStalledError";
 import type { CtrlProxyHierarchyResponse } from "./ios/types";
 import { iosHierarchyAcquisition } from "./ios/types";
@@ -54,6 +54,7 @@ import {
   annotateAndroidHierarchyAvailability,
 } from "./ViewHierarchyAndroidAvailability";
 import {
+  classifyDisconnectedIosHierarchy,
   iosHierarchyUnavailable,
   typeQueuedRunnerLaunch,
   type RecoveryReadContext,
@@ -178,9 +179,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
             signal,
             readOptions,
           );
-    // Before recovery, so a healthy queued launch never triggers a runner restart (#15291).
-    this.typePendingIosLaunch(result);
-    const recovered = await this.retryAfterTransportRecovery(result, {
+    return this.retryAfterTransportRecovery(result, {
       queryOptions,
       perf,
       skipWaitForFresh,
@@ -190,14 +189,6 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       requireFreshExtraction:
         typeof readOptions === "object" ? readOptions.requireFreshExtraction : undefined,
     });
-    this.typePendingIosLaunch(recovered);
-    return recovered;
-  }
-
-  private typePendingIosLaunch(result: ViewHierarchyResult): void {
-    if (this.device.platform === "ios") {
-      typeQueuedRunnerLaunch(result, this.device.deviceId, this.launchQueue);
-    }
   }
 
   private async retryAfterTransportRecovery(
@@ -235,11 +226,13 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     result: ViewHierarchyResult,
     context: RecoveryReadContext,
   ): Promise<ViewHierarchyResult> {
+    // Before recovery, so a healthy queued launch never triggers a runner restart (#15291).
+    typeQueuedRunnerLaunch(result, this.device.deviceId, this.launchQueue);
     if (result.hierarchy.unavailableReason === "runner_launch_queued") {
       return result;
     }
     const client = IOSCtrlProxyClient.getInstance(this.device);
-    this.classifyDisconnectedIosHierarchy(result, client);
+    classifyDisconnectedIosHierarchy(result, client);
     if (
       (result.hierarchy.unavailableReason !== "runner_not_running" &&
         result.hierarchy.unavailableReason !== "runner_stalled" &&
@@ -269,18 +262,6 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       this.remainingRecoveryBudget(context),
       context.signal,
     );
-  }
-
-  private classifyDisconnectedIosHierarchy(
-    result: ViewHierarchyResult,
-    client: Pick<IosCtrlProxy, "isConnected">,
-  ): void {
-    // A request-scoped runner error can be untyped while the host socket has
-    // already closed. The known disconnect is sufficient to join recovery.
-    if (result.hierarchy.unavailableReason === "unknown" && client.isConnected?.() === false) {
-      result.hierarchy.unavailableReason = "connection_lost";
-      result.hierarchy.iosUnavailableReason = "connection_lost";
-    }
   }
 
   private async retryAndroidAfterRecovery(

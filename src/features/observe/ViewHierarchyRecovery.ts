@@ -4,6 +4,7 @@ import { PerformanceTracker } from "../../utils/PerformanceTracker";
 import type { IosRunnerLaunchQueueView } from "../../ctrlProxy/ios/IosRunnerLaunchGate";
 import { RunnerLaunchQueuedError } from "../../ctrlProxy/ios/RunnerLaunchQueuedError";
 import type { ViewHierarchyResult } from "../../models/ViewHierarchyResult";
+import type { IosCtrlProxy } from "./ios";
 import type { CtrlProxyHierarchyResponse } from "./ios/types";
 
 export function iosHierarchyUnavailable(result: CtrlProxyHierarchyResponse | null): Hierarchy {
@@ -68,4 +69,16 @@ export function typeQueuedRunnerLaunch(
   result.hierarchy.error = `Failed to retrieve iOS view hierarchy from CtrlProxy iOS: runner_launch_queued: ${detail}`;
   // The runner is healthy and starting: reconnect metadata must not drive recovery.
   delete result.ctrlProxyReconnect;
+}
+
+export function classifyDisconnectedIosHierarchy(
+  result: ViewHierarchyResult,
+  client: Pick<IosCtrlProxy, "isConnected">,
+): void {
+  // A request-scoped runner error can be untyped while the host socket has
+  // already closed. The known disconnect is sufficient to join recovery.
+  if (result.hierarchy.unavailableReason === "unknown" && client.isConnected?.() === false) {
+    result.hierarchy.unavailableReason = "connection_lost";
+    result.hierarchy.iosUnavailableReason = "connection_lost";
+  }
 }

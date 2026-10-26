@@ -36,7 +36,11 @@ fun interface PrototypeWindowOnScreen {
   fun isOnScreen(displayId: Int): Boolean?
 }
 
-fun interface PrototypeResultSink {
+/**
+ * The base `prototype_result` reply and the saved-prototype replies, which default to it. Sinks
+ * that predate a saved-prototype reply answer a bare success or refusal.
+ */
+interface PrototypeReplySink {
   suspend fun send(requestId: String?, success: Boolean, error: String?)
 
   suspend fun sendPinned(
@@ -59,7 +63,10 @@ fun interface PrototypeResultSink {
     code: dev.jasonpearson.automobile.protocol.SavedPrototypeErrorCode,
     error: String,
   ) = send(requestId, false, error)
+}
 
+/** Every reply the prototype controllers send; the rest default to the base reply. */
+fun interface PrototypeResultSink : PrototypeReplySink {
   /**
    * A successful `show_prototype` that references assets the device does not have: a warning
    * carried by the same single `prototype_result`, so the host can re-upload. Sinks that predate it
@@ -105,6 +112,11 @@ fun interface PrototypeResultSink {
 
   /** The reply to `clear_prototype_storage`. Sinks that predate it answer a bare success. */
   suspend fun sendCleared(requestId: String?, cleared: Int) = send(requestId, true, null)
+
+  suspend fun sendAdvanced(requestId: String?, fired: Int) = send(requestId, true, null)
+
+  suspend fun sendAdvanceFailed(requestId: String?, fired: Int, error: String) =
+    send(requestId, false, error)
 
   /** The reply to `inspect_prototypes`. Sinks that predate it answer a bare success. */
   suspend fun sendPrototypeStatus(
@@ -632,6 +644,7 @@ class PrototypeController(
         remove(validated.id)
         put(validated.id, surface)
       }
+    if (blocked) runtime.pauseTimers()
     armIdle(runtime)
     // The accepted show succeeds even if a sibling host cannot detach. Its closed runtime stays
     // addressable only for host cleanup retries, never as a live inspected surface.
@@ -787,9 +800,9 @@ class PrototypeController(
           // Compose reports its initial/restored settled page; that is rendering, not idle
           // activity.
           if (
-            interaction !is PrototypeInteraction.PagerMotion ||
+            (interaction !is PrototypeInteraction.PagerMotion ||
               interaction.scrolling ||
-              runtime.current.pages[interaction.pager] != interaction.page
+              runtime.current.pages[interaction.pager] != interaction.page)
           )
             armIdle(runtime)
           runtime.handle(interaction)
@@ -950,6 +963,25 @@ class PrototypeController(
     }
   }
 
+  suspend fun advanceClock(requestId: String?, id: String, advanceTimeMs: Int) = mutex.withLock {
+    try {
+      check(!destroyed) { "Prototype host destroyed" }
+      val runtime = surfaces[id]?.runtime ?: error("Unknown prototype: $id")
+      val fired = runtime.advanceClock(advanceTimeMs)
+      syncAfterChange(runtime)
+      sink.sendAdvanced(requestId, fired)
+    } catch (error: CancellationException) {
+      throw error
+    } catch (error: PrototypeTimerAdvanceLimitException) {
+      Log.w("PrototypeController", "Prototype clock advance reached fire limit", error)
+      surfaces[id]?.runtime?.let { syncAfterChange(it) }
+      sink.sendAdvanceFailed(requestId, error.fired, checkNotNull(error.message))
+    } catch (error: Exception) {
+      Log.w("PrototypeController", "Prototype clock advance failed", error)
+      sink.send(requestId, false, error.message ?: "Prototype clock advance failed")
+    }
+  }
+
   /** The stored keys removed for [id]; callers hold no controller state of their own. */
   suspend fun clearStoredValues(id: String): Int {
     val persistence = storage ?: return 0
@@ -972,6 +1004,7 @@ class PrototypeController(
       hiddenReason = shownHiddenReason(surface),
       appearance = surface.theme.value.appearance,
       storage = runtime.storage?.report(),
+      timers = runtime.timerReports(),
     )
   }
 
@@ -1065,6 +1098,7 @@ class PrototypeController(
       PrototypeWindowDecision.HIDE -> {
         val wasShowing = isShowing
         check(surface.host.dismiss()) { "Prototype host failed to hide window" }
+        runtime.pauseTimers()
         if (wasShowing && !isShowing) notifyDetached()
       }
       PrototypeWindowDecision.RELAYOUT -> relayoutOrRestore(runtime)
@@ -1083,14 +1117,19 @@ class PrototypeController(
     val request = surface.request
     if (host.isShowing) {
       if (host.relayout()) {
+        if (host.isShowing) runtime.resumeTimers()
         if (!host.isShowing && !isShowing) notifyDetached()
         return
       }
       // Still attached: a retryable platform failure, so keep the window and runtime as they are.
       check(!host.isShowing) { "Prototype host failed to re-layout window" }
     }
-    if (restoreWindow(surface.host, request)) return
+    if (restoreWindow(surface.host, request)) {
+      runtime.resumeTimers()
+      return
+    }
     if (lifecycle.isBlocked() || surface.foreground.suspended) {
+      runtime.pauseTimers()
       if (!isShowing) notifyDetached()
     } else abandon(runtime)
   }

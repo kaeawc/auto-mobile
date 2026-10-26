@@ -1,3 +1,4 @@
+import { requirePrototypeTimersSupport } from "../../prototype/prototypeTimers";
 import { collectPrototypeStrings } from "../../prototype/prototypeAssetReferences";
 import type { PrototypeShowOverrides } from "../../prototype/PrototypeTransport";
 import {
@@ -57,6 +58,7 @@ import {
   type PinSavedPrototypeMessage,
   type ListSavedPrototypesMessage,
   type ClearPrototypeStorageMessage,
+  type AdvancePrototypeClockMessage,
   type DeleteSavedPrototypeMessage,
   PROTOTYPE_DISPLAY_CAPABILITY,
   PROTOTYPE_STACK_CAPABILITY,
@@ -415,6 +417,22 @@ export class CtrlProxyPrototypes {
   ): Promise<PrototypeResult> {
     return this.request(ctrlProxyRequests.listSavedPrototypes({ requestId: "" }), timeoutMs, perf);
   }
+  async requestAdvancePrototypeClock(
+    id: string,
+    advanceTimeMs: number,
+    timeoutMs = 5000,
+    perf?: PerformanceTracker,
+  ): Promise<PrototypeResult> {
+    if (!id || !Number.isInteger(advanceTimeMs) || advanceTimeMs < 1 || advanceTimeMs > 3600000) {
+      throw new ActionableError("simulate requires id and advanceTimeMs (integer 1..3600000)");
+    }
+    return this.request(
+      ctrlProxyRequests.advancePrototypeClock({ requestId: "", id, advanceTimeMs }),
+      timeoutMs,
+      perf,
+    );
+  }
+
   /**
    * Wipes the values the device stored for prototype `id` (#12522). Refused before anything is
    * sent when the device does not advertise `prototype_storage_v1`.
@@ -765,7 +783,8 @@ export class CtrlProxyPrototypes {
       | SavePrototypeMessage
       | ListSavedPrototypesMessage
       | DeleteSavedPrototypeMessage
-      | ClearPrototypeStorageMessage,
+      | ClearPrototypeStorageMessage
+      | AdvancePrototypeClockMessage,
     timeoutMs: number,
     perf?: PerformanceTracker,
     deliveryOptions: Pick<SendCommandOptions<PrototypeResult>, "onDispatch" | "timeoutError"> = {},
@@ -803,7 +822,8 @@ export class CtrlProxyPrototypes {
       | SavePrototypeMessage
       | ListSavedPrototypesMessage
       | DeleteSavedPrototypeMessage
-      | ClearPrototypeStorageMessage,
+      | ClearPrototypeStorageMessage
+      | AdvancePrototypeClockMessage,
   ): void {
     const supports = (command: string) => this.context.isCommandSupported?.(command);
     if (message.type === "patch_prototype" && supports(PROTOTYPE_PATCH_CAPABILITY) !== true) {
@@ -818,6 +838,7 @@ export class CtrlProxyPrototypes {
     }
     this.requireMultiSurfaceSupport(message, supports);
     requirePrototypeStorageSupport(message.type, supports);
+    requirePrototypeTimersSupport(message.type, supports);
     const type = message.type;
     if (
       [

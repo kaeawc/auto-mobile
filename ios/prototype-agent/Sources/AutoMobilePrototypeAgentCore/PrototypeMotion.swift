@@ -38,10 +38,10 @@ struct PrototypeMotion: Equatable {
     }
 
     /// Nodes without `visibleWhen` have nothing to animate, so callers pass the transition only for
-    /// those that do.
-    func visibility(transition: String?) -> PrototypeVisibilityTransition {
+    /// those that do. A stack's transition controls navigation only, so visibility uses the default.
+    func visibility(transition: String?, nodeType: String? = nil) -> PrototypeVisibilityTransition {
         guard enabled else { return .instant }
-        switch transition {
+        switch nodeType == "stack" ? nil : transition {
         case "none": return .instant
         case "fade": return .fade
         case "expand": return .expand

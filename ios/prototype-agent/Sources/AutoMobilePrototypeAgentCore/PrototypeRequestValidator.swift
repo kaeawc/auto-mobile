@@ -69,6 +69,12 @@ enum PrototypeRequestValidator {
         if action["type"] == .string("emit"), action["name"] == .string(PrototypeRequestEvent.name) {
             throw fail("\(path).name", "The emit name \(PrototypeRequestEvent.name) is reserved for request events")
         }
+        if action["type"] == .string("startTimer"), case let .array(nested)? = action["actions"] {
+            guard depth < PrototypeLimits.maxActionDepth else {
+                throw fail("\(path).actions", "Action nesting depth limit exceeded")
+            }
+            try validateList(nested, path: "\(path).actions", depth: depth + 1, state: state)
+        }
         guard action["type"] == .string("request") else { return }
         try validateUnrepeated(action, path: path, state: state)
         for list in ["onSuccess", "onError"] {

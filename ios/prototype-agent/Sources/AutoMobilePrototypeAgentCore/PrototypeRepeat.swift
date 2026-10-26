@@ -307,8 +307,12 @@ extension PrototypeRepeat {
     private static func validateEmitActions(_ raw: JSONValue?, path: String, scope: EmitScope?) throws {
         guard case let .array(actions)? = raw else { return }
         for (index, rawAction) in actions.enumerated() {
-            guard case let .object(action) = rawAction, action["type"] == .string("emit"),
-                  let context = action["context"] else { continue }
+            guard case let .object(action) = rawAction else { continue }
+            let lists = action["type"] == .string("startTimer") ? ["actions"] : ["onSuccess", "onError"]
+            for list in lists {
+                try validateEmitActions(action[list], path: "\(path)[\(index)].\(list)", scope: scope)
+            }
+            guard action["type"] == .string("emit"), let context = action["context"] else { continue }
             let contextPath = "\(path)[\(index)].context"
             let bindings = try PrototypeEmitContext.validate(context, path: contextPath)
             for name in bindings.keys.sorted(by: { $0.utf8.lexicographicallyPrecedes($1.utf8) }) {
@@ -487,6 +491,10 @@ struct PrototypeRepeatInstance {
             bindEmit(&fields)
         case .string("setData")?, .string("appendData")?, .string("removeData")?:
             bindDataAction(&fields)
+        case .string("startTimer")?:
+            if case let .array(actions)? = fields["actions"] {
+                fields["actions"] = .array(actions.map(bindAction))
+            }
         case .string("request")?:
             bindRequest(&fields)
         default:

@@ -1,3 +1,4 @@
+export const PROTOTYPE_TIMERS_CAPABILITY = "prototype_timers_v1";
 /** Android control-proxy capability negotiation and request/response registries. */
 import type { CtrlProxyRequestType } from "./requestMessages";
 import { PROTOTYPE_SAVED_CAPABILITY } from "./prototypeMessages";
@@ -121,6 +122,7 @@ export const PROTOTYPE_TEXT_FIELD_LEADING_ICON_CAPABILITY = "prototype_text_fiel
 export const PROTOTYPE_REFRESH_CAPABILITY = "prototype_refresh_v1";
 
 /** Screen stacks and push/pop/popToRoot/replace actions with screen_changed snapshots. */
+export const PROTOTYPE_STACK_TRANSITIONS_CAPABILITY = "prototype_stack_transitions_v1";
 export const PROTOTYPE_STACK_CAPABILITY = "prototype_stack_v1";
 
 /**
@@ -387,6 +389,7 @@ const REQUEST_TYPE_REGISTRY: Record<CtrlProxyRequestType, true> = {
   pin_saved_prototype: true,
   list_saved_prototypes: true,
   delete_saved_prototype: true,
+  advance_prototype_clock: true,
   clear_prototype_storage: true,
   put_prototype_asset: true,
   remove_prototype_asset: true,

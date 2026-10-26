@@ -24,6 +24,7 @@ import {
   GUIDE_PATCH,
   GUIDE_REPEAT,
   GUIDE_STORAGE,
+  GUIDE_TIMERS,
 } from "./prototypeGuideProse";
 import { MAX_PROTOTYPE_COMPONENT_DEPTH } from "./prototypeComponents";
 import { PROTOTYPE_NATIVE_ASSET_URI, PROTOTYPE_NATIVE_URI } from "./nativePrototypeUris";
@@ -262,6 +263,7 @@ export function renderPrototypeGuide(): string {
     GUIDE_DATA,
     GUIDE_DATA_ACTIONS,
     GUIDE_STORAGE,
+    GUIDE_TIMERS,
     GUIDE_REQUEST,
     GUIDE_EMIT_CONTEXT,
     GUIDE_CHECKS,

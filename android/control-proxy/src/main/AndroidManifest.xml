@@ -72,6 +72,8 @@
 
       <activity
         android:name=".prototype.SavedPrototypeActivity"
+        android:enableOnBackInvokedCallback="true"
+        tools:ignore="UnusedAttribute"
         android:exported="false"
         android:documentLaunchMode="intoExisting"
         android:excludeFromRecents="false"

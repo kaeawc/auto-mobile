@@ -1,3 +1,5 @@
+import { PROTOTYPE_TIMERS_CAPABILITY } from "../../observe/android/ctrlProxyProtocol";
+import { prototypeTimersUnsupportedMessage } from "../prototypeTimers";
 import { prototypeHasStack, prototypeStackUnsupportedMessage } from "../prototypeSpec";
 import { PROTOTYPE_STACK_CAPABILITY } from "../../observe/android/ctrlProxyProtocol";
 import { prototypeStacksSchema } from "../../observe/android/CtrlProxyPrototypes";
@@ -125,6 +127,16 @@ export function prototypeAgentNotConnectedMessage(deviceId: string): string {
   );
 }
 
+/** Both device counters are optional, nonnegative integral result fields. */
+function resultCount(
+  key: "fired" | "cleared",
+  value: unknown,
+): Partial<Pick<PrototypeResult, "fired" | "cleared">> {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? { [key]: value }
+    : {};
+}
+
 function toPrototypeResult(result: PrototypeAgentResult): PrototypeResult {
   const { missingAssets, totalTimeMs } = result;
   // Only a show answered by an agent advertising prototype_appearance_v1 carries it.
@@ -136,11 +148,8 @@ function toPrototypeResult(result: PrototypeAgentResult): PrototypeResult {
       : {}),
     success: result.success,
     requestId: result.requestId,
-    ...(typeof result.cleared === "number" &&
-    Number.isSafeInteger(result.cleared) &&
-    result.cleared >= 0
-      ? { cleared: result.cleared }
-      : {}),
+    ...resultCount("fired", result.fired),
+    ...resultCount("cleared", result.cleared),
     ...(typeof result.error === "string" ? { error: result.error } : {}),
     ...(typeof totalTimeMs === "number" ? { totalTimeMs } : {}),
     ...(Array.isArray(missingAssets) &&
@@ -304,6 +313,22 @@ export class IosPrototypeTransport implements PrototypeTransport {
   async dismiss(target: PrototypeDismiss, timeoutMs?: number): Promise<PrototypeResult> {
     const body: PrototypeAgentMessage = target.all ? { all: true } : { id: target.id };
     return toPrototypeResult(await this.request("dismiss_prototype", body, timeoutMs));
+  }
+
+  async advanceClock(
+    id: string,
+    advanceTimeMs: number,
+    timeoutMs?: number,
+  ): Promise<PrototypeResult> {
+    if (!this.supportsCapability(PROTOTYPE_TIMERS_CAPABILITY)) {
+      throw new ActionableError(prototypeTimersUnsupportedMessage([], "ios"));
+    }
+    if (!id || !Number.isInteger(advanceTimeMs) || advanceTimeMs < 1 || advanceTimeMs > 3600000) {
+      throw new ActionableError("simulate requires id and advanceTimeMs (integer 1..3600000)");
+    }
+    return toPrototypeResult(
+      await this.request("advance_prototype_clock", { id, advanceTimeMs }, timeoutMs),
+    );
   }
 
   /** Wipes the values the agent stored for `id` (#12522); refused unless it advertises prototype_storage_v1. */

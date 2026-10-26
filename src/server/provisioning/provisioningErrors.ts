@@ -143,6 +143,9 @@ export function failureBoundaryRecovery(
     // A rollback error's own lifecycle is newer than the last one recorded.
     lifecycle: lifecycle ?? request.lifecycleEvidence.lifecycle,
     ...(ownership ? { ownership } : {}),
+    deviceIntact:
+      error instanceof ProvisionDeviceRollbackError &&
+      error.diagnostics.retainedDevice !== undefined,
     originalError: { code, message: errorMessage(failure) },
     ...(retryable !== undefined ? { retryable } : {}),
   });

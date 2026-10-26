@@ -128,7 +128,7 @@ function clearedPackageFallbacks(deviceCondition: unknown): ToolMutation[] {
  */
 export function deviceStateToolMutations(
   name: string,
-  _args: Record<string, unknown>,
+  args: Record<string, unknown>,
   platform?: Platform,
 ): ToolMutation[] | undefined {
   if (name !== "setPosture") {
@@ -137,5 +137,9 @@ export function deviceStateToolMutations(
   return [
     { kind: "device-setting", key: "tool:setPosture" },
     ...(platform === "ios" ? [] : [opaqueDeviceState("posture")]),
+    // A display preset resizes the display, which the foldable posture restore does not undo.
+    ...(platform !== "ios" && args.displayPreset !== undefined
+      ? [opaqueDeviceState("posture", "displayPreset")]
+      : []),
   ];
 }

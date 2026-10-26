@@ -24,7 +24,8 @@ import {
 import type { ResetOutcome } from "./devicePort";
 import { ResetFailureError } from "./ResetFailureError";
 import { androidBaselineCleanCovers, isAndroidCriticalSetting } from "./androidKeepBootedCleanup";
-import { parsePowerIntentKey } from "./mutations/deviceStateKeys";
+import { parsePowerIntentKey, POSTURE_OPAQUE_PARTS } from "./mutations/deviceStateKeys";
+import { opaqueIntentKey } from "./mutations/types";
 import {
   opaqueForcesFallback,
   type DeviceBaseline,
@@ -413,7 +414,11 @@ export class AndroidKeepBootedReset implements AndroidResetStrategy {
       return `journaled mutations recorded under a different incarnation (${strays.length}) cannot be journal-reverted`;
     }
     const entries = await this.dependencies.journal.list(mutationContext.scope);
-    const opaque = entries.find(opaqueForcesFallback);
+    const opaque = entries.find(
+      (entry) =>
+        opaqueForcesFallback(entry) &&
+        !(context.foldPostureRestored && entry.key === opaqueIntentKey(...POSTURE_OPAQUE_PARTS)),
+    );
     if (opaque) {
       return `opaque journaled mutation (${opaque.toolName}) cannot be journal-reverted`;
     }

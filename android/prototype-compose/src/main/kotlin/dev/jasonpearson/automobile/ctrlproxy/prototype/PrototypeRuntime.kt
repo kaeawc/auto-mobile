@@ -36,6 +36,7 @@ data class PrototypeRuntimeSnapshot(
   /** Removed keys keep their stamp so a stale add cannot resurrect them unnoticed. */
   val stateRevisions: Map<String, Long> = emptyMap(),
   val stacks: Map<String, PrototypeStackSnapshot> = emptyMap(),
+  val stackChange: PrototypeStackChange? = null,
   /** Device-local error visibility, cleared on spec replacement. */
   val shownErrors: Set<String> = emptySet(),
   /** The latest `scrollTo` per scroll id (#14232); the scroll performs each once. */
@@ -57,6 +58,8 @@ sealed interface PrototypeInteraction {
   data object Back : PrototypeInteraction
 
   data class Tap(val actions: List<PrototypeAction>) : PrototypeInteraction
+
+  data class TimerFire(val actions: List<PrototypeAction>) : PrototypeInteraction
 
   data class PagerMotion(val pager: String, val page: Int, val scrolling: Boolean) :
     PrototypeInteraction
@@ -163,6 +166,19 @@ class PrototypeRuntime(
   internal var prepareStateWrites: (PrototypeSpec) -> PrototypeStateWriteValidator = {
     PrototypeSpecValidator.prepareStateWrites(it, runtimeJson)
   }
+
+  private val timerEngine =
+    PrototypeTimers(clock, requestScope, exclusively) { actions ->
+      handle(PrototypeInteraction.TimerFire(actions))
+    }
+
+  fun pauseTimers() = timerEngine.pause()
+
+  fun resumeTimers() = timerEngine.resume()
+
+  fun timerReports(): List<PrototypeTimerReport> = timerEngine.reports()
+
+  suspend fun advanceClock(ms: Int): Int = timerEngine.advance(ms)
 
   private val renderMapper = PrototypeRenderMapper()
 
@@ -323,6 +339,7 @@ class PrototypeRuntime(
 
   fun close() {
     mutableSnapshot.value = current.copy(active = false)
+    timerEngine.cancelAll()
     cancelRequests()
   }
 
@@ -385,6 +402,13 @@ class PrototypeRuntime(
       // eligible, preserve the existing Back dismissal rather than changing a hidden screen.
       PrototypeInteraction.Back -> if (!popTopmostStack()) dismiss()
       is PrototypeInteraction.Tap -> control(emptyMap(), interaction.actions)
+      is PrototypeInteraction.TimerFire -> {
+        try {
+          control(emptyMap(), interaction.actions)
+        } catch (error: IllegalArgumentException) {
+          warn("Refused timer fire: ${error.message}")
+        }
+      }
       is PrototypeInteraction.PagerMotion ->
         if (!interaction.scrolling) setPage(interaction.pager, interaction.page)
       is PrototypeInteraction.SettledPage -> setPage(interaction.pager, interaction.page)
@@ -489,7 +513,7 @@ class PrototypeRuntime(
           )
         }
         is PrototypePushAction ->
-          changeStack(action.stack) { node, path ->
+          changeStack(action.stack, "push", action.transition) { node, path ->
             if (
               path.size >= PrototypeSpecValidator.MAX_PROTOTYPE_STACK_DEPTH ||
                 !node.screens.containsKey(action.screen)
@@ -503,7 +527,7 @@ class PrototypeRuntime(
           }
         is PrototypePopToRootAction -> changeStack(action.stack) { node, _ -> listOf(node.start) }
         is PrototypeReplaceAction ->
-          changeStack(action.stack) { node, path ->
+          changeStack(action.stack, "replace", action.transition) { node, path ->
             if (!node.screens.containsKey(action.screen)) path else path.dropLast(1) + action.screen
           }
         PrototypeDismissAction -> dismiss()
@@ -512,6 +536,8 @@ class PrototypeRuntime(
         is PrototypeRemoveDataAction -> writeData(action)
         is PrototypeRequestAction -> startRequest(action, touched)
         is PrototypeScrollToAction -> requestScroll(action)
+        is PrototypeStartTimerAction -> timerEngine.start(action)
+        is PrototypeCancelTimerAction -> timerEngine.cancel(action.id)
         else ->
           writes[index]?.let { (key, planned) ->
             // A data write earlier in this list may have added rows that bind this key, so a
@@ -631,6 +657,15 @@ class PrototypeRuntime(
   fun hasPoppableStack(model: PrototypeRenderModel = renderModel()): Boolean =
     current.active && stackPopTarget(model.root, current.stacks) != null
 
+  internal fun backPreview(): PrototypeRuntimeSnapshot? {
+    val id = stackPopTarget(renderModel().root, current.stacks) ?: return null
+    val stack = current.stacks.getValue(id)
+    return current.copy(
+      stacks = current.stacks + (id to PrototypeStackSnapshot(stack.path.dropLast(1))),
+      stackChange = PrototypeStackChange(id, "pop"),
+    )
+  }
+
   private fun stackPopTarget(
     root: PrototypeRenderNode,
     stacks: Map<String, PrototypeStackSnapshot>,
@@ -655,6 +690,8 @@ class PrototypeRuntime(
 
   private suspend fun changeStack(
     id: String,
+    direction: String = "pop",
+    override: PrototypeStackTransition? = null,
     transform: (PrototypeStackNode, List<String>) -> List<String>,
   ) {
     val node = stackNodes(current.spec.root)[id] ?: return
@@ -662,7 +699,12 @@ class PrototypeRuntime(
     val path = transform(node, before.path)
     if (path == before.path) return
     val next = PrototypeStackSnapshot(path.toList())
-    mutableSnapshot.value = current.copy(stacks = current.stacks + (id to next))
+    mutableSnapshot.value =
+      current.copy(
+        stacks = current.stacks + (id to next),
+        stackChange =
+          PrototypeStackChange(id, direction, override, (current.stackChange?.sequence ?: 0) + 1),
+      )
     if (before.path.last() != path.last() || before.depth != next.depth) {
       emit(
         kind = PrototypeEventKind.SCREEN_CHANGED,

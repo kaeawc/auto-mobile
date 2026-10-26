@@ -1,4 +1,5 @@
 import type { ConfigurableDeviceResource } from "../models/DeviceResourceConfiguration";
+import { isIosDuoDeviceType } from "../utils/ios-cmdline-tools/iosDeviceType";
 import type { SimulatorCreator } from "./SimulatorCreator";
 /**
  * Device provisioning — creating a simulator/emulator when none matches.
@@ -151,6 +152,11 @@ function deviceTypeMatchesIosFormFactor(
   deviceType: AppleDeviceType,
   formFactor: "phone" | "tablet" = "phone",
 ): boolean {
+  // The Duo is foldable, so a phone request must not select it: inventory would report it as
+  // foldable and the next phone request would provision again.
+  if (formFactor === "phone" && isIosDuoDeviceType(deviceType.identifier)) {
+    return false;
+  }
   const family = IOS_FAMILY_BY_FORM_FACTOR[formFactor];
   return deviceType.productFamily === family || deviceType.name.startsWith(family);
 }

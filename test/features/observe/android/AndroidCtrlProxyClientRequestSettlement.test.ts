@@ -71,6 +71,7 @@ async function harness() {
     "request_list_keyboard_profiles",
     "prototype_saved_v1",
     "prototype_storage_v1",
+    "prototype_timers_v1",
     "prototype_patch_v1",
     "prototype_persistence_replay_v1",
     "show_prototype",
@@ -82,6 +83,7 @@ async function harness() {
     "inspect_prototypes",
     "delete_saved_prototype",
     "clear_prototype_storage",
+    "advance_prototype_clock",
     "put_prototype_asset",
     "remove_prototype_asset",
   ]);
@@ -401,6 +403,11 @@ const methods: RequestMethod[] = [
     name: "requestClearPrototypeStorage",
     abortable: false,
     invoke: (h) => h.client.requestClearPrototypeStorage("p", LONG_TIMEOUT_MS, perf),
+  },
+  {
+    name: "requestAdvancePrototypeClock",
+    abortable: false,
+    invoke: (h) => h.client.requestAdvancePrototypeClock("p", 1000, LONG_TIMEOUT_MS, perf),
   },
   {
     name: "requestPutPrototypeAsset",

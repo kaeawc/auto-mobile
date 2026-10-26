@@ -1,3 +1,5 @@
+import type { LifecycleRequester } from "../../features/deviceLifecycle/lifecycleRequester";
+import type { InternalTeardownOptions } from "../../features/deviceLifecycle/teardown/teardownContracts";
 import type { DeviceResourceConfigurationResult } from "../../models/DeviceResourceConfiguration";
 import { BootedDevice, DeviceInfo } from "../../models";
 import { createPerformanceTracker } from "../../utils/PerformanceTracker";
@@ -40,6 +42,7 @@ export type ProvisioningHooks = {
     callerSignal: AbortSignal | undefined,
     teardownService: DeviceTeardownService,
     lifecycleLease?: VirtualDeviceLifecycleLease,
+    ...options: [requester?: LifecycleRequester, internal?: InternalTeardownOptions]
   ) => Promise<TeardownToolResponse>;
 };
 
@@ -85,6 +88,8 @@ export type ProvisionBootOptions = {
 };
 
 export type ProvisionSettlementState = {
+  /** Conservative launch boundary: even a rejected boot call may have launched the AVD. */
+  bootAttempted?: boolean;
   /** Only a retryable readiness deadline after creation, before binding, may retain a simulator. */
   retainCreatedForRetry?: boolean;
   exactProvisioning?: Promise<unknown>;

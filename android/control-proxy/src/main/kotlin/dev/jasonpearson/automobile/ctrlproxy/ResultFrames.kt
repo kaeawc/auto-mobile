@@ -65,6 +65,7 @@ internal fun prototypeResultFrame(
   pages: Map<String, Int>? = null,
   stacks: Map<String, PrototypeStackSnapshot>? = null,
   hiddenReason: PrototypeHiddenReason? = null,
+  fired: Int? = null,
 ): String =
   resultFrameJson.encodeToString<WebSocketResponse>(
     PrototypeResult(
@@ -79,6 +80,7 @@ internal fun prototypeResultFrame(
       pages = pages,
       stacks = stacks,
       hiddenReason = hiddenReason,
+      fired = fired,
     ),
   )
 

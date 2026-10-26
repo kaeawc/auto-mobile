@@ -13,6 +13,7 @@ import {
 } from "../../utils/android-cmdline-tools/AndroidDisplayInventory";
 import { type IosCtrlProxy } from "../observe/ios/IOSCtrlProxyClient";
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
+import { isIosDuoDeviceType } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { SimCtlClient, type SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { displayTransitions, type DisplayTransitionSink } from "../observe/DisplayTransition";
@@ -698,7 +699,7 @@ export class SetPosture {
     }
     // Explicit identity wins over stale inventory; Duo panels suffice for session devices.
     if (this.device.deviceType !== undefined) {
-      return this.device.deviceType.endsWith(".iPhone-Duo");
+      return isIosDuoDeviceType(this.device.deviceType);
     }
     if (
       this.device.displays?.panels.some((panel) => panel.role === "cover") &&
@@ -725,7 +726,7 @@ export class SetPosture {
         );
         return false;
       }
-      return deviceInfo.deviceTypeIdentifier.endsWith(".iPhone-Duo");
+      return isIosDuoDeviceType(deviceInfo.deviceTypeIdentifier);
     } catch (error) {
       assertCurrent();
       throwIfAborted(signal);

@@ -20,6 +20,7 @@ import type {
   RequirementResult,
   SessionDeviceCatalog,
   SessionDeviceRequirement,
+  SessionRequirementCapabilities,
   SessionRequirementDefaults,
 } from "./types";
 import { normalizeOsSelector, osSelectorMatchesVersion, parseNumericVersion } from "./version";
@@ -180,6 +181,7 @@ function normalizeIos(
   original: IosSessionDeviceRequirement,
   defaults: Extract<SessionRequirementDefaults, { platform: "ios" }>,
   catalog: IosSessionDeviceCatalog,
+  capabilities: SessionRequirementCapabilities,
 ): RequirementResult<NormalizedIosSessionDeviceRequirement> {
   const hardware = effectiveIosHardware(original, defaults);
   if (!hardware.ok) {
@@ -202,13 +204,15 @@ function normalizeIos(
   if (!exactModel.ok) {
     return exactModel;
   }
-  const capability = validateIosCapability(effectiveRequest, exactModel.value);
-  if (!capability.ok) {
-    return capability;
-  }
-  const defaultCapability = validateIosDefaultCapability(effectiveRequest, defaults, catalog);
-  if (!defaultCapability.ok) {
-    return defaultCapability;
+  if (capabilities.iosDuo !== true) {
+    const capability = validateIosCapability(effectiveRequest, exactModel.value);
+    if (!capability.ok) {
+      return capability;
+    }
+    const defaultCapability = validateIosDefaultCapability(effectiveRequest, defaults, catalog);
+    if (!defaultCapability.ok) {
+      return defaultCapability;
+    }
   }
   return success({
     platform: "ios",
@@ -224,9 +228,13 @@ function normalizeAndroid(
   defaults: Extract<SessionRequirementDefaults, { platform: "android" }>,
   catalog: Extract<SessionDeviceCatalog, { platform: "android" }>,
 ): RequirementResult<NormalizedAndroidSessionDeviceRequirement> {
-  if (defaults.hardware.omitted !== "phone" && defaults.hardware.omitted !== "tablet") {
+  if (
+    defaults.hardware.omitted !== "phone" &&
+    defaults.hardware.omitted !== "tablet" &&
+    defaults.hardware.omitted !== "foldable"
+  ) {
     return invalidConfig(
-      "The omitted Android hardware default must be phone or tablet.",
+      "The omitted Android hardware default must be phone, tablet or foldable.",
       "defaults.hardware.omitted",
     );
   }
@@ -250,10 +258,16 @@ function normalizeAndroid(
   });
 }
 
+/**
+ * Duo selectors stay refused with `capability_disabled` unless `capabilities.iosDuo` is set.
+ * Enabling it never widens other selectors: resolution still requires a configured default
+ * to belong to the requested model type, so a phone or tablet request cannot reach a Duo.
+ */
 export function normalizeSessionDeviceRequirement(
   request: SessionDeviceRequirement,
   defaults: SessionRequirementDefaults,
   catalog: SessionDeviceCatalog,
+  capabilities: SessionRequirementCapabilities = {},
 ): RequirementResult<NormalizedSessionDeviceRequirement> {
   const parsed = parseSessionDeviceRequirement(request);
   if (!parsed.ok) {
@@ -268,7 +282,7 @@ export function normalizeSessionDeviceRequirement(
     defaults.platform === "ios" &&
     catalog.platform === "ios"
   ) {
-    return normalizeIos(parsed.value, defaults, catalog);
+    return normalizeIos(parsed.value, defaults, catalog, capabilities);
   }
   if (
     parsed.value.platform === "android" &&

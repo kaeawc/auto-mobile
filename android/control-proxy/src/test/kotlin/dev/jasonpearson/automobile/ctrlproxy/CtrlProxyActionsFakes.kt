@@ -186,6 +186,9 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
 
   override suspend fun deleteSavedPrototype(requestId: String?, id: String) = Unit
 
+  override suspend fun advancePrototypeClock(requestId: String?, id: String, advanceTimeMs: Int) =
+    Unit
+
   override suspend fun clearPrototypeStorage(requestId: String?, id: String) = Unit
 
   override suspend fun removePrototypeAsset(requestId: String?, id: String) = Unit
@@ -497,6 +500,9 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
 
   override suspend fun deleteSavedPrototype(requestId: String?, id: String) =
     record("deleteSavedPrototype", requestId, id)
+
+  override suspend fun advancePrototypeClock(requestId: String?, id: String, advanceTimeMs: Int) =
+    record("advancePrototypeClock", requestId, id, advanceTimeMs)
 
   override suspend fun clearPrototypeStorage(requestId: String?, id: String) =
     record("clearPrototypeStorage", requestId, id)

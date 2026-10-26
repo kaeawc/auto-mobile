@@ -44,6 +44,7 @@ import dev.jasonpearson.automobile.prototype.PrototypeStorage
 import dev.jasonpearson.automobile.prototype.ProvideEmbeddedPrototypeHost
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -205,12 +206,20 @@ class ViewerActivity : ComponentActivity() {
     }
   }
 
+  override fun onStart() {
+    super.onStart()
+    lifecycleScope.launch(start = CoroutineStart.UNDISPATCHED) {
+      interactions.withLock { runtime?.resumeTimers() }
+    }
+  }
+
   override fun onStop() {
     val target = runtime
-    services.flushScope.launch {
+    services.flushScope.launch(start = CoroutineStart.UNDISPATCHED) {
       withContext(NonCancellable) {
         interactions.withLock {
           try {
+            target?.pauseTimers()
             target?.flushStorage()
           } catch (error: IOException) {
             Log.w("ProtoViewer", "Cannot flush prototype storage", error)

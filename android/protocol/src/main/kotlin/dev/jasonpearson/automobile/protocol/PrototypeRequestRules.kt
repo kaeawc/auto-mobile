@@ -44,7 +44,9 @@ internal object PrototypeRequestRules {
                 "The emit name ${PrototypeRequests.EVENT_NAME} is reserved for request events",
               )
             else null
-          "request" -> requestError(value, path)
+          "request" ->
+            requestError(value, path)
+              ?: appendError(value, path, (context.root as? JsonObject)?.get("data") as? JsonObject)
           else -> null
         }
       if (error != null) return error
@@ -66,6 +68,25 @@ internal object PrototypeRequestRules {
     return requestEntryError(action["headers"], at, "headers")
       ?: requestEntryError(action["query"], at, "query")
   }
+
+  private fun appendError(action: JsonObject, at: String, data: JsonObject?): PrototypeSpecError? {
+    val to = (action["append"] as? JsonObject)?.text("to") ?: return null
+    val path = "$at.append.to"
+    requestIntoError(to)?.let {
+      return fail(path, it)
+    }
+    val into = action.text("into")
+    if (into != null && overlaps(to, into)) return fail(path, "append.to must not overlap into")
+    if (!to.split('/').contains("{index}") && data != null) {
+      val target = PrototypeDataPointer.resolve(data, to.removePrefix("/data"))
+      if (target != null && target !is kotlinx.serialization.json.JsonArray)
+        return fail(path, "append.to must name an array")
+    }
+    return null
+  }
+
+  private fun overlaps(to: String, into: String): Boolean =
+    to == into || to.startsWith("$into/") || into.startsWith("$to/")
 
   fun requestUrlError(url: String): String? =
     if ('{' in url) {

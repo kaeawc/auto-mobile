@@ -23,6 +23,7 @@ enum PrototypeDataWrite {
     enum Operation: String, Equatable {
         case set
         case append
+        case extend
         case remove
 
         init?(actionType: String) {
@@ -94,17 +95,54 @@ enum PrototypeDataWrite {
     )
         -> Result<[String: JSONValue], PrototypeDataWriteFailure>
     {
+        applyWindowed(data, op: operation, path: path, value: value).map(\.data)
+    }
+
+    struct Applied: Equatable {
+        let data: [String: JSONValue]
+        let trimmed: Int
+    }
+
+    static func applyWindowed(
+        _ data: [String: JSONValue]?, op operation: Operation, path: String, value: JSONValue?, maxItems: Double? = nil
+    )
+        -> Result<Applied, PrototypeDataWriteFailure>
+    {
         guard let pointer = pointer(ofPath: path) else {
             return fail(.invalidPath, "\(path) is not a /data/<pointer> path")
         }
         if operation != .remove, value == nil { return fail(.invalidValue, "A set or append write needs a value") }
+        if operation == .extend, case .array? = value {} else if operation == .extend {
+            return fail(.invalidValue, "An extend write needs an array value")
+        }
+        if operation == .append || operation == .extend, let maxItems,
+           maxItems < 1 || maxItems > 9_007_199_254_740_991 || Int(exactly: maxItems) == nil
+        {
+            return fail(.invalidValue, "maxItems must be a positive safe integer")
+        }
         let current = data ?? [:]
         let tokens = PrototypeDataPointer.tokens(pointer)
         let existing = PrototypeDataPointer.resolve(.object(current), tokens: tokens[...])
         if let refusal = targetRefusal(current, tokens: tokens, existing: existing, op: operation, path: path) {
             return .failure(refusal)
         }
-        guard case let .object(next)? = mutate(.object(current), tokens: tokens[...], op: operation, value: value)
+        var effectiveOperation = operation
+        var effectiveValue = value
+        var trimmed = 0
+        if operation == .append || operation == .extend, case let .array(items)? = existing, let value {
+            let incoming: [JSONValue]
+            if operation == .extend, case let .array(values) = value { incoming = values } else { incoming = [value] }
+            let combined = items + incoming
+            trimmed = maxItems.map { max(0, combined.count - Int($0)) } ?? 0
+            effectiveValue = .array(Array(combined.dropFirst(trimmed)))
+            effectiveOperation = .set
+        }
+        guard case let .object(next)? = mutate(
+            .object(current),
+            tokens: tokens[...],
+            op: effectiveOperation,
+            value: effectiveValue
+        )
         else {
             return fail(.notFound, "\(path): the target cannot be written")
         }
@@ -112,19 +150,22 @@ enum PrototypeDataWrite {
             try PrototypeLimits.guardDataWrite(next)
         } catch {
             // Only the limit walk throws here; its messages name the limit when one was exceeded.
-            let message = "\(error)"
+            let message: String
+            if case let DecodingError.dataCorrupted(context) = error {
+                message = context.debugDescription.components(separatedBy: ": ").dropFirst().joined(separator: ": ")
+            } else { message = error.localizedDescription }
             return fail(
                 message.contains("limit") ? .limitExceeded : .invalidValue,
-                "\(path): \(message)"
+                message
             )
         }
-        return .success(next)
+        return .success(Applied(data: next, trimmed: trimmed))
     }
 
-    private static func fail(
+    private static func fail<T>(
         _ code: PrototypeDataWriteCode, _ message: String
     )
-        -> Result<[String: JSONValue], PrototypeDataWriteFailure>
+        -> Result<T, PrototypeDataWriteFailure>
     {
         .failure(.init(code: code, message: message))
     }
@@ -135,11 +176,12 @@ enum PrototypeDataWrite {
         -> PrototypeDataWriteFailure?
     {
         switch operation {
-        case .append:
+        case .append, .extend:
+            let name = operation == .append ? "appendData" : "extend"
             guard let existing
-            else { return .init(code: .notFound, message: "appendData target \(path) does not exist") }
+            else { return .init(code: .notFound, message: "\(name) target \(path) does not exist") }
             if case .array = existing { return nil }
-            return .init(code: .notArray, message: "appendData target \(path) is not an array")
+            return .init(code: .notArray, message: "\(name) target \(path) is not an array")
         case .remove:
             return existing == nil
                 ? .init(code: .notFound, message: "removeData target \(path) does not exist") : nil
@@ -233,6 +275,9 @@ enum PrototypeDataWrite {
             guard present, case var .array(items)? = old, let value else { return nil }
             items.append(value)
             return .some(.array(items))
+        case .extend:
+            guard present, case let .array(items)? = old, case let .array(values)? = value else { return nil }
+            return .some(.array(items + values))
         case .remove:
             return present ? .some(nil) : nil
         }

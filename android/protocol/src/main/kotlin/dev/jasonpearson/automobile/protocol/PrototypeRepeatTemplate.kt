@@ -330,6 +330,11 @@ internal object PrototypeBindableFields {
       field(action, "into", path, PrototypeBindableKind.REQUEST_INTO)?.let {
         return it
       }
+      (action["append"] as? JsonObject)?.let { append ->
+        field(append, "to", "$path.append", PrototypeBindableKind.REQUEST_INTO)?.let {
+          return it
+        }
+      }
       field(action, "statusKey", path, PrototypeBindableKind.KEY)?.let {
         return it
       }
@@ -381,7 +386,8 @@ internal object PrototypeBindableFields {
     }
 
     fun actions(data: JsonObject, path: String): T? {
-      for (field in listOf("onTap", "onLongPress", "onDoubleTap")) {
+      for (field in
+        listOf("onTap", "onLongPress", "onDoubleTap", "onEndReached", "onStartReached")) {
         for ((action, actionPath) in objects(data, field, path)) {
           action(action, actionPath)?.let {
             return it

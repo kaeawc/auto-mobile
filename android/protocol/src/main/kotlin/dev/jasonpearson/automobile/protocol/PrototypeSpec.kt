@@ -349,6 +349,7 @@ data class PrototypeRequestAction(
   val query: Map<String, JsonElement>? = null,
   val body: EmitContextBinding? = null,
   val into: String? = null,
+  val append: PrototypeRequestAppend? = null,
   val statusKey: String? = null,
   val via: String? = null,
   val timeoutMs: Int? = null,
@@ -1311,6 +1312,34 @@ data class PrototypeDatePickerNode(
   val enabledWhen: PrototypeCondition? = null,
   val checks: List<PrototypeCheck>? = null,
   val validateOn: PrototypeValidateOn? = null,
+) : PrototypeNode()
+
+@SerialName("list")
+@Serializable
+data class PrototypeListNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val contentDescription: String? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
+  override val transition: PrototypeTransition? = null,
+  override val animate: PrototypeAnimate? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
+  val axis: String = "vertical",
+  val refresh: PrototypeScrollRefresh? = null,
+  val repeat: PrototypeRepeat,
+  val children: List<PrototypeNode>,
+  val header: PrototypeNode? = null,
+  val footer: PrototypeNode? = null,
+  val spacing: Double? = null,
+  val contentPadding: Double? = null,
+  val onEndReached: List<PrototypeAction>? = null,
+  val endThreshold: Int = 3,
+  val maxItems: Int? = null,
 ) : PrototypeNode()
 
 @SerialName("scroll")

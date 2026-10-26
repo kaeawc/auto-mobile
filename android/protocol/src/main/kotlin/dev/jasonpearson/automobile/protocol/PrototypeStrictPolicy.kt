@@ -12,7 +12,10 @@ internal object PrototypeStrictPolicy {
     context: PrototypeStateChecks.Context,
   ): PrototypeSpecError? {
     if (supported != null && !supported.containsAll(required(spec))) {
-      return PrototypeSpecError("$", "Unsupported capabilities")
+      return PrototypeSpecError(
+        "$",
+        "Unsupported capabilities: " + (required(spec) - supported).sorted().joinToString(", "),
+      )
     }
     val window = spec["window"] as? JsonObject
     if (library && window?.text("layer") == "system")
@@ -148,6 +151,7 @@ internal object PrototypeStrictPolicy {
       "carousel" to "carousel",
       "searchBar" to "search_bar",
       "chart" to "chart",
+      "list" to "lazy_list",
       "menu" to "menus",
       "select" to "menus",
       "scrollTo" to "chat_scroll",
@@ -276,6 +280,10 @@ internal object PrototypeStrictPolicy {
       typeFeatures[type]?.let(::need)
       for ((feature, keys) in typeFieldFeatures[type].orEmpty()) {
         if (keys.any { fields[it] != null }) need(feature)
+      }
+      if (type == "list" || (type == "request" && fields.containsKey("append"))) {
+        need("lazy_list")
+        need("data_model")
       }
       if (type == "request" && fields.text("via") == "device") need("network_device")
     }

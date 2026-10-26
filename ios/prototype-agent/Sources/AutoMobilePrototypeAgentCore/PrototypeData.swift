@@ -248,7 +248,8 @@ enum PrototypeDataResolver {
     {
         guard case var .object(fields) = root else { return root }
         PrototypeRepeat.bindTextFields(&fields) { PrototypeDataText.bind($0, data: data) }
-        if let value = fields["repeat"] { fields["repeat"] = resolveRepeat(value, repeats: &repeats) }
+        let lazy = fields["type"] == .string("list")
+        if !lazy, let value = fields["repeat"] { fields["repeat"] = resolveRepeat(value, repeats: &repeats) }
         for key in ["visibleWhen", "enabledWhen"] {
             if let value = fields[key] { fields[key] = resolveCondition(value, data: data) }
         }
@@ -263,6 +264,9 @@ enum PrototypeDataResolver {
             fields["child"] = resolveRoot(child, data: data, repeats: &repeats)
         } else if case let .array(children)? = fields["children"] {
             fields["children"] = .array(children.map { resolveRoot($0, data: data, repeats: &repeats) })
+        }
+        for name in ["header", "footer"] {
+            if let child = fields[name] { fields[name] = resolveRoot(child, data: data, repeats: &repeats) }
         }
         if case let .object(screens)? = fields["screens"] {
             fields["screens"] = .object(screens.mapValues { resolveRoot($0, data: data, repeats: &repeats) })

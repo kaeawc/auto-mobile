@@ -156,12 +156,11 @@ class PrototypeRequestBindingsTest : PrototypeRequestTestSupport() {
   }
 
   @Test
-  fun `a literal null body is invalid_response and leaves into unchanged`() {
+  fun `a literal null body becomes an empty string like the TS outcome reference`() {
     val result = applied("""{"t":"old"}""", "/data/t", received(JsonNull))
-    assertFalse(result.result.succeeded)
-    assertFalse(result.result.wroteInto)
-    assertEquals(JsonPrimitive("old"), result.data!!["t"])
-    assertEquals(PrototypeRequestErrorCode.INVALID_RESPONSE, result.result.meta.error!!.code)
+    assertTrue(result.result.succeeded)
+    assertTrue(result.result.wroteInto)
+    assertEquals(JsonPrimitive(""), result.data!!["t"])
   }
 
   @Test

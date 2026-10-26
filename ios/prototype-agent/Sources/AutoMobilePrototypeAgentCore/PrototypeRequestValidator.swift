@@ -6,7 +6,14 @@ import Foundation
 /// offending path instead of misbehaving when tapped.
 enum PrototypeRequestValidator {
     /// Every key under which a node holds an action list.
-    private static let actionLists: Set<String> = ["onTap", "onLongPress", "onDoubleTap", "onSubmit", "onRefresh"]
+    private static let actionLists: Set<String> = [
+        "onTap",
+        "onLongPress",
+        "onDoubleTap",
+        "onSubmit",
+        "onRefresh",
+        "onEndReached",
+    ]
     private static let methods = Set(PrototypeRequestMethod.allCases.map(\.rawValue))
     private static let bindingKeys: Set<String> = ["state", "data", "value", "item", "index"]
     private static let headerName = try? NSRegularExpression(pattern: "^[!#$%&'*+\\-.^_`|~0-9A-Za-z]+$")
@@ -137,7 +144,7 @@ enum PrototypeRequestValidator {
     }
 
     /// `/data/<pointer>` naming an object member, so `<into>__meta` can sit beside it.
-    private static func into(_ raw: JSONValue, path: String) throws {
+    static func into(_ raw: JSONValue, path: String) throws {
         let message = "request into is /data/<RFC 6901 pointer> and addresses a member of data"
         guard case let .string(text) = raw else { throw fail(path, message) }
         let bound = text.split(separator: "/", omittingEmptySubsequences: false)

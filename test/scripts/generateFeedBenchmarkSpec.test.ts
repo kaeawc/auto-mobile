@@ -61,7 +61,8 @@ test("flag validation rejects bad rows, paging URLs and unknown arguments", () =
     ["--out"],
     ["--bogus"],
     ["positional"],
-  ])
+  ]) {
     expect(() => parseFeedOptions(args)).toThrow();
+  }
   expect(parseFeedOptions(["--rows", "1"]).rows).toBe(1);
 });

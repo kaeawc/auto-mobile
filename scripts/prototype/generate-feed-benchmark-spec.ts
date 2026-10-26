@@ -99,8 +99,11 @@ if (import.meta.main) {
   try {
     const options = parseFeedOptions(process.argv.slice(2));
     const json = `${JSON.stringify(generateFeedSpec(options), null, 2)}\n`;
-    if (options.out) await Bun.write(options.out, json);
-    else process.stdout.write(json);
+    if (options.out) {
+      await Bun.write(options.out, json);
+    } else {
+      process.stdout.write(json);
+    }
   } catch (error) {
     console.error(
       `generate-feed-benchmark-spec: ${error instanceof Error ? error.message : String(error)}`,

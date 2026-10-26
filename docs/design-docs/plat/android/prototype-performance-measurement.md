@@ -159,7 +159,13 @@ each CLI swipe step and for the scroll loop, including CLI/transport overhead an
 excluding show/dismiss. These are **not frame times**; simulators expose no gfxinfo.
 `--swipes` accepts 1–100 (default 6); `--dry-run` prints commands without executing them.
 
-Feed baseline: not yet recorded on a device.
+Feed baseline (2026-10-26, 1,000 rows, debug CtrlProxy on an API 37 arm64 emulator with
+software rendering, host load average above 140): `feed-scroll-down` p95 250 ms and
+`feed-fling-roundtrip` p95 300 ms (about 98% janky), `feed-idle` no frames. This is a
+smoke baseline, not a verdict: it misses the 16 ms target, but the debug build, software
+GL and a saturated host dominate it. Re-measure a release build on an idle host or device.
+iOS simulator (iPhone 17, iOS 26.5): six scripted swipes took 50.5 s wall time including
+CLI overhead, which is not a frame-time measure.
 
 ## Trace sections
 

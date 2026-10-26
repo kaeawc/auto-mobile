@@ -469,7 +469,7 @@ SessionManager
   is today).
 - A `DesiredRow` is a full row image, so replacing an unwritten desire is sound:
   `live(binding, activity) | released(reason, binding) | terminal(reason, binding,
-  journaled)`. `released`/`terminal` carry the binding because `markReleased` is an
+journaled)`. `released`/`terminal` carry the binding because `markReleased` is an
   UPDATE: if the row does not exist yet, the writer upserts with the release status.
   Replacement applies to an **unwritten** desire only; an issued write occupies the
   slot until it settles or hits its deadline (per the W2 owner decision, then the next

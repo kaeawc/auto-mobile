@@ -474,12 +474,12 @@ subprocesses, fewer round trips and less waiting — not just correctness.
 ## Phase 2 — Restart the daemon with the right flags
 
 1. Initialize a new private batch with `private-daemon.ts init --batch-dir B
-   --count 1 --base-port <unused-port> --server <absolute-dist-entry>
-   --broker-batch <absolute-broker-batch.json> --max-devices 2`.
+--count 1 --base-port <unused-port> --server <absolute-dist-entry>
+--broker-batch <absolute-broker-batch.json> --max-devices 2`.
    If replacing a daemon you started, use `private-daemon.ts stop --batch-dir B
-   --daemon 1`, then `start`. Never stop another batch's or the resident daemon.
+--daemon 1`, then `start`. Never stop another batch's or the resident daemon.
 2. Start ONE private daemon using `private-daemon.ts start --batch-dir B --
-   <daemon-flags>`. Set run environment options with repeatable `init --env K=V`:
+<daemon-flags>`. Set run environment options with repeatable `init --env K=V`:
    - `AUTOMOBILE_CTRL_PROXY_APK_PATH=<fresh apk>` to use the freshly-built Android
      runner (also uninstall+reinstall the APK on the emulator first for a runner fix);
      otherwise `AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED=true` to keep the
@@ -649,7 +649,7 @@ on a held, broker-assigned or reserved device is a defect. See
 private daemon with a short `AUTOMOBILE_SESSION_IDLE_TIMEOUT_MS`):**
 
 1. Watching a device (mirror open, no input) never allocates it: `--daemon
-   active-sessions` shows no session for that serial.
+active-sessions` shows no session for that serial.
 2. The first tap allocates it: a session with `holderKind` for the desktop appears
    and the tap lands.
 3. Further taps refresh the idle window: `lastToolActivityAt` advances, and the

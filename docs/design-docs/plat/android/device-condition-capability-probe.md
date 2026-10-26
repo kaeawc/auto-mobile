@@ -79,8 +79,7 @@ type DeviceConditionCapability =
   | "console.power"; // …one id per matrix row the injectors need
 
 type CapabilityProbeResult =
-  | { supported: true; detail?: string }
-  | { supported: false; reason: string };
+  { supported: true; detail?: string } | { supported: false; reason: string };
 
 interface DeviceCapabilityProbe {
   probe(

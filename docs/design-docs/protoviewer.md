@@ -239,7 +239,7 @@ Bundle limits (shared TS/Kotlin/Swift transport contract):
 - Each image is at most `MAX_PROTOTYPE_ASSET_BYTES = 4,194,304` bytes; each font is at most
   `MAX_PROTOTYPE_FONT_ASSET_BYTES = 2,097,152` bytes, from the asset contract.
 - `BUNDLE_MAX_EXPANDED_BYTES = MAX_PROTOTYPE_ASSET_TOTAL_BYTES + BUNDLE_MAX_SPEC_BYTES +
-  BUNDLE_MAX_MANIFEST_BYTES = 17,891,328`; `BUNDLE_MAX_COMPRESSED_BYTES` is the same value and
+BUNDLE_MAX_MANIFEST_BYTES = 17,891,328`; `BUNDLE_MAX_COMPRESSED_BYTES` is the same value and
   caps the entire archive file, including headers.
 - `BUNDLE_MAX_RATIO = 100`: actual total inflated bytes / total compressed entry data bytes;
   the known compressed-data total supplies a hard output budget during inflation. Header sizes
@@ -414,8 +414,14 @@ The shared request-policy and storage work is tracked in #13622.
   (iOS 27.1+, `UIHinge.status` closed, partially open, fully open) is the public signal, but it exists
   only on the newest runtime, needs a view in the hierarchy, and cannot tell tabletop from book without
   the hinge axis, so the runner's `setPosture` remains the way to drive a posture and the app never
-  reads one. Panel-swap behaviour (state kept across fold and unfold, no watchdog trip) is verified
-  on a device, not in unit tests.
+  reads one. Panel swap re-lays out through the existing window-size sync (the prototype's model and the
+  library selection live above the window, so a swap remounts nothing) and the render watchdog is
+  cancelled at first render, so it cannot trip on a later swap. Host routing: ProtoViewer opens on
+  whichever panel is in front when the URL is handled and cannot choose one, so a `display` given to
+  `save` or `open` is not applied; the result's `warning` says so when the reported `viewer.display`
+  differs from the request or no panel was reported. Needs device verification (`needs-device-verify`):
+  fold and unfold with a prototype open keeps state with no error screen, and a `grid` with
+  `minWidth: 170` shows more columns on the inner panel.
 - `prototype open` (new action) launches a library id (`viewer.libraryId`) through the same
   activity with action `….mcp.OPEN` on Android or the iOS simulator URL route, and returns the same warning.
 - Not in the first release: MCP `export` and `import` actions, a `listSaved` merge, live attach.

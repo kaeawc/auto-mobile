@@ -45,7 +45,10 @@ internal class ViewHierarchyExtractorWrapperPruningFixturesTest {
       val after = pruning.optimizeHierarchy(capture.root).flatMap(::flatten)
 
       val reduction = 1.0 - after.size.toDouble() / before.size
-      assertTrue("$path reduced ${"%.2f".format(reduction)}, wanted $minimum", reduction >= minimum)
+      assertTrue(
+        "$path reduced ${"%.2f".format(java.util.Locale.ROOT, reduction)}, wanted $minimum",
+        reduction >= minimum,
+      )
 
       assertEquals(
         "$path lost nodes a selector or tap can reach",

@@ -2174,8 +2174,9 @@ to true. Scrolling is not a state change and emits nothing. A composer is a row 
 (`imeAction: "send"`, `onSubmit`) and a send `iconButton`, padded with
 `safeAreaPadding {edges: ["bottom"], types: ["ime", "systemBars"]}`; whether a fullscreen overlay
 receives IME insets is owed device verification, like the bottom-sheet lift (#10262). Rows off
-screen are absent from `observe`; `swipeOn lookFor` still finds them. The iOS agent does not
-advertise the capability yet (#14671), so the host refuses these specs there.
+screen are absent from `observe`; `swipeOn lookFor` still finds them. The iOS agent advertises the
+capability too (#14671, SwiftUI `ScrollViewReader` with the same edge-trigger rules; the simulator
+acceptance of the pill, jump-to-end and keyboard behaviour is still owed).
 
 ## Swipe actions (not device-verified)
 

@@ -32,7 +32,8 @@ final class PrototypeThemeModesTests: XCTestCase {
         XCTAssertEqual(PrototypeAgentProtocol.themeModesCapability, "prototype_theme_modes_v1")
         XCTAssertEqual(PrototypeAgentProtocol.capabilities, [
             "show_prototype", "dismiss_prototype", "put_prototype_asset", "remove_prototype_asset",
-            "get_prototype_status", "patch_prototype", "prototype_patch_v1", "prototype_show_in_place_v1",
+            "get_prototype_status", "patch_prototype", "prototype_patch_v1", "prototype_chat_scroll_v1",
+            "prototype_show_in_place_v1",
             "prototype_anchor_v1", "hide_for_capture",
             "restore_after_capture", "screenshot_hide_prototype_v1", "prototype_inspect_v1",
             "prototype_theme_modes_v1", "prototype_flow_grid_v1", "prototype_pager_options_v1",

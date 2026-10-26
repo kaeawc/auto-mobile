@@ -21,6 +21,7 @@ enum PrototypeAgentProtocol {
         "get_prototype_status",
         patchRequest,
         patchCapability,
+        "prototype_chat_scroll_v1",
         showInPlaceCapability,
         anchorCapability,
         hideForCaptureRequest,

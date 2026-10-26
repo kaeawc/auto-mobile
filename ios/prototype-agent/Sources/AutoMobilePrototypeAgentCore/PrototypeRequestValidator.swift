@@ -6,7 +6,14 @@ import Foundation
 /// offending path instead of misbehaving when tapped.
 enum PrototypeRequestValidator {
     /// Every key under which a node holds an action list.
-    private static let actionLists: Set<String> = ["onTap", "onLongPress", "onDoubleTap", "onSubmit", "onRefresh"]
+    private static let actionLists: Set<String> = [
+        "onTap",
+        "onLongPress",
+        "onDoubleTap",
+        "onSubmit",
+        "onRefresh",
+        "onStartReached",
+    ]
     private static let methods = Set(PrototypeRequestMethod.allCases.map(\.rawValue))
     private static let bindingKeys: Set<String> = ["state", "data", "value", "item", "index"]
     private static let headerName = try? NSRegularExpression(pattern: "^[!#$%&'*+\\-.^_`|~0-9A-Za-z]+$")

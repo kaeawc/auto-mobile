@@ -497,6 +497,9 @@ struct PrototypeAction: Decodable, Sendable {
     let name: String?
     let payload: JSONValue?
     let context: PrototypeEmitContext?
+    let scroll: String?
+    let to: JSONValue?
+    let animated: Bool?
     let pager: String?
     let page: JSONValue?
     let stack: String?
@@ -533,7 +536,8 @@ struct PrototypeAction: Decodable, Sendable {
     let onError: [PrototypeAction]?
 
     private enum CodingKeys: String, CodingKey {
-        case type, name, payload, context, pager, page, stack, screen, transition, path, key, value
+        case type, name, payload, context, pager, page, stack, screen, transition, path, key, value, scroll, to,
+             animated
         case id, afterMs, everyMs, maxRuns, actions
         case incrementAmount = "by"
         case requireValid, method, url, headers, query, body, into, statusKey, via, timeoutMs, onSuccess, onError
@@ -547,8 +551,12 @@ struct PrototypeAction: Decodable, Sendable {
         into: String? = nil, statusKey: String? = nil, via: String? = nil, timeoutMs: Double? = nil,
         onSuccess: [PrototypeAction]? = nil, onError: [PrototypeAction]? = nil,
         id: String? = nil, afterMs: Int? = nil, everyMs: Int? = nil, maxRuns: Int? = nil,
-        actions: [PrototypeAction]? = nil, transition: PrototypeStackTransition? = nil
+        actions: [PrototypeAction]? = nil, transition: PrototypeStackTransition? = nil,
+        scroll: String? = nil, to: JSONValue? = nil, animated: Bool? = nil
     ) {
+        self.scroll = scroll
+        self.to = to
+        self.animated = animated
         self.id = id
         self.afterMs = afterMs
         self.everyMs = everyMs
@@ -771,6 +779,12 @@ final class PrototypeNode: Decodable {
     let openWhen: Condition?
     /// Pull-to-refresh on a vertical `scroll` (`prototype_refresh_v1`).
     let refresh: PrototypeScrollRefresh?
+    let reverse: Bool?
+    let stickToEnd: Bool?
+    let atEndKey: String?
+    let onStartReached: [PrototypeAction]?
+    /// Internal identity stamped after authored-spec validation.
+    let repeatKey: String?
     let detents: [Detent]?
     let scrim: PrototypeModeValue?
     let dragHandle: Bool?
@@ -839,7 +853,8 @@ final class PrototypeNode: Decodable {
         case orientation, min, max, step, title, navigationIcon, actions, confirm
         case dismiss, action, durationMs, hourKey, minuteKey, is24Hour, headline, supporting
         case leadingIcon, trailing, swipeActions
-        case refresh
+        case refresh, reverse, stickToEnd, atEndKey, onStartReached
+        case repeatKey = "_repeatKey"
         case onLongPress, onDoubleTap, enabledWhen, checks, validateOn, maxLines, columns, span, start, screens, spans,
              linkify,
              activeKey, trailingActions, onSubmit, pageSpacing, peek, pageSize, indicator, itemWidth, itemSpacing,
@@ -872,6 +887,11 @@ final class PrototypeNode: Decodable {
         variant = try container.decodeIfPresent(String.self, forKey: .variant)
         stateKey = try container.decodeIfPresent(String.self, forKey: .stateKey)
         placeholder = try container.decodeIfPresent(String.self, forKey: .placeholder)
+        reverse = try container.decodeIfPresent(Bool.self, forKey: .reverse)
+        stickToEnd = try container.decodeIfPresent(Bool.self, forKey: .stickToEnd)
+        atEndKey = try container.decodeIfPresent(String.self, forKey: .atEndKey)
+        onStartReached = try container.decodeIfPresent([PrototypeAction].self, forKey: .onStartReached)
+        repeatKey = try container.decodeIfPresent(String.self, forKey: .repeatKey)
         axis = try container.decodeIfPresent(String.self, forKey: .axis)
         if decodedType == "menu" {
             items = nil

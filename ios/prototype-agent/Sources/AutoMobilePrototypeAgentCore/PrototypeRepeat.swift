@@ -57,7 +57,20 @@ enum PrototypeRepeat {
         guard case var .object(fields) = node else { return node }
         if case let .array(children)? = fields["children"] {
             let expanded: [JSONValue] = if case let .object(spec)? = fields["repeat"] {
-                instances(of: spec).flatMap { instance in children.map { instance.bind($0) } }
+                instances(of: spec).flatMap { instance in
+                    children.enumerated().map { index, child in
+                        var bound = instance.bind(child)
+                        // As on Android, the first template child anchors the repeat row.
+                        if index == 0, let key = spec["key"]?.stringValue,
+                           let value = instance.item[key], var fields = bound.objectFields,
+                           let rendered = PrototypeScrollTarget.scalarKey(value)
+                        {
+                            fields["_repeatKey"] = .string(rendered)
+                            bound = .object(fields)
+                        }
+                        return bound
+                    }
+                }
             } else {
                 children
             }
@@ -71,7 +84,7 @@ enum PrototypeRepeat {
         return .object(fields)
     }
 
-    /// `key` is accepted but rows keep positional identity until keyed patching (#11675).
+    /// Concrete instances retain item order; expansion stamps the first child with its row key.
     private static func instances(of spec: [String: JSONValue]) -> [PrototypeRepeatInstance] {
         guard case let .string(alias)? = spec["as"], case let .array(items)? = spec["items"] else { return [] }
         return items.enumerated().map { index, item in
@@ -346,6 +359,9 @@ struct PrototypeRepeatInstance {
         guard case var .object(fields) = node else { return node }
         PrototypeRepeat.bindTextFields(&fields, transform: interpolate)
         bindComponentActions(&fields)
+        if case let .array(actions)? = fields["onStartReached"] {
+            fields["onStartReached"] = .array(actions.map(bindAction))
+        }
         if fields["type"] == .string("text") {
             bindList("spans", in: &fields) { bindPartFields(&$0) }
         }

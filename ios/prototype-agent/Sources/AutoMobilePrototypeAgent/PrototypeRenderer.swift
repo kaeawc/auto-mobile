@@ -169,6 +169,14 @@
         @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
         var body: some View {
+            if let key = node.repeatKey {
+                contentBody.id(PrototypeScrollTarget.key(key))
+            } else {
+                contentBody
+            }
+        }
+
+        @ViewBuilder private var contentBody: some View {
             // A node that draws nothing here (hidden, anchored elsewhere, a modal not yet in its layer)
             // returns no view at all: a stack puts its spacing around an empty ZStack too, which left
             // a gap Android does not (#10912). Container parents also leave such children out.
@@ -349,9 +357,7 @@
                 if node.axis != "horizontal", let refresh = node.refresh {
                     PrototypeRefreshableScroll(node: node, refresh: refresh, model: model)
                 } else {
-                    ScrollView(node.axis == "horizontal" ? .horizontal : .vertical) {
-                        if let child = node.child { NodeView(node: child, model: model) }
-                    }
+                    PrototypeChatScrollView(node: node, model: model)
                 }
             case "stack":
                 PrototypeStackView(node: node, model: model)
@@ -1422,25 +1428,23 @@
         private var refreshing: Bool { model.state[refresh.stateKey]?.boolValue == true }
 
         var body: some View {
-            ScrollView(.vertical) {
-                if let child = node.child { NodeView(node: child, model: model) }
-            }
-            .refreshable {
-                guard !refreshing else { return }
-                pulling = true
-                model.run(PrototypeRefresh.actions(for: refresh))
-                await PrototypeRefresh.awaitCompletion(
-                    isRefreshing: { model.state[refresh.stateKey]?.boolValue == true },
-                    isCancelled: { Task.isCancelled },
-                    sleep: { try? await Task.sleep(for: .milliseconds(100)) }
-                )
-                pulling = false
-            }
-            .overlay(alignment: .top) {
-                if refreshing, !pulling {
-                    ProgressView().padding(.top, 8)
+            PrototypeChatScrollView(node: node, model: model)
+                .refreshable {
+                    guard !refreshing else { return }
+                    pulling = true
+                    model.run(PrototypeRefresh.actions(for: refresh))
+                    await PrototypeRefresh.awaitCompletion(
+                        isRefreshing: { model.state[refresh.stateKey]?.boolValue == true },
+                        isCancelled: { Task.isCancelled },
+                        sleep: { try? await Task.sleep(for: .milliseconds(100)) }
+                    )
+                    pulling = false
                 }
-            }
+                .overlay(alignment: .top) {
+                    if refreshing, !pulling {
+                        ProgressView().padding(.top, 8)
+                    }
+                }
         }
     }
 #endif

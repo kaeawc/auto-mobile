@@ -3,18 +3,22 @@ import Foundation
 import XCTest
 
 final class PrototypeMcpRequestTests: XCTestCase {
+    private func url(_ string: String) throws -> URL {
+        try XCTUnwrap(URL(string: string))
+    }
+
     func testGrammar() throws {
         XCTAssertEqual(
-            PrototypeMcpRequest.parse(URL(string: "automobile-proto://import?request=a_1&label=Hello%20%26%20world")!),
+            try PrototypeMcpRequest.parse(url("automobile-proto://import?request=a_1&label=Hello%20%26%20world")),
             .importBundle(request: "a_1", label: "Hello & world")
         )
         XCTAssertEqual(
-            PrototypeMcpRequest.parse(URL(string: "automobile-proto://open?request=a&id=entry")!),
+            try PrototypeMcpRequest.parse(url("automobile-proto://open?request=a&id=entry")),
             .open(request: "a", libraryId: "entry")
         )
-        XCTAssertNil(PrototypeMcpRequest.parse(URL(string: "file:///Inbox/test.json")!))
+        XCTAssertNil(try PrototypeMcpRequest.parse(url("file:///Inbox/test.json")))
         for query in ["", "?request=", "?request=bad%2Fid", "?request=" + String(repeating: "a", count: 65)] {
-            XCTAssertNil(PrototypeMcpRequest.parse(URL(string: "automobile-proto://import" + query)!))
+            XCTAssertNil(try PrototypeMcpRequest.parse(url("automobile-proto://import" + query)))
         }
     }
 
@@ -23,8 +27,8 @@ final class PrototypeMcpRequestTests: XCTestCase {
             "open?request=r", "other?request=r", "import?request=r&label=a&label=b",
             "open?request=r&id=a&id=b", "import?request=r&request=r",
         ] {
-            guard case let .unsupported(request, _) = PrototypeMcpRequest.parse(
-                URL(string: "automobile-proto://" + suffix)!
+            guard case let .unsupported(request, _) = try PrototypeMcpRequest.parse(
+                url("automobile-proto://" + suffix)
             ) else { return XCTFail("Expected unsupported: \(suffix)") }
             XCTAssertEqual(request, "r")
         }

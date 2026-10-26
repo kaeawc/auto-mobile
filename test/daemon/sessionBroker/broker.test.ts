@@ -21,7 +21,13 @@ import { parseSessionConfig, type SessionConfig } from "../../../src/devices/ses
 import { logger } from "../../../src/utils/logger";
 import type { SessionBrokerReleaseResult } from "../../../src/devices/sessionBrokerResult";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
-import { IOS_DUO, iosCatalog, iosDefaults } from "../../devices/sessionRequirements/fixtures";
+import {
+  androidCatalog,
+  androidDefaults,
+  IOS_DUO,
+  iosCatalog,
+  iosDefaults,
+} from "../../devices/sessionRequirements/fixtures";
 
 const OWNER: BindingProcessIdentity = {
   daemonId: "broker-daemon",
@@ -458,6 +464,74 @@ describe("session-only broker lifecycle", () => {
     expect(devices.prepared[1]).toBe(devices.prepared[0]);
     expect(await broker.release(first)).toMatchObject({ outcome: "released" });
     expect(devices.sessions.has(second)).toBe(true);
+  });
+
+  test("foldable refusal precedes reservations and creation", async () => {
+    options.catalog = async () => androidCatalog();
+    options.defaults = () => androidDefaults();
+    const request: SessionConfig = {
+      ...config("fold-missing"),
+      device: {
+        schemaVersion: 1,
+        platform: "android",
+        hardware: { kind: "archetype", archetype: "foldable" },
+        os: { kind: "omitted" },
+      },
+    };
+    const result = await broker.prepare(request, "owner-token");
+    expect(result).toMatchObject({
+      outcome: "failed",
+      failure: { code: "unsupported_hardware", retryable: false },
+    });
+    expect(JSON.stringify(result)).toContain("defaults.android.hardware.profiles");
+    expect(await options.store.listResources()).toEqual([]);
+    expect(devices.prepared).toEqual([]);
+  });
+
+  test.each([
+    [undefined, 4096],
+    [4096, undefined],
+    [4096, 4096],
+  ] as const)("idle fold RAM %s then %s", async (firstMemory, secondMemory) => {
+    let memoryMb: number | undefined = firstMemory;
+    options.catalog = async () =>
+      androidCatalog({
+        profiles: [
+          { profileId: "pixel_9_pro_fold", archetype: "foldable", metadataState: "current" },
+        ],
+      });
+    options.defaults = () =>
+      androidDefaults({
+        hardware: {
+          omitted: "foldable",
+          profiles: [
+            {
+              archetype: "foldable",
+              profileId: "pixel_9_pro_fold",
+              ...(memoryMb === undefined ? {} : { memoryMb }),
+            },
+          ],
+        },
+      });
+    broker = new SessionBroker({ ...options, reuseAndroidCleanDevices: true });
+    const request = (requestId: string): SessionConfig => ({
+      ...config(requestId),
+      device: {
+        schemaVersion: 1,
+        platform: "android",
+        hardware: { kind: "archetype", archetype: "foldable" },
+        os: { kind: "omitted" },
+      },
+    });
+    const first = await broker.prepare(request("fold-first"), "owner-token");
+    if (first.outcome !== "ready" || !first.sessionUuid) {
+      throw new Error(JSON.stringify(first));
+    }
+    await broker.release(first.sessionUuid);
+    memoryMb = secondMemory;
+    const second = await broker.prepare(request("fold-second"), "owner-token");
+    expect(second.outcome).toBe("ready");
+    expect(devices.prepared[0] === devices.prepared[1]).toBe(firstMemory === secondMemory);
   });
 
   test("lost prepare reply replays original session despite unavailable catalog", async () => {

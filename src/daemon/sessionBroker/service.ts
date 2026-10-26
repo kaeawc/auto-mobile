@@ -1,3 +1,4 @@
+import { AdbAndroidFoldPostureRestore } from "./androidFoldPostureRestore";
 import {
   InMemoryMutationRecordingGaps,
   type MutationRecordingGaps,
@@ -592,6 +593,7 @@ function nativeAndroidBaselineReset(
     port: (device) => new AndroidDeviceMutationResetPort(defaultAdbClientFactory.create(device)),
   });
   return new AndroidBaselineReset({
+    postureReset: new AdbAndroidFoldPostureRestore(defaultAdbClientFactory),
     timer,
     resetTimeoutMs: config.androidResetTimeoutMs,
     inventory: async (options) => {

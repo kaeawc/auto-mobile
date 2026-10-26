@@ -14,7 +14,7 @@ final class PrototypeHostLayersTests: XCTestCase {
         switch type {
         case "sheet": #"{"type":"sheet","edge":"bottom","height":200}"#
         case "floating": #"{"type":"floating","gravity":"center","offset":{"x":0,"y":0}}"#
-        default: #"{"type":"\(type)"}"#
+        default: #"{"type":"\#(type)"}"#
         }
     }
 

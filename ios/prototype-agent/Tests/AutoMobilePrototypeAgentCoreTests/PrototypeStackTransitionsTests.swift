@@ -10,6 +10,93 @@ final class PrototypeStackTransitionsTests: XCTestCase {
         """.utf8)
     }
 
+    private func navigationSession() throws -> PrototypeSession {
+        let source =
+            #"{"id":"a","window":{"placement":{"type":"fullscreen"}},"data":{"items":[]},"root":{"type":"column","children":[{"type":"stack","id":"nav","start":"home","screens":{"home":{"type":"text","text":"home"},"detail":{"type":"text","text":"detail"}}},{"type":"stack","id":"other","start":"home","screens":{"home":{"type":"text","text":"other"}}}]}}"#
+        var session = PrototypeSession()
+        try session.show(JSONDecoder().decode(PrototypeSpec.self, from: Data(source.utf8)))
+        _ = try session.run([JSONDecoder().decode(PrototypeAction.self, from: Data(
+            #"{"type":"push","stack":"nav","screen":"detail"}"#.utf8
+        ))])
+        return session
+    }
+
+    func testDataWritesAndUnrelatedPatchPreserveNavigation() throws {
+        var session = try navigationSession()
+        let entries = session.stackEntries
+        let changes = session.stackChanges
+        for json in [
+            #"{"type":"setData","path":"/data/items","value":{"value":[]}}"#,
+            #"{"type":"appendData","path":"/data/items","value":{"value":"x"}}"#,
+            #"{"type":"removeData","path":"/data/items/0"}"#,
+        ] {
+            let events = try session.run([JSONDecoder().decode(PrototypeAction.self, from: Data(json.utf8))])
+            XCTAssertFalse(events.isEmpty)
+            XCTAssertEqual(session.stackEntries, entries)
+            XCTAssertEqual(session.stackChanges, changes)
+        }
+        let (outcome, _) = session.patch(id: "a", baseRevision: nil, ops: .array([
+            .object(["op": .string("add"), "path": .string("/data/title"), "value": .string("new")]),
+        ]))
+        XCTAssertEqual(outcome, .applied(revision: session.dataRevision))
+        XCTAssertEqual(session.stackEntries, entries)
+        XCTAssertEqual(session.stackChanges, changes)
+    }
+
+    func testScreenRemovalResetsOnlyAffectedStackAndRetainsPrefix() throws {
+        var session = try navigationSession()
+        let entries = session.stackEntries
+        let changes = session.stackChanges
+        let (outcome, _) = try session.patch(id: "a", baseRevision: nil, ops: .array([
+            JSONDecoder().decode(JSONValue.self, from: Data(
+                #"{"op":"replaceNode","id":"nav","node":{"type":"stack","id":"nav","start":"home","screens":{"home":{"type":"text","text":"home"}}}}"#
+                    .utf8
+            )),
+        ]))
+        XCTAssertEqual(outcome, .applied(revision: session.dataRevision))
+        XCTAssertEqual(session.stackEntries["nav"], entries["nav"].map { Array($0.prefix(1)) })
+        XCTAssertEqual(session.stackChanges["nav"]?.direction, .reset)
+        XCTAssertNotEqual(session.stackChanges["nav"]?.revision, changes["nav"]?.revision)
+        XCTAssertEqual(session.stackEntries["other"], entries["other"])
+        XCTAssertEqual(session.stackChanges["other"], changes["other"])
+    }
+
+    func testScreenEditResetsRevisionButKeepsEntryIdentity() throws {
+        var session = try navigationSession()
+        let entries = session.stackEntries
+        let changes = session.stackChanges
+        let (outcome, _) = try session.patch(id: "a", baseRevision: nil, ops: .array([
+            JSONDecoder().decode(JSONValue.self, from: Data(
+                #"{"op":"replaceNode","id":"nav","node":{"type":"stack","id":"nav","start":"home","screens":{"home":{"type":"text","text":"home"},"detail":{"type":"text","text":"edited"}}}}"#
+                    .utf8
+            )),
+        ]))
+        XCTAssertEqual(outcome, .applied(revision: session.dataRevision))
+        XCTAssertEqual(session.stackEntries, entries)
+        XCTAssertNotEqual(session.stackChanges["nav"], changes["nav"])
+        XCTAssertEqual(session.stackChanges["other"], changes["other"])
+    }
+
+    func testSwipeCancellationReturnsToRestAndEndIsInert() throws {
+        var swipe = PrototypeStackSwipeState()
+        swipe.update(target: "nav", revision: 4, start: 10, translation: 75, vertical: 0, width: 300, rtl: false)
+        XCTAssertEqual(swipe.target, "nav")
+        XCTAssertEqual(swipe.revision, 4)
+        XCTAssertEqual(swipe.progress, 0.25)
+        swipe.cancel()
+        XCTAssertNil(swipe.target)
+        XCTAssertNil(swipe.revision)
+        XCTAssertEqual(swipe.progress, 0)
+        XCTAssertNil(swipe.end())
+        swipe.update(target: "nav", revision: 4, start: 80, translation: 75, vertical: 0, width: 300, rtl: false)
+        XCTAssertNil(swipe.target)
+        XCTAssertNil(swipe.end())
+        swipe.update(target: "nav", revision: 4, start: 10, translation: 90, vertical: 0, width: 300, rtl: false)
+        XCTAssertEqual(swipe.end()?.target, "nav")
+        XCTAssertNil(swipe.target)
+        XCTAssertNil(swipe.revision)
+    }
+
     func testEnumMatchesSharedContract() throws {
         let (_, validator) = try PrototypeContractValidator.inspect(data: spec())
         let values = validator.definitions["stackTransition"]?.objectFields?["values"]

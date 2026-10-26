@@ -759,12 +759,11 @@ intentional infinite animations (today only the shimmer) and is ignored by hosts
 while `active` is positive and stay bounded by their usual timeout. The count is
 zero after a single frame under `motion: "none"` or animator scale 0.
 
-
 ### Stack transitions
 
 `prototype_stack_transitions_v1` gates every explicit stack `transition` and push/replace
 `transition` override. Omission means `platform`; pop/popToRoot have no override. The contract
-is validated by both agents; the Android renderer advertises the capability.
+is validated by both agents, and both advertise the capability.
 
 | Value      | Platform behaviour                         |
 | ---------- | ------------------------------------------ |
@@ -784,11 +783,11 @@ and authored actions use ordinary transitions. Each path entry owns its scroll o
 while covered and discarded on pop, replacement or removal. Settled screen containers expose
 `paneTitle`; outgoing content leaves composition and semantics after the animation.
 
-The motion-active window signal (#15114) is not available; there is no additional metadata field.
-Transitions use finite animations so Compose idle detection settles before observation.
+Stack transitions, including a predictive-back scrub, count in the motion-active window signal
+(#15114), so `observe(waitFor: stable)` waits them out.
 
-A stack's transition replaces its visibility
-transition: wrap it in a box to animate the stack's own `visibleWhen` enter/exit.
+A stack's `transition` is the screen navigation animation only. The stack's own `visibleWhen`
+uses the default visibility animation; wrap the stack in a box to give that a custom transition.
 
 ### Motion v2 (#14208, `prototype_motion_v2`, not device-verified)
 

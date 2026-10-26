@@ -82,10 +82,11 @@ Android Back and the iOS edge swipe pop a stack above depth 1. A stack's optiona
 \`transition: "platform" | "slide" | "fade" | "none"\` selects screen navigation animation
 (default \`platform\`); \`push\` and \`replace\` can override it with their own \`transition\`.
 Any explicit value needs \`prototype_stack_transitions_v1\`; pop/popToRoot take no override.
-Transitions honour \`motion: "none"\`, animator scale 0 and system reduced motion. This capability
-is not advertised by either agent yet. Stack \`transition\` does not animate its own visibility:
-wrap the stack in a \`box\` with \`visibleWhen\` and a visibility transition for that.
-Per-screen scroll position is not restored. A stack cannot appear inside a repeat template.
+Transitions honour \`motion: "none"\`, animator scale 0 and system reduced motion. A stack's
+\`transition\` accepts only those four values and no longer animates the stack's own visibility
+(earlier specs using \`expand\`, \`scale\`, \`slideStart\`, \`slideEnd\` or \`blurReplace\` on a stack
+are now refused): wrap the stack in a \`box\` with \`visibleWhen\` and a visibility transition for
+that. Each entry's scroll position is restored on pop. A stack cannot appear inside a repeat template.
 
 On Android, \`show replaceOthers: false\` retains other prototype windows, up to four distinct ids
 (requires \`prototype_multi_surface_v1\`); a fifth is refused listing the shown ids. A same-id show

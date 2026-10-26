@@ -3,17 +3,17 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.ScrollState
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import dev.jasonpearson.automobile.protocol.PrototypeStackNode
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOf
 
 private const val STACK_DURATION_MS = 300
 private const val STACK_FADE_THROUGH_MS = STACK_DURATION_MS / 2
@@ -94,61 +94,24 @@ internal fun PrototypeStackContent(
   val seek = LocalPrototypeBackSeek.current
   val runtime = LocalPrototypeStackRuntime.current
   val preview = seek?.preview?.takeIf { it.stackChange?.id == source.id }
-  val animation =
-    resolveStackAnimation(
-      source.stackTransition,
-      change,
-      LocalPrototypeMotion.current,
-      LocalPrototypeReducedMotion.current,
-    )
+  val motion = LocalPrototypeMotion.current
+  val reducedMotion = LocalPrototypeReducedMotion.current
+  val animation = resolveStackAnimation(source.stackTransition, change, motion, reducedMotion)
   val rtl = prototypeRtl()
-  val draw: @Composable (StackFrame, Boolean) -> Unit = { screen, settled ->
-    StackScreen(screen, store, settled, interact)
-  }
-  val previous = remember { mutableStateOf(frame) }
-  SideEffect { previous.value = frame }
-  if (preview == null) {
-    OrdinaryStackContent(frame, modifier, animation, rtl, node.style.alignment, draw)
-  } else {
-    SeekableStackContent(
-      previous.value,
-      frame,
-      preview,
-      runtime,
-      seek,
-      modifier,
-      animation.kind,
-      rtl,
-      node.style.alignment,
-      draw,
-    )
-  }
-}
-
-@Composable
-private fun OrdinaryStackContent(
-  frame: StackFrame,
-  modifier: Modifier,
-  animation: StackAnimation,
-  rtl: Boolean,
-  alignment: Alignment,
-  draw: @Composable (StackFrame, Boolean) -> Unit,
-) {
-  // Retain the transition across instant actions so the next animated pop starts at that screen.
-  val transition = updateTransition(frame, label = "prototype stack")
-  if (animation.kind == StackTransitionKind.None)
-    Box(modifier, contentAlignment = alignment) { key(frame.key) { draw(frame, true) } }
-  else {
-    transition.AnimatedContent(
-      modifier,
-      transitionSpec = {
-        stackTransform(animation.kind, animation.direction, rtl, animation.fadeThrough)
-      },
-      contentKey = { it.key },
-      contentAlignment = alignment,
-    ) { screen ->
-      draw(screen, !transition.isRunning && transition.currentState.key == screen.key)
-    }
+  AnimatedStackContent(
+    frame,
+    source,
+    motion,
+    reducedMotion,
+    preview,
+    runtime,
+    seek,
+    modifier,
+    animation,
+    rtl,
+    node.style.alignment,
+  ) { screen ->
+    StackScreen(screen, store, interact)
   }
 }
 
@@ -156,15 +119,12 @@ private fun OrdinaryStackContent(
 private fun StackScreen(
   screen: StackFrame,
   store: PrototypeStackScrollStore,
-  settled: Boolean,
   interact: (PrototypeInteraction) -> Unit,
 ) {
-  val focus = remember { FocusRequester() }
-  LaunchedEffect(screen.key, settled) { if (settled) focus.requestFocus() }
   CompositionLocalProvider(
     LocalStackScrollEntry provides ScrollEntry(store, screen.position, screen.screen),
   ) {
-    Box(Modifier.semantics { paneTitle = screen.screen }.focusRequester(focus).focusable()) {
+    Box(Modifier.semantics { paneTitle = screen.screen }) {
       RenderPrototypeNode(screen.node, interact)
     }
   }
@@ -172,57 +132,115 @@ private fun StackScreen(
 
 @Composable
 @Suppress("LongParameterList")
-private fun SeekableStackContent(
-  initial: StackFrame,
+private fun AnimatedStackContent(
   frame: StackFrame,
+  source: PrototypeStackNode,
+  motion: Boolean,
+  reducedMotion: Boolean,
   preview: PrototypeRuntimeSnapshot?,
   runtime: PrototypeRuntime?,
-  seek: PrototypeBackSeek,
+  seek: PrototypeBackSeek?,
   modifier: Modifier,
-  kind: StackTransitionKind,
+  animation: StackAnimation,
   rtl: Boolean,
   alignment: Alignment,
-  draw: @Composable (StackFrame, Boolean) -> Unit,
+  draw: @Composable (StackFrame) -> Unit,
 ) {
-  val state = remember { SeekableTransitionState(initial) }
-  val transition = rememberTransition(state, label = "prototype back")
-  val target =
-    remember(preview, frame) {
-      if (preview == null || runtime == null) frame
-      else {
-        val id = checkNotNull(preview.stackChange).id
-        fun find(node: PrototypeRenderNode): PrototypeRenderNode? =
-          if ((node.source as? PrototypeStackNode)?.id == id) node
-          else node.children.firstNotNullOfOrNull(::find)
-        val stack = find(runtime.renderModel(preview).root)
-        val path = preview.stacks.getValue(id).path
-        stack?.children?.firstOrNull()?.let { StackFrame(path.lastIndex, path.last(), it) } ?: frame
+  // One keyed content tree owns screen state through ordinary navigation and back previews.
+  val state = remember { SeekableTransitionState(frame) }
+  val kind = animation.kind
+  val transition = rememberTransition(state, label = "prototype stack")
+  var inFlight by remember { mutableStateOf(false) }
+  ReportPrototypeMotion {
+    kind != StackTransitionKind.None &&
+      (preview != null ||
+        inFlight ||
+        state.currentState != state.targetState ||
+        transition.isRunning)
+  }
+  // Observe runtime changes directly so snapTo is driven before the next screen composition,
+  // rather than leaving instant navigation one frame behind a LaunchedEffect keyed by frame.
+  LaunchedEffect(
+    runtime,
+    source,
+    motion,
+    reducedMotion,
+    seek,
+    if (runtime == null) frame else null,
+  ) {
+    combine(
+        runtime?.snapshots ?: flowOf(null),
+        snapshotFlow {
+          val backPreview = seek?.preview?.takeIf { it.stackChange?.id == source.id }
+          Triple(
+            backPreview,
+            if (backPreview != null) seek.progress else 0f,
+            if (backPreview != null) seek.result else null,
+          )
+        },
+      ) { snapshot, gesture ->
+        snapshot to gesture
       }
-    }
-  LaunchedEffect(frame, target, preview, seek.progress, seek.result, kind) {
-    if (preview == null) {
-      if (kind == StackTransitionKind.None) state.snapTo(frame) else state.animateTo(frame)
-    } else
-      when (seek.result) {
-        null -> if (kind != StackTransitionKind.None) state.seekTo(seek.progress, target)
-        true -> {
-          if (kind == StackTransitionKind.None) state.snapTo(target) else state.animateTo(target)
-          seek.clear()
-        }
-        false -> {
-          if (kind == StackTransitionKind.None) state.snapTo(frame) else state.animateTo(frame)
-          seek.clear()
+      .collectLatest { (snapshot, gesture) ->
+        val (backPreview, progress, result) = gesture
+        val current = snapshot?.let { stackFrame(runtime, it, source.id) } ?: frame
+        val target = backPreview?.let { stackFrame(runtime, it, source.id) } ?: current
+        val kind =
+          resolveStackAnimation(
+              source.stackTransition,
+              (backPreview ?: snapshot)?.stackChange?.takeIf { it.id == source.id },
+              motion,
+              reducedMotion,
+            )
+            .kind
+        inFlight = true
+        try {
+          if (backPreview == null) {
+            if (kind == StackTransitionKind.None) state.snapTo(current)
+            else state.animateTo(current)
+          } else
+            when (result) {
+              null -> if (kind != StackTransitionKind.None) state.seekTo(progress, target)
+              true -> {
+                if (kind == StackTransitionKind.None) state.snapTo(target)
+                else state.animateTo(target)
+                seek?.clear()
+              }
+              false -> {
+                if (kind == StackTransitionKind.None) state.snapTo(current)
+                else state.animateTo(current)
+                seek?.clear()
+              }
+            }
+        } finally {
+          inFlight = false
         }
       }
   }
   transition.AnimatedContent(
     modifier,
-    transitionSpec = { stackTransform(kind, "pop", rtl) },
+    transitionSpec = {
+      stackTransform(kind, animation.direction, rtl, animation.fadeThrough)
+    },
     contentKey = { it.key },
     contentAlignment = alignment,
   ) {
-    draw(it, !transition.isRunning && state.currentState.key == it.key)
+    draw(it)
   }
+}
+
+private fun stackFrame(
+  runtime: PrototypeRuntime?,
+  snapshot: PrototypeRuntimeSnapshot,
+  id: String,
+): StackFrame? {
+  if (runtime == null) return null
+  fun find(node: PrototypeRenderNode): PrototypeRenderNode? =
+    if ((node.source as? PrototypeStackNode)?.id == id) node
+    else node.children.firstNotNullOfOrNull(::find)
+  val stack = find(runtime.renderModel(snapshot).root) ?: return null
+  val path = snapshot.stacks.getValue(id).path
+  return stack.children.firstOrNull()?.let { StackFrame(path.lastIndex, path.last(), it) }
 }
 
 private fun stackTransform(

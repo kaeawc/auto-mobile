@@ -465,24 +465,25 @@ internal fun RenderPrototypeNode(
     return
   }
   // Only `visibleWhen` nodes animate; wrapping every node would add a layout to each one.
-  if (node.role != "stack" && LocalPrototypeMotion.current && node.source?.visibleWhen != null) {
+  if (LocalPrototypeMotion.current && node.source?.visibleWhen != null) {
+    // A stack transition controls navigation only; its own visibility uses the defaults.
+    val visibilityTransition = node.source.transition?.type.takeUnless { node.role == "stack" }
     // The row/column weight rides on the animated container: it is the Row/Column's direct child.
     AnimatedVisibility(
       visible = node.visible,
       modifier = parentModifier,
-      enter =
-        prototypeEnterTransition(node.source.transition?.type, prototypeRtl(), node.enterDelayMs),
-      exit = prototypeExitTransition(node.source.transition?.type, prototypeRtl()),
+      enter = prototypeEnterTransition(visibilityTransition, prototypeRtl(), node.enterDelayMs),
+      exit = prototypeExitTransition(visibilityTransition, prototypeRtl()),
     ) {
       ReportPrototypeMotion { transition.isRunning }
       ProvideAnchorFade(
-        none = node.source.transition?.type == "none",
+        none = visibilityTransition == "none",
         enterDelayMs = node.enterDelayMs,
       ) {
         RenderPrototypeNodeContent(
           node,
           interact,
-          Modifier.prototypeBlurReplace(this, node.source.transition?.type, node.enterDelayMs),
+          Modifier.prototypeBlurReplace(this, visibilityTransition, node.enterDelayMs),
           weightAxis,
           windowRoot,
         )

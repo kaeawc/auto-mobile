@@ -205,6 +205,9 @@ struct PrototypeSession {
         keepingPages previous: [String: Int],
         keepingStacks previousStacks: [String: PrototypeStackSnapshot]
     ) {
+        let previousNodes = stackNodes
+        let previousEntries = stackEntries
+        let previousChanges = stackChanges
         stackNodes = [:]
         root.collectStacks(into: &stackNodes)
         stacks = stackNodes.mapValues { node in
@@ -213,15 +216,25 @@ struct PrototypeSession {
             return PrototypeStackSnapshot(path: path.isEmpty ? [node.start ?? ""] : Array(path))
         }
         stackChanges = [:]
-        stackEntries = stacks.mapValues { snapshot in
-            snapshot.path.map { screen in
+        stackEntries = [:]
+        for (id, snapshot) in stacks {
+            let before = previousStacks[id]?.path ?? []
+            let retained = zip(before, snapshot.path).prefix(while: { $0.0 == $0.1 }).count
+            var entries = Array((previousEntries[id] ?? []).prefix(retained))
+            for screen in snapshot.path.dropFirst(entries.count) {
                 nextStackEntry += 1
-                return PrototypeStackEntry(id: nextStackEntry, screen: screen)
+                entries.append(PrototypeStackEntry(id: nextStackEntry, screen: screen))
             }
-        }
-        for id in stacks.keys {
-            stackRevision += 1
-            stackChanges[id] = PrototypeStackChange(direction: .reset, transition: .none, revision: stackRevision)
+            stackEntries[id] = entries
+            if before == snapshot.path,
+               previousNodes[id]?.screenDefinitions == stackNodes[id]?.screenDefinitions,
+               let change = previousChanges[id]
+            {
+                stackChanges[id] = change
+            } else {
+                stackRevision += 1
+                stackChanges[id] = PrototypeStackChange(direction: .reset, transition: .none, revision: stackRevision)
+            }
         }
         pageCounts = root.pagerCounts()
         pages = pageCounts.reduce(into: [:]) { result, entry in

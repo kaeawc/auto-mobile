@@ -56,3 +56,41 @@ enum PrototypeStackSwipe {
             progress(translation: predicted, width: width, rtl: rtl) > 0.5
     }
 }
+
+/// In-flight edge swipe only; completion animations belong to the renderer. Cancelling invalidates
+/// the target and revision together, so a later end or an off-edge drag cannot reuse either.
+struct PrototypeStackSwipeState {
+    private(set) var target: String?
+    private(set) var revision: Int?
+    private(set) var progress = 0.0
+
+    mutating func update(
+        target: String, revision: Int, start: Double, translation: Double, vertical: Double,
+        width: Double, rtl: Bool
+    ) {
+        if self.target == nil {
+            guard PrototypeStackSwipe.isAtEdge(start: start, width: width, rtl: rtl),
+                  abs(vertical) < abs(translation),
+                  PrototypeStackSwipe.distance(translation: translation, rtl: rtl) > 0 else { return }
+            self.target = target
+            self.revision = revision
+        }
+        guard self.target == target, self.revision == revision else {
+            cancel()
+            return
+        }
+        progress = PrototypeStackSwipe.progress(translation: translation, width: width, rtl: rtl)
+    }
+
+    mutating func cancel() {
+        target = nil
+        revision = nil
+        progress = 0
+    }
+
+    mutating func end() -> (target: String, revision: Int)? {
+        defer { cancel() }
+        guard let target, let revision else { return nil }
+        return (target, revision)
+    }
+}

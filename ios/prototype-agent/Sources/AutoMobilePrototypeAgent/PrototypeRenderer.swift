@@ -230,11 +230,14 @@
             }
         }
 
-        /// `visibleWhen` appears and disappears with the node's `transition`; instant when motion is
+        /// `visibleWhen` uses the node's `transition` (the default for stacks); instant when motion is
         /// off (spec `motion: "none"` or the system's Reduce Motion), as on Android (#10442).
         private var transition: PrototypeVisibilityTransition {
             let motion = PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
-            return node.visibleWhen == nil ? .instant : motion.visibility(transition: node.transition)
+            return node.visibleWhen == nil ? .instant : motion.visibility(
+                transition: node.transition,
+                nodeType: node.type
+            )
         }
 
         /// Whether anything is drawn for the node in the slot this view occupies. Unfiltered parents

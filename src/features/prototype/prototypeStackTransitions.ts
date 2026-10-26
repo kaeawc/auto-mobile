@@ -1,8 +1,23 @@
+import { z } from "zod";
 import { PROTOTYPE_STACK_TRANSITIONS_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
 import { mapBindableFields } from "./prototypeTemplate";
 
 export const PROTOTYPE_STACK_TRANSITIONS = ["platform", "slide", "fade", "none"] as const;
+
+/** A stack's `transition` and the per-action override on `push` and `replace`. */
+export const stackTransitionSchema = z.enum(PROTOTYPE_STACK_TRANSITIONS).optional();
+
+/** The `push` and `replace` actions: a stack, a screen name and an optional transition override. */
+export const stackScreenActionSchema = <T extends "push" | "replace">(type: T) =>
+  z
+    .object({
+      type: z.enum([type]),
+      stack: z.string().min(1),
+      screen: z.string().min(1),
+      transition: stackTransitionSchema,
+    })
+    .strict();
 
 /** Authored stack and navigation-action transition fields, in tree order. */
 export function prototypeStackTransitionFields(spec: unknown): string[] {

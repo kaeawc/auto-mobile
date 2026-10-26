@@ -1,5 +1,5 @@
 import * as timers from "./prototypeTimerSchema";
-import { PROTOTYPE_STACK_TRANSITIONS } from "./prototypeStackTransitions";
+import { stackScreenActionSchema, stackTransitionSchema } from "./prototypeStackTransitions";
 import { z } from "zod";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { PROTOTYPE_STACK_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
@@ -141,14 +141,7 @@ export const actionSchema = z.discriminatedUnion("type", [
   timers.cancelTimerActionSchema,
   requestActionSchema,
   platformActionSchema,
-  z
-    .object({
-      type: z.enum(["push"]),
-      stack: z.string().min(1),
-      screen: z.string().min(1),
-      transition: z.enum(PROTOTYPE_STACK_TRANSITIONS).optional(),
-    })
-    .strict(),
+  stackScreenActionSchema("push"),
   z.object({ type: z.enum(["pop"]), stack: z.string().min(1) }).strict(),
   z.object({ type: z.enum(["popToRoot"]), stack: z.string().min(1) }).strict(),
   z
@@ -162,14 +155,7 @@ export const actionSchema = z.discriminatedUnion("type", [
       animated: z.boolean().optional(),
     })
     .strict(),
-  z
-    .object({
-      type: z.enum(["replace"]),
-      stack: z.string().min(1),
-      screen: z.string().min(1),
-      transition: z.enum(PROTOTYPE_STACK_TRANSITIONS).optional(),
-    })
-    .strict(),
+  stackScreenActionSchema("replace"),
 ]);
 timers.bindPrototypeTimerActions(() => actionSchema);
 bindPrototypeRequestFollowUps(() => actionSchema);
@@ -677,7 +663,7 @@ const bottomSheetBaseSchema = z
 const stackBaseSchema = z
   .object({
     ...commonNodeShape,
-    transition: z.enum(PROTOTYPE_STACK_TRANSITIONS).optional(),
+    transition: stackTransitionSchema,
     type: z.enum(["stack"]),
     id: z.string().min(1),
     start: z.string().min(1),

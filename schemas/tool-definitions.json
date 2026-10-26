@@ -20268,8 +20268,7 @@
                               "minLength": 1
                             },
                             "transition": {
-                              "type": "string",
-                              "enum": ["platform", "slide", "fade", "none"]
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/14/properties/transition"
                             }
                           },
                           "required": ["type", "stack", "screen"],
@@ -23999,8 +23998,7 @@
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
                     "transition": {
-                      "type": "string",
-                      "enum": ["platform", "slide", "fade", "none"]
+                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/14/properties/transition"
                     },
                     "animate": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/animate"

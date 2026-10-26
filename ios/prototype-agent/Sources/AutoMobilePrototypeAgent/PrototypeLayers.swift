@@ -142,8 +142,8 @@
         let layer: PrototypeHostLayer
         @Environment(\.accessibilityReduceMotion) private var reduceMotion
         @Environment(\.layoutDirection) private var layoutDirection
-        @State private var swipeTarget: String?
-        @State private var swipeRevision: Int?
+        @State private var swipe = PrototypeStackSwipeState()
+        @GestureState private var swipeActive = false
 
         var body: some View {
             // The model's one resolved mode, not this window's `colorScheme`: the window carries that
@@ -233,9 +233,14 @@
             // Edge navigation observes authored scroll/pager gestures without reserving a touch strip.
             .simultaneousGesture(
                 DragGesture(minimumDistance: 10, coordinateSpace: .global)
+                    .updating($swipeActive) { _, active, _ in active = true }
                     .onChanged(edgeSwipeChanged)
                     .onEnded(edgeSwipeEnded)
             )
+            .onChange(of: swipeActive) { _, active in
+                if !active { cancelEdgeSwipe() }
+            }
+            .onDisappear { cancelEdgeSwipe() }
         }
 
         private var swipeRTL: Bool { layoutDirection == .rightToLeft }
@@ -248,31 +253,36 @@
         }
 
         private func edgeSwipeChanged(_ value: DragGesture.Value) {
-            guard model.stackDrag?.settling != true, let target = model.stackPopTarget else { return }
-            if swipeTarget == nil {
-                guard PrototypeStackSwipe.isAtEdge(
-                    start: value.startLocation.x,
-                    width: model.windowSize.width, rtl: swipeRTL
-                ), abs(value.translation.height) < abs(value.translation.width),
-                PrototypeStackSwipe.distance(translation: value.translation.width, rtl: swipeRTL) > 0
-                else { return }
-                swipeTarget = target
-                swipeRevision = model.stackChanges[target]?.revision
+            guard model.stackDrag?.settling != true, let target = model.stackPopTarget,
+                  let revision = model.stackChanges[target]?.revision else { return }
+            swipe.update(
+                target: target, revision: revision, start: value.startLocation.x,
+                translation: value.translation.width, vertical: value.translation.height,
+                width: model.windowSize.width, rtl: swipeRTL
+            )
+            guard swipe.target == target, swipe.revision == revision else {
+                cancelEdgeSwipe()
+                return
             }
-            guard swipeTarget == target, swipeRevision == model.stackChanges[target]?.revision,
-                  swipeAnimation(target) == .slide, let revision = swipeRevision else { return }
+            guard swipeAnimation(target) == .slide else { return }
             model.stackDrag = PrototypeModel.StackDrag(
-                target: target, revision: revision,
-                progress: PrototypeStackSwipe.progress(
-                    translation: value.translation.width, width: model.windowSize.width, rtl: swipeRTL
-                )
+                target: target, revision: revision, progress: swipe.progress
             )
         }
 
+        private func cancelEdgeSwipe() {
+            swipe.cancel()
+            guard model.stackDrag?.settling != true else { return }
+            withAnimation(.easeOut(duration: 0.2)) { model.stackDrag = nil }
+        }
+
         private func edgeSwipeEnded(_ value: DragGesture.Value) {
-            defer { swipeTarget = nil; swipeRevision = nil }
-            guard let target = swipeTarget, let revision = swipeRevision,
-                  model.stackPopTarget == target, model.stackChanges[target]?.revision == revision else { return }
+            guard let ended = swipe.end() else { return }
+            let (target, revision) = ended
+            guard model.stackPopTarget == target, model.stackChanges[target]?.revision == revision else {
+                cancelEdgeSwipe()
+                return
+            }
             guard swipeAnimation(target) == .slide, let drag = model.stackDrag else {
                 model.stackDrag = nil
                 if PrototypeStackSwipe.distance(translation: value.translation.width, rtl: swipeRTL) >= 60,

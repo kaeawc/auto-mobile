@@ -212,7 +212,8 @@ is a no-op.
 serial change). `--daemon active-sessions` includes these binding fields for every
 held session.
 
-When a retained session moves to a new serial, its proxy sends an MCP logging
+When a retained session is recovered onto a new serial (not when you move it yourself with
+`setActiveDevice` or an explicit bind), its proxy sends an MCP logging
 notification at level `info`, logger `auto-mobile.liveness`, with data
 `{ code: "session_device_rebound", sessionUuid, previousDeviceId, deviceId,
 stableDeviceId?, avdName?, generation }`. `avdName` is the Android AVD name when

@@ -109,6 +109,7 @@ export interface SessionRecoveryPublicationHost {
     assignedDevice: string,
     platform: Platform,
     stableDeviceId: string | undefined,
+    recovery?: boolean,
   ): Session;
   guardedRowRewriteOptions(
     supersededReasons: readonly string[],
@@ -368,6 +369,7 @@ export class SessionRecoveryPublication {
     platform: Platform,
     stableDeviceId: string | undefined,
     deferCleanup?: (cleanup: DeferredRebindCleanup) => void,
+    recovery = false,
   ): Promise<Session> {
     const activeSetups = Array.from(this.host.sessionSetupPromises, (setup) =>
       setup.session === existing ? setup.promise : null,
@@ -386,7 +388,13 @@ export class SessionRecoveryPublication {
     }
     await this.host.liveness.livenessOwnershipClaimMutexFor(existing).runExclusive(async () => {
       await this.host.persistSession(
-        this.host.createReboundSession(existing, assignedDevice, platform, stableDeviceId),
+        this.host.createReboundSession(
+          existing,
+          assignedDevice,
+          platform,
+          stableDeviceId,
+          recovery,
+        ),
         existing,
         this.host.guardedRowRewriteOptions([...(this.host.superseded.remembered(existing) ?? [])]),
       );
@@ -473,7 +481,7 @@ export class SessionRecoveryPublication {
     // Recreate after awaited work to preserve activity and label-routing updates made in flight.
     Object.assign(
       existing,
-      this.host.createReboundSession(existing, assignedDevice, platform, stableDeviceId),
+      this.host.createReboundSession(existing, assignedDevice, platform, stableDeviceId, recovery),
     );
     const sessionId = existing.sessionId;
     this.host.rowWriter.noteLive(sessionId);
@@ -490,7 +498,9 @@ export class SessionRecoveryPublication {
     if (assignedDevice !== previousDevice) {
       // Full: the replacement (including the same AVD on another serial) has its own screen.
       this.host.notifyDeviceOwnershipChange(assignedDevice, "full");
-      this.publishReboundIfLive(sessionId, existing, previousDevice);
+      if (recovery) {
+        this.publishReboundIfLive(sessionId, existing, previousDevice);
+      }
     }
     if (!replacementFence) {
       this.host.notifySessionDeviceUnbound(existing.sessionId, previousDevice, {

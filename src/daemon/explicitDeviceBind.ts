@@ -541,6 +541,7 @@ export class ExplicitDeviceBind {
             expectedExistingSessionDeviceId,
           ),
           recoveryTarget: options.recoveryTarget,
+          recovery: expectedExistingSessionDeviceId === undefined ? undefined : true,
           signal: options.signal,
         },
       ),
@@ -795,6 +796,8 @@ export class ExplicitDeviceBind {
       persistenceSource: string | undefined;
       deferCleanup?: (cleanup: DeferredRebindCleanup) => void;
       recoveryTarget?: SessionRecoveryTarget;
+      /** An Android loss recovery moving its own session, not a client-chosen device. */
+      recovery?: boolean;
       signal?: AbortSignal;
     },
   ): () => Promise<Session> {
@@ -844,6 +847,7 @@ export class ExplicitDeviceBind {
       const session = await this.port.sessionManager.rebindSession(sessionId, deviceId, platform, {
         stableDeviceId,
         deferCleanup: creation.deferCleanup,
+        recovery: creation.recovery,
         signal,
       });
       if (previousDevice) {

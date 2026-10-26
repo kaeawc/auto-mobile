@@ -23,6 +23,7 @@ class PrototypeListWritesTest {
         val input =
           when (write.getValue("op").jsonPrimitive.content) {
             "append" -> PrototypeDataWrite.Append(path, value, maxItems)
+            "prepend" -> PrototypeDataWrite.Prepend(path, value, maxItems)
             "extend" -> PrototypeDataWrite.Extend(path, value, maxItems)
             "set" -> PrototypeDataWrite.Set(path, value)
             "remove" -> PrototypeDataWrite.Remove(path)

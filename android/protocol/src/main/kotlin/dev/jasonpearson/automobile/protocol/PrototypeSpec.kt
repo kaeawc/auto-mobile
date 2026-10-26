@@ -231,7 +231,7 @@ data class PrototypeDecrementAction(val key: String, val by: Double? = null) : P
 @SerialName("dismiss") @Serializable data object PrototypeDismissAction : PrototypeAction()
 
 /**
- * `setData`, `appendData` and `removeData` change the prototype's own `/data` on the device
+ * `setData`, `appendData`, `prependData` and `removeData` change the prototype's own `/data` on the device
  * (`prototype_data_actions_v1`, #12519). [path] is `/data/<RFC 6901 pointer>`; inside a `repeat`, a
  * whole `{index}` segment binds to the current row. [value] is an emit-context binding without
  * `page`: `{value}`, `{state}`, `{data}` and, in a repeat, `{item}` or `{index}`.
@@ -239,6 +239,11 @@ data class PrototypeDecrementAction(val key: String, val by: Double? = null) : P
 @SerialName("setData")
 @Serializable
 data class PrototypeSetDataAction(val path: String, val value: EmitContextBinding) :
+  PrototypeAction()
+
+@SerialName("prependData")
+@Serializable
+data class PrototypePrependDataAction(val path: String, val value: EmitContextBinding) :
   PrototypeAction()
 
 @SerialName("appendData")

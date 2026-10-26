@@ -21,7 +21,7 @@ struct PrototypeDataWriteEvent: Equatable {
               let op = PrototypeDataWrite.Operation(rawValue: raw),
               let revision = safeInteger(fields["revision"], minimum: 0)
         else { return nil }
-        let windowed = op == .append || op == .extend
+        let windowed = op == .append || op == .extend || op == .prepend
         let allowed: Set<String> = Set(["op", "revision"])
             .union(op == .remove ? [] : ["value"])
             .union(windowed ? ["maxItems"] : [])
@@ -31,7 +31,9 @@ struct PrototypeDataWriteEvent: Equatable {
             guard let count = safeInteger(fields["maxItems"], minimum: 1) else { return nil }
             maxItems = count
         } else { maxItems = nil }
-        if op == .extend, case .array? = fields["value"] {} else if op == .extend { return nil }
+        if (op == .extend || op == .prepend), let value = fields["value"] {
+            guard case .array = value else { return nil }
+        }
         return Self(op: op, path: path, value: fields["value"], maxItems: maxItems, revision: revision)
     }
 

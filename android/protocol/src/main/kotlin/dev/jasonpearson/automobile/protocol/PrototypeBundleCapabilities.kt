@@ -39,6 +39,10 @@ internal object PrototypeBundleCapabilities {
         caps.add("prototype_network_v1")
         if (text(action["via"]) == "device") caps.add("prototype_network_device_v1")
       }
+      "prependData" -> {
+        caps.add("prototype_data_actions_v1")
+        caps.add("prototype_lazy_list_v1")
+      }
       "setData",
       "appendData",
       "removeData" -> caps.add("prototype_data_actions_v1")

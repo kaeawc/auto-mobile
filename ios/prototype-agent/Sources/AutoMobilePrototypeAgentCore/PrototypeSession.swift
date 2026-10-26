@@ -410,7 +410,7 @@ struct PrototypeSession {
                 events += runStack(action)
             case "setPage":
                 events += runSetPage(action)
-            case "setData", "appendData", "removeData":
+            case "setData", "appendData", "prependData", "removeData":
                 events += runDataWrite(action)
             case "startTimer":
                 timerCommands.append(.start(action))
@@ -428,7 +428,7 @@ struct PrototypeSession {
         return events + emitStateChange(touched.filter { baseline[$0] != state[$0] })
     }
 
-    /// A `setData`, `appendData` or `removeData` action (#12519). The write is applied to the shown
+    /// A `setData`, `appendData`, `prependData` or `removeData` action (#12519). The write is applied to the shown
     /// spec's data with `PrototypeDataWrite`, the drawn tree is rebuilt from the changed data so
     /// bindings and repeat rows refresh, the data revision is bumped, and one `change` event named
     /// for the written `/data/...` path reports `{op, value?, revision}`. A refused write (any
@@ -446,7 +446,7 @@ struct PrototypeSession {
             guard case let .success(resolved) = PrototypeDataWrite.resolveValue(action.value, inputs: inputs) else {
                 return []
             }
-            value = resolved
+            value = operation == .prepend ? .array([resolved]) : resolved
         }
         return (try? commitDataWrite(operation, path: path, value: value).get()) ?? []
     }
@@ -460,7 +460,7 @@ struct PrototypeSession {
     {
         guard let spec else { return .failure(.init(code: .notFound, message: "No prototype is shown")) }
         let data: [String: JSONValue]
-        let maxItems = operation == .append || operation == .extend
+        let maxItems = operation == .append || operation == .extend || operation == .prepend
             ? PrototypeLazyList.listMaxItems(spec: spec, dataPath: path) : nil
         switch PrototypeDataWrite.applyWindowed(
             spec.data,

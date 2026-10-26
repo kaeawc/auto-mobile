@@ -161,6 +161,7 @@ internal object PrototypeStrictPolicy {
       "cancelTimer" to "timers",
       "setData" to "data_actions",
       "appendData" to "data_actions",
+      "prependData" to "data_actions",
       "removeData" to "data_actions",
       "platform" to "platform",
     )
@@ -262,7 +263,10 @@ internal object PrototypeStrictPolicy {
     private fun scanFields(fields: JsonObject, field: String) {
       val type = fields.text("type") ?: ""
       for ((key, child) in fields) {
-        if (key == "payload" || (key == "value" && type !in listOf("setData", "appendData")))
+        if (
+          key == "payload" ||
+            (key == "value" && type !in listOf("setData", "appendData", "prependData"))
+        )
           continue
         if (key == "repeat") {
           repeatFeatures(child)
@@ -288,6 +292,7 @@ internal object PrototypeStrictPolicy {
       for ((feature, keys) in typeFieldFeatures[type].orEmpty()) {
         if (keys.any { fields[it] != null }) need(feature)
       }
+      if (type == "prependData") need("lazy_list")
       if (type == "list" || (type == "request" && fields.containsKey("append"))) {
         need("lazy_list")
         need("data_model")

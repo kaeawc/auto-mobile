@@ -128,7 +128,7 @@ enum PrototypeMenus {
                 keys = ["type", "pager", "page"]
                 try validatePageAction(fields, path: path)
             case "dismiss": keys = ["type"]
-            case "setData", "appendData", "removeData":
+            case "setData", "appendData", "prependData", "removeData":
                 keys = type == "removeData" ? ["type", "path"] : ["type", "path", "value"]
                 try validateDataAction(fields, type: type, path: path)
             default: throw fail("\(path).type", "Invalid string value")

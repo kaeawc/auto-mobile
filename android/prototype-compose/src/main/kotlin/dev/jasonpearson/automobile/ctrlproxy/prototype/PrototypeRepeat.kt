@@ -41,6 +41,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeMenuEntry
 import dev.jasonpearson.automobile.protocol.PrototypeMenuNode
 import dev.jasonpearson.automobile.protocol.PrototypeNode
 import dev.jasonpearson.automobile.protocol.PrototypePagerNode
+import dev.jasonpearson.automobile.protocol.PrototypePrependDataAction
 import dev.jasonpearson.automobile.protocol.PrototypeProgressNode
 import dev.jasonpearson.automobile.protocol.PrototypeRadioGroupNode
 import dev.jasonpearson.automobile.protocol.PrototypeRemoveDataAction
@@ -538,6 +539,8 @@ private fun PrototypeAction.bound(instance: RepeatInstance): PrototypeAction =
           },
       )
     is PrototypeSetDataAction ->
+      copy(path = instance.dataPath(path), value = instance.dataValue(value))
+    is PrototypePrependDataAction ->
       copy(path = instance.dataPath(path), value = instance.dataValue(value))
     is PrototypeAppendDataAction ->
       copy(path = instance.dataPath(path), value = instance.dataValue(value))

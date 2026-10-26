@@ -15,7 +15,7 @@ struct PrototypeDataWriteFailure: Error, Equatable {
     let message: String
 }
 
-/// The device side of `setData`, `appendData` and `removeData` (#12519): a Swift twin of the pure
+/// The device side of `setData`, `appendData`, `prependData` and `removeData` (#12519): a Swift twin of the pure
 /// `applyPrototypeDataWrite` and `resolvePrototypeDataWriteValue` helpers, so the host mirror and
 /// this runtime cannot drift. Nothing here touches a session; a refused write returns a failure and
 /// the input is untouched.
@@ -24,19 +24,21 @@ enum PrototypeDataWrite {
         case set
         case append
         case extend
+        case prepend
         case remove
 
         init?(actionType: String) {
             switch actionType {
             case "setData": self = .set
             case "appendData": self = .append
+            case "prependData": self = .prepend
             case "removeData": self = .remove
             default: return nil
             }
         }
     }
 
-    static let actionTypes: Set<String> = ["setData", "appendData", "removeData"]
+    static let actionTypes: Set<String> = ["setData", "appendData", "prependData", "removeData"]
 
     /// The pointer of a `/data/<pointer>` path: `/data` alone (the whole document) has none.
     static func pointer(ofPath path: String) -> String? {
@@ -88,6 +90,7 @@ enum PrototypeDataWrite {
 
     /// Applies one write to `data` (absent data is an empty object). `set` creates or replaces an
     /// object member and replaces an existing array element; `append` pushes onto an existing array;
+    /// `prepend` inserts an ordered page and keeps its first maxItems rows when windowed;
     /// `remove` deletes an existing member or element and later elements shift down. The result must
     /// satisfy the data limits, including `maxDataWriteBytes`, or nothing is written.
     static func apply(
@@ -111,14 +114,15 @@ enum PrototypeDataWrite {
         guard let pointer = pointer(ofPath: path) else {
             return fail(.invalidPath, "\(path) is not a /data/<pointer> path")
         }
-        if operation != .remove, value == nil { return fail(.invalidValue, "A set or append write needs a value") }
-        if operation == .extend, case .array? = value {} else if operation == .extend {
-            return fail(.invalidValue, "An extend write needs an array value")
+        let name = operation == .prepend ? "prependData" : operation.rawValue
+        if operation != .remove, value == nil { return fail(.invalidValue, "\(name) write needs a value") }
+        if operation == .extend || operation == .prepend {
+            guard case .array? = value else { return fail(.invalidValue, "\(name) needs an array value") }
         }
-        if operation == .append || operation == .extend, let maxItems,
+        if operation == .append || operation == .extend || operation == .prepend, let maxItems,
            maxItems < 1 || maxItems > 9_007_199_254_740_991 || Int(exactly: maxItems) == nil
         {
-            return fail(.invalidValue, "maxItems must be a positive safe integer")
+            return fail(.invalidValue, "\(name) maxItems must be a positive safe integer")
         }
         let current = data ?? [:]
         let tokens = PrototypeDataPointer.tokens(pointer)
@@ -129,12 +133,17 @@ enum PrototypeDataWrite {
         var effectiveOperation = operation
         var effectiveValue = value
         var trimmed = 0
-        if operation == .append || operation == .extend, case let .array(items)? = existing, let value {
+        if operation == .append || operation == .extend || operation == .prepend,
+           case let .array(items)? = existing, let value
+        {
             let incoming: [JSONValue]
-            if operation == .extend, case let .array(values) = value { incoming = values } else { incoming = [value] }
-            let combined = items + incoming
+            if operation == .extend || operation == .prepend, case let .array(values) = value {
+                incoming = values
+            } else { incoming = [value] }
+            let combined = operation == .prepend ? incoming + items : items + incoming
             trimmed = maxItems.map { max(0, combined.count - Int($0)) } ?? 0
-            effectiveValue = .array(Array(combined.dropFirst(trimmed)))
+            effectiveValue = .array(operation == .prepend
+                ? Array(combined.dropLast(trimmed)) : Array(combined.dropFirst(trimmed)))
             effectiveOperation = .set
         }
         guard case let .object(next)? = mutate(
@@ -176,8 +185,8 @@ enum PrototypeDataWrite {
         -> PrototypeDataWriteFailure?
     {
         switch operation {
-        case .append, .extend:
-            let name = operation == .append ? "appendData" : "extend"
+        case .append, .extend, .prepend:
+            let name = operation == .append ? "appendData" : operation == .prepend ? "prependData" : "extend"
             guard let existing
             else { return .init(code: .notFound, message: "\(name) target \(path) does not exist") }
             if case .array = existing { return nil }
@@ -278,6 +287,9 @@ enum PrototypeDataWrite {
         case .extend:
             guard present, case let .array(items)? = old, case let .array(values)? = value else { return nil }
             return .some(.array(items + values))
+        case .prepend:
+            guard present, case let .array(items)? = old, case let .array(values)? = value else { return nil }
+            return .some(.array(values + items))
         case .remove:
             return present ? .some(nil) : nil
         }
@@ -289,7 +301,7 @@ extension PrototypeDataWrite {
     static func validate(actions: [PrototypeLocatedValue], data: [String: JSONValue]?) throws {
         for action in actions {
             let fields = action.value
-            guard ["setData", "appendData", "removeData"].contains(fields["type"]?.stringValue ?? "") else { continue }
+            guard ["setData", "appendData", "prependData", "removeData"].contains(fields["type"]?.stringValue ?? "") else { continue }
             let path = fields["path"]?.stringValue ?? ""
             let bound = path.split(separator: "/", omittingEmptySubsequences: false)
                 .map { $0 == "{index}" ? "0" : String($0) }.joined(separator: "/")
@@ -304,12 +316,12 @@ extension PrototypeDataWrite {
                     "Invalid data write value"
                 ) }
             }
-            if fields["type"] == .string("appendData"), !path.contains("{index}"),
+            if ["appendData", "prependData"].contains(fields["type"]?.stringValue ?? ""), !path.contains("{index}"),
                let value = PrototypeDataPointer.resolve(data, pointer: pointer)
             {
                 guard case .array = value else { throw PrototypeContractValidator.invalid(
                     "\(action.path).path",
-                    "appendData needs array"
+                    "\(fields["type"]?.stringValue ?? "") target is not an array"
                 ) }
             }
         }

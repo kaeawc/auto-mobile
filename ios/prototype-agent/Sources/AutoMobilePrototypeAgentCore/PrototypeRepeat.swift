@@ -505,7 +505,7 @@ struct PrototypeRepeatInstance {
             bindString("key", in: &fields)
         case .string("emit")?:
             bindEmit(&fields)
-        case .string("setData")?, .string("appendData")?, .string("removeData")?:
+        case .string("setData")?, .string("appendData")?, .string("prependData")?, .string("removeData")?:
             bindDataAction(&fields)
         case .string("startTimer")?:
             if case let .array(actions)? = fields["actions"] {

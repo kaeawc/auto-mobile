@@ -3,7 +3,7 @@ package dev.jasonpearson.automobile.protocol
 import kotlinx.serialization.json.*
 
 /**
- * A decoded change event; an omitted set/append/extend value is retained for tracking-drop
+ * A decoded change event; an omitted set/append/prepend/extend value is retained for tracking-drop
  * handling.
  */
 data class PrototypeDataWriteEvent(
@@ -17,6 +17,7 @@ data class PrototypeDataWriteEvent(
     when (op) {
       "set" -> value?.let { PrototypeDataWrite.Set(path, it) }
       "append" -> value?.let { PrototypeDataWrite.Append(path, it, maxItems) }
+      "prepend" -> value?.let { PrototypeDataWrite.Prepend(path, it, maxItems) }
       "extend" -> value?.let { PrototypeDataWrite.Extend(path, it, maxItems) }
       "remove" -> PrototypeDataWrite.Remove(path)
       else -> null
@@ -46,6 +47,7 @@ private fun decodeDataWrite(name: String, fields: JsonObject): PrototypeDataWrit
     when (op) {
       "set" -> setOf("op", "value", "revision")
       "append",
+      "prepend",
       "extend" -> setOf("op", "value", "revision", "maxItems")
       "remove" -> setOf("op", "revision")
       else -> return null
@@ -62,7 +64,7 @@ private fun decodeDataWrite(name: String, fields: JsonObject): PrototypeDataWrit
 private fun validWriteValue(op: String, value: JsonElement?): Boolean =
   when {
     value == null -> true
-    op == "extend" && value !is JsonArray -> false
+    op in setOf("extend", "prepend") && value !is JsonArray -> false
     else -> PrototypeRequests.parseJson(value.toString()) != null
   }
 

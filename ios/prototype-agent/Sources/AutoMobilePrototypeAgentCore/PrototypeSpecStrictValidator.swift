@@ -127,7 +127,7 @@ public enum PrototypeSpecStrictValidator {
                     }
                 }
                 append(action.value["body"], path: "\(action.path).body", request: true)
-            case "setData", "appendData":
+            case "setData", "appendData", "prependData":
                 append(action.value["value"], path: "\(action.path).value")
             case "emit", "platform":
                 let name = action.value["type"] == .string("emit") ? "context" : "args"

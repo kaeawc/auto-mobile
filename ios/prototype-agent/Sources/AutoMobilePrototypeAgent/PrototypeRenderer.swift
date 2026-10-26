@@ -346,6 +346,7 @@
             case "button":
                 buttonView
             case "list":
+                // A replacing show resets list state; stack pushes/pops keep this identity.
                 PrototypeLazyListView(node: node, model: model).id(model.showRevision)
             case "scroll":
                 if node.axis != "horizontal", let refresh = node.refresh {
@@ -1418,13 +1419,14 @@
         let model: PrototypeModel
         let index: Int
         let key: String
+        let visibility: (String, Bool) -> Void
         @State private var decoder = PrototypeLazyList.RowDecoder()
 
         var body: some View {
             if let row = decoder.decode(node: node, data: model.spec?.data, index: index) {
                 NodeView(node: row.node, model: model)
-                    .onAppear { model.listVisible(node, appearedKey: key) }
-                    .onDisappear { model.listVisible(node, disappearedKey: key) }
+                    .onAppear { visibility(key, true) }
+                    .onDisappear { visibility(key, false) }
             }
         }
     }
@@ -1432,14 +1434,40 @@
     private struct PrototypeLazyListView: View {
         let node: PrototypeNode
         let model: PrototypeModel
+        @Environment(\.prototypeStackEntryID) private var entryID
+        @Environment(\.prototypeStackActive) private var active
         @State private var pulling = false
+        @State private var anchorKey: String?
+        @State private var visibleKeys: Set<String> = []
+        @State private var restoreTop = false
+
+        private func visibility(_ key: String, appeared: Bool) {
+            if appeared { visibleKeys.insert(key) } else { visibleKeys.remove(key) }
+            if anchorKey == nil, active {
+                let keys = PrototypeLazyList.keys(node: node, data: model.spec?.data)
+                anchorKey = keys.first { visibleKeys.contains($0) }
+            }
+            model.listVisible(node, appearedKey: appeared ? key : nil, disappearedKey: appeared ? nil : key)
+        }
+
+        private func restore(keys: [String]) {
+            if restoreTop {
+                anchorKey = keys.first
+                restoreTop = false
+            } else if let saved = model.savedListAnchor(entryID: entryID, node: node, keys: keys) {
+                anchorKey = saved
+            } else if anchorKey != nil, PrototypeListAnchor.resolve(anchorKey: anchorKey, newKeys: keys) == nil {
+                anchorKey = keys.first
+            }
+        }
 
         @ViewBuilder
         private func content(keys: [String]) -> some View {
             if let header = node.header { NodeView(node: header, model: model) }
             ForEach(Array(keys.enumerated()), id: \.element) { index, key in
-                PrototypeLazyListCell(node: node, model: model, index: index, key: key)
+                PrototypeLazyListCell(node: node, model: model, index: index, key: key, visibility: visibility)
             }
+            .scrollTargetLayout()
             if let footer = node.footer { NodeView(node: footer, model: model) }
         }
 
@@ -1454,7 +1482,24 @@
                 }
                 .padding(CGFloat(node.contentPadding ?? 0))
             }
-            .onChange(of: keys) { _, _ in model.listVisible(node) }
+            // A nil anchor lets SwiftUI preserve a partially visible row's relative position,
+            // rather than aligning its leading edge on every data update. Both axes share it.
+            .scrollPosition(id: $anchorKey, anchor: nil)
+            .onAppear { restore(keys: keys) }
+            .onChange(of: active) { _, active in
+                if active { restore(keys: keys) }
+            }
+            .onChange(of: anchorKey) { _, key in
+                if active { model.saveListAnchor(entryID: entryID, node: node, key: key) }
+            }
+            .onChange(of: keys) { _, next in
+                let previous = anchorKey ?? model.savedListAnchor(entryID: entryID, node: node, keys: next)
+                let pinned = PrototypeListAnchor.resolve(anchorKey: previous, newKeys: next)
+                if !active, previous != nil, pinned == nil { restoreTop = true }
+                anchorKey = pinned
+                model.saveListAnchor(entryID: entryID, node: node, key: pinned)
+                model.listVisible(node)
+            }
         }
 
         var body: some View {

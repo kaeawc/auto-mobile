@@ -618,7 +618,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
         devices: await this.emulator.getBootedDevicesChecked(
           false,
           {
-            resolveForeignSerials: options.skipForeignEnrichment ? this.foreignResolver : undefined,
+            resolveForeignSerials: this.foreignResolver,
             coalesceInventoryEnrichment: options.coalesceInventoryEnrichment,
             memoizeReadAvdNames: options.memoizeReadAvdNames,
             bypassDeviceListCache: options.bypassAndroidDeviceListCache,

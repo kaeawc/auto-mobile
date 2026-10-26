@@ -294,12 +294,12 @@ describe("foreign Android inventory", () => {
     ).not.toThrow();
   });
 
-  test("ordinary booted discovery keeps full enrichment", async () => {
+  test("ordinary booted discovery also skips foreign enrichment", async () => {
     const { manager, names } = harness();
     manager.withForeignAndroidSerialSource({
       foreignSerials: async () => new Set(["emulator-5610"]),
     });
     await manager.getBootedDevicesDetailed("android");
-    expect(names).toEqual(["emulator-5554", "emulator-5610"]);
+    expect(names).toEqual(["emulator-5554"]);
   });
 });

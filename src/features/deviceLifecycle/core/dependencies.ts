@@ -309,15 +309,7 @@ export function getDeviceToolsDependencies(): DeviceToolsDependencies {
       },
       // The shared manager keeps devicectl caching/coalescing/last-good retention
       // and the Android model/arch caches across calls (#11063).
-      deviceManagerFactory: () => {
-        const manager = PlatformDeviceManagerFactory.getInstance();
-        manager.withForeignAndroidSerialSource?.({
-          foreignSerials: (serials, signal) =>
-            defaultDaemonContext.fullDevicePool()?.foreignSerials(serials, signal) ??
-            Promise.resolve(new Set<string>()),
-        });
-        return manager;
-      },
+      deviceManagerFactory: () => PlatformDeviceManagerFactory.getInstance(),
       avdManagerFactory: () => new AvdManagerService(),
       deviceMatcherFactory: () => new DefaultDeviceMatcher(),
       displayInventory: defaultDisplayInventoryProvider,

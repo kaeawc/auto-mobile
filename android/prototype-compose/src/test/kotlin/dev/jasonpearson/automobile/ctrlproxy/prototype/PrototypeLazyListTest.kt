@@ -31,6 +31,16 @@ class PrototypeLazyListTest {
     assertTrue(PrototypeListEndTrigger(3).onVisibleRange(9, 10, "ten"))
   }
 
+  @Test
+  fun `show holder retains triggers after list disposal and isolates paths and shows`() {
+    val holder = PrototypeListEndTriggers()
+    assertTrue(holder.get("root.screens.feed", 3).onVisibleRange(9, 10, "ten"))
+    assertFalse(holder.get("root.screens.feed", 3).onVisibleRange(9, 10, "ten"))
+    assertTrue(holder.get("root.screens.other", 3).onVisibleRange(9, 10, "ten"))
+    assertTrue(holder.get("root.screens.feed", 3).onVisibleRange(9, 10, "eleven"))
+    assertTrue(PrototypeListEndTriggers().get("root.screens.feed", 3).onVisibleRange(9, 10, "ten"))
+  }
+
   internal fun spec(count: Int = 500, axis: String = "vertical"): PrototypeSpec {
     val list =
       PrototypeListNode(

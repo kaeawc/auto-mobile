@@ -76,7 +76,8 @@ internal object PrototypeRequestRules {
       return fail(path, it)
     }
     val into = action.text("into")
-    if (into != null && overlaps(to, into)) return fail(path, "append.to must not overlap into")
+    if (into != null && PrototypeDataPointer.overlaps(to, into))
+      return fail(path, "append.to must not overlap into")
     if (!to.split('/').contains("{index}") && data != null) {
       val target = PrototypeDataPointer.resolve(data, to.removePrefix("/data"))
       if (target != null && target !is kotlinx.serialization.json.JsonArray)
@@ -84,9 +85,6 @@ internal object PrototypeRequestRules {
     }
     return null
   }
-
-  private fun overlaps(to: String, into: String): Boolean =
-    to == into || to.startsWith("$into/") || into.startsWith("$to/")
 
   fun requestUrlError(url: String): String? =
     if ('{' in url) {

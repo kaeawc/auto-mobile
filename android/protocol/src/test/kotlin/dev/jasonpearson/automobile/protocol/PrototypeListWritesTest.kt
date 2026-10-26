@@ -54,7 +54,8 @@ class PrototypeListWritesTest {
             PrototypeRequestResponse.Received(
               response.getValue("status").jsonPrimitive.int,
               response.getValue("headers").jsonObject.mapValues { it.value.jsonPrimitive.content },
-              response["body"],
+              // The shared transport fixtures model an empty HTTP body as JSON null.
+              response["body"]?.takeUnless { it is JsonNull },
               duration,
             )
           else {

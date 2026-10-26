@@ -8,8 +8,8 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.key
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
@@ -31,6 +31,16 @@ internal class PrototypeListEndTrigger(private val endThreshold: Int) {
   }
 }
 
+/** Show-owned trigger lookup, independent of an individual list's composition lifetime. */
+internal class PrototypeListEndTriggers {
+  private val triggers = mutableMapOf<Pair<String, Int>, PrototypeListEndTrigger>()
+
+  fun get(path: String, endThreshold: Int): PrototypeListEndTrigger =
+    triggers.getOrPut(path to endThreshold) { PrototypeListEndTrigger(endThreshold) }
+}
+
+internal val LocalPrototypeListEndTriggers = compositionLocalOf<PrototypeListEndTriggers?> { null }
+
 /** Row data and an on-demand mapper; no expanded row tree is retained here. */
 @InternalAutoMobilePrototypeApi
 class PrototypeLazyListModel
@@ -41,7 +51,7 @@ internal constructor(
   internal val snapshot: Any,
   internal val render: (JsonObject, Int) -> PrototypeRenderNode,
 ) {
-  fun key(index: Int): String = PrototypeListRows.key(source, rows[index])
+  fun key(index: Int): String = PrototypeListRows.key(source, rows[index], index)
 
   override fun equals(other: Any?): Boolean =
     other is PrototypeLazyListModel &&
@@ -49,7 +59,8 @@ internal constructor(
       rows == other.rows &&
       snapshot == other.snapshot
 
-  override fun hashCode(): Int = 31 * (31 * source.hashCode() + rows.hashCode()) + snapshot.hashCode()
+  override fun hashCode(): Int =
+    31 * (31 * source.hashCode() + rows.hashCode()) + snapshot.hashCode()
 }
 
 @Composable
@@ -64,9 +75,7 @@ internal fun RenderPrototypeLazyList(
   val epoch = LocalPrototypeShowEpoch.current
   val state = key(epoch, node.identity) { rememberLazyListState() }
   val trigger =
-    remember(epoch, node.identity, source.endThreshold) {
-      PrototypeListEndTrigger(source.endThreshold)
-    }
+    checkNotNull(LocalPrototypeListEndTriggers.current).get(node.identity, source.endThreshold)
   val header = node.children.firstOrNull { it.identity == "${node.identity}.header" }
   val footer = node.children.firstOrNull { it.identity == "${node.identity}.footer" }
   PrototypeListEndEffect(model, state, trigger, header != null, interact)
@@ -75,7 +84,7 @@ internal fun RenderPrototypeLazyList(
       if (header != null) item(key = "header", contentType = "header") { render(header) }
       itemsIndexed(
         model.rows,
-        key = { _, item -> "row:${PrototypeListRows.key(source, item)}" },
+        key = { index, _ -> "row:${model.key(index)}" },
         contentType = { _, _ -> "row" },
       ) { index, item ->
         render(model.render(item, index))

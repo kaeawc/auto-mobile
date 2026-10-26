@@ -16,6 +16,10 @@ import kotlinx.serialization.json.put
 
 /** RFC 6901 pointers relative to the read-only data object. Invalid input is always missing. */
 object PrototypeDataPointer {
+  /** Segment-aware overlap for validated RFC 6901 paths, including `/data` write targets. */
+  fun overlaps(first: String, second: String): Boolean =
+    first == second || first.startsWith("$second/") || second.startsWith("$first/")
+
   fun isValid(pointer: String): Boolean {
     if (pointer.length !in 1..PrototypeSpecValidator.MAX_PROTOTYPE_DATA_POINTER_LENGTH) return false
     if (!pointer.startsWith('/')) return false

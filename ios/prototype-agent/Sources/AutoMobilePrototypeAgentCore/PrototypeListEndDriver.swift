@@ -1,13 +1,14 @@
-/// Session-owned visibility high-water mark plus the shared signature edge trigger.
+/// Session-owned visible identities plus the shared signature edge trigger.
 struct PrototypeListEndDriver {
     private var trigger: PrototypeListEndTrigger
-    private var lastVisibleIndex = -1
+    private var visibleKeys: Set<String> = []
 
     init(endThreshold: Int = 3) { trigger = PrototypeListEndTrigger(endThreshold: endThreshold) }
 
-    mutating func update(appearedIndex: Int?, rowKeys: [String]) -> Bool {
-        if let appearedIndex { lastVisibleIndex = max(lastVisibleIndex, appearedIndex) }
-        guard lastVisibleIndex >= 0 else { return false }
+    mutating func update(appearedKey: String? = nil, disappearedKey: String? = nil, rowKeys: [String]) -> Bool {
+        if let appearedKey { visibleKeys.insert(appearedKey) }
+        if let disappearedKey { visibleKeys.remove(disappearedKey) }
+        guard let lastVisibleIndex = rowKeys.lastIndex(where: { visibleKeys.contains($0) }) else { return false }
         return trigger.onVisibleRange(
             lastVisibleIndex: lastVisibleIndex,
             rowCount: rowKeys.count,

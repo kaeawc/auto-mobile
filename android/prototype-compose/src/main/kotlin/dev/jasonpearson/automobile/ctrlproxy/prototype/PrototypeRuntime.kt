@@ -164,6 +164,8 @@ class PrototypeRuntime(
     PrototypeSpecValidator.prepareStateWrites(it, runtimeJson)
   }
 
+  // A runtime is owned by one show; list disposal during navigation never clears its signatures.
+  internal val listEndTriggers = PrototypeListEndTriggers()
   private val renderMapper = PrototypeRenderMapper()
 
   @InternalAutoMobilePrototypeApi
@@ -807,6 +809,11 @@ class PrototypeRuntime(
         is PrototypeDataWriteResult.Success -> result.data
         is PrototypeDataWriteResult.Failure -> return StagedWrite.Refused(result.error)
       }
+    prototypeListDataWriteError(from, data, write.path)?.let {
+      return StagedWrite.Refused(
+        PrototypeDataWriteError(PrototypeDataWriteErrorCode.INVALID_VALUE, it.message),
+      )
+    }
     val spec = from.copy(data = data)
     // Rows added by the write must still fit the renderer's limits; a disposable mapper keeps a
     // rejected write from touching the runtime's own caches, as for a patch.
@@ -968,8 +975,8 @@ class PrototypeRuntime(
   /**
    * A `request` action: resolves its bindings against the committed state and data, moves
    * `statusKey` to `loading`, then waits for the response off the interaction. The latest request
-   * for the same `into` wins (the older one reports `cancelled`), at most
-   * [PrototypeSpecValidator.MAX_PROTOTYPE_REQUESTS_IN_FLIGHT] run at once, and a request that
+   * with overlapping `into` or `append.to` targets wins (the older one reports `cancelled`), at
+   * most [PrototypeSpecValidator.MAX_PROTOTYPE_REQUESTS_IN_FLIGHT] run at once, and a request that
    * cannot start finishes at once as an error. The response is applied by [finishRequest].
    */
   private suspend fun startRequest(action: PrototypeRequestAction, touched: MutableSet<String>) {
@@ -994,7 +1001,7 @@ class PrototypeRuntime(
       )
     }
     // The newest request wins even when it fails to resolve: the older one must not land later.
-    supersedeRequests(action.into)
+    supersedeRequests(action.into, action.append?.to)
     val resolved =
       when (val result = PrototypeRequestResolver.resolve(bound, bound.url, bindingInputs())) {
         is PrototypeResolvedRequestResult.Failure ->
@@ -1056,13 +1063,18 @@ class PrototypeRuntime(
     started.job.start()
   }
 
-  /** A newer request to the same `into` ends the older one: it writes nothing and says so. */
-  private suspend fun supersedeRequests(into: String?) {
-    if (into == null) return
+  /** A newer request to overlapping write targets ends the older one without follow-ups. */
+  private suspend fun supersedeRequests(into: String?, appendTo: String?) {
+    val targets = listOfNotNull(into, appendTo)
+    if (targets.isEmpty()) return
     val older =
       synchronized(inFlight) {
         inFlight.values
-          .filter { it.into == into }
+          .filter { old ->
+            listOfNotNull(old.into, old.append?.to).any { target ->
+              targets.any { PrototypeDataPointer.overlaps(target, it) }
+            }
+          }
           .also { it.forEach { old -> inFlight.remove(old.requestId) } }
       }
     for (request in older) {
@@ -1071,7 +1083,7 @@ class PrototypeRuntime(
       val error =
         PrototypeRequestError(
           PrototypeRequestErrorCode.CANCELLED,
-          "Superseded by a newer request to $into",
+          "Superseded by a newer request to ${into ?: appendTo}",
         )
       sendRequestEvent(request, null, clock() - request.startedAt, error)
     }

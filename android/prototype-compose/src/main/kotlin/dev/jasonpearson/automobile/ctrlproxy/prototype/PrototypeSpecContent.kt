@@ -171,6 +171,7 @@ fun PrototypeRuntimeContent(
           }
         }
       CompositionLocalProvider(
+        LocalPrototypeListEndTriggers provides runtime.listEndTriggers,
         LocalPrototypeTextEpochs provides snapshot.textEpochs,
         LocalPrototypeScrollRequests provides snapshot.scrollRequests,
         LocalPrototypeImageCache provides images,
@@ -203,6 +204,9 @@ fun PrototypeSpecContent(
     val menuLayers = remember { PrototypeMenuLayers() }
     val menuParents = remember(root) { prototypeMenuParents(root) }
     CompositionLocalProvider(
+      LocalPrototypeListEndTriggers provides
+        (LocalPrototypeListEndTriggers.current
+          ?: remember(LocalPrototypeShowEpoch.current) { PrototypeListEndTriggers() }),
       LocalPrototypeAnchorLocals provides anchorLocals,
       LocalPrototypeGestureTaps provides remember { PrototypeGestureTaps() },
       LocalPrototypeMenuLayers provides menuLayers,

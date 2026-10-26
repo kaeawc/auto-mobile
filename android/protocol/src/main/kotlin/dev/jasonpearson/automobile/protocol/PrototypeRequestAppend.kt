@@ -19,7 +19,10 @@ internal object PrototypeRequestAppendWrites {
   )
 
   fun stage(into: String?, body: JsonElement?, append: PrototypeRequestAppend?): Staged {
-    var rest = body?.takeUnless { it is JsonNull } ?: JsonPrimitive("")
+    // A literal JSON null is distinct from an empty HTTP body (Kotlin null).
+    if (body is JsonNull)
+      return Staged(emptyList(), 0, "The response body is JSON null, which /data cannot hold.")
+    var rest = body ?: JsonPrimitive("")
     val writes = mutableListOf<PrototypeDataWrite>()
     var appended = 0
     if (append != null) {

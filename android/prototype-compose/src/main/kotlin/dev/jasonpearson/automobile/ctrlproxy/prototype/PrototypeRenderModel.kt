@@ -327,7 +327,7 @@ internal class PrototypeNodeMapping(
                 )
                 .map(
                   bindPrototypeListRow(list, item, index),
-                  "$path.repeat[${JsonPrimitive(PrototypeListRows.key(list, item))}].children[0]",
+                  "$path.repeat[${JsonPrimitive(PrototypeListRows.key(list, item, index))}].children[0]",
                   if (inPager) localState else null,
                 )
             }

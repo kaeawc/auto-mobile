@@ -1,4 +1,7 @@
 import Foundation
+import os
+
+private let lazyListLog = Logger(subsystem: "dev.jasonpearson.automobile.prototype-agent", category: "prototype")
 
 struct PrototypeListRepeat: Decodable {
     struct Items: Decodable { let path: String }
@@ -17,18 +20,58 @@ enum PrototypeLazyList {
         let node: PrototypeNode
     }
 
-    static func rows(node: PrototypeNode, data: [String: JSONValue]?) throws -> [Row] {
-        guard let spec = node.listRepeat, node.children?.first != nil,
+    /// Identity only: no template binding, data resolution or JSON coding.
+    static func keys(node: PrototypeNode, data: [String: JSONValue]?) -> [String] {
+        guard let spec = node.listRepeat,
               case let .array(items)? = PrototypeDataPointer.resolve(data, pointer: spec.items.path)
         else { return [] }
-        // Use the retained raw template, preserving conditions until each row has been bound.
-        guard let raw = node.listRowTemplate else { return [] }
-        return try items.enumerated().map { index, value in
-            let fields = PrototypeDataValues.project(value.objectFields ?? [:]).objectFields ?? [:]
-            let bound = PrototypeRepeatInstance(alias: spec.as, item: fields, index: index).bind(raw)
-            let resolved = PrototypeDataResolver.resolveRoot(bound, data: data)
-            let row = try JSONDecoder().decode(PrototypeNode.self, from: JSONEncoder().encode(resolved))
-            return Row(key: fields[spec.key]?.displayString ?? "", index: index, node: row)
+        return items.map { value in
+            guard PrototypeRepeat.isFieldName(spec.key), let key = value.objectFields?[spec.key],
+                  PrototypeDataValues.isScalar(key) else { return "" }
+            return key.displayString
+        }
+    }
+
+    static func row(node: PrototypeNode, data: [String: JSONValue]?, index: Int) throws -> Row? {
+        guard let spec = node.listRepeat, let raw = node.listRowTemplate,
+              case let .array(items)? = PrototypeDataPointer.resolve(data, pointer: spec.items.path),
+              items.indices.contains(index) else { return nil }
+        let fields = PrototypeDataValues.project(items[index].objectFields ?? [:]).objectFields ?? [:]
+        let bound = PrototypeRepeatInstance(alias: spec.as, item: fields, index: index).bind(raw)
+        let resolved = PrototypeDataResolver.resolveRoot(bound, data: data)
+        let row = try JSONDecoder().decode(PrototypeNode.self, from: JSONEncoder().encode(resolved))
+        return Row(key: fields[spec.key]?.displayString ?? "", index: index, node: row)
+    }
+
+    static func rows(node: PrototypeNode, data: [String: JSONValue]?) throws -> [Row] {
+        try keys(node: node, data: data).indices.compactMap { try row(node: node, data: data, index: $0) }
+    }
+
+    /// Owned by a single lazy cell, so a malformed row is absent and warns once per cell lifetime.
+    final class RowDecoder {
+        private var reportedFailure = false
+        private let warning: (String) -> Void
+        private let load: (PrototypeNode, [String: JSONValue]?, Int) throws -> Row?
+
+        init(
+            warning: @escaping (String) -> Void = { lazyListLog.warning("\($0, privacy: .private)") },
+            load: @escaping (PrototypeNode, [String: JSONValue]?, Int) throws -> Row? = {
+                try row(node: $0, data: $1, index: $2)
+            }
+        ) {
+            self.warning = warning
+            self.load = load
+        }
+
+        func decode(node: PrototypeNode, data: [String: JSONValue]?, index: Int) -> Row? {
+            do { return try load(node, data, index) }
+            catch {
+                if !reportedFailure {
+                    reportedFailure = true
+                    warning("Could not decode lazy list row at \(node.nodePath)[\(index)]: \(error)")
+                }
+                return nil
+            }
         }
     }
 
@@ -95,6 +138,11 @@ enum PrototypeLazyList {
                 }) { try reject("A list cannot sit inside a scroll on the same axis") }
                 if node["endThreshold"] != nil, node["onEndReached"] == nil {
                     try reject("endThreshold needs onEndReached", field: ".endThreshold")
+                }
+                if node["onEndReached"] != nil, let maxItems = node["maxItems"]?.intValue,
+                   maxItems <= (node["endThreshold"]?.intValue ?? 3)
+                {
+                    try reject("maxItems must be greater than endThreshold", field: ".maxItems")
                 }
                 if let refresh = node["refresh"]?.objectFields {
                     if axis == "horizontal" { try reject("Pull-to-refresh needs a vertical list", field: ".refresh") }

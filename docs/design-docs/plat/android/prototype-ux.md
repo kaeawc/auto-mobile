@@ -2428,16 +2428,16 @@ to accessibility (Android LazyColumn/LazyRow collection info and scroll actions;
 Both the list node and `request.append` require `prototype_lazy_list_v1` together with
 `prototype_data_model_v1`.
 
-| Field                          | Contract                                                                                                                                              |
-| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `repeat`                       | Required `{items:{path}, as, key}`; path resolves relative to `data` to an array of objects. Literal items are forbidden.                             |
-| `children`                     | Exactly one row template; `{index}`, `{<as>.<field>}`, state/data bindings and ordinary repeat projection rules apply.                                |
-| `axis`                         | `vertical` (default) or `horizontal`.                                                                                                                 |
-| `header`, `footer`             | Optional single ordinary nodes inside the scrolling content, outside the row repeat scope.                                                            |
-| `spacing`, `contentPadding`    | Nonnegative dp; gap between rows/header/footer and padding inside the scroll bounds.                                                                  |
-| `onEndReached`, `endThreshold` | Ordinary action list; threshold 1–50 (default 3), permitted only with `onEndReached`.                                                                 |
-| `refresh`                      | `{stateKey,onRefresh}` as on scroll: declared boolean state key, set true before actions run. Vertical lists only; also needs `prototype_refresh_v1`. |
-| `maxItems`                     | Optional integer 1–500. Initial data must fit. Appends trim the oldest rows from the start in the same write.                                         |
+| Field                          | Contract                                                                                                                                                                          |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `repeat`                       | Required `{items:{path}, as, key}`; path resolves relative to `data` to an array of objects. Literal items are forbidden.                                                         |
+| `children`                     | Exactly one row template; `{index}`, `{<as>.<field>}`, state/data bindings and ordinary repeat projection rules apply.                                                            |
+| `axis`                         | `vertical` (default) or `horizontal`.                                                                                                                                             |
+| `header`, `footer`             | Optional single ordinary nodes inside the scrolling content, outside the row repeat scope.                                                                                        |
+| `spacing`, `contentPadding`    | Nonnegative dp; gap between rows/header/footer and padding inside the scroll bounds.                                                                                              |
+| `onEndReached`, `endThreshold` | Ordinary action list; threshold 1–50 (default 3), permitted only with `onEndReached`.                                                                                             |
+| `refresh`                      | `{stateKey,onRefresh}` as on scroll: declared boolean state key, set true before actions run. Vertical lists only; also needs `prototype_refresh_v1`.                             |
+| `maxItems`                     | Optional integer 1–500, greater than `endThreshold` (default 3) when `onEndReached` is set. Initial data must fit. Appends trim the oldest rows from the start in the same write. |
 
 `repeat.key` must name a projected scalar field present in every item, with unique rendered
 values. Keys preserve row identity across appends, trims and reorders. Empty lists and several
@@ -2478,8 +2478,17 @@ data-array limit applies after concatenation. `extend` rejects a non-array value
 
 A device change event names the target `/data/...` path and carries
 `{op:"append"|"extend",value,maxItems?,revision}`. The host replays it through the same writer;
-malformed extend values or noninteger/nonpositive `maxItems` are dropped. Request success emits
-the extend event first, then `into`, `into__meta`, status key, `prototype_request` and `onSuccess`.
+malformed extend values or noninteger/nonpositive `maxItems` are dropped. A page too large for the
+emit byte budget travels without `value`; the host then stops tracking the spec instead of mirroring
+it. Request success emits the extend event first, then `into`, `into__meta`, status key,
+`prototype_request` and `onSuccess`.
+
+A newer request cancels an in-flight one whose `into` or `append.to` equals, contains or sits inside
+the newer request's `into` or `append.to` (latest wins), so a refresh that replaces `/data/feed` and
+a page append to `/data/feed/items` cannot interleave. A failed page request does not re-arm the
+trigger; the signature changes again only when the data does (a refresh, for example). A device data
+write that would leave a list's array with a non-object row, a missing, non-scalar or duplicate
+`repeat.key`, or more than `maxItems` rows is refused (`invalid_value`) and changes nothing.
 
 ```json
 {

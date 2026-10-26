@@ -21,10 +21,22 @@ internal object PrototypeLazyListRules {
           "A scroll cannot sit inside a list on the same axis"
         else null
       if (message != null) return PrototypeSpecError(path, message)
-      if (type == "list" && "endThreshold" in node && "onEndReached" !in node)
-        return PrototypeSpecError("$path.endThreshold", "endThreshold needs onEndReached")
+      if (type == "list")
+        endError(node, path)?.let {
+          return it
+        }
     }
     return null
+  }
+
+  private fun endError(node: JsonObject, path: String): PrototypeSpecError? {
+    if ("endThreshold" in node && "onEndReached" !in node)
+      return PrototypeSpecError("$path.endThreshold", "endThreshold needs onEndReached")
+    val maximum = (node["maxItems"] as? JsonPrimitive)?.intOrNull ?: return null
+    val threshold = (node["endThreshold"] as? JsonPrimitive)?.intOrNull ?: 3
+    return if ("onEndReached" in node && maximum <= threshold)
+      PrototypeSpecError("$path.maxItems", "maxItems must be greater than endThreshold")
+    else null
   }
 
   private fun listError(
@@ -87,3 +99,28 @@ fun prototypeListMaxItemsFor(spec: JsonElement, dataPath: String): Int? =
 
 fun prototypeListMaxItemsFor(spec: PrototypeSpec, dataPath: String): Int? =
   prototypeListMaxItemsFor(PrototypeSpecValidator.json.encodeToJsonElement(spec), dataPath)
+
+/** Reuses show-time source and projected-key checks for every list touched by a write. */
+fun prototypeListDataWriteError(
+  spec: PrototypeSpec,
+  data: JsonObject?,
+  writePath: String,
+): PrototypeSpecError? {
+  val repeats = PrototypeRepeatData(data)
+  val state = PrototypeRepeatTextChecks.RepeatState(repeats)
+  for ((node, path) in
+    PrototypeLazyListRules.nodes(PrototypeSpecValidator.json.encodeToJsonElement(spec))) {
+    if (node.text("type") != "list") continue
+    val pointer =
+      ((node["repeat"] as? JsonObject)?.get("items") as? JsonObject)?.text("path") ?: continue
+    if (!PrototypeDataPointer.overlaps(writePath, "/data$pointer")) continue
+    PrototypeRepeatTree.repeatSourceError(node, path, state)?.let {
+      return it
+    }
+    PrototypeRepeatTree.repeatKeyError(node, path, PrototypeRepeatTree.scopeOf(node, path, repeats))
+      ?.let {
+        return it
+      }
+  }
+  return null
+}

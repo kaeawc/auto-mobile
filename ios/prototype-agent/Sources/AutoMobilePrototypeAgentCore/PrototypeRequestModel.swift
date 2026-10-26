@@ -167,8 +167,14 @@ struct PrototypeRequestLedger {
         return commands
     }
 
-    func inFlight(into: String) -> PrototypeInFlightRequest? {
-        inFlight.values.first { $0.into == into }
+    func inFlight(overlapping targets: [String]) -> [PrototypeInFlightRequest] {
+        inFlight.values.filter { request in
+            [request.into, request.append?.to].compactMap { $0 }.contains { path in
+                targets.contains { target in
+                    path == target || path.hasPrefix("\(target)/") || target.hasPrefix("\(path)/")
+                }
+            }
+        }.sorted { $0.job.requestId < $1.job.requestId }
     }
 }
 

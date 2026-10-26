@@ -195,6 +195,71 @@ class PrototypeLazyListTest {
     assertEquals(listOf("/data/items", "/data/page", "/data/page__meta"), committed.map { it.path })
   }
 
+  @Test
+  fun `extend events may omit the value when the page exceeds the event budget`() {
+    val payload = obj("""{"op":"extend","maxItems":4,"revision":8}""")
+    val event = checkNotNull(prototypeDataWriteOf("change", "/data/items", payload))
+    assertEquals(payload, event.payload())
+    assertNull(event.write())
+    assertNull(
+      prototypeDataWriteOf(
+        "change",
+        "/data/items",
+        obj("""{"op":"extend","value":null,"revision":8}"""),
+      ),
+    )
+  }
+
+  @Test
+  fun `paging maxItems must exceed the effective end threshold`() {
+    for ((threshold, maximum) in listOf(null to 3, 2 to 2, 4 to 3)) {
+      val root =
+        JsonObject(
+          obj(list) +
+            buildJsonObject {
+              put("onEndReached", JsonArray(listOf(obj("""{"type":"emit","name":"page"}"""))))
+              put("maxItems", maximum)
+              threshold?.let { put("endThreshold", it) }
+            },
+        )
+      val result =
+        PrototypeSpecValidator.validate(JsonObject(spec(root)).toString())
+          as PrototypeSpecValidation.Failure
+      assertEquals("root.maxItems", result.error.path)
+      assertEquals("maxItems must be greater than endThreshold", result.error.message)
+    }
+  }
+
+  @Test
+  fun `missing and non scalar row keys never throw`() {
+    val decoded =
+      (PrototypeSpecValidator.validate(JsonObject(spec(obj(list))).toString())
+          as PrototypeSpecValidation.Success)
+        .spec
+    val node = decoded.root as PrototypeListNode
+    val missing = PrototypeListRows.key(node, obj("{}"), 0)
+    val nested = PrototypeListRows.key(node, obj("""{"id":{}}"""), 1)
+    val nullKey = PrototypeListRows.key(node, obj("""{"id":null}"""), 2)
+    assertEquals(3, setOf(missing, nested, nullKey).size)
+    assertNotEquals(PrototypeListRows.key(node, obj("""{"id":0}"""), 0), missing)
+  }
+
+  @Test
+  fun `literal null append response fails without committing a page`() {
+    val before = obj("""{"items":[],"page":"old"}""")
+    val result =
+      PrototypeRequestOutcome.apply(
+        before,
+        "/data/page",
+        PrototypeRequestResponse.Received(200, emptyMap(), JsonNull, 0),
+        PrototypeRequestAppend("/items", "/data/items"),
+      )
+    assertFalse(result.result.succeeded)
+    assertEquals(PrototypeRequestErrorCode.INVALID_RESPONSE, result.result.meta.error!!.code)
+    assertEquals(before["items"], result.data!!["items"])
+    assertEquals(before["page"], result.data["page"])
+  }
+
   companion object {
     @BeforeAll
     @JvmStatic

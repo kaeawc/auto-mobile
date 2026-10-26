@@ -1,4 +1,10 @@
 import Foundation
+import os
+
+private let requestCompletionLog = Logger(
+    subsystem: "dev.jasonpearson.automobile.prototype-agent",
+    category: "prototype"
+)
 
 /// Why an embedded prototype went away.
 /// This enum may gain cases; include a default branch when switching over it.
@@ -822,15 +828,21 @@ extension PrototypeSession {
     /// A `request` action. Bindings resolve against the committed state and data; a request that
     /// cannot be built or is refused completes at once as an error. Otherwise the status key moves
     /// to `loading` and a start command is issued; the response arrives later through
-    /// `completeRequest`. Starting a request to an `into` that already has one in flight cancels
-    /// the older (the latest wins).
+    /// `completeRequest`. Starting a request cancels older requests with overlapping write targets
+    /// (the latest wins).
     private mutating func runRequest(_ action: PrototypeAction) -> [PrototypeEvent] {
         guard let spec else { return [] }
         let inputs = EmitContextInputs(state: state, pages: pages, dataModel: spec.data)
         var events: [PrototypeEvent] = []
         let into = action.into
-        if let into, let older = requests.inFlight(into: into) {
-            events += cancelRequest(older, message: "Superseded by a newer request to \(into)")
+        let targets = [into, action.append?.to].compactMap { $0 }
+        for older in requests.inFlight(overlapping: targets) {
+            let target = targets.first { target in
+                [older.into, older.append?.to].compactMap { $0 }.contains { path in
+                    path == target || path.hasPrefix("\(target)/") || target.hasPrefix("\(path)/")
+                }
+            } ?? targets.first ?? ""
+            events += cancelRequest(older, message: "Superseded by a newer request to \(target)")
         }
         let urlText = PrototypeRequestResolver.urlText(action, inputs: inputs)
         let resolved = PrototypeRequestResolver.resolve(action, urlText: urlText, inputs: inputs)
@@ -1006,11 +1018,17 @@ private struct EmitContextInputs: PrototypeEmitContextInputs {
 
 extension PrototypeSession {
     /// Both visibility and content changes enter the same synchronous session transition.
-    mutating func listVisible(_ node: PrototypeNode, appearedIndex: Int? = nil) -> [PrototypeEvent] {
-        guard isShown, let actions = node.onEndReached,
-              let rows = try? PrototypeLazyList.rows(node: node, data: data) else { return [] }
+    mutating func listVisible(
+        _ node: PrototypeNode,
+        appearedKey: String? = nil,
+        disappearedKey: String? = nil
+    )
+        -> [PrototypeEvent]
+    {
+        guard isShown, let actions = node.onEndReached else { return [] }
+        let keys = PrototypeLazyList.keys(node: node, data: data)
         var driver = listEnds[node.nodePath] ?? PrototypeListEndDriver(endThreshold: node.endThreshold ?? 3)
-        let fires = driver.update(appearedIndex: appearedIndex, rowKeys: rows.map(\.key))
+        let fires = driver.update(appearedKey: appearedKey, disappearedKey: disappearedKey, rowKeys: keys)
         listEnds[node.nodePath] = driver
         return fires ? run(actions) : []
     }
@@ -1036,7 +1054,10 @@ extension PrototypeSession {
         do {
             if outcome.status == "success", case let .received(_, _, body, _) = response {
                 let items = PrototypeDataPointer.resolve(body, tokens: PrototypeDataPointer.tokens(append.from)[...])
-                events += try staged.commitDataWrite(.extend, path: append.to, value: items).get()
+                switch staged.commitDataWrite(.extend, path: append.to, value: items) {
+                case let .success(written): events += written
+                case let .failure(error): throw PrototypeRequestError(.invalidResponse, "append.to \(error.message)")
+                }
                 if let into = request.into, let pointer = PrototypeDataWrite.pointer(ofPath: into) {
                     let rest = PrototypeDataPointer.resolve(outcome.data, pointer: pointer)
                     events += try staged.commitDataWrite(.set, path: into, value: rest).get()
@@ -1050,7 +1071,14 @@ extension PrototypeSession {
             self = staged
         } catch {
             events = []
-            meta.error = .init(.invalidResponse, "Request append completion could not rebuild the prototype")
+            if let requestError = error as? PrototypeRequestError { meta.error = requestError }
+            else if let writeError = error as? PrototypeDataWriteFailure {
+                meta.error = .init(.invalidResponse, writeError.message)
+            } else {
+                requestCompletionLog
+                    .warning("Request append completion failed: \(String(describing: error), privacy: .private)")
+                meta.error = .init(.invalidResponse, "Request append completion could not rebuild the prototype")
+            }
             if let into = request.into { events += writeRequestMeta(meta, beside: into, minimal: true) ?? [] }
         }
         let failed = meta.error != nil

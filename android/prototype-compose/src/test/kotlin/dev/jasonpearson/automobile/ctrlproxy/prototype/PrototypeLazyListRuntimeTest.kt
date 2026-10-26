@@ -53,7 +53,7 @@ class PrototypeLazyListRuntimeTest {
       warn = { warnings += it },
       httpClients = PrototypeHttpClients(host, host),
       requestScope = backgroundScope,
-      newRequestId = { "request" },
+      newRequestId = { "request-${++sequence}" },
       exclusively = exclusively,
     )
 
@@ -242,4 +242,173 @@ class PrototypeLazyListRuntimeTest {
         events.filter { it.kind == PrototypeEventKind.CHANGE }.map { it.name },
       )
     }
+
+  @Test
+  fun `appendData refuses duplicate keys without a change event`() = runTest {
+    val spec = listSpec()
+    val runtime = runtime(spec)
+    runtime.handle(
+      PrototypeInteraction.Tap(
+        listOf(
+          PrototypeAppendDataAction(
+            "/data/items",
+            json("""{"value":{"id":1,"title":"Duplicate"}}""").jsonObject,
+          ),
+        ),
+      ),
+    )
+    assertEquals(spec.data, runtime.current.spec.data)
+    assertTrue(events.isEmpty())
+    assertTrue(warnings.single().contains("Duplicate repeat key"))
+  }
+
+  @Test
+  fun `setData refuses missing and non scalar keys and non object rows`() = runTest {
+    for (rows in listOf("[{}]", "[{\"id\":{}}]", "[1]")) {
+      val spec = listSpec()
+      val runtime = runtime(spec)
+      runtime.handle(
+        PrototypeInteraction.Tap(
+          listOf(PrototypeSetDataAction("/data/items", json("{\"value\":$rows}").jsonObject)),
+        ),
+      )
+      assertEquals(spec.data, runtime.current.spec.data)
+      assertTrue(events.isEmpty())
+    }
+  }
+
+  @Test
+  fun `descendant writes cannot remove or duplicate list keys`() = runTest {
+    for (action in
+      listOf(
+        PrototypeRemoveDataAction("/data/items/1/id"),
+        PrototypeSetDataAction("/data/items/1/id", json("""{"value":0}""").jsonObject),
+      )) {
+      val spec = listSpec()
+      val runtime = runtime(spec)
+      runtime.handle(PrototypeInteraction.Tap(listOf(action)))
+      assertEquals(spec.data, runtime.current.spec.data)
+      assertTrue(events.isEmpty())
+    }
+  }
+
+  @Test
+  fun `overlapping request page is refused atomically`() = runTest {
+    val spec = listSpec()
+    val runtime = runtime(spec)
+    runtime.handle(PrototypeInteraction.Tap(listOf(appendRequest())))
+    runCurrent()
+    events.clear()
+    host.answer(0, received(json("""{"items":[{"id":1,"title":"Duplicate"}],"next":"p3"}""")))
+    runCurrent()
+    assertEquals(spec.data!!["items"], runtime.data("items"))
+    assertNull(runtime.data("page"))
+    assertFalse(
+      events.any { it.name == "/data/items" || it.name == "/data/page" || it.name == "done" },
+    )
+    assertEquals(
+      "invalid_response",
+      requestEvents().single().getValue("error").jsonObject.getValue("code").jsonPrimitive.content,
+    )
+  }
+
+  @Test
+  fun `refresh refuses an ancestor replacement above the list maximum`() = runTest {
+    val base = listSpec()
+    val root =
+      (base.root as PrototypeListNode).copy(
+        repeat = (base.root as PrototypeListNode).repeat.copy(itemsPath = "/feed/items"),
+      )
+    val spec = base.copy(root = root, data = buildJsonObject { put("feed", base.data!!) })
+    val runtime = runtime(spec)
+    runtime.handle(
+      PrototypeInteraction.Tap(listOf(appendRequest().copy(into = "/data/feed", append = null))),
+    )
+    runCurrent()
+    events.clear()
+    host.answer(0, received(json("""{"items":[{"id":0},{"id":1},{"id":2}]}""")))
+    runCurrent()
+    assertEquals(spec.data!!["feed"], runtime.data("feed"))
+    assertFalse(events.any { it.name == "/data/feed" || it.name == "done" })
+    assertEquals(
+      "invalid_response",
+      requestEvents().single().getValue("error").jsonObject.getValue("code").jsonPrimitive.content,
+    )
+  }
+
+  @Test
+  fun `over budget extend commits rows but omits event value`() = runTest {
+    val runtime = runtime(listSpec())
+    runtime.handle(PrototypeInteraction.Tap(listOf(appendRequest())))
+    runCurrent()
+    val title = "x".repeat(PrototypeSpecValidator.MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES)
+    val page = buildJsonObject {
+      put(
+        "items",
+        buildJsonArray {
+          add(
+            buildJsonObject {
+              put("id", 2)
+              put("title", title)
+            },
+          )
+        },
+      )
+    }
+    host.answer(0, received(page))
+    runCurrent()
+    val event = events.single { it.name == "/data/items" }
+    assertFalse(event.payload!!.jsonObject.containsKey("value"))
+    val decoded = checkNotNull(prototypeDataWriteOf("change", event.name, event.payload))
+    assertNull(decoded.write())
+    assertEquals("success", runtime.status())
+  }
+
+  @Test
+  fun `page then refresh cancels overlapping ancestor target`() = runTest {
+    assertSuperseded(
+      appendRequest()
+        .copy(into = null, append = PrototypeRequestAppend("/items", "/data/feed/items")),
+      appendRequest().copy(into = "/data/feed", append = null),
+    )
+  }
+
+  @Test
+  fun `refresh then page cancels overlapping descendant target`() = runTest {
+    assertSuperseded(
+      appendRequest().copy(into = "/data/feed", append = null),
+      appendRequest()
+        .copy(into = null, append = PrototypeRequestAppend("/items", "/data/feed/items")),
+    )
+  }
+
+  @Test
+  fun `two append only requests to the same target supersede`() = runTest {
+    assertSuperseded(appendRequest().copy(into = null), appendRequest().copy(into = null))
+  }
+
+  private suspend fun TestScope.assertSuperseded(
+    first: PrototypeRequestAction,
+    second: PrototypeRequestAction,
+  ) {
+    val spec = listSpec()
+    val runtime = runtime(spec)
+    runtime.handle(PrototypeInteraction.Tap(listOf(first)))
+    runCurrent()
+    runtime.handle(PrototypeInteraction.Tap(listOf(second)))
+    runCurrent()
+    val cancelled = requestEvents().single()
+    assertEquals(
+      "cancelled",
+      cancelled.getValue("error").jsonObject.getValue("code").jsonPrimitive.content,
+    )
+    host.answer(0, received(json("""{"items":[{"id":2,"title":"Old"}]}""")))
+    runCurrent()
+    assertEquals(spec.data, runtime.current.spec.data)
+    assertFalse(
+      events.any { it.kind == PrototypeEventKind.CHANGE || it.name == "done" || it.name == "bad" },
+    )
+    assertEquals(1, requestEvents().size)
+    runtime.close()
+  }
 }

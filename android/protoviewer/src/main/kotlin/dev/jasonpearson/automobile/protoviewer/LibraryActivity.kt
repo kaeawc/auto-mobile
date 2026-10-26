@@ -284,9 +284,9 @@ internal fun LibraryScreen(
       ListItem(
         headlineContent = { Text(stringResource(R.string.security_policy)) },
         modifier =
-          Modifier.fillMaxWidth()
-            .testTag("open-security-policy")
-            .clickable { openSecurityPolicy() },
+          Modifier.fillMaxWidth().testTag("open-security-policy").clickable {
+            openSecurityPolicy()
+          },
       )
     }
     if (actionFailed) item { Text(stringResource(R.string.action_error)) }

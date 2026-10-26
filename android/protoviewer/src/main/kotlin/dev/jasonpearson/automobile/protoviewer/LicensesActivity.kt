@@ -88,7 +88,7 @@ private fun LicenseRow(library: LicensedLibrary, document: LicenseDocument) {
       },
       modifier =
         Modifier.fillMaxWidth().testTag("license-${library.uniqueId}").clickable(
-          role = Role.Button
+          role = Role.Button,
         ) {
           expanded = !expanded
         },

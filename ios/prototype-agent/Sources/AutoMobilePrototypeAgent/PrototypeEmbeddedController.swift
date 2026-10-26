@@ -8,6 +8,9 @@
         private var onEvent: @MainActor (PrototypeEvent) -> Void
         private var onDismiss: @MainActor (PrototypeDismissReason) -> Void
         private var onLoadError: @MainActor (PrototypeLoadError) -> Void
+        /// Fires once, the first time the shown prototype is laid out in a window. App hosts use it
+        /// to stop their render watchdog; never fires for an invalid spec.
+        var onFirstRender: (@MainActor () -> Void)?
         init(
             spec: Data, assets: PrototypeAssets, storage: PrototypeStorageOption,
             network: PrototypeNetworkConfiguration,
@@ -51,6 +54,13 @@
             }
             model.setDeviceDark(UITraitCollection.current.userInterfaceStyle == .dark)
             model.show(loaded.spec, specBytes: loaded.bytes)
+        }
+
+        override func viewDidLayoutSubviews() {
+            super.viewDidLayoutSubviews()
+            guard loadError == nil, model.spec != nil, view.window != nil, let ready = onFirstRender else { return }
+            onFirstRender = nil
+            ready()
         }
 
         func updateNetwork(_ network: PrototypeNetworkConfiguration) {

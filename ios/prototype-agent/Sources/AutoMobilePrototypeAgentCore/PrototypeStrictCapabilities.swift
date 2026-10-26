@@ -95,6 +95,7 @@ enum PrototypeStrictCapabilities {
                 if key == "refresh" { need("refresh") }
                 if key == "linkify" { need("linkify") }
                 if key == "empty" || key == "shimmer" { need("loading_states") }
+                if key == "effects" { need("effects") }
                 let transitionType = child.objectFields?["type"]?.stringValue ?? child.stringValue ?? ""
                 if ["animate", "scale", "rotation", "zoomable"]
                     .contains(key) ||
@@ -112,7 +113,8 @@ enum PrototypeStrictCapabilities {
                 }
                 if key == "data", child.stringValue != nil { need("data_model") }
                 if key == "light" || key == "dark", !field.isEmpty { need("theme_modes") }
-                if key != "linkify" && key != "series" { scan(child, field: key) }
+                // An effect's own `animate`, colours and params are not spec features of their own.
+                if key != "linkify" && key != "series" && key != "effects" { scan(child, field: key) }
             }
         }
         if let root = spec["root"] { scan(root) }

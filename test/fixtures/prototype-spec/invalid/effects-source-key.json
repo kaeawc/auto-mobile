@@ -1,0 +1,24 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Effect",
+      "style": {
+        "effects": [
+          {
+            "type": "noise",
+            "source": "half4 main() {}"
+          }
+        ]
+      }
+    }
+  },
+  "expectedPath": "root.style.effects[0].source",
+  "expectedMessage": "Unknown property"
+}

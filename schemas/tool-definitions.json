@@ -20563,6 +20563,310 @@
                           "minimum": -360,
                           "maximum": 360
                         },
+                        "effects": {
+                          "type": "array",
+                          "items": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "const": "noise"
+                                  },
+                                  "amount": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                  },
+                                  "grain": {
+                                    "type": "number",
+                                    "minimum": 0.5,
+                                    "maximum": 8
+                                  },
+                                  "seed": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 65535
+                                  },
+                                  "monochrome": {
+                                    "type": "boolean"
+                                  },
+                                  "animate": {
+                                    "type": "object",
+                                    "properties": {
+                                      "periodMs": {
+                                        "type": "integer",
+                                        "minimum": 400,
+                                        "maximum": 20000
+                                      }
+                                    },
+                                    "required": ["periodMs"],
+                                    "additionalProperties": false
+                                  },
+                                  "phase": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/effects/items/anyOf/0/properties/amount"
+                                  }
+                                },
+                                "required": ["type"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "const": "gradientMesh"
+                                  },
+                                  "colors": {
+                                    "type": "array",
+                                    "items": {
+                                      "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim"
+                                    },
+                                    "minItems": 4,
+                                    "maxItems": 4
+                                  },
+                                  "softness": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/effects/items/anyOf/0/properties/amount"
+                                  },
+                                  "animate": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/effects/items/anyOf/0/properties/animate"
+                                  },
+                                  "phase": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/effects/items/anyOf/0/properties/phase"
+                                  }
+                                },
+                                "required": ["type", "colors"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "const": "shimmer"
+                                  },
+                                  "color": {
+                                    "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim"
+                                  },
+                                  "angle": {
+                                    "type": "number",
+                                    "minimum": -360,
+                                    "maximum": 360
+                                  },
+                                  "width": {
+                                    "type": "number",
+                                    "minimum": 0.05,
+                                    "maximum": 1
+                                  },
+                                  "animate": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/effects/items/anyOf/0/properties/animate"
+                                  },
+                                  "phase": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/effects/items/anyOf/0/properties/phase"
+                                  }
+                                },
+                                "required": ["type"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "const": "glow"
+                                  },
+                                  "color": {
+                                    "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim"
+                                  },
+                                  "radius": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 48
+                                  },
+                                  "intensity": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/effects/items/anyOf/0/properties/amount"
+                                  },
+                                  "animate": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/effects/items/anyOf/0/properties/animate"
+                                  },
+                                  "phase": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/effects/items/anyOf/0/properties/phase"
+                                  }
+                                },
+                                "required": ["type", "color"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "const": "vignette"
+                                  },
+                                  "color": {
+                                    "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim"
+                                  },
+                                  "intensity": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/effects/items/anyOf/0/properties/amount"
+                                  },
+                                  "radius": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/effects/items/anyOf/0/properties/amount"
+                                  },
+                                  "animate": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/effects/items/anyOf/0/properties/animate"
+                                  },
+                                  "phase": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/effects/items/anyOf/0/properties/phase"
+                                  }
+                                },
+                                "required": ["type"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "const": "blur"
+                                  },
+                                  "radius": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 25
+                                  },
+                                  "animate": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/effects/items/anyOf/0/properties/animate"
+                                  },
+                                  "phase": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/effects/items/anyOf/0/properties/phase"
+                                  }
+                                },
+                                "required": ["type", "radius"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "const": "pixelate"
+                                  },
+                                  "cell": {
+                                    "type": "number",
+                                    "minimum": 1,
+                                    "maximum": 64
+                                  },
+                                  "animate": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/effects/items/anyOf/0/properties/animate"
+                                  },
+                                  "phase": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/effects/items/anyOf/0/properties/phase"
+                                  }
+                                },
+                                "required": ["type", "cell"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "const": "chromaticAberration"
+                                  },
+                                  "offset": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 8
+                                  },
+                                  "angle": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/effects/items/anyOf/2/properties/angle"
+                                  },
+                                  "animate": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/effects/items/anyOf/0/properties/animate"
+                                  },
+                                  "phase": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/effects/items/anyOf/0/properties/phase"
+                                  }
+                                },
+                                "required": ["type"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "const": "wave"
+                                  },
+                                  "amplitude": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 16
+                                  },
+                                  "wavelength": {
+                                    "type": "number",
+                                    "minimum": 8,
+                                    "maximum": 400
+                                  },
+                                  "angle": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/effects/items/anyOf/2/properties/angle"
+                                  },
+                                  "animate": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/effects/items/anyOf/0/properties/animate"
+                                  },
+                                  "phase": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/effects/items/anyOf/0/properties/phase"
+                                  }
+                                },
+                                "required": ["type"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "const": "ripple"
+                                  },
+                                  "amplitude": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 16
+                                  },
+                                  "wavelength": {
+                                    "type": "number",
+                                    "minimum": 8,
+                                    "maximum": 400
+                                  },
+                                  "center": {
+                                    "type": "object",
+                                    "properties": {
+                                      "x": {
+                                        "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/effects/items/anyOf/0/properties/amount"
+                                      },
+                                      "y": {
+                                        "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/effects/items/anyOf/0/properties/amount"
+                                      }
+                                    },
+                                    "required": ["x", "y"],
+                                    "additionalProperties": false
+                                  },
+                                  "animate": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/effects/items/anyOf/0/properties/animate"
+                                  },
+                                  "phase": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/effects/items/anyOf/0/properties/phase"
+                                  }
+                                },
+                                "required": ["type"],
+                                "additionalProperties": false
+                              }
+                            ]
+                          },
+                          "minItems": 1,
+                          "maxItems": 4
+                        },
                         "alignment": {
                           "type": "string",
                           "enum": [

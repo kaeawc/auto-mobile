@@ -12,6 +12,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import dev.jasonpearson.automobile.ctrlproxy.prototype.BitmapPrototypeImageDecoder
 import dev.jasonpearson.automobile.ctrlproxy.prototype.ComposePrototypeFontLoader
 import dev.jasonpearson.automobile.ctrlproxy.prototype.CoroutinePrototypeScheduler
+import dev.jasonpearson.automobile.ctrlproxy.prototype.InternalAutoMobilePrototypeApi
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeDismissReason as InternalPrototypeDismissReason
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeFontCache
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImageCache
@@ -177,6 +178,7 @@ private fun EmbeddedPrototype(
   owner.error?.let { onError(it) }
 }
 
+@InternalAutoMobilePrototypeApi
 internal object PrototypeTimerLifecycle {
   fun observer(
     scope: CoroutineScope,

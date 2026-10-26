@@ -173,3 +173,9 @@ public final class dev.jasonpearson.automobile.prototype.PrototypeStorageKt {
   public static final dev.jasonpearson.automobile.prototype.PrototypeStorage prototypeHostStorage(dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeStorageStore);
   public static final dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeStorageStore adapt(dev.jasonpearson.automobile.prototype.PrototypeStorage);
 }
+Compiled from "AutoMobilePrototype.kt"
+public final class dev.jasonpearson.automobile.prototype.PrototypeTimerLifecycle {
+  public static final dev.jasonpearson.automobile.prototype.PrototypeTimerLifecycle INSTANCE;
+  public static final int $stable;
+  public final androidx.lifecycle.LifecycleEventObserver observer(kotlinx.coroutines.CoroutineScope, kotlinx.coroutines.sync.Mutex, kotlin.jvm.functions.Function0<dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRuntime>);
+}

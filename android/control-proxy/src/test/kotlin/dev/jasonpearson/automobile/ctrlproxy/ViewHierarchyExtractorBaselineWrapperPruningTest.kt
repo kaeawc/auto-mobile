@@ -114,6 +114,13 @@ internal class ViewHierarchyExtractorBaselineWrapperPruningTest : ViewHierarchyE
         "text" to { it.copy(text = "Label") },
         "content-desc" to { it.copy(contentDesc = "Close") },
         "test-tag" to { it.copy(testTag = "row") },
+        "unique-id" to { it.copy(uniqueId = "u1") },
+        "role" to { it.copy(role = "button") },
+        "state-description" to { it.copy(stateDescription = "On") },
+        "hint-text" to { it.copy(hintText = "Search") },
+        "scrollable" to { it.copy(scrollable = "true") },
+        "focusable" to { it.copy(focusable = "true") },
+        "checkable" to { it.copy(checkable = "true") },
         "clickable flag" to { it.copy(clickable = "true") },
         "long-clickable flag" to { it.copy(longClickable = "true") },
         "click action" to { it.copy(actions = baselineActions + "click") },
@@ -131,6 +138,24 @@ internal class ViewHierarchyExtractorBaselineWrapperPruningTest : ViewHierarchyE
         kept.children,
       )
     }
+  }
+
+  @Test
+  fun `a window root keeps its bounds while its baseline wrappers are pruned`() {
+    val bounds = dev.jasonpearson.automobile.ctrlproxy.models.ElementBounds(0, 0, 1080, 2400)
+    val label = UIElementInfo(text = "Label")
+    val root =
+      baselineNode(children = listOf(baselineNode(children = listOf(label)), baselineNode()))
+        .copy(bounds = bounds)
+
+    val pruned = ViewHierarchyExtractor(pruneBaselineWrappers = true).optimizeWindowRoot(root)
+
+    assertEquals(listOf(root.copy(children = listOf(label))), pruned)
+    assertEquals(
+      "without pruning the window root follows the legacy path",
+      ViewHierarchyExtractor(pruneBaselineWrappers = false).optimizeHierarchy(root),
+      ViewHierarchyExtractor(pruneBaselineWrappers = false).optimizeWindowRoot(root),
+    )
   }
 
   @Test

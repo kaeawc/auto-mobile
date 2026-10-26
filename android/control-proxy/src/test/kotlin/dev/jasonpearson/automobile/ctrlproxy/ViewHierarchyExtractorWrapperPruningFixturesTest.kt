@@ -84,15 +84,35 @@ internal class ViewHierarchyExtractorWrapperPruningFixturesTest {
     node.copy(node = null, children = emptyList())
 
   /**
-   * What a selector names or a tap can reach: id, text, description, tag or a real click handler.
+   * What a selector names or a tap can reach: any identifying string, any interaction flag, or a
+   * real click or long-click action. Wider than the extractor's own criteria on purpose, so the
+   * test fails if a field a selector could use stops protecting its node.
    */
   private fun selectorRelevant(node: UIElementInfo): Boolean =
-    !node.resourceId.isNullOrBlank() ||
-      !node.text.isNullOrBlank() ||
-      !node.contentDesc.isNullOrBlank() ||
-      !node.testTag.isNullOrBlank() ||
-      node.clickable == "true" ||
-      node.longClickable == "true" ||
+    listOf(
+        node.resourceId,
+        node.text,
+        node.contentDesc,
+        node.testTag,
+        node.uniqueId,
+        node.containerTitle,
+        node.role,
+        node.stateDescription,
+        node.hintText,
+        node.paneTitle,
+        node.errorMessage,
+        node.tooltipText,
+      )
+      .any { !it.isNullOrBlank() } ||
+      listOf(
+          node.clickable,
+          node.longClickable,
+          node.scrollable,
+          node.focusable,
+          node.checkable,
+          node.selected,
+        )
+        .any { it == "true" } ||
       node.actions?.any { it == "click" || it == "long_click" } == true
 
   private fun flatten(node: UIElementInfo): List<UIElementInfo> =

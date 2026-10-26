@@ -1,5 +1,5 @@
 import * as timers from "./prototypeTimerSchema";
-import { prototypeStringsTableError, type PrototypeStrings } from "./prototypeStrings";
+import { prototypeStringsSchema } from "./prototypeStrings";
 import { prototypeSemanticsSchema } from "./prototypeSemanticsSchema";
 import { z } from "zod";
 import contract from "../../../schemas/prototype-spec-contract.json";
@@ -883,9 +883,7 @@ const specSchema = z
     id: z.string().min(1),
     window: windowSchema,
     theme: themeSchema.optional(),
-    strings: z
-      .custom<PrototypeStrings>((value) => prototypeStringsTableError(value) === undefined)
-      .optional(),
+    strings: prototypeStringsSchema.optional(),
     data: z
       .custom<PrototypeData>((value) => {
         if (typeof value !== "object" || value === null || Array.isArray(value)) {

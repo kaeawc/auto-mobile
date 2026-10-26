@@ -1,3 +1,4 @@
+import { z } from "zod";
 import {
   PROTOTYPE_STRINGS_CAPABILITY,
   PROTOTYPE_SEMANTICS_CAPABILITY,
@@ -10,6 +11,11 @@ import { walkPrototypeNodes } from "./prototypeNodeChildren";
 import type { Located, PrototypeValidationError } from "./prototypeBindingValidation";
 
 export type PrototypeStrings = Record<string, Record<string, string | Record<string, string>>>;
+
+/** The spec `strings` field; the shared table check decides validity. */
+export const prototypeStringsSchema = z.custom<PrototypeStrings>(
+  (value) => prototypeStringsTableError(value) === undefined,
+);
 type Category = "zero" | "one" | "two" | "few" | "many" | "other";
 const categories = new Set(["zero", "one", "two", "few", "many", "other"]);
 const opaque = new Set(contract.stringOpaqueFields);

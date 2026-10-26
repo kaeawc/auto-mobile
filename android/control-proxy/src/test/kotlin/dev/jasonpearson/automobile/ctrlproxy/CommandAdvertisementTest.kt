@@ -64,6 +64,7 @@ class CommandAdvertisementTest {
       "prototype_loading_states_v1",
       "prototype_style_polish_v2",
       "prototype_motion_v2",
+      "prototype_effects_v1",
       "prototype_choreography_v1",
       "prototype_stack_transitions_v1",
       "prototype_chart_v1",

@@ -2353,7 +2353,7 @@ sweeps the same band (1.2 s, 35% white, clipped to the node's corner shape) over
 "Loading" to VoiceOver with the updates-frequently trait, draws no band under `motion: "none"` or
 Reduce Motion, and rejects shimmer on other node types at the same path.
 
-## Effects (#15128, `prototype_effects_v1`, contract only)
+## Effects (#15128, #15129, `prototype_effects_v1`, not device-verified)
 
 `style.effects` is an array of 1-4 effects drawn in order. The list is closed and data-only: a
 `source` key, `type: "shader"`, a fifth effect, an unknown type and an out-of-range param are each
@@ -2391,13 +2391,50 @@ node-level motion-v2 `animate`) and `phase` 0-1.
   (`Effect limit exceeded`, `Animated effect limit exceeded`); a template inside a `repeat` is
   reported at the `repeat` with the `Expanded` forms of those two messages.
 - **Capability.** Any `effects` list needs `prototype_effects_v1`, checked on `show` and on the full
-  patch result. No CtrlProxy or iOS agent advertises it yet: rendering is tracked by the Android
-  (#15129) and iOS (#15130) render issues, so the host refuses these specs today.
+  patch result. CtrlProxy and the embedded renderer advertise it (#15129); the iOS agent does not yet
+  (#15130), so the host still refuses these specs on iOS.
 
-Decisions left to the renderers, to settle in those issues: what `phase` means for an effect
-without a natural cycle (`noise`, `blur`, `pixelate`, `vignette`, `glow`, `gradientMesh`; the
-contract accepts it everywhere), and the colour-role and `{light, dark}` resolution inside effects
-(they use the same resolver as `style.color`; advertising the capability implies supporting it).
+### Android rendering (#15129)
+
+Compose plus bundled AGSL, in `android/prototype-compose` (`PrototypeEffects*.kt`); the same module
+renders in CtrlProxy and ProtoViewer. No spec carries shader source: the AGSL programs are constants
+in `PrototypeEffectShaders`.
+
+- **Layers.** Distortions (`blur`, `pixelate`, `chromaticAberration`, `wave`, `ripple`) are one
+  chained layer `RenderEffect` around the node's background and content, in authored order, clipped
+  to the node's bounds. `gradientMesh` paints between the background and the content. `shimmer`,
+  `glow`, `vignette` and `noise` paint over the content, clipped to the node's shape, undistorted.
+  Effects sit inside the node, so the host dismiss controls and the node's observe bounds are untouched.
+- **API floors and fallback.** Brush-based looks (`shimmer`, `glow`, `vignette`) draw on any API,
+  `blur` needs 31, the AGSL ones 33. Below its floor an effect is omitted and the node renders
+  unshaded. The device reports every omitted effect as `degradedEffects: [{path, type, reason:
+  "api"}]` on the show result and on `inspect_prototypes` (omitted when empty; older hosts see the
+  same frame). `path` is the node's structural path (`root.children[1].style.effects[0]`; a
+  `styleWhen` style adds `styleWhen[j]`).
+- **Settled by the renderer (conservative choices).**
+  - `phase` and `animate` move only `shimmer`, `wave` and `ripple`; `noise`, `gradientMesh`,
+    `glow`, `vignette`, `blur`, `pixelate` and `chromaticAberration` are static looks and ignore
+    both (they still count against the limits).
+  - Colours resolve like `style.color`: hex keeps its own alpha, a role comes from the active
+    scheme, a `{light, dark}` pair picks the shown mode; `scrim` is its plain scheme colour.
+  - A `shimmer` band never exceeds 0.5 alpha; with no colour it is white at 0.35. `glow` is an
+    inward edge glow (it never leaves the node), `vignette` defaults to black.
+  - Defaults when omitted: `noise` amount 0.1, grain 1 dp, seed 0, monochrome; `gradientMesh`
+    softness 0.5; `shimmer` angle 20, width 0.3; `glow` radius 12 dp, intensity 0.6; `vignette`
+    intensity 0.4, radius 0.7; `chromaticAberration` offset 2 dp; `wave` and `ripple` amplitude 4 dp,
+    wavelength 48 dp, `ripple` centre `{0.5, 0.5}`.
+- **Time.** An animated effect reads one per-node frame clock (`withFrameNanos`). It does not
+  advance under `motion: "none"`, animator duration scale 0, while the window is not shown, or in
+  direct `PrototypeSpecContent` callers (previews and screenshots), so those keep the authored
+  `phase`. `noise` is seeded from `seed` alone.
+- **Frame budget.** If a node's frame interval stays above 32 ms for 30 frames in a row the node
+  freezes its phase and `inspect_prototypes` lists its animated effects with reason `budget`.
+  Decision on the open question: no new `prototype_event` kind (that closed list is a contract change
+  shared with the TS host and iOS), so a frozen effect is visible on the next `inspect`, not pushed.
+  ProtoViewer shows no note when it degrades an effect; that stays an open follow-up.
+- **Owed device checks.** Goldens on API 30, 33 and 36 (`effects_all_types`, pending in
+  `PrototypeSpecContentScreenshotTest`), and a real-GPU look at the AGSL effects. Robolectric covers
+  decoding, API planning, the clock and budget on fakes, and bounds stability.
 
 ## Charts (#14209, not device-verified)
 

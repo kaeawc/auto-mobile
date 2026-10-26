@@ -180,6 +180,7 @@ fun PrototypeRuntimeContent(
         LocalPrototypeFontCache provides fonts,
         LocalPrototypeMotion provides motion,
         LocalPrototypeMotionActivity provides runtime.motionActivity,
+        LocalPrototypeEffectHealth provides runtime.effectHealth,
         LocalPrototypeStackRuntime provides runtime,
         LocalPrototypeStackSnapshot provides snapshot,
         LocalPrototypeSwipeCoordinator provides
@@ -1374,6 +1375,14 @@ private fun prototypeNodeModifier(
         modifier.shadow(it.toFloat().dp, shape, ambientColor = shadowColor, spotColor = shadowColor)
     }
   modifier = modifier.prototypeShadows(style.shadows, shape, inner = false)
+  // Effects (#15129): paint over the content undistorted, then the distorting layer around the
+  // background and content. Both sit outside the clip and keep to the node's bounds themselves.
+  val effects = rememberPrototypeEffectPlan(node)
+  val effectElapsed = rememberPrototypeEffectElapsed(effects, node.identity)
+  modifier =
+    modifier
+      .prototypeEffectOverlay(effects, shape, effectElapsed)
+      .prototypeEffectLayer(effects, effectElapsed)
   if (style.cornerRadius != null || style.cornerStyle != null) modifier = modifier.clip(shape)
   prototypeThemedColor(node.style.background, style.background)?.let {
     modifier = modifier.background(prototypeAnimatedColor(node, it), shape)
@@ -1381,6 +1390,7 @@ private fun prototypeNodeModifier(
   style.gradient?.let {
     modifier = modifier.background(prototypeGradientBrush(it, prototypePalette()), shape)
   }
+  modifier = modifier.prototypeEffectUnderlay(effects, shape)
   // Post-content modifiers nest in reverse painting order: shimmer, border, then inner shadows.
   modifier = modifier.prototypeShadows(style.shadows, shape, inner = true)
   style.border?.let {

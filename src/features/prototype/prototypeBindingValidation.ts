@@ -4,6 +4,7 @@ import { prototypeRequestStatusKeyError } from "./prototypeRequest";
 
 export interface Rule {
   kind: string;
+  pattern?: string;
   name?: string;
   empty?: boolean;
   nonblank?: boolean;

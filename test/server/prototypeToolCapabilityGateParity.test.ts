@@ -35,6 +35,16 @@ const chartData = { points: [{ y: 1 }, { y: 2 }] };
 // `with` lists capabilities a fixture needs besides the one under test: a device-run request also
 // needs the network capability, so the device gate is exercised with that one already advertised.
 const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: string[] }> = {
+  prototype_format_v1: fixture({
+    type: "column",
+    id: "label",
+    repeat: {
+      items: [{ n: 1 }],
+      as: "item",
+      derive: { nText: { of: { item: "n" }, format: { number: {} } } },
+    },
+    children: [{ type: "text", text: "{item.nText}" }],
+  }),
   prototype_theme_modes_v1: fixture({
     ...label,
     style: { background: { light: "#FFFFFF", dark: "#000000" } },

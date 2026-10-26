@@ -34,7 +34,8 @@ class AutoMobilePrototypeCapabilitiesTest {
    * supported. The platform vocabulary (#14294) runs on the module registry (#14295), and the
    * `test` module is a placeholder no production runtime ever advertises.
    */
-  private val exclusions = setOf("prototype_platform_v1", "prototype_platform_test_v1")
+  private val exclusions =
+    setOf("prototype_format_v1", "prototype_platform_v1", "prototype_platform_test_v1")
 
   @Test
   fun `shared spec capabilities are supported`() {

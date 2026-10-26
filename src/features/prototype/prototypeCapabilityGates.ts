@@ -1,5 +1,10 @@
 import {
+  prototypeFormatFields,
+  prototypeFormatUnsupportedMessage,
+} from "./prototypeFormatCapability";
+import {
   PROTOTYPE_STACK_CAPABILITY,
+  PROTOTYPE_FORMAT_CAPABILITY,
   PROTOTYPE_THEME_MODES_CAPABILITY,
   PROTOTYPE_DATA_MODEL_CAPABILITY,
   PROTOTYPE_FLOW_GRID_CAPABILITY,
@@ -111,6 +116,11 @@ interface PrototypeSpecCapabilityGate {
 
 /** Spec-introduced features must be checked on both show and the complete patch result. */
 export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGate[] = [
+  {
+    capability: PROTOTYPE_FORMAT_CAPABILITY,
+    fields: prototypeFormatFields,
+    unsupportedMessage: prototypeFormatUnsupportedMessage,
+  },
   {
     capability: PROTOTYPE_THEME_MODES_CAPABILITY,
     fields: prototypeThemeModeFields,

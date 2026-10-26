@@ -1,0 +1,320 @@
+{
+  "spec": {
+    "id": "formats",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "price": 1234.5
+    },
+    "state": {
+      "ratio": 0.256
+    },
+    "derive": {
+      "n0": {
+        "of": {
+          "value": 0
+        },
+        "format": {
+          "number": {}
+        }
+      },
+      "n1": {
+        "of": {
+          "value": 1
+        },
+        "format": {
+          "number": {}
+        }
+      },
+      "n2": {
+        "of": {
+          "value": 2
+        },
+        "format": {
+          "number": {}
+        }
+      },
+      "n3": {
+        "of": {
+          "value": 3
+        },
+        "format": {
+          "number": {}
+        }
+      },
+      "n4": {
+        "of": {
+          "value": 4
+        },
+        "format": {
+          "number": {}
+        }
+      },
+      "n5": {
+        "of": {
+          "value": 5
+        },
+        "format": {
+          "number": {}
+        }
+      },
+      "n6": {
+        "of": {
+          "value": 6
+        },
+        "format": {
+          "number": {}
+        }
+      },
+      "n7": {
+        "of": {
+          "value": 7
+        },
+        "format": {
+          "number": {}
+        }
+      },
+      "n8": {
+        "of": {
+          "value": 8
+        },
+        "format": {
+          "number": {}
+        }
+      },
+      "n9": {
+        "of": {
+          "value": 9
+        },
+        "format": {
+          "number": {}
+        }
+      },
+      "n10": {
+        "of": {
+          "value": 10
+        },
+        "format": {
+          "number": {}
+        }
+      },
+      "n11": {
+        "of": {
+          "value": 11
+        },
+        "format": {
+          "number": {}
+        }
+      },
+      "n12": {
+        "of": {
+          "value": 12
+        },
+        "format": {
+          "number": {}
+        }
+      },
+      "n13": {
+        "of": {
+          "value": 13
+        },
+        "format": {
+          "number": {}
+        }
+      },
+      "n14": {
+        "of": {
+          "value": 14
+        },
+        "format": {
+          "number": {}
+        }
+      },
+      "n15": {
+        "of": {
+          "value": 15
+        },
+        "format": {
+          "number": {}
+        }
+      },
+      "n16": {
+        "of": {
+          "value": 16
+        },
+        "format": {
+          "number": {}
+        }
+      },
+      "n17": {
+        "of": {
+          "value": 17
+        },
+        "format": {
+          "number": {}
+        }
+      },
+      "n18": {
+        "of": {
+          "value": 18
+        },
+        "format": {
+          "number": {}
+        }
+      },
+      "n19": {
+        "of": {
+          "value": 19
+        },
+        "format": {
+          "number": {}
+        }
+      },
+      "n20": {
+        "of": {
+          "value": 20
+        },
+        "format": {
+          "number": {}
+        }
+      },
+      "n21": {
+        "of": {
+          "value": 21
+        },
+        "format": {
+          "number": {}
+        }
+      },
+      "n22": {
+        "of": {
+          "value": 22
+        },
+        "format": {
+          "number": {}
+        }
+      },
+      "n23": {
+        "of": {
+          "value": 23
+        },
+        "format": {
+          "number": {}
+        }
+      },
+      "n24": {
+        "of": {
+          "value": 24
+        },
+        "format": {
+          "number": {}
+        }
+      },
+      "n25": {
+        "of": {
+          "value": 25
+        },
+        "format": {
+          "number": {}
+        }
+      },
+      "n26": {
+        "of": {
+          "value": 26
+        },
+        "format": {
+          "number": {}
+        }
+      },
+      "n27": {
+        "of": {
+          "value": 27
+        },
+        "format": {
+          "number": {}
+        }
+      },
+      "n28": {
+        "of": {
+          "value": 28
+        },
+        "format": {
+          "number": {}
+        }
+      },
+      "n29": {
+        "of": {
+          "value": 29
+        },
+        "format": {
+          "number": {}
+        }
+      },
+      "n30": {
+        "of": {
+          "value": 30
+        },
+        "format": {
+          "number": {}
+        }
+      },
+      "n31": {
+        "of": {
+          "value": 31
+        },
+        "format": {
+          "number": {}
+        }
+      },
+      "n32": {
+        "of": {
+          "value": 32
+        },
+        "format": {
+          "number": {}
+        }
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "{derived:price} {derived:percent} {derived:date}"
+        },
+        {
+          "type": "column",
+          "repeat": {
+            "items": [
+              {
+                "createdAt": "2026-01-05"
+              }
+            ],
+            "as": "item",
+            "derive": {
+              "createdAtText": {
+                "of": {
+                  "item": "createdAt"
+                },
+                "format": {
+                  "date": {}
+                }
+              }
+            }
+          },
+          "children": [
+            {
+              "type": "text",
+              "text": "{item.createdAtText}"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "derive",
+  "expectedMessage": "Map entry limit exceeded"
+}

@@ -7,7 +7,19 @@
       "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     ],
-    "rejected": ["", "0", "é", "a-b", " a", "a\n", "a\r", "a\r\n", "a", "a ", "a "]
+    "rejected": [
+      "",
+      "0",
+      "\u00e9",
+      "a-b",
+      " a",
+      "a\n",
+      "a\r",
+      "a\r\n",
+      "a\u0085",
+      "a\u2028",
+      "a\u2029"
+    ]
   },
   "stateKey": {
     "accepted": [
@@ -20,15 +32,15 @@
       "",
       "0",
       "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "é",
+      "\u00e9",
       "a-b",
       " a",
       "a\n",
       "a\r",
       "a\r\n",
-      "a",
-      "a ",
-      "a "
+      "a\u0085",
+      "a\u2028",
+      "a\u2029"
     ]
   },
   "boundKey": {
@@ -54,13 +66,13 @@
       "{}",
       "{index",
       "{index}}",
-      "é{index}",
+      "\u00e9{index}",
       "{index}\n",
       "{index}\r",
       "{index}\r\n",
-      "{index}",
-      "{index} ",
-      "{index} "
+      "{index}\u0085",
+      "{index}\u2028",
+      "{index}\u2029"
     ]
   },
   "color": {
@@ -75,9 +87,9 @@
       "#000000\n",
       "#000000\r",
       "#000000\r\n",
-      "#000000",
-      "#000000 ",
-      "#000000 "
+      "#000000\u0085",
+      "#000000\u2028",
+      "#000000\u2029"
     ]
   },
   "blankText": {
@@ -89,28 +101,40 @@
       "\f",
       "\r",
       " ",
-      " ",
-      " ",
-      " ",
-      " ",
-      " ",
-      " ",
-      " ",
-      " ",
-      " ",
-      " ",
-      " ",
-      " ",
-      " ",
-      " ",
-      " ",
-      " ",
-      " ",
-      "　",
-      "﻿",
-      "\t\n\u000b\f\r                  　﻿"
+      "\u00a0",
+      "\u1680",
+      "\u2000",
+      "\u2001",
+      "\u2002",
+      "\u2003",
+      "\u2004",
+      "\u2005",
+      "\u2006",
+      "\u2007",
+      "\u2008",
+      "\u2009",
+      "\u200a",
+      "\u2028",
+      "\u2029",
+      "\u202f",
+      "\u205f",
+      "\u3000",
+      "\ufeff",
+      "\t\n\u000b\f\r \u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
     ],
-    "rejected": ["a", "", "᠎", "​", " ​", "\u0000", "\u001c", "\u001f", "�", "😀", " a\n"]
+    "rejected": [
+      "a",
+      "\u0085",
+      "\u180e",
+      "\u200b",
+      " \u200b",
+      "\u0000",
+      "\u001c",
+      "\u001f",
+      "\ufffd",
+      "\ud83d\ude00",
+      " a\n"
+    ]
   },
   "numberToken": {
     "accepted": [
@@ -136,17 +160,39 @@
       "NaN",
       "Infinity",
       " 1",
-      "١",
+      "\u0661",
       "1\n",
       "1\r",
       "1\r\n",
-      "1",
-      "1 ",
-      "1 "
+      "1\u0085",
+      "1\u2028",
+      "1\u2029"
     ]
   },
   "pointer": {
-    "accepted": ["/", "//", "/a", "/a~0b/~1", "/~01", "/é/😀", "/a\n", "/a\r\n", "/a"],
+    "accepted": [
+      "/",
+      "//",
+      "/a",
+      "/a~0b/~1",
+      "/~01",
+      "/\u00e9/\ud83d\ude00",
+      "/a\n",
+      "/a\r\n",
+      "/a\u0085"
+    ],
     "rejected": ["", "a", "a/b", "/~", "/~2", "/~10~", "/a~\n"]
+  },
+  "currencyCode": {
+    "accepted": ["USD", "EUR", "JPY"],
+    "rejected": ["usd", "US", "USDD", "USD\n"]
+  },
+  "formatLocale": {
+    "accepted": ["en", "en-US", "zh-Hant-TW"],
+    "rejected": ["en_US", "e", "english", "en-US\n"]
+  },
+  "formatTimeZone": {
+    "accepted": ["UTC", "America/New_York", "Asia/Kolkata", "Etc/GMT+5"],
+    "rejected": ["bad zone", "/UTC", "UTC\n", "America//New_York"]
   }
 }

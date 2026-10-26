@@ -1,3 +1,4 @@
+import { prototypeDeriveSchema, prototypeRepeatDeriveSchema } from "./prototypeFormatSchema";
 import { z } from "zod";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { PROTOTYPE_STACK_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
@@ -197,6 +198,7 @@ const repeatSchema = z
       z.object({ path: pointerSchema }).strict(),
     ]),
     as: keySchema,
+    derive: prototypeRepeatDeriveSchema.optional(),
     key: keySchema.optional(),
   })
   .strict();
@@ -897,6 +899,7 @@ const specSchema = z
     storage: prototypeStorageSchema.optional(),
     requires: prototypeRequiresSchema.optional(),
     platform: prototypePlatformHandlersSchema.optional(),
+    derive: prototypeDeriveSchema.optional(),
     root: z.lazy(() => prototypeNodeSchema),
   })
   .strict();

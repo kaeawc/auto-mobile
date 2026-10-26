@@ -41,6 +41,7 @@ interface Scope {
   binding: Binding;
   items: readonly Readonly<Raw>[];
   pathBound: boolean;
+  derivedFields: ReadonlySet<string>;
 }
 
 const fail = (path: string, message: string): RepeatError => ({ path, message });
@@ -195,10 +196,7 @@ function fieldError(
   if (repeated) {
     return repeated;
   }
-  if (kind === "emitName") {
-    return emptyEmitName(value, path, scope);
-  }
-  return kind === "key" ? invalidBoundKey(value, path, scope) : undefined;
+  return repeatedValueError(kind, value, path, scope);
 }
 
 /** A data action path binds only a whole `{index}` segment; `{alias.field}` is refused. */
@@ -327,9 +325,13 @@ function scopeOf(node: Raw, path: string, data: PrototypeRepeatData): Scope | un
         binding: { alias: repeat.as, index: true },
         items:
           source && typeof source.path === "string"
-            ? data.items(source.path)
-            : literal.filter((item): item is Raw => record(item) !== undefined),
+            ? derivedValidationItems(data.items(source.path), repeat.derive)
+            : derivedValidationItems(
+                literal.filter((item): item is Raw => record(item) !== undefined),
+                repeat.derive,
+              ),
         pathBound: source !== undefined,
+        derivedFields: new Set(Object.keys(record(repeat.derive) ?? {})),
       }
     : undefined;
 }
@@ -378,7 +380,7 @@ function repeatIdentityError(
   scope: Scope | undefined,
 ): RepeatError | undefined {
   const key = record(node.repeat)?.key;
-  return scope && typeof key === "string"
+  return scope && typeof key === "string" && !scope.derivedFields.has(key)
     ? repeatKeyError(scope.items, key, `${path}.repeat.key`)
     : undefined;
 }
@@ -550,6 +552,15 @@ export function repeatKeyInstances<T extends { value: Raw; path: string }>(
   }
   return located.flatMap((entry) => {
     const scope = scopes.find((candidate) => entry.path.startsWith(`${candidate.path}.children[`));
+    // A derived key cannot be bound to its device-local string during host validation.
+    if (
+      scope &&
+      checkedKeyValues(entry.value).some(
+        (key) => typeof key === "string" && hasDerivedField(key, scope),
+      )
+    ) {
+      return [];
+    }
     const operandTemplated =
       scope !== undefined &&
       typeof entry.value.value === "string" &&
@@ -569,4 +580,33 @@ export function repeatKeyInstances<T extends { value: Raw; path: string }>(
       operandTemplated,
     }));
   });
+}
+
+/** Validation needs the projected field types, without reading a clock or formatting values. */
+function derivedValidationItems(
+  items: readonly Readonly<Raw>[],
+  derive: unknown,
+): readonly Readonly<Raw>[] {
+  const fields = Object.fromEntries(Object.keys(record(derive) ?? {}).map((name) => [name, ""]));
+  return Object.keys(fields).length ? items.map((item) => ({ ...item, ...fields })) : items;
+}
+
+function hasDerivedField(text: string, scope: Scope): boolean {
+  return templateFieldReferences(text, scope.binding).some((name) => scope.derivedFields.has(name));
+}
+
+function repeatedValueError(
+  kind: FieldKind,
+  value: string,
+  path: string,
+  scope: Scope,
+): RepeatError | undefined {
+  // Device locale and clock determine derived strings; their value-dependent checks run there.
+  if (hasDerivedField(value, scope)) {
+    return undefined;
+  }
+  if (kind === "emitName") {
+    return emptyEmitName(value, path, scope);
+  }
+  return kind === "key" ? invalidBoundKey(value, path, scope) : undefined;
 }

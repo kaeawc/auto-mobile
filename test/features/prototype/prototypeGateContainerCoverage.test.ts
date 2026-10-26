@@ -21,6 +21,15 @@ const platformCall = {
 // editing the server test outside this lane's permitted paths. No gate/container exceptions:
 // every current gate can be activated by a node, including theme and data via inline values.
 const fixtures: Record<string, Node> = {
+  prototype_format_v1: {
+    type: "column",
+    repeat: {
+      items: [{ n: 1 }],
+      as: "item",
+      derive: { nText: { of: { item: "n" }, format: { number: {} } } },
+    },
+    children: [label],
+  },
   prototype_theme_modes_v1: {
     ...label,
     style: { background: { light: "#FFFFFF", dark: "#000000" } },

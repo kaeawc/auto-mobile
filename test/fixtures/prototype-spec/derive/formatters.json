@@ -1,0 +1,2166 @@
+{
+  "note": "Compare after normalizing U+202F and U+00A0 to plain space (CLDR 42 AM/PM spacing varies by ICU version). Known CLDR/engine divergence: en-GB foreign currency symbols (US$ vs $), narrow relative abbreviations/punctuation, zero relative now wording, and non-English locale data; these are structural cases, not verified Android/iOS overrides. Relative thresholds in milliseconds: second=1000, minute=60000, hour=3600000, day=86400000, month=2592000000 (30 days), year=31536000000 (365 days); choose the largest threshold <= abs(diff), truncate toward zero; abs(diff)<1000 uses localized now. No weeks or calendar arithmetic. engines overrides are reserved for measured platform differences.",
+  "environment": {
+    "locale": "en-US",
+    "timeZone": "UTC",
+    "nowMs": 1767268800000
+  },
+  "cases": [
+    {
+      "name": "en-US negative number",
+      "format": {
+        "number": {}
+      },
+      "of": -12345.678,
+      "locale": "en-US",
+      "expected": "-12,345.678",
+      "exact": true
+    },
+    {
+      "name": "en-US no grouping",
+      "format": {
+        "number": {
+          "grouping": false
+        }
+      },
+      "of": 12345.678,
+      "locale": "en-US",
+      "expected": "12345.678",
+      "exact": true
+    },
+    {
+      "name": "en-US fractions",
+      "format": {
+        "number": {
+          "minFraction": 2,
+          "maxFraction": 2
+        }
+      },
+      "of": 1234.5,
+      "locale": "en-US",
+      "expected": "1,234.50",
+      "exact": true
+    },
+    {
+      "name": "en-US rounding",
+      "format": {
+        "number": {
+          "maxFraction": 1
+        }
+      },
+      "of": 12.345,
+      "locale": "en-US",
+      "expected": "12.3",
+      "exact": true
+    },
+    {
+      "name": "en-US minimum fraction",
+      "format": {
+        "number": {
+          "minFraction": 5
+        }
+      },
+      "of": 12,
+      "locale": "en-US",
+      "expected": "12.00000",
+      "exact": true
+    },
+    {
+      "name": "en-US maximum fraction",
+      "format": {
+        "number": {
+          "minFraction": 20,
+          "maxFraction": 20
+        }
+      },
+      "of": 1,
+      "locale": "en-US",
+      "expected": "1.00000000000000000000",
+      "exact": true
+    },
+    {
+      "name": "en-US compact short 999",
+      "format": {
+        "compact": {
+          "style": "short"
+        }
+      },
+      "of": 999,
+      "locale": "en-US",
+      "expected": "999",
+      "exact": true
+    },
+    {
+      "name": "en-US compact short 1200",
+      "format": {
+        "compact": {
+          "style": "short"
+        }
+      },
+      "of": 1200,
+      "locale": "en-US",
+      "expected": "1.2K",
+      "exact": true
+    },
+    {
+      "name": "en-US compact short 1500000",
+      "format": {
+        "compact": {
+          "style": "short"
+        }
+      },
+      "of": 1500000,
+      "locale": "en-US",
+      "expected": "1.5M",
+      "exact": true
+    },
+    {
+      "name": "en-US compact long 999",
+      "format": {
+        "compact": {
+          "style": "long"
+        }
+      },
+      "of": 999,
+      "locale": "en-US",
+      "expected": "999",
+      "exact": true
+    },
+    {
+      "name": "en-US compact long 1200",
+      "format": {
+        "compact": {
+          "style": "long"
+        }
+      },
+      "of": 1200,
+      "locale": "en-US",
+      "expected": "1.2 thousand",
+      "exact": true
+    },
+    {
+      "name": "en-US compact long 1500000",
+      "format": {
+        "compact": {
+          "style": "long"
+        }
+      },
+      "of": 1500000,
+      "locale": "en-US",
+      "expected": "1.5 million",
+      "exact": true
+    },
+    {
+      "name": "en-US currency USD",
+      "format": {
+        "currency": {
+          "code": "USD"
+        }
+      },
+      "of": 1234.5,
+      "locale": "en-US",
+      "expected": "$1,234.50",
+      "exact": true
+    },
+    {
+      "name": "en-US currency EUR",
+      "format": {
+        "currency": {
+          "code": "EUR"
+        }
+      },
+      "of": 1234.5,
+      "locale": "en-US",
+      "expected": "€1,234.50",
+      "exact": true
+    },
+    {
+      "name": "en-US currency JPY",
+      "format": {
+        "currency": {
+          "code": "JPY"
+        }
+      },
+      "of": 1234.5,
+      "locale": "en-US",
+      "expected": "¥1,235",
+      "exact": true
+    },
+    {
+      "name": "en-US currency GBP",
+      "format": {
+        "currency": {
+          "code": "GBP"
+        }
+      },
+      "of": 1234.5,
+      "locale": "en-US",
+      "expected": "£1,234.50",
+      "exact": true
+    },
+    {
+      "name": "en-US percent ratio",
+      "format": {
+        "percent": {
+          "minFraction": 1,
+          "maxFraction": 1
+        }
+      },
+      "of": 0.256,
+      "locale": "en-US",
+      "expected": "25.6%",
+      "exact": true
+    },
+    {
+      "name": "en-US percent default",
+      "format": {
+        "percent": {}
+      },
+      "of": -0.256,
+      "locale": "en-US",
+      "expected": "-26%",
+      "exact": true
+    },
+    {
+      "name": "en-US date short",
+      "format": {
+        "date": {
+          "style": "short"
+        }
+      },
+      "of": "2026-01-05",
+      "locale": "en-US",
+      "expected": "1/5/26",
+      "exact": true
+    },
+    {
+      "name": "en-US time short UTC",
+      "format": {
+        "time": {
+          "style": "short"
+        }
+      },
+      "of": "2026-01-05T18:34:56.123Z",
+      "locale": "en-US",
+      "timeZone": "UTC",
+      "expected": "6:34 PM",
+      "exact": true
+    },
+    {
+      "name": "en-US time short America/New_York",
+      "format": {
+        "time": {
+          "style": "short"
+        }
+      },
+      "of": "2026-01-05T18:34:56.123Z",
+      "locale": "en-US",
+      "timeZone": "America/New_York",
+      "expected": "1:34 PM",
+      "exact": true
+    },
+    {
+      "name": "en-US time short Asia/Kolkata",
+      "format": {
+        "time": {
+          "style": "short"
+        }
+      },
+      "of": "2026-01-05T18:34:56.123Z",
+      "locale": "en-US",
+      "timeZone": "Asia/Kolkata",
+      "expected": "12:04 AM",
+      "exact": true
+    },
+    {
+      "name": "en-US date medium",
+      "format": {
+        "date": {
+          "style": "medium"
+        }
+      },
+      "of": "2026-01-05",
+      "locale": "en-US",
+      "expected": "Jan 5, 2026",
+      "exact": true
+    },
+    {
+      "name": "en-US time medium UTC",
+      "format": {
+        "time": {
+          "style": "medium"
+        }
+      },
+      "of": "2026-01-05T18:34:56.123Z",
+      "locale": "en-US",
+      "timeZone": "UTC",
+      "expected": "6:34:56 PM",
+      "exact": true
+    },
+    {
+      "name": "en-US time medium America/New_York",
+      "format": {
+        "time": {
+          "style": "medium"
+        }
+      },
+      "of": "2026-01-05T18:34:56.123Z",
+      "locale": "en-US",
+      "timeZone": "America/New_York",
+      "expected": "1:34:56 PM",
+      "exact": true
+    },
+    {
+      "name": "en-US time medium Asia/Kolkata",
+      "format": {
+        "time": {
+          "style": "medium"
+        }
+      },
+      "of": "2026-01-05T18:34:56.123Z",
+      "locale": "en-US",
+      "timeZone": "Asia/Kolkata",
+      "expected": "12:04:56 AM",
+      "exact": true
+    },
+    {
+      "name": "en-US date long",
+      "format": {
+        "date": {
+          "style": "long"
+        }
+      },
+      "of": "2026-01-05",
+      "locale": "en-US",
+      "expected": "January 5, 2026",
+      "exact": true
+    },
+    {
+      "name": "en-US time long UTC",
+      "format": {
+        "time": {
+          "style": "long"
+        }
+      },
+      "of": "2026-01-05T18:34:56.123Z",
+      "locale": "en-US",
+      "timeZone": "UTC",
+      "expected": "6:34:56 PM UTC",
+      "exact": true
+    },
+    {
+      "name": "en-US time long America/New_York",
+      "format": {
+        "time": {
+          "style": "long"
+        }
+      },
+      "of": "2026-01-05T18:34:56.123Z",
+      "locale": "en-US",
+      "timeZone": "America/New_York",
+      "expected": "1:34:56 PM EST",
+      "exact": true
+    },
+    {
+      "name": "en-US time long Asia/Kolkata",
+      "format": {
+        "time": {
+          "style": "long"
+        }
+      },
+      "of": "2026-01-05T18:34:56.123Z",
+      "locale": "en-US",
+      "timeZone": "Asia/Kolkata",
+      "expected": "12:04:56 AM GMT+5:30",
+      "exact": true
+    },
+    {
+      "name": "en-US epoch",
+      "format": {
+        "date": {}
+      },
+      "of": 1767571200000,
+      "locale": "en-US",
+      "expected": "Jan 5, 2026",
+      "exact": true
+    },
+    {
+      "name": "en-US offset ISO",
+      "format": {
+        "time": {}
+      },
+      "of": "2026-01-05T18:34:56+05:30",
+      "locale": "en-US",
+      "expected": "1:04 PM",
+      "exact": true
+    },
+    {
+      "name": "en-US relative narrow second -1",
+      "format": {
+        "relative": {
+          "style": "narrow"
+        }
+      },
+      "of": 1767268797200,
+      "locale": "en-US",
+      "nonEmpty": true,
+      "expected": "2s ago",
+      "exact": false
+    },
+    {
+      "name": "en-US relative narrow second 1",
+      "format": {
+        "relative": {
+          "style": "narrow"
+        }
+      },
+      "of": 1767268802800,
+      "locale": "en-US",
+      "nonEmpty": true,
+      "expected": "in 2s",
+      "exact": false
+    },
+    {
+      "name": "en-US relative narrow minute -1",
+      "format": {
+        "relative": {
+          "style": "narrow"
+        }
+      },
+      "of": 1767268632000,
+      "locale": "en-US",
+      "nonEmpty": true,
+      "expected": "2m ago",
+      "exact": false
+    },
+    {
+      "name": "en-US relative narrow minute 1",
+      "format": {
+        "relative": {
+          "style": "narrow"
+        }
+      },
+      "of": 1767268968000,
+      "locale": "en-US",
+      "nonEmpty": true,
+      "expected": "in 2m",
+      "exact": false
+    },
+    {
+      "name": "en-US relative narrow hour -1",
+      "format": {
+        "relative": {
+          "style": "narrow"
+        }
+      },
+      "of": 1767258720000,
+      "locale": "en-US",
+      "nonEmpty": true,
+      "expected": "2h ago",
+      "exact": false
+    },
+    {
+      "name": "en-US relative narrow hour 1",
+      "format": {
+        "relative": {
+          "style": "narrow"
+        }
+      },
+      "of": 1767278880000,
+      "locale": "en-US",
+      "nonEmpty": true,
+      "expected": "in 2h",
+      "exact": false
+    },
+    {
+      "name": "en-US relative narrow day -1",
+      "format": {
+        "relative": {
+          "style": "narrow"
+        }
+      },
+      "of": 1767026880000,
+      "locale": "en-US",
+      "nonEmpty": true,
+      "expected": "2d ago",
+      "exact": false
+    },
+    {
+      "name": "en-US relative narrow day 1",
+      "format": {
+        "relative": {
+          "style": "narrow"
+        }
+      },
+      "of": 1767510720000,
+      "locale": "en-US",
+      "nonEmpty": true,
+      "expected": "in 2d",
+      "exact": false
+    },
+    {
+      "name": "en-US relative narrow month -1",
+      "format": {
+        "relative": {
+          "style": "narrow"
+        }
+      },
+      "of": 1760011200000,
+      "locale": "en-US",
+      "nonEmpty": true,
+      "expected": "2mo ago",
+      "exact": false
+    },
+    {
+      "name": "en-US relative narrow month 1",
+      "format": {
+        "relative": {
+          "style": "narrow"
+        }
+      },
+      "of": 1774526400000,
+      "locale": "en-US",
+      "nonEmpty": true,
+      "expected": "in 2mo",
+      "exact": false
+    },
+    {
+      "name": "en-US relative narrow year -1",
+      "format": {
+        "relative": {
+          "style": "narrow"
+        }
+      },
+      "of": 1678968000000,
+      "locale": "en-US",
+      "nonEmpty": true,
+      "expected": "2y ago",
+      "exact": false
+    },
+    {
+      "name": "en-US relative narrow year 1",
+      "format": {
+        "relative": {
+          "style": "narrow"
+        }
+      },
+      "of": 1855569600000,
+      "locale": "en-US",
+      "nonEmpty": true,
+      "expected": "in 2y",
+      "exact": false
+    },
+    {
+      "name": "en-US relative short second -1",
+      "format": {
+        "relative": {
+          "style": "short"
+        }
+      },
+      "of": 1767268797200,
+      "locale": "en-US",
+      "expected": "2 sec. ago",
+      "exact": true
+    },
+    {
+      "name": "en-US relative short second 1",
+      "format": {
+        "relative": {
+          "style": "short"
+        }
+      },
+      "of": 1767268802800,
+      "locale": "en-US",
+      "expected": "in 2 sec.",
+      "exact": true
+    },
+    {
+      "name": "en-US relative short minute -1",
+      "format": {
+        "relative": {
+          "style": "short"
+        }
+      },
+      "of": 1767268632000,
+      "locale": "en-US",
+      "expected": "2 min. ago",
+      "exact": true
+    },
+    {
+      "name": "en-US relative short minute 1",
+      "format": {
+        "relative": {
+          "style": "short"
+        }
+      },
+      "of": 1767268968000,
+      "locale": "en-US",
+      "expected": "in 2 min.",
+      "exact": true
+    },
+    {
+      "name": "en-US relative short hour -1",
+      "format": {
+        "relative": {
+          "style": "short"
+        }
+      },
+      "of": 1767258720000,
+      "locale": "en-US",
+      "expected": "2 hr. ago",
+      "exact": true
+    },
+    {
+      "name": "en-US relative short hour 1",
+      "format": {
+        "relative": {
+          "style": "short"
+        }
+      },
+      "of": 1767278880000,
+      "locale": "en-US",
+      "expected": "in 2 hr.",
+      "exact": true
+    },
+    {
+      "name": "en-US relative short day -1",
+      "format": {
+        "relative": {
+          "style": "short"
+        }
+      },
+      "of": 1767026880000,
+      "locale": "en-US",
+      "expected": "2 days ago",
+      "exact": true
+    },
+    {
+      "name": "en-US relative short day 1",
+      "format": {
+        "relative": {
+          "style": "short"
+        }
+      },
+      "of": 1767510720000,
+      "locale": "en-US",
+      "expected": "in 2 days",
+      "exact": true
+    },
+    {
+      "name": "en-US relative short month -1",
+      "format": {
+        "relative": {
+          "style": "short"
+        }
+      },
+      "of": 1760011200000,
+      "locale": "en-US",
+      "expected": "2 mo. ago",
+      "exact": true
+    },
+    {
+      "name": "en-US relative short month 1",
+      "format": {
+        "relative": {
+          "style": "short"
+        }
+      },
+      "of": 1774526400000,
+      "locale": "en-US",
+      "expected": "in 2 mo.",
+      "exact": true
+    },
+    {
+      "name": "en-US relative short year -1",
+      "format": {
+        "relative": {
+          "style": "short"
+        }
+      },
+      "of": 1678968000000,
+      "locale": "en-US",
+      "expected": "2 yr. ago",
+      "exact": true
+    },
+    {
+      "name": "en-US relative short year 1",
+      "format": {
+        "relative": {
+          "style": "short"
+        }
+      },
+      "of": 1855569600000,
+      "locale": "en-US",
+      "expected": "in 2 yr.",
+      "exact": true
+    },
+    {
+      "name": "en-US relative long second -1",
+      "format": {
+        "relative": {
+          "style": "long"
+        }
+      },
+      "of": 1767268797200,
+      "locale": "en-US",
+      "expected": "2 seconds ago",
+      "exact": true
+    },
+    {
+      "name": "en-US relative long second 1",
+      "format": {
+        "relative": {
+          "style": "long"
+        }
+      },
+      "of": 1767268802800,
+      "locale": "en-US",
+      "expected": "in 2 seconds",
+      "exact": true
+    },
+    {
+      "name": "en-US relative long minute -1",
+      "format": {
+        "relative": {
+          "style": "long"
+        }
+      },
+      "of": 1767268632000,
+      "locale": "en-US",
+      "expected": "2 minutes ago",
+      "exact": true
+    },
+    {
+      "name": "en-US relative long minute 1",
+      "format": {
+        "relative": {
+          "style": "long"
+        }
+      },
+      "of": 1767268968000,
+      "locale": "en-US",
+      "expected": "in 2 minutes",
+      "exact": true
+    },
+    {
+      "name": "en-US relative long hour -1",
+      "format": {
+        "relative": {
+          "style": "long"
+        }
+      },
+      "of": 1767258720000,
+      "locale": "en-US",
+      "expected": "2 hours ago",
+      "exact": true
+    },
+    {
+      "name": "en-US relative long hour 1",
+      "format": {
+        "relative": {
+          "style": "long"
+        }
+      },
+      "of": 1767278880000,
+      "locale": "en-US",
+      "expected": "in 2 hours",
+      "exact": true
+    },
+    {
+      "name": "en-US relative long day -1",
+      "format": {
+        "relative": {
+          "style": "long"
+        }
+      },
+      "of": 1767026880000,
+      "locale": "en-US",
+      "expected": "2 days ago",
+      "exact": true
+    },
+    {
+      "name": "en-US relative long day 1",
+      "format": {
+        "relative": {
+          "style": "long"
+        }
+      },
+      "of": 1767510720000,
+      "locale": "en-US",
+      "expected": "in 2 days",
+      "exact": true
+    },
+    {
+      "name": "en-US relative long month -1",
+      "format": {
+        "relative": {
+          "style": "long"
+        }
+      },
+      "of": 1760011200000,
+      "locale": "en-US",
+      "expected": "2 months ago",
+      "exact": true
+    },
+    {
+      "name": "en-US relative long month 1",
+      "format": {
+        "relative": {
+          "style": "long"
+        }
+      },
+      "of": 1774526400000,
+      "locale": "en-US",
+      "expected": "in 2 months",
+      "exact": true
+    },
+    {
+      "name": "en-US relative long year -1",
+      "format": {
+        "relative": {
+          "style": "long"
+        }
+      },
+      "of": 1678968000000,
+      "locale": "en-US",
+      "expected": "2 years ago",
+      "exact": true
+    },
+    {
+      "name": "en-US relative long year 1",
+      "format": {
+        "relative": {
+          "style": "long"
+        }
+      },
+      "of": 1855569600000,
+      "locale": "en-US",
+      "expected": "in 2 years",
+      "exact": true
+    },
+    {
+      "name": "en-US now",
+      "format": {
+        "relative": {}
+      },
+      "of": 1767268800000,
+      "locale": "en-US",
+      "nonEmpty": true,
+      "expected": "now",
+      "exact": false
+    },
+    {
+      "name": "en-GB negative number",
+      "format": {
+        "number": {}
+      },
+      "of": -12345.678,
+      "locale": "en-GB",
+      "expected": "-12,345.678",
+      "exact": true
+    },
+    {
+      "name": "en-GB no grouping",
+      "format": {
+        "number": {
+          "grouping": false
+        }
+      },
+      "of": 12345.678,
+      "locale": "en-GB",
+      "expected": "12345.678",
+      "exact": true
+    },
+    {
+      "name": "en-GB fractions",
+      "format": {
+        "number": {
+          "minFraction": 2,
+          "maxFraction": 2
+        }
+      },
+      "of": 1234.5,
+      "locale": "en-GB",
+      "expected": "1,234.50",
+      "exact": true
+    },
+    {
+      "name": "en-GB rounding",
+      "format": {
+        "number": {
+          "maxFraction": 1
+        }
+      },
+      "of": 12.345,
+      "locale": "en-GB",
+      "expected": "12.3",
+      "exact": true
+    },
+    {
+      "name": "en-GB minimum fraction",
+      "format": {
+        "number": {
+          "minFraction": 5
+        }
+      },
+      "of": 12,
+      "locale": "en-GB",
+      "expected": "12.00000",
+      "exact": true
+    },
+    {
+      "name": "en-GB maximum fraction",
+      "format": {
+        "number": {
+          "minFraction": 20,
+          "maxFraction": 20
+        }
+      },
+      "of": 1,
+      "locale": "en-GB",
+      "expected": "1.00000000000000000000",
+      "exact": true
+    },
+    {
+      "name": "en-GB compact short 999",
+      "format": {
+        "compact": {
+          "style": "short"
+        }
+      },
+      "of": 999,
+      "locale": "en-GB",
+      "expected": "999",
+      "exact": true
+    },
+    {
+      "name": "en-GB compact short 1200",
+      "format": {
+        "compact": {
+          "style": "short"
+        }
+      },
+      "of": 1200,
+      "locale": "en-GB",
+      "expected": "1.2k",
+      "exact": true
+    },
+    {
+      "name": "en-GB compact short 1500000",
+      "format": {
+        "compact": {
+          "style": "short"
+        }
+      },
+      "of": 1500000,
+      "locale": "en-GB",
+      "expected": "1.5m",
+      "exact": true
+    },
+    {
+      "name": "en-GB compact long 999",
+      "format": {
+        "compact": {
+          "style": "long"
+        }
+      },
+      "of": 999,
+      "locale": "en-GB",
+      "expected": "999",
+      "exact": true
+    },
+    {
+      "name": "en-GB compact long 1200",
+      "format": {
+        "compact": {
+          "style": "long"
+        }
+      },
+      "of": 1200,
+      "locale": "en-GB",
+      "expected": "1.2 thousand",
+      "exact": true
+    },
+    {
+      "name": "en-GB compact long 1500000",
+      "format": {
+        "compact": {
+          "style": "long"
+        }
+      },
+      "of": 1500000,
+      "locale": "en-GB",
+      "expected": "1.5 million",
+      "exact": true
+    },
+    {
+      "name": "en-GB currency USD",
+      "format": {
+        "currency": {
+          "code": "USD"
+        }
+      },
+      "of": 1234.5,
+      "locale": "en-GB",
+      "nonEmpty": true,
+      "expected": "US$1,234.50",
+      "exact": false
+    },
+    {
+      "name": "en-GB currency EUR",
+      "format": {
+        "currency": {
+          "code": "EUR"
+        }
+      },
+      "of": 1234.5,
+      "locale": "en-GB",
+      "nonEmpty": true,
+      "expected": "€1,234.50",
+      "exact": false
+    },
+    {
+      "name": "en-GB currency JPY",
+      "format": {
+        "currency": {
+          "code": "JPY"
+        }
+      },
+      "of": 1234.5,
+      "locale": "en-GB",
+      "nonEmpty": true,
+      "expected": "JP¥1,235",
+      "exact": false
+    },
+    {
+      "name": "en-GB currency GBP",
+      "format": {
+        "currency": {
+          "code": "GBP"
+        }
+      },
+      "of": 1234.5,
+      "locale": "en-GB",
+      "expected": "£1,234.50",
+      "exact": true
+    },
+    {
+      "name": "en-GB percent ratio",
+      "format": {
+        "percent": {
+          "minFraction": 1,
+          "maxFraction": 1
+        }
+      },
+      "of": 0.256,
+      "locale": "en-GB",
+      "expected": "25.6%",
+      "exact": true
+    },
+    {
+      "name": "en-GB percent default",
+      "format": {
+        "percent": {}
+      },
+      "of": -0.256,
+      "locale": "en-GB",
+      "expected": "-26%",
+      "exact": true
+    },
+    {
+      "name": "en-GB date short",
+      "format": {
+        "date": {
+          "style": "short"
+        }
+      },
+      "of": "2026-01-05",
+      "locale": "en-GB",
+      "expected": "05/01/2026",
+      "exact": true
+    },
+    {
+      "name": "en-GB time short UTC",
+      "format": {
+        "time": {
+          "style": "short"
+        }
+      },
+      "of": "2026-01-05T18:34:56.123Z",
+      "locale": "en-GB",
+      "timeZone": "UTC",
+      "expected": "18:34",
+      "exact": true
+    },
+    {
+      "name": "en-GB time short America/New_York",
+      "format": {
+        "time": {
+          "style": "short"
+        }
+      },
+      "of": "2026-01-05T18:34:56.123Z",
+      "locale": "en-GB",
+      "timeZone": "America/New_York",
+      "expected": "13:34",
+      "exact": true
+    },
+    {
+      "name": "en-GB time short Asia/Kolkata",
+      "format": {
+        "time": {
+          "style": "short"
+        }
+      },
+      "of": "2026-01-05T18:34:56.123Z",
+      "locale": "en-GB",
+      "timeZone": "Asia/Kolkata",
+      "expected": "00:04",
+      "exact": true
+    },
+    {
+      "name": "en-GB date medium",
+      "format": {
+        "date": {
+          "style": "medium"
+        }
+      },
+      "of": "2026-01-05",
+      "locale": "en-GB",
+      "expected": "5 Jan 2026",
+      "exact": true
+    },
+    {
+      "name": "en-GB time medium UTC",
+      "format": {
+        "time": {
+          "style": "medium"
+        }
+      },
+      "of": "2026-01-05T18:34:56.123Z",
+      "locale": "en-GB",
+      "timeZone": "UTC",
+      "expected": "18:34:56",
+      "exact": true
+    },
+    {
+      "name": "en-GB time medium America/New_York",
+      "format": {
+        "time": {
+          "style": "medium"
+        }
+      },
+      "of": "2026-01-05T18:34:56.123Z",
+      "locale": "en-GB",
+      "timeZone": "America/New_York",
+      "expected": "13:34:56",
+      "exact": true
+    },
+    {
+      "name": "en-GB time medium Asia/Kolkata",
+      "format": {
+        "time": {
+          "style": "medium"
+        }
+      },
+      "of": "2026-01-05T18:34:56.123Z",
+      "locale": "en-GB",
+      "timeZone": "Asia/Kolkata",
+      "expected": "00:04:56",
+      "exact": true
+    },
+    {
+      "name": "en-GB date long",
+      "format": {
+        "date": {
+          "style": "long"
+        }
+      },
+      "of": "2026-01-05",
+      "locale": "en-GB",
+      "expected": "5 January 2026",
+      "exact": true
+    },
+    {
+      "name": "en-GB time long UTC",
+      "format": {
+        "time": {
+          "style": "long"
+        }
+      },
+      "of": "2026-01-05T18:34:56.123Z",
+      "locale": "en-GB",
+      "timeZone": "UTC",
+      "expected": "18:34:56 UTC",
+      "exact": true
+    },
+    {
+      "name": "en-GB time long America/New_York",
+      "format": {
+        "time": {
+          "style": "long"
+        }
+      },
+      "of": "2026-01-05T18:34:56.123Z",
+      "locale": "en-GB",
+      "timeZone": "America/New_York",
+      "expected": "13:34:56 GMT-5",
+      "exact": true
+    },
+    {
+      "name": "en-GB time long Asia/Kolkata",
+      "format": {
+        "time": {
+          "style": "long"
+        }
+      },
+      "of": "2026-01-05T18:34:56.123Z",
+      "locale": "en-GB",
+      "timeZone": "Asia/Kolkata",
+      "expected": "00:04:56 GMT+5:30",
+      "exact": true
+    },
+    {
+      "name": "en-GB epoch",
+      "format": {
+        "date": {}
+      },
+      "of": 1767571200000,
+      "locale": "en-GB",
+      "expected": "5 Jan 2026",
+      "exact": true
+    },
+    {
+      "name": "en-GB offset ISO",
+      "format": {
+        "time": {}
+      },
+      "of": "2026-01-05T18:34:56+05:30",
+      "locale": "en-GB",
+      "expected": "13:04",
+      "exact": true
+    },
+    {
+      "name": "en-GB relative narrow second -1",
+      "format": {
+        "relative": {
+          "style": "narrow"
+        }
+      },
+      "of": 1767268797200,
+      "locale": "en-GB",
+      "nonEmpty": true,
+      "expected": "2 sec ago",
+      "exact": false
+    },
+    {
+      "name": "en-GB relative narrow second 1",
+      "format": {
+        "relative": {
+          "style": "narrow"
+        }
+      },
+      "of": 1767268802800,
+      "locale": "en-GB",
+      "nonEmpty": true,
+      "expected": "in 2 sec",
+      "exact": false
+    },
+    {
+      "name": "en-GB relative narrow minute -1",
+      "format": {
+        "relative": {
+          "style": "narrow"
+        }
+      },
+      "of": 1767268632000,
+      "locale": "en-GB",
+      "nonEmpty": true,
+      "expected": "2 min ago",
+      "exact": false
+    },
+    {
+      "name": "en-GB relative narrow minute 1",
+      "format": {
+        "relative": {
+          "style": "narrow"
+        }
+      },
+      "of": 1767268968000,
+      "locale": "en-GB",
+      "nonEmpty": true,
+      "expected": "in 2 min",
+      "exact": false
+    },
+    {
+      "name": "en-GB relative narrow hour -1",
+      "format": {
+        "relative": {
+          "style": "narrow"
+        }
+      },
+      "of": 1767258720000,
+      "locale": "en-GB",
+      "nonEmpty": true,
+      "expected": "2 hr ago",
+      "exact": false
+    },
+    {
+      "name": "en-GB relative narrow hour 1",
+      "format": {
+        "relative": {
+          "style": "narrow"
+        }
+      },
+      "of": 1767278880000,
+      "locale": "en-GB",
+      "nonEmpty": true,
+      "expected": "in 2 hr",
+      "exact": false
+    },
+    {
+      "name": "en-GB relative narrow day -1",
+      "format": {
+        "relative": {
+          "style": "narrow"
+        }
+      },
+      "of": 1767026880000,
+      "locale": "en-GB",
+      "nonEmpty": true,
+      "expected": "2 days ago",
+      "exact": false
+    },
+    {
+      "name": "en-GB relative narrow day 1",
+      "format": {
+        "relative": {
+          "style": "narrow"
+        }
+      },
+      "of": 1767510720000,
+      "locale": "en-GB",
+      "nonEmpty": true,
+      "expected": "in 2 days",
+      "exact": false
+    },
+    {
+      "name": "en-GB relative narrow month -1",
+      "format": {
+        "relative": {
+          "style": "narrow"
+        }
+      },
+      "of": 1760011200000,
+      "locale": "en-GB",
+      "nonEmpty": true,
+      "expected": "2 mo ago",
+      "exact": false
+    },
+    {
+      "name": "en-GB relative narrow month 1",
+      "format": {
+        "relative": {
+          "style": "narrow"
+        }
+      },
+      "of": 1774526400000,
+      "locale": "en-GB",
+      "nonEmpty": true,
+      "expected": "in 2 mo",
+      "exact": false
+    },
+    {
+      "name": "en-GB relative narrow year -1",
+      "format": {
+        "relative": {
+          "style": "narrow"
+        }
+      },
+      "of": 1678968000000,
+      "locale": "en-GB",
+      "nonEmpty": true,
+      "expected": "2 yr ago",
+      "exact": false
+    },
+    {
+      "name": "en-GB relative narrow year 1",
+      "format": {
+        "relative": {
+          "style": "narrow"
+        }
+      },
+      "of": 1855569600000,
+      "locale": "en-GB",
+      "nonEmpty": true,
+      "expected": "in 2 yr",
+      "exact": false
+    },
+    {
+      "name": "en-GB relative short second -1",
+      "format": {
+        "relative": {
+          "style": "short"
+        }
+      },
+      "of": 1767268797200,
+      "locale": "en-GB",
+      "expected": "2 sec ago",
+      "exact": true
+    },
+    {
+      "name": "en-GB relative short second 1",
+      "format": {
+        "relative": {
+          "style": "short"
+        }
+      },
+      "of": 1767268802800,
+      "locale": "en-GB",
+      "expected": "in 2 sec",
+      "exact": true
+    },
+    {
+      "name": "en-GB relative short minute -1",
+      "format": {
+        "relative": {
+          "style": "short"
+        }
+      },
+      "of": 1767268632000,
+      "locale": "en-GB",
+      "expected": "2 min ago",
+      "exact": true
+    },
+    {
+      "name": "en-GB relative short minute 1",
+      "format": {
+        "relative": {
+          "style": "short"
+        }
+      },
+      "of": 1767268968000,
+      "locale": "en-GB",
+      "expected": "in 2 min",
+      "exact": true
+    },
+    {
+      "name": "en-GB relative short hour -1",
+      "format": {
+        "relative": {
+          "style": "short"
+        }
+      },
+      "of": 1767258720000,
+      "locale": "en-GB",
+      "expected": "2 hr ago",
+      "exact": true
+    },
+    {
+      "name": "en-GB relative short hour 1",
+      "format": {
+        "relative": {
+          "style": "short"
+        }
+      },
+      "of": 1767278880000,
+      "locale": "en-GB",
+      "expected": "in 2 hr",
+      "exact": true
+    },
+    {
+      "name": "en-GB relative short day -1",
+      "format": {
+        "relative": {
+          "style": "short"
+        }
+      },
+      "of": 1767026880000,
+      "locale": "en-GB",
+      "expected": "2 days ago",
+      "exact": true
+    },
+    {
+      "name": "en-GB relative short day 1",
+      "format": {
+        "relative": {
+          "style": "short"
+        }
+      },
+      "of": 1767510720000,
+      "locale": "en-GB",
+      "expected": "in 2 days",
+      "exact": true
+    },
+    {
+      "name": "en-GB relative short month -1",
+      "format": {
+        "relative": {
+          "style": "short"
+        }
+      },
+      "of": 1760011200000,
+      "locale": "en-GB",
+      "expected": "2 mo ago",
+      "exact": true
+    },
+    {
+      "name": "en-GB relative short month 1",
+      "format": {
+        "relative": {
+          "style": "short"
+        }
+      },
+      "of": 1774526400000,
+      "locale": "en-GB",
+      "expected": "in 2 mo",
+      "exact": true
+    },
+    {
+      "name": "en-GB relative short year -1",
+      "format": {
+        "relative": {
+          "style": "short"
+        }
+      },
+      "of": 1678968000000,
+      "locale": "en-GB",
+      "expected": "2 yr ago",
+      "exact": true
+    },
+    {
+      "name": "en-GB relative short year 1",
+      "format": {
+        "relative": {
+          "style": "short"
+        }
+      },
+      "of": 1855569600000,
+      "locale": "en-GB",
+      "expected": "in 2 yr",
+      "exact": true
+    },
+    {
+      "name": "en-GB relative long second -1",
+      "format": {
+        "relative": {
+          "style": "long"
+        }
+      },
+      "of": 1767268797200,
+      "locale": "en-GB",
+      "expected": "2 seconds ago",
+      "exact": true
+    },
+    {
+      "name": "en-GB relative long second 1",
+      "format": {
+        "relative": {
+          "style": "long"
+        }
+      },
+      "of": 1767268802800,
+      "locale": "en-GB",
+      "expected": "in 2 seconds",
+      "exact": true
+    },
+    {
+      "name": "en-GB relative long minute -1",
+      "format": {
+        "relative": {
+          "style": "long"
+        }
+      },
+      "of": 1767268632000,
+      "locale": "en-GB",
+      "expected": "2 minutes ago",
+      "exact": true
+    },
+    {
+      "name": "en-GB relative long minute 1",
+      "format": {
+        "relative": {
+          "style": "long"
+        }
+      },
+      "of": 1767268968000,
+      "locale": "en-GB",
+      "expected": "in 2 minutes",
+      "exact": true
+    },
+    {
+      "name": "en-GB relative long hour -1",
+      "format": {
+        "relative": {
+          "style": "long"
+        }
+      },
+      "of": 1767258720000,
+      "locale": "en-GB",
+      "expected": "2 hours ago",
+      "exact": true
+    },
+    {
+      "name": "en-GB relative long hour 1",
+      "format": {
+        "relative": {
+          "style": "long"
+        }
+      },
+      "of": 1767278880000,
+      "locale": "en-GB",
+      "expected": "in 2 hours",
+      "exact": true
+    },
+    {
+      "name": "en-GB relative long day -1",
+      "format": {
+        "relative": {
+          "style": "long"
+        }
+      },
+      "of": 1767026880000,
+      "locale": "en-GB",
+      "expected": "2 days ago",
+      "exact": true
+    },
+    {
+      "name": "en-GB relative long day 1",
+      "format": {
+        "relative": {
+          "style": "long"
+        }
+      },
+      "of": 1767510720000,
+      "locale": "en-GB",
+      "expected": "in 2 days",
+      "exact": true
+    },
+    {
+      "name": "en-GB relative long month -1",
+      "format": {
+        "relative": {
+          "style": "long"
+        }
+      },
+      "of": 1760011200000,
+      "locale": "en-GB",
+      "expected": "2 months ago",
+      "exact": true
+    },
+    {
+      "name": "en-GB relative long month 1",
+      "format": {
+        "relative": {
+          "style": "long"
+        }
+      },
+      "of": 1774526400000,
+      "locale": "en-GB",
+      "expected": "in 2 months",
+      "exact": true
+    },
+    {
+      "name": "en-GB relative long year -1",
+      "format": {
+        "relative": {
+          "style": "long"
+        }
+      },
+      "of": 1678968000000,
+      "locale": "en-GB",
+      "expected": "2 years ago",
+      "exact": true
+    },
+    {
+      "name": "en-GB relative long year 1",
+      "format": {
+        "relative": {
+          "style": "long"
+        }
+      },
+      "of": 1855569600000,
+      "locale": "en-GB",
+      "expected": "in 2 years",
+      "exact": true
+    },
+    {
+      "name": "en-GB now",
+      "format": {
+        "relative": {}
+      },
+      "of": 1767268800000,
+      "locale": "en-GB",
+      "nonEmpty": true,
+      "expected": "now",
+      "exact": false
+    },
+    {
+      "name": "threshold -999",
+      "format": {
+        "relative": {}
+      },
+      "of": 1767268799001,
+      "nonEmpty": true,
+      "expected": "now",
+      "exact": false
+    },
+    {
+      "name": "threshold 0",
+      "format": {
+        "relative": {}
+      },
+      "of": 1767268800000,
+      "nonEmpty": true,
+      "expected": "now",
+      "exact": false
+    },
+    {
+      "name": "threshold 999",
+      "format": {
+        "relative": {}
+      },
+      "of": 1767268800999,
+      "nonEmpty": true,
+      "expected": "now",
+      "exact": false
+    },
+    {
+      "name": "threshold 1000",
+      "format": {
+        "relative": {}
+      },
+      "of": 1767268801000,
+      "expected": "in 1 second",
+      "exact": true
+    },
+    {
+      "name": "threshold 59999",
+      "format": {
+        "relative": {}
+      },
+      "of": 1767268859999,
+      "expected": "in 59 seconds",
+      "exact": true
+    },
+    {
+      "name": "threshold 60000",
+      "format": {
+        "relative": {}
+      },
+      "of": 1767268860000,
+      "expected": "in 1 minute",
+      "exact": true
+    },
+    {
+      "name": "threshold 3599999",
+      "format": {
+        "relative": {}
+      },
+      "of": 1767272399999,
+      "expected": "in 59 minutes",
+      "exact": true
+    },
+    {
+      "name": "threshold 3600000",
+      "format": {
+        "relative": {}
+      },
+      "of": 1767272400000,
+      "expected": "in 1 hour",
+      "exact": true
+    },
+    {
+      "name": "threshold 86399999",
+      "format": {
+        "relative": {}
+      },
+      "of": 1767355199999,
+      "expected": "in 23 hours",
+      "exact": true
+    },
+    {
+      "name": "threshold 86400000",
+      "format": {
+        "relative": {}
+      },
+      "of": 1767355200000,
+      "expected": "in 1 day",
+      "exact": true
+    },
+    {
+      "name": "threshold 2591999999",
+      "format": {
+        "relative": {}
+      },
+      "of": 1769860799999,
+      "expected": "in 29 days",
+      "exact": true
+    },
+    {
+      "name": "threshold 2592000000",
+      "format": {
+        "relative": {}
+      },
+      "of": 1769860800000,
+      "expected": "in 1 month",
+      "exact": true
+    },
+    {
+      "name": "threshold 31535999999",
+      "format": {
+        "relative": {}
+      },
+      "of": 1798804799999,
+      "expected": "in 12 months",
+      "exact": true
+    },
+    {
+      "name": "threshold 31536000000",
+      "format": {
+        "relative": {}
+      },
+      "of": 1798804800000,
+      "expected": "in 1 year",
+      "exact": true
+    },
+    {
+      "name": "de-DE number",
+      "format": {
+        "number": {}
+      },
+      "of": 1234.56,
+      "locale": "de-DE",
+      "nonEmpty": true,
+      "expected": "1.234,56",
+      "exact": false
+    },
+    {
+      "name": "de-DE compact",
+      "format": {
+        "compact": {}
+      },
+      "of": 1234.56,
+      "locale": "de-DE",
+      "nonEmpty": true,
+      "expected": "1235",
+      "exact": false
+    },
+    {
+      "name": "de-DE currency",
+      "format": {
+        "currency": {
+          "code": "EUR"
+        }
+      },
+      "of": 1234.56,
+      "locale": "de-DE",
+      "nonEmpty": true,
+      "expected": "1.234,56 €",
+      "exact": false
+    },
+    {
+      "name": "de-DE percent",
+      "format": {
+        "percent": {}
+      },
+      "of": 1234.56,
+      "locale": "de-DE",
+      "nonEmpty": true,
+      "expected": "123.456 %",
+      "exact": false
+    },
+    {
+      "name": "de-DE date",
+      "format": {
+        "date": {}
+      },
+      "of": 1767265200000,
+      "locale": "de-DE",
+      "nonEmpty": true,
+      "expected": "01.01.2026",
+      "exact": false
+    },
+    {
+      "name": "de-DE time",
+      "format": {
+        "time": {}
+      },
+      "of": 1767265200000,
+      "locale": "de-DE",
+      "nonEmpty": true,
+      "expected": "11:00",
+      "exact": false
+    },
+    {
+      "name": "de-DE relative",
+      "format": {
+        "relative": {}
+      },
+      "of": 1767265200000,
+      "locale": "de-DE",
+      "nonEmpty": true,
+      "expected": "vor 1 Stunde",
+      "exact": false
+    },
+    {
+      "name": "ja-JP number",
+      "format": {
+        "number": {}
+      },
+      "of": 1234.56,
+      "locale": "ja-JP",
+      "nonEmpty": true,
+      "expected": "1,234.56",
+      "exact": false
+    },
+    {
+      "name": "ja-JP compact",
+      "format": {
+        "compact": {}
+      },
+      "of": 1234.56,
+      "locale": "ja-JP",
+      "nonEmpty": true,
+      "expected": "1235",
+      "exact": false
+    },
+    {
+      "name": "ja-JP currency",
+      "format": {
+        "currency": {
+          "code": "EUR"
+        }
+      },
+      "of": 1234.56,
+      "locale": "ja-JP",
+      "nonEmpty": true,
+      "expected": "€1,234.56",
+      "exact": false
+    },
+    {
+      "name": "ja-JP percent",
+      "format": {
+        "percent": {}
+      },
+      "of": 1234.56,
+      "locale": "ja-JP",
+      "nonEmpty": true,
+      "expected": "123,456%",
+      "exact": false
+    },
+    {
+      "name": "ja-JP date",
+      "format": {
+        "date": {}
+      },
+      "of": 1767265200000,
+      "locale": "ja-JP",
+      "nonEmpty": true,
+      "expected": "2026/01/01",
+      "exact": false
+    },
+    {
+      "name": "ja-JP time",
+      "format": {
+        "time": {}
+      },
+      "of": 1767265200000,
+      "locale": "ja-JP",
+      "nonEmpty": true,
+      "expected": "11:00",
+      "exact": false
+    },
+    {
+      "name": "ja-JP relative",
+      "format": {
+        "relative": {}
+      },
+      "of": 1767265200000,
+      "locale": "ja-JP",
+      "nonEmpty": true,
+      "expected": "1 時間前",
+      "exact": false
+    },
+    {
+      "name": "ar-EG number",
+      "format": {
+        "number": {}
+      },
+      "of": 1234.56,
+      "locale": "ar-EG",
+      "nonEmpty": true,
+      "expected": "١٬٢٣٤٫٥٦",
+      "exact": false
+    },
+    {
+      "name": "ar-EG compact",
+      "format": {
+        "compact": {}
+      },
+      "of": 1234.56,
+      "locale": "ar-EG",
+      "nonEmpty": true,
+      "expected": "١٫٢ ألف",
+      "exact": false
+    },
+    {
+      "name": "ar-EG currency",
+      "format": {
+        "currency": {
+          "code": "EUR"
+        }
+      },
+      "of": 1234.56,
+      "locale": "ar-EG",
+      "nonEmpty": true,
+      "expected": "‏١٬٢٣٤٫٥٦ €",
+      "exact": false
+    },
+    {
+      "name": "ar-EG percent",
+      "format": {
+        "percent": {}
+      },
+      "of": 1234.56,
+      "locale": "ar-EG",
+      "nonEmpty": true,
+      "expected": "١٢٣٬٤٥٦٪؜",
+      "exact": false
+    },
+    {
+      "name": "ar-EG date",
+      "format": {
+        "date": {}
+      },
+      "of": 1767265200000,
+      "locale": "ar-EG",
+      "nonEmpty": true,
+      "expected": "٠١‏/٠١‏/٢٠٢٦",
+      "exact": false
+    },
+    {
+      "name": "ar-EG time",
+      "format": {
+        "time": {}
+      },
+      "of": 1767265200000,
+      "locale": "ar-EG",
+      "nonEmpty": true,
+      "expected": "١١:٠٠ ص",
+      "exact": false
+    },
+    {
+      "name": "ar-EG relative",
+      "format": {
+        "relative": {}
+      },
+      "of": 1767265200000,
+      "locale": "ar-EG",
+      "nonEmpty": true,
+      "expected": "قبل ساعة واحدة",
+      "exact": false
+    },
+    {
+      "name": "number string",
+      "format": {
+        "number": {}
+      },
+      "of": "12",
+      "expected": "",
+      "exact": true
+    },
+    {
+      "name": "boolean",
+      "format": {
+        "currency": {
+          "code": "USD"
+        }
+      },
+      "of": true,
+      "expected": "",
+      "exact": true
+    },
+    {
+      "name": "null",
+      "format": {
+        "number": {}
+      },
+      "of": null,
+      "expected": "",
+      "exact": true
+    },
+    {
+      "name": "object",
+      "format": {
+        "number": {}
+      },
+      "of": {},
+      "expected": "",
+      "exact": true
+    },
+    {
+      "name": "array",
+      "format": {
+        "percent": {}
+      },
+      "of": [],
+      "expected": "",
+      "exact": true
+    },
+    {
+      "name": "invalid date",
+      "format": {
+        "date": {}
+      },
+      "of": "no date",
+      "expected": "",
+      "exact": true
+    },
+    {
+      "name": "calendar overflow",
+      "format": {
+        "date": {}
+      },
+      "of": "2026-02-30",
+      "expected": "",
+      "exact": true
+    },
+    {
+      "name": "no offset",
+      "format": {
+        "time": {}
+      },
+      "of": "2026-01-05T12:00:00",
+      "expected": "",
+      "exact": true
+    },
+    {
+      "name": "fractional epoch",
+      "format": {
+        "date": {}
+      },
+      "of": 1.5,
+      "expected": "",
+      "exact": true
+    },
+    {
+      "name": "epoch range",
+      "format": {
+        "relative": {}
+      },
+      "of": 8640000000000001,
+      "expected": "",
+      "exact": true
+    },
+    {
+      "name": "bad offset",
+      "format": {
+        "date": {}
+      },
+      "of": "2026-01-05T12:00:00+25:00",
+      "expected": "",
+      "exact": true
+    }
+  ]
+}

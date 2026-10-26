@@ -25,6 +25,7 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRuntime
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRuntimeContent
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeStoragePersistence
 import dev.jasonpearson.automobile.ctrlproxy.prototype.collectStackBackProgress
+import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeInitialDeviceState
 import dev.jasonpearson.automobile.protocol.PrototypeEvent
 import dev.jasonpearson.automobile.protocol.PrototypeEventKind
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
@@ -179,14 +180,7 @@ private fun EmbeddedPrototype(
   LaunchedEffect(owner) {
     interactions.withLock {
       owner.open(
-        EmbeddedConfiguration(
-          input.spec,
-          input.storage,
-          input.network,
-          scope,
-          environment,
-          context.cacheDir,
-        ),
+        EmbeddedConfiguration(input, scope, environment, context),
       ) {
         environment.host?.eventSink?.send(it)
         latestCallbacks.send(it)
@@ -289,13 +283,17 @@ private fun EmbeddedLifetime(
 }
 
 private class EmbeddedConfiguration(
-  val spec: PrototypeSpec,
-  val storage: PrototypeStorage,
-  val network: PrototypeNetwork,
+  input: EmbeddedInput,
   val scope: CoroutineScope,
   val environment: EmbeddedPrototypeEnvironment,
-  val cacheDir: java.io.File,
-)
+  context: android.content.Context,
+) {
+  val spec = input.spec
+  val storage = input.storage
+  val network = input.network
+  val cacheDir = context.cacheDir
+  val initialDeviceState = prototypeInitialDeviceState(context)
+}
 
 private class EmbeddedOwner(
   assets: PrototypeAssets,
@@ -354,6 +352,7 @@ private class EmbeddedOwner(
         requestScope = config.scope,
         exclusively = { block -> interactions.withLock { block() } },
         newRequestId = config.environment.requestId,
+        initialPlatformState = config.initialDeviceState,
       )
     config.environment.host?.onRuntime?.invoke(runtime)
     session =

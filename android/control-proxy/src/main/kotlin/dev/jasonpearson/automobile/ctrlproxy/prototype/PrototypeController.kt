@@ -571,6 +571,7 @@ class PrototypeController(
         // A response lands between interactions, never in the middle of one.
         exclusively = { block -> settleRequest(runtime, block) },
         requestLimiter = requestLimiter,
+        initialPlatformState = surfaceHost.initialDeviceState(request),
       )
     val mappedSpec = runtime.renderModel()
     val theme = MutableStateFlow(shownTheme(mappedSpec, appearance))
@@ -797,14 +798,7 @@ class PrototypeController(
       if (destroyed || !runtime.current.active || surfaceOf(runtime) == null) return@withLock
       PrototypeTrace.asyncSection(PrototypeTrace.INTERACT) {
         try {
-          // Compose reports its initial/restored settled page; that is rendering, not idle
-          // activity.
-          if (
-            (interaction !is PrototypeInteraction.PagerMotion ||
-              interaction.scrolling ||
-              runtime.current.pages[interaction.pager] != interaction.page)
-          )
-            armIdle(runtime)
+          if (interaction.countsAsUserActivity(runtime.current.pages)) armIdle(runtime)
           runtime.handle(interaction)
           syncAfterChange(runtime)
         } catch (error: CancellationException) {

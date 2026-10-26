@@ -416,8 +416,15 @@ See the [`prototype` tool reference](../../../tools.md#prototype).
 
 Style contract fields `style.shadows`, `style.cornerStyle`, `style.border.gradient`,
 `scroll.fadeEdges` and `image.filter` require `prototype_style_polish_v2`. The strict
-validator accepts these fields; the agent does not advertise this capability until
-its renderers support them.
+validator accepts these fields and the agent advertises this capability. A shared corner
+path clips content and paints backgrounds, gradients, shimmer, borders and shadows;
+continuous full radii clamp to half the short side. Shadow layers paint in authored
+order within the outer and inner groups, with inner shadows above the border. The
+Canvas shadow-only filter avoids painting the spread source itself; its Gaussian
+radius is half the authored CSS-like blur. Positive spread expands outer sources
+and contracts inner holes. Scroll fades use iOS 17 geometry preferences to mask only
+edges with remaining content, mirroring horizontal start/end in RTL; opposing fades
+are capped at half the viewport. Image saturation precedes the palette-resolved tint.
 
 ## Data model capability
 

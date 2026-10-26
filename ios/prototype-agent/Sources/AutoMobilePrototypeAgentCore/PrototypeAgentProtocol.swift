@@ -44,6 +44,7 @@ enum PrototypeAgentProtocol {
         carouselCapability,
         chartCapability,
         loadingStatesCapability,
+        PrototypeStylePolishV2.capability,
         textFieldLeadingIconCapability,
         refreshCapability,
         searchBarCapability,

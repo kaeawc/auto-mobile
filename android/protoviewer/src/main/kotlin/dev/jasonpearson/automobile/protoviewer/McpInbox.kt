@@ -114,9 +114,10 @@ class McpInbox(
     listOf(root, File(root, "inbox"), File(root, "results")).map(::ensureDirectory).all { it }
 
   /**
-   * Deletes regular files in `mcp/inbox` and `mcp/results` not modified for [MCP_ORPHAN_MAX_AGE_MS]:
-   * leftovers of a host timeout or a stray push. Best effort and never throws; returns the number
-   * of files removed. Folders and fresh files, which may belong to a request in flight, are kept.
+   * Deletes regular files in `mcp/inbox` and `mcp/results` not modified for
+   * [MCP_ORPHAN_MAX_AGE_MS]: leftovers of a host timeout or a stray push. Best effort and never
+   * throws; returns the number of files removed. Folders and fresh files, which may belong to a
+   * request in flight, are kept.
    */
   fun sweepOrphans(): Int {
     val cutoff = nowMillis() - MCP_ORPHAN_MAX_AGE_MS

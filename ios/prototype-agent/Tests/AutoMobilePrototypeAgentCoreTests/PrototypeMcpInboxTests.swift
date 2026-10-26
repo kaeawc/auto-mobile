@@ -189,7 +189,9 @@ final class PrototypeMcpInboxTests: XCTestCase {
             "/mcp/results/fresh.json": fresh, "/mcp/inbox/inflight.automobile-proto": now,
         ]
         files.state.withLock { fake in
-            for (path, date) in paths { fake.data[path] = Data([1]); fake.modified[path] = date }
+            for (path, date) in paths {
+                fake.data[path] = Data([1]); fake.modified[path] = date
+            }
             fake.data["/mcp/results/unknown.json"] = Data([1])
             fake.directories.formUnion(["/mcp/results/nested", "/mcp/inbox", "/mcp/results"])
         }
@@ -202,7 +204,12 @@ final class PrototypeMcpInboxTests: XCTestCase {
         XCTAssertEqual(removed, 2)
         XCTAssertFalse(files.exists(URL(fileURLWithPath: "/mcp/results/old.json")))
         XCTAssertFalse(files.exists(URL(fileURLWithPath: "/mcp/inbox/stray.automobile-proto")))
-        for kept in ["results/fresh.json", "inbox/inflight.automobile-proto", "results/unknown.json", "results/nested"] {
+        for kept in [
+            "results/fresh.json",
+            "inbox/inflight.automobile-proto",
+            "results/unknown.json",
+            "results/nested",
+        ] {
             XCTAssertTrue(files.exists(root.appendingPathComponent(kept)), kept)
         }
     }

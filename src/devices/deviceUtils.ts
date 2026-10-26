@@ -878,6 +878,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
           deviceId: device.deviceId,
           signal,
           cameraPosterPath: options.cameraPosterPath,
+          ...(options.discardSnapshotOnExit ? { extraArgs: ["-no-snapshot-save"] } : {}),
           ...(admitter
             ? {
                 admitColdBoot: () => admitter.admit({ timeoutMs, signal, avdName: device.name }),

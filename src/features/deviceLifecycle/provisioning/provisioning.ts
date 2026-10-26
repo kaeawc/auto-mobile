@@ -108,6 +108,24 @@ export function lifecycleStateForCleanup(
     : "retained";
 }
 
+export const DEVICE_INTACT_REFUSAL_CODES = [
+  "target_identity_unresolved",
+  "target_identity_conflict",
+  "inventory_incomplete",
+  "booted_inventory_incomplete",
+] as const;
+
+/** Only these precondition refusals guarantee cleanup never stopped or deleted the device. */
+export function isDeviceIntactRefusal(cleanup: ProvisionDeviceCleanup): boolean {
+  // Keep this narrow subset aligned with PRE_NATIVE_REFUSALS in
+  // daemon/sessionBroker/provisioning/deviceDeleter.ts; broker admission refusals are broader.
+  return (
+    cleanup.status === "failed" &&
+    cleanup.failure?.phase === "precondition" &&
+    DEVICE_INTACT_REFUSAL_CODES.some((code) => code === cleanup.failure?.code)
+  );
+}
+
 export function lifecycleCleanupStatus(
   cleanup: ProvisionDeviceCleanup,
 ): NonNullable<ProvisionDeviceLifecycleOutcome["cleanup"]>["status"] {
@@ -121,6 +139,7 @@ export class ProvisionDeviceRollbackError extends ProvisionDeviceError {
   constructor(
     readonly provisionFailure: ProvisionDeviceError,
     readonly cleanup: ProvisionDeviceCleanup,
+    options?: { retainedDevice?: NonNullable<ProvisionDeviceLifecycleOutcome["device"]> },
   ) {
     super(
       cleanup.status === "failed" ? "cleanup_failed" : provisionFailure.code,
@@ -129,9 +148,12 @@ export class ProvisionDeviceRollbackError extends ProvisionDeviceError {
             cleanup.failure?.message ?? "unknown cleanup failure"
           }`
         : provisionFailure.message,
-      // Retry risks an identity collision while the failed-rollback device may still exist.
-      cleanup.status === "failed" ? false : provisionFailure.retryable,
-      provisionFailure.diagnostics,
+      // A refused rollback changed nothing: retry re-runs the lifecycle and adopts the retained
+      // device. Other cleanup failures may have partially mutated it and remain non-retryable.
+      cleanup.status === "failed" && !options?.retainedDevice ? false : provisionFailure.retryable,
+      cleanup.status === "failed" && options?.retainedDevice
+        ? { ...provisionFailure.diagnostics, retainedDevice: options.retainedDevice }
+        : provisionFailure.diagnostics,
     );
     this.name = "ProvisionDeviceRollbackError";
   }

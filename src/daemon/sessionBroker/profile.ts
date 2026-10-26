@@ -29,7 +29,8 @@ export const exactProfile = z.discriminatedUnion("platform", [
     platform: z.literal("android"),
     metadataState: z.literal("current"),
     profileId: z.string().min(1),
-    archetype: z.enum(["phone", "tablet"]),
+    archetype: z.enum(["phone", "tablet", "foldable"]),
+    memoryMb: z.number().int().positive().optional(),
     systemImagePackage: z.string().min(1),
     osVersion: z.string().regex(/^\d+(?:\.\d+)*$/),
     versionPrecision: z.enum(["major", "minor", "patch"]),
@@ -44,6 +45,8 @@ export type BrokerNativeProfile = z.infer<typeof exactProfile>;
 /**
  * Only provider-produced exact resolution records enter this store. Revalidate their native
  * identity before platform work so damaged or old metadata cannot widen a provisioning request.
+ * Capability policy (for example Duo) is enforced at admission, not here: a stored resource must
+ * stay readable for recovery, reset and destroy even after its host capability is turned off.
  */
 export function nativeProfile(
   resource: Pick<BrokerResourceRecord, "profile">,
@@ -54,16 +57,7 @@ export function nativeProfile(
       "Stored session device profile is incomplete; retain its reservation for recovery",
     );
   }
-  const profile = result.data.profile;
-  if (
-    profile.platform === "ios" &&
-    (profile.archetype === "duo" || profile.modelType.family === "duo")
-  ) {
-    throw new ActionableError(
-      "Duo is recognized but execution is disabled by the current provider policy",
-    );
-  }
-  return profile;
+  return result.data.profile;
 }
 
 export function poolProfile(value: unknown): SessionDeviceProfile {

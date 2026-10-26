@@ -88,6 +88,13 @@ describe("pickIosDeviceType", () => {
     expect(pickIosDeviceType(types, {}).name).toBe("iPhone 17");
   });
 
+  it("never picks the foldable iPhone Duo for a phone request, even when it is the newest", () => {
+    const withDuo = [deviceType("iPhone 17"), deviceType("iPhone Duo")];
+    expect(pickIosDeviceType(withDuo, {}).name).toBe("iPhone 17");
+    expect(() => pickIosDeviceType([deviceType("iPhone Duo")], {})).toThrow(ActionableError);
+    expect(pickIosDeviceType(withDuo, { name: "iPhone Duo" }).name).toBe("iPhone Duo");
+  });
+
   it("honours an explicit name (case-insensitive)", () => {
     expect(pickIosDeviceType(types, { name: "iphone 16" }).name).toBe("iPhone 16");
   });

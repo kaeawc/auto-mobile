@@ -62,7 +62,7 @@ and the [session broker operator/consumer contract](../design-docs/session-broke
 
 The batch also carries the product's catalog classification keys, validated by the
 host-config parser and copied into `broker/host-config.json`:
-`androidProfileArchetypes` (AVD profile id to `phone` or `tablet`, e.g.
+`androidProfileArchetypes` (AVD profile id to `phone`, `tablet`, or `foldable`, e.g.
 `{ "medium_phone": "phone" }`) and `iosClassifications` (simulator device type
 identifier to model type). Omit them and the first acquisition fails with
 `catalog_metadata_invalid` ("lacks current archetype metadata").

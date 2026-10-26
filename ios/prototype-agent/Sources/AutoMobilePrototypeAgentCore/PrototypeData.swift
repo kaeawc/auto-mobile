@@ -280,7 +280,12 @@ enum PrototypeDataResolver {
                 .map { resolveRoot($0, data: data, platform: platform, repeats: &repeats) })
         }
         for name in ["header", "footer"] {
-            if let child = fields[name] { fields[name] = resolveRoot(child, data: data, repeats: &repeats) }
+            if let child = fields[name] { fields[name] = resolveRoot(
+                child,
+                data: data,
+                platform: platform,
+                repeats: &repeats
+            ) }
         }
         if case let .object(screens)? = fields["screens"] {
             fields["screens"] = .object(screens

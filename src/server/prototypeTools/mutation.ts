@@ -1,3 +1,4 @@
+import { prototypeTimerWarnings } from "../../features/prototype/prototypeTimers";
 import { prototypeAccessibilityOutput } from "../../features/prototype/prototypeAccessibilityLint";
 import { pseudoLocalizeSpec } from "../../features/prototype/prototypePseudoLocale";
 import { z } from "zod/v4";
@@ -171,19 +172,18 @@ async function performMutation(
   // restart. It still validates before replacing, so a refused show leaves the old prototype and its
   // events exactly as an in-place one does; only the caller needs telling.
   const legacy = await legacyInPlaceWarning(prototypeTarget, target, inPlace, signal);
-  const takenGeneration = beginShowGeneration(commits, scope, args.action, target);
+  const generation = beginShowGeneration(commits, scope, args.action, target);
   // Display lookups and window-option checks precede staging, so a refused show cannot reset the event epoch.
   const ordering: ShowOrdering = {
     commits,
     scope,
     target,
-    generation: takenGeneration,
+    generation: generation,
     sent: false,
     startedFreshEvents: false,
   };
   const reversing = reverseLifecycle(dependencies, device, args, target);
   try {
-    const generation = takenGeneration;
     const resolved = await preflightWithGeneration(ordering, () =>
       preflightMutation(
         { inPlace, shownDisplayId: shown?.displayId },
@@ -293,6 +293,7 @@ async function performMutation(
       displayId,
       signal,
     });
+    const spec = authoredArgs.spec;
     return {
       success: result.success,
       ...(result.error ? { error: result.error } : {}),
@@ -302,7 +303,7 @@ async function performMutation(
       ...showAdviceOutput(authoredArgs, device, prototypeTarget, result.success),
       ...visibility,
       ...reversing.output(reverseReport, result.success),
-      ...missingAssetsOutput(result, [warning, placed.warning, visibilityWarning], legacy),
+      ...missingAssetsOutput(result, [warning, placed.warning, visibilityWarning], legacy, spec),
     };
   } catch (error) {
     recordPrototypeTextShow(device.deviceId, args.action, undefined, {
@@ -671,8 +672,13 @@ function missingAssetsOutput(
   result: PrototypeResult,
   warnings: readonly (string | undefined)[],
   landedWarning?: string,
+  spec?: unknown,
 ): { missingAssets?: string[]; warning?: string } {
-  const warning = [...warnings, result.success ? landedWarning : undefined]
+  const warning = [
+    ...warnings,
+    result.success ? landedWarning : undefined,
+    ...(result.success ? prototypeTimerWarnings(spec) : []),
+  ]
     .filter((entry) => entry !== undefined)
     .join(" ");
   return {

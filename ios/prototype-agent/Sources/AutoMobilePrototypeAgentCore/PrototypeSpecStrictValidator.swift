@@ -20,13 +20,7 @@ public enum PrototypeSpecStrictValidator {
             try repeats.expanded(root.objectFields ?? [:], path: "root")
             try PrototypeStrictSemantics.storage(fields)
             try PrototypeDataWrite.validate(actions: context.actions, data: modelData)
-            try PrototypeStrictSemantics.vocabulary(context, data: modelData)
-            try PrototypeLinkify.validate(root: root, nodes: context.locatedNodes)
-            try PrototypeStrictSemantics.targets(context)
-            let nodes = repeats.bound(context.locatedNodes)
-            let actions = repeats.bound(context.actions, actions: true)
-            try PrototypeStrictBindings.validate(nodes: nodes, actions: actions, state: state)
-            try PrototypeChecks.validate(nodes: nodes, actions: actions, state: state)
+            try PrototypeRequestValidator.validate(root, state: state)
             try PrototypePlatformValidator.validateTestTags(nodes: context.locatedNodes)
             try PrototypePlatformValidator.validate(
                 requires: fields["requires"],
@@ -34,8 +28,15 @@ public enum PrototypeSpecStrictValidator {
                 root: root,
                 state: state
             )
+            try PrototypeTimerValidator.validate(context.actions)
+            try PrototypeStrictSemantics.vocabulary(context, data: modelData)
+            try PrototypeLinkify.validate(root: root, nodes: context.locatedNodes)
+            try PrototypeStrictSemantics.targets(context)
+            let nodes = repeats.bound(context.locatedNodes)
+            let actions = repeats.bound(context.actions, actions: true)
+            try PrototypeStrictBindings.validate(nodes: nodes, actions: actions, state: state)
+            try PrototypeChecks.validate(nodes: nodes, actions: actions, state: state)
             try PrototypeLimits.guardAuthoredTree(root)
-            try PrototypeRequestValidator.validate(root, state: state)
             try PrototypeMenus.validateAuthoredText(root)
             try PrototypeRepeat.validateEmitContexts(root, data: modelData)
             let resolved = PrototypeDataResolver.resolveRoot(root, data: modelData)

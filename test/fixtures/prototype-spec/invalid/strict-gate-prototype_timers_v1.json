@@ -1,0 +1,94 @@
+{
+  "spec": {
+    "id": "timers",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "button",
+          "label": "Start",
+          "onTap": [
+            {
+              "type": "startTimer",
+              "id": "tick",
+              "afterMs": 100,
+              "actions": [
+                {
+                  "type": "emit",
+                  "name": "tick"
+                },
+                {
+                  "type": "startTimer",
+                  "id": "nested",
+                  "afterMs": 3600000,
+                  "actions": [
+                    {
+                      "type": "emit",
+                      "name": "tick"
+                    }
+                  ]
+                }
+              ],
+              "everyMs": 3600000,
+              "maxRuns": 10000
+            },
+            {
+              "type": "cancelTimer",
+              "id": "tick"
+            },
+            {
+              "type": "request",
+              "url": "https://example.com",
+              "onSuccess": [
+                {
+                  "type": "startTimer",
+                  "id": "request",
+                  "afterMs": 100,
+                  "actions": [
+                    {
+                      "type": "emit",
+                      "name": "tick"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "requires": {
+      "platform": ["test"]
+    },
+    "platform": {
+      "on": {
+        "test.tick": [
+          {
+            "type": "startTimer",
+            "id": "handler",
+            "afterMs": 100,
+            "actions": [
+              {
+                "type": "emit",
+                "name": "handler"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "options": {
+    "supportedCapabilities": [
+      "prototype_network_v1",
+      "prototype_platform_test_v1",
+      "prototype_platform_v1"
+    ]
+  },
+  "expectedPath": "$"
+}

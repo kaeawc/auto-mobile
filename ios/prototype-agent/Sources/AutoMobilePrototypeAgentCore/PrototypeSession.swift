@@ -117,6 +117,13 @@ struct PrototypeSession {
     /// `request` actions in flight (#12529) and the commands for the driver that runs them; see
     /// `takeRequestCommands`.
     private(set) var requests = PrototypeRequestLedger()
+    private var timerCommands: [PrototypeTimerCommand] = []
+
+    mutating func takeTimerCommands() -> [PrototypeTimerCommand] {
+        defer { timerCommands = [] }
+        return timerCommands
+    }
+
     /// The shown prototype's `appearance` from its show request.
     /// The shown spec's size outside its `state`, for the spec byte cap (#11562); see
     /// `PrototypeStateValidator.stateBytes`.
@@ -166,6 +173,7 @@ struct PrototypeSession {
         restoredState: [String: JSONValue]? = nil
     ) {
         listEnds = [:]
+        timerCommands.append(.cancelAll)
         appearanceOverride = appearance
         // The agent keeps no raw spec, so the request's own size (when the caller has it) less the
         // state it carried is what the cap adds every later state to; without it only state counts.
@@ -376,6 +384,10 @@ struct PrototypeSession {
                 events += runSetPage(action)
             case "setData", "appendData", "removeData":
                 events += runDataWrite(action)
+            case "startTimer":
+                timerCommands.append(.start(action))
+            case "cancelTimer":
+                if let id = action.id { timerCommands.append(.cancel(id)) }
             case "request":
                 events += runRequest(action)
             case "dismiss":
@@ -682,6 +694,7 @@ struct PrototypeSession {
         guard isShown else { return [] }
         let events = emit(kind: "dismissed", name: nil, payload: .object(["reason": .string(reason.rawValue)]))
         requests.cancelAll()
+        timerCommands.append(.cancelAll)
         spec = nil
         return events
     }

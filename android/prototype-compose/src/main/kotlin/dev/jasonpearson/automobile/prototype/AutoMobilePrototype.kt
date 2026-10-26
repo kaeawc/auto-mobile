@@ -12,6 +12,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import dev.jasonpearson.automobile.ctrlproxy.prototype.BitmapPrototypeImageDecoder
 import dev.jasonpearson.automobile.ctrlproxy.prototype.ComposePrototypeFontLoader
 import dev.jasonpearson.automobile.ctrlproxy.prototype.CoroutinePrototypeScheduler
+import dev.jasonpearson.automobile.ctrlproxy.prototype.InternalAutoMobilePrototypeApi
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeDismissReason as InternalPrototypeDismissReason
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeFontCache
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImageCache
@@ -159,7 +160,7 @@ private fun EmbeddedPrototype(
     }
   }
   if (host == null) EmbeddedLifetime(owner, lifecycle, scope, interactions)
-  else EmbeddedHostLifetime(owner, host)
+  else EmbeddedHostLifetime(owner, host, lifecycle)
   val session = owner.session
   if (session != null) {
     val active by session.runtime.snapshots.collectAsState()
@@ -177,8 +178,36 @@ private fun EmbeddedPrototype(
   owner.error?.let { onError(it) }
 }
 
+@InternalAutoMobilePrototypeApi
+internal object PrototypeTimerLifecycle {
+  fun observer(
+    scope: CoroutineScope,
+    interactions: Mutex,
+    runtime: () -> PrototypeRuntime?,
+  ): LifecycleEventObserver = LifecycleEventObserver { _, event ->
+    if (event == Lifecycle.Event.ON_START || event == Lifecycle.Event.ON_STOP) {
+      scope.launch(NonCancellable, start = CoroutineStart.UNDISPATCHED) {
+        interactions.withLock {
+          if (event == Lifecycle.Event.ON_STOP) runtime()?.pauseTimers()
+          else runtime()?.resumeTimers()
+        }
+      }
+    }
+  }
+}
+
 @Composable
-private fun EmbeddedHostLifetime(owner: EmbeddedOwner, host: EmbeddedPrototypeHost) {
+private fun EmbeddedHostLifetime(
+  owner: EmbeddedOwner,
+  host: EmbeddedPrototypeHost,
+  lifecycle: Lifecycle,
+) {
+  DisposableEffect(owner, host, lifecycle) {
+    val observer =
+      PrototypeTimerLifecycle.observer(host.scope, host.interactions) { owner.session?.runtime }
+    lifecycle.addObserver(observer)
+    onDispose { lifecycle.removeObserver(observer) }
+  }
   // The host performs its own flush before reload and on stop, and closes on destroy. Only the
   // composition's temporary assets belong to this disposal path.
   DisposableEffect(owner) {
@@ -200,9 +229,15 @@ private fun EmbeddedLifetime(
 ) {
   DisposableEffect(owner, lifecycle) {
     val observer = LifecycleEventObserver { _, event ->
+      if (event == Lifecycle.Event.ON_START) {
+        scope.launch { interactions.withLock { owner.session?.runtime?.resumeTimers() } }
+      }
       if (event == Lifecycle.Event.ON_STOP) {
         scope.launch(NonCancellable, start = CoroutineStart.UNDISPATCHED) {
-          interactions.withLock { owner.session?.runtime?.flushStorage() }
+          interactions.withLock {
+            owner.session?.runtime?.pauseTimers()
+            owner.session?.runtime?.flushStorage()
+          }
         }
       }
     }

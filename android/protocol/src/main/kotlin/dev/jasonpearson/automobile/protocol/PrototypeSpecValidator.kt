@@ -70,6 +70,9 @@ object PrototypeSpecValidator {
   val MAX_PROTOTYPE_RESPONSE_BYTES: Int = limit("MAX_PROTOTYPE_RESPONSE_BYTES")
   val MAX_PROTOTYPE_REQUESTS_IN_FLIGHT: Int = limit("MAX_PROTOTYPE_REQUESTS_IN_FLIGHT")
   val MAX_PROTOTYPE_ACTION_DEPTH: Int = limit("MAX_PROTOTYPE_ACTION_DEPTH")
+  val MAX_PROTOTYPE_TIMERS: Int = limit("MAX_PROTOTYPE_TIMERS")
+  val MAX_PROTOTYPE_TIMER_RUNS: Int = limit("MAX_PROTOTYPE_TIMER_RUNS")
+  val MAX_PROTOTYPE_TIMER_MS: Int = limit("MAX_PROTOTYPE_TIMER_MS")
   internal val maxRepeatItems: Int =
     definitions
       .getValue("repeat")

@@ -24,6 +24,29 @@
       ]
     },
     {
+      "serialName": "advance_prototype_clock",
+      "fields": [
+        {
+          "name": "requestId",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "advanceTimeMs",
+          "type": "int",
+          "nullable": false,
+          "hasDefault": false
+        }
+      ]
+    },
+    {
       "serialName": "clear_preferences",
       "fields": [
         {
@@ -3778,6 +3801,12 @@
           "type": "int",
           "nullable": true,
           "hasDefault": true
+        },
+        {
+          "name": "fired",
+          "type": "int",
+          "nullable": true,
+          "hasDefault": true
         }
       ]
     },
@@ -5212,6 +5241,14 @@
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
         "nullable": true,
         "hasDefault": true
+      }
+    ],
+    "cancelTimer": [
+      {
+        "name": "id",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
       }
     ],
     "card": [
@@ -7738,6 +7775,12 @@
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeStorageReport",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "timers",
+        "type": "list",
+        "nullable": false,
+        "hasDefault": true
       }
     ],
     "dev.jasonpearson.automobile.protocol.PrototypeStorageBlock": [
@@ -8152,6 +8195,26 @@
         "type": "object:PrototypeModeValue",
         "nullable": true,
         "hasDefault": true
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeTimerReport": [
+      {
+        "name": "id",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "nextFireInMs",
+        "type": "long",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "runs",
+        "type": "int",
+        "nullable": false,
+        "hasDefault": false
       }
     ],
     "dev.jasonpearson.automobile.protocol.PrototypeWindow": [
@@ -11074,6 +11137,38 @@
       {
         "name": "screens",
         "type": "map",
+        "nullable": false,
+        "hasDefault": false
+      }
+    ],
+    "startTimer": [
+      {
+        "name": "id",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "afterMs",
+        "type": "int",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "everyMs",
+        "type": "int",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "maxRuns",
+        "type": "int",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "actions",
+        "type": "list",
         "nullable": false,
         "hasDefault": false
       }

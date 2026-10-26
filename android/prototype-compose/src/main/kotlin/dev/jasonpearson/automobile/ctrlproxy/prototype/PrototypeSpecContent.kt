@@ -178,6 +178,7 @@ fun PrototypeRuntimeContent(
         LocalPrototypeImageVersion provides imageVersion,
         LocalPrototypeFontCache provides fonts,
         LocalPrototypeMotion provides motion,
+        LocalPrototypeMotionActivity provides runtime.motionActivity,
         LocalPrototypeSwipeCoordinator provides
           (LocalPrototypeSwipeCoordinator.current ?: remember { SwipeCoordinator() }),
       ) {
@@ -472,6 +473,7 @@ private fun RenderPrototypeNode(
         prototypeEnterTransition(node.source.transition?.type, prototypeRtl(), node.enterDelayMs),
       exit = prototypeExitTransition(node.source.transition?.type, prototypeRtl()),
     ) {
+      ReportPrototypeMotion { transition.isRunning }
       ProvideAnchorFade(
         none = node.source.transition?.type == "none",
         enterDelayMs = node.enterDelayMs,
@@ -537,6 +539,7 @@ private fun RenderPrototypeVisibility(
           ),
         exit = prototypeExitTransition(node.source?.transition?.type, prototypeRtl()),
       ) {
+        ReportPrototypeMotion { transition.isRunning }
         ProvideAnchorFade(
           none = node.source?.transition?.type == "none",
           enterDelayMs = node.enterDelayMs,
@@ -1099,6 +1102,7 @@ private fun RenderPrototypePager(
       source.pageSize is PrototypePagerPageSize.Dp
   val pager = rememberPagerState(initialPage = node.page) { node.children.size }
   val animate = LocalPrototypeMotion.current
+  ReportPrototypeMotion { pager.isScrollInProgress }
   // Keyed on motion too: turning motion off mid-scroll cancels the animation and snaps to the page.
   // The offset check matters then: past the halfway point currentPage already reads the target.
   LaunchedEffect(node.page, animate) {

@@ -140,6 +140,7 @@ internal object PrototypeStrictPolicy {
     scanner.envelope(spec)
     spec["root"]?.let { scanner.scan(it) }
     scanner.platform(spec)
+    (spec["platform"] as? JsonObject)?.get("on")?.let { scanner.scan(it) }
     return scanner.result
   }
 
@@ -156,6 +157,8 @@ internal object PrototypeStrictPolicy {
       "select" to "menus",
       "scrollTo" to "chat_scroll",
       "request" to "network",
+      "startTimer" to "timers",
+      "cancelTimer" to "timers",
       "setData" to "data_actions",
       "appendData" to "data_actions",
       "removeData" to "data_actions",

@@ -123,6 +123,21 @@
             self?.apply(activity: false) { $0.closeModal(node) }
         }
 
+        /// Authored timers are non-activity transitions, shared by every host.
+        @ObservationIgnored private lazy var timers = PrototypeTimers(clock: clock) { [weak self] actions in
+            self?.apply(activity: false) { $0.run(actions) }
+        }
+
+        func pauseTimers() { timers.pause() }
+        func resumeTimers() { timers.resume() }
+
+        func advanceClock(id: String, milliseconds: Int) -> PrototypeTimers.AdvanceResult {
+            guard session.isShown, spec?.id == id else {
+                return .init(fired: 0, error: "Unknown prototype id: \(id)")
+            }
+            return timers.advance(milliseconds)
+        }
+
         /// Ends a prototype nobody has touched for the TTL (`reason: ttl`, as on Android).
         @ObservationIgnored private lazy var idleTimer = PrototypeIdleTimer(clock: clock) { [weak self] in
             self?.dismiss(reason: .ttl)
@@ -148,6 +163,8 @@
         /// keeps nothing, which is what tests and a sandbox without Application Support get.
         @ObservationIgnored private let storage: PrototypeStorageCoordinator?
 
+        @ObservationIgnored private var timerLifecycle: PrototypeTimerLifecycle?
+
         let mode: PrototypeLifecycleMode
 
         init(
@@ -158,6 +175,7 @@
             self.clock = clock
             self.mode = mode
             self.storage = storage
+            timerLifecycle = PrototypeTimerLifecycle(model: self)
         }
 
         /// Local override of the five-minute idle TTL; no wire field carries it. Applies from the next
@@ -216,7 +234,9 @@
             )
             // A show that replaces another prototype cancels that one's requests.
             let requestCommands = next.takeRequestCommands()
+            let timerCommands = next.takeTimerCommands()
             publish(next, replacingSpec: true)
+            timers.perform(timerCommands)
             requestDriver?.perform(requestCommands)
             expandedSelect = nil
             showRevision += 1
@@ -393,6 +413,7 @@
             var next = session
             let events = next.transition(transition)
             let requestCommands = next.takeRequestCommands()
+            let timerCommands = next.takeTimerCommands()
             publish(next)
             // A rejected edit (#11562) or no-op transition leaves the stored values unchanged;
             // redraw value-holding controls so they show those values instead of the refused input.
@@ -413,6 +434,7 @@
                 hitRects.removeAll()
                 onVisibilityChange?(false)
             }
+            timers.perform(timerCommands)
             requestDriver?.perform(requestCommands)
         }
 
@@ -432,6 +454,8 @@
                 "assets": assets.keys.sorted(),
                 "lastSequence": session.lastSequence,
             ]
+            let timerSnapshots = timers.snapshot()
+            if !timerSnapshots.isEmpty { status["timers"] = timerSnapshots.map(\.wireObject) }
             if !fontFaces.isEmpty { status["fonts"] = fontFaces.keys.sorted() }
             if !assetProblems.isEmpty { status["assetProblems"] = assetProblems.map(\.wireObject) }
             if let data = session.data { status["data"] = JSONValue.object(data).foundationObject }
@@ -453,5 +477,36 @@
         func change(key: String, value: String) {
             apply { $0.change(key: key, value: .string(value)) }
         }
+    }
+
+    /// Selector registrations are weakly held by NotificationCenter.
+    @MainActor
+    private final class PrototypeTimerLifecycle: NSObject {
+        private weak var model: PrototypeModel?
+
+        init(model: PrototypeModel) {
+            self.model = model
+            super.init()
+            let center = NotificationCenter.default
+            center.addObserver(
+                self,
+                selector: #selector(pause),
+                name: UIApplication.willResignActiveNotification,
+                object: nil
+            )
+            center.addObserver(
+                self,
+                selector: #selector(resume),
+                name: UIApplication.didBecomeActiveNotification,
+                object: nil
+            )
+            if UIApplication.shared.applicationState != .active { model.pauseTimers() }
+        }
+
+        deinit { NotificationCenter.default.removeObserver(self) }
+        @objc
+        private func pause() { model?.pauseTimers() }
+        @objc
+        private func resume() { model?.resumeTimers() }
     }
 #endif

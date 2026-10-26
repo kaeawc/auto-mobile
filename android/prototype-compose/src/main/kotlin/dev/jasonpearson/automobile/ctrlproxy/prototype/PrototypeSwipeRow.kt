@@ -102,6 +102,7 @@ internal fun PrototypeSwipeRow(
     else 0f
   val offset = remember(id) { Animatable(initial) }
   var raw by remember(id) { mutableFloatStateOf(initial) }
+  ReportPrototypeMotion { offset.isRunning }
   val entries = remember(swipe) { swipe.entries() }
 
   suspend fun moveTo(target: Float) {

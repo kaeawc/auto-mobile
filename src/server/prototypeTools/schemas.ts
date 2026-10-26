@@ -1,3 +1,4 @@
+import { validatePrototypeSimulateInput } from "../prototypeSimulateAction";
 import { z as specZ, type ZodTypeAny } from "zod";
 import { PROTOVIEWER_DEFAULT_TIMEOUT_MS } from "../../features/prototype/protoViewer/protoViewerDevice";
 import { zodToJsonSchema } from "zod-to-json-schema";
@@ -241,11 +242,12 @@ export const prototypeSchema = addDeviceTargetingToSchema(
           "deleteSaved",
           "open",
           "clearStorage",
+          "simulate",
         ],
         {
           error: (issue) =>
             getRemovedToolActionHint(PROTOTYPE_TOOL_NAME, issue.input) ??
-            "action must be one of show, patch, dismiss, status, inspect or awaitEvent; saved actions: save, listSaved, deleteSaved or open; storage action: clearStorage",
+            "action must be one of show, patch, dismiss, status, inspect or awaitEvent; saved actions: save, listSaved, deleteSaved or open; storage action: clearStorage; timer action: simulate",
         },
       ),
       spec: specInput
@@ -322,6 +324,13 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .describe(
           'show only: what the system light/dark setting means for this prototype. device (default) follows the device; light or dark pins it without changing the device or the app behind, so a spec with theme.mode "system" or no mode can be checked in both modes. It replaces the system setting only: an explicit theme.mode, a flat theme.colors.background/surface override and an opaque authored background still decide first. Each show states it afresh (a same-id show without it follows the device again). light and dark need a device advertising prototype_appearance_v1 and are refused otherwise.',
         ),
+      advanceTimeMs: z
+        .number()
+        .int()
+        .min(1)
+        .max(3600000)
+        .optional()
+        .describe("simulate only: advance the prototype clock without waiting"),
       id: z
         .string()
         .min(1)
@@ -411,6 +420,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     "assets",
     "ops",
     "baseRevision",
+    "advanceTimeMs",
     "label",
     "icon",
     "pin",
@@ -434,6 +444,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     deleteSaved: ["id", "removeIcon"],
     open: ["id"],
     clearStorage: ["id"],
+    simulate: ["id", "advanceTimeMs"],
     dismiss: ["id", "all"],
     status: [],
     inspect: [],
@@ -457,6 +468,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
       );
   }
   validatePrototypeStorageInput(value, ctx);
+  validatePrototypeSimulateInput(value, ctx);
   if (value.action === "awaitEvent") {
     validateAwaitEventInput(value, ctx);
   }
@@ -576,6 +588,16 @@ const lastResultSchema = z.object({
       "The light or dark mode the prototype is drawn in, as the device last reported it: in lastResult what a successful show resolved to, and per prototype in inspect that value, and in status its mode and source as refreshed by inspect and by appearance_changed events (status never carries deviceDark; after a show crossed by an appearance_changed event, its status entry has no appearance until a later event or inspect states it). Absent when the device does not advertise prototype_appearance_v1, on dismiss and on a failed show",
     ),
   storage: prototypeStorageOutputField,
+  timers: z
+    .array(
+      z.object({
+        id: z.string().min(1).max(64),
+        nextFireInMs: z.number().int().safe().nonnegative(),
+        runs: z.number().int().safe().nonnegative(),
+      }),
+    )
+    .max(8)
+    .optional(),
   success: z.boolean(),
   error: z.string().optional(),
   totalTimeMs: z.number().optional(),
@@ -682,6 +704,7 @@ export const prototypeOutputSchema = z.object({
       "patch only: newer user edits or device /data writes that refused the whole patch, with current revision and touched state values or data paths",
     ),
   cleared: prototypeClearedOutputField,
+  fired: z.number().int().min(0).max(10000).optional(),
   success: z.boolean(),
   error: z.string().optional(),
   prototypes: z

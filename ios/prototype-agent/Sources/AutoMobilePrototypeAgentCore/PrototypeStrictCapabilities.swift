@@ -27,6 +27,8 @@ enum PrototypeStrictCapabilities {
             PrototypeRepeat.bindTextFields(&own) { text in textBinding(text); return text }
             let type = fields["type"]?.stringValue ?? ""
             let types = [
+                "startTimer": "timers",
+                "cancelTimer": "timers",
                 "stack": "stack",
                 "flow": "flow_grid",
                 "grid": "flow_grid",
@@ -111,6 +113,7 @@ enum PrototypeStrictCapabilities {
             }
         }
         if let root = spec["root"] { scan(root) }
+        if let handlers = spec["platform"] { scan(handlers) }
         if let scrim = spec["window"]?.objectFields?["placement"]?.objectFields?["scrim"],
            scrim.objectFields != nil { need("theme_modes") }
         if let requires = spec["requires"]?.objectFields {

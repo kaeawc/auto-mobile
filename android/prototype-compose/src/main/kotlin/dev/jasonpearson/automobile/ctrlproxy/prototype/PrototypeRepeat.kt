@@ -10,6 +10,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeBottomNavNode
 import dev.jasonpearson.automobile.protocol.PrototypeBottomSheetNode
 import dev.jasonpearson.automobile.protocol.PrototypeBoxNode
 import dev.jasonpearson.automobile.protocol.PrototypeButtonNode
+import dev.jasonpearson.automobile.protocol.PrototypeCancelTimerAction
 import dev.jasonpearson.automobile.protocol.PrototypeCardNode
 import dev.jasonpearson.automobile.protocol.PrototypeCarouselNode
 import dev.jasonpearson.automobile.protocol.PrototypeChartNode
@@ -59,6 +60,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeSliderNode
 import dev.jasonpearson.automobile.protocol.PrototypeSnackbarNode
 import dev.jasonpearson.automobile.protocol.PrototypeSpacerNode
 import dev.jasonpearson.automobile.protocol.PrototypeStackNode
+import dev.jasonpearson.automobile.protocol.PrototypeStartTimerAction
 import dev.jasonpearson.automobile.protocol.PrototypeStyleWhen
 import dev.jasonpearson.automobile.protocol.PrototypeSwipeAction
 import dev.jasonpearson.automobile.protocol.PrototypeSwipeActions
@@ -540,6 +542,8 @@ private fun PrototypeAction.bound(instance: RepeatInstance): PrototypeAction =
     is PrototypeAppendDataAction ->
       copy(path = instance.dataPath(path), value = instance.dataValue(value))
     is PrototypeRemoveDataAction -> copy(path = instance.dataPath(path))
+    is PrototypeStartTimerAction -> copy(actions = actions.map { it.bound(instance) })
+    is PrototypeCancelTimerAction -> this
     is PrototypeRequestAction ->
       copy(
         url = instance.interpolate(url),

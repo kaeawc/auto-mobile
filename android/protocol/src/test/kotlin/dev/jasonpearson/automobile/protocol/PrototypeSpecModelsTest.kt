@@ -10,9 +10,11 @@ import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonObject
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 
 class PrototypeSpecModelsTest {
+  private val json = Json { classDiscriminator = "type" }
   private val fixture =
     Json.parseToJsonElement(File(fixtureDirectory(), "models.json").readText()).jsonObject
 
@@ -43,10 +45,148 @@ class PrototypeSpecModelsTest {
     assertEquals(PrototypeStagger(0), Json.decodeFromString<PrototypeStagger>("""{"ms":0}"""))
   }
 
+  companion object {
+    @JvmStatic
+    @BeforeAll
+    fun initializeSerializationMetadata() {
+      // JVM serializer metadata is lazy; initialize it outside each model's assertion budget.
+      val serializers =
+        listOf(
+          PrototypeContainer.serializer(),
+          PrototypeSelector.serializer(),
+          PrototypeStyleWhen.serializer(),
+          PrototypeAnchor.serializer(),
+          PrototypePlacement.serializer(),
+          PrototypeGradient.serializer(),
+          PrototypeListItemTrailing.serializer(),
+          PrototypeAppBarAction.serializer(),
+          PrototypeDialogButton.serializer(),
+          PrototypeScrollRefresh.serializer(),
+          PrototypeBorder.serializer(),
+          PrototypeGradientStop.serializer(),
+          PrototypeCondition.serializer(),
+          PrototypeStyle.serializer(),
+          PrototypeAction.serializer(),
+        )
+      for (serializer in serializers) {
+        val descriptor = serializer.descriptor
+        for (index in 0 until descriptor.elementsCount) descriptor.getElementDescriptor(index)
+      }
+    }
+  }
+
+  @Test
+  fun `generated container and selector references round trip`() {
+    val container =
+      PrototypeContainer(
+        text = "Panel",
+        index = 0,
+        selectionStrategy = "unique",
+        container = PrototypeContainer(elementId = "outer"),
+      )
+    assertRoundTrip("container", container)
+    assertRoundTrip("selector", PrototypeSelector(testTag = "target", container = container))
+  }
+
+  @Test
+  fun `generated style condition references round trip`() {
+    assertRoundTrip(
+      "styleWhenEntry",
+      PrototypeStyleWhen(
+        PrototypeCondition(key = "enabled", equals = PrototypeScalar.BooleanValue(true)),
+        PrototypeStyle(color = PrototypeModeValue.Single("#112233")),
+      ),
+    )
+  }
+
+  @Test
+  fun `generated anchor variants round trip`() {
+    val offset = PrototypeOffset(-12.5, 24.25)
+    assertRoundTrip<PrototypeAnchor>(
+      "anchorBounds",
+      PrototypeBoundsAnchor(
+        PrototypeBounds(-1.5, 2.5, 300.25, 400.5),
+        "top",
+        offset,
+      ),
+    )
+    assertRoundTrip<PrototypeAnchor>(
+      "anchorElement",
+      PrototypeElementAnchor(
+        PrototypeSelector(elementId = "target"),
+        "cover",
+        offset,
+      ),
+    )
+  }
+
+  @Test
+  fun `generated placement variants round trip`() {
+    val modes = PrototypeModeValue.Modes("#112233", "#445566")
+    assertRoundTrip<PrototypePlacement>("placementFullscreen", PrototypeFullscreenPlacement(modes))
+    assertRoundTrip<PrototypePlacement>("placementSheet", PrototypeSheetPlacement("bottom", 320.0))
+    assertRoundTrip<PrototypePlacement>(
+      "placementFloating",
+      PrototypeFloatingPlacement("center", PrototypeOffset(-12.5, 24.25)),
+    )
+  }
+
+  @Test
+  fun `generated gradient variants round trip`() {
+    val modes = PrototypeModeValue.Modes("#112233", "#445566")
+    val stops = listOf(PrototypeGradientStop("#112233", 0.0), PrototypeGradientStop(modes, 1.0))
+    assertRoundTrip<PrototypeGradient>("gradientLinear", PrototypeLinearGradient(45.0, stops))
+    assertRoundTrip<PrototypeGradient>("gradientRadial", PrototypeRadialGradient(stops))
+  }
+
+  @Test
+  fun `generated trailing control variants round trip`() {
+    assertRoundTrip<PrototypeListItemTrailing>(
+      "listItemTrailingSwitch",
+      PrototypeListItemSwitch("enabled"),
+    )
+    assertRoundTrip<PrototypeListItemTrailing>(
+      "listItemTrailingCheckbox",
+      PrototypeListItemCheckbox("enabled"),
+    )
+    assertRoundTrip<PrototypeListItemTrailing>(
+      "listItemTrailingIcon",
+      PrototypeListItemIcon("check"),
+    )
+  }
+
+  @Test
+  fun `generated app bar action references round trip`() {
+    assertRoundTrip(
+      "appBarAction",
+      PrototypeAppBarAction("check", "Go", listOf(PrototypeEmitAction("go"))),
+    )
+  }
+
+  @Test
+  fun `generated dialog button references round trip`() {
+    assertRoundTrip("dialogButton", PrototypeDialogButton("Go", listOf(PrototypeEmitAction("go"))))
+  }
+
+  @Test
+  fun `generated refresh action references round trip`() {
+    assertRoundTrip(
+      "scrollRefresh",
+      PrototypeScrollRefresh("enabled", listOf(PrototypeEmitAction("go"))),
+    )
+  }
+
+  @Test
+  fun `shared border and gradient stop fixtures round trip`() {
+    val modes = PrototypeModeValue.Modes("#112233", "#445566")
+    assertRoundTrip("border", PrototypeBorder(2.5, "#112233"))
+    assertRoundTrip("gradientStop", PrototypeGradientStop(modes, 0.5))
+  }
+
   private inline fun <reified T> assertRoundTrip(name: String, expected: T) {
     val element = fixture.getValue(name)
-    assertEquals(expected, Json.decodeFromJsonElement<T>(element))
-    assertEquals(element, Json.encodeToJsonElement(expected))
+    assertEquals(expected, json.decodeFromJsonElement<T>(element))
+    assertEquals(element, json.encodeToJsonElement(expected))
   }
 
   @Test

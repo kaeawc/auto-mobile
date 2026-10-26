@@ -2,10 +2,20 @@
 import XCTest
 
 final class PrototypeSpecDecodingTests: XCTestCase {
+    /// A contract-valid placement: a sheet needs its `edge` and `height`, a floating window its
+    /// `gravity` and `offset`.
+    private func placementObject(_ type: String) -> [String: Any] {
+        switch type {
+        case "sheet": ["type": type, "edge": "bottom", "height": 200]
+        case "floating": ["type": type, "gravity": "center", "offset": ["x": 0, "y": 0]]
+        default: ["type": type]
+        }
+    }
+
     func testWindowChromeDecodesOrNamesTheInvalidField() throws {
         for placement in ["fullscreen", "sheet", "floating"] {
             for value: String? in [nil, "none", "bar"] {
-                var window: [String: Any] = ["placement": ["type": placement]]
+                var window: [String: Any] = ["placement": placementObject(placement)]
                 if let value { window["chrome"] = value }
                 let data = try JSONSerialization.data(withJSONObject: window)
                 XCTAssertEqual(try JSONDecoder().decode(WindowSpec.self, from: data).chrome, value)

@@ -17,6 +17,10 @@ import {
   runWithAbortSignal,
 } from "../../utils/AbortContext";
 import { type BackoffPolicy } from "../../utils/Backoff";
+import {
+  publishSessionDeviceRebound,
+  type SessionDeviceReboundEmitter,
+} from "../sessionDeviceReboundBroadcast";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
@@ -50,6 +54,7 @@ import type { SupersededRowReasserts } from "../supersededRowReasserts";
 import { type SessionLifecycleSlots } from "./internalContracts";
 
 export interface SessionRecoveryPublicationHost {
+  readonly sessionDeviceReboundEmitter: SessionDeviceReboundEmitter | undefined;
   recoveryTargetFromPersisted(
     sessionId: string,
     persisted: DeviceSession | undefined,
@@ -346,6 +351,17 @@ export class SessionRecoveryPublication {
     return snapshot;
   }
 
+  /**
+   * A session force-released while its rebind was in flight is gone: announcing a move after its
+   * release would tell clients a dead session is live on the new serial.
+   */
+  private publishReboundIfLive(sessionId: string, existing: Session, previousDevice: string): void {
+    if (this.host.sessions.get(sessionId) !== existing) {
+      return;
+    }
+    publishSessionDeviceRebound(this.host.sessionDeviceReboundEmitter, existing, previousDevice);
+  }
+
   async persistAndPublishRebind(
     existing: Session,
     assignedDevice: string,
@@ -474,6 +490,7 @@ export class SessionRecoveryPublication {
     if (assignedDevice !== previousDevice) {
       // Full: the replacement (including the same AVD on another serial) has its own screen.
       this.host.notifyDeviceOwnershipChange(assignedDevice, "full");
+      this.publishReboundIfLive(sessionId, existing, previousDevice);
     }
     if (!replacementFence) {
       this.host.notifySessionDeviceUnbound(existing.sessionId, previousDevice, {

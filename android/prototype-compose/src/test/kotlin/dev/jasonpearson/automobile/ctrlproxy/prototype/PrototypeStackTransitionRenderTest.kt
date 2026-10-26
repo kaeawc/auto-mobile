@@ -27,6 +27,7 @@ class PrototypeStackTransitionRenderTest {
   @get:Rule val compose = createComposeRule()
   private val events = mutableListOf<PrototypeEvent>()
 
+  @Suppress("LongParameterList") // Test fixture: every knob has a default.
   private fun show(
     motion: String? = null,
     durationScale: Float = 1f,

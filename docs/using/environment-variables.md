@@ -207,8 +207,23 @@ A one-shot `--cli` call needs no keeper, and `--daemon heartbeat` on a CLI sessi
 is a no-op.
 
 `--daemon session-info <session-id>` prints a session's device, platform,
-`lastToolActivityAt`, `idleReleaseAt` and lease `liveness`. `--daemon
-active-sessions` prints the same for every held session.
+`lastToolActivityAt`, `idleReleaseAt` and lease `liveness`, plus `stableDeviceId`
+(when known), `deviceGeneration` (zero initially), and `previousDeviceId` (after a
+serial change). `--daemon active-sessions` includes these binding fields for every
+held session.
+
+When a retained session moves to a new serial, its proxy sends an MCP logging
+notification at level `info`, logger `auto-mobile.liveness`, with data
+`{ code: "session_device_rebound", sessionUuid, previousDeviceId, deviceId,
+stableDeviceId?, avdName?, generation }`. `avdName` is the Android AVD name when
+known. A client logging threshold above `info` suppresses this notification.
+Subsequent admitted daemon tool results also carry
+`_meta["automobile/sessionDevice"] = { sessionUuid, deviceId, stableDeviceId?,
+generation, previousDeviceId }`; this field is absent before the first serial
+change. Compare `sessionUuid` and `stableDeviceId` across results to verify the
+same session and device image, with the new `deviceId` and an incremented
+`generation`. Generations count serial changes within one daemon lifetime and
+restart at zero after a daemon restart. See [device-loss retry guidance](device-ownership.md#when-a-session-is-released).
 
 ## CLI session lifetime
 

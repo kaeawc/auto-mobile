@@ -1,3 +1,4 @@
+import type { SessionDeviceRebound } from "../daemon/sessionDeviceReboundBroadcast";
 import { errorMessage } from "../utils/describeUnknownError";
 import { DaemonShuttingDownError } from "../daemon/DaemonShuttingDownError";
 import type {
@@ -430,6 +431,29 @@ async function forwardLivenessHandover(
   }
 }
 
+async function forwardSessionDeviceRebound(
+  server: McpServer,
+  event: SessionDeviceRebound,
+): Promise<void> {
+  try {
+    await server.server.sendLoggingMessage({
+      level: "info",
+      logger: "auto-mobile.liveness",
+      data: {
+        code: "session_device_rebound",
+        sessionUuid: event.sessionId,
+        previousDeviceId: event.previousDeviceId,
+        deviceId: event.deviceId,
+        avdName: event.avdName,
+        stableDeviceId: event.stableDeviceId,
+        generation: event.generation,
+      },
+    });
+  } catch (error) {
+    logger.warn("[ProxyServer] Failed to forward session-device rebound", error);
+  }
+}
+
 async function forwardResourceUpdate(server: McpServer, uri: string): Promise<void> {
   try {
     await server.server.notification({
@@ -780,10 +804,14 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
   const stopLivenessHandovers = proxy.onLivenessHandover((handover) => {
     void forwardLivenessHandover(server, handover);
   });
+  const stopSessionDeviceRebounds = proxy.onSessionDeviceRebound((event) => {
+    void forwardSessionDeviceRebound(server, event);
+  });
   const previousOnClose = server.server.onclose;
   server.server.onclose = () => {
     stopResourceUpdates();
     stopLivenessHandovers();
+    stopSessionDeviceRebounds();
     previousOnClose?.();
     void proxy.close().catch((error) => {
       logger.warn("[ProxyServer] Failed to close daemon proxy", error);

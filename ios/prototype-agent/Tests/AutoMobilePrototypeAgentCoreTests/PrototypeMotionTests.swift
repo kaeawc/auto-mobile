@@ -57,6 +57,19 @@ final class PrototypeMotionTests: XCTestCase {
         XCTAssertEqual(motion.visibility(transition: "slide"), .slide)
     }
 
+    func testStackTransitionOnlyControlsNavigation() {
+        let motion = PrototypeMotion(specMotion: nil, reduceMotion: false)
+        for transition in PrototypeStackTransition.allCases {
+            XCTAssertEqual(motion.visibility(transition: transition.rawValue, nodeType: "stack"), .standard)
+        }
+        XCTAssertEqual(motion.visibility(transition: "slide", nodeType: "column"), .slide)
+        XCTAssertEqual(
+            PrototypeMotion(specMotion: "none", reduceMotion: false)
+                .visibility(transition: "slide", nodeType: "stack"),
+            .instant
+        )
+    }
+
     func testDisabledMotionIsInstantWhateverTheTransition() {
         let off = PrototypeMotion(specMotion: "none", reduceMotion: false)
         XCTAssertEqual(

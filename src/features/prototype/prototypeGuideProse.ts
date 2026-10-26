@@ -78,8 +78,15 @@ existing screen. Actions \`push {stack, screen}\`, \`pop {stack}\`, \`popToRoot 
 Push is ignored at depth 32; pop at depth 1 does nothing. \`screen_changed\` has name = stack id
 and payload \`{screen, depth}\`, emitted only when the top screen or depth changes. Requires
 \`prototype_stack_v1\`; every screen counts toward node limits, including hidden screens.
-Android Back and the iOS edge swipe pop a stack above depth 1. No transitions yet; per-screen
-scroll position is not restored. A stack cannot appear inside a repeat template.
+Android Back and the iOS edge swipe pop a stack above depth 1. A stack's optional
+\`transition: "platform" | "slide" | "fade" | "none"\` selects screen navigation animation
+(default \`platform\`); \`push\` and \`replace\` can override it with their own \`transition\`.
+Any explicit value needs \`prototype_stack_transitions_v1\`; pop/popToRoot take no override.
+Transitions honour \`motion: "none"\`, animator scale 0 and system reduced motion. A stack's
+\`transition\` accepts only those four values and no longer animates the stack's own visibility
+(earlier specs using \`expand\`, \`scale\`, \`slideStart\`, \`slideEnd\` or \`blurReplace\` on a stack
+are now refused): wrap the stack in a \`box\` with \`visibleWhen\` and a visibility transition for
+that. Each entry's scroll position is restored on pop. A stack cannot appear inside a repeat template.
 
 On Android, \`show replaceOthers: false\` retains other prototype windows, up to four distinct ids
 (requires \`prototype_multi_surface_v1\`); a fifth is refused listing the shown ids. A same-id show
@@ -185,7 +192,7 @@ accessibility zoom actions; it cannot also have \`onDoubleTap\`. Everything snap
 
 ## Choreography
 
-(needs \`prototype_choreography_v1\`) \`transition\` also takes \`{type, delayMs?}\` (\`delayMs\` 0-600 ms, the wait
+(needs \`prototype_choreography_v1\`) On nodes other than stacks, \`transition\` also takes \`{type, delayMs?}\` (\`delayMs\` 0-600 ms, the wait
 before the enter starts) besides the plain names, and \`blurReplace\`: a blur-and-fade enter and exit
 (iOS \`.blurReplace\`; Android 12 and later blur, Android 11 and earlier fade only). A \`box\`, \`row\` or \`column\` takes \`stagger: {ms, order?}\` (\`ms\` 0-100 per child;
 \`order\` \`forward\` (default), \`reverse\` or \`center\`): its direct children with \`visibleWhen\`

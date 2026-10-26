@@ -20,12 +20,14 @@ import dev.jasonpearson.automobile.protocol.PrototypeDismissAction
 import dev.jasonpearson.automobile.protocol.PrototypeEmitAction
 import dev.jasonpearson.automobile.protocol.PrototypeEvent
 import dev.jasonpearson.automobile.protocol.PrototypeEventKind
+import dev.jasonpearson.automobile.protocol.PrototypePushAction
 import dev.jasonpearson.automobile.protocol.PrototypeRequestAction
 import dev.jasonpearson.automobile.protocol.PrototypeRequestError
 import dev.jasonpearson.automobile.protocol.PrototypeRequestErrorCode
 import dev.jasonpearson.automobile.protocol.PrototypeRequestResponse
 import dev.jasonpearson.automobile.protocol.PrototypeRequests
 import dev.jasonpearson.automobile.protocol.PrototypeScalar
+import dev.jasonpearson.automobile.protocol.PrototypeStackNode
 import dev.jasonpearson.automobile.protocol.PrototypeStorageBlock
 import dev.jasonpearson.automobile.protocol.PrototypeStoredValues
 import dev.jasonpearson.automobile.protocol.PrototypeSwitchNode
@@ -132,6 +134,51 @@ class SavedPrototypeActivityTest {
   fun `back finishes and buffers exactly one user dismissal`() {
     val activity = launch()
     activity.onBackPressedDispatcher.onBackPressed()
+    activity.onBackPressedDispatcher.onBackPressed()
+    compose.waitForIdle()
+    assertUserDismissed(activity)
+  }
+
+  @Test
+  fun `activity back pops the saved stack before dismissing at root`() = runBlocking {
+    val original = savedPrototypeFixture()
+    val spec =
+      original.spec.copy(
+        motion = "none",
+        root =
+          PrototypeStackNode(
+            id = "nav",
+            start = "home",
+            screens =
+              mapOf(
+                "home" to original.spec.root,
+                "detail" to PrototypeButtonNode(label = "Detail", testTag = "detail"),
+              ),
+          ),
+      )
+    store.stored["panel"] =
+      SavedPrototypeLoadResult.Loaded(
+        original.id,
+        original.label,
+        original.slug,
+        original.savedAt,
+        spec,
+        "",
+        emptyMap(),
+      )
+    val activity = launch()
+    activity.interact(PrototypeInteraction.Tap(listOf(PrototypePushAction("nav", "detail"))))
+    compose.waitForIdle()
+    assertNotNull(root(activity).find("detail"))
+    SavedPrototypeEvents.buffer.drain()
+    activity.onBackPressedDispatcher.onBackPressed()
+    compose.waitForIdle()
+    assertFalse(activity.isFinishing)
+    assertNotNull(root(activity).find("saved-node"))
+    assertEquals(
+      listOf(PrototypeEventKind.SCREEN_CHANGED),
+      SavedPrototypeEvents.buffer.drain().map { it.kind },
+    )
     activity.onBackPressedDispatcher.onBackPressed()
     compose.waitForIdle()
     assertUserDismissed(activity)

@@ -9819,6 +9819,12 @@
         "type": "string",
         "nullable": false,
         "hasDefault": false
+      },
+      {
+        "name": "transition",
+        "type": "enum",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "radial": [
@@ -9953,6 +9959,12 @@
         "type": "string",
         "nullable": false,
         "hasDefault": false
+      },
+      {
+        "name": "transition",
+        "type": "enum",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "request": [

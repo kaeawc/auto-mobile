@@ -41,6 +41,8 @@ internal object PrototypeBundleCapabilities {
       "removeData" -> caps.add("prototype_data_actions_v1")
       "startTimer",
       "cancelTimer" -> caps.add("prototype_timers_v1")
+      "push",
+      "replace" -> if ("transition" in action) caps.add("prototype_stack_transitions_v1")
       "scrollTo" -> caps.add("prototype_chat_scroll_v1")
       "emit" -> if ("context" in action) caps.add("prototype_emit_context_v1")
     }

@@ -20,6 +20,17 @@
         private(set) var swipe = PrototypeSwipeCoordinator()
         private(set) var shownErrors: Set<String> = []
         private(set) var pages: [String: Int] = [:]
+        struct StackDrag {
+            let target: String
+            let revision: Int
+            var progress = 0.0
+            var settling = false
+        }
+
+        var stackDrag: StackDrag?
+        var completedStackSwipe: String?
+        private(set) var stackChanges: [String: PrototypeStackChange] = [:]
+        private(set) var stackEntries: [String: [PrototypeStackEntry]] = [:]
         private(set) var stacks: [String: PrototypeStackSnapshot] = [:]
         private(set) var appearance: PrototypeAppearance?
         private(set) var deviceDark = false
@@ -54,6 +65,9 @@
             if state != next.state { state = next.state }
             if shownErrors != next.shownErrors { shownErrors = next.shownErrors }
             if pages != next.pages { pages = next.pages }
+            if let drag = stackDrag, next.stackChanges[drag.target]?.revision != drag.revision { stackDrag = nil }
+            if stackChanges != next.stackChanges { stackChanges = next.stackChanges }
+            if stackEntries != next.stackEntries { stackEntries = next.stackEntries }
             if stacks != next.stacks { stacks = next.stacks }
             if appearance != next.appearance { appearance = next.appearance }
             if deviceDark != next.deviceDark { deviceDark = next.deviceDark }
@@ -292,6 +306,11 @@
             _ = pages
             _ = stacks
             return session.stackPopTarget
+        }
+
+        func stackTransition(_ id: String) -> PrototypeStackTransition {
+            _ = spec
+            return session.stackTransition(id)
         }
 
         @discardableResult

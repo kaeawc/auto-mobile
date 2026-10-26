@@ -1,3 +1,5 @@
+import { ActionableError, toActionableError } from "../../../models/ActionableError";
+import { readBackWithSettle } from "./readBackWithSettle";
 import { TypingSession } from "./TypingSession";
 import { KeyEventSupport } from "./KeyEventSupport";
 import {
@@ -478,6 +480,74 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       return "keyboardProfile is Android-only; select an Android device.";
     }
     return null;
+  }
+
+  async withEnterReadBack(
+    action: () => Promise<SendKeysCommandResult>,
+    signal?: AbortSignal,
+    display?: string,
+  ): Promise<SendKeysCommandResult> {
+    const read = async () =>
+      this.clearVerifier.readFocusedTextSnapshot(
+        await this.clearVerifier.readFreshObservation(signal, display),
+      );
+    let before: { text: string; length: number } | undefined;
+    try {
+      // Take the baseline before dispatch, never from the prior command's cached tree.
+      before = await read();
+    } catch (error) {
+      this.checkAbort(signal, error);
+      logger.warn("[SendKeys] Enter baseline read failed; dispatching without a read-back", error);
+    }
+    const result = await action();
+    if (!result.success) {
+      return result;
+    }
+    if (before === undefined) {
+      // No readable focused field before the key (password field, unreadable node): the
+      // newline cannot be confirmed either way, so keep the pre-guard behaviour.
+      logger.warn("[SendKeys] Enter read-back skipped: focused field text was unreadable");
+      return result;
+    }
+    const baseline = before.text;
+    try {
+      // The bug is a stale snapshot: the field still shows its pre-enter text after the key.
+      // The key has landed when a line was added, or when the text no longer extends the
+      // baseline (a submit that clears the field, or focus moving to another field).
+      const confirmed = await readBackWithSettle(
+        read,
+        (snapshot) =>
+          snapshot === undefined ||
+          snapshot.text.split("\n").length > baseline.split("\n").length ||
+          !snapshot.text.startsWith(baseline),
+        {
+          timer: this.timer,
+          beforeRead: () => this.checkAbort(signal),
+          finish: (_, accepted) => accepted,
+        },
+      );
+      if (confirmed) {
+        return result;
+      }
+      throw new ActionableError(
+        "Enter was dispatched but its newline could not be confirmed before the next a11y insert. " +
+          "Observe the field before continuing; do not retry the sequence blindly. " +
+          "For a single-line submit action, end the sequence at enter and re-observe the target.",
+      );
+    } catch (error) {
+      this.checkAbort(signal, error);
+      logger.warn("[SendKeys] Enter read-back failed after dispatch", error);
+      return {
+        ...result,
+        success: false,
+        partialApplication: true,
+        retryable: false,
+        error: toActionableError(
+          error,
+          "Enter read-back is unavailable after dispatch; observe the field and do not retry the sequence blindly",
+        ).message,
+      };
+    }
   }
 
   async key(

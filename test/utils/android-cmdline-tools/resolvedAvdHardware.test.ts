@@ -46,7 +46,9 @@ describe("FileAvdConfigReader.readResolvedHardware", () => {
     return new FileAvdConfigReader(
       async (path) => {
         const content = files[path];
-        if (content === undefined) throw new Error(`ENOENT ${path}`);
+        if (content === undefined) {
+          throw new Error(`ENOENT ${path}`);
+        }
         return content;
       },
       (path) => path in files || path === "/avd/Pixel.avd",

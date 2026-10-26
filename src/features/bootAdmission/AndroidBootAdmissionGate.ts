@@ -51,6 +51,11 @@ import { ENV } from "../../config/env";
 /** Env override: positive integer cap on concurrently booted Android emulators. */
 export const ANDROID_MAX_BOOTED_ENV = ENV.ANDROID_MAX_BOOTED.name;
 
+/** Reservations name no AVD; there is nothing to read for them. */
+const BINDING_REPLACEMENT_AVD = "binding replacement";
+/** A local file read; a hung AVD home must not hold admission. */
+const RESOLVED_RAM_READ_TIMEOUT_MS = 2_000;
+
 export interface AndroidBootAdmissionRequest {
   /** Boot budget: bounds the capacity sample and the hand-off window. */
   timeoutMs: number;
@@ -124,7 +129,7 @@ export class AndroidBootAdmissionGate
 
   async reserveBoot(options: BootReservationOptions): Promise<BootSlotReservation> {
     const reserved = await this.admitNew(
-      { ...options, avdName: "binding replacement" },
+      { ...options, avdName: BINDING_REPLACEMENT_AVD },
       options.replacingDeviceId,
     );
     return this.reservations.hold(
@@ -658,12 +663,21 @@ export class AndroidBootAdmissionGate
   private async candidateGuestBytes(
     request: AndroidBootAdmissionRequest,
   ): Promise<number | undefined> {
-    if (!this.resolvedGuestBytes) {
+    const read = this.resolvedGuestBytes;
+    if (!read || request.avdName === BINDING_REPLACEMENT_AVD) {
       return undefined;
     }
     try {
-      return await this.resolvedGuestBytes(request.avdName, request.signal);
+      return await raceWithDeadline(() => read(request.avdName, request.signal), {
+        timer: this.timer,
+        timeoutMs: RESOLVED_RAM_READ_TIMEOUT_MS,
+        signal: request.signal,
+        label: "Reading resolved AVD RAM",
+      });
     } catch (error) {
+      if (request.signal?.aborted) {
+        throw error;
+      }
       // The estimate falls back to the measured or default value; reading is best effort.
       logger.warn(
         `[BootAdmission] Could not read resolved RAM for '${request.avdName}': ${errorMessage(error)}`,

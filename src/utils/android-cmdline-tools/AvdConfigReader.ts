@@ -1,3 +1,4 @@
+import { errorMessage } from "../describeUnknownError";
 import { ActionableError } from "../../models/ActionableError";
 import { logger } from "../logger";
 import { AMBIENT_ENV, readEnvRaw } from "../../config/env";
@@ -298,7 +299,7 @@ export class FileAvdConfigReader implements AvdConfigReader, AvdDirectoryResolve
     try {
       return parseResolvedAvdHardware(await this.readFileFn(file, "utf-8"));
     } catch (error) {
-      logger.warn(`Failed to read resolved hardware for ${avdName}: ${error}`, error);
+      logger.warn(`Failed to read resolved hardware for ${avdName}: ${errorMessage(error)}`, error);
       return null;
     }
   }

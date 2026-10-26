@@ -54,6 +54,10 @@ lipo "${app}/ProtoViewer" -verify_arch "${archs[@]}"
 cp "${viewer_root}/Info.plist" "${app}/Info.plist"
 plutil -replace MinimumOSVersion -string "${min_ios}" "${app}/Info.plist"
 plutil -lint "${app}/Info.plist"
+# Required-reason API declarations ship at the bundle root (#14151); the privacy-manifest guard
+# (scripts/ios/check-privacy-manifests.ts) keeps them equal to the APIs these sources use.
+cp "${viewer_root}/PrivacyInfo.xcprivacy" "${app}/PrivacyInfo.xcprivacy"
+plutil -lint "${app}/PrivacyInfo.xcprivacy"
 
 # Compile both app chrome and system permission/display-name translations.
 for catalog in Localizable InfoPlist; do

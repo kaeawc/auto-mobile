@@ -163,6 +163,8 @@ nav:
       - "ProtoViewer": design-docs/protoviewer.md
       - "ProtoViewer localization": design-docs/protoviewer-localization.md
       - "ProtoViewer agent": design-docs/protoviewer-agent.md
+      - "ProtoViewer privacy": protoviewer/privacy.md
+      - "ProtoViewer store listing": design-docs/protoviewer-store-listing.md
       - "Native prototype embedding": design-docs/prototype-embedding.md
       - "Runtime dependency pinning": design-docs/release/runtime-dependency-pinning.md
       - "Unit lane scaling": design-docs/ci/unit-lane-scaling.md

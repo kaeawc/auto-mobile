@@ -212,6 +212,7 @@ if [[ "${protoviewer_changed}" == true && "${PREPUSH_IOS_SKIP_PROTOVIEWER:-0}" !
     exit 1
   fi
   bun "${project_root}/scripts/ios/protoviewer-notices.ts" --check
+  bun "${project_root}/scripts/ios/check-privacy-manifests.ts"
   "${project_root}/scripts/ios/protoviewer-build.sh" "${project_root}/scratch/protoviewer-prepush"
   attestation_protoviewer=pass
 fi

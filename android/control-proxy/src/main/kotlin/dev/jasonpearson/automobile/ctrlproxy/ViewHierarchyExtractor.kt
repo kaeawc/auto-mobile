@@ -13,6 +13,7 @@ import android.view.accessibility.AccessibilityWindowInfo
 import androidx.core.util.size
 import dev.jasonpearson.automobile.ctrlproxy.models.ContentHiddenRegion
 import dev.jasonpearson.automobile.ctrlproxy.models.ElementBounds
+import dev.jasonpearson.automobile.ctrlproxy.models.PrototypeWindowMotion
 import dev.jasonpearson.automobile.ctrlproxy.models.ScreenDimensions
 import dev.jasonpearson.automobile.ctrlproxy.models.SemanticLink
 import dev.jasonpearson.automobile.ctrlproxy.models.TraversalOrderResult
@@ -955,6 +956,8 @@ internal constructor(
       prototypePlacement = prototypeMetadata?.placement,
       prototypeOpaque = prototypeMetadata?.opaque,
       prototypeAppearance = prototypeMetadata?.appearance,
+      prototypeMotion =
+        prototypeMetadata?.motion?.let { PrototypeWindowMotion(it.active, it.loops) },
     )
   }
 

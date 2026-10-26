@@ -36,6 +36,7 @@ data class PrototypeRuntimeSnapshot(
   /** Removed keys keep their stamp so a stale add cannot resurrect them unnoticed. */
   val stateRevisions: Map<String, Long> = emptyMap(),
   val stacks: Map<String, PrototypeStackSnapshot> = emptyMap(),
+  val stackChange: PrototypeStackChange? = null,
   /** Device-local error visibility, cleared on spec replacement. */
   val shownErrors: Set<String> = emptySet(),
   /** The latest `scrollTo` per scroll id (#14232); the scroll performs each once. */
@@ -512,7 +513,7 @@ class PrototypeRuntime(
           )
         }
         is PrototypePushAction ->
-          changeStack(action.stack) { node, path ->
+          changeStack(action.stack, "push", action.transition) { node, path ->
             if (
               path.size >= PrototypeSpecValidator.MAX_PROTOTYPE_STACK_DEPTH ||
                 !node.screens.containsKey(action.screen)
@@ -526,7 +527,7 @@ class PrototypeRuntime(
           }
         is PrototypePopToRootAction -> changeStack(action.stack) { node, _ -> listOf(node.start) }
         is PrototypeReplaceAction ->
-          changeStack(action.stack) { node, path ->
+          changeStack(action.stack, "replace", action.transition) { node, path ->
             if (!node.screens.containsKey(action.screen)) path else path.dropLast(1) + action.screen
           }
         PrototypeDismissAction -> dismiss()
@@ -656,6 +657,15 @@ class PrototypeRuntime(
   fun hasPoppableStack(model: PrototypeRenderModel = renderModel()): Boolean =
     current.active && stackPopTarget(model.root, current.stacks) != null
 
+  internal fun backPreview(): PrototypeRuntimeSnapshot? {
+    val id = stackPopTarget(renderModel().root, current.stacks) ?: return null
+    val stack = current.stacks.getValue(id)
+    return current.copy(
+      stacks = current.stacks + (id to PrototypeStackSnapshot(stack.path.dropLast(1))),
+      stackChange = PrototypeStackChange(id, "pop"),
+    )
+  }
+
   private fun stackPopTarget(
     root: PrototypeRenderNode,
     stacks: Map<String, PrototypeStackSnapshot>,
@@ -680,6 +690,8 @@ class PrototypeRuntime(
 
   private suspend fun changeStack(
     id: String,
+    direction: String = "pop",
+    override: PrototypeStackTransition? = null,
     transform: (PrototypeStackNode, List<String>) -> List<String>,
   ) {
     val node = stackNodes(current.spec.root)[id] ?: return
@@ -687,7 +699,12 @@ class PrototypeRuntime(
     val path = transform(node, before.path)
     if (path == before.path) return
     val next = PrototypeStackSnapshot(path.toList())
-    mutableSnapshot.value = current.copy(stacks = current.stacks + (id to next))
+    mutableSnapshot.value =
+      current.copy(
+        stacks = current.stacks + (id to next),
+        stackChange =
+          PrototypeStackChange(id, direction, override, (current.stackChange?.sequence ?: 0) + 1),
+      )
     if (before.path.last() != path.last() || before.depth != next.depth) {
       emit(
         kind = PrototypeEventKind.SCREEN_CHANGED,

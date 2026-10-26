@@ -153,7 +153,7 @@ class PrototypeChromelessTest {
     node.assertTextEquals(PROTOTYPE_DISMISS_LABEL)
     assertEquals(
       PROTOTYPE_DISMISS_TEST_TAG,
-      pill().fetchSemanticsNode().config.getOrNull(SemanticsProperties.TestTag),
+      pill().fetchSemanticsNode().config[SemanticsProperties.TestTag],
     )
   }
 

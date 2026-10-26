@@ -51,6 +51,8 @@ enum PrototypeAgentProtocol {
         richTextCapability,
         linkifyCapability,
         menusCapability,
+        tooltipCapability,
+        drawerCapability,
         stackCapability,
         stackTransitionsCapability,
         emitContextCapability,
@@ -153,6 +155,8 @@ enum PrototypeAgentProtocol {
     static let linkifyCapability = "prototype_linkify_v1"
     /// In-window menus and exposed select option lists.
     static let menusCapability = "prototype_menus_v1"
+    static let tooltipCapability = "prototype_tooltip_v1"
+    static let drawerCapability = "prototype_drawer_v1"
     // ORCHESTRATOR-CHOSEN gate; fold into PROTOTYPE_SPEC_CAPABILITY_GATES when it lands
     static let emitContextCapability = "prototype_emit_context_v1"
     /// Draws icons from schemas/prototype-ios-icon-symbols.json and honours filled/outlined

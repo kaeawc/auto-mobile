@@ -88,7 +88,9 @@ function nodeFields(value: unknown, path: string): string[] {
         styleFields(record(entry)?.style, `${path}.styleWhen[${index}].style`),
       ),
       ...(node.type === "image" ? pairAt(node.asset, `${path}.asset`) : []),
-      ...(node.type === "bottomSheet" ? newlyThemedColor(node.scrim, `${path}.scrim`) : []),
+      ...(node.type === "bottomSheet" || node.type === "drawer"
+        ? newlyThemedColor(node.scrim, `${path}.scrim`)
+        : []),
       ...list(node.items).flatMap((item, index) =>
         pairAt(record(item)?.image, `${path}.items[${index}].image`),
       ),

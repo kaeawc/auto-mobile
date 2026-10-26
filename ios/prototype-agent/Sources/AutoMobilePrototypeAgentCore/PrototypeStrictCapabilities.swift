@@ -38,6 +38,8 @@ enum PrototypeStrictCapabilities {
                 "searchBar": "search_bar",
                 "chart": "chart",
                 "menu": "menus",
+                "tooltip": "tooltip",
+                "drawer": "drawer",
                 "select": "menus",
                 "scrollTo": "chat_scroll",
             ]

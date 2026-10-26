@@ -18,6 +18,7 @@ object AutoMobilePrototype {
       "prototype_choreography_v1",
       "prototype_data_actions_v1",
       "prototype_data_model_v1",
+      "prototype_drawer_v1",
       "prototype_emit_context_v1",
       "prototype_flow_grid_v1",
       "prototype_gestures_v1",
@@ -43,5 +44,6 @@ object AutoMobilePrototype {
       "prototype_text_field_options_v1",
       "prototype_theme_modes_v1",
       "prototype_timers_v1",
+      "prototype_tooltip_v1",
     )
 }

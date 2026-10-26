@@ -36,6 +36,8 @@ enum PrototypeBundleCapabilities {
                 "carousel": "carousel",
                 "searchBar": "search_bar",
                 "menu": "menus",
+                "tooltip": "tooltip",
+                "drawer": "drawer",
                 "select": "menus",
                 "stack": "stack",
                 "chart": "chart",

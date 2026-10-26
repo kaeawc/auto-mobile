@@ -42,6 +42,7 @@ class CommandAdvertisementTest {
       "prototype_window_chrome_v1",
       "prototype_theme_modes_v1",
       "prototype_timers_v1",
+      "prototype_tooltip_v1",
       "prototype_flow_grid_v1",
       "prototype_pager_options_v1",
       "prototype_data_model_v1",
@@ -68,6 +69,7 @@ class CommandAdvertisementTest {
       "prototype_chart_v1",
       "prototype_linkify_v1",
       "prototype_chat_scroll_v1",
+      "prototype_drawer_v1",
       "prototype_emit_context_v1",
       "prototype_checks_v1",
       "prototype_appearance_v1",
@@ -184,6 +186,8 @@ class CommandAdvertisementTest {
     assertTrue(commands.contains("network_mock_rules_report_v1"))
     assertTrue(commands.contains("prototype_window_metadata_v1"))
     assertTrue(commands.contains("prototype_menus_v1"))
+    assertTrue(commands.contains("prototype_tooltip_v1"))
+    assertTrue(commands.contains("prototype_drawer_v1"))
     assertTrue(commands.contains("screenshot_hide_prototype_v1"))
     assertTrue(commands.contains("sdk_capabilities_user_id_v1"))
   }

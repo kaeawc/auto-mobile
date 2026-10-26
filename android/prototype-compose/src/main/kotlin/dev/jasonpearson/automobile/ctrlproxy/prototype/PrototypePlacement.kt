@@ -62,3 +62,104 @@ enum class PrototypeWindowLayer(val windowType: Int) {
       }
   }
 }
+
+/** Window-space pixels; independent of Compose and device density. */
+internal data class PrototypeTargetRect(
+  val left: Float,
+  val top: Float,
+  val right: Float,
+  val bottom: Float,
+)
+
+internal data class PrototypeBubbleSize(val width: Float, val height: Float)
+
+internal data class PrototypeBubblePlacement(
+  val caret: String,
+  val x: Float,
+  val y: Float,
+  val caretOffset: Float,
+)
+
+internal data class PrototypeBubbleOptions(
+  val rtl: Boolean,
+  val caret: String,
+  val gap: Float,
+  val margin: Float,
+  val cornerRadius: Float,
+)
+
+/** Caret names are bubble edges: top places the bubble below its target. */
+internal fun placePrototypeBubble(
+  target: PrototypeTargetRect,
+  bubble: PrototypeBubbleSize,
+  window: PrototypeTargetRect,
+  options: PrototypeBubbleOptions,
+): PrototypeBubblePlacement {
+  val space = PrototypeBubbleSpace(target, bubble, window, options)
+  val side = space.resolveSide()
+  val centerX = (target.left + target.right) / 2f
+  val centerY = (target.top + target.bottom) / 2f
+  val vertical = side in setOf("top", "bottom")
+  val bubbleOnRight = (side == "start") != options.rtl
+  val rawX =
+    if (vertical) centerX - bubble.width / 2f
+    else if (bubbleOnRight) target.right + options.gap else target.left - options.gap - bubble.width
+  val rawY =
+    if (!vertical) centerY - bubble.height / 2f
+    else if (side == "top") target.bottom + options.gap
+    else target.top - options.gap - bubble.height
+  val x = rawX.coerceIn(space.left, (space.right - bubble.width).coerceAtLeast(space.left))
+  val y = rawY.coerceIn(space.top, (space.bottom - bubble.height).coerceAtLeast(space.top))
+  val length = if (vertical) bubble.width else bubble.height
+  val inset = options.cornerRadius.coerceIn(0f, length / 2f)
+  val offset =
+    (if (vertical) centerX - x else centerY - y).coerceIn(
+      inset,
+      (length - inset).coerceAtLeast(inset),
+    )
+  return PrototypeBubblePlacement(side, x, y, offset)
+}
+
+private class PrototypeBubbleSpace(
+  val target: PrototypeTargetRect,
+  val bubble: PrototypeBubbleSize,
+  window: PrototypeTargetRect,
+  val options: PrototypeBubbleOptions,
+) {
+  val left = window.left + options.margin
+  val top = window.top + options.margin
+  val right = window.right - options.margin
+  val bottom = window.bottom - options.margin
+
+  private fun room(side: String): Float =
+    when (side) {
+      "top" -> bottom - target.bottom - options.gap
+      "bottom" -> target.top - top - options.gap
+      "start" ->
+        if (!options.rtl) right - target.right - options.gap else target.left - left - options.gap
+      else ->
+        if (!options.rtl) target.left - left - options.gap else right - target.right - options.gap
+    }
+
+  private fun fits(side: String) =
+    room(side) >= if (side in setOf("top", "bottom")) bubble.height else bubble.width
+
+  fun resolveSide(): String {
+    val preferred = if (options.caret == "auto") "top" else options.caret
+    val opposite =
+      when (preferred) {
+        "top" -> "bottom"
+        "bottom" -> "top"
+        "start" -> "end"
+        else -> "start"
+      }
+    return when {
+      fits(preferred) -> preferred
+      fits(opposite) -> opposite
+      options.caret == "auto" && fits("start") -> "start"
+      options.caret == "auto" && fits("end") -> "end"
+      room(opposite) > room(preferred) -> opposite
+      else -> preferred
+    }
+  }
+}

@@ -26,6 +26,12 @@ struct ImageFilter: Decodable, Equatable, Sendable {
     let tint: PrototypeModeValue?
 }
 
+/// Tooltip spotlight hole: padding 0..64 dp (default 8), cornerRadius 0..64 dp (default 12).
+struct TooltipSpotlight: Codable, Equatable, Sendable {
+    let padding: Int?
+    let cornerRadius: Int?
+}
+
 struct Offset: Codable, Equatable, Sendable {
     let x: Double
     let y: Double

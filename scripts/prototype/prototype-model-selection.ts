@@ -9,6 +9,10 @@ export const prototypeModelSelection = {
   shadow: { swiftConformances: ["Decodable", "Equatable", "Sendable"] },
   fadeEdges: {},
   imageFilter: { swiftConformances: ["Decodable", "Equatable", "Sendable"] },
+  // tooltipCaret/drawerEdge are enum rules: native node fields use strings, as for existing enums.
+  tooltipSpotlight: {
+    doc: "Tooltip spotlight hole: padding 0..64 dp (default 8), cornerRadius 0..64 dp (default 12).",
+  },
   offset: {},
   padding: {},
   bounds: { languages: ["kotlin"] },

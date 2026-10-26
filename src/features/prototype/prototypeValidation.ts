@@ -18,6 +18,7 @@ import { prototypeChartError } from "./prototypeChart";
 import { prototypeRequestsError } from "./prototypeRequest";
 import { prototypePlatformError } from "./prototypePlatform";
 import { prototypeLinkifyError } from "./prototypeLinkify";
+import { prototypeTooltipError } from "./prototypeTooltip";
 import { prototypeChatScrollError } from "./prototypeChatScroll";
 import { BOUND_STATE_KEY_PATTERN } from "./prototypeTemplate";
 import { effectUses } from "./prototypeEffects";
@@ -805,6 +806,19 @@ function motionErrors(nodes: Located[]): PrototypeValidationError | undefined {
   return prototypeMotionV2Error(nodes) ?? prototypeChoreographyError(nodes);
 }
 
+/** Cross-node references share the component-expanded tree and repeat cardinalities. */
+function nodeReferenceErrors(
+  context: Context,
+  repeats: PrototypeRepeatData,
+): PrototypeValidationError | undefined {
+  return (
+    prototypeTooltipError(context.nodes, repeats) ??
+    prototypeChatScrollError(context.nodes, context.actions) ??
+    pagerErrors(context) ??
+    stackErrors(context)
+  );
+}
+
 /** Action, container and state checks, after the layout checks pass. */
 function behaviourErrors(
   value: unknown,
@@ -822,9 +836,7 @@ function behaviourErrors(
     motionErrors(context.nodes) ??
     prototypeChartError(context.nodes, data.data) ??
     prototypeLinkifyError(value) ??
-    prototypeChatScrollError(context.nodes, context.actions) ??
-    pagerErrors(context) ??
-    stackErrors(context) ??
+    nodeReferenceErrors(context, repeats) ??
     stateTypeErrors(value, context, data, repeats)
   );
 }

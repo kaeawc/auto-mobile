@@ -14,6 +14,16 @@
         private(set) var showRevision = 0
         /// Transient presentation only; never written to or reported as spec state.
         var expandedSelect: PrototypeNode?
+        @ObservationIgnored private var nodeFocusAnchors: [ObjectIdentifier: PrototypeOverlayFocusAnchor] = [:]
+
+        func focusAnchor(for node: PrototypeNode) -> PrototypeOverlayFocusAnchor {
+            let key = ObjectIdentifier(node)
+            if let found = nodeFocusAnchors[key] { return found }
+            let anchor = PrototypeOverlayFocusAnchor()
+            nodeFocusAnchors[key] = anchor
+            return anchor
+        }
+
         var menuBounds: [ObjectIdentifier: CGRect] = [:]
         private(set) var state: [String: JSONValue] = [:]
         /// Which swipe-actions row is open; opening one closes the others. Presentation only.
@@ -54,7 +64,7 @@
             if let selected = expandedSelect {
                 let root = next.spec?.root
                 let blocker = root?.openModals(state: next.state, pages: next.pages)
-                    .last { ["dialog", "menu"].contains($0.type) }
+                    .last { $0.blocksUnderlyingPage }
                 if root?.visibleSelect(selected, state: next.state, pages: next.pages) != true ||
                     (blocker != nil && blocker?.visibleSelect(selected, state: next.state, pages: next.pages) != true)
                 {
@@ -347,6 +357,12 @@
 
         @discardableResult
         func popTopmostStack() -> Bool {
+            if spec?.root.openModals(state: state, pages: pages, stacks: stacks)
+                .contains(where: { $0.type == "drawer" }) == true
+            {
+                apply { $0.popTopmostStack() }
+                return true
+            }
             guard stackPopTarget != nil else { return false }
             apply { $0.popTopmostStack() }
             return true

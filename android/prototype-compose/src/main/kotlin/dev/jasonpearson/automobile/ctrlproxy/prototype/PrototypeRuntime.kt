@@ -754,16 +754,25 @@ class PrototypeRuntime(
   /** Framework-free Back policy; the controller serializes this with other interactions. */
   suspend fun popTopmostStack(): Boolean {
     if (!current.active) return false
-    val id = stackPopTarget(renderModel().root, current.stacks) ?: return false
+    val root = renderModel().root
+    val drawer = modalPrototypeSheets(root).lastOrNull { it.role == "drawer" }
+    if (drawer != null) {
+      control(closing((drawer.source as PrototypeDrawerNode).openWhen), emptyList())
+      return true
+    }
+    val id = stackPopTarget(root, current.stacks) ?: return false
     changeStack(id) { _, path -> path.dropLast(1) }
     return true
   }
 
   /** Focus and Back dispatch use exactly the same visible target selection. */
   fun hasPoppableStack(model: PrototypeRenderModel = renderModel()): Boolean =
-    current.active && stackPopTarget(model.root, current.stacks) != null
+    current.active &&
+      (modalPrototypeSheets(model.root).any { it.role == "drawer" } ||
+        stackPopTarget(model.root, current.stacks) != null)
 
   internal fun backPreview(): PrototypeRuntimeSnapshot? {
+    if (modalPrototypeSheets(renderModel().root).any { it.role == "drawer" }) return null
     val id = stackPopTarget(renderModel().root, current.stacks) ?: return null
     val stack = current.stacks.getValue(id)
     return current.copy(
@@ -1558,6 +1567,7 @@ internal fun prototypeDescendants(node: PrototypeNode): List<PrototypeNode> =
     is PrototypeCardNode -> node.children
     is PrototypeScrollNode -> listOf(node.child)
     is PrototypeBottomSheetNode -> listOf(node.child)
+    is PrototypeDrawerNode -> listOf(node.child)
     is PrototypeDialogNode -> listOfNotNull(node.child)
     is PrototypeSearchBarNode -> listOfNotNull(node.child)
     else -> emptyList()

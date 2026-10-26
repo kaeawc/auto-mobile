@@ -72,6 +72,8 @@ const SURFACE_TYPES = new Set([
   "card",
   "dialog",
   "bottomSheet",
+  "tooltip",
+  "drawer",
   "snackbar",
   "topAppBar",
   "bottomNav",

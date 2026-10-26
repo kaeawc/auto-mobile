@@ -348,6 +348,13 @@ struct PrototypePalette: Equatable {
         return color
     }
 
+    /// A bottomSheet's scrim: the authored slot through `scrim`, or the `scrim` role at
+    /// `scrimRoleAlpha` when the sheet has none, the fallback Android draws
+    /// (`prototypeSheetScrimFallback`, #15117). A tap on it closes the sheet like an authored one.
+    func sheetScrim(_ spec: PrototypeModeValue?) -> PrototypeRGBA? {
+        scrim(spec ?? .single("scrim"))
+    }
+
     /// The asset id an image slot names in this palette's mode.
     func asset(_ slot: PrototypeModeValue?) -> String? {
         slot?.value(dark: dark)

@@ -1,3 +1,4 @@
+import type { InternalTeardownOptions } from "../features/deviceLifecycle/teardown/teardownContracts";
 import type { RestartStopIdentity } from "../daemon/devicePool";
 import { BootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";
 import type { DaemonStateLike } from "../daemon/daemonState";
@@ -483,7 +484,10 @@ function createDeleteDeviceWorkflow(
   deadlineMs: number,
   timeoutMs: number,
   requester: LifecycleRequester | undefined,
-  stopIdentities: TeardownStopIdentities,
+  {
+    stopIdentities,
+    internal,
+  }: { stopIdentities: TeardownStopIdentities; internal?: InternalTeardownOptions },
 ): DeviceTeardownWorkflow<TeardownState, "accepted" | "not_required", TeardownToolResponse> {
   return {
     resolve: async (requestAbortSignal, lifecycleLease) => {
@@ -497,6 +501,7 @@ function createDeleteDeviceWorkflow(
         timeoutMs,
         cancelOnRequestAbort: args.cancellationPolicy === "cancel-on-request-abort",
         lifecycleLease,
+        unlaunchedCreatedAvd: internal?.unlaunchedCreatedAvd,
         mode: args.force === true ? "serial-only" : "named",
         initialScan: { serials: new Set(), pooledEntries: [] },
       };
@@ -659,7 +664,7 @@ async function runDeleteDevice(
   callerSignal: AbortSignal | undefined,
   teardownService: DeviceTeardownService,
   lifecycleLease?: VirtualDeviceLifecycleLease,
-  requester?: LifecycleRequester,
+  ...[requester, internal]: [requester?: LifecycleRequester, internal?: InternalTeardownOptions]
 ): Promise<TeardownToolResponse> {
   const timeoutMs = args.timeoutMs ?? DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS;
   const deadlineMs = deps.timer.now() + timeoutMs;
@@ -694,7 +699,10 @@ async function runDeleteDevice(
         cancellationPolicy: args.cancellationPolicy ? "cancel-on-caller-abort" : undefined,
         lifecycleLease,
       },
-      createDeleteDeviceWorkflow(args, deps, deadlineMs, timeoutMs, requester, stopIdentities),
+      createDeleteDeviceWorkflow(args, deps, deadlineMs, timeoutMs, requester, {
+        stopIdentities,
+        internal,
+      }),
     );
   } catch (error) {
     return deleteDeviceCatchResponse(args, error, callerSignal);
@@ -803,7 +811,7 @@ export function createLifecycleHandlers(options: { iosDeleteGate?: BootConcurren
     teardownService: DeviceTeardownService,
     lifecycleLease?: VirtualDeviceLifecycleLease,
     /** The deleteDevice caller; omitted by internal rollbacks of a device the caller created. */
-    requester?: LifecycleRequester,
+    ...[requester, internal]: [requester?: LifecycleRequester, internal?: InternalTeardownOptions]
   ): Promise<TeardownToolResponse> {
     // Queue before the deadline starts, so waiting for a turn never spends the delete's own budget.
     let permit: Awaited<ReturnType<BootConcurrencyPool["acquire"]>> | undefined;
@@ -823,6 +831,7 @@ export function createLifecycleHandlers(options: { iosDeleteGate?: BootConcurren
         teardownService,
         lifecycleLease,
         requester,
+        internal,
       );
     } finally {
       permit?.release();

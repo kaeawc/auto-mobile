@@ -8,7 +8,7 @@ enum PrototypeRequestValidator {
     /// Every key under which a node holds an action list.
     private static let actionLists: Set<String> = ["onTap", "onLongPress", "onDoubleTap", "onSubmit", "onRefresh"]
     private static let methods = Set(PrototypeRequestMethod.allCases.map(\.rawValue))
-    private static let bindingKeys: Set<String> = ["state", "data", "value", "item", "index"]
+    private static let bindingKeys: Set<String> = ["state", "data", "value", "item", "index", "platform", "event"]
     private static let headerName = try? NSRegularExpression(pattern: "^[!#$%&'*+\\-.^_`|~0-9A-Za-z]+$")
     private static let templatedURL = try? NSRegularExpression(pattern: "^https?://", options: .caseInsensitive)
 
@@ -206,11 +206,12 @@ enum PrototypeRequestValidator {
         }
     }
 
-    /// Exactly one of `state`, `data`, `value`, `item`, `index: true`.
+    /// One structured value binding, including platform state and handler-scoped event data.
     private static func binding(_ raw: JSONValue, path: String) throws {
         guard case let .object(form) = raw, form.count == 1, let key = form.keys.first,
               bindingKeys.contains(key), key != "index" || form[key] == .bool(true)
-        else { throw fail(path, "Expected one value binding: state, data, value, item or index") }
+        else { throw fail(path, "Expected one value binding: state, data, value, item, index, platform or event")
+        }
     }
 
     private static func fail(_ path: String, _ message: String) -> DecodingError {

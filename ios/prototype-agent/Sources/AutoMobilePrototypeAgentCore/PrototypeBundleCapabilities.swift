@@ -113,6 +113,11 @@ enum PrototypeBundleCapabilities {
             names.insert("prototype_stack_transitions_v1")
         }
         if type == nil, fields["data"]?.stringValue != nil { names.insert("prototype_data_model_v1") }
+        if type == nil, let pointer = fields["platform"]?.stringValue {
+            names.insert("prototype_platform_v1")
+            if let module = PrototypeDataPointer.tokens(pointer).first,
+               let capability = PrototypePlatformValidator.modules[module]?.capability { names.insert(capability) }
+        }
         if type == "platform", let method = fields["call"]?.stringValue {
             names.insert("prototype_platform_v1")
             if let module = method.split(separator: ".").first,
@@ -150,7 +155,12 @@ enum PrototypeBundleCapabilities {
             if textKeys.contains(key), let text = child.stringValue {
                 if PrototypeDataText.substitutionLength(text, data: nil)
                     .recognized { names.insert("prototype_data_model_v1") }
-                if !PrototypePlatformValidator.placeholders(text).isEmpty { names.insert("prototype_platform_v1") }
+                for pointer in PrototypePlatformValidator.placeholders(text) {
+                    names.insert("prototype_platform_v1")
+                    if let module = PrototypeDataPointer.tokens(pointer).first,
+                       let capability = PrototypePlatformValidator.modules[module]?
+                       .capability { names.insert(capability) }
+                }
             }
             scanSlots(child, names: &names)
         }

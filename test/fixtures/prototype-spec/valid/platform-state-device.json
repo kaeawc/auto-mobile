@@ -1,0 +1,45 @@
+{
+  "id": "platform-state-device",
+  "window": { "placement": { "type": "fullscreen" } },
+  "state": { "changes": 0 },
+  "requires": { "platform": ["device"] },
+  "platform": {
+    "on": {
+      "device.changed": [{ "type": "increment", "key": "changes" }]
+    }
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "text",
+        "text": "{platform:/device/os} {platform:/device/osVersion} {platform:/device/idiom} changes {changes}"
+      },
+      {
+        "type": "row",
+        "visibleWhen": { "platform": "/device/widthClass", "equals": "expanded" },
+        "children": [{ "type": "text", "text": "Expanded, {platform:/device/windowWidth} wide" }]
+      },
+      {
+        "type": "column",
+        "visibleWhen": {
+          "all": [
+            { "platform": "/device/sizeClass", "equals": "regular" },
+            { "platform": "/device/windowWidth", "gt": 599 }
+          ]
+        },
+        "children": [{ "type": "text", "text": "Regular" }]
+      },
+      {
+        "type": "text",
+        "text": "Tabletop",
+        "visibleWhen": { "platform": "/device/posture", "equals": "tabletop" }
+      },
+      {
+        "type": "text",
+        "text": "Pointer",
+        "visibleWhen": { "platform": "/device/pointer", "equals": true }
+      }
+    ]
+  }
+}

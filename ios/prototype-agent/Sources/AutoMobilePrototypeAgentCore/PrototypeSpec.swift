@@ -98,6 +98,8 @@ struct PrototypeSpec: Decodable {
     /// The authored `root` before data resolution and repeat expansion, kept so a device data write
     /// (#12519) can rebuild `root` from the changed data without the host re-sending the spec.
     let authoredRoot: JSONValue
+    let platformHandlers: [String: JSONValue]
+    private(set) var platformState: [String: JSONValue] = [:]
 
     private enum CodingKeys: String, CodingKey {
         case id, window, state, data, theme, motion, root, storage, requires, platform
@@ -128,10 +130,12 @@ struct PrototypeSpec: Decodable {
         storage = (try? container.decodeIfPresent(PrototypeStorageBlock.self, forKey: .storage))
         let raw = try container.decode(JSONValue.self, forKey: .root)
         authoredRoot = raw
+        platformHandlers = try container.decodeIfPresent(JSONValue.self, forKey: .platform)?.objectFields?["on"]?
+            .objectFields ?? [:]
         // Menus validate against state, but state is decoded (and checked) after root to keep the
         // key order; a state that does not decode is reported at its own turn below.
         let menuState = (try? container.decodeIfPresent([String: JSONValue].self, forKey: .state))
-        // The platform vocabulary (#14294) is checked as a backstop; the agent does not run it yet.
+        // Validate platform vocabulary before resolving device-owned reads.
         try PrototypePlatformValidator.validate(
             requires: container.decodeIfPresent(JSONValue.self, forKey: .requires),
             handlers: container.decodeIfPresent(JSONValue.self, forKey: .platform),
@@ -161,7 +165,8 @@ struct PrototypeSpec: Decodable {
     /// Everything between the authored root and the drawn one, in the order the host reports
     /// errors. It depends on `data` and the initial state only, so a data write reruns it.
     private static func buildRoot(
-        _ raw: JSONValue, data: [String: JSONValue]?, menuState: [String: JSONValue]
+        _ raw: JSONValue, data: [String: JSONValue]?, menuState: [String: JSONValue],
+        platform: [String: JSONValue] = [:]
     )
         throws -> PrototypeNode
     {
@@ -173,7 +178,7 @@ struct PrototypeSpec: Decodable {
         try PrototypeLoadingStates.validate(raw)
         try PrototypeRepeat.validateEmitContexts(raw, data: data)
         try PrototypeLimits.guardSubstitutedText(raw, data: data)
-        let resolved = PrototypeDataResolver.resolveRoot(raw, data: data)
+        let resolved = PrototypeDataResolver.resolveRoot(raw, data: data, platform: platform)
         try PrototypeLimits.guardTree(resolved)
         let expanded = PrototypeRepeat.expand(resolved)
         try PrototypeBarScroll.validate(expanded)
@@ -194,6 +199,8 @@ struct PrototypeSpec: Decodable {
         replacing spec: PrototypeSpec, data: [String: JSONValue]?, root: PrototypeNode,
         authoredRoot: JSONValue? = nil, state: [String: JSONValue]? = nil
     ) {
+        platformHandlers = spec.platformHandlers
+        platformState = spec.platformState
         id = spec.id
         window = spec.window
         self.state = state ?? spec.state
@@ -205,6 +212,13 @@ struct PrototypeSpec: Decodable {
         self.authoredRoot = authoredRoot ?? spec.authoredRoot
     }
 
+    func replacingPlatform(_ platform: [String: JSONValue]) throws -> PrototypeSpec {
+        let rebuilt = try Self.buildRoot(authoredRoot, data: data, menuState: state ?? [:], platform: platform)
+        var next = PrototypeSpec(replacing: self, data: data, root: rebuilt)
+        next.platformState = platform
+        return next
+    }
+
     /// This spec after a host patch (#11675): the authored root, data and state replaced, and the drawn
     /// tree rebuilt and re-validated the way a show would. Id, window and theme are carried over, as
     /// the patch grammar cannot address them. Throws what a show of the same content would.
@@ -214,7 +228,7 @@ struct PrototypeSpec: Decodable {
         throws -> PrototypeSpec
     {
         if let data { try PrototypeLimits.guardData(data) }
-        let rebuilt = try Self.buildRoot(raw, data: data, menuState: state ?? [:])
+        let rebuilt = try Self.buildRoot(raw, data: data, menuState: state ?? [:], platform: platformState)
         try PrototypeStacks.validate(root: rebuilt)
         try PrototypeThemeModes.validate(placement: window.placement, root: rebuilt)
         return PrototypeSpec(replacing: self, data: data, root: rebuilt, authoredRoot: raw, state: state)
@@ -224,7 +238,7 @@ struct PrototypeSpec: Decodable {
     /// bindings, `repeat` rows and data conditions follow the write. Throws when the changed data
     /// breaks a limit the show enforces (for example more repeat cells than the tree allows).
     func replacingData(_ data: [String: JSONValue]) throws -> PrototypeSpec {
-        let rebuilt = try Self.buildRoot(authoredRoot, data: data, menuState: state ?? [:])
+        let rebuilt = try Self.buildRoot(authoredRoot, data: data, menuState: state ?? [:], platform: platformState)
         try PrototypeStacks.validate(root: rebuilt)
         try PrototypeThemeModes.validate(placement: window.placement, root: rebuilt)
         return PrototypeSpec(replacing: self, data: data, root: rebuilt)

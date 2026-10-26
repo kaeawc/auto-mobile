@@ -5,6 +5,13 @@ protocol PrototypeEmitContextInputs {
     func state(_ key: String) -> JSONValue?
     func page(_ id: String) -> Int?
     func data(_ pointer: String) -> JSONValue?
+    func platform(_ pointer: String) -> JSONValue?
+    func event(_ pointer: String) -> JSONValue?
+}
+
+extension PrototypeEmitContextInputs {
+    func platform(_: String) -> JSONValue? { nil }
+    func event(_: String) -> JSONValue? { nil }
 }
 
 struct PrototypeResolvedEmitContext: Equatable, Sendable {
@@ -57,12 +64,12 @@ struct PrototypeEmitContext: Decodable {
         case "state", "page": value.stringValue.map { !$0.isEmpty } ?? false
         case "item": value.stringValue.map(PrototypeRepeat.isFieldName) ?? false
         case "index": value == .bool(true)
-        case "data": value.stringValue.map(PrototypeDataPointer.isValid) ?? false
+        case "data", "platform", "event": value.stringValue.map(PrototypeDataPointer.isValid) ?? false
         case "value": validJSON(value, depth: 0)
         default: false
         }
         guard valid else {
-            if ["state", "item", "index", "page", "data", "value"].contains(kind) {
+            if ["state", "item", "index", "page", "data", "platform", "event", "value"].contains(kind) {
                 throw violation(PrototypeLimits.dataMemberPath(path, key: kind), "Unknown property")
             }
             throw violation("\(path).state", "Required property")
@@ -86,6 +93,8 @@ struct PrototypeEmitContext: Decodable {
             if let key = binding["state"]?.stringValue { return inputs.state(key) ?? .null }
             if let id = binding["page"]?.stringValue { return inputs.page(id).map { .number(Double($0)) } ?? .null }
             if let pointer = binding["data"]?.stringValue { return inputs.data(pointer) ?? .null }
+            if let pointer = binding["platform"]?.stringValue { return inputs.platform(pointer) ?? .null }
+            if let pointer = binding["event"]?.stringValue { return inputs.event(pointer) ?? .null }
             return binding["value"] ?? .null
         }
         if Self.fits(complete) { return PrototypeResolvedEmitContext(context: complete, contextTruncated: nil) }

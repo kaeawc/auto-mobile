@@ -26,6 +26,7 @@ final class PrototypePlatformTests: XCTestCase {
         for (name, entry) in table {
             let module = try XCTUnwrap(PrototypePlatformValidator.modules[name])
             XCTAssertEqual(module.capability, entry["capability"] as? String, name)
+            XCTAssertEqual(module.state, (entry["state"] as? [String: Any]).map { Set($0.keys) }, name)
             let events = try XCTUnwrap(entry["events"] as? [String: Any])
             XCTAssertEqual(module.events, Set(events.keys), name)
             let calls = try XCTUnwrap(entry["calls"] as? [String: [String: Any]])

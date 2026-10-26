@@ -115,6 +115,7 @@ struct PrototypeSession {
     /// `request` actions in flight (#12529) and the commands for the driver that runs them; see
     /// `takeRequestCommands`.
     private(set) var requests = PrototypeRequestLedger()
+    private var platformEventData: JSONValue?
     private var timerCommands: [PrototypeTimerCommand] = []
 
     mutating func takeTimerCommands() -> [PrototypeTimerCommand] {
@@ -295,6 +296,32 @@ struct PrototypeSession {
 
     // MARK: Interactions
 
+    mutating func setPlatformState(_ snapshot: [String: JSONValue]) throws {
+        guard let spec, spec.platformState != snapshot else { return }
+        let limit = PrototypeContractValidator.limit("MAX_PROTOTYPE_PLATFORM_STATE_BYTES")
+        guard try JSONEncoder().encode(snapshot).count <= limit else {
+            throw PrototypeLimits.violation("platform", "Platform state exceeds limit")
+        }
+        let rebuilt = try spec.replacingPlatform(snapshot)
+        self.spec = rebuilt
+        structureRevision += 1
+        rebuildNavigation(for: rebuilt.root, keepingPages: pages, keepingStacks: stacks)
+    }
+
+    mutating func deliverPlatformEvent(_ name: String, data: JSONValue) throws -> [PrototypeEvent] {
+        guard let spec else { return [] }
+        let payload = JSONValue.object(["event": .string(name), "data": data])
+        guard try JSONEncoder().encode(payload).count <= PrototypeLimits.maxEmitPayloadBytes else {
+            throw PrototypeLimits.violation("platform", "Platform event payload exceeds limit")
+        }
+        let actions = spec.platformHandlers[name] ?? .array([])
+        let decoded = try JSONDecoder().decode([PrototypeAction].self, from: JSONEncoder().encode(actions))
+        let delivered = emit(kind: "emit", name: "prototype_platform_event", payload: payload)
+        platformEventData = data
+        defer { platformEventData = nil }
+        return delivered + run(decoded)
+    }
+
     /// A tap's actions in order; a `dismiss` ends the prototype and drops the remaining actions.
     /// Android's `PrototypeRuntime.tap` (#10622): if any `setState`/`toggle`/`increment`/`decrement`
     /// changed state, exactly one `change` event carrying the final state follows the last action;
@@ -383,7 +410,13 @@ struct PrototypeSession {
     }
 
     private mutating func runEmit(_ action: PrototypeAction) -> [PrototypeEvent] {
-        let context = action.context?.resolve(EmitContextInputs(state: state, pages: pages, dataModel: data))
+        let context = action.context?.resolve(EmitContextInputs(
+            state: state,
+            pages: pages,
+            dataModel: data,
+            platformModel: spec?.platformState,
+            eventData: platformEventData
+        ))
         return emit(kind: "emit", name: action.name, payload: action.payload ?? .null, context: context)
     }
 
@@ -431,7 +464,13 @@ struct PrototypeSession {
         else {
             return []
         }
-        let inputs = EmitContextInputs(state: state, pages: pages, dataModel: spec.data)
+        let inputs = EmitContextInputs(
+            state: state,
+            pages: pages,
+            dataModel: spec.data,
+            platformModel: spec.platformState,
+            eventData: platformEventData
+        )
         var value: JSONValue?
         if operation != .remove {
             guard case let .success(resolved) = PrototypeDataWrite.resolveValue(action.value, inputs: inputs) else {
@@ -878,7 +917,13 @@ extension PrototypeSession {
     /// the older (the latest wins).
     private mutating func runRequest(_ action: PrototypeAction) -> [PrototypeEvent] {
         guard let spec else { return [] }
-        let inputs = EmitContextInputs(state: state, pages: pages, dataModel: spec.data)
+        let inputs = EmitContextInputs(
+            state: state,
+            pages: pages,
+            dataModel: spec.data,
+            platformModel: spec.platformState,
+            eventData: platformEventData
+        )
         var events: [PrototypeEvent] = []
         let into = action.into
         if let into, let older = requests.inFlight(into: into) {
@@ -1048,6 +1093,13 @@ private struct EmitContextInputs: PrototypeEmitContextInputs {
     let state: [String: JSONValue]
     let pages: [String: Int]
     let dataModel: [String: JSONValue]?
+    var platformModel: [String: JSONValue]?
+    var eventData: JSONValue?
+
+    func platform(_ pointer: String) -> JSONValue? { PrototypeDataPointer.resolve(platformModel, pointer: pointer) }
+    func event(_ pointer: String) -> JSONValue? {
+        eventData.flatMap { PrototypeDataPointer.resolve($0, tokens: PrototypeDataPointer.tokens(pointer)[...]) }
+    }
 
     func state(_ key: String) -> JSONValue? { state[key] }
     func page(_ id: String) -> Int? { pages[id] }

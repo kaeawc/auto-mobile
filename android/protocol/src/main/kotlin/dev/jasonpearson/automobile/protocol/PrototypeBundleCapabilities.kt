@@ -90,6 +90,13 @@ internal object PrototypeBundleCapabilities {
     }
 
   private fun platform(refs: PrototypeBundleReferences, caps: MutableSet<String>) {
+    val declared = ((refs.spec["requires"] as? JsonObject)?.get("platform") as? JsonArray).orEmpty()
+    if (declared.isNotEmpty() || "platform" in refs.spec) caps.add("prototype_platform_v1")
+    for (name in declared) {
+      text(name)
+        ?.let { text(PrototypePlatformModules.module(it)?.get("capability")) }
+        ?.let(caps::add)
+    }
     val uses = PrototypePlatformUses.uses(refs.spec, refs.context)
     if (uses.isNotEmpty()) caps.add("prototype_platform_v1")
     for (use in uses) {

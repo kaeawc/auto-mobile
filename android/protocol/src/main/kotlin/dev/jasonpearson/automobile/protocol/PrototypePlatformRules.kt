@@ -105,6 +105,10 @@ internal object PrototypePlatformRules {
         when {
           module(name) == null -> fail(use.path, "Unknown platform module $name")
           name !in declared.modules -> notDeclared(use.path, name)
+          module(name)?.member("state")?.let { state ->
+            val tokens = PrototypeDataPointer.tokens(use.pointer)
+            tokens.size != 2 || tokens[1] !in state
+          } == true -> fail(use.path, "Unknown platform state ${use.pointer}")
           else -> null
         }
       }

@@ -12,6 +12,10 @@ interface EmitContextInputs {
   fun page(id: String): Int?
 
   fun data(pointer: String): JsonElement?
+
+  fun platform(pointer: String): JsonElement? = null
+
+  fun event(pointer: String): JsonElement? = null
 }
 
 data class ResolvedEmitContext(val context: JsonObject, val contextTruncated: Boolean? = null)
@@ -29,6 +33,9 @@ object EmitContextResolver {
           "page" in binding ->
             inputs.page(binding.getValue("page").jsonPrimitive.content)?.let(::JsonPrimitive)
           "data" in binding -> inputs.data(binding.getValue("data").jsonPrimitive.content)
+          "platform" in binding ->
+            inputs.platform(binding.getValue("platform").jsonPrimitive.content)
+          "event" in binding -> inputs.event(binding.getValue("event").jsonPrimitive.content)
           else -> binding["value"]
         }
       name to (value ?: JsonNull)

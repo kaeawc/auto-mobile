@@ -91,11 +91,14 @@ function classifyRunner(
 
 interface IosObserveRoundTripClassification {
   failed: boolean;
+  /** No runner was running to ask, so nothing was probed on this simulator (#15310). */
+  notProbed: boolean;
   line: string;
 }
 
 function classifyObserveRoundTrip(
   inspection: IosObserveRoundTripInspection,
+  targetDeviceId: string | undefined,
 ): IosObserveRoundTripClassification {
   const hasDegenerateScreen = inspection.screenSize.width <= 0 || inspection.screenSize.height <= 0;
   const hasHierarchyError =
@@ -110,7 +113,13 @@ function classifyObserveRoundTrip(
   // completed (connected, non-degenerate, error-free, non-empty) passes despite
   // the divergence, and a genuine wrong-port bind (issue #2731) still fails here
   // because it cannot connect (connected=false) and surfaces a hierarchyError.
-  const failed = !inspection.connected || hasDegenerateScreen || hasHierarchyError || hasNoElements;
+  const unhealthy =
+    !inspection.connected || hasDegenerateScreen || hasHierarchyError || hasNoElements;
+  // Without a requested simulator, one with no running runner is a bystander (e.g. a CI simulator
+  // another tool owns): doctor sent it nothing, so it warns instead of failing the round trip.
+  // An explicitly requested simulator still fails.
+  const notProbed = unhealthy && inspection.probed === false && targetDeviceId === undefined;
+  const failed = unhealthy && !notProbed;
 
   const parts = [
     "platform=ios",
@@ -126,7 +135,11 @@ function classifyObserveRoundTrip(
     parts.push(`hierarchyError=${inspection.hierarchyError}`);
   }
 
-  return { failed, line: parts.join("; ") };
+  if (notProbed) {
+    parts.push("notProbed=true");
+  }
+
+  return { failed, notProbed, line: parts.join("; ") };
 }
 
 /**
@@ -267,7 +280,9 @@ export async function checkIosObserveRoundTrip(
       };
     }
 
-    const classifications = inspections.map(classifyObserveRoundTrip);
+    const classifications = inspections.map((inspection) =>
+      classifyObserveRoundTrip(inspection, targetDeviceId),
+    );
     const message = classifications.map((classification) => classification.line).join(" | ");
     const hasFailure = classifications.some((classification) => classification.failed);
 
@@ -280,6 +295,17 @@ export async function checkIosObserveRoundTrip(
           "Restart the AutoMobile daemon and iOS CtrlProxy runner, then confirm each simulator's runner is " +
           "reachable through its assigned client endpoint and returns a non-empty hierarchy, and re-run: " +
           "auto-mobile --doctor --ios.",
+      };
+    }
+
+    if (classifications.some((classification) => classification.notProbed)) {
+      return {
+        name,
+        status: "warn",
+        message,
+        recommendation:
+          "A booted simulator has no running iOS CtrlProxy runner, so doctor did not probe it. " +
+          "Pass --device <udid> to require its round trip, or start its runner.",
       };
     }
 

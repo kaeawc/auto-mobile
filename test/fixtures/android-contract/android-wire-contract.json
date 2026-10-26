@@ -9629,6 +9629,12 @@
         "type": "string",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "stateKey",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "platform": [

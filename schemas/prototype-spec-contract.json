@@ -8713,6 +8713,12 @@
                 "values": ["none", "dots"]
               },
               "optional": true
+            },
+            "stateKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
             }
           }
         },

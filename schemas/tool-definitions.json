@@ -23915,6 +23915,9 @@
                       "type": "string",
                       "enum": ["pager"]
                     },
+                    "stateKey": {
+                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                    },
                     "axis": {
                       "type": "string",
                       "enum": ["horizontal", "vertical"]

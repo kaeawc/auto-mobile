@@ -68,6 +68,7 @@ enum PrototypeBundleCapabilities {
                 if node["leadingIcon"] != nil { need("text_field_leading_icon") }
             }
             if type == "pager" {
+                if node["stateKey"] != nil { need("pager_state_key") }
                 if ["axis", "pageSpacing", "peek", "pageSize"]
                     .contains(where: { node[$0] != nil }) { need("pager_options") }
                 if node["indicator"] != nil { need("carousel") }

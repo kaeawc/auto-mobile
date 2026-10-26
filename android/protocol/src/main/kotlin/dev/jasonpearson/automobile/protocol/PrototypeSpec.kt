@@ -1264,6 +1264,7 @@ data class PrototypePagerNode(
   val peek: PrototypePagerPeek? = null,
   val pageSize: PrototypePagerPageSize? = null,
   val indicator: String? = null,
+  val stateKey: String? = null,
 ) : PrototypeNode()
 
 /**

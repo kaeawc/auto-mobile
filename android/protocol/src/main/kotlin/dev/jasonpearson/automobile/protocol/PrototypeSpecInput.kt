@@ -127,6 +127,7 @@ internal object PrototypeSpecInput {
     val error =
       walk(value, definitions.getValue("spec").jsonObject, "", context, 0)
         ?: gridSpanErrors(context)
+        ?: PrototypeContainerRules.pagerStateKeyErrors(context)
         ?: PrototypeRepeatValidator.validate(value, repeats)
         ?: PrototypeStorageValidation.error(value.jsonObject)
         ?: dataActionErrors(context, value)

@@ -677,6 +677,27 @@ function pagerNodeError(
     ? fail(`${path}.axis`, "A vertical pager cannot appear inside a vertical scroll")
     : undefined;
 }
+function pagerStateKeyErrors(context: Context): PrototypeValidationError | undefined {
+  const keys = new Set<string>();
+  for (const { value, path } of context.nodes) {
+    if (value.type !== "pager" || typeof value.stateKey !== "string") {
+      continue;
+    }
+    if (
+      context.nodes.some(
+        (ancestor) => ancestor.value.repeat !== undefined && path.startsWith(`${ancestor.path}.`),
+      )
+    ) {
+      return fail(`${path}.stateKey`, "Pager stateKey cannot appear inside repeat");
+    }
+    if (keys.has(value.stateKey)) {
+      return fail(`${path}.stateKey`, "Two pagers cannot bind the same state key");
+    }
+    keys.add(value.stateKey);
+  }
+  return undefined;
+}
+
 function pagerErrors(context: Context): PrototypeValidationError | undefined {
   const pagers = new Set<string>();
   for (const { value, path } of context.nodes) {
@@ -753,6 +774,7 @@ function layoutErrors(
   return (
     gridSpanErrors(context) ??
     swipeActionsErrors(context) ??
+    pagerStateKeyErrors(context) ??
     repeatErrors(value, repeats) ??
     prototypeStorageError(value)
   );

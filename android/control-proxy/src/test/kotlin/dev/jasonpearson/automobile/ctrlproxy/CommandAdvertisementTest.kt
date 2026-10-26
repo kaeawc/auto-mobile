@@ -42,6 +42,7 @@ class CommandAdvertisementTest {
       "prototype_window_chrome_v1",
       "prototype_theme_modes_v1",
       "prototype_timers_v1",
+      "prototype_pager_state_key_v1",
       "prototype_flow_grid_v1",
       "prototype_pager_options_v1",
       "prototype_data_model_v1",

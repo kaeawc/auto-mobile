@@ -22,7 +22,7 @@ const label = { type: "text", id: "label", text: "Hello" };
 const base = {
   id: "parity",
   window: { placement: { type: "fullscreen" } },
-  state: { liked: false, name: "Ada", query: "", active: false },
+  state: { page: 0, liked: false, name: "Ada", query: "", active: false },
   root: { type: "column", children: [label] },
 };
 const chart = {
@@ -128,6 +128,12 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     id: "label",
     text: "@ana",
     linkify: { kinds: ["mention"], onTap: [{ type: "emit", name: "link" }] },
+  }),
+  prototype_pager_state_key_v1: fixture({
+    type: "pager",
+    id: "label",
+    stateKey: "page",
+    children: [{ type: "spacer" }],
   }),
   prototype_timers_v1: fixture({
     ...label,

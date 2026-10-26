@@ -165,6 +165,7 @@ struct PrototypeSpec: Decodable {
     )
         throws -> PrototypeNode
     {
+        try PrototypePagerOptions.validateStateKeys(raw, state: menuState)
         try PrototypeSizeBounds.validate(.object(["root": raw]))
         try PrototypeLimits.guardAuthoredTree(raw)
         try PrototypeRequestValidator.validate(raw, state: menuState)

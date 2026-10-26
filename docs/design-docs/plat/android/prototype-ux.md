@@ -420,7 +420,128 @@ page. `stateKey: "selected"` follows and sets an initialized nonnegative integer
 state value. The selected value is clamped to the available item/page range by
 the future renderer. Nav item count need not equal pager page count; authors
 should match them when each item represents a page. Per-pager selection starts
-at zero, is separate from the flat state map, and is changed by `setPage`.
+at zero without a binding and is changed by `setPage`.
+
+Optional `pager.stateKey` binds a declared nonnegative integer number key in both directions
+(`prototype_pager_state_key_v1`). The host refuses older renderers before sending the show.
+Initial and replacing-show state is authoritative; unbound pagers preserve their previous page
+on same-id replacement. Settled swipes write the key and emit `page_changed` plus `change`
+in one interaction. State actions and `/state/<key>` patches move the pager; integer values
+clamp to the page range, with animation unless `motion: "none"`. Settling the same page is
+silent. `setPage` and pager-bound navigation write the same key. A nav bar may use the same
+`stateKey` (the simplest wiring). Two pagers cannot share a key, and bindings inside repeat
+templates are refused at the pager's `stateKey`.
+
+An authored indicator can live outside the pager:
+
+```json
+{
+  "id": "pager-state-key",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "page": 0
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "row",
+        "children": [
+          {
+            "type": "box",
+            "style": {
+              "width": {
+                "dp": 8
+              },
+              "height": {
+                "dp": 8
+              },
+              "background": "#888888"
+            },
+            "styleWhen": [
+              {
+                "when": {
+                  "key": "page",
+                  "equals": 0
+                },
+                "style": {
+                  "background": "#0066FF"
+                }
+              }
+            ],
+            "children": []
+          },
+          {
+            "type": "box",
+            "style": {
+              "width": {
+                "dp": 8
+              },
+              "height": {
+                "dp": 8
+              },
+              "background": "#888888"
+            },
+            "styleWhen": [
+              {
+                "when": {
+                  "key": "page",
+                  "equals": 1
+                },
+                "style": {
+                  "background": "#0066FF"
+                }
+              }
+            ],
+            "children": []
+          }
+        ]
+      },
+      {
+        "type": "pager",
+        "id": "deck",
+        "stateKey": "page",
+        "children": [
+          {
+            "type": "text",
+            "text": "First"
+          },
+          {
+            "type": "text",
+            "text": "Second"
+          }
+        ]
+      },
+      {
+        "type": "button",
+        "label": "Next",
+        "onTap": [
+          {
+            "type": "increment",
+            "key": "page"
+          }
+        ]
+      },
+      {
+        "type": "tabBar",
+        "stateKey": "page",
+        "items": [
+          {
+            "label": "First"
+          },
+          {
+            "label": "Second"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
 
 When a pager settles on another page the device sends one `page_changed` event whose
 `name` is the pager id and whose `payload` is the new zero-based page index, the same

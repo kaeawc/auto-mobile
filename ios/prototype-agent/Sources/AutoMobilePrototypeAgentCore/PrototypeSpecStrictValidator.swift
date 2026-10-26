@@ -13,6 +13,7 @@ public enum PrototypeSpecStrictValidator {
             let state = fields["state"]?.objectFields ?? [:]
             let modelData = fields["data"]?.objectFields
             try PrototypeStrictSemantics.layout(context)
+            try PrototypeStrictSemantics.pagerStateKeys(context)
             var repeats = PrototypeStrictRepeats(data: modelData)
             try repeats.templates(root.objectFields ?? [:], path: "root")
             try PrototypeLimits.guardRepeatPathCells(root, data: modelData)

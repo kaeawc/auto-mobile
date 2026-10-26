@@ -1,0 +1,32 @@
+{
+  "spec": {
+    "id": "pager-state-key",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "page": 0
+    },
+    "root": {
+      "type": "pager",
+      "id": "deck",
+      "stateKey": "page",
+      "children": [
+        {
+          "type": "text",
+          "text": "First"
+        },
+        {
+          "type": "text",
+          "text": "Second"
+        }
+      ]
+    }
+  },
+  "options": {
+    "supportedCapabilities": []
+  },
+  "expectedPath": "$"
+}

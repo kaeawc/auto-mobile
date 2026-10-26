@@ -64,6 +64,7 @@
     "opaque-json-keys.json",
     "pager-indicator-dots.json",
     "pager-options.json",
+    "pager-state-key-indicator.json",
     "platform-call.json",
     "platform-handler.json",
     "platform-reads.json",
@@ -198,6 +199,13 @@
     "bad-transition.json",
     "border-width-over-max.json",
     "both-bindings.json",
+    "bound-pager-state-key-boolean.json",
+    "bound-pager-state-key-duplicate.json",
+    "bound-pager-state-key-fractional.json",
+    "bound-pager-state-key-negative.json",
+    "bound-pager-state-key-repeat.json",
+    "bound-pager-state-key-string.json",
+    "bound-pager-state-key-undeclared.json",
     "bounds-height-over-max.json",
     "bounds-width-over-max.json",
     "bounds-x-below-min.json",
@@ -743,6 +751,7 @@
     "strict-gate-prototype_network_device_v1.json",
     "strict-gate-prototype_network_v1.json",
     "strict-gate-prototype_pager_options_v1.json",
+    "strict-gate-prototype_pager_state_key_v1.json",
     "strict-gate-prototype_platform_test_v1.json",
     "strict-gate-prototype_platform_v1.json",
     "strict-gate-prototype_refresh_v1.json",
@@ -1312,6 +1321,7 @@
       "prototype_timers_v1"
     ],
     "transition-slide.json": [],
-    "width-dp-at-max.json": []
+    "width-dp-at-max.json": [],
+    "pager-state-key-indicator.json": ["prototype_pager_state_key_v1"]
   }
 }

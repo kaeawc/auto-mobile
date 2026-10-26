@@ -319,7 +319,15 @@ A \`carousel\` (\`prototype_carousel_v1\`) is a horizontally scrolling row of it
 (at least one), that snaps to items and may declare \`repeat\` like \`row\`. \`itemWidth\` (dp, > 0)
 is required. \`variant\` is \`multiBrowse\` (default; items change width as they scroll, Android
 Material), \`hero\` (centered large item) or \`uncontained\` (fixed-width items). \`itemSpacing\`
-is dp >= 0. iOS draws every variant as fixed-width snapping items. A pager may also declare
+is dp >= 0. iOS draws every variant as fixed-width snapping items.
+A pager's optional \`stateKey\` binds a declared nonnegative integer number key both ways
+(requires \`prototype_pager_state_key_v1\`). Swipes write the key and emit \`page_changed\`
+and \`change\`; state writes and patches move the pager, clamped to its page range, animated
+unless \`motion: "none"\`. Initial/replacing-show state wins over retained pages. Use the
+same key on a tabBar/bottomNav for simple shared selection, and read it in \`styleWhen\`
+on a row of dot boxes outside the pager. Two pagers cannot share a key; binding inside
+repeat templates is refused. \`setPage\` writes the same selection.
+A pager may also declare
 \`indicator: "dots"\` (default \`none\`): page dots below the pages, with the current page filled;
 they need the same capability. A carousel has no page index, event or \`setPage\` target; use a
 \`pager\` when the page matters.

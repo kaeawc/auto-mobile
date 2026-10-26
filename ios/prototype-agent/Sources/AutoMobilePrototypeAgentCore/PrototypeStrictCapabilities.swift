@@ -62,6 +62,7 @@ enum PrototypeStrictCapabilities {
                 if fields["leadingIcon"] != nil { need("text_field_leading_icon") }
             }
             if type == "pager" {
+                if fields["stateKey"] != nil { need("pager_state_key") }
                 if ["axis", "pageSpacing", "peek", "pageSize"]
                     .contains(where: { fields[$0] != nil }) { need("pager_options") }
                 if fields["indicator"] != nil { need("carousel") }

@@ -185,6 +185,7 @@ internal object PrototypeStrictPolicy {
       "pager" to
         mapOf(
           "pager_options" to listOf("axis", "pageSpacing", "peek", "pageSize"),
+          "pager_state_key" to listOf("stateKey"),
           "carousel" to listOf("indicator"),
         ),
       "scroll" to

@@ -117,6 +117,7 @@ internal object PrototypeSpecInput {
       ?: motionErrors(context)
       ?: choreographyErrors(context)
       ?: shimmerErrors(context)
+      ?: PrototypeStringsRules.semanticError(value, context)
       ?: chartErrors(value, context)
       ?: linkifyErrors(value, context)
       ?: chatScrollErrors(context)

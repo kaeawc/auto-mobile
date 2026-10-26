@@ -1,4 +1,5 @@
 #if canImport(UIKit)
+    import Accessibility
     import SwiftUI
     import UIKit
 
@@ -487,7 +488,7 @@
                     )
                     .frame(idealWidth: 24, idealHeight: 24)
                     .fixedSize(horizontal: style?.width == nil, vertical: style?.height == nil)
-                    .accessibilityHidden(accessibilityLabelOverride == nil)
+                    .accessibilityHidden(accessibilityLabelOverride == nil && node.semantics == nil)
                     .accessibilityAddTraits(accessibilityLabelOverride == nil ? [] : .isImage)
             }
         }
@@ -496,8 +497,10 @@
         /// name needs to be applied explicitly.
         private var accessibilityLabelOverride: String? {
             // A chart reads its summary, unless an authored description wins (#14679).
-            if node.type == "chart" { return node.chartLabel(data: model.spec?.data, state: model.state) }
-            guard node.contentDescription != nil || ["icon", "iconButton", "fab"].contains(node.type)
+            if node.type == "chart",
+               node.semantics?.label == nil { return node.chartLabel(data: model.spec?.data, state: model.state) }
+            guard node.semantics?.label != nil || node.contentDescription != nil || ["icon", "iconButton", "fab"]
+                .contains(node.type)
             else { return nil }
             return node.accessibilityLabel(
                 state: model.state,
@@ -850,7 +853,15 @@
                     // The search bar's editable field owns the node identifier.
                     identifier: node.type == "searchBar" ? nil : node.testTag,
                     label: accessibilityLabelOverride,
-                    grouping: grouping
+                    grouping: grouping,
+                    semantics: node.semantics,
+                    accessibleText: node.semantics?.liveRegion == nil
+                        ? "" : node.announcementText(state: model.state, pager: pagerPosition),
+                    hint: node.semantics?.hint.map { interpolatePrototypeText(
+                        $0,
+                        state: model.state,
+                        pager: pagerPosition
+                    ) }
                 ))
         }
 
@@ -1134,16 +1145,30 @@
         let identifier: String?
         let label: String?
         let grouping: AccessibilityGrouping
+        let semantics: PrototypeSemantics?
+        let accessibleText: String
+        let hint: String?
 
         func body(content: Content) -> some View {
             labelled(identified(content))
+                .accessibilityAddTraits(traits)
+                .onChange(of: accessibleText) { old, new in
+                    guard let announcement = PrototypeAnnouncement.change(
+                        previous: old,
+                        current: new,
+                        liveRegion: semantics?.liveRegion
+                    ) else { return }
+                    var text = AttributedString(announcement.text)
+                    if announcement.assertive { text.accessibilitySpeechAnnouncementPriority = .high }
+                    AccessibilityNotification.Announcement(text).post()
+                }
         }
 
         /// A label needs its own accessibility element: on a bare container SwiftUI would spread it
         /// over the children.
         @ViewBuilder
         private func identified(_ content: Content) -> some View {
-            if identifier == nil, label == nil || grouping == .leaf {
+            if identifier == nil, semantics == nil, label == nil || grouping == .leaf {
                 content
             } else if let identifier {
                 grouped(content).accessibilityIdentifier(identifier)
@@ -1154,20 +1179,35 @@
 
         @ViewBuilder
         private func grouped(_ content: Content) -> some View {
-            switch grouping {
+            switch semantics?.group == true ? .contain : grouping {
             case .leaf: content
             case .contain: content.accessibilityElement(children: .contain)
             case .combine: content.accessibilityElement(children: .combine)
             }
         }
 
+        private var traits: AccessibilityTraits {
+            var result: AccessibilityTraits = []
+            if semantics?.heading == true { _ = result.insert(.isHeader) }
+            for trait in semantics?.traits ?? [] {
+                switch trait {
+                case "button": _ = result.insert(.isButton)
+                case "image": _ = result.insert(.isImage)
+                case "selected": _ = result.insert(.isSelected)
+                default: break
+                }
+            }
+            return result
+        }
+
         @ViewBuilder
         private func labelled(_ content: some View) -> some View {
-            if let label {
-                content.accessibilityLabel(label)
-            } else {
-                content
-            }
+            if let hint { named(content).accessibilityHint(hint) } else { named(content) }
+        }
+
+        @ViewBuilder
+        private func named(_ content: some View) -> some View {
+            if let label { content.accessibilityLabel(label) } else { content }
         }
     }
 

@@ -393,7 +393,10 @@ object PrototypeDataResolver {
         )
           return@first true
         val text = (value as? JsonPrimitive)?.takeIf { it.isString }?.content
-        if (kind == PrototypeBindableKind.TEXT && text?.let(PrototypeDataText::hasBinding) == true)
+        if (
+          kind == PrototypeBindableKind.TEXT &&
+            text?.let { PrototypeDataText.hasBinding(it) || "{t:" in it } == true
+        )
           true
         else null
       } == true

@@ -350,6 +350,7 @@ export class CtrlProxyPrototypes {
         displayId: target,
         reset,
         appearance: overrides?.appearance,
+        locale: spec.strings ? overrides?.locale : undefined,
         replaceOthers: overrides?.replaceOthers,
       }),
       timeoutMs,

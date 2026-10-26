@@ -105,6 +105,17 @@ import {
   prototypeChecksUnsupportedMessage,
 } from "./prototypeChecksCapability";
 
+import {
+  PROTOTYPE_STRINGS_CAPABILITY,
+  PROTOTYPE_SEMANTICS_CAPABILITY,
+} from "../observe/android/ctrlProxyProtocol";
+import {
+  prototypeStringsFields,
+  prototypeStringsUnsupportedMessage,
+  prototypeSemanticsFields,
+  prototypeSemanticsUnsupportedMessage,
+} from "./prototypeStrings";
+
 interface PrototypeSpecCapabilityGate {
   readonly capability: string;
   readonly fields: (spec: unknown) => string[];
@@ -113,6 +124,16 @@ interface PrototypeSpecCapabilityGate {
 
 /** Spec-introduced features must be checked on both show and the complete patch result. */
 export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGate[] = [
+  {
+    capability: PROTOTYPE_STRINGS_CAPABILITY,
+    fields: prototypeStringsFields,
+    unsupportedMessage: prototypeStringsUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_SEMANTICS_CAPABILITY,
+    fields: prototypeSemanticsFields,
+    unsupportedMessage: prototypeSemanticsUnsupportedMessage,
+  },
   {
     capability: PROTOTYPE_THEME_MODES_CAPABILITY,
     fields: prototypeThemeModeFields,

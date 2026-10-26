@@ -262,15 +262,7 @@ export class IosPrototypeTransport implements PrototypeTransport {
       throw new ActionableError(prototypeAppearanceUnsupportedMessage(appearance, "ios"));
     }
     return toPrototypeResult(
-      await this.request(
-        "show_prototype",
-        {
-          spec,
-          ...(options.reset === true ? { reset: true } : {}),
-          ...(appearance === undefined ? {} : { appearance }),
-        },
-        options.timeoutMs,
-      ),
+      await this.request("show_prototype", showMessage(spec, options), options.timeoutMs),
     );
   }
 
@@ -447,4 +439,14 @@ export class IosPrototypeTransport implements PrototypeTransport {
       };
     }
   }
+}
+
+/** Show overrides share the message envelope, never the spec. */
+function showMessage(spec: PrototypeSpec, options: PrototypeShowOptions) {
+  return {
+    spec,
+    ...(options.reset === true ? { reset: true } : {}),
+    ...(options.appearance === undefined ? {} : { appearance: options.appearance }),
+    ...(spec.strings && options.locale !== undefined ? { locale: options.locale } : {}),
+  };
 }

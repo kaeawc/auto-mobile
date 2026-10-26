@@ -35,6 +35,11 @@ const chartData = { points: [{ y: 1 }, { y: 2 }] };
 // `with` lists capabilities a fixture needs besides the one under test: a device-run request also
 // needs the network capability, so the device gate is exercised with that one already advertised.
 const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: string[] }> = {
+  prototype_strings_v1: {
+    minimalSpec: { ...base, strings: { default: { title: "Title" } } },
+    ops: [],
+  },
+  prototype_semantics_v1: fixture({ ...label, semantics: { heading: true } }),
   prototype_theme_modes_v1: fixture({
     ...label,
     style: { background: { light: "#FFFFFF", dark: "#000000" } },
@@ -398,5 +403,23 @@ test.each(["android", "ios"] as const)(
       ).success,
     ).toBe(true);
     expect(requests(device)).toHaveLength(1);
+  },
+);
+
+test.each(["android", "ios"] as const)(
+  "%s rechecks strings capability on a state-only patch of an existing string spec",
+  async (platform) => {
+    const device: BootedDevice = { platform, deviceId: `parity-${platform}`, name: "Fake" };
+    advertise("prototype_strings_v1");
+    expect((await show(device, fixtures.prototype_strings_v1!.minimalSpec)).success).toBe(true);
+    advertise();
+    const index = agent.handshake.capabilities.indexOf("prototype_strings_v1");
+    agent.handshake.capabilities.splice(index, 1);
+    const result = await patch(device, [{ op: "replace", path: "/state/liked", value: true }], {
+      baseRevision: 1,
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("prototype_strings_v1");
+    expect(requests(device)).toEqual([]);
   },
 );

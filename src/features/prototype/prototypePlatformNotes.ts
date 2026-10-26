@@ -1,3 +1,4 @@
+import { prototypeStringsFallbackKeys } from "./prototypeStrings";
 import iconSymbols from "../../../schemas/prototype-ios-icon-symbols.json";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import {
@@ -24,10 +25,11 @@ export type PrototypePlatformNoteConstruct =
   | "searchBar"
   | "searchBar.icons"
   | "menu"
-  | "select";
+  | "select"
+  | "strings.fallback";
 export type PrototypePlatformNoteEffect = "ignored" | "substituted";
 export interface PrototypePlatformNote {
-  platform: "ios";
+  platform: "android" | "ios" | "all";
   construct: PrototypePlatformNoteConstruct;
   effect: PrototypePlatformNoteEffect;
   /** Paths in the component-expanded, anchor-resolved device spec, in tree order, capped at 20.
@@ -35,7 +37,7 @@ export interface PrototypePlatformNote {
   paths: string[];
   /** Total occurrences when more than the cap were found. */
   total?: number;
-  /** Distinct placeholder icon names, sorted; icon.name only. */
+  /** icon.name: sorted distinct placeholders; strings.fallback: up to 20 referenced keys. */
   values?: string[];
   detail: string;
 }
@@ -302,6 +304,8 @@ function occurrences(
     case "ref":
       referenceOccurrences(value, rule.name!, path, found, nodeType);
       break;
+    case "strings":
+      break;
     case "screenMap":
       Object.entries(value as Record<string, unknown>).forEach(([name, child]) =>
         occurrences(child, rule.item!, `${path}[${JSON.stringify(name)}]`, found),
@@ -441,4 +445,27 @@ export function prototypePlatformNotes(
         ];
   });
   return [...notes, ...menus];
+}
+
+export function prototypeStringsFallbackNotes(
+  spec: PrototypeSpec,
+  locale?: string,
+): PrototypePlatformNote[] {
+  if (locale === undefined || !spec.strings) {
+    return [];
+  }
+  const keys = prototypeStringsFallbackKeys(spec, locale);
+  return keys.length
+    ? [
+        {
+          platform: "all",
+          construct: "strings.fallback",
+          effect: "substituted",
+          paths: keys.slice(0, 20).map((key) => `strings.default.${key}`),
+          values: keys.slice(0, 20),
+          ...(keys.length > 20 ? { total: keys.length } : {}),
+          detail: `Locale ${locale}: referenced keys fall through to default: ${keys.slice(0, 20).join(", ")}.`,
+        },
+      ]
+    : [];
 }

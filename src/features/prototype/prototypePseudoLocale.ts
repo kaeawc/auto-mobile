@@ -4,37 +4,14 @@
  * never changed; only the copy sent to the device is.
  */
 
+import contract from "../../../schemas/prototype-spec-contract.json";
 import { prototypeLinkifyMatches, type PrototypeLinkifyKind } from "./prototypeLinkify";
 import { prototypeBindingSpans } from "./prototypeData";
 import { record } from "./prototypeTemplate";
 
 /** Spec fields that hold text a user reads. Identifiers, state keys and `contentDescription` stay. */
-const DISPLAY_TEXT_FIELDS = new Set([
-  "text",
-  "label",
-  "placeholder",
-  "headline",
-  "title",
-  "supportingText",
-  "supporting",
-  "trailingText",
-  "message",
-]);
-/** Subtrees that hold data, bindings or styling, never authored copy. */
-const OPAQUE_FIELDS = new Set([
-  "context",
-  "data",
-  "state",
-  "assets",
-  "theme",
-  "storage",
-  "value",
-  "repeat",
-  "payload",
-  "body",
-  "headers",
-  "query",
-]);
+const DISPLAY_TEXT_FIELDS = new Set(contract.stringFields);
+const OPAQUE_FIELDS = new Set(contract.stringOpaqueFields);
 
 export const PSEUDO_LOCALE_EXPANSION = 0.4;
 const PAD = "~";
@@ -102,7 +79,13 @@ const PLACEHOLDER = /\{[^{}]*\}/g;
  * the shared scan (a pointer may hold braces), then the plain `{key}` ones around them.
  */
 function bindingRanges(text: string): { start: number; end: number }[] {
-  const pointers = prototypeBindingSpans(text);
+  const pointers = [
+    ...prototypeBindingSpans(text),
+    ...[...text.matchAll(/\{t:[^{}]*(?:\{data:[^{}]*\}[^{}]*)?\}/g)].map((found) => ({
+      start: found.index,
+      end: found.index + found[0].length,
+    })),
+  ];
   const plain = [...text.matchAll(PLACEHOLDER)]
     .map((found) => ({ start: found.index, end: found.index + found[0].length }))
     .filter((range) =>
@@ -137,7 +120,7 @@ function pseudoLocalizeSegment(text: string): string {
 
 /** Accented, bracketed and padded to ~140% of the original length; placeholders are untouched. */
 export function pseudoLocalizeText(text: string): string {
-  if (text.trim() === "") {
+  if (text.trim() === "" || /^\{t:[^{}]*(?:\{data:[^{}]*\}[^{}]*)?\}$/.test(text)) {
     return text;
   }
   const padding = PAD.repeat(Math.ceil([...text].length * PSEUDO_LOCALE_EXPANSION));
@@ -174,7 +157,7 @@ function linkMatchesAroundBindings(
  * reason. Both platform runtimes detect links in the text they receive.
  */
 function pseudoLocalizeLinkifiedText(text: string, kinds: readonly PrototypeLinkifyKind[]): string {
-  if (text.trim() === "") {
+  if (text.trim() === "" || /^\{t:[^{}]*(?:\{data:[^{}]*\}[^{}]*)?\}$/.test(text)) {
     return text;
   }
   // A token that cuts through a binding (a pointer such as `/hello @sam`) is part of the binding,
@@ -200,6 +183,7 @@ function pseudoLocalizeEntry(
   object: Record<string, unknown>,
   key: string,
   child: unknown,
+  parent: string,
 ): [string, unknown] {
   if (OPAQUE_FIELDS.has(key)) {
     return [key, child];
@@ -211,27 +195,53 @@ function pseudoLocalizeEntry(
     ]);
     return [key, Object.fromEntries(named)];
   }
-  if (DISPLAY_TEXT_FIELDS.has(key) && typeof child === "string") {
+  if (
+    (DISPLAY_TEXT_FIELDS.has(key) || DISPLAY_TEXT_FIELDS.has(`${parent}.${key}`)) &&
+    typeof child === "string"
+  ) {
     const kinds = key === "text" ? linkifyKinds(object) : undefined;
     return [key, kinds ? pseudoLocalizeLinkifiedText(child, kinds) : pseudoLocalizeText(child)];
   }
-  return [key, pseudoLocalizeValue(child)];
+  return [key, pseudoLocalizeValue(child, key)];
 }
 
-function pseudoLocalizeValue(value: unknown): unknown {
+function pseudoLocalizeValue(value: unknown, parent = ""): unknown {
   if (Array.isArray(value)) {
-    return value.map(pseudoLocalizeValue);
+    return value.map((child) => pseudoLocalizeValue(child, parent));
   }
   const object = record(value);
   if (!object) {
     return value;
   }
   return Object.fromEntries(
-    Object.entries(object).map(([key, child]) => pseudoLocalizeEntry(object, key, child)),
+    Object.entries(object).map(([key, child]) => pseudoLocalizeEntry(object, key, child, parent)),
   );
 }
 
 /** A copy of the spec with its display text pseudo-localized. Spans are covered by their `text`. */
 export function pseudoLocalizeSpec<T>(spec: T): T {
-  return pseudoLocalizeValue(spec) as T;
+  const localized = pseudoLocalizeValue(spec);
+  const object = record(localized);
+  const strings = record(record(spec)?.strings);
+  if (object && strings) {
+    object.strings = Object.fromEntries(
+      Object.entries(strings).map(([tag, table]) => [
+        tag,
+        Object.fromEntries(
+          Object.entries(record(table) ?? {}).map(([key, entry]) => [
+            key,
+            typeof entry === "string"
+              ? pseudoLocalizeText(entry)
+              : Object.fromEntries(
+                  Object.entries(record(entry) ?? {}).map(([form, text]) => [
+                    form,
+                    typeof text === "string" ? pseudoLocalizeText(text) : text,
+                  ]),
+                ),
+          ]),
+        ),
+      ]),
+    );
+  }
+  return localized as T;
 }

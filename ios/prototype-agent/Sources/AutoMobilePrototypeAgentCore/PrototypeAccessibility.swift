@@ -78,6 +78,19 @@ private func resolveInterpolation(
 }
 
 extension PrototypeNode {
+    func announcementText(state: [String: JSONValue], pager: PagerPosition?) -> String {
+        if let label = semantics?.label ?? contentDescription {
+            return interpolatePrototypeText(label, state: state, pager: pager)
+        }
+        let authored = [label, title, headline, supporting, supportingText].compactMap { $0 }
+            .map { interpolatePrototypeText($0, state: state, pager: pager) }
+        let own = ([plainText(state: state, pager: pager)] + authored)
+            .filter { !$0.isEmpty }.joined(separator: " ")
+        let descendants = (children ?? []) + [child].compactMap { $0 }
+        return ([own] + descendants.map { $0.announcementText(state: state, pager: pager) })
+            .filter { !$0.isEmpty }.joined(separator: " ")
+    }
+
     /// The accessible label for this node, in Android's priority order (contentDescription, text,
     /// icon, node kind); `iconButton` and `fab` fall back to an extended FAB's label, then the icon. Placeholders are
     /// resolved in each. Nil means "let the native control
@@ -91,7 +104,7 @@ extension PrototypeNode {
     )
         -> String?
     {
-        let authored = contentDescription.map {
+        let authored = (semantics?.label ?? contentDescription).map {
             interpolatePrototypeText($0, state: state, pager: pager)
         }
         if let authored, !authored.isEmpty { return authored }

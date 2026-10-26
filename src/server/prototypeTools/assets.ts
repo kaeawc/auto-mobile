@@ -33,6 +33,9 @@ async function mutate(
       timeoutMs: args.timeoutMs,
       displayId,
       reset: args.reset,
+      ...((args.spec as PrototypeSpec | undefined)?.strings && args.locale !== undefined
+        ? { locale: args.locale }
+        : {}),
       replaceOthers: args.replaceOthers,
       // [appearanceRefusal] already ended the call when the device would ignore it.
       appearance: prototypeAppearanceOverride(args.appearance),

@@ -49,6 +49,8 @@ final class PrototypeThemeModesTests: XCTestCase {
             "prototype_carousel_v1",
             "prototype_chart_v1",
             "prototype_loading_states_v1",
+            "prototype_strings_v1",
+            "prototype_semantics_v1",
             "prototype_text_field_leading_icon_v1",
             "prototype_refresh_v1",
             "prototype_search_bar_v1",

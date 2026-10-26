@@ -2473,3 +2473,86 @@ Cross-field errors point to `.maxRuns` when everyMs is absent and to `.id` on th
 startTimer in contract document order. A cancelTimer id with no declaration produces a host-only
 show/patch warning. This asymmetry is deliberate: Kotlin and Swift accept it without a diagnostic
 and cancellation remains a runtime no-op.
+
+## Strings and semantics (#14210)
+
+`prototype_strings_v1` gates top-level `strings` and every `{t:` display placeholder;
+`prototype_semantics_v1` gates every node's `semantics`. Unsupported fields refuse show/patch
+before rendering. Host validation and the shared contract define the accepted shape.
+
+```json
+{
+  "strings": {
+    "default": { "cart.title": "Cart", "cart.items": { "one": "{#} item", "other": "{#} items" } },
+    "fr": {
+      "cart.title": "Panier",
+      "cart.items": { "one": "{#} article", "other": "{#} articles" }
+    }
+  },
+  "root": { "type": "text", "text": "{t:cart.title}", "semantics": { "heading": true } }
+}
+```
+
+The fragment shows the strings/root portion of an envelope. `default` is mandatory. Up to 16 tables,
+512 keys per table and 2048 characters per nonempty string/form are accepted. Locale tags match
+`^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$`; keys match `^[A-Za-z_][A-Za-z0-9_.-]{0,63}$`.
+Normalized duplicate tags are rejected. Plurals accept only zero/one/two/few/many/other, with other
+required. Values may contain `{key}` state bindings and plural `{#}`, but cannot contain `{t:`,
+`{data:` or `{platform:`. String tables are opaque to all other binding and node walkers.
+
+Display fields (including spans and semantics.label/hint) accept `{t:key}` and `{t:key|count}`;
+contentDescription instead directs authors to semantics.label. Every reference must exist in default;
+plural default entries require a count. Counts are non-negative integer literals of 1–9 digits or
+`{data:/pointer}`; state-key counts are unsupported. Missing, negative, fractional or non-number
+runtime counts select other. Resolution order is data substitution, translation, then state binding.
+Translated text is never scanned again for translations. `{#}` becomes decimal count without grouping.
+
+Show `locale` is optional, show-only, at most 35 characters and uses the locale-tag pattern above.
+It is forwarded as a top-level `locale` string in `show_prototype` only for specs with strings.
+Each show states it afresh. Otherwise the current device preferred locale list is used; configuration
+changes on Android and locale notifications/trait changes on iOS re-resolve live without the host.
+Expand each requested tag to its full tag then shorter prefixes (`zh-Hant-TW`, `zh-Hant`, `zh`),
+deduplicate, and finally try default. Matching ignores case and treats `_` as `-`. Lookup falls back
+per key. The supplying table's language selects the plural category; default uses the first requested
+language, or en. Missing selected forms use other; a missing runtime key renders its key text.
+
+| Languages                                                                   | Integer category rule                                                                        |
+| --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| ja zh ko vi th id ms lo km my                                               | other                                                                                        |
+| en de nl sv da nb no fi it es el hu tr bg ca et eu sw ur; unknown languages | one when n=1, otherwise other                                                                |
+| fr pt hi bn fa gu kn am                                                     | one when n=0 or 1, otherwise other                                                           |
+| ru uk be                                                                    | one when n%10=1 and n%100!=11; few when n%10=2..4 and n%100 not 12..14; otherwise many       |
+| pl                                                                          | one when n=1; few when n%10=2..4 and n%100 not 12..14; otherwise many                        |
+| cs sk                                                                       | one when n=1; few when n=2..4; otherwise other                                               |
+| ar                                                                          | zero at 0, one at 1, two at 2; few when n%100=3..10; many when n%100=11..99; otherwise other |
+
+Hand-written rules are shared across platforms and cross-checked against Intl.PluralRules fixtures
+for 0..120, 1000, 1001, 1002, 1011 and 1012. Romance many for million multiples (fr/pt/es/it) is
+intentionally ignored. Non-integers use other. With explicit show locale, platformNotes
+`strings.fallback` uses platform all and lists the locale plus up to 20 referenced keys reaching
+default (`values`, with `paths` into strings.default and `total` only when capped). Without an
+override the host does not know device locales. PseudoLocale accents/pads/brackets every table
+value/form, preserving locale tags, keys, plural category names and bindings. Node `{t:...}` remains
+intact; semantics.label/hint are display fields, contentDescription remains unchanged.
+
+Every node accepts `semantics` with at least one of heading (boolean), liveRegion (polite/assertive),
+group (boolean), nonempty label/hint, or unique traits (1–3 of button/image/selected). Label and
+contentDescription on the same node conflict; label/hint accept translation/data/state placeholders.
+A liveRegion without text descendants is valid.
+
+| Semantics                    | Android Compose                                                       | iOS SwiftUI                                                                                               |
+| ---------------------------- | --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| heading                      | heading()                                                             | isHeader trait                                                                                            |
+| liveRegion                   | LiveRegionMode.Polite/Assertive                                       | Accessible-text changes post announcements, excluding initial render; assertive uses high speech priority |
+| group                        | isTraversalGroup=true                                                 | accessibilityElement(children: .contain)                                                                  |
+| label                        | contentDescription                                                    | accessibilityLabel                                                                                        |
+| hint                         | onClickLabel for a tap action, otherwise appended to stateDescription | accessibilityHint                                                                                         |
+| button/image/selected traits | Role.Button / Role.Image / selected=true; PrototypeRole retained      | isButton / isImage / isSelected                                                                           |
+
+Semantics-bearing nodes bypass decorative/container skips. Android observe exposes `heading` as
+string `"true"` (API 28+) alongside `live-region` strings polite/assertive. The iOS XCUITest snapshot
+path exposes no SwiftUI traits; observe cannot verify those semantics today. Advisory lint adds
+missing-translation (missing key, shape mismatch or missing required integer plural form),
+unknown-translation-key (locale key absent from default), and empty-heading (heading without
+text/label). Semantics labels name controls for existing unlabeled rules. Findings retain the existing
+cap of 50. Device acceptance has not yet been run. Logical RTL swipe sides are not included.

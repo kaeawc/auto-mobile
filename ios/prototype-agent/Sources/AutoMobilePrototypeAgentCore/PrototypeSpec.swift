@@ -95,12 +95,14 @@ struct PrototypeSpec: Decodable {
     let storage: PrototypeStorageBlock?
     /// The node tree with every `repeat` list template already expanded (see `PrototypeRepeat`).
     let root: PrototypeNode
+    let strings: JSONValue?
+    private(set) var locales: [String] = []
     /// The authored `root` before data resolution and repeat expansion, kept so a device data write
     /// (#12519) can rebuild `root` from the changed data without the host re-sending the spec.
     let authoredRoot: JSONValue
 
     private enum CodingKeys: String, CodingKey {
-        case id, window, state, data, theme, motion, root, storage, requires, platform
+        case id, window, state, data, theme, motion, root, storage, requires, platform, strings
     }
 
     // Keep the root prefix in coding paths when decoding the resolved/expanded tree.
@@ -128,6 +130,8 @@ struct PrototypeSpec: Decodable {
         storage = (try? container.decodeIfPresent(PrototypeStorageBlock.self, forKey: .storage))
         let raw = try container.decode(JSONValue.self, forKey: .root)
         authoredRoot = raw
+        strings = container.contains(.strings) ? try container.decode(JSONValue.self, forKey: .strings) : nil
+        if let strings { try PrototypeStrings.validateTables(strings) }
         // Menus validate against state, but state is decoded (and checked) after root to keep the
         // key order; a state that does not decode is reported at its own turn below.
         let menuState = (try? container.decodeIfPresent([String: JSONValue].self, forKey: .state))
@@ -138,7 +142,7 @@ struct PrototypeSpec: Decodable {
             root: raw,
             state: menuState ?? [:]
         )
-        root = try Self.buildRoot(raw, data: data, menuState: menuState ?? [:])
+        root = try Self.buildRoot(raw, data: data, menuState: menuState ?? [:], strings: strings, locales: locales)
         state = try container.decodeIfPresent([String: JSONValue].self, forKey: .state)
         // Android's `PrototypeScalarSerializer` and the host schema accept only string, number and
         // boolean state values, so a null, array or object fails the show everywhere.
@@ -161,10 +165,15 @@ struct PrototypeSpec: Decodable {
     /// Everything between the authored root and the drawn one, in the order the host reports
     /// errors. It depends on `data` and the initial state only, so a data write reruns it.
     private static func buildRoot(
-        _ raw: JSONValue, data: [String: JSONValue]?, menuState: [String: JSONValue]
+        _ raw: JSONValue, data: [String: JSONValue]?, menuState: [String: JSONValue],
+        strings: JSONValue?, locales: [String]
     )
         throws -> PrototypeNode
     {
+        try PrototypeStrings.validate(
+            spec: ["root": raw].merging(strings.map { ["strings": $0] } ?? [:]) { $1 },
+            nodes: stringNodes(raw)
+        )
         try PrototypeSizeBounds.validate(.object(["root": raw]))
         try PrototypeLimits.guardAuthoredTree(raw)
         try PrototypeRequestValidator.validate(raw, state: menuState)
@@ -173,7 +182,9 @@ struct PrototypeSpec: Decodable {
         try PrototypeLoadingStates.validate(raw)
         try PrototypeRepeat.validateEmitContexts(raw, data: data)
         try PrototypeLimits.guardSubstitutedText(raw, data: data)
-        let resolved = PrototypeDataResolver.resolveRoot(raw, data: data)
+        let bound = PrototypeDataResolver.resolveRoot(raw, data: data)
+        let resolved = strings
+            .map { PrototypeStrings.resolve(bound, strings: $0, locales: locales, data: data) } ?? bound
         try PrototypeLimits.guardTree(resolved)
         let expanded = PrototypeRepeat.expand(resolved)
         try PrototypePagerOptions.validate(expanded)
@@ -194,6 +205,8 @@ struct PrototypeSpec: Decodable {
         authoredRoot: JSONValue? = nil, state: [String: JSONValue]? = nil
     ) {
         id = spec.id
+        strings = spec.strings
+        locales = spec.locales
         window = spec.window
         self.state = state ?? spec.state
         self.data = data
@@ -213,17 +226,43 @@ struct PrototypeSpec: Decodable {
         throws -> PrototypeSpec
     {
         if let data { try PrototypeLimits.guardData(data) }
-        let rebuilt = try Self.buildRoot(raw, data: data, menuState: state ?? [:])
+        let rebuilt = try Self.buildRoot(raw, data: data, menuState: state ?? [:], strings: strings, locales: locales)
         try PrototypeStacks.validate(root: rebuilt)
         try PrototypeThemeModes.validate(placement: window.placement, root: rebuilt)
         return PrototypeSpec(replacing: self, data: data, root: rebuilt, authoredRoot: raw, state: state)
+    }
+
+    private static func stringNodes(_ raw: JSONValue, path: String = "root") -> [PrototypeLocatedValue] {
+        guard let fields = raw.objectFields else { return [] }
+        return [.init(value: fields, path: path)] + PrototypeStrictRepeats.children(fields, path: path).flatMap {
+            stringNodes(.object($0.value), path: $0.path)
+        }
+    }
+
+    func replacingLocale(_ locales: [String]) throws -> PrototypeSpec {
+        let root = try Self.buildRoot(
+            authoredRoot,
+            data: data,
+            menuState: state ?? [:],
+            strings: strings,
+            locales: locales
+        )
+        var result = PrototypeSpec(replacing: self, data: data, root: root)
+        result.locales = locales
+        return result
     }
 
     /// This spec with `data` replaced and the drawn tree rebuilt from the authored one, so text
     /// bindings, `repeat` rows and data conditions follow the write. Throws when the changed data
     /// breaks a limit the show enforces (for example more repeat cells than the tree allows).
     func replacingData(_ data: [String: JSONValue]) throws -> PrototypeSpec {
-        let rebuilt = try Self.buildRoot(authoredRoot, data: data, menuState: state ?? [:])
+        let rebuilt = try Self.buildRoot(
+            authoredRoot,
+            data: data,
+            menuState: state ?? [:],
+            strings: strings,
+            locales: locales
+        )
         try PrototypeStacks.validate(root: rebuilt)
         try PrototypeThemeModes.validate(placement: window.placement, root: rebuilt)
         return PrototypeSpec(replacing: self, data: data, root: rebuilt)
@@ -731,6 +770,7 @@ final class PrototypeNode: Decodable {
     /// Mentions, hashtags and URLs in `text` as links (#14233).
     let linkify: PrototypeLinkifyOptions?
     /// Authored accessible label (#10446); wins over the label derived from text or icon.
+    let semantics: PrototypeSemantics?
     let contentDescription: String?
     /// An uploaded image asset id, or a `{light, dark}` pair of ids (#11218).
     let asset: PrototypeModeValue?
@@ -828,7 +868,7 @@ final class PrototypeNode: Decodable {
 
     private enum CodingKeys: String, CodingKey {
         case type, id, testTag, onTap, style, styleWhen, visibleWhen, transition
-        case safeAreaPadding, anchor, children, child, text, contentDescription, asset, contentScale
+        case safeAreaPadding, anchor, children, child, text, contentDescription, asset, contentScale, semantics
         case name, label, variant, stateKey, placeholder, axis, items, pager
         case scrollable, openWhen, detents, scrim, dragHandle, options, icon, size
         case orientation, min, max, step, title, navigationIcon, actions, confirm
@@ -859,6 +899,7 @@ final class PrototypeNode: Decodable {
         children = try container.decodeIfPresent([PrototypeNode].self, forKey: .children)
         child = try container.decodeIfPresent(PrototypeNode.self, forKey: .child)
         text = try container.decodeIfPresent(String.self, forKey: .text)
+        semantics = try container.decodeIfPresent(PrototypeSemantics.self, forKey: .semantics)
         contentDescription = try container.decodeIfPresent(String.self, forKey: .contentDescription)
         asset = try container.decodeIfPresent(PrototypeModeValue.self, forKey: .asset)
         contentScale = try container.decodeIfPresent(String.self, forKey: .contentScale)

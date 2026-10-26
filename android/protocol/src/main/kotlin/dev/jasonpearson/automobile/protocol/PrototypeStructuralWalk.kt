@@ -43,6 +43,7 @@ internal object PrototypeStructuralWalk {
       "record" -> visitRecord(value, rule, path, context, depth)
       "choice" -> visitChoice(value, rule, path, context, depth)
       "data" -> dataError(value)
+      "strings" -> PrototypeStringsRules.tableError(value)
       else ->
         if (primitiveValid(value, rule)) null
         else

@@ -164,6 +164,7 @@ class PrototypeController(
   private val foreground: PrototypeForegroundScope = NoPrototypeForegroundScope,
   /** The device's light or dark setting and dynamic-colour palette, read at every resolve. */
   private val deviceAppearance: PrototypeDeviceAppearance = NoPrototypeDeviceAppearance,
+  private val deviceLocale: PrototypeDeviceLocale = NoPrototypeDeviceLocale,
   private val windowOnScreen: PrototypeWindowOnScreen = PrototypeWindowOnScreen { null },
   private val settle: suspend (Long) -> Unit = { delay(it) },
   /** The supplied host handles the first surface; additional surfaces need independent hosts. */
@@ -256,6 +257,7 @@ class PrototypeController(
     @Volatile var request: PrototypeRequest,
     val theme: MutableStateFlow<PrototypeShownTheme>,
     val appearanceOverride: PrototypeAppearanceOverride?,
+    val localeOverride: String?,
     val observerSession: Int,
     val host: PrototypeHost,
     val idle: PrototypeLifecycle,
@@ -287,13 +289,18 @@ class PrototypeController(
     val dark: Boolean,
     val paletteKey: Int,
     val override: PrototypeAppearanceOverride?,
+    val locales: List<String>,
   ) {
     fun matches(other: AppearanceSyncKey): Boolean =
       snapshot === other.snapshot &&
         dark == other.dark &&
         paletteKey == other.paletteKey &&
-        override == other.override
+        override == other.override &&
+        locales == other.locales
   }
+
+  private fun effectiveLocales(locale: String?): List<String> =
+    locale?.let { listOf(it) } ?: deviceLocale.locales.toList()
 
   private fun appearanceKey(runtime: PrototypeRuntime) =
     AppearanceSyncKey(
@@ -301,6 +308,7 @@ class PrototypeController(
       deviceAppearance.dark,
       deviceAppearance.paletteKey,
       surfaceOf(runtime)?.appearanceOverride,
+      effectiveLocales(surfaceOf(runtime)?.localeOverride),
     )
 
   // Match WebSocketServer.protocolJson; default-valued optional fields are omitted, not null.
@@ -330,6 +338,7 @@ class PrototypeController(
     reset: Boolean = false,
     appearance: PrototypeAppearanceOverride? = null,
     replaceOthers: Boolean = true,
+    locale: String? = null,
   ) =
     execute(requestId) {
       val previous = surfaces[spec.id]
@@ -346,6 +355,7 @@ class PrototypeController(
           displayId =
             if (inPlace) previous.request.displayId else displayId ?: Display.DEFAULT_DISPLAY,
           appearance = appearance,
+          locale = locale,
         )
       if (surfaceOf(shown.runtime) == null) Outcome()
       else
@@ -511,6 +521,7 @@ class PrototypeController(
     preservePages: Boolean = false,
     displayId: Int = Display.DEFAULT_DISPLAY,
     appearance: PrototypeAppearanceOverride? = null,
+    locale: String? = null,
   ): Surface {
     val authored = validate(spec)
     // A same-id show reads the document the shown prototype is about to have written.
@@ -565,6 +576,7 @@ class PrototypeController(
         exclusively = { block -> settleRequest(runtime, block) },
         requestLimiter = requestLimiter,
       )
+    runtime.updateLocales(effectiveLocales(locale))
     val mappedSpec = runtime.renderModel()
     val theme = MutableStateFlow(shownTheme(mappedSpec, appearance))
     val interactive =
@@ -619,6 +631,7 @@ class PrototypeController(
         retainedRequest,
         theme,
         appearance,
+        locale,
         observerSession,
         surfaceHost,
         idle,
@@ -629,6 +642,7 @@ class PrototypeController(
             theme.value.appearance.deviceDark,
             theme.value.paletteKey,
             appearance,
+            effectiveLocales(locale),
           ),
       )
     surfaces =
@@ -1055,7 +1069,8 @@ class PrototypeController(
     try {
       val key = appearanceKey(runtime)
       if (surfaceOf(runtime)?.appearanceSyncKey?.matches(key) == true) return
-      syncAppearance(runtime, runtime.renderModel(), key)
+      runtime.updateLocales(key.locales)
+      syncAppearance(runtime, runtime.renderModel(), appearanceKey(runtime))
     } catch (error: CancellationException) {
       throw error
     } catch (error: Exception) {

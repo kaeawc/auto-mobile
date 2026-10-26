@@ -118,10 +118,22 @@ struct PrototypeSession {
         return timerCommands
     }
 
-    /// The shown prototype's `appearance` from its show request.
     /// The shown spec's size outside its `state`, for the spec byte cap (#11562); see
     /// `PrototypeStateValidator.stateBytes`.
     private var nonStateBytes = 0
+    private(set) var localeOverride: String?
+    private(set) var deviceLocales: [String] = []
+    var effectiveLocales: [String] { localeOverride.map { [$0] } ?? deviceLocales }
+
+    mutating func setDeviceLocales(_ locales: [String]) {
+        guard deviceLocales != locales else { return }
+        deviceLocales = locales
+        guard localeOverride == nil, let spec, let rebuilt = try? spec.replacingLocale(effectiveLocales) else { return }
+        self.spec = rebuilt
+        structureRevision += 1
+    }
+
+    /// The shown prototype's `appearance` from its show request.
     private(set) var appearanceOverride = PrototypeAppearanceOverride.device
     /// The device's own appearance, as last reported through `setDeviceDark`; it outlives a show.
     private(set) var deviceDark = false
@@ -161,11 +173,14 @@ struct PrototypeSession {
         _ spec: PrototypeSpec,
         reset: Bool = false,
         appearance: PrototypeAppearanceOverride = .device,
+        locale: String? = nil,
         specBytes: Int? = nil,
         restoredState: [String: JSONValue]? = nil
     ) {
         timerCommands.append(.cancelAll)
         appearanceOverride = appearance
+        localeOverride = locale
+        let spec = (try? spec.replacingLocale(effectiveLocales)) ?? spec
         // The agent keeps no raw spec, so the request's own size (when the caller has it) less the
         // state it carried is what the cap adds every later state to; without it only state counts.
         nonStateBytes = max(0, (specBytes ?? 0) - PrototypeStateValidator.stateBytes(spec.state ?? [:]))

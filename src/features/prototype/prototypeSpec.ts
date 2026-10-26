@@ -1,4 +1,6 @@
 import * as timers from "./prototypeTimerSchema";
+import { prototypeStringsTableError, type PrototypeStrings } from "./prototypeStrings";
+import { prototypeSemanticsSchema } from "./prototypeSemanticsSchema";
 import { z } from "zod";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { PROTOTYPE_STACK_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
@@ -176,6 +178,7 @@ const checksShape = {
   validateOn: z.enum(["change", "blur", "submit"]).optional(),
 };
 const commonNodeShape = {
+  semantics: prototypeSemanticsSchema.optional(),
   span: z.number().finite().int().min(1).optional(),
   id: z.string().min(1).optional(),
   testTag: z.string().min(1).optional(),
@@ -880,6 +883,9 @@ const specSchema = z
     id: z.string().min(1),
     window: windowSchema,
     theme: themeSchema.optional(),
+    strings: z
+      .custom<PrototypeStrings>((value) => prototypeStringsTableError(value) === undefined)
+      .optional(),
     data: z
       .custom<PrototypeData>((value) => {
         if (typeof value !== "object" || value === null || Array.isArray(value)) {

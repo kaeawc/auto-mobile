@@ -1,0 +1,25 @@
+{
+  "spec": {
+    "id": "strings",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "{t:title}",
+      "semantics": {
+        "heading": true,
+        "label": "{t:title}",
+        "hint": "{t:hint}",
+        "traits": ["selected"]
+      }
+    },
+    "strings": {
+      "default": []
+    }
+  },
+  "expectedPath": "strings.default",
+  "expectedMessage": "Expected string table"
+}

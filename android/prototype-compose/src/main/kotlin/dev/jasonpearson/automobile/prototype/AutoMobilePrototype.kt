@@ -132,6 +132,10 @@ private fun EmbeddedPrototype(
   onError: @Composable (PrototypeLoadError) -> Unit,
 ) {
   val context = LocalContext.current.applicationContext
+  val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+  val locales =
+    (0 until configuration.locales.size()).map { configuration.locales[it].toLanguageTag() }
+  val latestLocales by rememberUpdatedState(locales)
   val lifecycle = LocalLifecycleOwner.current.lifecycle
   val environment = LocalEmbeddedPrototypeEnvironment.current
   val compositionScope = rememberCoroutineScope()
@@ -152,6 +156,7 @@ private fun EmbeddedPrototype(
           scope,
           environment,
           context.cacheDir,
+          locales = { latestLocales },
         ),
       ) {
         environment.host?.eventSink?.send(it)
@@ -163,6 +168,9 @@ private fun EmbeddedPrototype(
   else EmbeddedHostLifetime(owner, host, lifecycle)
   val session = owner.session
   if (session != null) {
+    LaunchedEffect(session, locales) {
+      interactions.withLock { session.runtime.updateLocales(locales) }
+    }
     val active by session.runtime.snapshots.collectAsState()
     if (handleBack) {
       BackHandler(enabled = active.active) {
@@ -261,6 +269,7 @@ private class EmbeddedConfiguration(
   val scope: CoroutineScope,
   val environment: EmbeddedPrototypeEnvironment,
   val cacheDir: java.io.File,
+  val locales: () -> List<String>,
 )
 
 private class EmbeddedOwner(
@@ -321,6 +330,8 @@ private class EmbeddedOwner(
         exclusively = { block -> interactions.withLock { block() } },
         newRequestId = config.environment.requestId,
       )
+    // Seed before publishing the session, so its first rendered frame is already localized.
+    runtime.updateLocales(config.locales())
     config.environment.host?.onRuntime?.invoke(runtime)
     session =
       EmbeddedSession(

@@ -1,0 +1,30 @@
+{
+  "spec": {
+    "id": "strings",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Hi",
+      "contentDescription": "{t:title}"
+    },
+    "strings": {
+      "default": {
+        "title": "Cart",
+        "hint": "Your cart",
+        "items": {
+          "one": "{#} item",
+          "other": "{#} items"
+        }
+      },
+      "fr": {
+        "title": "Panier"
+      }
+    }
+  },
+  "expectedPath": "root.contentDescription",
+  "expectedMessage": "Use semantics.label for string placeholders"
+}

@@ -10,6 +10,7 @@ import { isPrototypeDataPointer, PrototypeRepeatData } from "./prototypeData";
 import { prototypeDataActionsError } from "./prototypeDataActions";
 import { prototypeTimersError, prototypeTimerActions } from "./prototypeTimers";
 import { prototypeStorageError } from "./prototypeStorage";
+import { prototypeStringsError, prototypeStringsTableError } from "./prototypeStrings";
 import { prototypeLoadingStatesError } from "./prototypeLoadingStates";
 import { prototypeChoreographyError } from "./prototypeChoreography";
 import { prototypeMotionV2Error } from "./prototypeMotionV2";
@@ -258,7 +259,12 @@ function objectConstraint(
     return formError;
   }
   if (rule.atLeastOne && Object.keys(data).length === 0) {
-    return fail(path, "At least one selector field is required");
+    return fail(
+      path,
+      rule === definitions.semantics
+        ? "Expected at least one semantics field"
+        : "At least one selector field is required",
+    );
   }
   return undefined;
 }
@@ -542,6 +548,7 @@ function walk(
   depth: number,
 ): PrototypeValidationError | undefined {
   const handlers: Record<string, typeof visitObject> = {
+    strings: (value) => prototypeStringsTableError(value),
     data: visitData,
     ref: visitReference,
     tagged: visitTagged,
@@ -778,7 +785,6 @@ function motionErrors(nodes: Located[]): PrototypeValidationError | undefined {
   return prototypeMotionV2Error(nodes) ?? prototypeChoreographyError(nodes);
 }
 
-/** Action, container and state checks, after the layout checks pass. */
 function behaviourErrors(
   value: unknown,
   context: Context,
@@ -789,6 +795,7 @@ function behaviourErrors(
   return (
     prototypeDataActionsError(context.actions, data.data, prototypeDataError) ??
     prototypeRequestsError(context.actions) ??
+    prototypeStringsError(value, context.nodes) ??
     prototypePlatformError(value, context.actions, platformArgumentError) ??
     prototypeTimersError([...context.actions, ...componentTimers]) ??
     prototypeLoadingStatesError(context.nodes) ??

@@ -168,6 +168,8 @@ final class PrototypeAgent: NSObject {
     // its old block registration was retained by the center until that registration was removed.
     private var sceneObservers: [PrototypeSceneActivationObserver] = []
     /// Keeps the scene's appearance observation alive; the window, once attached, is never removed.
+    private var localeObservation: NSObjectProtocol?
+    private let localeProvider: any PrototypeLocaleProvider = SystemPrototypeLocaleProvider()
     private var appearanceObservation: (any UITraitChangeRegistration)?
     /// App windows' own `accessibilityElementsHidden` while the prototype covers them.
     private var hiddenBeforeCovering: [ObjectIdentifier: Bool] = [:]
@@ -360,6 +362,7 @@ final class PrototypeAgent: NSObject {
     private func syncDeviceAppearance() {
         let traits = (window?.windowScene ?? activeScene())?.traitCollection ?? UITraitCollection.current
         model.setDeviceDark(traits.userInterfaceStyle == .dark)
+        model.setDeviceLocales(localeProvider.preferredLanguages)
     }
 
     /// Puts the resolved mode on the window's UIKit trait, so UIKit-backed pieces (a text field's
@@ -450,6 +453,13 @@ final class PrototypeAgent: NSObject {
             [UITraitUserInterfaceStyle.self]
         ) { [weak self] (_: UIWindowScene, _: UITraitCollection) in
             self?.syncDeviceAppearance()
+        }
+        if localeObservation == nil {
+            localeObservation = NotificationCenter.default.addObserver(
+                forName: NSLocale.currentLocaleDidChangeNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in self?.syncDeviceAppearance() }
+            }
         }
         syncDeviceAppearance()
         applyInterfaceStyle(session: model.session)
@@ -584,12 +594,17 @@ final class PrototypeAgent: NSObject {
         guard let appearance = PrototypeAppearanceOverride.parse(message["appearance"]) else {
             return result(false, "appearance: Expected device, light or dark")
         }
+        if let rawLocale = message["locale"],
+           (rawLocale as? String)
+           .map({ $0.utf16.count <= 35 && PrototypeContractValidator.matches("localeTag", $0) }) != true
+        { return result(false, "locale: Invalid locale tag") }
         // The viewer controller owns device appearance; the injected agent reads it here.
         if !viewerHosted { syncDeviceAppearance() }
         model.show(
             spec,
             reset: message["reset"] as? Bool == true,
             appearance: appearance,
+            locale: message["locale"] as? String,
             specBytes: message["spec"].flatMap {
                 try? JSONSerialization.data(withJSONObject: $0, options: .fragmentsAllowed).count
             }

@@ -216,10 +216,17 @@
             apply(activity: false) { $0.setDeviceDark(dark) }
         }
 
+        func setDeviceLocales(_ locales: [String]) {
+            var next = session
+            next.setDeviceLocales(locales)
+            publish(next, replacingSpec: next.structureRevision != session.structureRevision)
+        }
+
         func show(
             _ spec: PrototypeSpec,
             reset: Bool = false,
             appearance: PrototypeAppearanceOverride = .device,
+            locale: String? = nil,
             specBytes: Int? = nil
         ) {
             // Keep the touchable rects: SwiftUI re-reports a frame only when it changes, so clearing
@@ -229,7 +236,7 @@
             // nothing (#12526); the session only receives the result.
             let prepared = storage?.prepare(spec)
             next.show(
-                prepared?.spec ?? spec, reset: reset, appearance: appearance, specBytes: specBytes,
+                prepared?.spec ?? spec, reset: reset, appearance: appearance, locale: locale, specBytes: specBytes,
                 restoredState: prepared?.state
             )
             // A show that replaces another prototype cancels that one's requests.

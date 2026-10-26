@@ -245,3 +245,51 @@ describe("baseline palette parity", () => {
     }
   });
 });
+
+test("translation lint reports missing keys, shapes, required forms and unknown keys", () => {
+  const value = {
+    ...spec({ type: "text", text: "Title" }),
+    strings: {
+      default: { title: "Title", count: { one: "One", other: "Many" }, shape: "Plain" },
+      ru: { count: { one: "One", other: "Many" }, shape: { other: "Plural" }, extra: "Unused" },
+    },
+  };
+  expect(rules(value)).toEqual([
+    "missing-translation strings.ru.title",
+    "missing-translation strings.ru.count",
+    "missing-translation strings.ru.shape",
+    "unknown-translation-key strings.ru.extra",
+  ]);
+  expect(lintPrototypeAccessibility(value).findings[1]?.detail).toContain("many, few");
+});
+test("semantics labels name controls, images and fields and headings need descendant text", () => {
+  expect(
+    rules(
+      spec(
+        column(
+          { type: "iconButton", icon: "close", semantics: { label: "Close" } },
+          { type: "image", testTag: "image", semantics: { label: "Photo" } },
+          { type: "textField", semantics: { label: "Name" } },
+          { type: "box", semantics: { heading: true }, child: { type: "text", text: "Title" } },
+          { type: "box", semantics: { heading: true, label: "Title" } },
+          { type: "box", semantics: { heading: true } },
+        ),
+      ),
+    ),
+  ).toEqual(["empty-heading root.children[5].semantics.heading"]);
+});
+test("translation findings share the existing output cap", () => {
+  const defaults = Object.fromEntries(Array.from({ length: 60 }, (_, i) => [`key${i}`, "Text"]));
+  const result = lintPrototypeAccessibility({
+    ...spec({ type: "text", text: "Text" }),
+    strings: { default: defaults, fr: {} },
+  });
+  expect(result.total).toBe(60);
+  expect(result.findings).toHaveLength(MAX_PROTOTYPE_ACCESSIBILITY_FINDINGS);
+});
+
+test("whitespace spans do not name an empty heading", () => {
+  expect(
+    rules(spec({ type: "text", spans: [{ text: " " }], semantics: { heading: true } })),
+  ).toEqual(["empty-heading root.semantics.heading"]);
+});

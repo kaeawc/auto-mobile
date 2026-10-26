@@ -6,7 +6,9 @@
     "color": "^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$(?![\\s\\S])",
     "blankText": "^[\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]*$(?![\\s\\S])",
     "numberToken": "^-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$(?![\\s\\S])",
-    "pointer": "^(?:/(?:[^~/]|~[01])*)+$(?![\\s\\S])"
+    "pointer": "^(?:/(?:[^~/]|~[01])*)+$(?![\\s\\S])",
+    "stringKey": "^[A-Za-z_][A-Za-z0-9_.-]{0,63}$",
+    "localeTag": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$"
   },
   "limits": {
     "MIN_PROTOTYPE_TIMER_MS": 100,
@@ -51,7 +53,10 @@
     "MAX_PROTOTYPE_PLATFORM_HANDLERS": 32,
     "MAX_PROTOTYPE_PLATFORM_ARGS": 16,
     "MAX_PROTOTYPE_CHECK_QUANTIFIER_BOUND": 100,
-    "MAX_PROTOTYPE_CHECK_VARIABLE_QUANTIFIERS": 2
+    "MAX_PROTOTYPE_CHECK_VARIABLE_QUANTIFIERS": 2,
+    "MAX_PROTOTYPE_STRING_LOCALES": 16,
+    "MAX_PROTOTYPE_STRING_KEYS": 512,
+    "MAX_PROTOTYPE_STRING_LENGTH": 2048
   },
   "definitions": {
     "offset": {
@@ -2483,6 +2488,13 @@
                 "name": "stagger"
               },
               "optional": true
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
             }
           }
         },
@@ -2692,6 +2704,13 @@
                 "name": "stagger"
               },
               "optional": true
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
             }
           }
         },
@@ -2894,6 +2913,13 @@
                 "name": "stagger"
               },
               "optional": true
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
             }
           }
         },
@@ -3069,6 +3095,13 @@
                 "kind": "number",
                 "integer": true,
                 "min": 1
+              },
+              "optional": true
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
               },
               "optional": true
             }
@@ -3267,6 +3300,13 @@
                 ]
               },
               "optional": false
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
             }
           }
         },
@@ -3457,6 +3497,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "pagerDp"
+              },
+              "optional": true
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
               },
               "optional": true
             }
@@ -3662,6 +3709,13 @@
                 "name": "linkify"
               },
               "optional": true
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
             }
           },
           "exactlyOne": ["text", "spans"]
@@ -3860,6 +3914,13 @@
                 "name": "zoomable"
               },
               "optional": true
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
             }
           }
         },
@@ -4050,6 +4111,13 @@
                 "name": "iconVariant"
               },
               "optional": true
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
             }
           }
         },
@@ -4198,6 +4266,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
               },
               "optional": true
             }
@@ -4488,6 +4563,13 @@
                 "name": "condition"
               },
               "optional": true
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
             }
           }
         },
@@ -4674,6 +4756,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
               },
               "optional": true
             }
@@ -4864,6 +4953,13 @@
                 "name": "condition"
               },
               "optional": true
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
             }
           }
         },
@@ -5039,6 +5135,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
               },
               "optional": true
             }
@@ -5236,6 +5339,13 @@
                 "name": "condition"
               },
               "optional": true
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
             }
           }
         },
@@ -5409,6 +5519,13 @@
                 "kind": "number",
                 "integer": true,
                 "min": 1
+              },
+              "optional": true
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
               },
               "optional": true
             }
@@ -5599,6 +5716,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
               },
               "optional": true
             }
@@ -5810,6 +5934,13 @@
                 "name": "condition"
               },
               "optional": true
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
             }
           }
         },
@@ -5984,6 +6115,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
               },
               "optional": true
             }
@@ -6181,6 +6319,13 @@
                 "unique": false
               },
               "optional": false
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
             }
           }
         },
@@ -6350,6 +6495,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
               },
               "optional": true
             }
@@ -6529,6 +6681,13 @@
                 "name": "condition"
               },
               "optional": true
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
             }
           }
         },
@@ -6698,6 +6857,13 @@
                 "unique": false
               },
               "optional": false
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
             }
           }
         },
@@ -6881,6 +7047,13 @@
                 "unique": false
               },
               "optional": true
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
             }
           }
         },
@@ -7038,6 +7211,13 @@
                 "values": ["horizontal", "vertical"]
               },
               "optional": true
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
             }
           }
         },
@@ -7192,6 +7372,13 @@
             "text": {
               "rule": {
                 "kind": "string"
+              },
+              "optional": true
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
               },
               "optional": true
             }
@@ -7362,6 +7549,13 @@
               "rule": {
                 "kind": "number",
                 "integer": false
+              },
+              "optional": true
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
               },
               "optional": true
             }
@@ -7561,6 +7755,13 @@
                 "name": "node"
               },
               "optional": true
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
             }
           }
         },
@@ -7729,6 +7930,13 @@
                 "kind": "number",
                 "integer": true,
                 "min": 1
+              },
+              "optional": true
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
               },
               "optional": true
             }
@@ -7908,6 +8116,13 @@
                 "integer": true,
                 "min": 1,
                 "max": 600000
+              },
+              "optional": true
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
               },
               "optional": true
             }
@@ -8104,6 +8319,13 @@
                 "name": "condition"
               },
               "optional": true
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
             }
           }
         },
@@ -8284,6 +8506,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
               },
               "optional": true
             }
@@ -8487,6 +8716,13 @@
                 "name": "node"
               },
               "optional": false
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
             }
           }
         },
@@ -8699,6 +8935,13 @@
                 "values": ["none", "dots"]
               },
               "optional": true
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
             }
           }
         },
@@ -8880,6 +9123,13 @@
                 "kind": "boolean"
               },
               "optional": true
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
             }
           },
           "binding": true
@@ -9054,6 +9304,13 @@
             "stateKey": {
               "rule": {
                 "kind": "boundKey"
+              },
+              "optional": true
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
               },
               "optional": true
             }
@@ -9251,6 +9508,13 @@
             "dismissOnSwipe": {
               "rule": {
                 "kind": "boolean"
+              },
+              "optional": true
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
               },
               "optional": true
             }
@@ -9469,6 +9733,13 @@
                 "min": 1
               },
               "optional": true
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
             }
           }
         },
@@ -9635,6 +9906,13 @@
                 "kind": "number",
                 "integer": true,
                 "min": 1
+              },
+              "optional": true
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
               },
               "optional": true
             }
@@ -9828,6 +10106,13 @@
                 "integer": false
               },
               "optional": true
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
             }
           }
         }
@@ -9945,6 +10230,12 @@
           "rule": {
             "kind": "ref",
             "name": "platformHandlers"
+          },
+          "optional": true
+        },
+        "strings": {
+          "rule": {
+            "kind": "strings"
           },
           "optional": true
         }
@@ -13533,6 +13824,56 @@
           "optional": true
         }
       }
+    },
+    "semantics": {
+      "kind": "object",
+      "atLeastOne": true,
+      "fields": {
+        "heading": {
+          "rule": {
+            "kind": "boolean"
+          },
+          "optional": true
+        },
+        "group": {
+          "rule": {
+            "kind": "boolean"
+          },
+          "optional": true
+        },
+        "liveRegion": {
+          "rule": {
+            "kind": "enum",
+            "values": ["polite", "assertive"]
+          },
+          "optional": true
+        },
+        "label": {
+          "rule": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        "hint": {
+          "rule": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        "traits": {
+          "rule": {
+            "kind": "array",
+            "min": 1,
+            "max": 3,
+            "unique": true,
+            "item": {
+              "kind": "enum",
+              "values": ["button", "image", "selected"]
+            }
+          },
+          "optional": true
+        }
+      }
     }
   },
   "eventKinds": [
@@ -13593,5 +13934,33 @@
     "pattern": ["textField"],
     "min": ["slider", "datePicker", "timePicker"],
     "max": ["slider", "datePicker", "timePicker"]
-  }
+  },
+  "stringFields": [
+    "text",
+    "label",
+    "placeholder",
+    "headline",
+    "title",
+    "supportingText",
+    "supporting",
+    "trailingText",
+    "message",
+    "semantics.label",
+    "semantics.hint"
+  ],
+  "stringOpaqueFields": [
+    "context",
+    "data",
+    "state",
+    "assets",
+    "theme",
+    "storage",
+    "value",
+    "repeat",
+    "payload",
+    "body",
+    "headers",
+    "query",
+    "strings"
+  ]
 }

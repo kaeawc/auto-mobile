@@ -25,6 +25,8 @@ export interface ShowPrototypeMessage {
    * ignores the field and follows the device silently, so it is never sent to one.
    */
   appearance?: PrototypeAppearanceOverride;
+  /** Locale override for a spec with strings. */
+  locale?: string;
 }
 /** A fixed mode a show takes as the system setting; following the device is the absent field. */
 export type PrototypeAppearanceOverride = "light" | "dark";

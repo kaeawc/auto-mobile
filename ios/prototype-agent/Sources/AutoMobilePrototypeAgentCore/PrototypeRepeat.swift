@@ -179,6 +179,11 @@ enum PrototypeRepeat {
                 return .object(rule)
             })
         }
+        if case var .object(semantics)? = fields["semantics"] {
+            string("label", in: &semantics)
+            string("hint", in: &semantics)
+            fields["semantics"] = .object(semantics)
+        }
         bindBasicTextFields(&fields, string: string, part: part, list: list)
     }
 

@@ -259,8 +259,7 @@ internal object PrototypeStrictPolicy {
     private fun scanFields(fields: JsonObject, field: String) {
       val type = fields.text("type") ?: ""
       for ((key, child) in fields) {
-        if (key == "payload" || (key == "value" && type !in listOf("setData", "appendData")))
-          continue
+        if (skipsScan(key, type)) continue
         if (key == "repeat") {
           repeatFeatures(child)
           continue
@@ -270,10 +269,18 @@ internal object PrototypeStrictPolicy {
         } else {
           fieldFeatures(key, child, field)
         }
-        // An effect's own `animate`, colours and params are not spec features of their own.
-        if (key == "linkify") {
-          (child as? JsonObject)?.get("onTap")?.let { scan(it, "onTap") }
-        } else if (key != "series" && key != "effects") scan(child, key)
+        descend(key, child)
+      }
+    }
+
+    private fun skipsScan(key: String, type: String): Boolean =
+      key == "payload" || (key == "value" && type !in listOf("setData", "appendData"))
+
+    // An effect's own `animate`, colours and params are not spec features of their own.
+    private fun descend(key: String, child: JsonElement) {
+      when {
+        key == "linkify" -> (child as? JsonObject)?.get("onTap")?.let { scan(it, "onTap") }
+        key != "series" && key != "effects" -> scan(child, key)
       }
     }
 
@@ -302,28 +309,31 @@ internal object PrototypeStrictPolicy {
 
     private fun fieldFeatures(key: String, child: JsonElement, field: String) {
       fieldFeatures[key]?.let(::need)
-      if (usesMotion(key, child)) result.add("prototype_motion_v2")
-      if (usesChoreography(key, child)) need("choreography")
+      if (PrototypeMotionFeatures.usesMotion(key, child)) result.add("prototype_motion_v2")
+      if (PrototypeMotionFeatures.usesChoreography(key, child)) need("choreography")
       if (key == "data" && child is JsonPrimitive && child.isString) need("data_model")
       if (key in listOf("light", "dark") && field.isNotEmpty()) need("theme_modes")
     }
-
-    private fun usesMotion(key: String, child: JsonElement): Boolean =
-      when (key) {
-        "animate",
-        "scale",
-        "rotation",
-        "zoomable" -> true
-        "transition" -> transitionType(child) in listOf("slideStart", "slideEnd", "scale")
-        else -> false
-      }
-
-    /** Transition delays, `blurReplace` and container `stagger` (#15247). */
-    private fun usesChoreography(key: String, child: JsonElement): Boolean =
-      key == "stagger" ||
-        (key == "transition" && (child is JsonObject || transitionType(child) == "blurReplace"))
-
-    private fun transitionType(child: JsonElement): String? =
-      ((child as? JsonObject)?.get("type") ?: child).let { (it as? JsonPrimitive)?.content }
   }
+}
+
+/** Which per-field motion and choreography features a field uses (#15247). */
+private object PrototypeMotionFeatures {
+  fun usesMotion(key: String, child: JsonElement): Boolean =
+    when (key) {
+      "animate",
+      "scale",
+      "rotation",
+      "zoomable" -> true
+      "transition" -> transitionType(child) in listOf("slideStart", "slideEnd", "scale")
+      else -> false
+    }
+
+  /** Transition delays, `blurReplace` and container `stagger` (#15247). */
+  fun usesChoreography(key: String, child: JsonElement): Boolean =
+    key == "stagger" ||
+      (key == "transition" && (child is JsonObject || transitionType(child) == "blurReplace"))
+
+  fun transitionType(child: JsonElement): String? =
+    ((child as? JsonObject)?.get("type") ?: child).let { (it as? JsonPrimitive)?.content }
 }

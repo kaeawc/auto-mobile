@@ -58,7 +58,7 @@ sealed interface PrototypeImageState {
  */
 @InternalAutoMobilePrototypeApi
 class PrototypeImageCache(
-  private val source: PrototypeAssetSource,
+  internal val source: PrototypeAssetSource,
   private val decoder: PrototypeImageDecoder,
   private val maxDecodedBytes: Long = DEFAULT_MAX_DECODED_BYTES,
   private val dispatcher: CoroutineDispatcher = Dispatchers.IO,

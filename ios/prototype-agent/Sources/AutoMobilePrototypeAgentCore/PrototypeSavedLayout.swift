@@ -14,6 +14,7 @@ enum PrototypeSavedLayout {
 struct PrototypeSavedLayoutLimits {
     var maxImageBytes = 4_194_304
     var maxFontBytes = 2_097_152
+    var maxShaderBytes = 16384
     var maxAssetCount = 32
     var maxTotalBytes = 16_777_216
     var maxIdLength = 256

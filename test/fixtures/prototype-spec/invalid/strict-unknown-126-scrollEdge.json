@@ -1,0 +1,58 @@
+{
+  "spec": {
+    "id": "scroll-motion",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "opacity": 100
+    },
+    "motion": "none",
+    "root": {
+      "id": "feed",
+      "style": {
+        "height": {
+          "dp": 200
+        }
+      },
+      "type": "scroll",
+      "axis": "vertical",
+      "child": {
+        "type": "column",
+        "children": [
+          {
+            "scrollLinked": {
+              "source": "feed",
+              "range": [0, 160],
+              "alpha": [1, 0],
+              "scale": [1, 0.8],
+              "offsetY": [0, -40],
+              "offsetX": [0, 20],
+              "blur": [0, 8]
+            },
+            "scrollTransition": {
+              "axis": "vertical",
+              "edge": {
+                "scale": 0.88,
+                "alpha": 0.5,
+                "rotation": 8,
+                "zzzUnknown": true
+              }
+            },
+            "type": "text",
+            "text": "Hero"
+          },
+          {
+            "style": {
+              "height": {
+                "dp": 1000
+              }
+            },
+            "type": "spacer"
+          }
+        ]
+      }
+    }
+  },
+  "expectedPath": "root.child.children[0].scrollTransition.edge.zzzUnknown"
+}

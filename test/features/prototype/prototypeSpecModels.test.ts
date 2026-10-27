@@ -448,30 +448,21 @@ struct Mixed: Codable, Equatable, Sendable {
     expect(swiftOnly.swift).toContain("struct PrototypePoint: Codable");
   });
 
-  test.each([
-    "ref",
-    "color",
-    "choice",
-    "tagged",
-    "json",
-    "scalar",
-    "record",
-    "map",
-    "screenMap",
-    "data",
-    "true",
-  ])("refuses unsupported selected field kind %s with its definition and field", (kind) => {
-    expect(() =>
-      renderPrototypeSpecModels(
-        {
-          definitions: {
-            point: { kind: "object", fields: { value: { rule: { kind }, optional: false } } },
+  test.each(["ref", "color", "choice", "tagged", "record", "map", "screenMap", "data", "true"])(
+    "refuses unsupported selected field kind %s with its definition and field",
+    (kind) => {
+      expect(() =>
+        renderPrototypeSpecModels(
+          {
+            definitions: {
+              point: { kind: "object", fields: { value: { rule: { kind }, optional: false } } },
+            },
           },
-        },
-        { point: {} },
-      ),
-    ).toThrow(`Definition point.value: unsupported kind ${kind}`);
-  });
+          { point: {} },
+        ),
+      ).toThrow(`Definition point.value: unsupported kind ${kind}`);
+    },
+  );
 
   test("refuses enums with non-string values and arrays of unsupported items", () => {
     const field = (rule: Rule) => ({
@@ -536,8 +527,28 @@ struct Mixed: Codable, Equatable, Sendable {
     ).toEqual([]);
   });
 
+  test("filled fixtures cover every contract field, with a separate semantic condition tree", () => {
+    for (const [definition, value] of [
+      [contract.definitions.condition, fixture.conditionFilled],
+      [contract.definitions.style, fixture.style],
+      [contract.definitions.item, fixture.item],
+    ] as const) {
+      // `style.shadows` is exclusive with `elevation`/`shadowColor`, so no single valid style fills both.
+      const fields = Object.keys(definition.fields).filter(
+        (field) => field !== "shadows" || definition !== contract.definitions.style,
+      );
+      expect(Object.keys(value).sort()).toEqual(fields.sort());
+    }
+    // The contract allows one condition selector/comparator at a time, unlike the wire model.
+    expect(presentation.conditionSchema.safeParse(fixture.conditionFilled).success).toBe(false);
+  });
+
   test("every migrated fixture satisfies the existing contract interpreters", () => {
     const leaves = [
+      [presentation.conditionSchema, fixture.condition],
+      [presentation.styleSchema, fixture.style],
+      [presentation.itemSchema, fixture.item],
+      [presentation.itemSchema, fixture.itemString],
       [presentation.containerSchema, fixture.container],
       [presentation.selectorSchema, fixture.selector],
       [presentation.styleWhenEntrySchema, fixture.styleWhenEntry],
@@ -605,4 +616,25 @@ struct Mixed: Codable, Equatable, Sendable {
     expect(paddingSchema.safeParse({ ...fixture.padding, unknown: 1 }).success).toBe(false);
     expect(paddingSchema.parse({})).toEqual({});
   });
+});
+
+test("selected bounded records generate native number maps", () => {
+  const sources = renderPrototypeSpecModels(
+    {
+      definitions: {
+        shader: {
+          kind: "object",
+          fields: {
+            uniforms: {
+              optional: true,
+              rule: { kind: "record", maxEntries: 16, item: { kind: "number", integer: false } },
+            },
+          },
+        },
+      },
+    },
+    { shader: {} },
+  );
+  expect(sources.kotlin).toContain("Map<String, Double>?");
+  expect(sources.swift).toContain("[String: Double]?");
 });

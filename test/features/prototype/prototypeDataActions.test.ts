@@ -13,7 +13,7 @@ import {
 } from "../../../src/features/prototype/prototypeSpec";
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
 
-const DATA_ACTIONS = ["setData", "appendData", "removeData"];
+const DATA_ACTIONS = ["setData", "appendData", "prependData", "removeData"];
 const label = { type: "text", id: "label", text: "Hello" };
 function spec(
   actions: unknown[],
@@ -346,4 +346,40 @@ describe("resolvePrototypeDataWriteValue", () => {
       error: { code: "not_found" },
     });
   });
+});
+
+for (const binding of [{ value: { sku: "new" } }, { state: "picked" }, { data: "/profile/name" }]) {
+  test(`prependData accepts binding ${JSON.stringify(binding)} and requires all three capabilities`, () => {
+    const action = { type: "prependData", path: "/data/cart", value: binding };
+    expect(validatePrototypeSpec(spec([action])).success).toBe(true);
+    expect(prototypeRequiredCapabilities(spec([action])).map((g) => g.capability)).toEqual(
+      expect.arrayContaining([
+        "prototype_data_model_v1",
+        "prototype_data_actions_v1",
+        "prototype_lazy_list_v1",
+      ]),
+    );
+    expect(rejection(spec([{ ...action, path: "/data/profile" }]))?.message).toBe(
+      "prependData target is not an array",
+    );
+    expect(rejection(spec([{ ...action, path: "/state/picked" }]))?.path).toBe(
+      "root.onTap[0].path",
+    );
+  });
+}
+
+test("prependData binds whole index segments and per-row item/index values", () => {
+  const row = (path: string, value: unknown) => ({
+    type: "column",
+    repeat: { items: [{ id: "a" }], as: "item" },
+    children: [{ ...label, onTap: [{ type: "prependData", path, value }] }],
+  });
+  for (const value of [{ item: "id" }, { index: true }]) {
+    expect(
+      validatePrototypeSpec({ ...spec([]), root: row("/data/cart/{index}", value) }).success,
+    ).toBe(true);
+  }
+  expect(
+    rejection({ ...spec([]), root: row("/data/cart/row{index}", { index: true }) })?.message,
+  ).toBe("{index} must be a whole data path segment");
 });

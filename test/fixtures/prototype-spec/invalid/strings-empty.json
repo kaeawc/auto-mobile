@@ -1,0 +1,27 @@
+{
+  "spec": {
+    "id": "strings",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "{t:title}",
+      "semantics": {
+        "heading": true,
+        "label": "{t:title}",
+        "hint": "{t:hint}",
+        "traits": ["selected"]
+      }
+    },
+    "strings": {
+      "default": {
+        "title": ""
+      }
+    }
+  },
+  "expectedPath": "strings.default.title",
+  "expectedMessage": "Invalid translation string"
+}

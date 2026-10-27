@@ -1,0 +1,22 @@
+{
+  "spec": {
+    "id": "design",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "button",
+      "label": "Save",
+      "testTag": "save"
+    },
+    "theme": {
+      "design": "platform"
+    }
+  },
+  "options": {
+    "supportedCapabilities": []
+  },
+  "expectedPath": "$"
+}

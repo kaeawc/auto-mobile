@@ -21,7 +21,14 @@ const indexSchema = z
       z
         .object({
           id: z.string(),
-          mimeType: z.enum(["image/png", "image/jpeg", "image/webp", "font/ttf", "font/otf"]),
+          mimeType: z.enum([
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+            "font/ttf",
+            "font/otf",
+            "application/vnd.automobile.agsl",
+          ]),
           sha256: z.string().regex(/^[a-f0-9]{64}$/),
           size: z.number().int().nonnegative(),
           usedAt: z.number().finite(),

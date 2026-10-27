@@ -28,6 +28,125 @@ final class PrototypeDataActionsTests: XCTestCase {
         return nil
     }
 
+    func testPrependWritesAnOrderedPageAndTrimsFromEndBeforeLimits() throws {
+        let before = try object(#"{"items":[3,4]}"#)
+        let page: JSONValue = .array([.number(1), .number(2)])
+        let applied = try PrototypeDataWrite.applyWindowed(
+            before, op: .prepend, path: "/data/items", value: page, maxItems: 3
+        ).get()
+        XCTAssertEqual(applied.data, try object(#"{"items":[1,2,3]}"#))
+        XCTAssertEqual(applied.trimmed, 1)
+        XCTAssertEqual(before, try object(#"{"items":[3,4]}"#))
+        let hugePage = JSONValue.array((0 ... PrototypeLimits.maxDataArrayItems).map { .number(Double($0)) })
+        let trimmed = try PrototypeDataWrite.applyWindowed(
+            before, op: .prepend, path: "/data/items", value: hugePage, maxItems: 2
+        ).get()
+        XCTAssertEqual(trimmed.data, try object(#"{"items":[0,1]}"#))
+        XCTAssertEqual(trimmed.trimmed, PrototypeLimits.maxDataArrayItems + 1)
+        XCTAssertEqual(try failure(write("{}", .prepend, "/data/items", page)), .notFound)
+        XCTAssertEqual(try failure(write(#"{"items":1}"#, .prepend, "/data/items", page)), .notArray)
+        XCTAssertEqual(try failure(write(#"{"items":[]}"#, .prepend, "/data/items", .number(1))), .invalidValue)
+    }
+
+    func testPrependValidationRuntimeAndChangeEvent() throws {
+        let json =
+            #"{"id":"prepend","window":{"placement":{"type":"fullscreen"}},"data":{"items":[2]},"root":{"type":"text","text":"Add","onTap":[{"type":"prependData","path":"/data/items","value":{"value":1}}]}}"#
+        let decoded = try spec(json)
+        var session = PrototypeSession()
+        session.show(decoded)
+        let events = try session.run(XCTUnwrap(decoded.root.onTap))
+        XCTAssertEqual(session.data, try object(#"{"items":[1,2]}"#))
+        let event = try XCTUnwrap(events.first)
+        let write = try XCTUnwrap(PrototypeDataWriteEvent.decode(
+            kind: event.wireKind, name: event.name, payload: event.payload
+        ))
+        XCTAssertEqual(write.op, .prepend)
+        XCTAssertEqual(write.value, .array([.number(1)]))
+        XCTAssertEqual(write.revision, session.dataRevision)
+        XCTAssertThrowsError(try PrototypeSpecStrictValidator.validate(data: Data(
+            json.replacingOccurrences(of: #""items":[2]"#, with: #""items":2"#).utf8
+        ))) { error in
+            XCTAssertEqual(error as? PrototypeLoadError, .invalidSpec(
+                path: "root.onTap[0].path", message: "prependData target is not an array"
+            ))
+        }
+    }
+
+    func testPrependBindsRepeatPathsAndItemValues() throws {
+        let decoded = try spec(Self.listSpec.replacingOccurrences(of: "appendData", with: "prependData"))
+        var session = PrototypeSession()
+        session.show(decoded)
+        let actions = try button(session, "Tag three")
+        XCTAssertEqual(actions.first?.path, "/data/items/2/tags")
+        XCTAssertEqual(actions.first?.value, .object(["value": .string("three")]))
+        _ = session.run(actions)
+        XCTAssertEqual(
+            PrototypeDataPointer.resolve(session.data, pointer: "/items/2/tags"),
+            .array([.string("three"), .string("c")])
+        )
+    }
+
+    func testPrependOversizedChangeOmitsValueAndRemainsDecodable() throws {
+        let text = String(repeating: "x", count: PrototypeLimits.maxEmitPayloadBytes)
+        var session = PrototypeSession()
+        try session.show(spec("""
+        {"id":"big-prepend","window":{"placement":{"type":"fullscreen"}},"data":{"items":[]},
+         "root":{"type":"text","text":"Add","onTap":[
+           {"type":"prependData","path":"/data/items","value":{"value":\(PrototypeJSONText.string(.string(text)))}}]}}
+        """))
+        let events = try session.run(XCTUnwrap(session.spec?.root.onTap))
+        let event = try XCTUnwrap(events.first)
+        let write = try XCTUnwrap(PrototypeDataWriteEvent.decode(
+            kind: event.wireKind, name: event.name, payload: event.payload
+        ))
+        XCTAssertEqual(write.op, .prepend)
+        XCTAssertNil(write.value)
+        XCTAssertEqual(session.data?["items"], .array([.string(text)]))
+    }
+
+    func testPrependNeedsBothDataActionsAndLazyListCapabilities() throws {
+        let bytes =
+            Data(
+                #"{"id":"prepend","window":{"placement":{"type":"fullscreen"}},"data":{"items":[]},"root":{"type":"text","text":"Add","onTap":[{"type":"prependData","path":"/data/items","value":{"value":1}}]}}"#
+                    .utf8
+            )
+        let required: Set<String> = ["prototype_data_model_v1", "prototype_data_actions_v1", "prototype_lazy_list_v1"]
+        XCTAssertNoThrow(try PrototypeSpecStrictValidator.validate(data: bytes, supportedCapabilities: required))
+        for missing in ["prototype_data_actions_v1", "prototype_lazy_list_v1"] {
+            XCTAssertThrowsError(try PrototypeSpecStrictValidator.validate(
+                data: bytes, supportedCapabilities: required.subtracting([missing])
+            ))
+        }
+        XCTAssertTrue(try required.isSubset(of: Set(PrototypeBundleCapabilities.required(bytes))))
+    }
+
+    func testPrependEventAllowsOmittedPageButRejectsMalformedPage() {
+        let pages: [JSONValue?] = [.array([.number(1)]), nil]
+        for value in pages {
+            let event = PrototypeDataWriteEvent(
+                op: .prepend,
+                path: "/data/items",
+                value: value,
+                maxItems: 2,
+                revision: 1
+            )
+            XCTAssertEqual(
+                PrototypeDataWriteEvent.decode(kind: "change", name: event.path, payload: event.payload),
+                event
+            )
+        }
+        for value in [JSONValue.number(1), .object([:])] {
+            let event = PrototypeDataWriteEvent(
+                op: .prepend,
+                path: "/data/items",
+                value: value,
+                maxItems: 2,
+                revision: 1
+            )
+            XCTAssertNil(PrototypeDataWriteEvent.decode(kind: "change", name: event.path, payload: event.payload))
+        }
+    }
+
     // MARK: Pure write
 
     func testSetCreatesAndReplacesObjectMembersAtANestedPointer() throws {

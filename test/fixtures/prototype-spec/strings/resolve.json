@@ -1,0 +1,642 @@
+[
+  {
+    "name": "plain",
+    "strings": {
+      "default": {
+        "title": "Cart",
+        "hint": "Your cart",
+        "items": {
+          "one": "{#} item",
+          "other": "{#} items"
+        }
+      },
+      "fr": {
+        "title": "Panier"
+      }
+    },
+    "locales": ["en"],
+    "text": "{t:title}",
+    "expected": "Cart"
+  },
+  {
+    "name": "region",
+    "strings": {
+      "default": {
+        "title": "Cart",
+        "hint": "Your cart",
+        "items": {
+          "one": "{#} item",
+          "other": "{#} items"
+        }
+      },
+      "fr": {
+        "title": "Panier"
+      }
+    },
+    "locales": ["fr-CA"],
+    "text": "{t:title}",
+    "expected": "Panier"
+  },
+  {
+    "name": "case",
+    "strings": {
+      "default": {
+        "title": "Cart",
+        "hint": "Your cart",
+        "items": {
+          "one": "{#} item",
+          "other": "{#} items"
+        }
+      },
+      "fr": {
+        "title": "Panier"
+      }
+    },
+    "locales": ["FR-ca"],
+    "text": "{t:title}",
+    "expected": "Panier"
+  },
+  {
+    "name": "per-key",
+    "strings": {
+      "default": {
+        "title": "Cart",
+        "hint": "Your cart",
+        "items": {
+          "one": "{#} item",
+          "other": "{#} items"
+        }
+      },
+      "fr": {
+        "title": "Panier"
+      }
+    },
+    "locales": ["fr"],
+    "text": "{t:hint}",
+    "expected": "Your cart"
+  },
+  {
+    "name": "state",
+    "strings": {
+      "default": {
+        "title": "Hello {name}"
+      }
+    },
+    "locales": ["en"],
+    "text": "{t:title}",
+    "expected": "Hello {name}"
+  },
+  {
+    "name": "unrelated",
+    "strings": {
+      "default": {
+        "title": "Cart",
+        "hint": "Your cart",
+        "items": {
+          "one": "{#} item",
+          "other": "{#} items"
+        }
+      },
+      "fr": {
+        "title": "Panier"
+      }
+    },
+    "locales": ["en"],
+    "text": "{x} {t:title} {t:hint}",
+    "expected": "{x} Cart Your cart"
+  },
+  {
+    "name": "count",
+    "strings": {
+      "default": {
+        "title": "Cart",
+        "hint": "Your cart",
+        "items": {
+          "one": "{#} item",
+          "other": "{#} items"
+        }
+      },
+      "fr": {
+        "title": "Panier"
+      }
+    },
+    "locales": ["en"],
+    "text": "{t:items|2}",
+    "expected": "2 items"
+  },
+  {
+    "name": "data",
+    "strings": {
+      "default": {
+        "title": "Cart",
+        "hint": "Your cart",
+        "items": {
+          "one": "{#} item",
+          "other": "{#} items"
+        }
+      },
+      "fr": {
+        "title": "Panier"
+      }
+    },
+    "locales": ["en"],
+    "text": "{t:items|{data:/n}}",
+    "expected": "1 item",
+    "data": {
+      "n": 1
+    }
+  },
+  {
+    "name": "invalid-data",
+    "strings": {
+      "default": {
+        "title": "Cart",
+        "hint": "Your cart",
+        "items": {
+          "one": "{#} item",
+          "other": "{#} items"
+        }
+      },
+      "fr": {
+        "title": "Panier"
+      }
+    },
+    "locales": ["en"],
+    "text": "{t:items|{data:/n}}",
+    "expected": "{#} items",
+    "data": {
+      "n": -1
+    }
+  },
+  {
+    "name": "missing-data",
+    "strings": {
+      "default": {
+        "title": "Cart",
+        "hint": "Your cart",
+        "items": {
+          "one": "{#} item",
+          "other": "{#} items"
+        }
+      },
+      "fr": {
+        "title": "Panier"
+      }
+    },
+    "locales": ["en"],
+    "text": "{t:items|{data:/n}}",
+    "expected": "{#} items",
+    "data": {}
+  },
+  {
+    "name": "without-count",
+    "strings": {
+      "default": {
+        "title": "Cart",
+        "hint": "Your cart",
+        "items": {
+          "one": "{#} item",
+          "other": "{#} items"
+        }
+      },
+      "fr": {
+        "title": "Panier"
+      }
+    },
+    "locales": ["en"],
+    "text": "{t:items}",
+    "expected": "{#} items"
+  },
+  {
+    "name": "underscore",
+    "strings": {
+      "default": {
+        "title": "Cart"
+      },
+      "pt-BR": {
+        "title": "Carrinho"
+      }
+    },
+    "locales": ["pt_BR"],
+    "text": "{t:title}",
+    "expected": "Carrinho"
+  },
+  {
+    "name": "plural-en-1",
+    "strings": {
+      "default": {
+        "title": {
+          "zero": "zero {#}",
+          "one": "one {#}",
+          "two": "two {#}",
+          "few": "few {#}",
+          "many": "many {#}",
+          "other": "other {#}"
+        }
+      }
+    },
+    "locales": ["en"],
+    "text": "{t:title|1}",
+    "expected": "one 1"
+  },
+  {
+    "name": "plural-ar-0",
+    "strings": {
+      "default": {
+        "title": {
+          "zero": "zero {#}",
+          "one": "one {#}",
+          "two": "two {#}",
+          "few": "few {#}",
+          "many": "many {#}",
+          "other": "other {#}"
+        }
+      }
+    },
+    "locales": ["ar"],
+    "text": "{t:title|0}",
+    "expected": "zero 0"
+  },
+  {
+    "name": "plural-ar-2",
+    "strings": {
+      "default": {
+        "title": {
+          "zero": "zero {#}",
+          "one": "one {#}",
+          "two": "two {#}",
+          "few": "few {#}",
+          "many": "many {#}",
+          "other": "other {#}"
+        }
+      }
+    },
+    "locales": ["ar"],
+    "text": "{t:title|2}",
+    "expected": "two 2"
+  },
+  {
+    "name": "plural-ru-22",
+    "strings": {
+      "default": {
+        "title": {
+          "zero": "zero {#}",
+          "one": "one {#}",
+          "two": "two {#}",
+          "few": "few {#}",
+          "many": "many {#}",
+          "other": "other {#}"
+        }
+      }
+    },
+    "locales": ["ru"],
+    "text": "{t:title|22}",
+    "expected": "few 22"
+  },
+  {
+    "name": "plural-pl-12",
+    "strings": {
+      "default": {
+        "title": {
+          "zero": "zero {#}",
+          "one": "one {#}",
+          "two": "two {#}",
+          "few": "few {#}",
+          "many": "many {#}",
+          "other": "other {#}"
+        }
+      }
+    },
+    "locales": ["pl"],
+    "text": "{t:title|12}",
+    "expected": "many 12"
+  },
+  {
+    "name": "plural-fr-0",
+    "strings": {
+      "default": {
+        "title": {
+          "zero": "zero {#}",
+          "one": "one {#}",
+          "two": "two {#}",
+          "few": "few {#}",
+          "many": "many {#}",
+          "other": "other {#}"
+        }
+      }
+    },
+    "locales": ["fr"],
+    "text": "{t:title|0}",
+    "expected": "one 0"
+  },
+  {
+    "name": "supplying-table-language",
+    "strings": {
+      "default": {
+        "title": "fallback"
+      },
+      "ru": {
+        "title": {
+          "one": "one",
+          "few": "few",
+          "many": "many",
+          "other": "other"
+        }
+      }
+    },
+    "locales": ["en", "ru"],
+    "text": "{t:title|22}",
+    "expected": "few"
+  },
+  {
+    "name": "missing-runtime-key",
+    "strings": {
+      "default": {
+        "title": "Cart",
+        "hint": "Your cart",
+        "items": {
+          "one": "{#} item",
+          "other": "{#} items"
+        }
+      },
+      "fr": {
+        "title": "Panier"
+      }
+    },
+    "locales": ["en"],
+    "text": "{t:absent}",
+    "expected": "absent"
+  },
+  {
+    "name": "data-negative",
+    "strings": {
+      "default": {
+        "x": {
+          "one": "one",
+          "other": "other"
+        }
+      }
+    },
+    "locales": ["en"],
+    "text": "{t:x|{data:/n}}",
+    "data": {
+      "n": -1
+    },
+    "expected": "other"
+  },
+  {
+    "name": "data-fractional",
+    "strings": {
+      "default": {
+        "x": {
+          "one": "one",
+          "other": "other"
+        }
+      }
+    },
+    "locales": ["en"],
+    "text": "{t:x|{data:/n}}",
+    "data": {
+      "n": 1.5
+    },
+    "expected": "other"
+  },
+  {
+    "name": "data-digit-string",
+    "strings": {
+      "default": {
+        "x": {
+          "one": "one",
+          "other": "other"
+        }
+      }
+    },
+    "locales": ["en"],
+    "text": "{t:x|{data:/n}}",
+    "data": {
+      "n": "1"
+    },
+    "expected": "one"
+  },
+  {
+    "name": "data-null",
+    "strings": {
+      "default": {
+        "x": {
+          "one": "one",
+          "other": "other"
+        }
+      }
+    },
+    "locales": ["en"],
+    "text": "{t:x|{data:/n}}",
+    "data": {
+      "n": null
+    },
+    "expected": "other"
+  },
+  {
+    "name": "data-boolean",
+    "strings": {
+      "default": {
+        "x": {
+          "one": "one",
+          "other": "other"
+        }
+      }
+    },
+    "locales": ["en"],
+    "text": "{t:x|{data:/n}}",
+    "data": {
+      "n": true
+    },
+    "expected": "other"
+  },
+  {
+    "name": "no-locales-default-en",
+    "strings": {
+      "default": {
+        "x": {
+          "one": "one",
+          "other": "other"
+        }
+      }
+    },
+    "locales": [],
+    "text": "{t:x|1}",
+    "expected": "one"
+  },
+  {
+    "name": "missing-category",
+    "strings": {
+      "default": {
+        "x": {
+          "other": "fallback"
+        }
+      }
+    },
+    "locales": ["ar"],
+    "text": "{t:x|2}",
+    "expected": "fallback"
+  },
+  {
+    "name": "count-on-string",
+    "strings": {
+      "default": {
+        "x": "literal"
+      }
+    },
+    "locales": ["en"],
+    "text": "{t:x|2}",
+    "expected": "literal"
+  },
+  {
+    "name": "script-prefix",
+    "strings": {
+      "default": {
+        "x": "default"
+      },
+      "zh-Hant": {
+        "x": "traditional"
+      }
+    },
+    "locales": ["zh-Hant-TW"],
+    "text": "{t:x}",
+    "expected": "traditional"
+  },
+  {
+    "name": "substituted-negative",
+    "strings": {
+      "default": {
+        "x": {
+          "one": "one",
+          "other": "other"
+        }
+      }
+    },
+    "locales": ["en"],
+    "text": "{t:x|-1}",
+    "expected": "other"
+  },
+  {
+    "name": "substituted-fractional",
+    "strings": {
+      "default": {
+        "x": {
+          "one": "one",
+          "other": "other"
+        }
+      }
+    },
+    "locales": ["en"],
+    "text": "{t:x|1.5}",
+    "expected": "other"
+  },
+  {
+    "name": "substituted-missing",
+    "strings": {
+      "default": {
+        "x": {
+          "one": "one",
+          "other": "other"
+        }
+      }
+    },
+    "locales": ["en"],
+    "text": "{t:x|}",
+    "expected": "other"
+  },
+  {
+    "name": "substituted-hex",
+    "strings": {
+      "default": {
+        "x": {
+          "one": "one",
+          "other": "other"
+        }
+      }
+    },
+    "locales": ["en"],
+    "text": "{t:x|0x1}",
+    "expected": "other"
+  },
+  {
+    "name": "substituted-padded",
+    "strings": {
+      "default": {
+        "x": {
+          "one": "one",
+          "other": "other"
+        }
+      }
+    },
+    "locales": ["en"],
+    "text": "{t:x| 1}",
+    "expected": "other"
+  },
+  {
+    "name": "substituted-too-long",
+    "strings": {
+      "default": {
+        "x": {
+          "one": "one",
+          "other": "other"
+        }
+      }
+    },
+    "locales": ["en"],
+    "text": "{t:x|1000000000}",
+    "expected": "other"
+  },
+  {
+    "name": "data-decimal-string",
+    "strings": {
+      "default": {
+        "x": {
+          "one": "one",
+          "other": "other"
+        }
+      }
+    },
+    "locales": ["en"],
+    "text": "{t:x|{data:/n}}",
+    "expected": "other",
+    "data": {
+      "n": "1.0"
+    }
+  },
+  {
+    "name": "data-too-large",
+    "strings": {
+      "default": {
+        "x": {
+          "one": "one",
+          "other": "other"
+        }
+      }
+    },
+    "locales": ["en"],
+    "text": "{t:x|{data:/n}}",
+    "expected": "other",
+    "data": {
+      "n": 1000000000
+    }
+  },
+  {
+    "name": "data-whole-float",
+    "strings": {
+      "default": {
+        "x": {
+          "one": "one",
+          "other": "other"
+        }
+      }
+    },
+    "locales": ["en"],
+    "text": "{t:x|{data:/n}}",
+    "expected": "one",
+    "data": {
+      "n": 1.0
+    }
+  }
+]

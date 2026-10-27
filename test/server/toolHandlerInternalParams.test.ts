@@ -108,6 +108,14 @@ function unsafeSchemaParses(file: string, source: string): string[] {
       ) {
         return;
       }
+      // The host-built test-session report, validated as JSON for the output envelope.
+      if (
+        file === "prototypeTools/testSession.ts" &&
+        receiver.type === "Identifier" &&
+        receiver.name === "hostReportSchema"
+      ) {
+        return;
+      }
       // The injected iOS agent's status reply, likewise not a tool argument.
       if (
         file === "prototypeTools/inspection.ts" &&

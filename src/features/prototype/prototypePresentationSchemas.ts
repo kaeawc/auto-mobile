@@ -83,6 +83,10 @@ export type PrototypeCondition =
   | { platform: string; lt: number }
   | { key: string; equals: string | number | boolean }
   | { key: string; notEquals: string | number | boolean }
+  | { key: string; contains: string }
+  | { key: string; startsWith: string }
+  | { key: string; lengthGt: number }
+  | { key: string; lengthLt: number }
   | { key: string; gt: number }
   | { key: string; lt: number }
   | { all: PrototypeCondition[] }
@@ -109,6 +113,10 @@ export const conditionSchema: z.ZodType<PrototypeCondition> = z.lazy(
       z.object({ platform: pointerSchema, lt: z.number().finite() }).strict(),
       z.object({ key: stateKeySchema, equals: scalarSchema }).strict(),
       z.object({ key: stateKeySchema, notEquals: scalarSchema }).strict(),
+      z.object({ key: stateKeySchema, contains: z.string().min(1).max(256) }).strict(),
+      z.object({ key: stateKeySchema, startsWith: z.string().min(1).max(256) }).strict(),
+      z.object({ key: stateKeySchema, lengthGt: z.number().int().min(0).max(100000) }).strict(),
+      z.object({ key: stateKeySchema, lengthLt: z.number().int().min(0).max(100000) }).strict(),
       z.object({ key: stateKeySchema, gt: z.number().finite() }).strict(),
       z.object({ key: stateKeySchema, lt: z.number().finite() }).strict(),
       z.object({ all: z.array(conditionSchema).min(1).max(16) }).strict(),
@@ -318,6 +326,20 @@ export const TEXT_STYLE_ROLES = [
   "labelSmall",
 ] as const;
 
+export const prototypeShaderSchema = z
+  .object({
+    asset: z.string().min(1).max(256),
+    uniforms: z
+      .record(
+        z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$(?![\s\S])/),
+        z.number().finite().min(-1000000).max(1000000),
+      )
+      .and(z.unknown())
+      .refine((value) => Object.keys(value).length <= 16)
+      .optional(),
+  })
+  .strict();
+
 export const styleSchema = z
   .object({
     width: dimensionSchema.optional(),
@@ -348,6 +370,7 @@ export const styleSchema = z
     pressScale: z.number().finite().min(0.5).max(1).optional(),
     // An animated highlight sweep over the background of a loading placeholder (#14207).
     shimmer: z.boolean().optional(),
+    shader: prototypeShaderSchema.optional(),
     scale: z.number().finite().min(0).max(4).optional(),
     rotation: z.number().finite().min(-360).max(360).optional(),
     // Paint-only looks, applied in order; gated by prototype_effects_v1 (#15128).

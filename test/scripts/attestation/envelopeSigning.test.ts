@@ -140,8 +140,8 @@ describe("Ed25519 envelope signing", () => {
     expect(verifyEnvelopeEd25519(p, signature, pair.publicKey)).toBe(true);
   });
 
-  test("no algorithm is enabled until the owner approves one", () => {
-    expect(SUPPORTED_SIGNATURE_ALGORITHMS).toEqual([]);
+  test("only the approved algorithm is enabled", () => {
+    expect(SUPPORTED_SIGNATURE_ALGORITHMS).toEqual(["ed25519-v1"]);
   });
 });
 

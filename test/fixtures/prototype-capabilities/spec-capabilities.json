@@ -19,6 +19,8 @@
   "prototype_network_v1",
   "prototype_pager_options_v1",
   "prototype_platform_device_v1",
+  "prototype_platform_haptics_v1",
+  "prototype_platform_sound_v1",
   "prototype_platform_test_v1",
   "prototype_platform_v1",
   "prototype_reduced_motion_v1",

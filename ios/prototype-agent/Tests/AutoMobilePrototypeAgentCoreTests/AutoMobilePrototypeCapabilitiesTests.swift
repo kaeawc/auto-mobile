@@ -17,11 +17,12 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
         // Chat-list scrolls (#14232) are drawn on Android only so far (#14671);
         // motion v2 (#14208) is Android-only until the SwiftUI side lands (#14684), and so is
         // transition choreography (#15247). Style effects (#15128) have a validated contract and
-        // no renderer yet.
+        // no renderer yet, and so do the haptics and sound platform modules (#14329).
         let exclusions: Set<String> = [
             "prototype_platform_test_v1",
             "prototype_chat_scroll_v1", "prototype_motion_v2", "prototype_choreography_v1",
             "prototype_effects_v1",
+            "prototype_platform_haptics_v1", "prototype_platform_sound_v1",
         ]
         XCTAssertTrue(exclusions.isSubset(of: required), "Exclusions must name current spec gates")
         XCTAssertTrue(exclusions.isDisjoint(with: supported), "Remove exclusions once supported")

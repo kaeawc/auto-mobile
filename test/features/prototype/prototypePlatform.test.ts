@@ -371,3 +371,109 @@ describe("device platform module", () => {
     ]);
   });
 });
+
+describe("haptics and sound platform modules (#14329)", () => {
+  const haptics = PROTOTYPE_PLATFORM_MODULES.haptics!;
+  const sound = PROTOTYPE_PLATFORM_MODULES.sound!;
+  const callSpec = (module: string, call: string, args: unknown) =>
+    validatePrototypeSpec(
+      spec(
+        { requires: { platform: [module] } },
+        { type: "button", label: "Go", onTap: [{ type: "platform", call, args }] },
+      ),
+    );
+
+  test("are production call-only modules with their own capabilities", () => {
+    for (const [module, capability, call] of [
+      [haptics, "prototype_platform_haptics_v1", "perform"],
+      [sound, "prototype_platform_sound_v1", "play"],
+    ] as const) {
+      expect(module.placeholder).toBeUndefined();
+      expect(module.capability).toBe(capability);
+      expect(Object.keys(module.calls)).toEqual([call]);
+      expect(module.events).toEqual({});
+      expect(module.state).toEqual({});
+      expect(module.calls[call]?.permissions).toEqual([]);
+      expect(module.calls[call]?.sensitive).toBe(false);
+    }
+  });
+
+  test("the effect and sound lists are closed", () => {
+    for (const effect of [
+      "click",
+      "tick",
+      "heavyClick",
+      "doubleClick",
+      "selection",
+      "success",
+      "warning",
+      "error",
+      "impactLight",
+      "impactMedium",
+      "impactHeavy",
+      "longPress",
+    ]) {
+      expect(callSpec("haptics", "haptics.perform", { effect: { value: effect } }).success).toBe(
+        true,
+      );
+    }
+    for (const name of ["click", "send", "receive", "shutter"]) {
+      expect(callSpec("sound", "sound.play", { sound: { value: name } }).success).toBe(true);
+    }
+    expect(callSpec("haptics", "haptics.perform", { effect: { value: "buzz" } }).success).toBe(
+      false,
+    );
+    expect(callSpec("sound", "sound.play", { sound: { value: "cheer" } }).success).toBe(false);
+    // Audio asset ids wait for the audio asset type (#14254).
+    expect(callSpec("sound", "sound.play", { sound: { asset: "ding" } }).success).toBe(false);
+  });
+
+  test("volume is a whole number from 0 to 100", () => {
+    const volume = (value: number) =>
+      callSpec("sound", "sound.play", { sound: { value: "click" }, volume: { value } }).success;
+    expect([volume(0), volume(100)]).toEqual([true, true]);
+    expect([volume(-1), volume(101), volume(50.5)]).toEqual([false, false, false]);
+  });
+
+  test("a use gates on the platform capability and its module capability", () => {
+    const required = requiredPrototypeCapabilities(
+      spec(
+        { requires: { platform: ["haptics", "sound"] } },
+        {
+          type: "column",
+          children: [
+            {
+              type: "button",
+              label: "A",
+              onTap: [
+                { type: "platform", call: "haptics.perform", args: { effect: { value: "tick" } } },
+              ],
+            },
+            {
+              type: "button",
+              label: "B",
+              onTap: [{ type: "platform", call: "sound.play", args: { sound: { value: "send" } } }],
+            },
+          ],
+        },
+      ),
+    );
+    expect(required).toEqual(
+      expect.arrayContaining([
+        "prototype_platform_v1",
+        "prototype_platform_haptics_v1",
+        "prototype_platform_sound_v1",
+      ]),
+    );
+  });
+
+  test("no state is readable", () => {
+    const result = validatePrototypeSpec(
+      spec(
+        { requires: { platform: ["haptics"] } },
+        { type: "text", text: "{platform:/haptics/last}" },
+      ),
+    );
+    expect(result.success).toBe(false);
+  });
+});

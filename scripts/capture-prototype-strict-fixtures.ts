@@ -1,6 +1,6 @@
 import { applyPrototypeDataWrite } from "../src/features/prototype/prototypeDataWrite";
 /** Capture strict differential fixtures from the real TS validator, never hand-authored paths. */
-import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import contract from "../schemas/prototype-spec-contract.json";
 import { object, type Rule } from "../src/features/prototype/prototypeBindingValidation";
@@ -11,7 +11,21 @@ import {
 } from "../src/features/prototype/prototypeValidation";
 import type { PrototypeStrictOptions } from "../src/features/prototype/prototypeStrictPolicy";
 
-const directory = join(import.meta.dir, "../test/fixtures/prototype-spec");
+/**
+ * The committed corpus is a curated subset of what this script derives, and the derived names are
+ * numbered in contract order, so a full run renumbers fixtures, adds near-duplicates and rewrites
+ * formatting (#15565). By default it works on a copy under scratch/ and prints how to compare;
+ * copy the fixtures you want into test/fixtures by hand. Pass --in-place only to regenerate the
+ * whole corpus deliberately, then run oxfmt and review every change.
+ */
+const live = join(import.meta.dir, "../test/fixtures/prototype-spec");
+const inPlace = process.argv.includes("--in-place");
+const directory = inPlace ? live : join(import.meta.dir, "../scratch/prototype-spec-capture");
+if (!inPlace) {
+  rmSync(directory, { recursive: true, force: true });
+  mkdirSync(directory, { recursive: true });
+  cpSync(live, directory, { recursive: true });
+}
 const definitions: Record<string, Rule> = contract.definitions;
 const base = () => ({
   id: "strict",
@@ -487,3 +501,6 @@ writeFileSync(
 console.log(
   `Captured ${valid.length} valid, ${invalid.length} invalid; ${seenObjects.size} object rules, ${seenBounds.size} bounds, ${capabilityExamples.size} gates`,
 );
+if (!inPlace) {
+  console.log(`Wrote the capture to ${directory}; compare with: diff -rq ${live} ${directory}`);
+}

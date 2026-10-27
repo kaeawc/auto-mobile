@@ -8,6 +8,9 @@ import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { createSuccessWebSocketFactory } from "../../../fakes/FakeWebSocket";
 
+// The source filters process.pid from foreign clients.
+const FOREIGN_PID = process.pid + 1;
+
 const device = { deviceId: "foreign-forward-test", name: "Pixel", platform: "android" as const };
 let client: AndroidCtrlProxyClient | undefined;
 beforeEach(() => {
@@ -42,7 +45,7 @@ function harness(acquire = true, recorded = false) {
   const lease: CtrlProxyForwardLease = {
     tryAcquire: () => acquire,
     release: () => {},
-    getLastOwnerPid: () => 4242,
+    getLastOwnerPid: () => FOREIGN_PID,
     ownsForward: () => recorded,
     forgetOwnedForward: () => {
       recorded = false;
@@ -66,7 +69,7 @@ describe("#12220 foreign forward protection", () => {
     const h = harness();
     let connected = true;
     let alive = true;
-    h.client.forwardClientProbe = { findClientPids: async () => (connected ? [4242] : []) };
+    h.client.forwardClientProbe = { findClientPids: async () => (connected ? [FOREIGN_PID] : []) };
     h.client.forwardClientProcessIsRunning = () => alive;
     await expect(h.client.sweepOrphanedCtrlProxyPortForwards()).rejects.toBeInstanceOf(
       CtrlProxyForwardingLeaseConflictError,
@@ -93,7 +96,7 @@ describe("#12220 foreign forward protection", () => {
   test("F1 recorded orphan stray disconnect retries reclamation while its PID lives", async () => {
     const h = harness(true, true);
     let connected = true;
-    h.client.forwardClientProbe = { findClientPids: async () => (connected ? [4242] : []) };
+    h.client.forwardClientProbe = { findClientPids: async () => (connected ? [FOREIGN_PID] : []) };
     h.client.forwardClientProcessIsRunning = () => true;
     const failure = await h.client
       .sweepOrphanedCtrlProxyPortForwards()

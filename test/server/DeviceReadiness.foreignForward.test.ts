@@ -23,6 +23,9 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeWindow } from "../fakes/FakeWindow";
 import { FakeVirtualDeviceLifecycleCoordinator } from "../fakes/FakeVirtualDeviceLifecycleCoordinator";
 
+// The source filters process.pid from foreign clients.
+const FOREIGN_PID = process.pid + 1;
+
 afterEach(() => {
   AndroidCtrlProxyManager.setForeignForwardEvidenceForTesting(null);
   AndroidCtrlProxyManager.resetInstances();
@@ -115,7 +118,7 @@ function installAdbForwardEvidence(
           if (mode === "unknown") {
             throw new Error("host client probe unavailable");
           }
-          return [4242];
+          return [FOREIGN_PID];
         },
       },
       ownership: () => ({ ownsForward: () => mode === "owned" }),
@@ -257,7 +260,7 @@ describe("#12220 foreign CtrlProxy forward at DeviceReadiness readiness", () => 
             throw new Error("service recovery must not run");
           },
         });
-        realClient.forwardClientProbe = { findClientPids: async () => [4242] };
+        realClient.forwardClientProbe = { findClientPids: async () => [FOREIGN_PID] };
         realClient.forwardClientProcessIsRunning = () => true;
         AndroidCtrlProxyManager.setForeignForwardEvidenceForTesting(
           new DefaultForeignCtrlProxyForwardEvidence({

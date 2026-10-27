@@ -14,9 +14,10 @@ export interface InputEntry {
  * include it; an over-inclusive hash costs a cache miss, an under-inclusive one a false skip.
  */
 export function canonicalInputPath(path: string): string {
-  const slashed = path.replaceAll("\\", "/");
+  // Entries come from git, whose separator is always "/": a backslash is part of a file name, and
+  // folding it into a separator would let two different files collide.
   const parts: string[] = [];
-  for (const part of slashed.split("/")) {
+  for (const part of path.split("/")) {
     if (part === "" || part === ".") {
       continue;
     }
@@ -25,7 +26,7 @@ export function canonicalInputPath(path: string): string {
     }
     parts.push(part);
   }
-  if (slashed.startsWith("/") || /^[A-Za-z]:/.test(slashed) || parts.length === 0) {
+  if (path.startsWith("/") || /^[A-Za-z]:/.test(path) || parts.length === 0) {
     throw new Error(`input path is not repository-relative: ${path}`);
   }
   return parts.join("/");

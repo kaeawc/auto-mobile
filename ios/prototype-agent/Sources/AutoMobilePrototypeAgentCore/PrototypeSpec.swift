@@ -634,6 +634,7 @@ struct PrototypeAction: Decodable, Sendable {
     /// Contract-only setStack path; data actions retain their existing string path.
     let stackPath: [PrototypeRouteEntry]?
     let transition: PrototypeStackTransition?
+    let source: String?
     /// `setData`/`appendData`/`prependData`/`removeData`: `/data/<pointer>`, a whole `{index}` segment bound per
     /// repeat row at expansion (#12519).
     let path: String?
@@ -668,7 +669,7 @@ struct PrototypeAction: Decodable, Sendable {
     let onError: [PrototypeAction]?
 
     private enum CodingKeys: String, CodingKey {
-        case type, name, payload, context, pager, page, stack, screen, transition, path, key, value, scroll, to,
+        case type, name, payload, context, pager, page, stack, screen, transition, source, path, key, value, scroll, to,
              animated, call, args, params, force
         case id, afterMs, everyMs, maxRuns, actions
         case incrementAmount = "by"
@@ -685,7 +686,7 @@ struct PrototypeAction: Decodable, Sendable {
         timeoutMs: Double? = nil,
         onSuccess: [PrototypeAction]? = nil, onError: [PrototypeAction]? = nil,
         id: String? = nil, afterMs: Int? = nil, everyMs: Int? = nil, maxRuns: Int? = nil,
-        actions: [PrototypeAction]? = nil, transition: PrototypeStackTransition? = nil,
+        actions: [PrototypeAction]? = nil, transition: PrototypeStackTransition? = nil, source: String? = nil,
         scroll: String? = nil, to: JSONValue? = nil, animated: Bool? = nil,
         call: String? = nil, args: [String: JSONValue]? = nil,
         params: [String: JSONValue]? = nil, force: Bool? = nil, stackPath: [PrototypeRouteEntry]? = nil
@@ -712,6 +713,7 @@ struct PrototypeAction: Decodable, Sendable {
         self.force = force
         self.stackPath = stackPath
         self.transition = transition
+        self.source = source
         self.path = path
         self.key = key
         self.value = value

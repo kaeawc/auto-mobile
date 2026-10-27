@@ -1639,6 +1639,10 @@
               },
               "optional": true
             },
+            "source": {
+              "rule": { "kind": "string", "min": 1 },
+              "optional": true
+            },
             "params": {
               "rule": {
                 "kind": "ref",
@@ -1717,6 +1721,10 @@
                 "kind": "ref",
                 "name": "stackTransition"
               },
+              "optional": true
+            },
+            "source": {
+              "rule": { "kind": "string", "min": 1 },
               "optional": true
             },
             "params": {
@@ -18058,7 +18066,16 @@
     },
     "stackTransition": {
       "kind": "enum",
-      "values": ["platform", "slide", "fade", "none"]
+      "values": [
+        "platform",
+        "slide",
+        "fade",
+        "none",
+        "sharedAxisX",
+        "sharedAxisY",
+        "fadeThrough",
+        "zoom"
+      ]
     },
     "shader": {
       "kind": "object",

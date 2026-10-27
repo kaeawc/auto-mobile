@@ -148,7 +148,7 @@ data class PrototypeRequest(
  * results report platform success; show/replace return false after destroy. Replace without a
  * window behaves as show. Read state is a snapshot, not a cross-thread compound transaction.
  */
-interface PrototypeHost {
+interface PrototypeHost : PrototypeHostLifecycle {
   /** Best synchronous baseline; the Compose window size corrects it after attachment. */
   @InternalAutoMobilePrototypeApi
   fun initialDeviceState(request: PrototypeRequest): kotlinx.serialization.json.JsonObject =
@@ -182,20 +182,6 @@ interface PrototypeHost {
 
   /** Changes Back focusability without changing text-field or keyboard state. */
   suspend fun setStackBackEnabled(enabled: Boolean): Boolean
-
-  /**
-   * Removes immediately, allowing the app to regain focus. A window already detached counts as
-   * removed; other failed removals are retryable.
-   */
-  suspend fun dismiss(): Boolean
-
-  suspend fun dismissImmediately(): Boolean = dismiss()
-
-  /**
-   * Terminal for show/replace; dismiss may still retry a failed platform removal. Invalidates
-   * pending restores, but does not cancel caller-owned gesture blocks.
-   */
-  suspend fun destroy(): Boolean
 
   /** Changes whole-view alpha in place; throws IllegalArgumentException outside 0..100. */
   suspend fun setOpacity(percent: Int)
@@ -380,7 +366,8 @@ class DefaultPrototypeHost(
       // New content places its own anchored root again, so a replaced spec starts from its
       // placement.
       inPlace?.anchoredOrigin = null
-      if (inPlace != null && !request.bringToFront) updateInPlace(inPlace, request, params)
+      if (inPlace != null && (!request.bringToFront || !windowMotionEnabled(request, target)))
+        updateInPlace(inPlace, request, params)
       else addWindow(target, request, params, replacing = current)
     }
 
@@ -632,7 +619,7 @@ class DefaultPrototypeHost(
   override suspend fun dismiss(): Boolean = mainThread.onMain {
     val current = window ?: return@onMain true
     if (!windowMotionEnabled(current)) return@onMain dismissOnMain()
-    if (!beginExit(current)) return@onMain false
+    if (!beginExit(current)) return@onMain window == null
     touchThroughToken = null
     window = null
     placement = null
@@ -649,10 +636,16 @@ class DefaultPrototypeHost(
     exiting.clear()
   }
 
-  private fun windowMotionEnabled(current: Window): Boolean {
-    val resolver = current.target.context.contentResolver
-    return current.request.transition != "none" &&
-      current.request.motion != "none" &&
+  private fun windowMotionEnabled(current: Window): Boolean =
+    windowMotionEnabled(current.request, current.target)
+
+  private fun windowMotionEnabled(
+    request: PrototypeRequest,
+    target: PrototypeDisplayWindow,
+  ): Boolean {
+    val resolver = target.context.contentResolver
+    return request.transition != "none" &&
+      request.motion != "none" &&
       android.provider.Settings.Global.getFloat(
         resolver,
         android.provider.Settings.Global.ANIMATOR_DURATION_SCALE,

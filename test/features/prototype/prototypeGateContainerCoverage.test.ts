@@ -178,7 +178,7 @@ test("every capability gate has a container fixture or is a root-level gate", ()
   );
 });
 
-test("the window motion gate reports window.transition and a repeat stagger", () => {
+test("the window motion gate reports window.transition", () => {
   const gate = PROTOTYPE_SPEC_CAPABILITY_GATES.find(
     (entry) => entry.capability === "prototype_window_motion_v1",
   )!;
@@ -331,3 +331,14 @@ test("reduced motion gate reports only spec.motion", () => {
   expect(gate.fields({ motion: "reduced", root: label })).toEqual(["motion"]);
   expect(gate.fields({ motion: "standard", root: { motion: "reduced" } })).toEqual([]);
 });
+
+for (const container of containers) {
+  test(`window motion repeat.stagger covers ${container.name}`, () => {
+    const gate = PROTOTYPE_SPEC_CAPABILITY_GATES.find(
+      (entry) => entry.capability === "prototype_window_motion_v1",
+    )!;
+    expect(gate.fields(container.wrap({ ...label, repeat: { stagger: { ms: 20 } } }))).toEqual([
+      `${container.prefix}.repeat.stagger`,
+    ]);
+  });
+}

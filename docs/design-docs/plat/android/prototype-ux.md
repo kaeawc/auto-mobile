@@ -805,6 +805,11 @@ Android `prototype_window_motion_v1` gates authored `window.transition` and
 `repeat.stagger`. Window transitions are `auto` (default), `none`, `fade`, `slide`,
 or `scale`. Auto slides a sheet from its placement edge, fades and scales a
 floating surface from 0.92 to 1, and fades fullscreen content. Exit mirrors enter.
+Same-id shows update the existing window when motion is off or the incoming
+transition is `none`, preserving focus and keyboard attachment. With full or
+reduced motion and an animated transition, replacement attaches a new window
+while the outgoing window exits; focus transfers to the new window. Changes to
+display, layer or surface id also require a new window regardless of motion.
 Root Compose content animates for 300 ms; removal is scheduled through the host
 settle timer at 400 ms, independent of animation frames. Exiting windows become
 non-touchable immediately. Outgoing windows retain their hierarchy motion metadata
@@ -819,7 +824,8 @@ snackbars fade and slide. Scrims fade with their surfaces. Panels remain compose
 through exit, including when removed from the authored tree; a patch reopening a
 panel cancels its exit and re-enters. `SheetDismiss` and modal button actions commit
 at exit start, so runtime state and emitted action events change immediately;
-retained visual content finishes exiting afterward. A dragged sheet follows the
+retained visual content finishes exiting afterward with input disabled and its
+semantics cleared. A dragged sheet follows the
 pointer directly and springs to the selected detent on release. Reduced motion
 uses fades without translation, scaling or detent springs. Off motion snaps and
 keeps the settled rendering unchanged. Window and modal transitions and detent

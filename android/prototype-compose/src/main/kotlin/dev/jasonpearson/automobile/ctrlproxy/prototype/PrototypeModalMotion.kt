@@ -5,22 +5,28 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.clearAndSetSemantics
+
+internal val LocalPrototypeModalInputEnabled = compositionLocalOf { true }
 
 private val LocalPrototypeModalProgress = compositionLocalOf { 1f }
 
 /** Retain closed panels until their fade finishes; reopening reverses the same transition. */
 @Composable
-internal fun PrototypeModalMotion(node: PrototypeRenderNode, content: @Composable () -> Unit) {
+internal fun PrototypeModalMotion(
+  node: PrototypeRenderNode,
+  interact: (PrototypeInteraction) -> Unit,
+  content: @Composable ((PrototypeInteraction) -> Unit) -> Unit,
+) {
+  val modalInteract: (PrototypeInteraction) -> Unit = { if (node.sheetOpen) interact(it) }
   if (node.role !in PROTOTYPE_ANIMATED_MODAL_ROLES || node.role == "drawer") {
-    content()
+    content(modalInteract)
     return
   }
   val layers = LocalPrototypeDrawerLayers.current
-  val enabled =
-    LocalPrototypeMotion.current &&
-      LocalPrototypeMotionProfile.current != PrototypeMotionProfile.OFF
-  if (!enabled) {
-    if (node.sheetOpen) content() else SideEffect { layers.retained.remove(node.identity) }
+  if (!prototypeModalMotionEnabled()) {
+    if (node.sheetOpen) content(modalInteract)
+    else SideEffect { layers.retained.remove(node.identity) }
     return
   }
   val state = remember(node.identity) { MutableTransitionState(false) }
@@ -41,11 +47,19 @@ internal fun PrototypeModalMotion(node: PrototypeRenderNode, content: @Composabl
       }
   }
   if (node.sheetOpen || state.currentState || !state.isIdle) {
-    CompositionLocalProvider(LocalPrototypeModalProgress provides progress) {
-      Box(Modifier.graphicsLayer { alpha = progress }) { content() }
+    CompositionLocalProvider(
+      LocalPrototypeModalProgress provides progress,
+      LocalPrototypeModalInputEnabled provides node.sheetOpen,
+    ) {
+      val semantics = if (node.sheetOpen) Modifier else Modifier.clearAndSetSemantics {}
+      Box(semantics.graphicsLayer { alpha = progress }) { content(modalInteract) }
     }
   }
 }
+
+@Composable
+private fun prototypeModalMotionEnabled(): Boolean =
+  LocalPrototypeMotion.current && LocalPrototypeMotionProfile.current != PrototypeMotionProfile.OFF
 
 /** Scrims only fade; translation and scale belong to the surface within them. */
 @Composable

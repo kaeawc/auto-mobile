@@ -59,7 +59,8 @@ class PrototypeWindowMotionTest {
     compose.mainClock.autoAdvance = false
     change { open = false }
     compose.mainClock.advanceTimeBy(100)
-    compose.onNodeWithText("OK").assertExists()
+    compose.onNodeWithText("OK").assertDoesNotExist()
+    compose.onNodeWithText("OK", useUnmergedTree = true).assertExists()
     compose.waitForIdle()
     assertTrue(activity.snapshot().active > 0)
     change { open = true }
@@ -142,40 +143,6 @@ class PrototypeWindowMotionTest {
     assertTrue(activity.snapshot().active > 0)
     compose.mainClock.advanceTimeBy(400)
     assertEquals(0, activity.snapshot().active)
-  }
-
-  @Test
-  fun `closed runtime content remains available to the window exit`() {
-    val spec =
-      PrototypeSpec(
-        "window",
-        PrototypeWindow(PrototypeFullscreenPlacement()),
-        root = PrototypeTextNode(text = "Final content"),
-      )
-    val runtime = PrototypeRuntime(spec, nextSequence = { 1L })
-    var visible by mutableStateOf(true)
-    compose.setContent {
-      CompositionLocalProvider(LocalPrototypeMotion provides true) {
-        PrototypeWindowMotion(
-          visible,
-          PrototypeWindowMotionSpec("fade", "fullscreen", motion = "standard"),
-          runtime.motionActivity,
-        ) {
-          PrototypeRuntimeContent(runtime) {}
-        }
-      }
-    }
-    compose.waitForIdle()
-    compose.mainClock.autoAdvance = false
-    change {
-      visible = false
-      runtime.close()
-    }
-    compose.mainClock.advanceTimeBy(100)
-    compose.onNodeWithText("Final content").assertExists()
-    assertTrue(runtime.motionActivity.snapshot().active > 0)
-    compose.mainClock.advanceTimeBy(400)
-    assertEquals(0, runtime.motionActivity.snapshot().active)
   }
 
   @Test

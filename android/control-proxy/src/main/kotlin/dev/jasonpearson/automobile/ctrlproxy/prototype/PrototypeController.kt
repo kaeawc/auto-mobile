@@ -20,6 +20,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.encodeToString
@@ -204,6 +205,8 @@ class PrototypeController(
   private val platform: dev.jasonpearson.automobile.prototype.PrototypePlatform =
     dev.jasonpearson.automobile.prototype.PrototypePlatform.None,
 ) {
+  // Asset cleanup must outlive service cancellation while retaining the injected worker dispatcher.
+  private val assetCleanupScope = CoroutineScope(requestScope.coroutineContext + SupervisorJob())
   private val platformLimiter = PrototypeRequestLimiter(PrototypePlatformCalls.maxInFlight)
 
   val isShowing: Boolean
@@ -625,7 +628,7 @@ class PrototypeController(
         hasStackBack = runtime.hasPoppableStack(mappedSpec),
         // Each window keeps its own focus flags; cross-window focus coordination is a follow-up.
         isSuspended = { scope.suspended },
-        bringToFront = reused != null,
+        bringToFront = reused != null && request.transition != "none" && request.motion != "none",
         theme = theme,
         motionActivity = runtime.motionActivity,
         exitResources = exitResources,
@@ -839,11 +842,16 @@ class PrototypeController(
   /** Asset cleanup is ancillary: it must never suppress a dismissal, event or lifecycle step. */
   private fun releaseAssets() {
     exitResources.whenIdle {
-      if (surfaces.isEmpty()) {
-        try {
-          clearAssets()
-        } catch (error: Exception) {
-          Log.w("PrototypeController", "Prototype asset cleanup failed", error)
+      // Cleanup survives service cancellation, on the same worker dispatcher as requests.
+      assetCleanupScope.launch {
+        mutex.withLock {
+          if (surfaces.isEmpty()) {
+            try {
+              clearAssets()
+            } catch (error: Exception) {
+              Log.w("PrototypeController", "Prototype asset cleanup failed", error)
+            }
+          }
         }
       }
     }

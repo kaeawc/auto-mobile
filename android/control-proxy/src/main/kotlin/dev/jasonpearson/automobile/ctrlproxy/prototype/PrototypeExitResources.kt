@@ -21,27 +21,35 @@ class PrototypeExitResources {
     owners[owner] = Exit(finish, surfaceId, metadata)
   }
 
-  @Synchronized
   fun release(owner: Any) {
-    owners.remove(owner)
-    if (owners.isEmpty()) {
-      val pending = cleanup
-      cleanup = null
-      pending?.invoke()
-    }
+    val pending =
+      synchronized(this) {
+        owners.remove(owner)
+        if (owners.isEmpty()) cleanup.also { cleanup = null } else null
+      }
+    pending?.invoke()
   }
 
-  @Synchronized
   fun whenIdle(block: () -> Unit) {
-    if (owners.isEmpty()) block() else cleanup = block
+    val idle =
+      synchronized(this) {
+        if (owners.isEmpty()) true
+        else {
+          cleanup = block
+          false
+        }
+      }
+    if (idle) block()
   }
 
-  @Synchronized
   fun drain() {
-    val exits = owners.values.toList()
-    val pending = cleanup
-    owners.clear()
-    cleanup = null
+    val (exits, pending) =
+      synchronized(this) {
+        (owners.values.toList() to cleanup).also {
+          owners.clear()
+          cleanup = null
+        }
+      }
     exits.forEach { it.finish() }
     pending?.invoke()
   }

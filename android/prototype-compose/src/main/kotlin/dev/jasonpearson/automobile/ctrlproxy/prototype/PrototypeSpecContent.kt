@@ -234,19 +234,19 @@ fun PrototypeSpecContent(
           }
           modals.forEach { node ->
             key(node.identity) {
-              PrototypeModalMotion(node) {
+              PrototypeModalMotion(node, interact) { modalInteract ->
                 if (node.role == "menu") {
                   val parent = menuParents[node.identity]
                   RenderPrototypeMenu(
                     node,
-                    prototypeNodeModifier(node, interact),
+                    prototypeNodeModifier(node, modalInteract),
                     parent?.let { menuLayers.bounds[it] } ?: menuLayers.windowBounds,
-                    interact,
+                    modalInteract,
                   )
-                } else RenderPrototypeModal(node, interact)
+                } else RenderPrototypeModal(node, modalInteract)
                 PrototypeAnchorLayer(
                   remember(node) { layeredPrototypeAnchorsIn(node.children) },
-                  interact,
+                  modalInteract,
                 )
               }
             }
@@ -447,13 +447,16 @@ internal fun Modifier.boundedScrollViewport(vertical: Boolean): Modifier =
 @Composable
 @Suppress("LongParameterList") // The shared render entry point; callers pass only what they need.
 internal fun RenderPrototypeNode(
-  node: PrototypeRenderNode,
+  renderedNode: PrototypeRenderNode,
   interact: (PrototypeInteraction) -> Unit,
   parentModifier: Modifier = Modifier,
   weightAxis: PrototypeWeightAxis? = null,
   windowRoot: Boolean = false,
   anchorLayer: Boolean = false,
 ) {
+  val node =
+    if (LocalPrototypeModalInputEnabled.current) renderedNode
+    else renderedNode.copy(enabled = false)
   // An anchored node below the root is drawn by its window's anchor layer, not in its parent.
   if (!windowRoot && !anchorLayer && isLayeredPrototypeAnchor(node)) {
     CaptureAnchorLocals(node.identity)
@@ -1295,7 +1298,13 @@ private fun RenderPrototypeSheet(
           prototypeThemedScrim(null, source.scrim)
             ?: prototypeSheetScrimFallback(prototypePalette()),
         )
-        .clickable { interact(PrototypeInteraction.SheetDismiss(source.openWhen)) },
+        .then(
+          if (node.sheetOpen)
+            Modifier.clickable {
+              interact(PrototypeInteraction.SheetDismiss(source.openWhen))
+            }
+          else Modifier,
+        ),
     )
     Column(
       modifier
@@ -1310,24 +1319,28 @@ private fun RenderPrototypeSheet(
             Modifier.background(MaterialTheme.colorScheme.surface)
           else Modifier,
         )
-        .pointerInput(heights, height, source.dismissOnSwipe) {
-          detectVerticalDragGestures(
-            onDragStart = { drag = 0.0 },
-            onVerticalDrag = { change, amount ->
-              change.consume()
-              drag += amount / density
-            },
-            onDragCancel = { drag = 0.0 },
-            onDragEnd = {
-              val settled = settlePrototypeSheet(heights, height, drag, source.dismissOnSwipe)
-              drag = 0.0
-              if (settled == null) interact(PrototypeInteraction.SheetDismiss(source.openWhen))
-              else height = settled
-            },
-          )
-        }
+        .then(
+          if (node.sheetOpen)
+            Modifier.pointerInput(heights, height, source.dismissOnSwipe) {
+              detectVerticalDragGestures(
+                onDragStart = { drag = 0.0 },
+                onVerticalDrag = { change, amount ->
+                  change.consume()
+                  drag += amount / density
+                },
+                onDragCancel = { drag = 0.0 },
+                onDragEnd = {
+                  val settled = settlePrototypeSheet(heights, height, drag, source.dismissOnSwipe)
+                  drag = 0.0
+                  if (settled == null) interact(PrototypeInteraction.SheetDismiss(source.openWhen))
+                  else height = settled
+                },
+              )
+            }
+          else Modifier,
+        )
         // Consume body taps to keep the scrim from closing the sheet through empty content.
-        .clickable {
+        .clickable(enabled = node.sheetOpen) {
           if (!source.onTap.isNullOrEmpty())
             interact(PrototypeInteraction.Tap(source.onTap.orEmpty()))
         },
@@ -1363,7 +1376,7 @@ private fun prototypeNodeModifier(
 ): Modifier {
   val style = node.style.source
   val actions = node.source?.onTap.orEmpty()
-  val tappable = prototypeNodeTappable(node)
+  val tappable = prototypeNodeTappable(node) && LocalPrototypeModalInputEnabled.current
   val handleVisual =
     (node.role == "icon" || node.role == "image") &&
       node.identity in LocalPrototypeHandleVisuals.current

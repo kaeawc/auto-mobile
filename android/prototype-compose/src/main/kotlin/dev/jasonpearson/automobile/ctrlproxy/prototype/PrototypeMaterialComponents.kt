@@ -343,7 +343,13 @@ internal fun RenderPrototypeDialog(
     Box(
       Modifier.fillMaxSize()
         .background(prototypeDialogScrimFallback(MaterialTheme.colorScheme))
-        .clickable { interact(PrototypeInteraction.SheetDismiss(source.openWhen)) },
+        .then(
+          if (node.sheetOpen)
+            Modifier.clickable {
+              interact(PrototypeInteraction.SheetDismiss(source.openWhen))
+            }
+          else Modifier,
+        ),
     )
     Surface(
       modifier
@@ -351,7 +357,11 @@ internal fun RenderPrototypeDialog(
         .padding(horizontal = 24.dp, vertical = 24.dp)
         .widthIn(min = 280.dp, max = 560.dp)
         // Consume body taps so they never reach the scrim; the node's own onTap runs instead.
-        .clickable(remember { MutableInteractionSource() }, indication = null) {
+        .clickable(
+          remember { MutableInteractionSource() },
+          indication = null,
+          enabled = node.sheetOpen,
+        ) {
           if (!source.onTap.isNullOrEmpty())
             interact(PrototypeInteraction.Tap(source.onTap.orEmpty()))
         },
@@ -465,7 +475,13 @@ private fun PrototypeDialogTextButton(
   tag: String?,
   onClick: () -> Unit,
 ) {
-  TextButton(onClick, Modifier.semantics { tag?.let { testTag = it } }) { Text(button.label) }
+  TextButton(
+    onClick,
+    Modifier.semantics { tag?.let { testTag = it } },
+    enabled = LocalPrototypeModalInputEnabled.current,
+  ) {
+    Text(button.label)
+  }
 }
 
 /**

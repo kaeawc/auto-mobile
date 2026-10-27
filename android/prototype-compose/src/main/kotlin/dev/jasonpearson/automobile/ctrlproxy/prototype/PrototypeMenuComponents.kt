@@ -113,13 +113,23 @@ internal fun RenderPrototypeMenu(
   Box(Modifier.fillMaxSize()) {
     Box(
       Modifier.fillMaxSize()
-        .clickable { interact(PrototypeInteraction.SheetDismiss(source.openWhen)) }
+        .then(
+          if (node.sheetOpen)
+            Modifier.clickable {
+              interact(PrototypeInteraction.SheetDismiss(source.openWhen))
+            }
+          else Modifier,
+        )
         .semantics { node.testTag?.let { testTag = "$it:outside" } },
     )
     PrototypeMenuSurface(
       anchor,
       layers,
-      modifier.prototypeModalSurface("scale").pointerInput(Unit) { detectTapGestures {} },
+      modifier
+        .prototypeModalSurface("scale")
+        .then(
+          if (node.sheetOpen) Modifier.pointerInput(Unit) { detectTapGestures {} } else Modifier,
+        ),
     ) {
       source.items.forEachIndexed { index, item ->
         when (item) {
@@ -128,7 +138,7 @@ internal fun RenderPrototypeMenu(
             val enabled = item.enabled != false
             val click =
               if (enabled)
-                Modifier.clickable(role = Role.Button) {
+                Modifier.clickable(enabled = node.sheetOpen, role = Role.Button) {
                   interact(PrototypeInteraction.CloseModal(source.openWhen, item.onTap.orEmpty()))
                 }
               else Modifier

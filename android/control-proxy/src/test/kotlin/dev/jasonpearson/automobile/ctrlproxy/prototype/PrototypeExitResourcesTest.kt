@@ -12,7 +12,10 @@ class PrototypeExitResourcesTest {
     var calls = 0
     resources.retain(first)
     resources.retain(second)
-    resources.whenIdle { calls++ }
+    resources.whenIdle {
+      assertFalse(Thread.holdsLock(resources))
+      calls++
+    }
     resources.release(first)
     assertEquals(0, calls)
     resources.release(second)
@@ -23,7 +26,11 @@ class PrototypeExitResourcesTest {
   @Test
   fun `without an outgoing window cleanup is immediate`() {
     var calls = 0
-    PrototypeExitResources().whenIdle { calls++ }
+    val resources = PrototypeExitResources()
+    resources.whenIdle {
+      assertFalse(Thread.holdsLock(resources))
+      calls++
+    }
     assertEquals(1, calls)
   }
 
@@ -46,9 +53,18 @@ class PrototypeExitResourcesTest {
   fun `service drain detaches every outgoing window before asset cleanup`() {
     val resources = PrototypeExitResources()
     val history = mutableListOf<String>()
-    resources.retain(Any(), { history += "first" })
+    resources.retain(
+      Any(),
+      {
+        assertFalse(Thread.holdsLock(resources))
+        history += "first"
+      },
+    )
     resources.retain(Any(), { history += "second" })
-    resources.whenIdle { history += "assets" }
+    resources.whenIdle {
+      assertFalse(Thread.holdsLock(resources))
+      history += "assets"
+    }
     resources.drain()
     resources.drain()
     assertEquals(listOf("first", "second", "assets"), history)

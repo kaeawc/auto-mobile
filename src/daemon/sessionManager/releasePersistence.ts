@@ -25,6 +25,7 @@ import { deriveSlotTag, isSlotTagBeingRecreated, type LegacyLifecycleView } from
 import type { SupersededRowReasserts } from "../supersededRowReasserts";
 import { TerminalReleaseGenerationRefusedError } from "../TerminalReleaseGenerationRefusedError";
 import { type SessionLifecycleSlots } from "./internalContracts";
+import { type TerminalIntentDurability } from "./releaseWrite";
 
 export interface SessionReleasePersistenceHost {
   isTerminalReleaseRetryCurrent(snapshot: SessionReleaseSnapshot): boolean;
@@ -95,6 +96,10 @@ export interface SessionReleasePersistenceHost {
   ): Promise<boolean>;
   getLegacyLifecycleView(): LegacyLifecycleView<Session>;
   readonly restartRecoveryActivityAt: Pick<Map<string, number>, "delete">;
+  recordTerminalReleaseIntent(
+    snapshot: SessionReleaseSnapshot,
+    early?: boolean,
+  ): TerminalIntentDurability;
   persistSessionRelease(
     snapshot: SessionReleaseSnapshot,
     retryPending?: boolean,
@@ -632,6 +637,17 @@ export class SessionReleasePersistence {
 
   recordPendingNonTerminalRelease(snapshot: SessionReleaseSnapshot): void {
     this.host.rowWriter.recordPendingNonTerminalRelease(snapshot);
+  }
+
+  /**
+   * Raise the terminal fence and record the journal intent, synchronously and without writing the
+   * row. A release that commits first (#11799) does this ahead of its final supersede fence, so a
+   * declined release lifts the fence and resolves the intent in one turn and has no row to undo.
+   */
+  fenceTerminalRelease(snapshot: SessionReleaseSnapshot): TerminalIntentDurability {
+    this.host.sessionSlots.setTerminalSnapshot(snapshot.sessionId, snapshot);
+    this.host.restartRecoveryActivityAt.delete(snapshot.sessionId);
+    return this.host.recordTerminalReleaseIntent(snapshot, true);
   }
 
   async persistTerminalReleaseIfNeeded(snapshot: SessionReleaseSnapshot): Promise<void> {

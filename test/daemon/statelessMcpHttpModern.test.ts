@@ -4,6 +4,9 @@ import { EventEmitter } from "node:events";
 import {
   classifyInboundRequest,
   McpServer,
+  TRACEPARENT_META_KEY,
+  TRACESTATE_META_KEY,
+  BAGGAGE_META_KEY,
   type McpServerFactory,
   type McpHandlerRequestOptions,
   type CreateMcpHandlerOptions,
@@ -20,6 +23,7 @@ import { MCP_SESSION_KEY_HEADER } from "../../src/daemon/mcpSessionKey";
 import { ListChangedBroadcaster } from "../../src/daemon/listChangedBroadcast";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { currentMcpTrace, type McpTraceContext } from "../../src/daemon/mcpTraceContext";
 
 /** The SDK factory requires an McpServer; transport behavior stays entirely fake. */
 class FakeServer extends McpServer {
@@ -88,10 +92,13 @@ function harness(flag?: string, block = false) {
   const scopes: StatelessMcpRequestScope[] = [];
   const inherited = new AsyncLocalStorage<string>();
   const seenContexts: Array<string | undefined> = [];
+  const seenTraces: Array<McpTraceContext | undefined> = [];
+  const fetchTraces: Array<McpTraceContext | undefined> = [];
   const sdk = new FakeServer();
   const createServer = mock((_req: McpHttpRequestLike, scope: StatelessMcpRequestScope) => {
     scopes.push(scope);
     seenContexts.push(inherited.getStore());
+    seenTraces.push(currentMcpTrace());
     return sdk;
   });
   const legacyHandle = mock(async () => {});
@@ -114,6 +121,7 @@ function harness(flag?: string, block = false) {
   let stream: ReadableStreamDefaultController<Uint8Array> | undefined;
   const fetch = mock(
     async (factory: McpServerFactory, req: Request, options?: McpHandlerRequestOptions) => {
+      fetchTraces.push(currentMcpTrace());
       // Cross an async boundary to prove the factory still sees its own request scope.
       await Promise.resolve();
       await factory({ era: "modern", requestInfo: req });
@@ -174,6 +182,8 @@ function harness(flag?: string, block = false) {
     timer,
     scopes,
     seenContexts,
+    seenTraces,
+    fetchTraces,
     inherited,
     createServer,
     createTransport,
@@ -199,6 +209,111 @@ beforeAll(() => {
 });
 
 describe("opt-in modern HTTP routing", () => {
+  const traceId = "4bf92f3577b34da6a3ce929d0e0e4736";
+  const tracedBody = {
+    ...modernBody,
+    params: {
+      _meta: {
+        ...modernBody.params._meta,
+        [TRACEPARENT_META_KEY]: `00-${traceId}-00f067aa0ba902b7-01`,
+        [TRACESTATE_META_KEY]: "vendor=private",
+        [BAGGAGE_META_KEY]: "user=private",
+      },
+    },
+  };
+
+  test("modern dispatch and its async factory see their own traces concurrently", async () => {
+    const h = harness("1");
+    const second = {
+      ...tracedBody,
+      params: {
+        _meta: {
+          ...tracedBody.params._meta,
+          [TRACEPARENT_META_KEY]: `00-${"1".repeat(32)}-00f067aa0ba902b7-00`,
+        },
+      },
+    };
+    await Promise.all(
+      [tracedBody, second].map((body) =>
+        h.endpoint.handle(h.request(), new FakeResponse(), body, h.error),
+      ),
+    );
+    expect(h.fetchTraces.map((ctx) => ctx?.traceId)).toEqual([traceId, "1".repeat(32)]);
+    expect(h.seenTraces).toEqual(h.fetchTraces);
+    expect(h.seenTraces[0]).toMatchObject({
+      tracestate: "vendor=private",
+      baggage: "user=private",
+    });
+    expect(currentMcpTrace()).toBeUndefined();
+    await h.endpoint.handle(h.request(), new FakeResponse(), modernBody, h.error);
+    expect(h.seenTraces[2]).toBeUndefined();
+    expect(h.error).not.toHaveBeenCalled();
+  });
+
+  test.each([undefined, "1"])(
+    "trace metadata stays absent on legacy dispatch with flag %s",
+    async (flag) => {
+      const h = harness(flag);
+      const body =
+        flag === undefined
+          ? tracedBody
+          : {
+              jsonrpc: "2.0",
+              id: 1,
+              method: "tools/list",
+              params: {
+                _meta: { [TRACEPARENT_META_KEY]: tracedBody.params._meta[TRACEPARENT_META_KEY] },
+              },
+            };
+      await h.endpoint.handle(h.request(), new FakeResponse(), body, h.error);
+      expect(h.legacyHandle).toHaveBeenCalledTimes(1);
+      expect(h.createHandler).not.toHaveBeenCalled();
+      expect(h.seenTraces).toEqual([undefined]);
+      expect(currentMcpTrace()).toBeUndefined();
+      await Promise.all(h.endpoint.inFlightRequests().map((r) => r.close()));
+    },
+  );
+
+  test("modern batches select the first message carrying metadata", async () => {
+    const h = harness("1");
+    const req = h.request();
+    req.headers["mcp-protocol-version"] = "2026-07-28";
+    const untraced = { jsonrpc: "2.0", id: 1, method: "tools/list" };
+    await h.endpoint.handle(
+      req,
+      new FakeResponse(),
+      [null, untraced, tracedBody, modernBody],
+      h.error,
+    );
+    expect(h.seenTraces[0]?.traceId).toBe(traceId);
+    await h.endpoint.handle(req, new FakeResponse(), [modernBody, tracedBody], h.error);
+    expect(h.seenTraces[1]).toBeUndefined();
+    await h.endpoint.handle(
+      req,
+      new FakeResponse(),
+      [{ ...untraced, params: { _meta: null } }, tracedBody],
+      h.error,
+    );
+    expect(h.seenTraces[2]).toBeUndefined();
+    expect(h.error).not.toHaveBeenCalled();
+  });
+
+  test("an invalid modern traceparent reaches the handler without trace context", async () => {
+    const h = harness("1");
+    await h.endpoint.handle(
+      h.request(),
+      new FakeResponse(),
+      {
+        ...tracedBody,
+        params: { _meta: { ...tracedBody.params._meta, [TRACEPARENT_META_KEY]: "invalid" } },
+      },
+      h.error,
+    );
+    expect(h.fetchTraces).toEqual([undefined]);
+    expect(h.seenTraces).toEqual([undefined]);
+    expect(h.error).not.toHaveBeenCalled();
+  });
+
   test.each([undefined, "", "0", "false", "no", "off"])(
     "flag %s never enters either SDK routing primitive",
     async (flag) => {

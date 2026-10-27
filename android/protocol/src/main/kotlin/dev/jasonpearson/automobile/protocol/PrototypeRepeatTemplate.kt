@@ -505,9 +505,6 @@ internal object PrototypeBindableFields {
       when ((node["type"] as? JsonPrimitive)?.content) {
         "button",
         "fab" -> visitor.field(node, "label", path, PrototypeBindableKind.TEXT)
-        "tooltip" -> tooltip(node, path)
-        // A string `asset` binds a repeat row's media item id, e.g. "{item.thumbnail}" (#14192).
-        "image" -> visitor.field(node, "asset", path, PrototypeBindableKind.TEXT)
         "menu" ->
           objects(node, "items", path).firstNotNullOfOrNull { (entry, entryPath) ->
             visitor.field(entry, "trailingText", entryPath, PrototypeBindableKind.TEXT)
@@ -532,14 +529,10 @@ internal object PrototypeBindableFields {
         "searchBar",
         "dialog",
         "snackbar" -> formComponent(node, path)
+        "tooltip",
+        "image" -> contentComponent(node, path)
         else -> null
       }
-
-    private fun tooltip(node: JsonObject, path: String): T? =
-      visitor.field(node, "text", path, PrototypeBindableKind.TEXT)
-        ?: objects(node, "onDismiss", path).firstNotNullOfOrNull { (entry, at) ->
-          visitor.action(entry, at)
-        }
 
     private fun formComponent(node: JsonObject, path: String): T? =
       when ((node["type"] as? JsonPrimitive)?.content) {
@@ -564,6 +557,18 @@ internal object PrototypeBindableFields {
         "snackbar" ->
           visitor.field(node, "text", path, PrototypeBindableKind.TEXT)
             ?: part(node["action"], "$path.action")
+        else -> null
+      }
+
+    private fun contentComponent(node: JsonObject, path: String): T? =
+      when ((node["type"] as? JsonPrimitive)?.content) {
+        "tooltip" ->
+          visitor.field(node, "text", path, PrototypeBindableKind.TEXT)
+            ?: objects(node, "onDismiss", path).firstNotNullOfOrNull { (entry, at) ->
+              visitor.action(entry, at)
+            }
+        // A string `asset` binds a repeat row's media item id, e.g. "{item.thumbnail}" (#14192).
+        "image" -> visitor.field(node, "asset", path, PrototypeBindableKind.TEXT)
         else -> null
       }
 

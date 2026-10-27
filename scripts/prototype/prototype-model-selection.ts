@@ -44,6 +44,7 @@ export const prototypeModelSelection = {
   },
   channelReconnect: { languages: ["kotlin"] },
   channelRoute: { languages: ["kotlin"], fieldTypes: { when: { kotlin: "JsonElement" } } },
+  press: { swiftName: "PrototypePress", swiftConformances: ["Decodable", "Equatable", "Sendable"] },
   shared: { swiftConformances: ["Decodable", "Equatable", "Sendable"] },
   shadow: { swiftConformances: ["Decodable", "Equatable", "Sendable"] },
   fadeEdges: {},

@@ -91,6 +91,7 @@ struct PrototypeSpec: Decodable {
     let theme: PrototypeTheme?
     /// `none` keeps every visibility and page change instant; `standard` (the default) animates them
     /// with spatial effects reduced by the spec or system setting (#10442). See `PrototypeMotion`.
+    // Expressive decodes tolerantly; the agent does not advertise motion v3 until #14684.
     let motion: String?
     /// The keys the device keeps across shows of this id (#12522); nil without a usable block.
     let storage: PrototypeStorageBlock?
@@ -638,6 +639,7 @@ struct PrototypeAction: Decodable, Sendable {
     /// Contract-only setStack path; data actions retain their existing string path.
     let stackPath: [PrototypeRouteEntry]?
     let transition: PrototypeStackTransition?
+    let source: String?
     /// `setData`/`appendData`/`prependData`/`removeData`: `/data/<pointer>`, a whole `{index}` segment bound per
     /// repeat row at expansion (#12519).
     let path: String?
@@ -672,7 +674,7 @@ struct PrototypeAction: Decodable, Sendable {
     let onError: [PrototypeAction]?
 
     private enum CodingKeys: String, CodingKey {
-        case type, name, payload, context, pager, page, stack, screen, transition, path, key, value, scroll, to,
+        case type, name, payload, context, pager, page, stack, screen, transition, source, path, key, value, scroll, to,
              animated, call, args, params, force
         case id, afterMs, everyMs, maxRuns, actions
         case incrementAmount = "by"
@@ -689,7 +691,7 @@ struct PrototypeAction: Decodable, Sendable {
         timeoutMs: Double? = nil,
         onSuccess: [PrototypeAction]? = nil, onError: [PrototypeAction]? = nil,
         id: String? = nil, afterMs: Int? = nil, everyMs: Int? = nil, maxRuns: Int? = nil,
-        actions: [PrototypeAction]? = nil, transition: PrototypeStackTransition? = nil,
+        actions: [PrototypeAction]? = nil, transition: PrototypeStackTransition? = nil, source: String? = nil,
         scroll: String? = nil, to: JSONValue? = nil, animated: Bool? = nil,
         call: String? = nil, args: [String: JSONValue]? = nil,
         params: [String: JSONValue]? = nil, force: Bool? = nil, stackPath: [PrototypeRouteEntry]? = nil
@@ -716,6 +718,7 @@ struct PrototypeAction: Decodable, Sendable {
         self.force = force
         self.stackPath = stackPath
         self.transition = transition
+        self.source = source
         self.path = path
         self.key = key
         self.value = value
@@ -931,6 +934,7 @@ final class PrototypeNode: Decodable {
     let onLongPress: [PrototypeAction]?
     let onDoubleTap: [PrototypeAction]?
     let style: Style?
+    let press: PrototypePress?
     let styleWhen: [StyleWhen]?
     let visibleWhen: Condition?
     let shared: Shared?
@@ -1088,7 +1092,7 @@ final class PrototypeNode: Decodable {
 
     private enum CodingKeys: String, CodingKey {
         case scrollTransition, scrollLinked
-        case type, id, testTag, onAppear, onTap, style, styleWhen, visibleWhen, shared, sharedKey, transition
+        case type, id, testTag, onAppear, onTap, style, styleWhen, press, visibleWhen, shared, sharedKey, transition
         case safeAreaPadding, anchor, children, child, text, contentDescription, asset, contentScale, semantics
         case name, label, variant, stateKey, placeholder, axis, items, pager
         case anchorTo, caret, spotlight, onDismiss, edge
@@ -1125,6 +1129,7 @@ final class PrototypeNode: Decodable {
         onAppear = try container.decodeIfPresent([PrototypeAction].self, forKey: .onAppear)
         onTap = try container.decodeIfPresent([PrototypeAction].self, forKey: .onTap)
         style = try container.decodeIfPresent(Style.self, forKey: .style)
+        press = try container.decodeIfPresent(PrototypePress.self, forKey: .press)
         styleWhen = try container.decodeIfPresent([StyleWhen].self, forKey: .styleWhen)
         visibleWhen = try container.decodeIfPresent(Condition.self, forKey: .visibleWhen)
         shared = try container.decodeIfPresent(Shared.self, forKey: .shared)

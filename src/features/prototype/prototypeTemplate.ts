@@ -158,6 +158,7 @@ export type FieldKind =
   | "scrollTo"
   | "timer"
   | "stackTransition"
+  | "stackSource"
   | "routeFeature"
   | "routePointer";
 
@@ -357,6 +358,7 @@ function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
 function mapNavigationTransition(action: Raw, path: string, visit: FieldVisitor): void {
   if (action.type === "push" || action.type === "replace") {
     mapField(action, "transition", path, "stackTransition", visit);
+    mapField(action, "source", path, "stackSource", visit);
   }
 }
 

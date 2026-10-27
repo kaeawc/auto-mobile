@@ -1,4 +1,5 @@
 import { prototypeChannelsSchema } from "./prototypeChannelSchema";
+import { prototypePressSchema } from "./prototypePressSchema";
 export { PROTOTYPE_COLOR_ROLES } from "./prototypePresentationSchemas";
 import { buildRouteSchema, setStackActionSchema } from "./prototypeRouteSchema";
 import { themeSchema } from "./prototypeThemeSchema";
@@ -200,6 +201,7 @@ export const commonNodeShape = {
   styleWhen: z.array(styleWhenEntrySchema).min(1).max(8).optional(),
   visibleWhen: conditionSchema.optional(),
   sharedKey: keySchema.optional(),
+  press: prototypePressSchema.optional(),
   shared: z
     .object({ key: z.string().min(1).max(256), as: z.enum(["element", "bounds"]) })
     .strict()
@@ -892,7 +894,7 @@ const specSchema = z
             .safeParse(value).success,
       )
       .optional(),
-    motion: z.enum(["none", "standard", "reduced"]).optional(),
+    motion: z.enum(["none", "standard", "reduced", "expressive"]).optional(),
     storage: prototypeStorageSchema.optional(),
     requires: prototypeRequiresSchema.optional(),
     platform: prototypePlatformHandlersSchema.optional(),

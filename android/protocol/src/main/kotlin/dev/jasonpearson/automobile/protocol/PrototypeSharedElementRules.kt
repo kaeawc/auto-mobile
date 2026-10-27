@@ -16,9 +16,13 @@ internal object PrototypeSharedElementRules {
   )
 
   fun error(context: PrototypeStateChecks.Context): PrototypeSpecError? {
+    PrototypeStackPatternRules.error(context)?.let {
+      return it
+    }
+    val sources = PrototypeStackPatternRules.sources(context)
     val pairs = linkedMapOf<String, MutableList<Occurrence>>()
     for (located in context.nodes) {
-      addNode(context, located, pairs)?.let {
+      addNode(context, located, pairs, sources)?.let {
         return it
       }
     }
@@ -33,6 +37,7 @@ internal object PrototypeSharedElementRules {
     context: PrototypeStateChecks.Context,
     located: PrototypeStateChecks.Located,
     pairs: MutableMap<String, MutableList<Occurrence>>,
+    sources: Set<String>,
   ): PrototypeSpecError? {
     val (node, path) = located
     val shared = node["shared"] as? JsonObject
@@ -40,11 +45,14 @@ internal object PrototypeSharedElementRules {
     val at = "$path.${if (shared != null) "shared.key" else "sharedKey"}"
     if (shared != null && "sharedKey" in node)
       return fail("$path.shared", "shared and sharedKey cannot both be set")
-    if ("visibleWhen" !in node) return fail(at, "sharedKey requires visibleWhen on the same node")
+    val source = key in sources
+    if ("visibleWhen" !in node && !source)
+      return fail(at, "sharedKey requires visibleWhen on the same node")
     val resolvedKeys = keys(context, path, key, shared != null, at)
     resolvedKeys.error?.let {
       return it
     }
+    if (source) return null
     val occurrence =
       Occurrence(
         path,

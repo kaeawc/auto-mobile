@@ -9,7 +9,7 @@ import org.junit.Test
 class PrototypeMotionTest {
   @Test
   fun `profiles respect spec and both system scales`() {
-    for (motion in listOf(null, "standard", "none", "reduced")) {
+    for (motion in listOf(null, "standard", "none", "reduced", "expressive")) {
       for (animator in listOf(0f, 0.5f, 1f)) {
         for (transition in listOf(0f, 0.5f, 1f)) {
           val expected =

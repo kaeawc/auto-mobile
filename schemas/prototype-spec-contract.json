@@ -1674,6 +1674,10 @@
               },
               "optional": true
             },
+            "source": {
+              "rule": { "kind": "string", "min": 1 },
+              "optional": true
+            },
             "params": {
               "rule": {
                 "kind": "ref",
@@ -1752,6 +1756,10 @@
                 "kind": "ref",
                 "name": "stackTransition"
               },
+              "optional": true
+            },
+            "source": {
+              "rule": { "kind": "string", "min": 1 },
               "optional": true
             },
             "params": {
@@ -3214,6 +3222,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -3483,6 +3498,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -3745,6 +3767,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -3980,6 +4009,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -4238,6 +4274,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -4488,6 +4531,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -4751,6 +4801,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -5018,6 +5075,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -5268,6 +5332,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -5476,6 +5547,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -5840,6 +5918,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           },
           "dependents": {
@@ -6091,6 +6176,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -6339,6 +6431,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -6574,6 +6673,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -6831,6 +6937,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -7064,6 +7177,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -7314,6 +7434,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -7585,6 +7712,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -7819,6 +7953,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -8076,6 +8217,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -8305,6 +8453,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -8544,6 +8699,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -8771,6 +8933,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -9029,6 +9198,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -9246,6 +9422,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -9460,6 +9643,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -9690,6 +9880,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -9949,6 +10146,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -10177,6 +10381,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -10416,6 +10627,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -10672,6 +10890,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -10912,6 +11137,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -11180,6 +11412,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -11460,6 +11699,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -11714,6 +11960,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           },
           "binding": true
@@ -11961,6 +12214,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -12218,6 +12478,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -12496,6 +12763,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -12689,6 +12963,13 @@
                   "kind": "ref",
                   "name": "route"
                 }
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -12940,6 +13221,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -13200,6 +13488,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -13442,6 +13737,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -13748,6 +14050,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         }
@@ -13864,7 +14173,7 @@
         "motion": {
           "rule": {
             "kind": "enum",
-            "values": ["none", "standard", "reduced"]
+            "values": ["none", "standard", "reduced", "expressive"]
           },
           "optional": true
         },
@@ -17919,7 +18228,16 @@
     },
     "stackTransition": {
       "kind": "enum",
-      "values": ["platform", "slide", "fade", "none"]
+      "values": [
+        "platform",
+        "slide",
+        "fade",
+        "none",
+        "sharedAxisX",
+        "sharedAxisY",
+        "fadeThrough",
+        "zoom"
+      ]
     },
     "shader": {
       "kind": "object",
@@ -19327,6 +19645,30 @@
               "kind": "ref",
               "name": "action"
             }
+          },
+          "optional": true
+        }
+      }
+    },
+    "press": {
+      "kind": "object",
+      "atLeastOne": true,
+      "fields": {
+        "scale": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0.85,
+            "max": 1
+          },
+          "optional": true
+        },
+        "alpha": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0.5,
+            "max": 1
           },
           "optional": true
         }

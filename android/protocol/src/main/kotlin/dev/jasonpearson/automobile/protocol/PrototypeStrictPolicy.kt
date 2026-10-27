@@ -285,6 +285,7 @@ internal object PrototypeStrictPolicy {
 
     fun envelope(spec: JsonObject) {
       PrototypeEnvelopeFeatures.collect(spec).forEach(::need)
+      if (spec.text("motion") == "expressive") result.add(PrototypeMotionV3.CAPABILITY)
       if (
         ((spec["storage"] as? JsonObject)?.get("keys") as? JsonArray).orEmpty().any {
           it.jsonPrimitive.content.startsWith("stack:")
@@ -319,6 +320,7 @@ internal object PrototypeStrictPolicy {
 
     private fun scanFields(fields: JsonObject, field: String, routeAlias: Boolean) {
       val type = fields.text("type") ?: ""
+      if (PrototypeStackPatternRules.required(fields)) need("stack_patterns")
       for ((key, child) in fields) {
         if (skipsScan(key, type)) continue
         if (key == "repeat") {
@@ -343,7 +345,7 @@ internal object PrototypeStrictPolicy {
       when {
         key == "linkify" ->
           (child as? JsonObject)?.get("onTap")?.let { scan(it, "onTap", routeAlias) }
-        key !in listOf("series", "effects", "scrollLinked", "scrollTransition") ->
+        key !in listOf("series", "effects", "scrollLinked", "scrollTransition", "press") ->
           scan(child, key, routeAlias)
       }
     }
@@ -355,12 +357,8 @@ internal object PrototypeStrictPolicy {
           if (usesData(raw, kind)) true else null
         }
       if (binding == true) need("data_model")
-      if (PrototypeRouteRules.nodeUses(fields, routeAlias)) need("routes")
-      if (PrototypeStylePolishV2Rules.themedBorder(fields)) need("theme_modes")
-      if (PrototypeStylePolishV2Rules.required(fields))
-        result.add(PrototypeStylePolishV2Rules.CAPABILITY)
+      polishFeatures(fields, routeAlias, result, ::need)
       val type = fields.text("type") ?: ""
-      if (PrototypeChannels.needsRealtimeCapability(fields)) need("platform_realtime")
       val nodeTypes =
         PrototypeSpecContract.definitions
           .getValue("node")
@@ -475,4 +473,19 @@ private fun hostChannelError(spec: JsonObject): PrototypeSpecError? {
       )
   }
   return null
+}
+
+/** Capabilities implied by routes, style polish, motion v3 and realtime fields on a node. */
+private fun polishFeatures(
+  fields: JsonObject,
+  routeAlias: Boolean,
+  result: MutableSet<String>,
+  need: (String) -> Unit,
+) {
+  if (PrototypeRouteRules.nodeUses(fields, routeAlias)) need("routes")
+  if (PrototypeStylePolishV2Rules.themedBorder(fields)) need("theme_modes")
+  if (PrototypeStylePolishV2Rules.required(fields))
+    result.add(PrototypeStylePolishV2Rules.CAPABILITY)
+  if (PrototypeMotionV3.required(fields)) result.add(PrototypeMotionV3.CAPABILITY)
+  if (PrototypeChannels.needsRealtimeCapability(fields)) need("platform_realtime")
 }

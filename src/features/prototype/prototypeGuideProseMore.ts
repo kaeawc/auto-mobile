@@ -130,6 +130,11 @@ inside the prototype window that no interactive node handled, excluding drags, s
 and app taps outside the window. Their payload has only screen ids and coordinates,
 rounded to one decimal in window-local dp (points on iOS). Reports include counts,
 up to 200 points per screen and a 48-unit grid. There is no screenshot overlay yet.
+
+Stack transition patterns: \`sharedAxisX\`, \`sharedAxisY\`, \`fadeThrough\` and \`zoom\` (and a push/replace
+\`source\`) require \`prototype_stack_patterns_v1\`; zoom needs a source naming exactly one shared key.
+Zoom falls back to fadeThrough on Android and the platform push on iOS; composed patterns pop
+non-interactively.
 `;
 
 export const GUIDE_DATA_ACTIONS = `### Data actions

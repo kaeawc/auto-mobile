@@ -1067,7 +1067,7 @@
         private func tapped(_ content: some View) -> some View {
             // SwiftUI resolves inner-first. A long press that fails to complete lets the ancestor's
             // tap through. Gesture-only nodes must never install a single-tap handler.
-            plan.layers.reduce(AnyView(content)) { view, layer in
+            let gestures = plan.layers.reduce(AnyView(content)) { view, layer in
                 switch layer {
                 case .longPress:
                     AnyView(view.onLongPressGesture {
@@ -1084,6 +1084,13 @@
                 case .tapResolver:
                     AnyView(view.onTapGesture { resolveTap() })
                 }
+            }
+            // `onLongPressGesture` and `onTapGesture(count: 2)` add no VoiceOver action, so name them.
+            return plan.accessibilityActions.reduce(gestures) { view, action in
+                AnyView(view.accessibilityAction(named: Text(action.name)) {
+                    guard model.isEnabled(node) else { return }
+                    model.run((action == .longPress ? longPress : doubleTap) ?? [])
+                })
             }
         }
 

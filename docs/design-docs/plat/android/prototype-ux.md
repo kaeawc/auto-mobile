@@ -2306,6 +2306,12 @@ single-tap delay applies only to nodes declaring `onDoubleTap`; `onTap` with onl
 fires immediately. Long-press uses the platform default
 (about 0.5 s on iOS versus the Android long-press timeout, about 0.4 s).
 
+Each list is also a named TalkBack action (#15123): `onLongPress` is the node's long-click action labelled
+`Long press` (on a node with `onTap` too, the labelled `combinedClickable` long click, never a second copy), and
+`onDoubleTap` a custom action `Double tap`, since TalkBack's own double tap activates `onTap`. The names are
+fixed English defaults. Whether `observe` reports custom actions is unchecked: the extractor maps only known
+action ids (`ViewHierarchyExtractor.kt`), so a device capture is owed before the guide promises it.
+
 `tapOn` with `action: "longPress"|"doubleTap"` and `layer: "prototype"` drives them by
 coordinate gesture; no new MCP tool is needed. Repeat and component action placeholders bind
 as they do for `onTap`.

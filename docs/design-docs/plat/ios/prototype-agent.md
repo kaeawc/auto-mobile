@@ -706,7 +706,8 @@ run like taps with no new event kind and make a node interactive without `onTap`
 long-press/double-tap does not consume single taps: the nearest ancestor's `onTap` runs. The
 single-tap delay applies only to nodes declaring `onDoubleTap`. Long-press uses the platform default
 (~0.5 s iOS, ~0.4 s Android). `tapOn` with `action: "longPress"|"doubleTap"` and `layer: "prototype"`
-drives them by coordinate gesture. Placeholders bind as for `onTap`.
+drives them by coordinate gesture. Placeholders bind as for `onTap`. Each list is also a named VoiceOver action (`Long press`, `Double tap`; #15123), planned by
+`PrototypeGesturePlan.accessibilityActions` and installed with `accessibilityAction(named:)`.
 
 ## Search bar contract (#12069)
 

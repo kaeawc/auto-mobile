@@ -1,3 +1,7 @@
+import {
+  parsePrototypeDegradedEffects,
+  prototypeDegradedEffectsOutput,
+} from "../../features/prototype/prototypeDegradedEffects";
 import { performPrototypeSimulate } from "../prototypeSimulateAction";
 import { PROTOTYPE_TIMERS_CAPABILITY } from "../../features/observe/android/ctrlProxyProtocol";
 import { parsePrototypeTimerReports } from "../../features/prototype/prototypeTimerSchema";
@@ -55,6 +59,7 @@ const devicePrototypeEntrySchema = z.object({
   appearance: z.unknown().optional().transform(parsePrototypeAppearance),
   storage: z.unknown().optional().transform(parsePrototypeStorageReport),
   timers: z.unknown().optional(),
+  degradedEffects: z.unknown().optional().transform(parsePrototypeDegradedEffects),
 });
 
 function parseReportedPrototypes(
@@ -241,6 +246,7 @@ const iosAgentStatusSchema = z.object({
   appearance: z.unknown().optional().transform(parsePrototypeAppearance),
   storage: z.unknown().optional().transform(parsePrototypeStorageReport),
   timers: z.unknown().optional(),
+  degradedEffects: z.unknown().optional().transform(parsePrototypeDegradedEffects),
 });
 
 /**
@@ -283,8 +289,19 @@ async function inspectIosAgent(
       error: "Prototype inspect failed: the agent returned a malformed status.",
     };
   }
-  const { shown, id, pages, stacks, state, data, lastSequence, appearance, storage, timers } =
-    status.data;
+  const {
+    shown,
+    id,
+    pages,
+    stacks,
+    state,
+    data,
+    lastSequence,
+    appearance,
+    storage,
+    timers,
+    degradedEffects,
+  } = status.data;
   const reported =
     shown && id !== null
       ? [
@@ -299,6 +316,7 @@ async function inspectIosAgent(
             appearance,
             storage,
             timers,
+            degradedEffects,
           },
         ]
       : [];
@@ -324,7 +342,8 @@ export function statusOutput(
   return {
     ...status,
     prototypes: status.prototypes.map((shown) => {
-      const entry = options.deviceDark === "fresh" ? shown : withoutCachedDeviceDark(shown);
+      const cached = options.deviceDark === "fresh" ? shown : withoutCachedDeviceDark(shown);
+      const entry = { ...cached, ...prototypeDegradedEffectsOutput(cached.degradedEffects) };
       const counts = entry.id ? events.counts(scope, entry.id) : undefined;
       return counts?.lastSequence === undefined ? entry : { ...entry, ...counts };
     }),

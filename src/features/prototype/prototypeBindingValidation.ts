@@ -498,7 +498,12 @@ function setStateBindingErrors(
   state: Record<string, unknown>,
 ): PrototypeValidationError | undefined {
   const { key, value } = action.value;
-  if (typeof key !== "string" || action.operandTemplated || value === undefined) {
+  if (
+    typeof key !== "string" ||
+    action.operandTemplated ||
+    value === undefined ||
+    dynamicStateValue(value)
+  ) {
     return undefined;
   }
   const controls = checked.nodes.filter((node) => boundKeys(node.value).includes(key));
@@ -574,3 +579,7 @@ export const bound = ({ located, value, item, operandTemplated }: KeyInstance<Lo
   item,
   operandTemplated,
 });
+
+function dynamicStateValue(value: unknown): boolean {
+  return object(value)?.event !== undefined || object(value)?.platform !== undefined;
+}

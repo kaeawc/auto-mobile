@@ -8,6 +8,36 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 
 @Serializable
+data class PrototypeChannel(
+  val kind: String,
+  val url: String,
+  val protocols: List<String>? = null,
+  val headers: Map<String, JsonElement>? = null,
+  val via: String? = null,
+  val connect: String? = null,
+  val statusKey: String? = null,
+  val reconnect: PrototypeChannelReconnect? = null,
+  val decode: String? = null,
+  val routes: List<PrototypeChannelRoute>? = null,
+  val onOpen: List<PrototypeAction>? = null,
+  val onClose: List<PrototypeAction>? = null,
+  val onError: List<PrototypeAction>? = null,
+)
+
+@Serializable
+data class PrototypeChannelReconnect(
+  val maxAttempts: Int,
+  val initialDelayMs: Int,
+  val maxDelayMs: Int,
+)
+
+@Serializable
+data class PrototypeChannelRoute(
+  val `when`: JsonElement? = null,
+  val actions: List<PrototypeAction>,
+)
+
+@Serializable
 data class PrototypeIconEffectTrigger(
   val key: String? = null,
   val data: String? = null,
@@ -179,6 +209,7 @@ data class PrototypeSetDataAction(
 data class PrototypeAppendDataAction(
   val path: String,
   val value: EmitContextBinding,
+  val maxItems: Int? = null,
 ) : PrototypeAction()
 
 @SerialName("removeData")
@@ -259,6 +290,15 @@ data class PrototypeScrollToAction(
 data class PrototypePrependDataAction(
   val path: String,
   val value: EmitContextBinding,
+) : PrototypeAction()
+
+@SerialName("upsertData")
+@Serializable
+data class PrototypeUpsertDataAction(
+  val path: String,
+  val value: EmitContextBinding,
+  val maxItems: Int? = null,
+  val key: String,
 ) : PrototypeAction()
 
 @SerialName("setStack")

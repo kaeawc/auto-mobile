@@ -106,6 +106,49 @@ describe("managed iOS Files fixture installer (#15404)", () => {
     );
   });
 
+  test("concurrent installs share one compilation", async () => {
+    const { host, simctl, installer } = installerHarness();
+
+    await Promise.all([installer.install(device), installer.install(device)]);
+
+    expect(host.getExecutedCommands().filter((command) => command.includes("swiftc"))).toHaveLength(
+      1,
+    );
+    expect(
+      simctl
+        .getMethodCalls("executeCommandArgs")
+        .filter((call) => (call.args as string[])[0] === "install"),
+    ).toHaveLength(2);
+  });
+
+  test("a different SDK rebuilds into a new cache entry", async () => {
+    const { host, simctl, installer } = installerHarness();
+
+    await installer.install(device);
+    host.setCommandResponse("--show-sdk-path", {
+      stdout: "/Xcode-next/SDKs/iPhoneSimulator.sdk\n",
+    } as never);
+    await installer.install(device);
+
+    expect(host.getExecutedCommands().filter((command) => command.includes("swiftc"))).toHaveLength(
+      2,
+    );
+    const installPaths = simctl
+      .getMethodCalls("executeCommandArgs")
+      .map((call) => (call.args as string[])[2]);
+    expect(installPaths[0]).not.toBe(installPaths[1]);
+  });
+
+  test("an empty SDK path is an actionable failure and builds nothing", async () => {
+    const { host, installer } = installerHarness();
+    host.setCommandResponse("--show-sdk-path", { stdout: "\n" } as never);
+
+    await expect(installer.install(device)).rejects.toThrow(
+      "did not report an iphonesimulator SDK path",
+    );
+    expect(host.getExecutedCommands().some((command) => command.includes("swiftc"))).toBe(false);
+  });
+
   test("a failed build is an actionable install failure and caches nothing", async () => {
     const { host, fileSystem, installer } = installerHarness();
     host.setCommandError("swiftc", new Error("no SDK"));

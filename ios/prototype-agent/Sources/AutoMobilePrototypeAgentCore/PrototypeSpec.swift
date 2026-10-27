@@ -102,11 +102,13 @@ struct PrototypeSpec: Decodable {
     /// The authored `root` before data resolution and repeat expansion, kept so a device data write
     /// (#12519) can rebuild `root` from the changed data without the host re-sending the spec.
     let authoredRoot: JSONValue
+    /// Declarations retained for contract validation; no realtime transport is installed.
+    let channels: JSONValue?
     let platformHandlers: [String: JSONValue]
     private(set) var platformState: [String: JSONValue] = [:]
 
     private enum CodingKeys: String, CodingKey {
-        case id, window, state, data, theme, motion, root, storage, requires, platform, strings, derive
+        case id, window, state, data, theme, motion, root, storage, requires, platform, strings, derive, channels
     }
 
     // Keep the root prefix in coding paths when decoding the resolved/expanded tree.
@@ -130,6 +132,7 @@ struct PrototypeSpec: Decodable {
         try PrototypeLazyList.validateLimits(root: container.decode(JSONValue.self, forKey: .root), data: data)
         if let data { try PrototypeLimits.guardData(data) }
         derive = try container.decodeIfPresent([String: PrototypeDerivedEntry].self, forKey: .derive)
+        channels = try container.decodeIfPresent(JSONValue.self, forKey: .channels)
         id = try container.decode(String.self, forKey: .id)
         motion = try container.decodeIfPresent(String.self, forKey: .motion)
         // The host validator owns the strict shape; a malformed block means "no storage" here.
@@ -147,6 +150,7 @@ struct PrototypeSpec: Decodable {
         try PrototypePlatformValidator.validate(
             requires: container.decodeIfPresent(JSONValue.self, forKey: .requires),
             handlers: container.decodeIfPresent(JSONValue.self, forKey: .platform),
+            channels: channels,
             root: raw,
             state: menuState ?? [:]
         )
@@ -231,6 +235,7 @@ struct PrototypeSpec: Decodable {
         replacing spec: PrototypeSpec, data: [String: JSONValue]?, root: PrototypeNode,
         authoredRoot: JSONValue? = nil, state: [String: JSONValue]? = nil
     ) {
+        channels = spec.channels
         platformHandlers = spec.platformHandlers
         platformState = spec.platformState
         id = spec.id
@@ -1090,7 +1095,8 @@ final class PrototypeNode: Decodable {
 
     private enum CodingKeys: String, CodingKey {
         case scrollTransition, scrollLinked
-        case into, type, id, testTag, onAppear, onTap, style, styleWhen, press, visibleWhen, shared, sharedKey, transition
+        case into, type, id, testTag, onAppear, onTap, style, styleWhen, press, visibleWhen, shared, sharedKey,
+             transition
         case safeAreaPadding, anchor, children, child, text, contentDescription, asset, contentScale, semantics
         case effect, name, label, variant, stateKey, placeholder, axis, items, pager
         case anchorTo, caret, spotlight, onDismiss, edge

@@ -2,7 +2,8 @@ import { prototypeShaderFields } from "./prototypeShaders";
 import { object, type Located, type PrototypeValidationError } from "./prototypeBindingValidation";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
 import { repeatKeyInstances } from "./prototypeRepeat";
-import { mapBindableFields } from "./prototypeTemplate";
+import { prototypeContractPatterns } from "./prototypeContractPatterns";
+import { mapBindableFields, visitPrototypeHandlerFields } from "./prototypeTemplate";
 
 export interface PrototypeStrictOptions {
   supportedCapabilities?: readonly string[];
@@ -20,13 +21,9 @@ export function prototypeStrictPolicyError(
   options: PrototypeStrictOptions,
   actions: readonly Located[],
 ): PrototypeValidationError | undefined {
-  if (options.supportedCapabilities !== undefined && options.requiredCapabilities !== undefined) {
-    const missing = options
-      .requiredCapabilities(spec)
-      .filter((name) => !options.supportedCapabilities?.includes(name));
-    if (missing.length) {
-      return { path: "$", message: `Unsupported capabilities: ${missing.join(", ")}` };
-    }
+  const unsupported = unsupportedCapabilitiesError(spec, options);
+  if (unsupported) {
+    return unsupported;
   }
   const window = object(object(spec)?.window);
   if (options.library) {
@@ -45,7 +42,7 @@ export function prototypeStrictPolicyError(
     if (host) {
       return { path: `${host.path}.via`, message: "Host requests are unavailable in a library" };
     }
-    return secureLibraryError(spec);
+    return hostChannelsError(spec) ?? secureLibraryError(spec);
   }
   return undefined;
 }
@@ -70,19 +67,7 @@ function secureLibraryError(spec: unknown): PrototypeValidationError | undefined
   if (!secure.size) {
     return undefined;
   }
-  const requests: string[] = [];
-  const fields: { text: string; path: string; key: boolean }[] = [];
-  for (const { value, path } of nodes) {
-    mapBindableFields(value, path, (raw, at, kind) => {
-      if (kind === "request") {
-        requests.push(at);
-      }
-      if (typeof raw === "string" && (kind === "text" || kind === "key")) {
-        fields.push({ text: raw, path: at, key: kind === "key" });
-      }
-      return raw;
-    });
-  }
+  const { requests, fields } = libraryFields(spec, nodes);
   fields.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   const inRequest = (path: string) =>
     requests.some(
@@ -124,6 +109,90 @@ function secureLibraryError(spec: unknown): PrototypeValidationError | undefined
     );
     if (index >= 0) {
       return { path: `storage.keys[${index}]`, message: "Secure value cannot be persisted" };
+    }
+  }
+  return undefined;
+}
+
+function hostChannelsError(spec: unknown): PrototypeValidationError | undefined {
+  const channels = object(object(spec)?.channels) ?? {};
+  for (const id of Object.keys(channels).sort()) {
+    if (object(channels[id])?.via !== "device") {
+      const at = prototypeContractPatterns.pathKey.test(id)
+        ? `channels.${id}`
+        : `channels[${JSON.stringify(id)}]`;
+      return { path: `${at}.via`, message: "Host requests are unavailable in a library" };
+    }
+  }
+  return undefined;
+}
+
+interface LibraryField {
+  text: string;
+  path: string;
+  key: boolean;
+}
+function libraryFields(
+  spec: unknown,
+  nodes: readonly Located[],
+): { requests: string[]; fields: LibraryField[] } {
+  const requests: string[] = [];
+  const fields: { text: string; path: string; key: boolean }[] = [];
+  for (const { value, path } of nodes) {
+    mapBindableFields(value, path, (raw, at, kind) => {
+      if (kind === "request") {
+        requests.push(at);
+      }
+      if (typeof raw === "string" && (kind === "text" || kind === "key")) {
+        fields.push({ text: raw, path: at, key: kind === "key" });
+      }
+      return raw;
+    });
+  }
+  visitPrototypeHandlerFields(spec, (raw, at, kind) => {
+    if (kind === "request") {
+      requests.push(at);
+    }
+    if (typeof raw === "string" && (kind === "text" || kind === "key")) {
+      fields.push({ text: raw, path: at, key: kind === "key" });
+    }
+    return raw;
+  });
+  channelFields(spec, requests, fields);
+  return { requests, fields };
+}
+
+function channelFields(spec: unknown, requests: string[], fields: LibraryField[]): void {
+  for (const [id, raw] of Object.entries(object(object(spec)?.channels) ?? {})) {
+    const channel = object(raw)!;
+    const at = prototypeContractPatterns.pathKey.test(id)
+      ? `channels.${id}`
+      : `channels[${JSON.stringify(id)}]`;
+    requests.push(at);
+    fields.push({ text: String(channel.url), path: `${at}.url`, key: false });
+    for (const [name, value] of Object.entries(object(channel.headers) ?? {})) {
+      const path = prototypeContractPatterns.pathKey.test(name)
+        ? `${at}.headers.${name}`
+        : `${at}.headers[${JSON.stringify(name)}]`;
+      if (typeof value === "string") {
+        fields.push({ text: value, path, key: false });
+      } else if (typeof object(value)?.state === "string") {
+        fields.push({ text: String(object(value)!.state), path: `${path}.state`, key: true });
+      }
+    }
+  }
+}
+
+function unsupportedCapabilitiesError(
+  spec: unknown,
+  options: PrototypeStrictOptions,
+): PrototypeValidationError | undefined {
+  if (options.supportedCapabilities !== undefined && options.requiredCapabilities !== undefined) {
+    const missing = options
+      .requiredCapabilities(spec)
+      .filter((name) => !options.supportedCapabilities?.includes(name));
+    if (missing.length) {
+      return { path: "$", message: `Unsupported capabilities: ${missing.join(", ")}` };
     }
   }
   return undefined;

@@ -1,0 +1,355 @@
+{
+  "note": "Frames are the actions each frame produced after routing and {event} binding, in arrival order within one flush window. A frame made only of setData/setState coalesces with the previous kept frame when both write exactly the same set of targets; the later frame replaces the earlier. Everything else is kept as is.",
+  "flushMs": 50,
+  "cases": [
+    {
+      "name": "same data target coalesces latest wins",
+      "frames": [
+        [
+          {
+            "type": "setData",
+            "path": "/data/driver",
+            "value": {
+              "lat": 1
+            }
+          }
+        ],
+        [
+          {
+            "type": "setData",
+            "path": "/data/driver",
+            "value": {
+              "lat": 2
+            }
+          }
+        ],
+        [
+          {
+            "type": "setData",
+            "path": "/data/driver",
+            "value": {
+              "lat": 3
+            }
+          }
+        ]
+      ],
+      "expected": [
+        [
+          {
+            "type": "setData",
+            "path": "/data/driver",
+            "value": {
+              "lat": 3
+            }
+          }
+        ]
+      ]
+    },
+    {
+      "name": "different targets are kept",
+      "frames": [
+        [
+          {
+            "type": "setData",
+            "path": "/data/a",
+            "value": 1
+          }
+        ],
+        [
+          {
+            "type": "setData",
+            "path": "/data/b",
+            "value": 2
+          }
+        ]
+      ],
+      "expected": [
+        [
+          {
+            "type": "setData",
+            "path": "/data/a",
+            "value": 1
+          }
+        ],
+        [
+          {
+            "type": "setData",
+            "path": "/data/b",
+            "value": 2
+          }
+        ]
+      ]
+    },
+    {
+      "name": "appends are never coalesced",
+      "frames": [
+        [
+          {
+            "type": "appendData",
+            "path": "/data/log",
+            "value": 1
+          }
+        ],
+        [
+          {
+            "type": "appendData",
+            "path": "/data/log",
+            "value": 2
+          }
+        ],
+        [
+          {
+            "type": "appendData",
+            "path": "/data/log",
+            "value": 3
+          }
+        ]
+      ],
+      "expected": [
+        [
+          {
+            "type": "appendData",
+            "path": "/data/log",
+            "value": 1
+          }
+        ],
+        [
+          {
+            "type": "appendData",
+            "path": "/data/log",
+            "value": 2
+          }
+        ],
+        [
+          {
+            "type": "appendData",
+            "path": "/data/log",
+            "value": 3
+          }
+        ]
+      ]
+    },
+    {
+      "name": "a write after an append starts a new run",
+      "frames": [
+        [
+          {
+            "type": "setData",
+            "path": "/data/a",
+            "value": 1
+          }
+        ],
+        [
+          {
+            "type": "appendData",
+            "path": "/data/log",
+            "value": 1
+          }
+        ],
+        [
+          {
+            "type": "setData",
+            "path": "/data/a",
+            "value": 2
+          }
+        ],
+        [
+          {
+            "type": "setData",
+            "path": "/data/a",
+            "value": 3
+          }
+        ]
+      ],
+      "expected": [
+        [
+          {
+            "type": "setData",
+            "path": "/data/a",
+            "value": 1
+          }
+        ],
+        [
+          {
+            "type": "appendData",
+            "path": "/data/log",
+            "value": 1
+          }
+        ],
+        [
+          {
+            "type": "setData",
+            "path": "/data/a",
+            "value": 3
+          }
+        ]
+      ]
+    },
+    {
+      "name": "state and data targets coalesce as a set, in any order",
+      "frames": [
+        [
+          {
+            "type": "setData",
+            "path": "/data/a",
+            "value": 1
+          },
+          {
+            "type": "setState",
+            "key": "k",
+            "value": 1
+          }
+        ],
+        [
+          {
+            "type": "setState",
+            "key": "k",
+            "value": 2
+          },
+          {
+            "type": "setData",
+            "path": "/data/a",
+            "value": 2
+          }
+        ],
+        [
+          {
+            "type": "setState",
+            "key": "k",
+            "value": 3
+          }
+        ]
+      ],
+      "expected": [
+        [
+          {
+            "type": "setState",
+            "key": "k",
+            "value": 2
+          },
+          {
+            "type": "setData",
+            "path": "/data/a",
+            "value": 2
+          }
+        ],
+        [
+          {
+            "type": "setState",
+            "key": "k",
+            "value": 3
+          }
+        ]
+      ]
+    },
+    {
+      "name": "a frame with any other action is never coalesced",
+      "frames": [
+        [
+          {
+            "type": "setData",
+            "path": "/data/a",
+            "value": 1
+          },
+          {
+            "type": "emit",
+            "name": "x"
+          }
+        ],
+        [
+          {
+            "type": "setData",
+            "path": "/data/a",
+            "value": 2
+          },
+          {
+            "type": "emit",
+            "name": "x"
+          }
+        ]
+      ],
+      "expected": [
+        [
+          {
+            "type": "setData",
+            "path": "/data/a",
+            "value": 1
+          },
+          {
+            "type": "emit",
+            "name": "x"
+          }
+        ],
+        [
+          {
+            "type": "setData",
+            "path": "/data/a",
+            "value": 2
+          },
+          {
+            "type": "emit",
+            "name": "x"
+          }
+        ]
+      ]
+    },
+    {
+      "name": "an empty frame is kept",
+      "frames": [
+        [],
+        [],
+        [
+          {
+            "type": "setData",
+            "path": "/data/a",
+            "value": 1
+          }
+        ]
+      ],
+      "expected": [
+        [],
+        [],
+        [
+          {
+            "type": "setData",
+            "path": "/data/a",
+            "value": 1
+          }
+        ]
+      ]
+    },
+    {
+      "name": "repeated target within a frame counts once",
+      "frames": [
+        [
+          {
+            "type": "setData",
+            "path": "/data/a",
+            "value": 1
+          },
+          {
+            "type": "setData",
+            "path": "/data/a",
+            "value": 2
+          }
+        ],
+        [
+          {
+            "type": "setData",
+            "path": "/data/a",
+            "value": 3
+          }
+        ]
+      ],
+      "expected": [
+        [
+          {
+            "type": "setData",
+            "path": "/data/a",
+            "value": 3
+          }
+        ]
+      ]
+    }
+  ]
+}

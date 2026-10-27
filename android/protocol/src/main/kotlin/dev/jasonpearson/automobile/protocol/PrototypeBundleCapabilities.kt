@@ -28,6 +28,15 @@ internal object PrototypeBundleCapabilities {
   private fun specContent(spec: JsonObject, caps: MutableSet<String>) {
     if ("strings" in spec || PrototypeStrings.fields(spec).any { "{t:" in it.text })
       caps.add("prototype_strings_v1")
+    if ("channels" in spec) {
+      caps.add("prototype_platform_realtime_v1")
+      if (
+        (spec["channels"] as? JsonObject).orEmpty().values.any {
+          text((it as? JsonObject)?.get("via")) == "device"
+        }
+      )
+        caps.add("prototype_platform_realtime_device_v1")
+    }
     if ("data" in spec) caps.add("prototype_data_model_v1")
     if ("storage" in spec) caps.add("prototype_storage_v1")
     if ("derive" in spec) caps.add("prototype_format_v1")
@@ -58,7 +67,10 @@ internal object PrototypeBundleCapabilities {
   }
 
   private fun actions(action: JsonObject, caps: MutableSet<String>) {
-    when (text(action["type"])) {
+    val type = text(action["type"])
+    if (PrototypeChannels.needsRealtimeCapability(action))
+      caps.add("prototype_platform_realtime_v1")
+    when (type) {
       "request" -> {
         if ("append" in action) {
           caps.add("prototype_lazy_list_v1")
@@ -73,6 +85,7 @@ internal object PrototypeBundleCapabilities {
       }
       "setData",
       "appendData",
+      "upsertData",
       "removeData" -> caps.add("prototype_data_actions_v1")
       "startTimer",
       "cancelTimer" -> caps.add("prototype_timers_v1")

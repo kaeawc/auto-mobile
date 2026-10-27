@@ -11,6 +11,7 @@ import java.math.RoundingMode
  */
 internal fun PrototypeScalar.renderedText(): String =
   when (this) {
+    is PrototypeScalar.Binding -> error("An unresolved action binding cannot be rendered as state")
     is PrototypeScalar.Text -> value
     is PrototypeScalar.BooleanValue -> value.toString()
     is PrototypeScalar.Numeric -> prototypeNumberText(value)

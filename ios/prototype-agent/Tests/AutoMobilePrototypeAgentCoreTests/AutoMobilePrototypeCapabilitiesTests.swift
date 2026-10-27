@@ -23,6 +23,8 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
         // no renderer yet, and so do device media items (#14192).
         // Routes are contract-only until navigation and restore semantics ship.
         let exclusions: Set<String> = [
+            // Realtime transport, routing and lifecycle remain owed by the runtime slices.
+            "prototype_platform_realtime_v1", "prototype_platform_realtime_device_v1",
             "prototype_routes_v1",
             "prototype_platform_test_v1", "prototype_platform_namespace_v1",
             // #15131: custom AGSL shaders are Android-only by owner decision.

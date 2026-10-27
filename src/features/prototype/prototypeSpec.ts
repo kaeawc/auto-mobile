@@ -1,3 +1,4 @@
+import { prototypeChannelsSchema } from "./prototypeChannelSchema";
 import { prototypePressSchema } from "./prototypePressSchema";
 export { PROTOTYPE_COLOR_ROLES } from "./prototypePresentationSchemas";
 import { buildRouteSchema, setStackActionSchema } from "./prototypeRouteSchema";
@@ -16,10 +17,15 @@ import contract from "../../../schemas/prototype-spec-contract.json";
 import { PROTOTYPE_STACK_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import {
   buildPrototypeActionListSchema,
+  appendDataActionSchema,
+  upsertDataActionSchema,
   keySchema,
+  prototypeEmitContextSchema,
+  dataActionPathSchema,
+  dataActionFields,
   pointerSchema,
   prototypeDataActionValueSchema,
-  prototypeMatchBindingSchema,
+  setStateValueSchema,
   stateKeySchema,
   type PrototypeDataActionValue,
 } from "./prototypeActionValues";
@@ -79,26 +85,11 @@ export const {
   MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL,
 } = contract.limits;
 export { prototypeJsonObjectSchema, prototypeJsonSchema, type PrototypeJson };
-export const prototypeEmitContextBindingSchema = z.union([
-  ...prototypeDataActionValueSchema.options,
-  z.object({ page: z.string().min(1) }).strict(),
-  prototypeMatchBindingSchema,
-]);
-export type PrototypeEmitContextBinding = z.infer<typeof prototypeEmitContextBindingSchema>;
-// A data action path is `/data` plus a pointer; a repeat binds a whole `{index}` segment.
-const dataActionPathSchema = z
-  .string()
-  .min(1)
-  .max(MAX_PROTOTYPE_DATA_POINTER_LENGTH + 5);
-const dataActionFields = {
-  path: dataActionPathSchema,
-  value: z.union([...prototypeDataActionValueSchema.options, prototypeMatchBindingSchema]),
-};
-// Retain arbitrary context names (Zod 3 record output alone drops __proto__).
-export const prototypeEmitContextSchema = z
-  .record(z.string().min(1), prototypeEmitContextBindingSchema)
-  .and(z.unknown())
-  .refine((context) => Object.keys(context).length <= MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES);
+export {
+  prototypeEmitContextBindingSchema,
+  type PrototypeEmitContextBinding,
+} from "./prototypeActionValues";
+export { prototypeEmitContextSchema };
 export const actionSchema = z.discriminatedUnion("type", [
   z
     .object({
@@ -120,7 +111,7 @@ export const actionSchema = z.discriminatedUnion("type", [
     .object({
       type: z.enum(["setState"]),
       key: stateKeySchema,
-      value: z.union([z.string(), z.number().finite(), z.boolean(), prototypeMatchBindingSchema]),
+      value: setStateValueSchema,
     })
     .strict(),
   z
@@ -145,7 +136,8 @@ export const actionSchema = z.discriminatedUnion("type", [
     .strict(),
   z.object({ type: z.enum(["dismiss"]) }).strict(),
   z.object({ type: z.enum(["setData"]), ...dataActionFields }).strict(),
-  z.object({ type: z.enum(["appendData"]), ...dataActionFields }).strict(),
+  appendDataActionSchema,
+  upsertDataActionSchema,
   z.object({ type: z.enum(["prependData"]), ...dataActionFields }).strict(),
   z.object({ type: z.enum(["removeData"]), path: dataActionPathSchema }).strict(),
   timers.startTimerActionSchema,
@@ -907,6 +899,7 @@ const specSchema = z
     storage: prototypeStorageSchema.optional(),
     requires: prototypeRequiresSchema.optional(),
     platform: prototypePlatformHandlersSchema.optional(),
+    channels: prototypeChannelsSchema(() => actionSchema).optional(),
     derive: prototypeDeriveSchema.optional(),
     root: z.lazy(() => prototypeNodeSchema),
   })
@@ -929,6 +922,7 @@ export const PROTOTYPE_ACTION_TYPES = [
   "dismiss",
   "setData",
   "appendData",
+  "upsertData",
   "prependData",
   "removeData",
   "request",

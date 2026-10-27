@@ -40,6 +40,12 @@ export type ModelSelection = Readonly<Record<string, ModelOptions>>;
  * preserve each native API. Type refs below bridge definitions that remain hand-written.
  */
 export const prototypeModelSelection = {
+  channel: {
+    languages: ["kotlin"],
+    fieldTypes: { headers: { kotlin: "Map<String, JsonElement>" } },
+  },
+  channelReconnect: { languages: ["kotlin"] },
+  channelRoute: { languages: ["kotlin"], fieldTypes: { when: { kotlin: "JsonElement" } } },
   iconEffectTrigger: {},
   iconEffect: {},
   press: { swiftName: "PrototypePress", swiftConformances: ["Decodable", "Equatable", "Sendable"] },

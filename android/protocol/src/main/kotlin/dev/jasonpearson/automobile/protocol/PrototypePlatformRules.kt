@@ -52,6 +52,7 @@ internal object PrototypePlatformRules {
         .orEmpty()
         .mapNotNull { (it as? JsonObject)?.text("name") }
         .toSet()
+    val channels = root.member("channels") ?: JsonObject(emptyMap())
     val background = requires.strings("background").toSet()
   }
 
@@ -61,13 +62,19 @@ internal object PrototypePlatformRules {
     reservedTestTagError(context)?.let {
       return it
     }
+    PrototypeChannels.error(root)?.let {
+      return it
+    }
     requiresError(root)?.let {
       return it
     }
     for (use in uses(root, context)) {
-      useError(use, declared)?.let {
-        return it
-      }
+      (useError(use, declared)
+          ?: (if (use is Use.Call) PrototypeChannels.callError(use.action, use.path, root)
+          else null))
+        ?.let {
+          return it
+        }
     }
     for ((action, path) in context.actions) {
       emitNameError(action, path)?.let {
@@ -121,7 +128,8 @@ internal object PrototypePlatformRules {
       name !in declared.modules -> notDeclared(use.path, name)
       module(name)?.member("state")?.let { state ->
         val tokens = PrototypeDataPointer.tokens(use.pointer)
-        tokens.size != 2 || tokens[1] !in state
+        if (name == "realtime") !PrototypeChannels.validRead(use.pointer, declared.channels)
+        else tokens.size != 2 || tokens[1] !in state
       } == true -> fail(use.path, "Unknown platform state ${use.pointer}")
       else -> comparisonError(use)
     }
@@ -191,8 +199,7 @@ internal object PrototypePlatformRules {
         if (!argument.flag("optional")) return fail(at, "Required argument")
         continue
       }
-      val literal = (binding as? JsonObject)?.get("value") ?: continue
-      walk(literal, argument.getValue("value").jsonObject, "$at.value", Context(), 0)?.let {
+      argumentValueError(action, name, binding, argument, at)?.let {
         return it
       }
     }
@@ -252,4 +259,22 @@ object PrototypePlatformCalls {
       definition,
     )
   }
+}
+
+private fun argumentValueError(
+  action: JsonObject,
+  name: String,
+  binding: JsonElement,
+  argument: JsonObject,
+  at: String,
+): PrototypeSpecError? {
+  if (binding is JsonPrimitive && binding.isString) {
+    if (action.text("call")?.startsWith("realtime.") == true && name == "channel") return null
+    return fail(at, "Invalid union value")
+  }
+  val literal = (binding as? JsonObject)?.get("value") ?: return null
+  walk(literal, argument.getValue("value").jsonObject, "$at.value", Context(), 0)?.let {
+    return it
+  }
+  return null
 }

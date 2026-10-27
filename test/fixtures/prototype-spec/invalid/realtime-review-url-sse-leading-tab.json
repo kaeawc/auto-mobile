@@ -1,0 +1,25 @@
+{
+  "spec": {
+    "id": "literal-scheme",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["realtime"]
+    },
+    "channels": {
+      "c": {
+        "kind": "sse",
+        "url": "\thttps://example.com"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "literal scheme"
+    }
+  },
+  "expectedPath": "channels.c.url",
+  "expectedMessage": "A request url must be an absolute http or https URL"
+}

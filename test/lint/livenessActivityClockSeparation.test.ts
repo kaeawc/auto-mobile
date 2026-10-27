@@ -451,6 +451,14 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
     writes: 1,
     reason: "WebRTC stream end-of-lease record expiry, unrelated to device sessions.",
   },
+  "src/server/deviceChoiceRequestState.ts <module>": {
+    writes: 1,
+    reason: "MRTR device-choice requestState expiry, unrelated to device sessions.",
+  },
+  "src/server/deviceChoiceRequestState.ts createDeviceChoiceRequestStateCodec": {
+    writes: 1,
+    reason: "MRTR device-choice requestState expiry, unrelated to device sessions.",
+  },
   "src/server/appResources.ts getAppMetadataResource": {
     writes: 1,
     reason: "App-metadata resource cache TTL, unrelated to device sessions.",

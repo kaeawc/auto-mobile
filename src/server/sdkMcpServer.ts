@@ -54,10 +54,12 @@ export function createSdkMcpServer(
   info: Implementation,
   capabilities: ServerCapabilities,
   cacheHints?: McpServerOptions["cacheHints"],
+  requestState?: McpServerOptions["requestState"],
 ): McpServer {
   const server = new McpServer(info, {
     capabilities: { ...capabilities, prompts: undefined },
     ...(cacheHints && { cacheHints }),
+    ...(requestState && { requestState }),
   });
   if (capabilities.prompts) {
     server.server.registerCapabilities({ prompts: capabilities.prompts });

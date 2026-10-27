@@ -73,7 +73,11 @@ export async function pressButtonHandler(
   RecompositionTracker.getInstance().recordInteraction(device.deviceId);
   try {
     const pressButton = (deps.pressButtonFactory ?? defaultPressButtonFactory)(device);
-    const result: PressButtonResult = await pressButton.execute(args.button, { progress, signal });
+    const result: PressButtonResult = await pressButton.execute(args.button, {
+      progress,
+      signal,
+      steps: args.steps,
+    });
 
     const message = result.success
       ? `Pressed button ${args.button}`

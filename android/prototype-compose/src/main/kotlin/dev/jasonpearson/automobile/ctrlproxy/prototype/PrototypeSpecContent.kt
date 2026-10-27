@@ -2,7 +2,6 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -190,6 +189,7 @@ fun PrototypeRuntimeContent(
         LocalPrototypeImageVersion provides imageVersion,
         LocalPrototypeFontCache provides fonts,
         LocalPrototypeShaderSession provides runtime.shaderSession,
+        LocalPrototypeExpressive provides (snapshot.spec.motion == "expressive"),
         LocalPrototypeMotion provides motion,
         LocalPrototypeScrollReduced provides (snapshot.spec.motion == "reduced"),
         LocalPrototypeMotionProfile provides profile,
@@ -272,7 +272,7 @@ fun PrototypeSpecContent(
   interact: (PrototypeInteraction) -> Unit = {},
 ) {
   PrototypeTheme(root, theme) {
-    PrototypeSharedRoot(root) {
+    PrototypeMotionSharedRoot(root) {
       val gestureTaps = remember { PrototypeGestureTaps() }
       val density = LocalDensity.current.density
       val currentInteract = rememberUpdatedState(interact)
@@ -539,8 +539,14 @@ internal fun RenderPrototypeNode(
     AnimatedVisibility(
       visible = node.visible,
       modifier = parentModifier,
-      enter = prototypeEnterTransition(visibilityTransition, prototypeRtl(), node.enterDelayMs),
-      exit = prototypeExitTransition(visibilityTransition, prototypeRtl()),
+      enter =
+        if (LocalPrototypeExpressive.current)
+          prototypeExpressiveEnter(visibilityTransition, prototypeRtl(), node.enterDelayMs)
+        else prototypeEnterTransition(visibilityTransition, prototypeRtl(), node.enterDelayMs),
+      exit =
+        if (LocalPrototypeExpressive.current)
+          prototypeExpressiveExit(visibilityTransition, prototypeRtl())
+        else prototypeExitTransition(visibilityTransition, prototypeRtl()),
     ) {
       ReportPrototypeMotion { transition.isRunning }
       ProvideAnchorFade(
@@ -619,12 +625,13 @@ private fun RenderPrototypeVisibility(
         visible = node.visible,
         modifier = parentModifier,
         enter =
-          prototypeEnterTransition(
-            visibilityTransition,
-            prototypeRtl(),
-            node.enterDelayMs,
-          ),
-        exit = prototypeExitTransition(visibilityTransition, prototypeRtl()),
+          if (LocalPrototypeExpressive.current)
+            prototypeExpressiveEnter(visibilityTransition, prototypeRtl(), node.enterDelayMs)
+          else prototypeEnterTransition(visibilityTransition, prototypeRtl(), node.enterDelayMs),
+        exit =
+          if (LocalPrototypeExpressive.current)
+            prototypeExpressiveExit(visibilityTransition, prototypeRtl())
+          else prototypeExitTransition(visibilityTransition, prototypeRtl()),
       ) {
         ReportPrototypeMotion { transition.isRunning }
         ProvideAnchorFade(
@@ -1524,7 +1531,7 @@ private fun prototypeNodeModifier(
   weightAxis: PrototypeWeightAxis? = null,
   windowRoot: Boolean = false,
 ): Modifier {
-  val style = node.style.source
+  val style = prototypeAnimatedLayout(node)
   val actions = node.source?.onTap.orEmpty()
   val tappable = prototypeNodeTappable(node) && LocalPrototypeModalInputEnabled.current
   val handleVisual =
@@ -1542,9 +1549,18 @@ private fun prototypeNodeModifier(
   // Draw-time offset, scale and rotation, animated with the node's `animate` (#14208).
   modifier = modifier.prototypeStyleTransform(node).prototypeScrollMotion(node)
   // Outside the touch target and drawing, so the whole node (shadow included) shrinks as one.
-  val pressScale = style.pressScale
-  if (tappable && pressScale != null) {
-    modifier = modifier.prototypePressScale(presses, pressScale.toFloat())
+  val press = node.source?.press
+  val pressScale = press?.scale ?: style.pressScale
+  val pressAlpha = press?.alpha
+  if (prototypePressApplies(tappable, press != null, pressScale, pressAlpha)) {
+    if (!tappable && node.enabled) modifier = modifier.prototypeComponentPress(presses)
+    modifier =
+      modifier.prototypePressScale(
+        presses,
+        (pressScale ?: 1.0).toFloat(),
+        (pressAlpha ?: 1.0).toFloat(),
+        drawOnly = press != null,
+      )
   }
   // Outermost, as in Material components: reserves a 48 dp touch target around a smaller node
   // without changing the size it draws at (#10435).
@@ -1562,7 +1578,10 @@ private fun prototypeNodeModifier(
     ?.takeIf { style.shadows == null }
     ?.let {
       val shadowColor =
-        prototypeThemedColor(node.style.shadowColor, style.shadowColor) ?: DefaultShadowColor
+        prototypeAnimatedColor(
+          node,
+          prototypeThemedColor(node.style.shadowColor, style.shadowColor) ?: DefaultShadowColor,
+        )
       modifier =
         modifier.shadow(it.toFloat().dp, shape, ambientColor = shadowColor, spotColor = shadowColor)
     }
@@ -1596,7 +1615,11 @@ private fun prototypeNodeModifier(
         )
       } else {
         val borderColor = prototypeThemedColor(node.style.borderColor, it.color)
-        modifier.border(it.width.toFloat().dp, checkNotNull(borderColor), shape)
+        modifier.border(
+          it.width.toFloat().dp,
+          prototypeAnimatedColor(node, checkNotNull(borderColor)),
+          shape,
+        )
       }
   }
   modifier = modifier.prototypeShimmer(style.shimmer == true)
@@ -1633,7 +1656,7 @@ private fun prototypeNodeModifier(
             onClickLabel = node.semantics?.hint,
             enabled = node.enabled,
             interactionSource = presses,
-            indication = LocalIndication.current,
+            indication = prototypeIndication(LocalPrototypeMotion.current),
             onClick = { gestureTaps.tap { interact(PrototypeInteraction.Tap(actions)) } },
             onLongClickLabel = longPress?.let { PROTOTYPE_LONG_PRESS_ACTION_LABEL },
             onLongClick = longPress?.let { { interact(PrototypeInteraction.Tap(it)) } },
@@ -1652,7 +1675,7 @@ private fun prototypeNodeModifier(
           onClickLabel = node.semantics?.hint,
           enabled = node.enabled,
           interactionSource = presses,
-          indication = LocalIndication.current,
+          indication = prototypeIndication(LocalPrototypeMotion.current),
         ) {
           gestureTaps.tap { interact(PrototypeInteraction.Tap(actions)) }
         }
@@ -2058,3 +2081,11 @@ internal fun SemanticsPropertyReceiver.applyPrototypeAuthoredSemantics(
     }
   }
 }
+
+/** Press feedback draws for tappable nodes, and for any node that authors `press`. */
+private fun prototypePressApplies(
+  tappable: Boolean,
+  hasPress: Boolean,
+  scale: Double?,
+  alpha: Double?,
+): Boolean = (tappable || hasPress) && (scale != null || alpha != null)

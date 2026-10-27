@@ -1,3 +1,4 @@
+import { GUIDE_MOTION_V3 } from "./prototypeGuideMotionV3";
 import { MAX_PROTOTYPE_PATCH_OPS } from "./prototypePatch";
 import {
   MAX_PROTOTYPE_DATA_ARRAY_ITEMS,
@@ -277,6 +278,8 @@ node's centre without moving siblings. \`transition\` also takes \`slideStart\` 
 accessibility zoom actions; it cannot also have \`onDoubleTap\`. Everything snaps under
 \`motion: "none"\` or Android animator/transition scale 0. In the reduced profile spatial changes
 snap or crossfade; color and alpha still animate. The iOS agent does not support Motion v2 yet (#14684).
+
+${GUIDE_MOTION_V3}
 
 ## Choreography
 

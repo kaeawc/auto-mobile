@@ -45,6 +45,7 @@ class AutoMobilePrototypeCapabilitiesTest {
       "prototype_platform_sound_v1",
       "prototype_platform_media_items_v1",
     )
+
   @Test
   fun `shared spec capabilities are supported`() {
     assertTrue(

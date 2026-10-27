@@ -1,0 +1,22 @@
+{
+  "id": "media",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "data": {
+    "photo": "media:5b1f",
+    "picked": [
+      {
+        "id": 1,
+        "thumbnail": "media:5b1f/thumb"
+      }
+    ]
+  },
+  "root": {
+    "type": "image",
+    "asset": "media:5b1f",
+    "contentDescription": "Photo"
+  }
+}

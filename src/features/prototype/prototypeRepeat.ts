@@ -468,6 +468,10 @@ export function imageSlotUses(value: unknown): number {
   if (!pair) {
     return 0;
   }
+  // A data-bound slot names a device media item, not an uploaded asset: it costs no image budget.
+  if (typeof pair.data === "string") {
+    return 0;
+  }
   return typeof pair.light === "string" && typeof pair.dark === "string" && pair.light !== pair.dark
     ? 2
     : 1;

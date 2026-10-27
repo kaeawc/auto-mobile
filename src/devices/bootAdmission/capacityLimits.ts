@@ -5,6 +5,12 @@ export const MEMORY_BUDGET_FRACTION = 0.5;
 /** One booted device is budgeted two cores. */
 const CORES_PER_DEVICE = 2;
 
+/** Hardware the AVD about to boot resolved to (`hardware-qemu.ini`), each field when known. */
+export interface CandidateHardware {
+  guestBytes?: number;
+  cpuCores?: number;
+}
+
 export type MaxBootedSource = "env" | "derived";
 
 export interface CapacityLimits {
@@ -58,6 +64,23 @@ export function estimatePerDeviceBytes(
   }
   const average = measuredRssBytes.reduce((sum, bytes) => sum + bytes, 0) / measuredRssBytes.length;
   return Math.min(policy.maxBytes, Math.max(policy.minBytes, average));
+}
+
+/**
+ * Raises a per-device estimate to at least the guest RAM the next AVD will resolve to
+ * (`hardware-qemu.ini`, #15475), capped by the policy maximum. Never lowers the estimate: an
+ * emulator's host footprint exceeds its guest RAM, so a small configured value saves nothing
+ * until a device measurement says so.
+ */
+export function raisePerDeviceBytes(
+  estimateBytes: number,
+  candidateGuestBytes: number | undefined,
+  policy: PerDeviceMemoryPolicy,
+): number {
+  if (candidateGuestBytes === undefined || !Number.isFinite(candidateGuestBytes)) {
+    return estimateBytes;
+  }
+  return Math.min(policy.maxBytes, Math.max(estimateBytes, candidateGuestBytes));
 }
 
 /** One sampled emulator process, with identities when the source can provide them. */
@@ -134,6 +157,7 @@ export function resolveBootCapacityLimits(
   envName: string,
   resources: CapacityHostResources,
   perDeviceBytes: number,
+  coresPerDevice: number = CORES_PER_DEVICE,
 ): CapacityLimits {
   const raw = env[envName];
   const override = parseOverride(raw);
@@ -143,7 +167,7 @@ export function resolveBootCapacityLimits(
   const byMemory = Math.floor(
     (resources.totalMemoryBytes * MEMORY_BUDGET_FRACTION) / perDeviceBytes,
   );
-  const byCpu = Math.floor(resources.cpuCount / CORES_PER_DEVICE);
+  const byCpu = Math.floor(resources.cpuCount / Math.max(1, coresPerDevice));
   const derived: CapacityLimits = {
     maxBooted: Math.max(1, Math.min(byMemory, byCpu)),
     source: "derived",

@@ -559,6 +559,23 @@ class PrototypeSpecContentScreenshotTest {
       pending = true,
     )
 
+  @Test
+  fun stylePolishV2() =
+    prototypeScreenshotTest(
+      "style_polish_v2",
+      validPrototypeFixture("theme-modes-style-polish-v2"),
+      pending = true,
+    )
+
+  @Test
+  @Config(qualifiers = "+night")
+  fun stylePolishV2Dark() =
+    prototypeScreenshotTest(
+      "style_polish_v2_dark",
+      validPrototypeFixture("theme-modes-style-polish-v2"),
+      pending = true,
+    )
+
   // Pending: #14208 scale, rotation and colour applied by styleWhen, settled (no motion in
   // screenshots); no Linux baseline recorded yet.
   @Test
@@ -569,6 +586,16 @@ class PrototypeSpecContentScreenshotTest {
         "motion-v2",
         stateOverrides = mapOf("liked" to OPEN, "drawer" to OPEN),
       ),
+      pending = true,
+    )
+
+  // Pending: #15129 style.effects, all ten settled (no motion in screenshots); goldens need an API
+  // 33+ emulator run and an API 30 one for the omitted-effect fallback; none recorded yet.
+  @Test
+  fun effectsAllTypes() =
+    prototypeScreenshotTest(
+      "effects_all_types",
+      validPrototypeFixture("z-effects-all-types"),
       pending = true,
     )
 
@@ -596,6 +623,65 @@ class PrototypeSpecContentScreenshotTest {
     prototypeScreenshotTest(
       "menu_open",
       validPrototypeFixture("menu-overflow", stateOverrides = mapOf("open" to OPEN)),
+      pending = true,
+    )
+
+  @Test
+  @Config(qualifiers = "+notnight")
+  fun tooltipSpotlightLight() =
+    prototypeScreenshotTest(
+      "tooltip_spotlight_light",
+      validPrototypeFixture("tooltip-node-spotlight"),
+      pending = true,
+    )
+
+  @Test
+  @Config(qualifiers = "+night")
+  fun tooltipSpotlightDark() =
+    prototypeScreenshotTest(
+      "tooltip_spotlight_dark",
+      validPrototypeFixture("tooltip-node-spotlight"),
+      pending = true,
+    )
+
+  @Test
+  @Config(qualifiers = "+notnight")
+  fun tooltipFlippedLight() =
+    prototypeScreenshotTest("tooltip_flipped_light", flippedTooltipSpec(), pending = true)
+
+  @Test
+  @Config(qualifiers = "+night")
+  fun tooltipFlippedDark() =
+    prototypeScreenshotTest("tooltip_flipped_dark", flippedTooltipSpec(), pending = true)
+
+  private fun flippedTooltipSpec(): PrototypeSpec =
+    PrototypeSpec(
+      "flipped-tooltip",
+      PrototypeWindow(PrototypeFullscreenPlacement()),
+      mapOf("open" to PrototypeScalar.BooleanValue(true)),
+      PrototypeTooltipNode(
+        text = "A hint above its target",
+        testTag = "flipped",
+        openWhen = PrototypeSheetCondition("open", true),
+        anchor = PrototypeBoundsAnchor(PrototypeBounds(160.0, 600.0, 40.0, 24.0)),
+      ),
+    )
+
+  @Test
+  @Config(qualifiers = "+notnight")
+  fun drawerOpenLight() =
+    prototypeScreenshotTest(
+      "drawer_open_light",
+      validPrototypeFixture("tooltip-drawer-start"),
+      pending = true,
+    )
+
+  @Test
+  @Config(qualifiers = "+night")
+  fun drawerOpenDark() =
+    prototypeScreenshotTest(
+      "drawer_open_dark",
+      validPrototypeFixture("tooltip-drawer-start"),
       pending = true,
     )
 

@@ -146,3 +146,23 @@ final class PrototypeKeyboardLiftTests: XCTestCase {
         )
     }
 }
+
+/// A native presentation avoids the keyboard itself, so the agent's lift must not stack (#15464).
+final class PrototypeKeyboardLiftNativePresentationTests: XCTestCase {
+    private let keyboard = PrototypeRect(x: 0, y: 500, width: 400, height: 300)
+
+    private func lift(nativePresentationActive: Bool) -> Double {
+        PrototypeKeyboardLift.amount(
+            placementType: "sheet", edge: "bottom", keyboardFrame: keyboard,
+            windowOriginY: 0, windowHeight: 800, nativePresentationActive: nativePresentationActive
+        )
+    }
+
+    func testNativePresentationSuppressesTheLift() {
+        XCTAssertEqual(lift(nativePresentationActive: true), 0)
+    }
+
+    func testLiftReturnsOnceThePresentationIsGone() {
+        XCTAssertEqual(lift(nativePresentationActive: false), 300)
+    }
+}

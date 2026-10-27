@@ -109,6 +109,7 @@ not_in_nav: |
   /design-docs/plat/android/android17-playground-audit.md
   /design-docs/plat/android/dependency-injection.md
   /release/ios-simulator-continuity.md
+  /release/device-claims-registry-migration.md
   /design-docs/plat/ios/xctestrunner/ci-integration.md
   /decisions/ios-user-files-provider.md
   /decisions/mcp-sdk-v2-split-packages.md
@@ -129,8 +130,11 @@ nav:
       - "Keystore test state": using/keystore-test-state.md
       - "Keystore metadata": using/keystore-metadata.md
       - "SDK capabilities": using/sdk-capabilities.md
+      - "Hackathon demo kit": using/hackathon.md
       - "Embedding prototypes in an app": using/prototype-embedding.md
+      - "Agent benchmarks": using/agent-benchmarks.md
       - "Dynamic Tools": using/dynamic-tools.md
+      - "Android Automotive OS": using/android-automotive.md
       - "Environment variables": using/environment-variables.md
       - "iOS Simulator fleet cost": using/ios-simulator-fleet-cost.md
       - "Screen control": using/screen-control.md
@@ -156,6 +160,7 @@ nav:
       - "iOS simulator load reduction": design-docs/plat/ios/simulator-load-reduction.md
       - "iOS keep-booted reset": design-docs/ios-keep-booted-reset.md
       - "Android emulator optimization": design-docs/android-emulator-optimization.md
+      - "Android emulator host cost": design-docs/android-emulator-host-cost.md
       - "Android prototype specification": design-docs/plat/android/prototype-ux.md
       - "Prototype performance measurement": design-docs/plat/android/prototype-performance-measurement.md
       - "Prototype Compose compiler report": design-docs/plat/android/prototype-compose-compiler-report.md
@@ -166,9 +171,13 @@ nav:
       - "ProtoViewer privacy": protoviewer/privacy.md
       - "ProtoViewer store listing": design-docs/protoviewer-store-listing.md
       - "Native prototype embedding": design-docs/prototype-embedding.md
+      - "Prototype user-test sessions": design-docs/prototype-user-test-sessions.md
       - "Runtime dependency pinning": design-docs/release/runtime-dependency-pinning.md
       - "Unit lane scaling": design-docs/ci/unit-lane-scaling.md
+      - "Workflow de-duplication": design-docs/ci/workflow-deduplication.md
       - "CI attestation shadow promotion": design-docs/ci/attestation-shadow-promotion.md
+      - "CI attestation store": design-docs/ci/attestation-store.md
+      - "CI attestation signing envelope": design-docs/ci/attestation-envelope.md
       - "CI attestation GitHub App transport": design-docs/ci/attestation-github-app-transport.md
       - "CircleCI macOS migration": design-docs/ci/circleci-macos-migration.md
       - "macOS CI capacity plan": design-docs/ci/macos-capacity-plan.md
@@ -179,6 +188,8 @@ nav:
       - "Push-stream backpressure": push-stream-backpressure.md
       - "MCP SDK v2 and stateless daemon": design-docs/mcp/sdk-v2-stateless-migration.md
       - "MCP SDK v2 adoption survey": design-docs/mcp/sdk-v2-adoption-survey.md
+      - "Elicitation for an ambiguous device": design-docs/mcp/elicitation-ambiguous-device.md
+      - "Live observe App shell": design-docs/mcp/observe-app-shell.md
       - "Session state record": design-docs/session-state-record.md
       - "Test runners": design-docs/plat/android/junit-runner/index.md
       - "InputConnection trace comparison": design-docs/plat/android/ime-trace-conformance.md

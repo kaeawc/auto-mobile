@@ -41,8 +41,16 @@ class PrototypeAssetStoreTest {
     assertEquals(16 * 1024 * 1024, defaults.maxTotalBytes)
     assertEquals(256, defaults.maxIdLength)
     assertEquals(2 * 1024 * 1024, defaults.maxFontBytes)
+    assertEquals(16 * 1024, defaults.maxShaderBytes)
     assertEquals(
-      setOf("image/png", "image/jpeg", "image/webp", "font/ttf", "font/otf"),
+      setOf(
+        "image/png",
+        "image/jpeg",
+        "image/webp",
+        "font/ttf",
+        "font/otf",
+        "application/vnd.automobile.agsl",
+      ),
       defaults.mimeTypes,
     )
     assertEquals(PrototypeAssetContract.MAX_PROTOTYPE_ASSET_BYTES, defaults.maxAssetBytes)

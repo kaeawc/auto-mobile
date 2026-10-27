@@ -1,0 +1,36 @@
+# Navigate the Playground's three-screen UX exploration flow from the Demo Index.
+# Exercises finding an entry point on a list screen and multi-step navigation.
+name: ux-flow
+platform: android
+prompt: ../prompts/ux-flow.txt
+app:
+  packageName: dev.jasonpearson.automobile.playground
+preflight:
+  clearAppData: true
+  sharedPreferences:
+    onboarding_prefs:
+      onboarding_completed: true
+    auth_prefs:
+      is_authenticated: true
+      user_id: agent-benchmark
+      display_name: Agent Benchmark
+  launchUri: automobile://playground/demos
+  # DemoIndexScreen's top bar; a redirect to onboarding or login stops the run before Claude.
+  startScreenIncludes: ["Docs Demo Index"]
+claude:
+  # The task is tap navigation: deep links (openLink), graph navigation (navigateTo),
+  # and plans (executePlan, which can run a nested openLink step) could reach the
+  # Summary screen without exercising the flow.
+  disallowedTools:
+    - Bash
+    - mcp__auto-mobile__openLink
+    - mcp__auto-mobile__navigateTo
+    - mcp__auto-mobile__executePlan
+  maxBudgetUsd: 2
+  timeoutSeconds: 600
+verify:
+  answerIncludes:
+    - "SUMMARY_STEP: Step 3: Summary and completion"
+  screenIncludes:
+    - "UX Flow: Summary"
+    - "Step 3: Summary and completion."

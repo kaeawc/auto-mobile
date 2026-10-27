@@ -12,15 +12,24 @@ public enum PrototypeSpecStrictValidator {
             else { throw PrototypeContractValidator.invalid("$", "Expected prototype envelope") }
             let state = fields["state"]?.objectFields ?? [:]
             let modelData = fields["data"]?.objectFields
+            try PrototypeRoutes.validate(fields, context: context)
+            try PrototypeStrings.validate(spec: fields, nodes: context.locatedNodes)
+            try PrototypeLazyList.validate(root: root, data: modelData, state: state)
+            try PrototypeLazyList.validateAppend(actions: context.actions, data: modelData)
+            try PrototypeDerivedValidator.validate(derive: fields["derive"], root: root, data: modelData)
+            try PrototypeScrollMotion.validate(root, data: modelData)
+            try PrototypeSharedElementPlan.validate(context.locatedNodes, data: modelData, actions: context.actions)
             try PrototypeStrictSemantics.layout(context)
+            try PrototypeStrictSemantics.pagerStateKeys(context)
             var repeats = PrototypeStrictRepeats(data: modelData)
             try repeats.templates(root.objectFields ?? [:], path: "root")
             try PrototypeLimits.guardRepeatPathCells(root, data: modelData)
             try PrototypeLimits.guardSubstitutedText(root, data: modelData)
             try repeats.expanded(root.objectFields ?? [:], path: "root")
-            try PrototypeStrictSemantics.storage(fields)
+            try PrototypeStrictSemantics.storage(fields, context: context)
             try PrototypeDataWrite.validate(actions: context.actions, data: modelData)
             try PrototypeRequestValidator.validate(root, state: state)
+            try PrototypePlatformValidator.validateTestTags(nodes: context.locatedNodes)
             try PrototypePlatformValidator.validate(
                 requires: fields["requires"],
                 handlers: fields["platform"],
@@ -31,6 +40,7 @@ public enum PrototypeSpecStrictValidator {
             try PrototypeStrictSemantics.vocabulary(context, data: modelData)
             try PrototypeLinkify.validate(root: root, nodes: context.locatedNodes)
             try PrototypeStrictSemantics.targets(context)
+            try PrototypeTooltips.validate(nodes: context.locatedNodes, scopes: repeats.scopes)
             let nodes = repeats.bound(context.locatedNodes)
             let actions = repeats.bound(context.actions, actions: true)
             try PrototypeStrictBindings.validate(nodes: nodes, actions: actions, state: state)
@@ -41,6 +51,7 @@ public enum PrototypeSpecStrictValidator {
             let resolved = PrototypeDataResolver.resolveRoot(root, data: modelData)
             try PrototypeLimits.guardTree(resolved)
             let expanded = PrototypeRepeat.expand(resolved)
+            try PrototypeBarScroll.validate(expanded)
             try PrototypePagerOptions.validate(expanded)
             try PrototypeSwipe.validate(expanded)
             try PrototypeCarousel.validate(expanded)
@@ -49,7 +60,17 @@ public enum PrototypeSpecStrictValidator {
             if let supportedCapabilities,
                !PrototypeStrictCapabilities.required(fields).isSubset(of: supportedCapabilities)
             {
-                throw PrototypeContractValidator.invalid("$", "Unsupported capabilities")
+                let missing = PrototypeStrictCapabilities.required(fields).subtracting(supportedCapabilities)
+                throw PrototypeContractValidator.invalid(
+                    "$",
+                    "Unsupported capabilities: \(PrototypeContractValidator.sorted(missing).joined(separator: ", "))"
+                )
+            }
+            if library, PrototypeCustomShaders.uses(fields) {
+                throw PrototypeContractValidator.invalid(
+                    "$",
+                    "ProtoViewer bundles refuse custom AGSL shaders"
+                )
             }
             if library, let window = fields["window"]?.objectFields {
                 if window["layer"] ==
@@ -121,7 +142,7 @@ public enum PrototypeSpecStrictValidator {
                     }
                 }
                 append(action.value["body"], path: "\(action.path).body", request: true)
-            case "setData", "appendData":
+            case "setData", "appendData", "prependData":
                 append(action.value["value"], path: "\(action.path).value")
             case "emit", "platform":
                 let name = action.value["type"] == .string("emit") ? "context" : "args"

@@ -25,6 +25,46 @@ enum PrototypePagerPageSize: Decodable, Equatable {
 
 /// On-device validation before typed decoding, preserving the host's authored tree paths.
 enum PrototypePagerOptions {
+    static func validateStateKeys(_ root: JSONValue, state: [String: JSONValue]) throws {
+        var keys = Set<String>()
+        func visit(_ node: JSONValue, path: String, repeated: Bool) throws {
+            guard let fields = node.objectFields else { return }
+            if fields["type"] == .string("pager"), let key = fields["stateKey"]?.stringValue {
+                if repeated { throw PrototypeContractValidator.invalid(
+                    "\(path).stateKey",
+                    "Pager stateKey cannot appear inside repeat"
+                ) }
+                guard keys.insert(key).inserted else { throw PrototypeContractValidator.invalid(
+                    "\(path).stateKey",
+                    "Two pagers cannot bind the same state key"
+                ) }
+                guard let value = state[key]?.numberValue, value.isFinite, value >= 0,
+                      value.rounded(.towardZero) == value
+                else {
+                    throw PrototypeContractValidator.invalid(
+                        "\(path).stateKey",
+                        "Pager requires a nonnegative integer state key"
+                    )
+                }
+            }
+            let repeated = repeated || fields["repeat"] != nil
+            if case let .array(children)? = fields["children"] {
+                for (index, child) in children.enumerated() {
+                    try visit(
+                        child,
+                        path: "\(path).children[\(index)]",
+                        repeated: repeated
+                    )
+                }
+            }
+            if let child = fields["child"] { try visit(child, path: "\(path).child", repeated: repeated) }
+            for (name, screen) in fields["screens"]?.objectFields ?? [:] {
+                try visit(screen, path: "\(path).screens[\(name)]", repeated: repeated)
+            }
+        }
+        try visit(root, path: "root", repeated: false)
+    }
+
     /// Pending contract-wide maxima from #12298.
     static let maxPagerDp = 10000.0
 
@@ -91,7 +131,9 @@ enum PrototypePagerOptions {
         path: String,
         verticalScrollAncestor: Bool,
         horizontalScrollAncestor: Bool
-    ) throws {
+    )
+        throws
+    {
         guard case let .object(node) = value else { return }
         if horizontalScrollAncestor { try validateHorizontalLazy(node, path: path) }
         if node["type"] == .string("pager") {

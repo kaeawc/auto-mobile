@@ -43,6 +43,7 @@ import { ManagedDevicePort } from "./managedDevicePort";
 import { SESSION_BROKER_SCOPE, iosReusePolicy, type SessionBrokerHostConfig } from "./hostConfig";
 import { IosBaselineReset } from "./iosBaselineReset";
 import { IosKeepBootedReset } from "./iosKeepBootedReset";
+import { IosMinimalReset } from "./iosMinimalReset";
 import { nativeIosMutationResetPort, nativeIosResetHealth } from "./iosResetNativePorts";
 import { captureFirstDeviceBaseline } from "./mutations/reset";
 import type { ManagedDevicePortDependencies } from "./managedDevicePort";
@@ -226,40 +227,13 @@ export async function openSessionBrokerService(
           }
         : undefined;
     let captureIosBaseline: ManagedDevicePortDependencies["captureIosBaseline"];
-    if (reuse.mode === "keep-booted" && iosReset) {
-      const mutations = nativeIosMutationResetPort(new SimCtlClient(null), options.timer);
-      const fast = new IosKeepBootedReset({
-        recordingGaps,
-        journal,
-        mutations,
-        simctl: new SimCtlClient(null),
-        timer: options.timer,
-        health: nativeIosResetHealth(options.timer),
-        erase: iosReset,
-        maxUses: reuse.maxUses,
-        fallback: reuse.fallback,
-        budgetMs: readEnvInt(ENV.IOS_RESET_STEP_BUDGET_MS),
-        budgetCeilingMs: readEnvInt(ENV.IOS_RESET_STEP_BUDGET_MAX_MS),
-      });
-      captureIosBaseline = (context) => captureFirstDeviceBaseline(journal, mutations, context);
-      resetIosBaseline = async (device, profile, assertOwned, signal, context) => {
-        const request = context?.resource.requestId
-          ? await store.getRequest(context.resource.requestId)
-          : undefined;
-        if (!context || !request?.sessionId) {
-          throw new ActionableError(
-            "iOS keep-booted reset requires its durable released session identity",
-          );
-        }
-        return fast.resetWithTiming(
-          device,
-          profile,
-          assertOwned,
-          { ...context.scope, sessionUuid: request.sessionId },
-          context.resource.reuseCount ?? 0,
-          { signal, runResetBoot: context.runResetBoot },
-        );
-      };
+    if (iosReset) {
+      ({ resetIosBaseline, captureIosBaseline } = iosReuseWiring(
+        options,
+        reuse,
+        { erase: iosReset, journal, recordingGaps, store },
+        resetIosBaseline,
+      ));
     }
     const bindMutationRecorder = options.mutationSessions
       ? (scope: DeviceMutationScope) => {
@@ -414,6 +388,125 @@ async function recoverSessionMutationRecorder(
     );
   }
   return recorder;
+}
+
+/** Chooses the iOS release reset for the configured reuse mode; `erase` keeps the default reset. */
+function iosReuseWiring(
+  options: OpenSessionBrokerServiceOptions,
+  reuse: ReturnType<typeof iosReusePolicy>,
+  parts: {
+    erase: IosBaselineReset;
+    journal: DeviceMutationJournal;
+    recordingGaps: MutationRecordingGaps;
+    store: Pick<SqliteSessionBrokerStore, "getRequest">;
+  },
+  erased: NonNullable<ManagedDevicePortDependencies["resetBaseline"]>["ios"],
+): {
+  resetIosBaseline: NonNullable<ManagedDevicePortDependencies["resetBaseline"]>["ios"];
+  captureIosBaseline: ManagedDevicePortDependencies["captureIosBaseline"];
+} {
+  const { erase, journal, recordingGaps, store } = parts;
+  if (reuse.mode === "keep-booted") {
+    return keepBootedIosWiring(options, reuse, erase, journal, recordingGaps, store);
+  }
+  if (reuse.mode === "minimal") {
+    return {
+      resetIosBaseline: minimalIosResetBaseline(
+        options,
+        reuse.maxUses,
+        journal,
+        recordingGaps,
+        store,
+      ),
+      captureIosBaseline: undefined,
+    };
+  }
+  return { resetIosBaseline: erased, captureIosBaseline: undefined };
+}
+
+/** Wires `reuse.ios.mode: "keep-booted"`: baseline capture plus the cleaning reset with its erase or destroy fallback. */
+function keepBootedIosWiring(
+  options: OpenSessionBrokerServiceOptions,
+  reuse: { maxUses: number; fallback: "erase" | "destroy" },
+  erase: IosBaselineReset,
+  journal: DeviceMutationJournal,
+  recordingGaps: MutationRecordingGaps,
+  store: Pick<SqliteSessionBrokerStore, "getRequest">,
+): {
+  resetIosBaseline: NonNullable<ManagedDevicePortDependencies["resetBaseline"]>["ios"];
+  captureIosBaseline: ManagedDevicePortDependencies["captureIosBaseline"];
+} {
+  const mutations = nativeIosMutationResetPort(new SimCtlClient(null), options.timer);
+  const fast = new IosKeepBootedReset({
+    recordingGaps,
+    journal,
+    mutations,
+    simctl: new SimCtlClient(null),
+    timer: options.timer,
+    health: nativeIosResetHealth(options.timer),
+    erase,
+    maxUses: reuse.maxUses,
+    fallback: reuse.fallback,
+    budgetMs: readEnvInt(ENV.IOS_RESET_STEP_BUDGET_MS),
+    budgetCeilingMs: readEnvInt(ENV.IOS_RESET_STEP_BUDGET_MAX_MS),
+  });
+  return {
+    captureIosBaseline: (context) => captureFirstDeviceBaseline(journal, mutations, context),
+    resetIosBaseline: async (device, profile, assertOwned, signal, context) => {
+      const request = context?.resource.requestId
+        ? await store.getRequest(context.resource.requestId)
+        : undefined;
+      if (!context || !request?.sessionId) {
+        throw new ActionableError(
+          "iOS keep-booted reset requires its durable released session identity",
+        );
+      }
+      return fast.resetWithTiming(
+        device,
+        profile,
+        assertOwned,
+        { ...context.scope, sessionUuid: request.sessionId },
+        context.resource.reuseCount ?? 0,
+        { signal, runResetBoot: context.runResetBoot },
+      );
+    },
+  };
+}
+
+/** Wires `reuse.ios.mode: "minimal"`: release runs the fixed minimal cleaning, never an erase (#14682). */
+function minimalIosResetBaseline(
+  options: OpenSessionBrokerServiceOptions,
+  maxUses: number,
+  journal: DeviceMutationJournal,
+  recordingGaps: MutationRecordingGaps,
+  store: Pick<SqliteSessionBrokerStore, "getRequest">,
+): NonNullable<ManagedDevicePortDependencies["resetBaseline"]>["ios"] {
+  const simctl = new SimCtlClient(null);
+  const minimal = new IosMinimalReset({
+    recordingGaps,
+    journal,
+    mutations: nativeIosMutationResetPort(simctl, options.timer),
+    simctl,
+    timer: options.timer,
+    maxUses,
+    budgetMs: readEnvInt(ENV.IOS_RESET_STEP_BUDGET_MS),
+  });
+  return async (device, profile, assertOwned, signal, context) => {
+    const request = context?.resource.requestId
+      ? await store.getRequest(context.resource.requestId)
+      : undefined;
+    if (!context || !request?.sessionId) {
+      throw new ActionableError("iOS minimal reset requires its durable released session identity");
+    }
+    return minimal.resetWithTiming(
+      device,
+      profile,
+      assertOwned,
+      { ...context.scope, sessionUuid: request.sessionId },
+      context.resource.reuseCount ?? 0,
+      { signal },
+    );
+  };
 }
 
 /** An iOS journal shares the reset scope's incarnation, or the keep-booted reset cannot find it. */

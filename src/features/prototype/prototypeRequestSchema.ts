@@ -1,6 +1,10 @@
 import { z } from "zod";
 import contract from "../../../schemas/prototype-spec-contract.json";
-import { prototypeDataActionValueSchema, stateKeySchema } from "./prototypeActionValues";
+import {
+  prototypeDataActionValueSchema,
+  pointerSchema,
+  stateKeySchema,
+} from "./prototypeActionValues";
 import { PROTOTYPE_REQUEST_METHODS } from "./prototypeRequestProtocol";
 
 /**
@@ -36,6 +40,16 @@ export const requestActionSchema = z
       .string()
       .min(1)
       .max(contract.limits.MAX_PROTOTYPE_DATA_POINTER_LENGTH + 5)
+      .optional(),
+    append: z
+      .object({
+        from: pointerSchema,
+        to: z
+          .string()
+          .min(1)
+          .max(contract.limits.MAX_PROTOTYPE_DATA_POINTER_LENGTH + 5),
+      })
+      .strict()
       .optional(),
     statusKey: stateKeySchema.optional(),
     via: z.enum(["host", "device"]).optional(),

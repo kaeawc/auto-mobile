@@ -103,6 +103,7 @@ function nodeConditionError(
   keys: Set<string>,
 ): PrototypeValidationError | undefined {
   const found =
+    conditionError(value.errorWhen, `${path}.errorWhen`, keys) ??
     conditionError(value.visibleWhen, `${path}.visibleWhen`, keys) ??
     conditionError(value.enabledWhen, `${path}.enabledWhen`, keys);
   if (found) {

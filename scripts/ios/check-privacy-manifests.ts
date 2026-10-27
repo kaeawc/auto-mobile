@@ -97,6 +97,8 @@ export interface ApiUsage {
   readonly line: number;
 }
 
+const blank = (text: string) => text.replace(/[^\n]/g, " ");
+
 /**
  * Appends one string literal starting at `start` to `out`, blanking the literal text but keeping
  * the code inside `\( ... )` interpolations (recursively stripped). Returns the index after it.
@@ -107,19 +109,28 @@ function stripSwiftString(
   multiline: boolean,
   out: string[],
 ): number {
-  const blank = (text: string) => text.replace(/[^\n]/g, " ");
   const open = multiline ? 3 : 1;
   out.push(blank(source.slice(start, start + open)));
   let i = start + open;
+  const stops = multiline ? /\\\(|"""/g : /\\\(|"|\n/g;
   while (i < source.length) {
-    if (multiline ? source.startsWith('"""', i) : source[i] === '"' || source[i] === "\n") {
-      const closeLength = multiline || source[i] === '"' ? open : 0;
-      out.push(blank(source.slice(i, i + closeLength)));
-      return i + closeLength;
+    stops.lastIndex = i;
+    const next = stops.exec(source);
+    // An escaped character (`\"`, `\\`) is skipped whole, so scan escapes explicitly.
+    const escape = source.indexOf("\\", i);
+    if (escape !== -1 && escape < (next?.index ?? source.length) && source[escape + 1] !== "(") {
+      out.push(blank(source.slice(i, escape + 2)));
+      i = escape + 2;
+      continue;
     }
-    if (source[i] === "\\" && source[i + 1] === "(") {
+    if (!next) {
+      out.push(blank(source.slice(i)));
+      return source.length;
+    }
+    out.push(blank(source.slice(i, next.index)));
+    if (next[0] === "\\(") {
       let depth = 1;
-      let j = i + 2;
+      let j = next.index + 2;
       while (j < source.length && depth > 0) {
         if (source[j] === "(") {
           depth += 1;
@@ -129,55 +140,57 @@ function stripSwiftString(
         j += 1;
       }
       out.push("  ");
-      out.push(stripSwiftNonCode(source.slice(i + 2, depth === 0 ? j - 1 : j)));
+      out.push(stripSwiftNonCode(source.slice(next.index + 2, depth === 0 ? j - 1 : j)));
       out.push(depth === 0 ? " " : "");
       i = j;
+    } else if (next[0] === "\n") {
+      return next.index;
     } else {
-      const width = source[i] === "\\" ? 2 : 1;
-      out.push(blank(source.slice(i, i + width)));
-      i += width;
+      out.push(blank(next[0]));
+      return next.index + next[0].length;
     }
   }
   return i;
 }
 
+/** End index of a (nestable) block comment whose `/*` opens at `start`. */
+function blockCommentEnd(source: string, start: number): number {
+  const tokens = /\/\*|\*\//g;
+  tokens.lastIndex = start + 2;
+  let depth = 1;
+  for (let token = tokens.exec(source); token; token = tokens.exec(source)) {
+    depth += token[0] === "/*" ? 1 : -1;
+    if (depth === 0) {
+      return token.index + 2;
+    }
+  }
+  return source.length;
+}
+
 /** Replaces comments and string-literal contents with spaces, keeping newlines for line numbers. */
 export function stripSwiftNonCode(source: string): string {
   const out: string[] = [];
+  const interesting = /\/\*|\/\/|"/g;
   let i = 0;
-  let commentDepth = 0;
-  const blank = (text: string) => text.replace(/[^\n]/g, " ");
   while (i < source.length) {
-    const rest = source.slice(i, i + 3);
-    if (commentDepth > 0) {
-      if (rest.startsWith("/*")) {
-        commentDepth += 1;
-        out.push("  ");
-        i += 2;
-      } else if (rest.startsWith("*/")) {
-        commentDepth -= 1;
-        out.push("  ");
-        i += 2;
-      } else {
-        out.push(blank(source[i]));
-        i += 1;
-      }
-    } else if (rest.startsWith("/*")) {
-      commentDepth = 1;
-      out.push("  ");
-      i += 2;
-    } else if (rest.startsWith("//")) {
-      const end = source.indexOf("\n", i);
-      const stop = end === -1 ? source.length : end;
-      out.push(blank(source.slice(i, stop)));
+    interesting.lastIndex = i;
+    const next = interesting.exec(source);
+    if (!next) {
+      out.push(source.slice(i));
+      break;
+    }
+    out.push(source.slice(i, next.index));
+    if (next[0] === "/*") {
+      const stop = blockCommentEnd(source, next.index);
+      out.push(blank(source.slice(next.index, stop)));
       i = stop;
-    } else if (rest === '"""' || source[i] === '"') {
-      const multiline = rest === '"""';
-      const stop = stripSwiftString(source, i, multiline, out);
+    } else if (next[0] === "//") {
+      const end = source.indexOf("\n", next.index);
+      const stop = end === -1 ? source.length : end;
+      out.push(blank(source.slice(next.index, stop)));
       i = stop;
     } else {
-      out.push(source[i]);
-      i += 1;
+      i = stripSwiftString(source, next.index, source.startsWith('"""', next.index), out);
     }
   }
   return out.join("");

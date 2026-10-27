@@ -1,0 +1,43 @@
+{
+  "spec": {
+    "id": "windowMotion",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "transition": "auto"
+    },
+    "state": {
+      "open": true
+    },
+    "root": {
+      "type": "column",
+      "repeat": {
+        "items": [
+          {
+            "name": "A"
+          },
+          {
+            "name": "B"
+          }
+        ],
+        "as": "item",
+        "stagger": 100
+      },
+      "children": [
+        {
+          "type": "text",
+          "text": "{item.name}",
+          "visibleWhen": {
+            "key": "open",
+            "equals": true
+          }
+        }
+      ]
+    }
+  },
+  "options": {
+    "supportedCapabilities": []
+  },
+  "expectedPath": "$"
+}

@@ -17,6 +17,7 @@ import {
 import { daemonShuttingDownFailure, daemonShuttingDownFrameFields } from "../daemonShutdownOutcome";
 
 import { ListChangedBroadcaster, ResourceUpdatedBroadcaster } from "../listChangedBroadcast";
+import { SessionDeviceReboundBroadcaster } from "../sessionDeviceReboundBroadcast";
 import { SessionReleaseBroadcaster } from "../sessionReleaseBroadcast";
 
 import { ActionableError } from "../../models/ActionableError";
@@ -48,6 +49,7 @@ type State = Pick<
   | "listChangedUnsubscribe"
   | "resourceUpdatedUnsubscribe"
   | "sessionReleaseUnsubscribe"
+  | "sessionDeviceReboundUnsubscribe"
   | "serverClosePromise"
   | "lifecycleGeneration"
   | "socketReachability"
@@ -78,6 +80,7 @@ type Callbacks = Pick<
   | "clearBoundMcpClientsForReleasedSession"
   | "liftStrokesHeldBy"
   | "broadcastSessionReleased"
+  | "broadcastSessionDeviceRebound"
   | "handleConnection"
   | "closeListeningServer"
   | "drainActiveRequestHandlers"
@@ -176,6 +179,8 @@ export class SocketLifecycle {
     this.state.resourceUpdatedUnsubscribe = null;
     this.state.sessionReleaseUnsubscribe?.();
     this.state.sessionReleaseUnsubscribe = null;
+    this.state.sessionDeviceReboundUnsubscribe?.();
+    this.state.sessionDeviceReboundUnsubscribe = null;
   }
   beginAccepting(): void {
     this.state.closing = false;
@@ -209,6 +214,10 @@ export class SocketLifecycle {
         void this.callbacks.liftStrokesHeldBy(sessionId);
         this.callbacks.broadcastSessionReleased(sessionId, reason, snapshot, extras?.recordingIds);
       },
+    );
+    this.state.sessionDeviceReboundUnsubscribe?.();
+    this.state.sessionDeviceReboundUnsubscribe = SessionDeviceReboundBroadcaster.subscribe(
+      (event) => this.callbacks.broadcastSessionDeviceRebound(event),
     );
     return (socket) => this.callbacks.handleConnection(socket);
   }

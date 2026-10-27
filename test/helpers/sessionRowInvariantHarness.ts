@@ -149,15 +149,18 @@ class ChaoticRepository extends DeviceSessionRepository {
 class MemoryJournal implements TerminalReleaseJournal {
   readonly intents = new Map<string, TerminalReleaseIntent>();
 
-  constructor(private readonly left: readonly TerminalReleaseIntent[] = []) {}
+  constructor(
+    private readonly left: readonly TerminalReleaseIntent[] = [],
+    private readonly durability: "durable" | "volatile" = "volatile",
+  ) {}
 
   loadUnconfirmed(): TerminalReleaseIntent[] {
     return [...this.left];
   }
 
-  record(intent: TerminalReleaseIntent): "volatile" {
+  record(intent: TerminalReleaseIntent): "durable" | "volatile" {
     this.intents.set(intent.sessionId, intent);
-    return "volatile";
+    return this.durability;
   }
 
   resolve(sessionId: string, reason?: string): void {
@@ -193,6 +196,11 @@ export interface SessionRowRunOptions {
   operations?: number;
   /** The operations a run may draw; all of the first model's when omitted. */
   allowed?: readonly SessionRowOperation[];
+  /**
+   * The journal's intents are durable: a terminal release commits before its row is written
+   * (#11799). Without it they are volatile, and the release writes its row first.
+   */
+  durable?: boolean;
 }
 
 const ALL_OPERATIONS: readonly SessionRowOperation[] = [
@@ -312,7 +320,8 @@ export async function runSessionRowInterleaving(
   manager.stopCleanupTimer();
   manager.setSupersededRowReassertBackoff(fixedBackoff(REASSERT_RETRY_DELAY_MS));
   manager.setTerminalReleaseRetryBackoff(fixedBackoff(TERMINAL_RETRY_DELAY_MS));
-  const journal = new MemoryJournal();
+  const durability = options.durable ? "durable" : "volatile";
+  const journal = new MemoryJournal([], durability);
   /** The peer daemon's writes: its own repository over the same database, landing at once. */
   const peer = new DeviceSessionRepository(db, timer);
   if (extended) {
@@ -320,9 +329,14 @@ export async function runSessionRowInterleaving(
     manager.attachDaemonSessionId(DAEMON);
     manager.attachTerminalReleaseJournal(journal);
     manager.attachLiveDaemonSessionIds(() => new Set([DAEMON, PEER_DAEMON]));
+  } else if (options.durable) {
+    manager.attachTerminalReleaseJournal(journal);
   }
 
   const sessionId = `row-invariant-${seed}`;
+  // A sweep and a regression case run the same seed on one database: start from no row, since
+  // the releases that win now leave a terminal row where a declined one left a live one.
+  await db.deleteFrom("device_sessions").where("session_uuid", "=", sessionId).execute();
   const deviceLoss: ReleaseReason = `device-disconnected:${DEVICES[0]}`;
   const trace: string[] = [];
   const violations: string[] = [];
@@ -898,7 +912,9 @@ export async function runSessionRowInterleaving(
     next.stopCleanupTimer();
     next.attachDaemonSessionId(RESTARTED_DAEMON);
     next.attachLiveDaemonSessionIds(() => liveDaemons);
-    next.attachTerminalReleaseJournal(new MemoryJournal(Array.from(journal.intents.values())));
+    next.attachTerminalReleaseJournal(
+      new MemoryJournal(Array.from(journal.intents.values()), durability),
+    );
     background("rehydration", next.rehydratePersistedSessions(poolOf(next)));
     await settle();
     const rehydrated = next.getSession(sessionId);

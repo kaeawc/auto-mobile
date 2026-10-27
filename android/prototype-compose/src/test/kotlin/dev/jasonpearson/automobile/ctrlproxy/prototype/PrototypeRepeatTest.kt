@@ -7,6 +7,55 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PrototypeRepeatTest {
+  @Test
+  fun `linkify binds each row before resolving its tapped match`() {
+    assertLinkifyRows("linkify-repeat-rows")
+  }
+
+  @Test
+  fun `linkify binds data rows before resolving tapped matches`() {
+    assertLinkifyRows("linkify-repeat-data-rows")
+  }
+
+  private fun assertLinkifyRows(name: String) {
+    val spec = fixture(name)
+    val rows = prototypeChildEntries(spec.root, "root").map { it.node as PrototypeTextNode }
+    for ((index, row) in rows.withIndex()) {
+      val id = if (index == 0) "a" else "b"
+      val onTap = row.linkify!!.onTap
+      assertTrue(onTap.toString().contains("\"match\":\"text\""))
+      val actions =
+        PrototypeLinkify.actions(onTap, PrototypeLinkify.Match("mention", row.text!!, 0, 4))
+      assertEquals("handle_$id", (actions[0] as PrototypeSetStateAction).key)
+      assertEquals(PrototypeScalar.Text(row.text!!), (actions[0] as PrototypeSetStateAction).value)
+      assertEquals("liked_$id", (actions[1] as PrototypeToggleAction).key)
+      assertEquals(
+        PrototypeScalar.Numeric(if (index == 0) 3.0 else 7.0),
+        (actions[2] as PrototypeSetStateAction).value,
+      )
+      val emit = actions[3] as PrototypeEmitAction
+      assertEquals("tap_${id}_$index", emit.name)
+      assertEquals(
+        kotlinx.serialization.json.Json.parseToJsonElement("{\"value\":\"$id\"}"),
+        emit.context!!["id"],
+      )
+      assertEquals(
+        kotlinx.serialization.json.Json.parseToJsonElement("{\"value\":$index}"),
+        emit.context!!["index"],
+      )
+      assertEquals(
+        kotlinx.serialization.json.Json.parseToJsonElement("{\"value\":\"mention\"}"),
+        emit.context!!["match"],
+      )
+      assertEquals(
+        kotlinx.serialization.json.Json.parseToJsonElement(
+          "{\"item\":\"id\",\"text\":\"{post.id}\",\"match\":\"text\"}",
+        ),
+        emit.payload,
+      )
+    }
+  }
+
   private val items =
     listOf(
       mapOf(
@@ -417,5 +466,44 @@ class PrototypeRepeatTest {
     assertEquals(PrototypeScalar.BooleanValue(false), runtime.current.state["liked_b"])
     assertEquals(likedColor, likeColors()[0])
     assertNotEquals(likedColor, likeColors()[1])
+  }
+
+  @Test
+  fun `error conditions bind repeat operands including empty strings`() {
+    val field =
+      PrototypeTextFieldNode(
+        stateKey = "value",
+        errorText = "Bad {item.label}",
+        errorWhen =
+          PrototypeCondition(key = "value", contains = PrototypeScalar.Text("{item.label}")),
+      )
+    val root = list(field, repeat = listOf(mapOf("label" to PrototypeScalar.Text(""))))
+    val mapped =
+      mapPrototypeSpec(spec(root, mapOf("value" to PrototypeScalar.Text("hello"))))
+        .root
+        .children
+        .single()
+    assertTrue(mapped.isError)
+    assertEquals("Bad ", mapped.errorMessage)
+  }
+
+  @Test
+  fun `a numeric repeat placeholder binds a substring operand as text`() {
+    val field =
+      PrototypeTextFieldNode(
+        stateKey = "value",
+        errorWhen = PrototypeCondition(key = "value", contains = PrototypeScalar.Text("{item.n}")),
+      )
+    val root = list(field, repeat = listOf(mapOf("n" to PrototypeScalar.Numeric(3.0))))
+
+    fun errorFor(value: String) =
+      mapPrototypeSpec(spec(root, mapOf("value" to PrototypeScalar.Text(value))))
+        .root
+        .children
+        .single()
+        .isError
+
+    assertTrue(errorFor("a3"))
+    assertFalse(errorFor("a4"))
   }
 }

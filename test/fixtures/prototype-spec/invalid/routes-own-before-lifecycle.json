@@ -1,0 +1,43 @@
+{
+  "spec": {
+    "id": "routes-review",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "stack",
+      "id": "nav",
+      "start": "home",
+      "screens": {
+        "home": {
+          "type": "text",
+          "text": "Home"
+        },
+        "detail": {
+          "type": "text",
+          "text": "Detail"
+        }
+      },
+      "routes": {
+        "detail": {
+          "onEnter": [
+            {
+              "type": "emit",
+              "name": "{route.lifecycle}"
+            }
+          ]
+        }
+      },
+      "onTap": [
+        {
+          "type": "emit",
+          "name": "{route.own}"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].name",
+  "expectedMessage": "Route placeholder outside a screen"
+}

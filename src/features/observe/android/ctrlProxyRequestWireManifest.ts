@@ -454,6 +454,7 @@ export const CTRL_PROXY_REQUEST_FIELDS: {
     reset: "optional",
     replaceOthers: "optional",
     appearance: "optional",
+    locale: "optional",
   },
   start_recording: {
     requestId: "optional",

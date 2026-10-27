@@ -1,0 +1,38 @@
+{
+  "spec": {
+    "id": "routes-review",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "stack",
+      "id": "nav",
+      "start": "home",
+      "screens": {
+        "home": {
+          "type": "text",
+          "text": "Home"
+        },
+        "detail": {
+          "type": "text",
+          "text": "Detail"
+        }
+      },
+      "routes": {
+        "detail": {
+          "onEnter": [
+            {
+              "type": "push",
+              "stack": "nav",
+              "screen": "detail"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "expectedPath": "root.routes.detail.onEnter[0]",
+  "expectedMessage": "onEnter cannot navigate to its own screen"
+}

@@ -1,0 +1,22 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["device"]
+    },
+    "root": {
+      "type": "spacer",
+      "visibleWhen": {
+        "platform": "/device/sizeClass",
+        "equals": "regular"
+      }
+    }
+  },
+  "expectedPath": "root.visibleWhen.platform",
+  "expectedMessage": "Unknown platform state /device/sizeClass"
+}

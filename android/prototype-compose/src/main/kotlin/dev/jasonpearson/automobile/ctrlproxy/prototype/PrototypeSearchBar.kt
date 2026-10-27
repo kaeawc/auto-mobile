@@ -45,6 +45,7 @@ internal fun RenderPrototypeSearchBar(
           this[PrototypeRole] = node.role
           node.testTag?.let { testTag = it }
           node.contentDescription?.let { contentDescription = it }
+          applyPrototypeAuthoredSemantics(node)
         },
         interact,
       ) { shown, change, fieldModifier, presses ->

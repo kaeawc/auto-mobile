@@ -1,0 +1,19 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "spacer",
+      "visibleWhen": {
+        "platform": "/device/widthClass",
+        "equals": "compact"
+      }
+    }
+  },
+  "expectedPath": "root.visibleWhen.platform",
+  "expectedMessage": "Platform module device is not declared in requires.platform"
+}

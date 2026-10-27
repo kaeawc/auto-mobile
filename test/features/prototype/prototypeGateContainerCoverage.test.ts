@@ -17,10 +17,58 @@ const platformCall = {
   ...label,
   onTap: [{ type: "platform", call: "test.echo", args: { message: { value: "hi" } } }],
 };
+const hapticsCall = {
+  ...label,
+  onTap: [
+    {
+      type: "platform",
+      call: "haptics.perform",
+      args: { effect: { value: "click" } },
+    },
+  ],
+};
+const soundCall = {
+  ...label,
+  onTap: [
+    {
+      type: "platform",
+      call: "sound.play",
+      args: { sound: { value: "send" }, volume: { value: 80 } },
+    },
+  ],
+};
+const mediaImage = { type: "image", asset: { data: "/photo" }, contentDescription: "Photo" };
+const deviceRead = { ...label, visibleWhen: { platform: "/device/os", equals: "android" } };
 // Minimal feature nodes mirrored from the server parity fixtures. Keeping them here avoids
 // editing the server test outside this lane's permitted paths. No gate/container exceptions:
 // every current gate can be activated by a node, including theme and data via inline values.
 const fixtures: Record<string, Node> = {
+  prototype_routes_v1: { ...label, onTap: [{ type: "pop", stack: "nav", force: true }] },
+  prototype_style_polish_v2: { ...label, style: { cornerStyle: "continuous" } },
+  prototype_tooltip_v1: {
+    type: "tooltip",
+    text: "Tip",
+    anchorTo: "target",
+    openWhen: { key: "liked", equals: true },
+  },
+  prototype_drawer_v1: {
+    type: "drawer",
+    edge: "start",
+    openWhen: { key: "liked", equals: true },
+    child: { type: "spacer" },
+  },
+  prototype_strings_v1: { ...label, text: "{t:title}" },
+  prototype_semantics_v1: { ...label, semantics: { heading: true } },
+  prototype_format_v1: {
+    type: "column",
+    repeat: {
+      items: [{ n: 1 }],
+      as: "item",
+      derive: { nText: { of: { item: "n" }, format: { number: {} } } },
+    },
+    children: [label],
+  },
+  prototype_platform_namespace_v1: { ...label, ios: { hover: "lift" } },
   prototype_theme_modes_v1: {
     ...label,
     style: { background: { light: "#FFFFFF", dark: "#000000" } },
@@ -38,8 +86,15 @@ const fixtures: Record<string, Node> = {
     stateKey: "name",
     leadingIcon: "search",
   },
+  prototype_custom_shaders_v1: { ...label, style: { shader: { asset: "effect" } } },
   prototype_flow_grid_v1: { type: "flow", children: [label] },
+  prototype_pager_state_key_v1: { type: "pager", stateKey: "page", children: [label] },
+  prototype_bar_scroll_v1: { type: "topAppBar", title: "Feed", onScroll: "pinned" },
   prototype_pager_options_v1: { type: "pager", axis: "horizontal", children: [label] },
+  prototype_scroll_motion_v1: {
+    ...label,
+    scrollLinked: { source: "feed", range: [0, 160], alpha: [1, 0] },
+  },
   prototype_gestures_v1: { ...label, onLongPress: [{ type: "emit", name: "long" }] },
   prototype_carousel_v1: { type: "carousel", itemWidth: 120, children: [label] },
   prototype_refresh_v1: {
@@ -58,13 +113,27 @@ const fixtures: Record<string, Node> = {
     activeKey: "active",
     child: label,
   },
+  prototype_string_conditions_v1: { ...label, visibleWhen: { key: "name", contains: "A" } },
   prototype_loading_states_v1: { type: "box", style: { shimmer: true }, children: [label] },
+  prototype_effects_v1: { ...label, style: { effects: [{ type: "noise" }] } },
+  prototype_motion_v3: { ...label, animate: {}, style: { cornerRadius: 8 } },
   prototype_motion_v2: { ...label, animate: { durationMs: 300 } },
+  prototype_shared_element_v2: { ...label, shared: { key: "hero", as: "bounds" } },
+  prototype_shared_element_v1: { ...label, sharedKey: "hero" },
+  prototype_stack_patterns_v1: {
+    ...label,
+    onTap: [{ type: "push", stack: "nav", screen: "home", transition: "sharedAxisX" }],
+  },
   prototype_stack_transitions_v1: {
     ...label,
     onTap: [{ type: "push", stack: "nav", screen: "home", transition: "slide" }],
   },
   prototype_choreography_v1: { ...label, transition: { type: "fade", delayMs: 100 } },
+  prototype_lazy_list_v1: {
+    type: "list",
+    repeat: { items: { path: "/rows" }, as: "row", key: "id" },
+    children: [label],
+  },
   prototype_chart_v1: {
     type: "chart",
     variant: "line",
@@ -112,6 +181,10 @@ const fixtures: Record<string, Node> = {
   },
   prototype_platform_v1: platformCall,
   prototype_platform_test_v1: platformCall,
+  prototype_platform_device_v1: deviceRead,
+  prototype_platform_haptics_v1: hapticsCall,
+  prototype_platform_sound_v1: soundCall,
+  prototype_platform_media_items_v1: mediaImage,
 };
 
 // One table drives the gate matrix and contract coverage, including every node-bearing variant.
@@ -122,17 +195,23 @@ const containers: {
   wrap: (node: Node) => Node;
 }[] = [
   { name: "root", prefix: "root", wrap: (root) => ({ root }) },
-  ...["scroll", "dialog", "bottomSheet", "searchBar"].map((type) => ({
+  ...["scroll", "dialog", "bottomSheet", "searchBar", "drawer"].map((type) => ({
     name: type,
     field: "child",
     prefix: "root.child",
     wrap: (child: Node) => ({ root: { type, child } }),
   })),
-  ...["box", "row", "column", "flow", "grid", "carousel", "card", "pager"].map((type) => ({
+  ...["box", "row", "column", "flow", "grid", "carousel", "card", "pager", "list"].map((type) => ({
     name: type,
     field: "children",
     prefix: "root.children[0]",
     wrap: (node: Node) => ({ root: { type, children: [node] } }),
+  })),
+  ...["header", "footer"].map((field) => ({
+    name: "list",
+    field,
+    prefix: `root.${field}`,
+    wrap: (node: Node) => ({ root: { type: "list", [field]: node } }),
   })),
   {
     name: "stack",
@@ -149,12 +228,46 @@ const containers: {
 
 // Gates on a root-level spec field, not a node: no container can hold them, so they get a
 // dedicated test below instead of a container fixture.
-const ROOT_LEVEL_GATES = ["prototype_storage_v1"];
+const ROOT_LEVEL_GATES = [
+  "prototype_storage_v1",
+  "prototype_backdrop_v1",
+  "prototype_design_platform_v1",
+  "prototype_reduced_motion_v1",
+  "prototype_window_motion_v1",
+];
 
 test("every capability gate has a container fixture or is a root-level gate", () => {
   expect([...Object.keys(fixtures), ...ROOT_LEVEL_GATES].sort()).toEqual(
     PROTOTYPE_SPEC_CAPABILITY_GATES.map((gate) => gate.capability).sort(),
   );
+});
+
+test("the backdrop gate reports the window-level backdrop", () => {
+  const gate = PROTOTYPE_SPEC_CAPABILITY_GATES.find(
+    (entry) => entry.capability === "prototype_backdrop_v1",
+  )!;
+  const spec = { window: { backdrop: { material: "thin" } }, root: label };
+  expect(gate.fields(spec)).toEqual(["window.backdrop"]);
+  expect(gate.fields({ window: {}, root: label })).toEqual([]);
+});
+
+test("the design gate reports only explicit root-level platform design", () => {
+  const gate = PROTOTYPE_SPEC_CAPABILITY_GATES.find(
+    (entry) => entry.capability === "prototype_design_platform_v1",
+  )!;
+  expect(gate.fields({ root: label, theme: { design: "platform" } })).toEqual(["theme.design"]);
+  expect(gate.fields({ root: label, theme: { design: "material" } })).toEqual([]);
+  expect(gate.fields({ root: label })).toEqual([]);
+});
+
+test("the window motion gate reports window.transition and a repeat stagger", () => {
+  const gate = PROTOTYPE_SPEC_CAPABILITY_GATES.find(
+    (entry) => entry.capability === "prototype_window_motion_v1",
+  )!;
+  expect(gate.fields({ window: { transition: "fade" }, root: label })).toEqual([
+    "window.transition",
+  ]);
+  expect(gate.fields({ root: label })).toEqual([]);
 });
 
 test("the storage gate reports the root-level storage block", () => {
@@ -206,7 +319,14 @@ function referencesNode(rule: unknown): boolean {
 
 test("contract node-reference fields are covered by both the iterator and container matrix", () => {
   const node = { type: "text" };
-  const actual = prototypeNodeChildren({ child: node, children: [node], screens: { home: node } });
+  const actual = prototypeNodeChildren({
+    type: "list",
+    child: node,
+    children: [node],
+    screens: { home: node },
+    header: node,
+    footer: node,
+  });
   const suffixes = actual.map(({ suffix }) => suffix);
   for (const [variant, definition] of Object.entries(contract.definitions.node.variants)) {
     for (const [field, definitionField] of Object.entries(definition.fields)) {
@@ -292,3 +412,35 @@ test("input checks on a textField do not trip any other capability gate", () => 
     "prototype_checks_v1",
   ]);
 });
+
+for (const container of containers) {
+  test(`prependData lazy-list gate covers ${container.name} ${container.field ?? ""}`, () => {
+    const gate = PROTOTYPE_SPEC_CAPABILITY_GATES.find(
+      (g) => g.capability === "prototype_lazy_list_v1",
+    )!;
+    const candidate = container.wrap({
+      ...label,
+      onTap: [{ type: "prependData", path: "/data/rows", value: { value: 1 } }],
+    });
+    expect(gate.fields(candidate)).toContain(`${container.prefix}.onTap[0]`);
+  });
+}
+
+test("reduced motion gate reports only spec.motion", () => {
+  const gate = PROTOTYPE_SPEC_CAPABILITY_GATES.find(
+    (entry) => entry.capability === "prototype_reduced_motion_v1",
+  )!;
+  expect(gate.fields({ motion: "reduced", root: label })).toEqual(["motion"]);
+  expect(gate.fields({ motion: "standard", root: { motion: "reduced" } })).toEqual([]);
+});
+
+for (const container of containers) {
+  test(`window motion repeat.stagger covers ${container.name}`, () => {
+    const gate = PROTOTYPE_SPEC_CAPABILITY_GATES.find(
+      (entry) => entry.capability === "prototype_window_motion_v1",
+    )!;
+    expect(gate.fields(container.wrap({ ...label, repeat: { stagger: { ms: 20 } } }))).toEqual([
+      `${container.prefix}.repeat.stagger`,
+    ]);
+  });
+}

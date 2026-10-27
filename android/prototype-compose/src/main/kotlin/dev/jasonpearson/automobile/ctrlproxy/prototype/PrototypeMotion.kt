@@ -1,12 +1,8 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
-import android.content.ContentResolver
-import android.database.ContentObserver
-import android.os.Handler
-import android.os.Looper
-import android.provider.Settings
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
@@ -15,17 +11,25 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkOut
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.interaction.InteractionSource
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.State
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.rememberGraphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.IntSize
@@ -41,45 +45,6 @@ import dev.jasonpearson.automobile.protocol.PrototypeRowNode
  * [PrototypeSpecContent] callers stay settled; [PrototypeRuntimeContent] turns it on from the spec.
  */
 internal val LocalPrototypeMotion = compositionLocalOf { false }
-
-/**
- * Animation is on unless the spec opts out (`motion: "none"`) or the system animator duration scale
- * is 0 (`settings put global animator_duration_scale 0`), which keeps screenshots settled.
- */
-internal fun prototypeMotionEnabled(motion: String?, durationScale: Float): Boolean =
-  motion != "none" && durationScale > 0f
-
-/** Reads the system animator duration scale; 1 (the platform default) when unset. */
-internal fun readAnimatorDurationScale(resolver: ContentResolver): Float =
-  Settings.Global.getFloat(resolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f)
-
-/**
- * The system animator duration scale as Compose state, kept current while the prototype is shown.
- * Automation commonly sets the scale to 0 after a prototype is already up; observing the setting
- * (rather than reading it once per spec) makes the very next state change instant, so `observe`
- * never captures an in-flight animation.
- */
-@Composable
-internal fun rememberAnimatorDurationScale(resolver: ContentResolver): State<Float> {
-  val scale = remember(resolver) { mutableFloatStateOf(readAnimatorDurationScale(resolver)) }
-  DisposableEffect(resolver) {
-    val observer =
-      object : ContentObserver(Handler(Looper.getMainLooper())) {
-        override fun onChange(selfChange: Boolean) {
-          scale.floatValue = readAnimatorDurationScale(resolver)
-        }
-      }
-    resolver.registerContentObserver(
-      Settings.Global.getUriFor(Settings.Global.ANIMATOR_DURATION_SCALE),
-      false,
-      observer,
-    )
-    // A change between the first read and registration has no callback; re-read once.
-    scale.floatValue = readAnimatorDurationScale(resolver)
-    onDispose { resolver.unregisterContentObserver(observer) }
-  }
-  return scale
-}
 
 /**
  * The x a horizontal slide starts from (enter) or ends at (exit): off the start edge for
@@ -140,7 +105,12 @@ private val SIZE_TRANSPARENT_ROLES = setOf("card", "scroll", "pager")
 @Composable
 internal fun Modifier.prototypeAnimateSize(enabled: Boolean): Modifier {
   if (!enabled) return this
-  val activity = LocalPrototypeMotionActivity.current ?: return animateContentSize()
+  // Standard motion keeps animateContentSize's own default spring; only expressive overrides it.
+  val expressive =
+    if (LocalPrototypeExpressive.current) prototypeExpressiveSpec<IntSize>() else null
+  fun Modifier.contentSize(): Modifier =
+    if (expressive == null) animateContentSize() else animateContentSize(expressive)
+  val activity = LocalPrototypeMotionActivity.current ?: return contentSize()
   val owner = remember { Any() }
   DisposableEffect(activity, owner) { onDispose { activity.release(owner) } }
   // The outer modifier sees the animated size and the inner one the target, so the container is
@@ -156,7 +126,7 @@ internal fun Modifier.prototypeAnimateSize(enabled: Boolean): Modifier {
     sizes[0] = it
     report()
   }
-    .animateContentSize()
+    .contentSize()
     .onSizeChanged {
       sizes[1] = it
       report()
@@ -169,14 +139,85 @@ internal fun Modifier.prototypeAnimateSize(enabled: Boolean): Modifier {
  * for a screenshot is deterministic.
  */
 @Composable
-internal fun Modifier.prototypePressScale(source: InteractionSource, scale: Float): Modifier {
+internal fun Modifier.prototypePressScale(
+  source: InteractionSource,
+  scale: Float,
+  pressAlpha: Float = 1f,
+  drawOnly: Boolean = false,
+): Modifier {
   val pressed by source.collectIsPressedAsState()
-  val spec = if (LocalPrototypeMotion.current) spring<Float>() else snap()
   val target = if (pressed) scale else 1f
-  val current by animateFloatAsState(target, spec, label = "prototypePressScale")
-  ReportPrototypeMotion { current != target }
-  return graphicsLayer {
-    scaleX = current
-    scaleY = current
+  val current by
+    animateFloatAsState(
+      target,
+      pressSpec(effects = false, fullOnly = true),
+      label = "prototypePressScale",
+    )
+  val alphaTarget = if (pressed) pressAlpha else 1f
+  val currentAlpha by
+    animateFloatAsState(
+      alphaTarget,
+      pressSpec(effects = true, fullOnly = false),
+      label = "prototypePressAlpha",
+    )
+  val instant =
+    !LocalPrototypeMotion.current ||
+      LocalPrototypeMotionProfile.current != PrototypeMotionProfile.FULL
+  val motion = LocalPrototypeMotion.current
+  ReportPrototypeMotion {
+    (!instant && current != target) || (motion && currentAlpha != alphaTarget)
+  }
+  val shownScale = { if (instant) target else current }
+  val shownAlpha = { if (!motion) alphaTarget else currentAlpha }
+  return if (drawOnly) prototypeDrawOnlyPress(shownScale, shownAlpha)
+  else
+    graphicsLayer {
+      alpha = shownAlpha()
+      scaleX = shownScale()
+      scaleY = shownScale()
+    }
+}
+
+/** Spring (expressive springs when selected) while motion is on, snap otherwise. */
+@Composable
+private fun pressSpec(effects: Boolean, fullOnly: Boolean): FiniteAnimationSpec<Float> {
+  val enabled =
+    LocalPrototypeMotion.current &&
+      (!fullOnly || LocalPrototypeMotionProfile.current == PrototypeMotionProfile.FULL)
+  return when {
+    !enabled -> snap()
+    LocalPrototypeExpressive.current -> prototypeExpressiveSpec(effects)
+    else -> spring()
   }
 }
+
+/** Records the content into a layer so scale and alpha never change layout or hit bounds. */
+@Composable
+private fun Modifier.prototypeDrawOnlyPress(scale: () -> Float, alpha: () -> Float): Modifier {
+  val layer = rememberGraphicsLayer()
+  return drawWithContent {
+    layer.record { this@drawWithContent.drawContent() }
+    layer.scaleX = scale()
+    layer.scaleY = scale()
+    layer.alpha = alpha()
+    drawLayer(layer)
+  }
+}
+
+/** Observe a component's own gesture without consuming or changing its semantics or bounds. */
+internal fun Modifier.prototypeComponentPress(source: MutableInteractionSource): Modifier =
+  pointerInput(source) {
+    awaitEachGesture {
+      val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+      val press = PressInteraction.Press(down.position)
+      source.tryEmit(press)
+      try {
+        val up = waitForUpOrCancellation(pass = PointerEventPass.Initial)
+        source.tryEmit(
+          if (up == null) PressInteraction.Cancel(press) else PressInteraction.Release(press),
+        )
+      } finally {
+        source.tryEmit(PressInteraction.Cancel(press))
+      }
+    }
+  }

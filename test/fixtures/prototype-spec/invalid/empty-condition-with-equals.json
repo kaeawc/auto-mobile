@@ -23,5 +23,5 @@
     }
   },
   "expectedPath": "root.visibleWhen.empty",
-  "expectedMessage": "Exactly one of equals, notEquals, gt, lt, empty is required"
+  "expectedMessage": "Exactly one of equals, notEquals, gt, lt, empty, contains, startsWith, lengthGt, lengthLt is required"
 }

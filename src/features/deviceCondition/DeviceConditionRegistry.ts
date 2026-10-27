@@ -14,6 +14,7 @@ import { resolvePermissionFaultInjector } from "./permissionFaultInjectors";
 import { resolvePowerFaultInjector } from "./powerFaultInjectors";
 import { resolveProcessFaultInjector } from "./processFaultInjectors";
 import { resolveStorageFaultInjector } from "./storageFaultInjectors";
+import { resolveVehicleStateInjector } from "./vehicleStateInjectors";
 import { resolveRootStateInjector } from "./rootStateInjector";
 import {
   deviceConditionInputIsMeaningful,
@@ -229,7 +230,8 @@ const defaultInjectorResolver: DeviceConditionInjectorResolver = (owner, key) =>
       resolvePermissionFaultInjector(owner.device, key) ??
       resolvePackageFaultInjector(owner.device, key) ??
       resolveProcessFaultInjector(owner.device, key) ??
-      resolveAppFileFaultInjector(owner.device, key))
+      resolveAppFileFaultInjector(owner.device, key) ??
+      resolveVehicleStateInjector(owner.device, key))
     : undefined;
 
 /**

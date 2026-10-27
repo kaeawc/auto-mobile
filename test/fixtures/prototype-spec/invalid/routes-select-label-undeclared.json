@@ -1,0 +1,43 @@
+{
+  "spec": {
+    "id": "routes-review",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "stack",
+      "id": "nav",
+      "start": "home",
+      "screens": {
+        "home": {
+          "type": "text",
+          "text": "Home"
+        },
+        "detail": {
+          "type": "select",
+          "stateKey": "choice",
+          "options": [
+            {
+              "label": "{route.x}",
+              "value": "one"
+            },
+            {
+              "label": "Other",
+              "value": "two"
+            }
+          ]
+        }
+      },
+      "routes": {
+        "detail": {}
+      }
+    },
+    "state": {
+      "choice": "one"
+    }
+  },
+  "expectedPath": "root.screens[\"detail\"].options[0].label",
+  "expectedMessage": "Undeclared route param \"x\""
+}

@@ -23,6 +23,7 @@ final class PrototypeBundleBoundaryTests: XCTestCase {
         XCTAssertEqual(corpus.contractLimits, [
             "MAX_PROTOTYPE_ASSET_BYTES": limits.maxImageBytes,
             "MAX_PROTOTYPE_FONT_ASSET_BYTES": limits.maxFontBytes,
+            "MAX_PROTOTYPE_SHADER_ASSET_BYTES": limits.maxShaderBytes,
             "MAX_PROTOTYPE_ASSET_COUNT": limits.maxAssetCount,
             "MAX_PROTOTYPE_ASSET_TOTAL_BYTES": limits.maxTotalBytes,
             "MAX_PROTOTYPE_ASSET_ID_LENGTH": limits.maxIdLength,

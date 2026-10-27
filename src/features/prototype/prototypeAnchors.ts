@@ -208,7 +208,11 @@ export function prototypeAnchorPlacementError(spec: PrototypeSpec): string | und
   if (spec.window.placement.type !== "floating" || root === undefined) {
     return undefined;
   }
-  const nested = anchoredNodes(root).find(({ path }) => path !== "root");
+  // Tooltip anchors identify the target rect; natives hoist the bubble as an overlay,
+  // rather than laying it out as an ordinary layered anchored node.
+  const nested = anchoredNodes(root).find(
+    ({ node, path }) => path !== "root" && node.type !== "tooltip",
+  );
   return nested
     ? `${nested.path}.anchor: in a floating window only the root node can be anchored (the window moves onto it). Nothing was shown. Anchor the root, or use a fullscreen or sheet placement.`
     : undefined;

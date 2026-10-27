@@ -68,6 +68,7 @@ enum PrototypeAgentProtocol {
         "prototype_platform_v1",
         "prototype_platform_device_v1",
         advanceClockRequest,
+        deadTapCapability,
     ]
     /// A same-id `show_prototype` replaces the prototype in place keeping pager pages and stack paths, and
     /// `reset: true` starts it fresh. Same name as the CtrlProxy capability; the host refuses
@@ -115,6 +116,8 @@ enum PrototypeAgentProtocol {
     /// Fullscreen `window.chrome` (#12064): `none` (default) fills the window with a hidden and
     /// accessible escape; `bar` reserves the host dismiss bar. Same name as the CtrlProxy capability.
     static let windowChromeCapability = "prototype_window_chrome_v1"
+    /// Opt-in unhandled taps inside the prototype window.
+    static let deadTapCapability = "prototype_dead_tap_v1"
     /// Read-only data (#11673): resolves path repeats, authored text and data conditions once per
     /// show before repeat expansion. Status reports the shown data alongside state.
     static let checksCapability = "prototype_checks_v1"

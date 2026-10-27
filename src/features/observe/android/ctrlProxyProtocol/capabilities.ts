@@ -50,6 +50,13 @@ export const PROTOTYPE_WINDOW_OPTIONS_CAPABILITY = "prototype_window_options_v1"
  */
 export const PROTOTYPE_WINDOW_CHROME_CAPABILITY = "prototype_window_chrome_v1";
 
+/**
+ * Advertised by a CtrlProxy or iOS prototype agent that honours spec `window.deadTaps` and reports
+ * a tap landing on no tappable or input node as an `emit` event named `prototype_dead_tap`
+ * (payload `{stack, screen, x, y}`, dp or points). A device without it would ignore the field.
+ */
+export const PROTOTYPE_DEAD_TAP_CAPABILITY = "prototype_dead_tap_v1";
+
 /** Buffers a device-persistent prototype's events while no host is connected; answers inspect. */
 export const PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY = "prototype_persistence_replay_v1";
 

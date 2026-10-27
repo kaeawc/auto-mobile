@@ -10830,6 +10830,12 @@
             "values": ["bar", "none"]
           },
           "optional": true
+        },
+        "deadTaps": {
+          "rule": {
+            "kind": "boolean"
+          },
+          "optional": true
         }
       }
     },

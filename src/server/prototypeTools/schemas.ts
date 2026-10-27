@@ -247,13 +247,38 @@ export const prototypeSchema = addDeviceTargetingToSchema(
           "clearStorage",
           "simulate",
           "screenMap",
+          "testSessionBegin",
+          "testSessionEnd",
+          "testSessionReport",
         ],
         {
           error: (issue) =>
             getRemovedToolActionHint(PROTOTYPE_TOOL_NAME, issue.input) ??
-            "action must be one of show, patch, dismiss, status, inspect or awaitEvent; saved actions: save, listSaved, deleteSaved or open; storage action: clearStorage; timer action: simulate; host-only: screenMap",
+            "action must be one of show, patch, dismiss, status, inspect or awaitEvent; saved actions: save, listSaved, deleteSaved or open; storage action: clearStorage; timer action: simulate; host test-session actions: testSessionBegin, testSessionEnd or testSessionReport; host-only: screenMap",
         },
       ),
+      goal: z
+        .string()
+        .min(1)
+        .max(200)
+        .optional()
+        .describe(
+          "testSessionBegin only: screen label such as checkout/done; reaching it completes the session",
+        ),
+      cohort: z
+        .string()
+        .min(1)
+        .max(64)
+        .optional()
+        .describe(
+          "testSessionBegin only: free label echoed in the report; no cross-session aggregation",
+        ),
+      testSessionId: z
+        .string()
+        .min(1)
+        .max(64)
+        .optional()
+        .describe("testSessionReport: stored session id, instead of the latest session for id"),
       spec: specInput
         .optional()
         .describe(
@@ -448,6 +473,9 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     "autoConfirm",
     "restartLauncher",
     "removeIcon",
+    "goal",
+    "cohort",
+    "testSessionId",
   ] as const;
   const allowed: Record<typeof value.action, readonly string[]> = {
     show: [
@@ -469,6 +497,9 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     clearStorage: ["id"],
     simulate: ["id", "advanceTimeMs"],
     dismiss: ["id", "all"],
+    testSessionBegin: ["id", "goal", "cohort"],
+    testSessionEnd: ["id"],
+    testSessionReport: ["id", "testSessionId"],
     status: [],
     inspect: [],
     screenMap: ["spec", "specPath"],
@@ -483,6 +514,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
       });
     }
   }
+  validateTestSessionInput(value, ctx);
   validatePrototypeSavedInput(value, ctx);
   if (value.action === "patch") {
     (["id", "ops"] as const)
@@ -506,6 +538,25 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     });
   }
 });
+
+function validateTestSessionInput(
+  value: { action: string; id?: string; testSessionId?: string },
+  ctx: z.RefinementCtx,
+): void {
+  if (
+    ((value.action === "testSessionBegin" || value.action === "testSessionEnd") &&
+      value.id === undefined) ||
+    (value.action === "testSessionReport" &&
+      value.id === undefined &&
+      value.testSessionId === undefined)
+  ) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["id"],
+      message: "Test sessions require id (testSessionReport also accepts testSessionId)",
+    });
+  }
+}
 
 /** save and open may wait on ProtoViewer; the daemon budgets at most the awaitEvent maximum. */
 function validateProtoViewerTimeout(
@@ -554,10 +605,17 @@ function validateAwaitEventInput(
 
 /** status and inspect show nothing on the device: reads (#10965). The rest are control. */
 export const PROTOTYPE_READ_ACTIONS: readonly string[] = [
+  
   "status",
+ 
   "inspect",
+ 
   "listSaved",
   "screenMap",
+,
+  "testSessionBegin",
+  "testSessionEnd",
+  "testSessionReport",
 ];
 
 export function isPrototypeReadAction(args: z.infer<typeof prototypeSchema>): boolean {
@@ -709,6 +767,23 @@ export const prototypeOutputSchema = z.object({
     .optional()
     .describe("screenMap only: the spec's screens and the actions that move between them"),
   mermaid: z.string().optional().describe("screenMap only: the same map as a Mermaid flowchart"),
+  testSession: z
+    .object({
+      id: z.string(),
+      status: z.enum(["active", "ended"]),
+      prototypeId: z.string(),
+      deviceId: z.string(),
+      cohort: z.string().optional(),
+      goal: z.string().optional(),
+      startedAt: z.number(),
+      endedAt: z.number().optional(),
+      eventCount: z.number().int().nonnegative(),
+      droppedCount: z.number().int().nonnegative(),
+      deadTaps: z.enum(["enabled", "off"]),
+    })
+    .optional(),
+  report: z.json().optional(),
+  markdown: z.string().optional(),
   saved: z.object({ id: z.string(), slug: z.string(), replaced: z.boolean() }).optional(),
   viewer: z
     .object({

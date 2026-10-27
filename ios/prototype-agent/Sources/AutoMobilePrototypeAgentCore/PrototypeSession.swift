@@ -807,6 +807,21 @@ struct PrototypeSession {
         return events
     }
 
+    /// An unhandled single-pointer tap, in window-local points. Runtime payloads never include text.
+    mutating func deadTap(x: Double, y: Double) -> [PrototypeEvent] {
+        guard isShown, spec?.window.deadTaps == true, x.isFinite, y.isFinite else { return [] }
+        let top = stacks.min {
+            if $0.value.depth != $1.value.depth { return $0.value.depth > $1.value.depth }
+            return $0.key.utf16.lexicographicallyPrecedes($1.key.utf16)
+        }
+        return emit(kind: "emit", name: "prototype_dead_tap", payload: .object([
+            "stack": top.map { .string($0.key) } ?? .null,
+            "screen": top?.value.path.last.map { .string($0) } ?? .null,
+            "x": .number((x * 10).rounded() / 10),
+            "y": .number((y * 10).rounded() / 10),
+        ]))
+    }
+
     private mutating func emit(
         kind: String, name: String?, payload: JSONValue, context: PrototypeResolvedEmitContext? = nil
     )

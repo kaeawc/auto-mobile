@@ -222,7 +222,9 @@
     "z-effects-all-types.json",
     "z-effects-animated-phase.json",
     "z-effects-at-limits.json",
-    "z-effects-style-when.json"
+    "z-effects-style-when.json",
+    "width-dp-at-max.json",
+    "window-dead-taps.json"
   ],
   "invalid": [
     "anchor-offset-x-over-max.json",
@@ -1285,6 +1287,7 @@
     "unknown-style.json",
     "weight-over-max.json",
     "width-dp-over-max.json",
+    "window-dead-taps-not-boolean.json",
     "wrong-type.json",
     "zero-aspect-ratio.json",
     "zero-line-height.json",
@@ -1621,6 +1624,8 @@
     "z-effects-all-types.json": ["prototype_effects_v1"],
     "z-effects-animated-phase.json": ["prototype_effects_v1"],
     "z-effects-at-limits.json": ["prototype_effects_v1"],
-    "z-effects-style-when.json": ["prototype_effects_v1"]
+    "z-effects-style-when.json": ["prototype_effects_v1"],
+    "width-dp-at-max.json": [],
+    "window-dead-taps.json": []
   }
 }

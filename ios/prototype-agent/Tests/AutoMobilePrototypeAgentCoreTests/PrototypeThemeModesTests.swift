@@ -73,6 +73,7 @@ final class PrototypeThemeModesTests: XCTestCase {
             "prototype_platform_v1",
             "prototype_platform_device_v1",
             "advance_prototype_clock",
+            "prototype_dead_tap_v1",
         ])
     }
 

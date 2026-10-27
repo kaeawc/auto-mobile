@@ -195,7 +195,12 @@ fun PrototypeRuntimeContent(
         val traceEnabled = traceSink.isEnabled()
         if (traceEnabled) traceSink.begin(PrototypeTrace.COMPOSE)
         ObservePrototypeDevice(send)
-        PrototypeSpecContent(runtime.renderModel(snapshot).root, snapshot.spec.theme, send)
+        PrototypeSpecContent(
+          runtime.renderModel(snapshot).root,
+          snapshot.spec.theme,
+          deadTaps = snapshot.spec.window.deadTaps == true,
+          interact = send,
+        )
         if (traceEnabled) traceSink.end()
       }
     }
@@ -208,9 +213,13 @@ fun PrototypeRuntimeContent(
 fun PrototypeSpecContent(
   root: PrototypeRenderNode,
   theme: PrototypeSpecTheme? = null,
+  deadTaps: Boolean = false,
   interact: (PrototypeInteraction) -> Unit = {},
 ) {
   PrototypeTheme(root, theme) {
+    val gestureTaps = remember { PrototypeGestureTaps() }
+    val density = LocalDensity.current.density
+    val currentInteract = rememberUpdatedState(interact)
     val anchorLocals = remember { PrototypeAnchorLocals() }
     val menuLayers = remember { PrototypeMenuLayers() }
     val menuParents = remember(root) { prototypeMenuParents(root) }
@@ -219,7 +228,7 @@ fun PrototypeSpecContent(
         (LocalPrototypeListEndTriggers.current
           ?: remember(LocalPrototypeShowEpoch.current) { PrototypeListEndTriggers() }),
       LocalPrototypeAnchorLocals provides anchorLocals,
-      LocalPrototypeGestureTaps provides remember { PrototypeGestureTaps() },
+      LocalPrototypeGestureTaps provides gestureTaps,
       LocalPrototypeMenuLayers provides menuLayers,
       LocalPrototypeDrawerLayers provides remember { PrototypeDrawerLayers() },
       LocalPrototypeTooltipTargets provides remember(root) { prototypeTooltipTargets(root) },
@@ -228,7 +237,14 @@ fun PrototypeSpecContent(
       LocalPrototypeHandleVisuals provides remember(root) { prototypeHandleVisuals(root) },
     ) {
       Box(
-        Modifier.onGloballyPositioned { menuLayers.windowBounds = it.boundsInRoot() }
+        Modifier.then(
+            if (deadTaps)
+              Modifier.prototypeDeadTapObserver(gestureTaps, density) {
+                currentInteract.value(it)
+              }
+            else Modifier,
+          )
+          .onGloballyPositioned { menuLayers.windowBounds = it.boundsInRoot() }
           .semantics { testTagsAsResourceId = true },
       ) {
         val modals = prototypeModalLayers(root)

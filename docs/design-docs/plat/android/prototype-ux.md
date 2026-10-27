@@ -2958,3 +2958,26 @@ missing-translation (missing key, shape mismatch or missing required integer plu
 unknown-translation-key (locale key absent from default), and empty-heading (heading without
 text/label). Semantics labels name controls for existing unlabeled rules. Findings retain the existing
 cap of 50. Device acceptance has not yet been run. Logical RTL swipe sides are not included.
+
+## Dead taps (`window.deadTaps`, `prototype_dead_tap_v1`)
+
+`window.deadTaps: true` enables `emit` events named `prototype_dead_tap`. The
+Android device advertises `prototype_dead_tap_v1`; this window option is a host
+preflight capability, not a strict-spec gate.
+
+A root Final-pass observer reports single-pointer down/up gestures left
+unconsumed by descendants, with movement below touch slop. Scrolling, pager
+drags, multitouch and taps outside the content window do not report. Interactive
+controls and dismissing scrims consume their gestures. Gesture-only nodes with
+nonempty long-press or double-tap actions explicitly mark their down as handled
+without consuming it, preserving ancestor clicks. Passive text, boxes, images
+and spacers remain dead areas. A single tap on a gesture-only node counts as
+handled, even if its hold or double tap action does not fire.
+
+Payloads contain only `stack`, `screen`, `x` and `y`; coordinates are window-local
+dp rounded to one decimal. The deepest stack path supplies its id and top screen;
+equal depths choose the lowest stack id lexicographically. Both ids are null
+without stacks. The event uses normal sequence allocation, state, pages and
+stacks. The payload never includes typed text. Authored emits cannot use the
+reserved `prototype_` prefix. Disabling the option or closing the runtime stops
+reporting.

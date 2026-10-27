@@ -40,6 +40,7 @@ class CommandAdvertisementTest {
       "prototype_multi_surface_v1",
       "prototype_window_options_v1",
       "prototype_window_chrome_v1",
+      "prototype_dead_tap_v1",
       "prototype_theme_modes_v1",
       "prototype_timers_v1",
       "prototype_tooltip_v1",
@@ -153,6 +154,7 @@ class CommandAdvertisementTest {
     assertTrue(commands.contains("prototype_multi_surface_v1"))
     assertTrue(commands.contains("prototype_window_options_v1"))
     assertTrue(commands.contains("prototype_window_chrome_v1"))
+    assertTrue(commands.contains("prototype_dead_tap_v1"))
     assertTrue(commands.contains("prototype_theme_modes_v1"))
     assertTrue(commands.contains("prototype_flow_grid_v1"))
     assertTrue(commands.contains("prototype_pager_options_v1"))

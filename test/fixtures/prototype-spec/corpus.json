@@ -276,6 +276,7 @@
     "transition-slide.json",
     "width-dp-at-max.json",
     "window-dead-taps.json",
+    "window-motion.json",
     "z-effects-all-types.json",
     "z-effects-animated-phase.json",
     "z-effects-at-limits.json",
@@ -792,6 +793,8 @@
     "repeat-nonscalar-item-value.json",
     "repeat-on-leaf-node.json",
     "repeat-pager-in-template.json",
+    "repeat-stagger-fraction.json",
+    "repeat-stagger-high.json",
     "repeat-too-many-items.json",
     "repeat-unknown-action-field.json",
     "repeat-unknown-condition-field.json",
@@ -1087,6 +1090,7 @@
     "strict-gate-prototype_theme_modes_v1.json",
     "strict-gate-prototype_timers_v1.json",
     "strict-gate-prototype_tooltip_v1.json",
+    "strict-gate-prototype_window_motion_v1.json",
     "strict-header-bound-cr.json",
     "strict-header-bound-crlf.json",
     "strict-header-bound-lf.json",
@@ -1523,6 +1527,7 @@
     "weight-over-max.json",
     "width-dp-over-max.json",
     "window-dead-taps-not-boolean.json",
+    "window-transition.json",
     "wrong-type.json",
     "zero-aspect-ratio.json",
     "zero-line-height.json",
@@ -1992,6 +1997,7 @@
     ],
     "routes-repeat-alias-backcompat.json": [],
     "routes-repeat-key-mixed-valid.json": ["prototype_routes_v1", "prototype_stack_v1"],
-    "routes.json": ["prototype_routes_v1", "prototype_stack_v1", "prototype_storage_v1"]
+    "routes.json": ["prototype_routes_v1", "prototype_stack_v1", "prototype_storage_v1"],
+    "window-motion.json": ["prototype_window_motion_v1"]
   }
 }

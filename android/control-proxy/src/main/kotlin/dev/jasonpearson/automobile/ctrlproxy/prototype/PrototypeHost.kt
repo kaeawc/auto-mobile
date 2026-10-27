@@ -132,6 +132,12 @@ data class PrototypeRequest(
   val bringToFront: Boolean = false,
   val onHostDismiss: suspend () -> Unit = {},
   /** Navigation takes Back even without an editable field; IME handling stays separate. */
+  val transition: String = "none",
+  val animateEnter: Boolean = true,
+  val exitResources: PrototypeExitResources? = null,
+  val exitMetadata: () -> PrototypeWindowMetadata? = { null },
+  val motion: String? = null,
+  val motionActivity: PrototypeMotionActivity? = null,
   val hasStackBack: Boolean = false,
   val onHostBack: (suspend () -> Unit)? = null,
   /** `window.backdrop` as resolved for this show (#15126); null without one. */
@@ -152,7 +158,7 @@ data class PrototypeRequest(
  * results report platform success; show/replace return false after destroy. Replace without a
  * window behaves as show. Read state is a snapshot, not a cross-thread compound transaction.
  */
-interface PrototypeHost {
+interface PrototypeHost : PrototypeHostLifecycle {
   /** Best synchronous baseline; the Compose window size corrects it after attachment. */
   @InternalAutoMobilePrototypeApi
   fun initialDeviceState(request: PrototypeRequest): kotlinx.serialization.json.JsonObject =
@@ -186,18 +192,6 @@ interface PrototypeHost {
 
   /** Changes Back focusability without changing text-field or keyboard state. */
   suspend fun setStackBackEnabled(enabled: Boolean): Boolean
-
-  /**
-   * Removes immediately, allowing the app to regain focus. A window already detached counts as
-   * removed; other failed removals are retryable.
-   */
-  suspend fun dismiss(): Boolean
-
-  /**
-   * Terminal for show/replace; dismiss may still retry a failed platform removal. Invalidates
-   * pending restores, but does not cancel caller-owned gesture blocks.
-   */
-  suspend fun destroy(): Boolean
 
   /** Changes whole-view alpha in place; throws IllegalArgumentException outside 0..100. */
   suspend fun setOpacity(percent: Int)
@@ -294,6 +288,7 @@ class DefaultPrototypeHost(
   ) {
     /** A floating window's screen position as its anchored root last placed it (#9316). */
     var anchoredOrigin: IntOffset? = null
+    val visible = androidx.compose.runtime.mutableStateOf(true)
   }
 
   @Volatile private var window: Window? = null
@@ -382,7 +377,8 @@ class DefaultPrototypeHost(
       // New content places its own anchored root again, so a replaced spec starts from its
       // placement.
       inPlace?.anchoredOrigin = null
-      if (inPlace != null && !request.bringToFront) updateInPlace(inPlace, request, params)
+      if (inPlace != null && (!request.bringToFront || !windowMotionEnabled(request, target)))
+        updateInPlace(inPlace, request, params)
       else addWindow(target, request, params, replacing = current)
     }
 
@@ -460,7 +456,7 @@ class DefaultPrototypeHost(
     window = added
     placement = request.placement
     owner.resume()
-    replacing?.let(::retire)
+    replacing?.let { if (!windowMotionEnabled(it) || !beginExit(it)) retire(it) }
     added.back.sync(request.focusable)
     onWindowAttached()
     return true
@@ -478,6 +474,8 @@ class DefaultPrototypeHost(
     old.back.release()
     old.owner.destroy()
     old.view.disposeComposition()
+    old.request.motionActivity?.release(old)
+    old.request.exitResources?.release(old.view)
   }
 
   private fun applyContent(current: Window) {
@@ -490,8 +488,24 @@ class DefaultPrototypeHost(
     val geometry = windowGeometry(current)
     current.view.setContent {
       CompositionLocalProvider(LocalPrototypeWindowGeometry provides geometry) {
-        PrototypeWindowContent(request, current.view.escapeState) {
-          prototypeInsetFloor(request.placement, target.density(), target.navigationBarBottomPx())
+        PrototypeWindowMotion(
+          current.visible.value,
+          PrototypeWindowMotionSpec(
+            request.transition,
+            when (request.placement) {
+              is PrototypePlacement.Sheet -> "sheet"
+              is PrototypePlacement.Floating -> "floating"
+              else -> "fullscreen"
+            },
+            (request.placement as? PrototypePlacement.Sheet)?.edge?.name?.lowercase() ?: "bottom",
+            request.motion,
+            request.animateEnter,
+          ),
+          request.motionActivity,
+        ) {
+          PrototypeWindowContent(request, current.view.escapeState) {
+            prototypeInsetFloor(request.placement, target.density(), target.navigationBarBottomPx())
+          }
         }
       }
     }
@@ -614,7 +628,70 @@ class DefaultPrototypeHost(
     }
   }
 
-  override suspend fun dismiss(): Boolean = mainThread.onMain { dismissOnMain() }
+  override suspend fun dismiss(): Boolean = mainThread.onMain {
+    val current = window ?: return@onMain true
+    if (!windowMotionEnabled(current)) return@onMain dismissOnMain()
+    if (!beginExit(current)) return@onMain window == null
+    touchThroughToken = null
+    window = null
+    placement = null
+    true
+  }
+
+  override suspend fun dismissImmediately(): Boolean = mainThread.onMain {
+    finishExits()
+    dismissOnMain()
+  }
+
+  private fun finishExits() {
+    exiting.toList().forEach(::retire)
+    exiting.clear()
+  }
+
+  private fun windowMotionEnabled(current: Window): Boolean =
+    windowMotionEnabled(current.request, current.target)
+
+  private fun windowMotionEnabled(
+    request: PrototypeRequest,
+    target: PrototypeDisplayWindow,
+  ): Boolean {
+    val resolver = target.context.contentResolver
+    return request.transition != "none" &&
+      request.motion != "none" &&
+      android.provider.Settings.Global.getFloat(
+        resolver,
+        android.provider.Settings.Global.ANIMATOR_DURATION_SCALE,
+        1f,
+      ) != 0f &&
+      android.provider.Settings.Global.getFloat(
+        resolver,
+        android.provider.Settings.Global.TRANSITION_ANIMATION_SCALE,
+        1f,
+      ) != 0f
+  }
+
+  private val exiting = mutableSetOf<Window>()
+
+  private fun beginExit(current: Window): Boolean {
+    val params = WindowManager.LayoutParams().apply { copyFrom(current.params) }
+    params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+    if (!update(current, params)) return false
+    current.visible.value = false
+    current.back.release()
+    exiting.add(current)
+    current.request.motionActivity?.report(current, true)
+    current.request.exitResources?.retain(
+      current.view,
+      { if (exiting.remove(current)) retire(current) },
+      current.request.surfaceId,
+      current.request.exitMetadata,
+    )
+    backScope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+      settleTimer.awaitSettle(400)
+      mainThread.onMain { if (exiting.remove(current)) retire(current) }
+    }
+    return true
+  }
 
   private fun dismissOnMain(): Boolean {
     val current = window ?: return true
@@ -644,6 +721,7 @@ class DefaultPrototypeHost(
 
   override suspend fun destroy(): Boolean = mainThread.onMain {
     destroyed = true
+    finishExits()
     touchThroughToken = null
     dismissOnMain()
   }
@@ -749,7 +827,7 @@ class DefaultPrototypeHost(
       current.target.windowManager.updateViewLayout(current.view, params)
     } catch (error: Exception) {
       Log.e(TAG, "Failed to update prototype", error)
-      if (isNotAttached(error)) {
+      if (isNotAttached(error) && window === current) {
         clearWindow(current)
         onWindowLost()
       }

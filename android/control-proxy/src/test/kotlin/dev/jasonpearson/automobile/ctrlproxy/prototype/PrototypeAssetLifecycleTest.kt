@@ -1,6 +1,8 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import dev.jasonpearson.automobile.protocol.*
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -15,6 +17,7 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [30])
 class PrototypeAssetLifecycleTest {
+  private val cleanupScope = TestScope()
   private val host = FakePrototypeHost()
   private val timer = FakePrototypeTimer()
   private val events = mutableListOf<PrototypeEvent>()
@@ -31,6 +34,7 @@ class PrototypeAssetLifecycleTest {
       eventSink = PrototypeEventSink { events += it },
       clock = { timer.now },
       lifecycle = lifecycle,
+      requestScope = cleanupScope,
       clearAssets = {
         clearFailure?.let { throw it }
         store.clear()
@@ -55,9 +59,15 @@ class PrototypeAssetLifecycleTest {
     assertEquals(2, store.count)
   }
 
-  private fun assertCleared() = assertEquals(0, store.count)
+  private fun assertCleared() {
+    cleanupScope.runCurrent()
+    assertEquals(0, store.count)
+  }
 
-  private fun assertKept() = assertEquals(2, store.count)
+  private fun assertKept() {
+    cleanupScope.runCurrent()
+    assertEquals(2, store.count)
+  }
 
   @Test
   fun `agent dismiss by id clears assets`() = runTest {

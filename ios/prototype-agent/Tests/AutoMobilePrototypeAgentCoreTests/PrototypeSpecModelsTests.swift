@@ -3,6 +3,8 @@ import XCTest
 
 final class PrototypeSpecModelsTests: XCTestCase {
     private struct Models: Decodable, Encodable {
+        let requestUploadFile: RequestUploadFile
+        let requestUploadPart: RequestUploadPart
         let offset: Offset
         let padding: Padding
         let safeAreaPadding: SafeAreaPadding
@@ -16,6 +18,11 @@ final class PrototypeSpecModelsTests: XCTestCase {
             .appendingPathComponent("test/fixtures/prototype-spec/models.json")
         let data = try Data(contentsOf: url)
         let models = try JSONDecoder().decode(Models.self, from: data)
+        XCTAssertEqual(models.requestUploadFile.asset, "hero")
+        XCTAssertEqual(models.requestUploadPart.file?.asset, "hero")
+        XCTAssertEqual(models.requestUploadPart.name, "photo")
+        XCTAssertEqual(models.requestUploadPart.filename, "photo.png")
+        XCTAssertEqual(models.requestUploadPart.contentType, "image/png")
         XCTAssertEqual(models.offset.x, -12.5)
         XCTAssertEqual(models.offset.y, 24.25)
         XCTAssertEqual(models.padding.top, 1.5)
@@ -31,7 +38,7 @@ final class PrototypeSpecModelsTests: XCTestCase {
         }
         // The fixture also carries Kotlin-only models; Swift emits only those it consumes.
         guard case let .object(round) = encoded else { return XCTFail("models did not encode") }
-        for name in ["offset", "padding", "safeAreaPadding", "chartRange"] {
+        for name in ["offset", "padding", "safeAreaPadding", "chartRange", "requestUploadFile", "requestUploadPart"] {
             XCTAssertEqual(round[name], source[name], name)
         }
     }

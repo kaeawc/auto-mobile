@@ -1,0 +1,33 @@
+{
+  "spec": {
+    "id": "request-upload",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "progress": 0,
+      "caption": "hello"
+    },
+    "root": {
+      "type": "button",
+      "label": "Upload",
+      "onTap": [
+        {
+          "type": "request",
+          "method": "HEAD",
+          "url": "https://example.com/upload",
+          "body": {
+            "form": {
+              "q": {
+                "value": "a"
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].body"
+}

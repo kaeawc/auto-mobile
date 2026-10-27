@@ -1,0 +1,81 @@
+{
+  "spec": {
+    "id": "request-upload",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "progress": 0,
+      "caption": "hello"
+    },
+    "root": {
+      "type": "button",
+      "label": "Upload",
+      "onTap": [
+        {
+          "type": "request",
+          "method": "POST",
+          "url": "https://example.com/upload",
+          "body": {
+            "form": {
+              "f0": {
+                "value": "v"
+              },
+              "f1": {
+                "value": "v"
+              },
+              "f2": {
+                "value": "v"
+              },
+              "f3": {
+                "value": "v"
+              },
+              "f4": {
+                "value": "v"
+              },
+              "f5": {
+                "value": "v"
+              },
+              "f6": {
+                "value": "v"
+              },
+              "f7": {
+                "value": "v"
+              },
+              "f8": {
+                "value": "v"
+              },
+              "f9": {
+                "value": "v"
+              },
+              "f10": {
+                "value": "v"
+              },
+              "f11": {
+                "value": "v"
+              },
+              "f12": {
+                "value": "v"
+              },
+              "f13": {
+                "value": "v"
+              },
+              "f14": {
+                "value": "v"
+              },
+              "f15": {
+                "value": "v"
+              },
+              "f16": {
+                "value": "v"
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].body.form"
+}

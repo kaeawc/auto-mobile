@@ -50,7 +50,10 @@ extension PrototypeContractValidator {
         }
         let exactlyOne = strings(rule["exactlyOne"])
         if let first = exactlyOne.first, exactlyOne.filter({ data[$0] != nil }).count != 1 {
-            throw invalid(keyPath(path, first), "Exactly one of \(exactlyOne.joined(separator: ", ")) is required")
+            throw invalid(
+                rule["exactlyOneAtObject"] == .bool(true) ? path : keyPath(path, first),
+                "Exactly one of \(exactlyOne.joined(separator: ", ")) is required"
+            )
         }
         for trigger in sorted(rule["dependents"]?.objectFields?.keys ?? [String: JSONValue]().keys) {
             let names = strings(rule["dependents"]?.objectFields?[trigger])

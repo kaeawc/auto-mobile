@@ -26,6 +26,8 @@ export interface PrototypeRequestEventPayload {
   /** The HTTP status; absent when no response arrived. */
   status?: number;
   durationMs: number;
+  /** Number of uploaded bytes, when reported by an upload-capable runtime. */
+  uploadBytes?: number;
   /** Present for every `error` outcome, including a non-2xx status (`http_error`). */
   error?: { code: (typeof PROTOTYPE_REQUEST_META_ERROR_CODES)[number]; message: string };
 }
@@ -39,6 +41,7 @@ const payloadSchema = z
     into: z.string().min(1).optional(),
     outcome: z.enum(["success", "error"]),
     status: z.number().finite().int().min(100).max(599).optional(),
+    uploadBytes: z.number().finite().int().nonnegative().optional(),
     durationMs: z.number().finite().nonnegative(),
     error: z
       .object({

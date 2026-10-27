@@ -1,0 +1,36 @@
+{
+  "spec": {
+    "id": "request-upload",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "progress": 0,
+      "caption": "hello"
+    },
+    "root": {
+      "type": "button",
+      "label": "Upload",
+      "onTap": [
+        {
+          "type": "request",
+          "method": "POST",
+          "url": "https://example.com/upload",
+          "body": {
+            "form": {
+              "payload": {
+                "data": "/caption"
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "$",
+  "options": {
+    "supportedCapabilities": ["prototype_network_v1", "prototype_network_upload_v1"]
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "spec": {
+    "id": "share",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["share"]
+    },
+    "root": {
+      "type": "button",
+      "label": "Share",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "share.open",
+          "args": {
+            "url": {
+              "value": "https://user:pass@example.com"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].args.url.value",
+  "expectedMessage": "Share URL must be absolute http(s) with a literal scheme"
+}

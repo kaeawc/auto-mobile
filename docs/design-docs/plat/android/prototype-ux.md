@@ -1601,30 +1601,40 @@ system-sheet driver is implemented. There are no share events or `/platform/shar
 The existing `into`, `statusKey`, `onSuccess`, `onError`, timeout and `prototype_platform`
 completion contract applies. A cancelled sheet must fail with `cancelled` and run `onError`.
 
-Arguments use value bindings. At least one of `text`, `url`, `images`, `files`, `contact` is
-required; `subject` is optional (`title` is unknown). String values use `{key}`,
+Arguments use value bindings. At least one nonblank `text`, nonempty `url`,
+`images`, `files`, or `contact` is required; `subject` alone is not an item.
+`subject` is optional; the error for `title` directs callers to use `subject`. String values use `{key}`,
 `{data:/pointer}`, `{item.field}`, `{index}` without rescanning substitutions. Missing state
 or item text remains literal; missing/non-scalar data text becomes empty. Missing whole-value
-bindings fail with `invalid_args`. URLs must have a literal http(s) scheme; placeholders elsewhere are checked again after binding;
-relative, javascript, data, file, and prototype deep-link URLs are refused. Backslashes and ASCII whitespace/control characters are refused by the portable URL grammar.
+bindings fail with `invalid_args`. Data, event, and platform pointer roots must be objects;
+arrays can be traversed below an object member, but an array root is a missing binding. URLs must have a literal http(s) scheme; placeholders elsewhere are checked again after binding;
+relative, javascript, data, file, and prototype deep-link URLs are refused. Userinfo, backslashes, ASCII whitespace, C0/C1 controls, NBSP, U+2028–U+202E, and
+U+2066–U+2069 are refused by the portable URL grammar.
 
 Images contain 1–10 uploaded asset IDs, `{asset: id}` objects, or `{data: "/pointer"}` objects
 resolving to either uploaded-ID form. Files contain 1–4 `{asset, name, mimeType}` objects.
 Names are 1–128 UTF-8 bytes, cannot start with a dot, and cannot contain path separators or
-C0/C1 controls. MIME values are nonempty RFC token `type/subtype` values, with no parameters.
+C0/C1 controls, NBSP, U+2028–U+202E, or U+2066–U+2069. Windows reserved device names,
+colons, trailing dots, and ordinary spaces are allowed by this platform-neutral contract. MIME values are nonempty RFC token `type/subtype` values, with no parameters.
 No device-local media type is introduced. A complete `shareAssetIds` inventory enables static
 unknown-ID refusal; bundle references use the existing asset lookup, and pure resolution always
-checks the supplied uploaded inventory. Existing asset transport limits and supported media types
+checks the supplied uploaded inventory. Every referenced entry must include a nonnegative
+safe-integer `bytes` value; malformed metadata fails with typed `invalid_args`. Existing asset transport limits and supported media types
 still apply; the contract does not add PDF or other upload formats.
 
-Contact fields are exactly `name` (nonempty, required), `phone`, `email`, `org`, `url`, `note`.
+Contact fields are exactly `name` (nonblank, required), `phone`, `email`, `org`, `url`, `note`.
 The pure `resolvePrototypeShare` twins produce vCard 3.0 (`text/x-vcard`, `public.vcard`):
 `FN` and an unstructured family `N` hold name, with `TEL`, `EMAIL`, `ORG`, `URL`, `NOTE` in that
-order. Backslash, comma, semicolon and CR/LF are escaped, lines use CRLF, and lines fold at
+order. TEXT properties escape backslash, comma, semicolon and CR/LF; the URI-valued `URL`
+property is preserved verbatim. Lines use CRLF, and lines fold at
 75 UTF-8 octets (continuation space included), without splitting a Unicode scalar.
 No Contacts permission is needed. Each string is bounded by `MAX_PROTOTYPE_SHARE_TEXT_BYTES`
 (65536); literal and resolved arguments use the same rules. Library imports refuse secure
 state in every share string, including nested contact/file values and follow-up handlers.
+The library secure-value scan guard caps total expanded bytes at 4,194,304 bytes, measured as
+authored UTF-8 sink bytes charged per repeat row before allocating repeated strings; zero-row
+templates are charged once. It charges literal spans even when substitution would shorten them.
+This is not a one-pass pre-scan; it is conservative: may refuse legitimate large library specs; a pre-scan would be exact.
 
 Pure resolution returns `{ok:true,payload,summary}` or
 `{ok:false,error:{code:"invalid_args",path,message}}`. Payload includes uploaded image IDs,
@@ -1639,6 +1649,20 @@ System-sheet presentation and dismissal handling remain runtime work. Fake mode 
 sheet and consume queued `share.open` outcomes (default shared with `simulated:true`); real
 mode must show the sheet and never auto-select a target. `platformMode` and `prototype simulate`
 are not accepted by this contract until their separate vocabulary lands.
+
+#### Known platform differences
+
+- Lone surrogates are not representable in portable JSON/UTF-8 input as Unicode scalar values.
+  Escaped lone UTF-16 code units can reach the TypeScript and Kotlin resolvers, but Swift's
+  JSON decoder refuses them before resolution. TypeScript preserves those code units in JSON
+  output; Kotlin's UTF-8 output encoder replaces them with `?`. These decoder/encoder differences
+  occur before or after the resolver and do not define portable share behavior.
+- Components are a host expansion feature. TypeScript validates component declarations, replaces
+  each `use` with its bound plain-node tree, and removes `components` before transport. Native
+  validators accept that expanded plain-node transport; they reject raw host declarations at
+  `components`. The host can instead report a component-definition or prop error, or reach the
+  share capability check after expansion. Comparing raw host specs at these different boundaries
+  therefore produces different error paths or messages without a native share-contract mismatch.
 
 ### Platform actions and events (#14294)
 

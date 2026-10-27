@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.protocol
 
+import java.util.Locale
 import kotlinx.serialization.json.*
 
 /** The only resolution failure is a typed platform invalid_args outcome, before any UI. */
@@ -56,14 +57,23 @@ object PrototypeShare {
   private fun validURL(value: String, dynamic: Boolean = false): Boolean {
     val start =
       when {
-        value.startsWith("https://", true) -> 8
-        value.startsWith("http://", true) -> 7
+        value.take(8).lowercase(Locale.ROOT) == "https://" -> 8
+        value.take(7).lowercase(Locale.ROOT) == "http://" -> 7
         else -> return false
       }
-    if (value.any { it.code <= 32 || it.code == 127 || it == '\\' }) return false
+    if (
+      value.any {
+        it.code <= 32 ||
+          it.code in 127..160 ||
+          it.code in 0x2028..0x202e ||
+          it.code in 0x2066..0x2069 ||
+          it == '\\'
+      }
+    )
+      return false
     val candidate = if (dynamic) maskTemplate(value, "1") else value
-    val authority = candidate.substring(start).takeWhile { it !in "/?#" }.substringAfterLast('@')
-    if (authority.isEmpty() || authority.any { it in "{}<>^|%" }) return false
+    val authority = candidate.substring(start).takeWhile { it !in "/?#" }
+    if (authority.isEmpty() || authority.any { it in "@{}<>^|%" }) return false
     val port: String?
     if (authority.startsWith("[")) {
       val end = authority.indexOf(']')
@@ -122,8 +132,9 @@ object PrototypeShare {
       val token = match.groupValues[1]
       if (
         PrototypeSpecContract.stateKeyPattern.matches(token) ||
-          (token.startsWith("item.") &&
-            PrototypeSpecContract.stateKeyPattern.matches(token.substring(5))) ||
+          (token.split('.').let {
+            it.size == 2 && it.all(PrototypeSpecContract.stateKeyPattern::matches)
+          }) ||
           (token.startsWith("data:") && PrototypeDataPointer.isValid(token.substring(5)))
       )
         replacement
@@ -141,7 +152,7 @@ object PrototypeShare {
       textError(value, path)?.let {
         return it
       }
-      return if (name == "url" && !validURL(text(value)!!, dynamic))
+      return if (name == "url" && text(value) != "" && !validURL(text(value)!!, dynamic))
         error(path, "Share URL must be absolute http(s) with a literal scheme")
       else null
     }
@@ -154,7 +165,8 @@ object PrototypeShare {
         textError(form[key], at)?.let {
           return it
         }
-        if (key == "name" && text(form[key]) == "") return error(at, "Required contact name")
+        if (key == "name" && PrototypeSpecContract.blankTextPattern.matches(text(form[key])!!))
+          return error(at, "Required contact name")
         if (key == "url" && !validURL(text(form[key])!!, dynamic))
           return error(at, "Share URL must be absolute http(s) with a literal scheme")
       }
@@ -191,7 +203,14 @@ object PrototypeShare {
             if (
               nameText.isNullOrEmpty() ||
                 nameText.startsWith(".") ||
-                nameText.any { it == '/' || it == '\\' || it.code <= 31 || it.code in 127..159 } ||
+                nameText.any {
+                  it == '/' ||
+                    it == '\\' ||
+                    it.code <= 31 ||
+                    it.code in 127..160 ||
+                    it.code in 0x2028..0x202e ||
+                    it.code in 0x2066..0x2069
+                } ||
                 bytes(nameText) > 128
             )
               return error(
@@ -211,11 +230,13 @@ object PrototypeShare {
     assets: Set<String>? = null,
     resolved: Boolean = false,
   ): PrototypeSpecError? {
-    if (setOf("text", "url", "images", "files", "contact").none { it in args })
-      return error(path, "Share requires text, url, images, files or contact")
     for (name in args.keys.sorted()) {
       val at = member(path, name)
-      if (name !in names) return error(at, "Unknown argument")
+      if (name !in names)
+        return error(
+          at,
+          if (name == "title") "Unknown argument: use subject" else "Unknown argument",
+        )
       val binding = args[name] as? JsonObject
       if (!resolved && binding?.containsKey("value") != true) continue
       valueError(
@@ -229,6 +250,20 @@ object PrototypeShare {
           return it
         }
     }
+    if (
+      setOf("text", "url", "images", "files", "contact").none { name ->
+        if (name !in args) false
+        else {
+          val binding = args[name] as? JsonObject
+          if (!resolved && binding?.containsKey("value") != true) true
+          else {
+            val value = if (resolved) args[name] else binding?.get("value")
+            text(value)?.let { !PrototypeSpecContract.blankTextPattern.matches(it) } ?: true
+          }
+        }
+      }
+    )
+      return error(path, "Share requires text, url, images, files or contact")
     return null
   }
 
@@ -287,7 +322,7 @@ object PrototypeShare {
         "url" to "URL",
         "note" to "NOTE",
       )) {
-      text(contact[field])?.let { lines.add("$label:${escape(it)}") }
+      text(contact[field])?.let { lines.add("$label:${if (field == "url") it else escape(it)}") }
     }
     lines.add("END:VCARD")
     return lines.joinToString("\r\n", postfix = "\r\n") { line ->
@@ -355,6 +390,28 @@ object PrototypeShare {
     val assets = inputs["assets"] as? JsonObject ?: JsonObject(emptyMap())
     argumentsError(JsonObject(resolved), "args", assets.keys, true)?.let {
       return failure(it)
+    }
+    for (name in listOf("images", "files")) {
+      for ((index, entry) in (resolved[name] as? JsonArray).orEmpty().withIndex()) {
+        val id = assetId(if (name == "files") entry.jsonObject["asset"] else entry)!!
+        val size =
+          ((assets[id] as? JsonObject)?.get("bytes") as? JsonPrimitive)
+            ?.takeUnless { it.isString }
+            ?.doubleOrNull
+        if (
+          size == null ||
+            !size.isFinite() ||
+            size < 0 ||
+            size > 9007199254740991.0 ||
+            size != Math.floor(size)
+        )
+          return failure(
+            error(
+              "args.$name[$index]" + if (name == "files") ".asset" else "",
+              "Share asset must have non-negative integer bytes",
+            ),
+          )
+      }
     }
     val images = (resolved["images"] as? JsonArray).orEmpty().map { JsonPrimitive(assetId(it)!!) }
     val files =

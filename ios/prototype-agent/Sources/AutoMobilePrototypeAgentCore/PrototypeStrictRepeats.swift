@@ -194,7 +194,7 @@ struct PrototypeStrictRepeats {
                         throw PrototypeContractValidator.invalid(path, "Unknown repeat field")
                     }
                 } else if keyField, !PrototypeContractValidator.primitive(child, rule: ["kind": .string("key")]) {
-                    throw PrototypeContractValidator.invalid(at, "Key placeholder outside repeat")
+                    throw PrototypeContractValidator.invalid(at, "State key placeholder outside a repeat template")
                 }
             } else {
                 try fields(

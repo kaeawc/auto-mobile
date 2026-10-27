@@ -497,6 +497,17 @@ extension PrototypeRepeat {
                     matchBindings: matchBindings
                 )
             }
+            if action["type"] == .string("platform"), let args = action["args"]?.objectFields {
+                for name in args.keys.sorted(by: { $0.utf16.lexicographicallyPrecedes($1.utf16) }) {
+                    if let binding = args[name]?.objectFields {
+                        try validateEmitBinding(
+                            binding,
+                            path: PrototypeLimits.dataMemberPath("\(path)[\(index)].args", key: name),
+                            scope: scope
+                        )
+                    }
+                }
+            }
             guard action["type"] == .string("emit"), let context = action["context"] else { continue }
             let contextPath = "\(path)[\(index)].context"
             // Match values are strings supplied at tap time, after the row is bound.

@@ -141,6 +141,27 @@ function secureLibraryError(spec: unknown): PrototypeValidationError | undefined
       inRequest(field.path) ||
       sharePaths.has(field.path),
   );
+  // Bound work before allocating per-row strings. Charge every sink's authored UTF-8 bytes
+  // for every repeat row, including literal spans that the repeat binder would copy.
+  const copies = new Map<string, number>();
+  for (const { located } of repeatKeyInstances(
+    spec,
+    sinkFields.map((field) => ({
+      ...field,
+      value: { stateKey: "{index}" },
+    })),
+  ))
+    copies.set(located.path, (copies.get(located.path) ?? 0) + 1);
+  let expandedBytes = 0;
+  for (const field of sinkFields) {
+    expandedBytes +=
+      Buffer.byteLength(field.text, "utf8") * Math.max(1, copies.get(field.path) ?? 0);
+    if (expandedBytes > 4194304)
+      return {
+        path: field.path,
+        message: "Secure binding scan exceeds 4194304 expanded UTF-8 bytes",
+      };
+  }
   // Reuse the key binder for text too: repeat substitution has the same string grammar.
   const instances = repeatKeyInstances(
     spec,

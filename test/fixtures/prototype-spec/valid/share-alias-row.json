@@ -1,0 +1,50 @@
+{
+  "id": "share",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "requires": {
+    "platform": ["share"]
+  },
+  "root": {
+    "type": "column",
+    "repeat": {
+      "as": "row",
+      "items": [
+        {
+          "u": "https://example.com",
+          "mime": "text/plain",
+          "name": "a.txt"
+        }
+      ]
+    },
+    "children": [
+      {
+        "type": "button",
+        "label": "Share",
+        "onTap": [
+          {
+            "type": "platform",
+            "call": "share.open",
+            "args": {
+              "url": {
+                "value": "https://{row.u}/"
+              },
+              "files": {
+                "value": [
+                  {
+                    "asset": "file",
+                    "name": "{row.name}",
+                    "mimeType": "{row.mime}"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

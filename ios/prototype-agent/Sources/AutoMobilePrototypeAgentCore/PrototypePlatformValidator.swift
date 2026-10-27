@@ -355,7 +355,10 @@ enum PrototypePlatformValidator {
         }
         for name in sorted(Set(definition.args.keys).union(args.keys)) {
             let at = PrototypeLimits.dataMemberPath("\(path).args", key: name)
-            guard let argument = definition.args[name] else { throw fail(at, "Unknown argument") }
+            guard let argument = definition.args[name] else { throw fail(
+                at,
+                call == "share.open" && name == "title" ? "Unknown argument: use subject" : "Unknown argument"
+            ) }
             guard let binding = args[name] else {
                 if argument.optional { continue }
                 throw fail(at, "Required argument")

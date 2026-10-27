@@ -22,5 +22,8 @@
         }
       }
     ]
+  },
+  "state": {
+    "host": "example.com"
   }
 }

@@ -102,3 +102,35 @@ describe("share contract corpus", () => {
     });
   });
 });
+
+describe("share review regressions", () => {
+  const budgetFixture = JSON.parse(
+    readFileSync(
+      new URL(
+        "../../fixtures/prototype-spec/invalid/share-secure-scan-budget.json",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  );
+  test("library scan refuses repeat byte amplification before expanding strings", () => {
+    expect(validatePrototypeSpec(budgetFixture.spec, { library: true })).toEqual({
+      success: false,
+      error: { path: budgetFixture.expectedPath, message: budgetFixture.expectedMessage },
+    });
+  });
+  const hostSpec = JSON.parse(
+    readFileSync(
+      new URL("../../fixtures/prototype-spec/valid/share-templated-host.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  test("the templated host fixture resolves to a usable URL", () => {
+    expect(
+      resolvePrototypeShare(hostSpec.root.onTap[0].args, { assets: {}, state: hostSpec.state }),
+    ).toMatchObject({
+      ok: true,
+      payload: { url: "https://example.com/" },
+    });
+  });
+});

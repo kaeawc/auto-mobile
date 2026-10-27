@@ -196,7 +196,19 @@ public enum PrototypeSpecStrictValidator {
                 break
             }
         }
-        for binding in bindings.sorted(by: { $0.path.utf16.lexicographicallyPrecedes($1.path.utf16) }) {
+        let sinks = bindings.sorted(by: { $0.path.utf16.lexicographicallyPrecedes($1.path.utf16) })
+        var expandedBytes = 0
+        for binding in sinks {
+            let scope = repeats.scopes.first { binding.path.hasPrefix("\($0.path).children[") }
+            expandedBytes += binding.text.utf8.count * max(1, scope?.items.count ?? 1)
+            if expandedBytes > 4_194_304 {
+                throw PrototypeContractValidator.invalid(
+                    binding.path,
+                    "Secure binding scan exceeds 4194304 expanded UTF-8 bytes"
+                )
+            }
+        }
+        for binding in sinks {
             let scope = repeats.scopes.first {
                 binding.path.hasPrefix("\($0.path).children[") && PrototypeRepeat
                     .segments(binding.text, alias: $0.alias)

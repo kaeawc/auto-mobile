@@ -23,10 +23,10 @@ const mimeToken = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+\/[!#$%&'*+.^_`|~0-9A-Za-z-]+$(?!
  */
 function validURL(text: string, dynamic = false): boolean {
   const start = text.match(/^https?:\/\//i)?.[0].length;
-  if (!start || /[\u0000-\u0020\u007f\\]/.test(text)) return false;
+  if (!start || /[\u0000-\u0020\u007f-\u00a0\u2028-\u202e\u2066-\u2069\\]/.test(text)) return false;
   const candidate = dynamic ? maskTemplate(text, "1") : text;
-  const authority = candidate.slice(start).split(/[/?#]/, 1)[0]!.split("@").at(-1)!;
-  if (!authority || /[{}<>^|%]/.test(authority)) return false;
+  const authority = candidate.slice(start).split(/[/?#]/, 1)[0]!;
+  if (!authority || /[@{}<>^|%]/.test(authority)) return false;
   let port: string | undefined;
   if (authority.startsWith("[")) {
     const end = authority.indexOf("]");
@@ -83,7 +83,8 @@ function assetError(
 function maskTemplate(text: string, replacement = "x"): string {
   return text.replace(/\{([^{}]*)\}/g, (original, token: string) =>
     prototypeContractPatterns.stateKey.test(token) ||
-    (token.startsWith("item.") && prototypeContractPatterns.stateKey.test(token.slice(5))) ||
+    (token.split(".").length === 2 &&
+      token.split(".").every((part) => prototypeContractPatterns.stateKey.test(part))) ||
     (token.startsWith("data:") && isPrototypeDataPointer(token.slice(5)))
       ? replacement
       : original,
@@ -100,7 +101,7 @@ function valueError(
     const error = textError(value, path);
     return (
       error ??
-      (name === "url" && !validURL(String(value), dynamic)
+      (name === "url" && value !== "" && !validURL(String(value), dynamic)
         ? issue(path, "Share URL must be absolute http(s) with a literal scheme")
         : undefined)
     );
@@ -114,7 +115,8 @@ function valueError(
       if (!Object.hasOwn(form, key)) return issue(at, "Required contact name");
       const error = textError(form[key], at);
       if (error) return error;
-      if (key === "name" && form[key] === "") return issue(at, "Required contact name");
+      if (key === "name" && prototypeContractPatterns.blankText.test(String(form[key])))
+        return issue(at, "Required contact name");
       if (key === "url" && !validURL(String(form[key]), dynamic))
         return issue(at, "Share URL must be absolute http(s) with a literal scheme");
     }
@@ -151,7 +153,7 @@ function valueError(
           typeof fileName !== "string" ||
           !fileName.length ||
           fileName.startsWith(".") ||
-          /[/\\\u0000-\u001f\u007f-\u009f]/.test(fileName) ||
+          /[/\\\u0000-\u001f\u007f-\u00a0\u2028-\u202e\u2066-\u2069]/.test(fileName) ||
           bytes(fileName) > 128
         ) {
           return issue(
@@ -174,11 +176,10 @@ export function prototypeShareArgumentsError(
   assets?: ReadonlySet<string>,
   resolved = false,
 ): PrototypePlatformError | undefined {
-  if (!["text", "url", "images", "files", "contact"].some((name) => Object.hasOwn(args, name)))
-    return issue(path, "Share requires text, url, images, files or contact");
   for (const name of Object.keys(args).sort()) {
     const at = member(path, name);
-    if (!names.includes(name)) return issue(at, "Unknown argument");
+    if (!names.includes(name))
+      return issue(at, name === "title" ? "Unknown argument: use subject" : "Unknown argument");
     const binding = record(args[name]);
     if (!resolved && (!binding || !Object.hasOwn(binding, "value"))) continue;
     const error = valueError(
@@ -190,6 +191,16 @@ export function prototypeShareArgumentsError(
     );
     if (error) return error;
   }
+  if (
+    !["text", "url", "images", "files", "contact"].some((name) => {
+      if (!Object.hasOwn(args, name)) return false;
+      const binding = record(args[name]);
+      if (!resolved && (!binding || !Object.hasOwn(binding, "value"))) return true;
+      const value = resolved ? args[name] : binding!.value;
+      return typeof value !== "string" || !prototypeContractPatterns.blankText.test(value);
+    })
+  )
+    return issue(path, "Share requires text, url, images, files or contact");
   return undefined;
 }
 
@@ -222,7 +233,7 @@ const scalar = (value: unknown): string | undefined =>
 function bindShareText(text: string, inputs: PrototypeShareInputs): string {
   return text.replace(/\{([^{}]*)\}/g, (original, token: string) => {
     if (token.startsWith("data:") && isPrototypeDataPointer(token.slice(5)))
-      return scalar(resolvePrototypeDataPointer(inputs.data, token.slice(5))) ?? "";
+      return scalar(resolvePrototypeDataPointer(record(inputs.data), token.slice(5))) ?? "";
     if (token === "index") return inputs.index === undefined ? original : String(inputs.index);
     if (token.startsWith("item.") && prototypeContractPatterns.stateKey.test(token.slice(5)))
       return scalar(inputs.item?.[token.slice(5)]) ?? original;
@@ -264,7 +275,10 @@ function vCard(contact: Raw): string {
     ["url", "URL"],
     ["note", "NOTE"],
   ]) {
-    if (Object.hasOwn(contact, field!)) lines.push(`${label}:${escape(String(contact[field!]))}`);
+    if (Object.hasOwn(contact, field!))
+      lines.push(
+        `${label}:${field === "url" ? String(contact[field!]) : escape(String(contact[field!]))}`,
+      );
   }
   lines.push("END:VCARD");
   return (
@@ -308,23 +322,23 @@ export function resolvePrototypeShare(
         ? inputs.state?.[binding.state]
         : undefined;
     else if (typeof binding.data === "string")
-      value = resolvePrototypeDataPointer(inputs.data, binding.data);
+      value = resolvePrototypeDataPointer(record(inputs.data), binding.data);
     else if (typeof binding.item === "string")
       value = Object.hasOwn(inputs.item ?? {}, binding.item)
         ? inputs.item?.[binding.item]
         : undefined;
     else if (binding.index === true) value = inputs.index;
     else if (typeof binding.platform === "string")
-      value = resolvePrototypeDataPointer(inputs.platform, binding.platform);
+      value = resolvePrototypeDataPointer(record(inputs.platform), binding.platform);
     else if (typeof binding.event === "string")
-      value = resolvePrototypeDataPointer(inputs.event, binding.event);
+      value = resolvePrototypeDataPointer(record(inputs.event), binding.event);
     if (value === undefined) return failure(issue(`args.${name}`, "Share binding is missing"));
     value = bindStrings(value, inputs);
     if (name === "images" && Array.isArray(value))
       value = value.map((entry) => {
         const form = record(entry);
         return typeof form?.data === "string"
-          ? resolvePrototypeDataPointer(inputs.data, form.data)
+          ? resolvePrototypeDataPointer(record(inputs.data), form.data)
           : entry;
       });
     resolved[name] = value;
@@ -336,6 +350,21 @@ export function resolvePrototypeShare(
     true,
   );
   if (error) return failure(error);
+  for (const name of ["images", "files"]) {
+    const entries = (resolved[name] as unknown[] | undefined) ?? [];
+    for (const [index, entry] of entries.entries()) {
+      const asset = name === "files" ? record(entry)!.asset : entry;
+      const assetId = typeof asset === "string" ? asset : (record(asset)!.asset as string);
+      const size = record(inputs.assets[assetId])?.bytes;
+      if (typeof size !== "number" || !Number.isSafeInteger(size) || size < 0)
+        return failure(
+          issue(
+            `args.${name}[${index}]${name === "files" ? ".asset" : ""}`,
+            "Share asset must have non-negative integer bytes",
+          ),
+        );
+    }
+  }
   const id = (entry: unknown): string =>
     (typeof entry === "string" ? entry : record(entry)!.asset) as string;
   const images = ((resolved.images as unknown[] | undefined) ?? []).map(id);

@@ -1024,8 +1024,10 @@ describe("HomeScreen", () => {
         client.setHierarchyData(iosHierarchy("com.apple.springboard"));
         const read = spyOn(client, "requestHierarchySync");
 
-        await action.executeIosHomeNavigation(undefined, undefined, undefined, undefined, () => {
-          dispatches++;
+        await action.executeIosHomeNavigation({
+          onDispatch: () => {
+            dispatches++;
+          },
         });
         expect(timeouts).toEqual([2500, 2400]);
         expect(fakeTimer.getSleepHistory()).toEqual([2500, 100]);
@@ -1077,7 +1079,7 @@ describe("HomeScreen", () => {
             },
           });
 
-          const error = await action.executeIosHomeNavigation(undefined, undefined, budget).then(
+          const error = await action.executeIosHomeNavigation({ timeoutMs: budget }).then(
             () => undefined,
             (failure: unknown) => failure,
           );
@@ -1161,18 +1163,16 @@ describe("HomeScreen", () => {
             },
           },
         });
-        const pending = action
-          .executeIosHomeNavigation(undefined, undefined, undefined, controller.signal)
-          .then(
-            () => {
-              settled = true;
-              return undefined;
-            },
-            (error: unknown) => {
-              settled = true;
-              return error;
-            },
-          );
+        const pending = action.executeIosHomeNavigation({ signal: controller.signal }).then(
+          () => {
+            settled = true;
+            return undefined;
+          },
+          (error: unknown) => {
+            settled = true;
+            return error;
+          },
+        );
         try {
           fakeTimer.advanceTime(2500);
           await drainUntil(() => settled || fakeTimer.getPendingSleeps().includes(100), {
@@ -1299,7 +1299,7 @@ describe("HomeScreen", () => {
       client.setHierarchyData(iosHierarchy("com.apple.Maps"));
       const readSpy = spyOn(client, "requestHierarchySync");
 
-      await expect(action.executeIosHomeNavigation(undefined, undefined, 500)).rejects.toThrow(
+      await expect(action.executeIosHomeNavigation({ timeoutMs: 500 })).rejects.toThrow(
         /SpringBoard.*com\.apple\.Maps/,
       );
       expect(fakeTimer.now()).toBe(500);
@@ -1352,6 +1352,28 @@ describe("HomeScreen", () => {
 
       await expect(action.execute()).rejects.toThrow("hardware home failed");
       expect(launches).toBe(0);
+    });
+
+    test("physical iOS forwards the frame context to the runner Home press", async () => {
+      const { action, client } = createIosHomeScreen();
+      client.setHierarchyData(iosHierarchy("com.apple.springboard"));
+      const press = spyOn(client, "requestPressHome");
+
+      await action.executeIosHomeNavigation({ frameContext: "frame-7" });
+      expect(press.mock.calls[0]?.[2]).toBe("frame-7");
+    });
+
+    test("physical iOS stops verification when the caller aborts during the foreground read", async () => {
+      const controller = new AbortController();
+      const { action, client } = createIosHomeScreen();
+      spyOn(client, "requestHierarchySync").mockImplementation(async () => {
+        controller.abort();
+        return { hierarchy: iosHierarchy("com.apple.springboard") };
+      });
+
+      await expect(
+        action.executeIosHomeNavigation({ signal: controller.signal }),
+      ).rejects.toBeDefined();
     });
   });
 

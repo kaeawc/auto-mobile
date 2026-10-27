@@ -43,12 +43,6 @@ export interface OwedSupersededRowReassert<S extends SupersededRowIncarnation = 
 }
 
 /** A pending non-terminal release whose row still holds its session's superseded release's row. */
-export interface SupersededRowUnderPendingRelease<S extends SupersededRowIncarnation = Session> {
-  session: S;
-  reasons: readonly string[];
-  release: SessionReleaseSnapshot;
-}
-
 export interface SupersededRowReassertsCollaborators {
   timer: Timer;
   logger: Pick<Logger, "warn">;
@@ -81,7 +75,6 @@ export class SupersededRowReasserts<S extends SupersededRowIncarnation = Session
    * Pending non-terminal releases whose row still holds their session's superseded release's
    * terminal row (#11557): the retry of `release` replaces that row before it writes its own.
    */
-  private readonly rowsUnderPendingRelease = new Map<string, SupersededRowUnderPendingRelease<S>>();
   /**
    * The superseded releases' reasons whose terminal row a rewrite or a replacement under way is
    * replacing, one entry per write. Not the parked write's whole window: the row a peer or a
@@ -180,32 +173,8 @@ export class SupersededRowReasserts<S extends SupersededRowIncarnation = Session
     return this.reasonsBeingRewritten.get(sessionId)?.includes(releaseReason) ?? false;
   }
 
-  rowUnderPendingRelease(sessionId: string): SupersededRowUnderPendingRelease<S> | undefined {
-    return this.rowsUnderPendingRelease.get(sessionId);
-  }
-
-  noteRowUnderPendingRelease(entry: SupersededRowUnderPendingRelease<S>): void {
-    this.rowsUnderPendingRelease.set(entry.release.sessionId, entry);
-  }
-
-  forgetRowUnder(release: SessionReleaseSnapshot): void {
-    if (this.rowsUnderPendingRelease.get(release.sessionId)?.release === release) {
-      this.rowsUnderPendingRelease.delete(release.sessionId);
-    }
-  }
-
-  clearRowsUnderPendingRelease(): void {
-    this.rowsUnderPendingRelease.clear();
-  }
-
   owed(sessionId: string): OwedSupersededRowReassert<S> | undefined {
     return this.owedReasserts.get(sessionId);
-  }
-
-  /** The superseded releases whose terminal row the session's owed rewrite is to replace. */
-  reasonsOwedTo(session: S): readonly string[] {
-    const owed = this.owedReasserts.get(session.sessionId);
-    return owed?.session === session ? [...owed.reasons] : [];
   }
 
   /**

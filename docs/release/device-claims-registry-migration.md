@@ -23,3 +23,12 @@ registry as unreadable and reports no exec owners rather than failing.
 ## Verification
 
 Live multi-daemon acceptance on a shared adb server is tracked in #15542 (`needs-device-verify`).
+
+## Known limits until the claim files stop deciding
+
+- The table is read after a claim file is taken and written afterwards, so two daemons that use
+  different claim directories can still both take a device in the same instant. Closing that needs an
+  atomic insert-if-absent, which belongs to the step that makes the table the authority.
+- A row without a recorded control socket (written by an early build or while no socket was bound) is
+  judged by its owner's PID alone, so a live owner whose release write was lost keeps the device
+  refused until it exits.

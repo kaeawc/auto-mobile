@@ -593,13 +593,22 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
   private async readForeignOwner(deviceId: string): Promise<number | undefined> {
     const leasePath = this.resolvePath(() => this.source.leasePath(deviceId), deviceId);
     const claimPath = this.resolvePath(() => this.source.claimPath(deviceId), deviceId);
-    const [lease, claimOwner, legacyOwner, tableOwner] = await Promise.all([
+    const [lease, claimOwner, legacyOwner] = await Promise.all([
       leasePath === undefined ? undefined : this.evaluateLock(leasePath, deviceId, "lease"),
       claimPath === undefined ? undefined : this.evaluateOwner(claimPath, deviceId, "claim"),
       this.legacyClaimOwner(deviceId),
-      this.tableClaimOwner(deviceId),
     ]);
-    if (lease?.idleSocketPath !== undefined && (claimOwner ?? legacyOwner) === undefined) {
+    // An owner a file names decides, so the table is not read (nor its owner asked) for it. A
+    // lease whose holder is idle does not: the table may still name a busy owner of the device.
+    const busyLeasePid = lease?.idleSocketPath === undefined ? lease?.pid : undefined;
+    const tableOwner =
+      (claimOwner ?? legacyOwner ?? busyLeasePid) === undefined
+        ? await this.tableClaimOwner(deviceId)
+        : undefined;
+    if (
+      lease?.idleSocketPath !== undefined &&
+      (claimOwner ?? legacyOwner ?? tableOwner) === undefined
+    ) {
       this.idleLeaseHolders.set(deviceId, lease.idleSocketPath);
     } else {
       this.idleLeaseHolders.delete(deviceId);

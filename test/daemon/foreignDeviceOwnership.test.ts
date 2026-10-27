@@ -1024,6 +1024,50 @@ describe("reading the host-wide claims table (#11811 c)", () => {
     expect(await d.ownerOf()).toBe(7);
   });
 
+  test("an owner a file names is not asked a second time through the table", async () => {
+    const d = readingDaemon();
+    const queries: string[] = [];
+    const query = d.probe.query.bind(d.probe);
+    d.probe.query = async (socketPath: string) => {
+      queries.push(socketPath);
+      return query(socketPath);
+    };
+    d.files.files.set(d.files.claimPath(DEVICE), {
+      pid: FOREIGN_PID,
+      token: "file-token",
+      metadata: metadata(TABLE_SOCKET),
+    });
+    d.probe.reports.set(TABLE_SOCKET, status(FOREIGN_PID, "peer-session"));
+    await d.store.upsert(d.row({ metadata: metadata(TABLE_SOCKET) }));
+    expect(await d.ownerOf()).toBe(FOREIGN_PID);
+    expect(queries).toEqual([TABLE_SOCKET]);
+  });
+
+  test("an idle lease holder is not asked to give up its lease while a busy table owner remains", async () => {
+    const d = readingDaemon();
+    const LEASE_SOCKET = "/sockets/lease.sock";
+    d.files.alive.add(9);
+    d.files.files.set(d.files.leasePath(DEVICE), {
+      pid: 9,
+      token: "lease-token",
+      metadata: metadata(LEASE_SOCKET),
+    });
+    d.probe.reports.set(LEASE_SOCKET, status(9, null));
+    const asked: string[] = [];
+    Object.assign(d.probe, {
+      requestRelinquish: async (socketPath: string) => {
+        asked.push(socketPath);
+        return { kind: "relinquish", result: { released: true, reason: "idle" } };
+      },
+    });
+    // A busy owner in the table keeps the device owned, so asking the idle lease holder is moot.
+    await d.store.upsert(d.row({ metadata: metadata(TABLE_SOCKET) }));
+    d.probe.reports.set(TABLE_SOCKET, status(FOREIGN_PID, "peer-session"));
+    expect(await d.ownerOf()).toBe(9);
+    await d.ownership.relinquishIdleLease?.(DEVICE);
+    expect(asked).toEqual([]);
+  });
+
   test("a table that cannot be read leaves the files to decide", async () => {
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {

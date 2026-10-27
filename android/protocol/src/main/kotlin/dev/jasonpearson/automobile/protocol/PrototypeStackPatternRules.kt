@@ -29,7 +29,14 @@ internal object PrototypeStackPatternRules {
     val actions = zooms(context)
     for ((action, path) in actions) {
       val source = action.text("source")
-      if (source == null || context.nodes.count { it.value.text("sharedKey") == source } != 1)
+      if (
+        source == null ||
+          '{' in source ||
+          context.nodes.count {
+            ((it.value["shared"] as? JsonObject)?.text("key") ?: it.value.text("sharedKey")) ==
+              source
+          } != 1
+      )
         return fail("$path.source", "zoom requires source to resolve to exactly one sharedKey node")
     }
     return null

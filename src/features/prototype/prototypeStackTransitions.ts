@@ -2,7 +2,7 @@ import { fail, type Located, type PrototypeValidationError } from "./prototypeBi
 import { z } from "zod";
 import { PROTOTYPE_STACK_TRANSITIONS_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
-import { mapBindableFields } from "./prototypeTemplate";
+import { mapBindableFields, record } from "./prototypeTemplate";
 
 export const PROTOTYPE_STACK_TRANSITIONS = [
   "platform",
@@ -129,7 +129,10 @@ export function prototypeZoomError(
       ["push", "replace"].includes(String(value.type)) &&
       (value.transition ?? stacks.get(value.stack)) === "zoom" &&
       (typeof value.source !== "string" ||
-        nodes.filter(({ value: node }) => node.sharedKey === value.source).length !== 1)
+        value.source.includes("{") ||
+        nodes.filter(
+          ({ value: node }) => (record(node.shared)?.key ?? node.sharedKey) === value.source,
+        ).length !== 1)
     ) {
       return fail(
         `${path}.source`,

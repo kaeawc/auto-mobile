@@ -120,7 +120,10 @@ enum PrototypeStackPatterns {
         }
         for action in zooms {
             guard let source = action.value["source"]?.stringValue,
-                  nodes.filter({ $0.value["sharedKey"] == .string(source) }).count == 1
+                  !source.contains("{"),
+                  nodes
+                  .filter({ ($0.value["shared"]?.objectFields?["key"] ?? $0.value["sharedKey"]) == .string(source) })
+                  .count == 1
             else {
                 throw PrototypeContractValidator.invalid(
                     "\(action.path).source",

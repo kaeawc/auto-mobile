@@ -56,6 +56,7 @@ final class PrototypeStackPatternsTests: XCTestCase {
             "stack-patterns",
             "stack-patterns-zoom",
             "stack-patterns-zoom-idle",
+            "stack-patterns-zoom-shared-v2",
             "stack-patterns-source-only",
         ] {
             let data = try Data(
@@ -65,15 +66,16 @@ final class PrototypeStackPatternsTests: XCTestCase {
             XCTAssertNoThrow(try PrototypeSpecStrictValidator.validate(data: data))
             XCTAssertNoThrow(try JSONDecoder().decode(PrototypeSpec.self, from: data))
         }
-        for name in ["missing", "unresolved", "ambiguous"] {
+        for name in ["missing", "unresolved", "ambiguous", "shared-v2-ambiguous", "shared-v2-template"] {
             let fixture = try PrototypeSpecFixtures.invalid("stack-patterns-zoom-\(name)")
             XCTAssertThrowsError(
                 try PrototypeSpecStrictValidator
                     .validate(data: JSONEncoder().encode(fixture.spec))
             ) { error in
-                guard case let PrototypeLoadError.invalidSpec(path, _) = error
+                guard case let PrototypeLoadError.invalidSpec(path, message) = error
                 else { return XCTFail("Unexpected error: \(error)") }
                 XCTAssertEqual(path, fixture.expectedPath)
+                XCTAssertEqual(message, "zoom requires source to resolve to exactly one sharedKey node")
             }
         }
     }

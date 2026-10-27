@@ -17,7 +17,7 @@ public enum PrototypeSpecStrictValidator {
             try PrototypeLazyList.validateAppend(actions: context.actions, data: modelData)
             try PrototypeDerivedValidator.validate(derive: fields["derive"], root: root, data: modelData)
             try PrototypeScrollMotion.validate(root, data: modelData)
-            try PrototypeSharedElementPlan.validate(context.locatedNodes, data: modelData)
+            try PrototypeSharedElementPlan.validate(context.locatedNodes, data: modelData, actions: context.actions)
             try PrototypeStrictSemantics.layout(context)
             try PrototypeStrictSemantics.pagerStateKeys(context)
             var repeats = PrototypeStrictRepeats(data: modelData)

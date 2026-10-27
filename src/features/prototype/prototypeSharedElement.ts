@@ -5,6 +5,7 @@ import {
 } from "../observe/android/ctrlProxyProtocol";
 import { fail, type Located, type PrototypeValidationError } from "./prototypeBindingValidation";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
+import { prototypeZoomError, prototypeZoomSources } from "./prototypeStackTransitions";
 import { PrototypeRepeatData } from "./prototypeData";
 import { bindText, templateSegments, record } from "./prototypeTemplate";
 
@@ -122,10 +123,16 @@ function templateKeys(
 export function prototypeSharedElementError(
   nodes: Located[],
   data: PrototypeRepeatData,
+  actions: Located[] = [],
 ): PrototypeValidationError | undefined {
+  const zoomError = prototypeZoomError(nodes, actions);
+  if (zoomError) {
+    return zoomError;
+  }
+  const sources = prototypeZoomSources(nodes, actions);
   const pairs = new Map<string, SharedOccurrence[]>();
   for (const located of nodes) {
-    const error = addSharedNode(located, nodes, data, pairs);
+    const error = addSharedNode(located, nodes, data, pairs, sources);
     if (error) {
       return error;
     }
@@ -143,6 +150,7 @@ function addSharedNode(
   nodes: Located[],
   data: PrototypeRepeatData,
   pairs: Map<string, SharedOccurrence[]>,
+  sources: Set<string>,
 ): PrototypeValidationError | undefined {
   const { value: node, path } = located;
   const shared = record(node.shared);
@@ -153,12 +161,16 @@ function addSharedNode(
   if (shared && node.sharedKey !== undefined) {
     return fail(`${path}.shared`, "shared and sharedKey cannot both be set");
   }
-  if (node.visibleWhen === undefined) {
+  const source = sources.has(String(shared?.key ?? node.sharedKey));
+  if (node.visibleWhen === undefined && !source) {
     return fail(at, "sharedKey requires visibleWhen on the same node");
   }
   const keys = sharedKeys(located, nodes, data);
   if (!Array.isArray(keys)) {
     return keys;
+  }
+  if (source) {
+    return undefined;
   }
   const entry = sharedOccurrence(located, nodes, shared, at);
   for (const key of keys) {

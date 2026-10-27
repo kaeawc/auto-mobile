@@ -1145,15 +1145,18 @@ the second (a list row into a detail card, a thumbnail into a viewer):
 }
 ```
 
+A literal key referenced as a zoom source labels exactly one node and is exempt from the
+`visibleWhen` requirement and visibility-pair counting.
+
 Rules, enforced by every validator with exact paths: `sharedKey` retains the state-key grammar
 and aliases `shared: {key, as: "bounds"}`. The object form requires
 `prototype_shared_element_v2`; plain `sharedKey` requires `prototype_shared_element_v1`.
-A node cannot set both and must have `visibleWhen`. Literal v2 keys allow hyphens in addition
-to the state-key characters, with a 64-character resolved limit. Literal keys pair exactly two
+A node cannot set both. Visibility morph nodes must have `visibleWhen`. Literal v2 keys allow hyphens in addition
+to the state-key characters, with a 64-character resolved limit. Literal visibility morph keys pair exactly two
 nodes. Inside repeat children, a key template must reference the field named by `repeat.key`,
 without index or other-field placeholders. Each instance must resolve a distinct key; at most
 two nodes can use each resolved key. Unmatched repeat items remain ordinary cards. A spec has
-at most 16 resolved keys, including unmatched feed items. Pairs cannot nest, disagree on `as`, or cross a `dialog` or `bottomSheet`
+at most 16 resolved keys for visibility morphs, including unmatched feed items. Pairs cannot nest, disagree on `as`, or cross a `dialog` or `bottomSheet`
 boundary (including two separate modals). Shared elements across pager pages and `stack` screens
 are not supported.
 
@@ -1247,7 +1250,7 @@ is validated by both agents, and both advertise the capability.
 | `zoom`        | Item-to-detail intent with a source key; currently uses the fallbacks below.   |
 
 The four named patterns and push/replace `source` require `prototype_stack_patterns_v1`.
-Zoom requires `source` on each push/replace using it, naming exactly one node's `sharedKey`
+Zoom requires `source` on each push/replace using it, naming exactly one node's `sharedKey` or literal `shared.key`
 in the spec. A key referenced as a zoom source is exempt from the two-node visibility-pair rule;
 repeat templates remain disallowed.
 Android currently substitutes fadeThrough and iOS substitutes platform push; container transforms

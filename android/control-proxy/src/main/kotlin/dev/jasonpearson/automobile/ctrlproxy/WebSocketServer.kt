@@ -54,6 +54,7 @@ class WebSocketServer(
         }
       }
     private const val MAX_START_ATTEMPTS = 5
+    private const val PROTOTYPE_SHADER_MIN_SDK = 33
     private const val START_RETRY_BASE_DELAY_MS = 250L
     private const val CONNECTOR_RESOLVE_TIMEOUT_MS = 2_000L
     // Allow large hierarchy frames over adb forward, but expire before ktor's 60-second timeout.
@@ -343,9 +344,8 @@ class WebSocketServer(
     // ORCHESTRATOR-CHOSEN: to be folded into the PROTOTYPE_SPEC_CAPABILITY_GATES registry.
     // show_prototype honours replaceOthers=false and addresses up to four independent surfaces.
     add("prototype_multi_surface_v1")
-    addAll(
-      dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeShaderCapabilities(options.sdkInt()),
-    )
+    // AGSL needs RuntimeShader (API 33); the compiler's own helper gates the same flag (#15131).
+    if (options.sdkInt() >= PROTOTYPE_SHADER_MIN_SDK) add("prototype_custom_shaders_v1")
     // Prototype specs honour window.layer and window.persistence. The request decoder ignores
     // unknown
     // spec fields, so an older device would silently show a session-scoped system-layer prototype.

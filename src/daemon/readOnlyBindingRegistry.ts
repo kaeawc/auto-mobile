@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
-import type { DeviceClaims } from "./deviceClaims";
+import type { DeviceClaim, DeviceClaims } from "./deviceClaims";
 import type { BindingRegistry } from "./sessionBroker/registry/bindingRegistry";
 import {
   defaultBindingRegistryPath,
@@ -91,8 +91,15 @@ export function createReadOnlyDeviceClaims(
       await registry.close();
     }
   }
+  // One read per instance: the doctor asks per device, and each open runs the migration check.
+  let snapshot: Promise<DeviceClaim[]> | undefined;
+  const list = (): Promise<DeviceClaim[]> => {
+    snapshot ??= withClaims<DeviceClaim[]>([], (claims) => claims.list());
+    return snapshot;
+  };
   return {
-    get: (platform, deviceId) => withClaims(undefined, (claims) => claims.get(platform, deviceId)),
-    list: () => withClaims([], (claims) => claims.list()),
+    get: async (platform, deviceId) =>
+      (await list()).find((claim) => claim.platform === platform && claim.deviceId === deviceId),
+    list,
   };
 }

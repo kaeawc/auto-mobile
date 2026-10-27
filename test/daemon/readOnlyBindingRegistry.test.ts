@@ -125,7 +125,8 @@ describe("createReadOnlyDeviceClaims", () => {
       });
       expect((await claims.list()).map((claim) => claim.pid)).toEqual([77]);
       expect((await claims.get("android", "Pixel_8"))?.ownerToken).toBe("t");
-      expect(closed).toBe(2);
+      // One read serves the list and every per-device get.
+      expect(closed).toBe(1);
     } finally {
       await real.close?.();
     }

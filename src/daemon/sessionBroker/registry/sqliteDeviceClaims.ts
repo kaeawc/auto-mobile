@@ -1,4 +1,4 @@
-import type { Kysely } from "kysely";
+import { sql, type Kysely } from "kysely";
 import type { Platform } from "../../../models";
 import type { DeviceClaim, DeviceClaimKind, DeviceClaims } from "../../deviceClaims";
 
@@ -36,7 +36,18 @@ export class SqliteDeviceClaims implements DeviceClaims {
     await this.db
       .insertInto("device_claims")
       .values(row)
-      .onConflict((conflict) => conflict.columns(["platform", "device_id"]).doUpdateSet(row))
+      .onConflict((conflict) =>
+        conflict
+          .columns(["platform", "device_id"])
+          .doUpdateSet({
+            ...row,
+            // Re-claiming by the same owner keeps when it first claimed.
+            claimed_at_ms: sql<number>`CASE WHEN device_claims.pid = excluded.pid
+              AND device_claims.owner_token = excluded.owner_token
+              THEN device_claims.claimed_at_ms ELSE excluded.claimed_at_ms END`,
+          })
+          .where("device_claims.updated_at_ms", "<=", row.updated_at_ms),
+      )
       .execute();
   }
 
@@ -52,6 +63,10 @@ export class SqliteDeviceClaims implements DeviceClaims {
       .where("pid", "=", owner.pid)
       .where("owner_token", "=", owner.ownerToken)
       .execute();
+  }
+
+  async releaseOwnedBy(pid: number): Promise<void> {
+    await this.db.deleteFrom("device_claims").where("pid", "=", pid).execute();
   }
 
   async get(platform: Platform, deviceId: string): Promise<DeviceClaim | undefined> {

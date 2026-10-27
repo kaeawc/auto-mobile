@@ -24,7 +24,11 @@ export interface DeviceClaim {
 
 /** The host-wide `device_claims` table. Step (b) only writes it beside the claim files. */
 export interface DeviceClaims {
-  /** The claim-file winner is recorded, replacing any earlier row for the device. */
+  /**
+   * The claim-file winner is recorded, replacing any earlier row for the device. A row written
+   * later (a larger `updatedAtMs`) is kept: a delayed write from a daemon that has since lost the
+   * claim must not replace the winner's row.
+   */
   upsert(claim: DeviceClaim): Promise<void>;
   /** Removes the row only while `owner` still holds it; another owner's row is left alone. */
   release(
@@ -32,6 +36,8 @@ export interface DeviceClaims {
     deviceId: string,
     owner: { pid: number; ownerToken: string },
   ): Promise<void>;
+  /** Removes every row this process owns (a clean shutdown); other owners' rows are left alone. */
+  releaseOwnedBy(pid: number): Promise<void>;
   get(platform: Platform, deviceId: string): Promise<DeviceClaim | undefined>;
   list(): Promise<DeviceClaim[]>;
 }

@@ -13,7 +13,22 @@ export class FakeDeviceClaims implements DeviceClaims {
 
   async upsert(claim: DeviceClaim): Promise<void> {
     this.failIfBusy();
-    this.rows.set(this.key(claim.platform, claim.deviceId), { ...claim });
+    const key = this.key(claim.platform, claim.deviceId);
+    const held = this.rows.get(key);
+    if (held && held.updatedAtMs > claim.updatedAtMs) {
+      return;
+    }
+    const sameOwner = held?.pid === claim.pid && held.ownerToken === claim.ownerToken;
+    this.rows.set(key, { ...claim, claimedAtMs: sameOwner ? held.claimedAtMs : claim.claimedAtMs });
+  }
+
+  async releaseOwnedBy(pid: number): Promise<void> {
+    this.failIfBusy();
+    for (const [key, row] of this.rows) {
+      if (row.pid === pid) {
+        this.rows.delete(key);
+      }
+    }
   }
 
   async release(

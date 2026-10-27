@@ -475,16 +475,28 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
   }
 
   async claim(deviceId: string): Promise<boolean> {
+    const owner = this.claimOwner();
+    const outcome = await this.claimFile(deviceId, owner);
+    if (outcome === "claimed") {
+      this.claimMirror?.claimed(deviceId, owner);
+    }
+    return outcome !== "refused";
+  }
+
+  /** Take the claim file: "unpublished" when no claim could be written and allocation proceeds. */
+  private async claimFile(
+    deviceId: string,
+    owner: { pid: number; ownerToken: string; metadata?: string },
+  ): Promise<"claimed" | "unpublished" | "refused"> {
     const path = this.resolvePath(() => this.source.claimPath(deviceId), deviceId);
     if (path === undefined) {
       // No claim can be published; allocation proceeds as it did before claims existed.
-      return true;
+      return "unpublished";
     }
     if ((await this.legacyClaimOwner(deviceId)) !== undefined) {
       // A 0.0.84 daemon claimed the device in its coordination directory and still uses it.
-      return false;
+      return "refused";
     }
-    const owner = this.claimOwner();
     let acquired: boolean;
     try {
       acquired = this.source.tryAcquire(path, owner);
@@ -494,31 +506,22 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
         error,
       );
       // Without a writable claim directory, allocation proceeds as it did before claims existed.
-      return true;
+      return "unpublished";
     }
     if (acquired) {
-      this.claimMirror?.claimed(deviceId, owner);
-      return true;
+      return "claimed";
     }
     const observed = this.source.read(path);
     if (!observed || Number.isNaN(observed.pid) || observed.pid === this.selfPid) {
       // Ours already. Anything else (a claim being taken over, or an unreadable claim file) is
       // refused here, and refresh reports the same device as not free, so the two agree.
-      const ours = observed?.pid === this.selfPid;
-      if (ours) {
-        this.claimMirror?.claimed(deviceId, owner);
-      }
-      return ours;
+      return observed?.pid === this.selfPid ? "claimed" : "refused";
     }
     if ((await this.evaluateOwner(path, deviceId, "claim")) !== undefined) {
-      return false;
+      return "refused";
     }
     // The previous claimant is gone or no longer uses the device.
-    const tookOver = this.source.takeOver(path, observed, owner);
-    if (tookOver) {
-      this.claimMirror?.claimed(deviceId, owner);
-    }
-    return tookOver;
+    return this.source.takeOver(path, observed, owner) ? "claimed" : "refused";
   }
 
   release(deviceId: string): void {

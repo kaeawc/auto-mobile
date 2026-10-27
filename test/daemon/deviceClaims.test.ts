@@ -35,7 +35,9 @@ describe("the device_claims table", () => {
   let claims: SqliteDeviceClaims;
 
   beforeAll(async () => {
-    db = (await createTestDatabase()).withTables<DeviceClaimTables>();
+    db = (await createTestDatabase()).withTables<{
+      [Table in keyof DeviceClaimTables]: DeviceClaimTables[Table];
+    }>();
     await migration.up(db as Kysely<unknown>);
   });
   afterAll(async () => {
@@ -57,6 +59,37 @@ describe("the device_claims table", () => {
     delete taken.processGenerationToken;
     await claims.upsert(taken);
     expect(await claims.list()).toEqual([taken]);
+  });
+
+  test("re-claiming keeps when the same owner first claimed; a new owner restarts it", async () => {
+    await claims.upsert(CLAIM);
+    await claims.upsert({ ...CLAIM, updatedAtMs: 50 });
+    expect(await claims.get("android", "emulator-5554")).toEqual({ ...CLAIM, updatedAtMs: 50 });
+    await claims.upsert({
+      ...CLAIM,
+      pid: 200,
+      ownerToken: "token-b",
+      claimedAtMs: 60,
+      updatedAtMs: 60,
+    });
+    expect((await claims.get("android", "emulator-5554"))?.claimedAtMs).toBe(60);
+  });
+
+  test("a delayed write from a daemon that lost the claim does not replace the winner's row", async () => {
+    const winner = { ...CLAIM, pid: 200, ownerToken: "token-b", claimedAtMs: 30, updatedAtMs: 30 };
+    await claims.upsert(winner);
+    await claims.upsert(CLAIM);
+    expect(await claims.get("android", "emulator-5554")).toEqual(winner);
+    await claims.release("android", "emulator-5554", OWNER);
+    expect(await claims.get("android", "emulator-5554")).toEqual(winner);
+  });
+
+  test("a clean shutdown removes every row its process owns and no other", async () => {
+    await claims.upsert(CLAIM);
+    await claims.upsert({ ...CLAIM, deviceId: "emulator-5556" });
+    await claims.upsert({ ...CLAIM, deviceId: "emulator-5558", pid: 200, ownerToken: "token-b" });
+    await claims.releaseOwnedBy(OWNER.pid);
+    expect((await claims.list()).map((claim) => claim.deviceId)).toEqual(["emulator-5558"]);
   });
 
   test("a platform keeps its own row for the same id", async () => {

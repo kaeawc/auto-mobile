@@ -809,11 +809,11 @@ describe("the host-wide claims mirror (#11811 b)", () => {
 
   const fileOwner = (files: FakeOwnershipFiles) => {
     const held = files.files.get(files.claimPath(DEVICE));
-    return held ? { pid: held.pid, ownerToken: held.token } : undefined;
+    return held ? `${held.pid}/${held.token}` : "none";
   };
   const tableOwner = async (store: FakeDeviceClaims) => {
     const row = await store.get("android", DEVICE);
-    return row ? { pid: row.pid, ownerToken: row.ownerToken } : undefined;
+    return row ? `${row.pid}/${row.ownerToken}` : "none";
   };
 
   test("a won claim is mirrored with the token its claim file names, and a release withdraws it", async () => {
@@ -823,12 +823,12 @@ describe("the host-wide claims mirror (#11811 b)", () => {
 
     expect(await ownership.claim(DEVICE)).toBe(true);
     await mirror.idle();
-    expect(await tableOwner(store)).toEqual(fileOwner(files)!);
+    expect(await tableOwner(store)).toBe(fileOwner(files));
     expect((await store.get("android", DEVICE))?.pid).toBe(SELF_PID);
 
     ownership.release(DEVICE);
     await mirror.idle();
-    expect(fileOwner(files)).toBeUndefined();
+    expect(fileOwner(files)).toBe("none");
     expect(store.rows.size).toBe(0);
   });
 
@@ -859,7 +859,7 @@ describe("the host-wide claims mirror (#11811 b)", () => {
     expect(await self.ownership.claim(DEVICE)).toBe(true);
     await self.mirror.idle();
 
-    expect(await tableOwner(store)).toEqual(fileOwner(files)!);
+    expect(await tableOwner(store)).toBe(fileOwner(files));
     expect((await store.get("android", DEVICE))?.pid).toBe(SELF_PID);
   });
 
@@ -872,12 +872,12 @@ describe("the host-wide claims mirror (#11811 b)", () => {
       const { ownership, mirror } = mirroredDaemon(files, store, SELF_PID);
       expect(await ownership.claim(DEVICE)).toBe(true);
       await mirror.idle();
-      expect(fileOwner(files)?.pid).toBe(SELF_PID);
+      expect(fileOwner(files)).toStartWith(`${SELF_PID}/`);
       expect(store.rows.size).toBe(0);
       // The next claim by the same daemon (already ours) catches the table up.
       expect(await ownership.claim(DEVICE)).toBe(true);
       await mirror.idle();
-      expect(await tableOwner(store)).toEqual(fileOwner(files)!);
+      expect(await tableOwner(store)).toBe(fileOwner(files));
     } finally {
       warn.mockRestore();
     }
@@ -910,10 +910,7 @@ describe("the host-wide claims mirror (#11811 b)", () => {
           files.alive.delete(pid);
         }
         await Promise.all(daemons.map((d) => d.mirror.idle()));
-        expect({ step, table: await tableOwner(store) }).toEqual({
-          step,
-          table: fileOwner(files),
-        });
+        expect(`${step}:${await tableOwner(store)}`).toBe(`${step}:${fileOwner(files)}`);
       }
     },
   );

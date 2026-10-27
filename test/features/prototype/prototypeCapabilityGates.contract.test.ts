@@ -19,7 +19,11 @@ const validFixtureDirectory = join(fixtures, "prototype-spec/valid");
 // List once and sample every fourth sorted fixture: the full corpus's node-limit case
 // exceeds the 100 ms unit budget. Keep sampled fixtures in separate tests as well.
 const validFixtureFiles = readdirSync(validFixtureDirectory).sort();
-const sampledValidFixtureFiles = validFixtureFiles.filter((_, index) => index % 4 === 0);
+// The sample is by index, so adding fixtures shifts it; the node-limit case is excluded by name
+// so it can never land in the sample again.
+const sampledValidFixtureFiles = validFixtureFiles.filter(
+  (file, index) => index % 4 === 0 && file !== "exact-node-limit.json",
+);
 const knownCapabilities = new Set([
   ...PROTOTYPE_SPEC_CAPABILITY_GATES.map((gate) => gate.capability),
   PROTOTYPE_ANCHOR_CAPABILITY,

@@ -820,7 +820,9 @@
       "delayMs": 10
     },
     "keyframes": {
-      "trigger": { "key": "enabled" },
+      "trigger": {
+        "key": "enabled"
+      },
       "durationMs": 600,
       "tracks": {
         "scale": [
@@ -982,5 +984,18 @@
     },
     "filename": "photo.png",
     "contentType": "image/png"
+  },
+  "nodeAdaptive": {
+    "type": "adaptive",
+    "kind": "listDetail",
+    "list": {
+      "type": "text",
+      "text": "Pane"
+    },
+    "detail": {
+      "type": "text",
+      "text": "Pane"
+    },
+    "selectionKey": "choice"
   }
 }

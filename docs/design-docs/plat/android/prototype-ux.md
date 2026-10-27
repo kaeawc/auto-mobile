@@ -297,6 +297,7 @@ There are no iOS prototype screenshot baselines to re-record.
 | column          | neutral  | neutral  | —     |
 | datePicker      | native   | material | —     |
 | dialog          | material | material | —     |
+| adaptive        | material | material | —     |
 | drawer          | material | material | —     |
 | tooltip         | material | material | —     |
 | divider         | neutral  | neutral  | —     |
@@ -508,6 +509,7 @@ layout room.
 | `image`           | Required opaque `asset` string; optional `contentScale`: `fit` (default), `crop`, `fill`.                                                                                                                                                              |
 | `icon`            | Required built-in `name` below; optional `variant` (`filled`, `outlined`, `rounded`, `sharp`, `twoTone`).                                                                                                                                              |
 | `spacer`          | No node-specific properties; size comes from style.                                                                                                                                                                                                    |
+| `adaptive`        | Native-width panes and navigation; see Adaptive layouts.                                                                                                                                                                                               |
 | `textField`       | Required `stateKey` naming an initialized string state value; optional `placeholder` string, default empty; `label`, `variant`, `supportingText`, `keyboardType`, `secure`, `multiline`, `minLines`, `maxLines`, `maxLength` (see Text field options). |
 | `switch`          | Required `stateKey` naming an initialized boolean state value; optional nonempty `label`.                                                                                                                                                              |
 | `checkbox`        | Required `stateKey` naming an initialized boolean state value; optional nonempty `label`.                                                                                                                                                              |
@@ -534,6 +536,12 @@ layout room.
 | `tabBar`          | Required `items`; exactly one `pager` or `stateKey`; optional `scrollable` boolean, default false.                                                                                                                                                     |
 | `bottomNav`       | Required 2–5 `items`; exactly one `pager` or `stateKey`. Author positions it, typically last in a column.                                                                                                                                              |
 | `bottomSheet`     | Required single `child`, `openWhen`, and `detents`; optional `scrim`, `dragHandle`, `dismissOnSwipe`.                                                                                                                                                  |
+
+### Adaptive layouts
+
+`adaptive` requires `prototype_adaptive_v1` and a closed `kind`. `listDetail` takes `list` and `detail` node slots plus a declared string `selectionKey`; empty string means no selection. `navigationSuite` takes 1–8 unique `{value,label}` items, a declared string `stateKey` naming an item, and `content`. `supporting` takes `main`, `supporting`, and a declared boolean `openKey`. Slots are ordinary node subtrees.
+
+Material adaptive scaffolds use native window classes: two panes at expanded, one below; navigation uses bar/rail/drawer at compact/medium/expanded. Compact list selection shows detail; Back clears the key. There is no shared breakpoint or `minWidth`. iOS uses compact/regular, and successful shows report the difference in `platformNotes`.
 
 Each nav item is `{label, icon?, image?}`. Label is nonempty; icon uses the same
 closed list as icon nodes; image is an opaque asset ID. Both icon and image may

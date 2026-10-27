@@ -503,6 +503,8 @@
                 PrototypeBadgeView(text: interpolated(node.text), style: style, tagged: node.identifier != nil)
             case "progress":
                 PrototypeProgressView(node: node, model: model)
+            case "adaptive":
+                PrototypeAdaptiveView(node: node, model: model)
             case "chart":
                 PrototypeChartView(node: node, model: model)
             case "timePicker":

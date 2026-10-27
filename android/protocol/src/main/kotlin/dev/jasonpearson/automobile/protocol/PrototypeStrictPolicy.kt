@@ -268,6 +268,7 @@ internal object PrototypeStrictPolicy {
       "list" to "lazy_list",
       "menu" to "menus",
       "tooltip" to "tooltip",
+      "adaptive" to "adaptive",
       "drawer" to "drawer",
       "select" to "menus",
       "scrollTo" to "chat_scroll",

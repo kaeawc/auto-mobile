@@ -67,6 +67,7 @@ enum PrototypeAgentProtocol {
         menusCapability,
         tooltipCapability,
         drawerCapability,
+        adaptiveCapability,
         stackCapability,
         stackTransitionsCapability,
         designPlatformCapability,
@@ -215,6 +216,7 @@ enum PrototypeAgentProtocol {
     /// In-window menus and exposed select option lists.
     static let menusCapability = "prototype_menus_v1"
     static let tooltipCapability = "prototype_tooltip_v1"
+    static let adaptiveCapability = "prototype_adaptive_v1"
     static let drawerCapability = "prototype_drawer_v1"
     // ORCHESTRATOR-CHOSEN gate; fold into PROTOTYPE_SPEC_CAPABILITY_GATES when it lands
     static let emitContextCapability = "prototype_emit_context_v1"

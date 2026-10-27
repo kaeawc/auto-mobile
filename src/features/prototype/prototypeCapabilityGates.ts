@@ -1,4 +1,9 @@
 import { prototypeGlassFields, prototypeScrollEdgeEffectFields } from "./prototypeGlass";
+import {
+  PROTOTYPE_ADAPTIVE_CAPABILITY,
+  prototypeAdaptiveFields,
+  prototypeAdaptiveUnsupportedMessage,
+} from "./prototypeAdaptive";
 import { prototypeFieldsOfKind } from "./prototypeEmitContext";
 import { PROTOTYPE_CONTENT_TRANSITION_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import {
@@ -286,6 +291,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_STYLE_POLISH_V2_CAPABILITY,
     fields: prototypeStylePolishV2Fields,
     unsupportedMessage: prototypeStylePolishV2UnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_ADAPTIVE_CAPABILITY,
+    fields: prototypeAdaptiveFields,
+    unsupportedMessage: prototypeAdaptiveUnsupportedMessage,
   },
   {
     capability: PROTOTYPE_DRAWER_CAPABILITY,

@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 import dev.jasonpearson.automobile.protocol.EmitContextBinding
 import dev.jasonpearson.automobile.protocol.EmitContextResolver
 import dev.jasonpearson.automobile.protocol.PrototypeAction
+import dev.jasonpearson.automobile.protocol.PrototypeAdaptiveNode
 import dev.jasonpearson.automobile.protocol.PrototypeAppBarAction
 import dev.jasonpearson.automobile.protocol.PrototypeAppendDataAction
 import dev.jasonpearson.automobile.protocol.PrototypeBadgeNode
@@ -124,12 +125,25 @@ private fun hasSingleChild(node: PrototypeNode): Boolean =
     node is PrototypeDialogNode ||
     node is PrototypeSearchBarNode
 
+private fun adaptiveChildEntries(
+  node: PrototypeAdaptiveNode,
+  path: String,
+): List<PrototypeChildEntry> =
+  listOfNotNull(
+    node.list?.let { PrototypeChildEntry(it, "$path.list") },
+    node.detail?.let { PrototypeChildEntry(it, "$path.detail") },
+    node.content?.let { PrototypeChildEntry(it, "$path.content") },
+    node.main?.let { PrototypeChildEntry(it, "$path.main") },
+    node.supporting?.let { PrototypeChildEntry(it, "$path.supporting") },
+  )
+
 internal fun prototypeChildEntries(
   node: PrototypeNode,
   path: String,
   bind: Boolean = true,
   formatter: PrototypeValueFormatter = AndroidPrototypeValueFormatter(),
 ): List<PrototypeChildEntry> {
+  if (node is PrototypeAdaptiveNode) return adaptiveChildEntries(node, path)
   if (node is PrototypeListNode)
     return listOfNotNull(
       node.header?.let { PrototypeChildEntry(it, "$path.header") },
@@ -464,6 +478,23 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         shared = shared,
         visibleWhen = visibleWhen,
         stateKey = stateKey?.let(instance::interpolate),
+      )
+    is PrototypeAdaptiveNode ->
+      copy(
+        semantics = semantics,
+        onAppear = onAppear,
+        onTap = onTap,
+        styleWhen = styleWhen,
+        shared = shared,
+        visibleWhen = visibleWhen,
+        list = list?.bound(instance),
+        detail = detail?.bound(instance),
+        content = content?.bound(instance),
+        main = main?.bound(instance),
+        supporting = supporting?.bound(instance),
+        selectionKey = selectionKey?.let(instance::interpolate),
+        stateKey = stateKey?.let(instance::interpolate),
+        openKey = openKey?.let(instance::interpolate),
       )
     is PrototypeBottomNavNode ->
       copy(

@@ -96,6 +96,8 @@ internal object PrototypeStateBindings {
   fun boundKeys(value: JsonObject): List<String> =
     listOfNotNull(
       value.text("stateKey"),
+      value.text("selectionKey"),
+      value.text("openKey"),
       value.text("activeKey"),
       value.text("hourKey"),
       value.text("minuteKey"),

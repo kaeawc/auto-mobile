@@ -360,6 +360,7 @@ export const prototypeOutputSchema = z.object({
           "design.fallback",
           "platformNamespace",
           "scroll.edgeEffect",
+          "adaptive",
           "menu",
           "select",
         ]),

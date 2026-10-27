@@ -73,6 +73,7 @@ enum PrototypeBundleCapabilities {
                 "menu": "menus",
                 "tooltip": "tooltip",
                 "drawer": "drawer",
+                "adaptive": "adaptive",
                 "select": "menus",
                 "stack": "stack",
                 "chart": "chart",
@@ -135,6 +136,7 @@ enum PrototypeBundleCapabilities {
             scanSlots(.object(node), names: &names)
             if case let .array(children) = node["children"] { pending += children }
             if let child = node["child"] { pending.append(child) }
+            if type == "adaptive" { pending += PrototypeAdaptive.slots.compactMap { node[$0] } }
             pending += Array(node["screens"]?.objectFields?.values ?? [:].values)
         }
         return names.sorted()

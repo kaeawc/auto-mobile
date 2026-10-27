@@ -1,5 +1,5 @@
 import { PROTOTYPE_LINKIFY_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
-import { prototypeSpecNodeRoots } from "./prototypeNodeChildren";
+import { prototypeNodeChildren, prototypeSpecNodeRoots } from "./prototypeNodeChildren";
 import { record, type Raw } from "./prototypeTemplate";
 
 /**
@@ -233,18 +233,8 @@ function walkNodes(value: unknown, path: string, visit: (node: Raw, path: string
   if (typeof object.type === "string") {
     visit(object, path);
   }
-  for (const key of Object.keys(object).sort()) {
-    if (key === "screens" && record(object.screens)) {
-      for (const name of Object.keys(record(object.screens)!).sort()) {
-        walkNodes(record(object.screens)![name], `${path}.screens[${JSON.stringify(name)}]`, visit);
-      }
-    } else if (
-      key === "child" ||
-      key === "children" ||
-      (object.type === "list" && ["header", "footer"].includes(key))
-    ) {
-      walkNodes(object[key], `${path}.${key}`, visit);
-    }
+  for (const child of prototypeNodeChildren(object)) {
+    walkNodes(child.value, `${path}${child.suffix}`, visit);
   }
 }
 

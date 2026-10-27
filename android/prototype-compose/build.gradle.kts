@@ -44,6 +44,10 @@ dependencies {
   implementation(libs.compose.ui.graphics)
   implementation(libs.compose.ui.foundation)
   implementation(libs.compose.material)
+  implementation(libs.compose.adaptive.core)
+  implementation(libs.compose.adaptive.layout)
+  implementation(libs.compose.adaptive.navigation)
+  implementation(libs.compose.adaptive.navigation.suite)
   implementation(libs.compose.material.icons.extended)
   api(libs.kotlinx.coroutines)
 

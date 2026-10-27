@@ -25,7 +25,10 @@ internal object PrototypeRepeatTree {
 
   fun childrenOf(node: JsonObject, path: String): List<Child> = buildList {
     for ((key, value) in node) when {
-      key == "child" || (node.text("type") == "list" && key in setOf("header", "footer")) ->
+      (node.text("type") == "adaptive" &&
+        key in setOf("list", "detail", "content", "main", "supporting")) ||
+        key == "child" ||
+        (node.text("type") == "list" && key in setOf("header", "footer")) ->
         (value as? JsonObject)?.let { add(Child(it, "$path.$key")) }
       key == "children" ->
         (value as? JsonArray).orEmpty().forEachIndexed { index, child ->

@@ -319,7 +319,11 @@ function nodeFields(value: unknown, path: string): string[] {
     const children = prototypeNodeChildren(node);
     const next: typeof pending = [];
     for (const [key, child] of Object.entries(node)) {
-      if (["child", "children", "screens", "header", "footer"].includes(key)) {
+      if (
+        ["child", "children", "screens", "header", "footer"].includes(key) ||
+        (node.type === "adaptive" &&
+          ["list", "detail", "content", "main", "supporting"].includes(key))
+      ) {
         next.push(
           ...children
             .filter((entry) => entry.suffix === `.${key}` || entry.suffix.startsWith(`.${key}[`))

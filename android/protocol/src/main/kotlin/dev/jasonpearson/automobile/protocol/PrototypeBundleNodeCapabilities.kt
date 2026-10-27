@@ -15,6 +15,8 @@ internal object PrototypeBundleNodeCapabilities {
         "chart" to "chart_v1",
         "stack" to "stack_v1",
         "menu" to "menus_v1",
+        "tooltip" to "tooltip_v1",
+        "drawer" to "drawer_v1",
         "select" to "menus_v1",
         "flow" to "flow_grid_v1",
         "grid" to "flow_grid_v1",
@@ -86,7 +88,7 @@ internal object PrototypeBundleNodeCapabilities {
     if ((n["filter"] as? JsonObject)?.get("tint") is JsonObject)
       caps.add("prototype_theme_modes_v1")
     val pairedImage = type == "image" && n["asset"] is JsonObject
-    val scrim = type == "bottomSheet" && themed(n["scrim"])
+    val scrim = type in setOf("bottomSheet", "drawer") && themed(n["scrim"])
     val items =
       (n["items"] as? JsonArray).orEmpty().any { (it as? JsonObject)?.get("image") is JsonObject }
     if (pairedImage || scrim || items) caps.add("prototype_theme_modes_v1")

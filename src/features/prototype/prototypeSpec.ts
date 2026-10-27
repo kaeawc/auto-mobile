@@ -1,3 +1,6 @@
+export { PROTOTYPE_COLOR_ROLES } from "./prototypePresentationSchemas";
+import { themeSchema } from "./prototypeThemeSchema";
+import { buildTooltipDrawerSchemas, tooltipAnchorIssue } from "./prototypeTooltipDrawerSchema";
 import * as timers from "./prototypeTimerSchema";
 import { stackScreenActionSchema, stackTransitionSchema } from "./prototypeStackTransitions";
 import { createSwipeActionsShape } from "./prototypeSwipeActionsSchema";
@@ -28,12 +31,10 @@ import {
   colorValueSchema,
   conditionSchema,
   detentSchema,
-  hexColorSchema,
   iconNameSchema,
   iconVariantSchema,
   itemSchema,
   placementSchema,
-  PROTOTYPE_COLOR_ROLES,
   type PrototypeData,
   safeAreaPaddingSchema,
   sheetConditionSchema,
@@ -49,11 +50,7 @@ import {
 import { bindPrototypeRequestFollowUps, requestActionSchema } from "./prototypeRequestSchema";
 import { prototypeStorageSchema } from "./prototypeStorageSchema";
 import { record } from "./prototypeTemplate";
-export {
-  PROTOTYPE_COLOR_ROLES,
-  type PrototypeAnchor,
-  type PrototypeData,
-} from "./prototypePresentationSchemas";
+export { type PrototypeAnchor, type PrototypeData } from "./prototypePresentationSchemas";
 export { prototypeDataActionValueSchema, type PrototypeDataActionValue };
 export const {
   MAX_PROTOTYPE_SPEC_BYTES,
@@ -174,7 +171,7 @@ const checksShape = {
   checks: z.array(prototypeCheckSchema).min(1).max(8).optional(),
   validateOn: z.enum(["change", "blur", "submit"]).optional(),
 };
-const commonNodeShape = {
+export const commonNodeShape = {
   span: z.number().finite().int().min(1).optional(),
   id: z.string().min(1).optional(),
   testTag: z.string().min(1).optional(),
@@ -641,6 +638,12 @@ const bottomNavBaseSchema = z
     stateKey: stateKeySchema.optional(),
   })
   .strict();
+const { tooltipBaseSchema, drawerBaseSchema } = buildTooltipDrawerSchemas({
+  commonNodeShape,
+  sheetConditionSchema,
+  actionSchema,
+  colorValueSchema,
+});
 const bottomSheetBaseSchema = z
   .object({
     ...commonNodeShape,
@@ -693,6 +696,8 @@ export type PrototypeNode =
   | z.infer<typeof progressBaseSchema>
   | z.infer<typeof chartBaseSchema>
   | (z.infer<typeof dialogBaseSchema> & { child?: PrototypeNode })
+  | z.infer<typeof tooltipBaseSchema>
+  | (z.infer<typeof drawerBaseSchema> & { child: PrototypeNode })
   | z.infer<typeof menuBaseSchema>
   | z.infer<typeof snackbarBaseSchema>
   | z.infer<typeof timePickerBaseSchema>
@@ -770,6 +775,8 @@ const prototypeNodeBaseSchema: z.ZodType<PrototypeNode, z.ZodTypeDef, unknown> =
       progressBaseSchema,
       chartBaseSchema,
       dialogBaseSchema.extend({ child: z.lazy(() => prototypeNodeSchema).optional() }),
+      tooltipBaseSchema,
+      drawerBaseSchema.extend({ child: z.lazy(() => prototypeNodeSchema) }),
       menuBaseSchema,
       snackbarBaseSchema,
       timePickerBaseSchema,
@@ -786,6 +793,7 @@ const prototypeNodeBaseSchema: z.ZodType<PrototypeNode, z.ZodTypeDef, unknown> =
 );
 export const prototypeNodeSchema: z.ZodType<PrototypeNode, z.ZodTypeDef, unknown> =
   prototypeNodeBaseSchema.superRefine((node, context) => {
+    tooltipAnchorIssue(node, context);
     if (node.type === "text" && (node.text !== undefined) === (node.spans !== undefined)) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
@@ -821,50 +829,6 @@ const windowSchema = z
       ),
   })
   .strict();
-/**
- * Explicit hex overrides for individual scheme roles, applied over the seed, device or baseline
- * scheme in both light and dark.
- */
-const themeColorRoleSchemas = Object.fromEntries(
-  PROTOTYPE_COLOR_ROLES.map((role) => [role, hexColorSchema.optional()]),
-) as Record<(typeof PROTOTYPE_COLOR_ROLES)[number], z.ZodOptional<typeof hexColorSchema>>;
-/** Role overrides for one resolved mode, applied after the flat overrides (#11218). */
-const themeModeColorsSchema = z
-  .object(themeColorRoleSchemas)
-  .strict()
-  .refine((value) => Object.keys(value).length > 0);
-const themeColorsSchema = z
-  .object({
-    seed: hexColorSchema.optional(),
-    source: z.enum(["device"]).optional(),
-    light: themeModeColorsSchema.optional(),
-    dark: themeModeColorsSchema.optional(),
-    ...themeColorRoleSchemas,
-  })
-  .strict()
-  .refine((value) => Object.keys(value).length > 0);
-const themeTypographySchema = z
-  .object({
-    scale: z.number().finite().min(0.75).max(1.5).optional(),
-    fontFamily: z.enum(["sans", "serif", "mono"]).optional(),
-  })
-  .strict()
-  .refine((value) => Object.keys(value).length > 0);
-const themeShapesSchema = z
-  .object({
-    corner: z.enum(["none", "small", "medium", "large", "full"]).optional(),
-  })
-  .strict()
-  .refine((value) => Object.keys(value).length > 0);
-const themeSchema = z
-  .object({
-    mode: z.enum(["light", "dark", "system"]).optional(),
-    colors: themeColorsSchema.optional(),
-    typography: themeTypographySchema.optional(),
-    shapes: themeShapesSchema.optional(),
-  })
-  .strict()
-  .refine((value) => Object.keys(value).length > 0);
 const specSchema = z
   .object({
     id: z.string().min(1),
@@ -937,6 +901,8 @@ export const PROTOTYPE_NODE_TYPES = [
   "tabBar",
   "bottomNav",
   "bottomSheet",
+  "tooltip",
+  "drawer",
 ] as const;
 export const PROTOTYPE_ACTION_TYPES = [
   "emit",

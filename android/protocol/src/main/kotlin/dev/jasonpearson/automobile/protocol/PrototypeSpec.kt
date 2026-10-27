@@ -1393,6 +1393,51 @@ data class PrototypeBottomSheetNode(
   val dismissOnSwipe: Boolean = true,
 ) : PrototypeNode()
 
+@SerialName("tooltip")
+@Serializable
+data class PrototypeTooltipNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val contentDescription: String? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
+  override val transition: PrototypeTransition? = null,
+  override val animate: PrototypeAnimate? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
+  val text: String,
+  val openWhen: PrototypeSheetCondition,
+  val anchorTo: String? = null,
+  val caret: String = "auto",
+  val spotlight: PrototypeTooltipSpotlight? = null,
+  val onDismiss: List<PrototypeAction>? = null,
+) : PrototypeNode()
+
+@SerialName("drawer")
+@Serializable
+data class PrototypeDrawerNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val contentDescription: String? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
+  override val transition: PrototypeTransition? = null,
+  override val animate: PrototypeAnimate? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
+  val edge: String,
+  val openWhen: PrototypeSheetCondition,
+  val child: PrototypeNode,
+  val scrim: PrototypeModeValue? = null,
+  val dismissOnSwipe: Boolean = true,
+) : PrototypeNode()
+
 @Serializable
 data class PrototypeWindow(
   val placement: PrototypePlacement,

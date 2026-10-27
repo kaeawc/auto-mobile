@@ -1,0 +1,23 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "open": true
+    },
+    "root": {
+      "type": "drawer",
+      "edge": "start",
+      "openWhen": {
+        "key": "open",
+        "equals": true
+      }
+    }
+  },
+  "expectedPath": "root.child",
+  "expectedMessage": "Required property"
+}

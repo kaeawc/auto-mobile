@@ -212,24 +212,18 @@ fun PrototypeSpecContent(
       LocalPrototypeAnchorLocals provides anchorLocals,
       LocalPrototypeGestureTaps provides remember { PrototypeGestureTaps() },
       LocalPrototypeMenuLayers provides menuLayers,
+      LocalPrototypeDrawerLayers provides remember { PrototypeDrawerLayers() },
+      LocalPrototypeTooltipTargets provides remember(root) { prototypeTooltipTargets(root) },
+      LocalPrototypeTargetFocus provides remember { mutableMapOf() },
       LocalPrototypeRetainedSubtrees provides remember(root) { prototypeRetainedSubtrees(root) },
       LocalPrototypeHandleVisuals provides remember(root) { prototypeHandleVisuals(root) },
     ) {
-      val fillsWindow = LocalPrototypeFillsWindow.current
       Box(
         Modifier.onGloballyPositioned { menuLayers.windowBounds = it.boundsInRoot() }
           .semantics { testTagsAsResourceId = true },
       ) {
-        val modals = remember(root) { modalPrototypeSheets(root) }
-        // An open dialog or menu is modal: the page behind it leaves the accessibility tree, as it
-        // does
-        // on iOS and as touches already do. A snackbar or sheet does not block the page.
-        val pageBlocked = modals.any { it.role == "dialog" || it.role == "menu" }
-        // The page box takes the fill: it is the root's parent and must measure the window.
-        Box(
-          Modifier.then(if (fillsWindow) Modifier.fillWhenEmpty() else Modifier)
-            .then(if (pageBlocked) Modifier.clearAndSetSemantics {} else Modifier),
-        ) {
+        val modals = prototypeModalLayers(root)
+        PrototypeModalPage(modals) {
           RenderPrototypeNode(root, interact, windowRoot = true)
           PrototypeAnchorLayer(remember(root) { layeredPrototypeAnchors(root) }, interact)
         }
@@ -395,10 +389,7 @@ private fun RenderPrototypeModal(
   node: PrototypeRenderNode,
   interact: (PrototypeInteraction) -> Unit,
 ) {
-  val layers = LocalPrototypeMenuLayers.current
-  val boundsModifier =
-    if (node.children.any { it.role == "menu" }) Modifier.prototypeMenuBounds(node.identity, layers)
-    else Modifier
+  val boundsModifier = Modifier.prototypeTargetBounds(node)
   val modifier = boundsModifier.then(prototypeNodeModifier(node, interact))
   when (node.role) {
     "dialog" ->
@@ -414,6 +405,8 @@ private fun RenderPrototypeModal(
           }
         }
       }
+    "tooltip" -> RenderPrototypeTooltip(node, modifier, interact)
+    "drawer" -> RenderPrototypeDrawer(node, modifier, interact)
     "snackbar" -> RenderPrototypeSnackbar(node, modifier, interact)
     else -> RenderPrototypeSheet(node, modifier, interact)
   }
@@ -585,10 +578,7 @@ private fun RenderPrototypeNodeContent(
   val traceEnabled = traceSink.isEnabled()
   if (traceEnabled) traceSink.begin(PrototypeTrace.NODE)
   LocalPrototypeCompositionProbe.current?.invoke(node.identity)
-  val layers = LocalPrototypeMenuLayers.current
-  val boundsModifier =
-    if (node.children.any { it.role == "menu" }) Modifier.prototypeMenuBounds(node.identity, layers)
-    else Modifier
+  val boundsModifier = Modifier.prototypeTargetBounds(node)
   val controlInteract: (PrototypeInteraction) -> Unit = { interaction ->
     if (node.source?.enabledCondition() != null)
       interact(PrototypeInteraction.Guarded(node.identity, interaction))
@@ -827,6 +817,8 @@ private fun RenderPrototypeNodeContent(
     "tabBar",
     "bottomNav" -> RenderPrototypeNavigation(node, modifier, interact)
     "bottomSheet",
+    "tooltip",
+    "drawer",
     "dialog",
     "menu",
     "snackbar" -> Unit // Modal content is hoisted above the whole author tree, within this window.
@@ -1350,7 +1342,7 @@ private fun prototypeNodeModifier(
   var modifier: Modifier = if (node.enabled) Modifier else Modifier.semantics { disabled() }
   // Outermost: the anchor fixes where the whole node, offset and touch target included, lands on
   // screen (#9316). The host resolved element anchors to screen dp bounds before sending.
-  val anchor = node.source?.anchor as? PrototypeBoundsAnchor
+  val anchor = if (node.role == "tooltip") null else node.source?.anchor as? PrototypeBoundsAnchor
   if (anchor != null) {
     modifier = modifier.prototypeAnchor(anchor, currentPrototypeWindowGeometry(), windowRoot)
   }

@@ -1,0 +1,29 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "opacity": 100
+    },
+    "state": {
+      "open": true
+    },
+    "root": {
+      "type": "drawer",
+      "edge": "end",
+      "openWhen": {
+        "key": "open",
+        "equals": true
+      },
+      "dismissOnSwipe": false,
+      "child": {
+        "type": "text",
+        "text": "Navigation"
+      },
+      "zzzUnknown": true
+    }
+  },
+  "expectedPath": "root.zzzUnknown"
+}

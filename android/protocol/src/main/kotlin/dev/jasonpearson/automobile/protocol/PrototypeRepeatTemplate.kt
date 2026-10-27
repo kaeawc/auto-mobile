@@ -385,7 +385,7 @@ internal object PrototypeBindableFields {
     }
 
     fun actions(data: JsonObject, path: String): T? {
-      for (field in listOf("onTap", "onLongPress", "onDoubleTap")) {
+      for (field in listOf("onTap", "onLongPress", "onDoubleTap", "onDismiss")) {
         for ((action, actionPath) in objects(data, field, path)) {
           action(action, actionPath)?.let {
             return it
@@ -423,6 +423,7 @@ internal object PrototypeBindableFields {
       when ((node["type"] as? JsonPrimitive)?.content) {
         "button",
         "fab" -> visitor.field(node, "label", path, PrototypeBindableKind.TEXT)
+        "tooltip" -> visitor.field(node, "text", path, PrototypeBindableKind.TEXT)
         "menu" ->
           objects(node, "items", path).firstNotNullOfOrNull { (entry, entryPath) ->
             part(entry, entryPath)

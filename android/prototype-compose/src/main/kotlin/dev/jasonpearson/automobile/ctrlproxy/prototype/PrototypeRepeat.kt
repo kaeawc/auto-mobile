@@ -24,6 +24,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeDecrementAction
 import dev.jasonpearson.automobile.protocol.PrototypeDialogButton
 import dev.jasonpearson.automobile.protocol.PrototypeDialogNode
 import dev.jasonpearson.automobile.protocol.PrototypeDividerNode
+import dev.jasonpearson.automobile.protocol.PrototypeDrawerNode
 import dev.jasonpearson.automobile.protocol.PrototypeEmitAction
 import dev.jasonpearson.automobile.protocol.PrototypeFabNode
 import dev.jasonpearson.automobile.protocol.PrototypeFlowNode
@@ -70,6 +71,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeTextFieldNode
 import dev.jasonpearson.automobile.protocol.PrototypeTextNode
 import dev.jasonpearson.automobile.protocol.PrototypeTimePickerNode
 import dev.jasonpearson.automobile.protocol.PrototypeToggleAction
+import dev.jasonpearson.automobile.protocol.PrototypeTooltipNode
 import dev.jasonpearson.automobile.protocol.PrototypeTopAppBarNode
 import dev.jasonpearson.automobile.protocol.PrototypeValidityKeys
 import kotlinx.serialization.json.JsonArray
@@ -122,6 +124,7 @@ internal fun prototypeChildEntries(
     val single =
       node is PrototypeScrollNode ||
         node is PrototypeBottomSheetNode ||
+        node is PrototypeDrawerNode ||
         node is PrototypeDialogNode ||
         node is PrototypeSearchBarNode
     return children.mapIndexed { index, child ->
@@ -270,6 +273,23 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
               onRefresh = it.onRefresh.map { action -> action.bound(instance) },
             )
           },
+        child = child.bound(instance),
+      )
+    is PrototypeTooltipNode ->
+      copy(
+        onTap = onTap,
+        styleWhen = styleWhen,
+        visibleWhen = visibleWhen,
+        text = instance.interpolate(text),
+        openWhen = openWhen.copy(key = instance.interpolate(openWhen.key)),
+        onDismiss = onDismiss?.map { it.bound(instance) },
+      )
+    is PrototypeDrawerNode ->
+      copy(
+        onTap = onTap,
+        styleWhen = styleWhen,
+        visibleWhen = visibleWhen,
+        openWhen = openWhen.copy(key = instance.interpolate(openWhen.key)),
         child = child.bound(instance),
       )
     is PrototypeBottomSheetNode ->

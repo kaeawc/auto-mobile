@@ -278,6 +278,8 @@ class WebSocketServer(
     addPrototypeRuntimeFlags()
     addPrototypeWindowFlags()
     add("prototype_menus_v1")
+    add("prototype_tooltip_v1")
+    add("prototype_drawer_v1")
     // request_action honours the semantic actions (expand, collapse, dismiss, select, scroll and
     // page directions, press_and_hold, set_progress with progress, custom with customAction) and
     // lists the node's available actions in a refusal (#14077). Older APKs refuse them as

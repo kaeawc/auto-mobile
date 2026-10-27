@@ -20,6 +20,8 @@ internal object PrototypeStateBindings {
       "dialog" to "Dialog",
       "snackbar" to "Snackbar",
       "menu" to "Menu",
+      "tooltip" to "Tooltip",
+      "drawer" to "Drawer",
     )
 
   fun openWhenErrors(

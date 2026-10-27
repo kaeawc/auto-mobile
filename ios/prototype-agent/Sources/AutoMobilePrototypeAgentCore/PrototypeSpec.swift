@@ -186,6 +186,7 @@ struct PrototypeSpec: Decodable {
         try PrototypeCarousel.validate(expanded)
         try PrototypeRefresh.validate(expanded)
         try PrototypeMenus.validate(expanded, state: menuState)
+        try PrototypeTooltips.validate(expanded)
         let root = try JSONDecoder().decode(
             DecodedRoot.self,
             from: JSONEncoder().encode(JSONValue.object(["root": expanded]))
@@ -788,6 +789,11 @@ final class PrototypeNode: Decodable {
     let itemWidth: Double?
     let itemSpacing: Double?
     let items: [NavItem]?
+    let anchorTo: String?
+    let caret: PrototypeCaret?
+    let spotlight: TooltipSpotlight?
+    let onDismiss: [PrototypeAction]?
+    let edge: String?
     /// Menu entries decoded from the same `items` JSON key, preserving navigation items.
     let menuItems: [PrototypeMenuItem]?
     let pager: String?
@@ -859,6 +865,7 @@ final class PrototypeNode: Decodable {
         case type, id, testTag, onTap, style, styleWhen, visibleWhen, transition
         case safeAreaPadding, anchor, children, child, text, contentDescription, asset, contentScale
         case name, label, variant, stateKey, placeholder, axis, items, pager
+        case anchorTo, caret, spotlight, onDismiss, edge
         case scrollable, openWhen, detents, scrim, dragHandle, options, icon, size
         case orientation, min, max, step, title, navigationIcon, actions, confirm
         case dismiss, action, durationMs, hourKey, minuteKey, is24Hour, headline, supporting
@@ -909,6 +916,11 @@ final class PrototypeNode: Decodable {
         }
         pager = try container.decodeIfPresent(String.self, forKey: .pager)
         scrollable = try container.decodeIfPresent(Bool.self, forKey: .scrollable)
+        anchorTo = try container.decodeIfPresent(String.self, forKey: .anchorTo)
+        caret = try container.decodeIfPresent(PrototypeCaret.self, forKey: .caret)
+        spotlight = try container.decodeIfPresent(TooltipSpotlight.self, forKey: .spotlight)
+        onDismiss = try container.decodeIfPresent([PrototypeAction].self, forKey: .onDismiss)
+        edge = try container.decodeIfPresent(String.self, forKey: .edge)
         openWhen = try container.decodeIfPresent(Condition.self, forKey: .openWhen)
         refresh = try container.decodeIfPresent(PrototypeScrollRefresh.self, forKey: .refresh)
         detents = try container.decodeIfPresent([Detent].self, forKey: .detents)

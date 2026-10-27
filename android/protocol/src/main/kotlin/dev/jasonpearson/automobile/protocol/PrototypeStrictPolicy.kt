@@ -150,6 +150,8 @@ internal object PrototypeStrictPolicy {
       "searchBar" to "search_bar",
       "chart" to "chart",
       "menu" to "menus",
+      "tooltip" to "tooltip",
+      "drawer" to "drawer",
       "select" to "menus",
       "scrollTo" to "chat_scroll",
       "request" to "network",

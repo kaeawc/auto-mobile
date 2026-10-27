@@ -33,6 +33,8 @@ private val RETENTION_EXCLUDED_ROLES =
     "datePicker",
     "progress",
     "bottomSheet",
+    "tooltip",
+    "drawer",
     "dialog",
     "snackbar",
     "menu",

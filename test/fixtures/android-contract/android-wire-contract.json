@@ -8313,6 +8313,20 @@
         "hasDefault": false
       }
     ],
+    "dev.jasonpearson.automobile.protocol.PrototypeTooltipSpotlight": [
+      {
+        "name": "padding",
+        "type": "int",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "cornerRadius",
+        "type": "int",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
     "dev.jasonpearson.automobile.protocol.PrototypeWindow": [
       {
         "name": "placement",
@@ -8759,6 +8773,110 @@
       {
         "name": "orientation",
         "type": "string",
+        "nullable": false,
+        "hasDefault": true
+      }
+    ],
+    "drawer": [
+      {
+        "name": "id",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "testTag",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "contentDescription",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onTap",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "style",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeStyle",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "styleWhen",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "visibleWhen",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "transition",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "anchor",
+        "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "span",
+        "type": "int",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "edge",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "openWhen",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSheetCondition",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "child",
+        "type": "polymorphic",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "scrim",
+        "type": "object:PrototypeModeValue",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "dismissOnSwipe",
+        "type": "boolean",
         "nullable": false,
         "hasDefault": true
       }
@@ -11655,6 +11773,116 @@
         "type": "string",
         "nullable": false,
         "hasDefault": false
+      }
+    ],
+    "tooltip": [
+      {
+        "name": "id",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "testTag",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "contentDescription",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onTap",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "style",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeStyle",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "styleWhen",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "visibleWhen",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "transition",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "anchor",
+        "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "span",
+        "type": "int",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "text",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "openWhen",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSheetCondition",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "anchorTo",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "caret",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": true
+      },
+      {
+        "name": "spotlight",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeTooltipSpotlight",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onDismiss",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "topAppBar": [

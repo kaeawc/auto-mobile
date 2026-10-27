@@ -275,7 +275,7 @@
             [
                 "switch", "checkbox", "button", "slider", "chip", "radioGroup", "listItem", "iconButton",
                 "fab", "segmentedButton", "topAppBar", "timePicker", "datePicker", "dialog", "snackbar", "searchBar",
-                "menu",
+                "menu", "tooltip",
                 "select",
             ].contains(node.type)
         }
@@ -402,6 +402,11 @@
                     title: interpolated(node.title),
                     text: node.text.map(interpolated)
                 )
+            // These bodies are reached only from the hoisted modal layer.
+            case "tooltip":
+                PrototypeTooltipBubble(node: node, model: model)
+            case "drawer":
+                if let child = node.child { NodeView(node: child, model: model) }
             case "menu":
                 PrototypeMenuView(node: node, model: model)
             case "select":

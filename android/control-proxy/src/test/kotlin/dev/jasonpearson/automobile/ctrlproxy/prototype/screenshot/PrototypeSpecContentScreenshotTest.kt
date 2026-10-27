@@ -617,6 +617,65 @@ class PrototypeSpecContentScreenshotTest {
     )
 
   @Test
+  @Config(qualifiers = "+notnight")
+  fun tooltipSpotlightLight() =
+    prototypeScreenshotTest(
+      "tooltip_spotlight_light",
+      validPrototypeFixture("tooltip-node-spotlight"),
+      pending = true,
+    )
+
+  @Test
+  @Config(qualifiers = "+night")
+  fun tooltipSpotlightDark() =
+    prototypeScreenshotTest(
+      "tooltip_spotlight_dark",
+      validPrototypeFixture("tooltip-node-spotlight"),
+      pending = true,
+    )
+
+  @Test
+  @Config(qualifiers = "+notnight")
+  fun tooltipFlippedLight() =
+    prototypeScreenshotTest("tooltip_flipped_light", flippedTooltipSpec(), pending = true)
+
+  @Test
+  @Config(qualifiers = "+night")
+  fun tooltipFlippedDark() =
+    prototypeScreenshotTest("tooltip_flipped_dark", flippedTooltipSpec(), pending = true)
+
+  private fun flippedTooltipSpec(): PrototypeSpec =
+    PrototypeSpec(
+      "flipped-tooltip",
+      PrototypeWindow(PrototypeFullscreenPlacement()),
+      mapOf("open" to PrototypeScalar.BooleanValue(true)),
+      PrototypeTooltipNode(
+        text = "A hint above its target",
+        testTag = "flipped",
+        openWhen = PrototypeSheetCondition("open", true),
+        anchor = PrototypeBoundsAnchor(PrototypeBounds(160.0, 600.0, 40.0, 24.0)),
+      ),
+    )
+
+  @Test
+  @Config(qualifiers = "+notnight")
+  fun drawerOpenLight() =
+    prototypeScreenshotTest(
+      "drawer_open_light",
+      validPrototypeFixture("tooltip-drawer-start"),
+      pending = true,
+    )
+
+  @Test
+  @Config(qualifiers = "+night")
+  fun drawerOpenDark() =
+    prototypeScreenshotTest(
+      "drawer_open_dark",
+      validPrototypeFixture("tooltip-drawer-start"),
+      pending = true,
+    )
+
+  @Test
   fun selectCollapsed() =
     prototypeScreenshotTest(
       "select_collapsed",

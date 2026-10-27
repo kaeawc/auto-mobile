@@ -396,6 +396,10 @@ const COMPONENT_FIELDS: Record<string, (node: Raw, path: string, visit: FieldVis
     mapList(node, "trailingActions", path, (entry, entryPath) => mapPart(entry, entryPath, visit));
     mapList(node, "onSubmit", path, (entry, entryPath) => mapAction(entry, entryPath, visit));
   },
+  tooltip: (node, path, visit) => {
+    mapField(node, "text", path, "text", visit);
+    mapList(node, "onDismiss", path, (entry, entryPath) => mapAction(entry, entryPath, visit));
+  },
   dialog: (node, path, visit) => {
     mapField(node, "title", path, "text", visit);
     mapField(node, "text", path, "text", visit);

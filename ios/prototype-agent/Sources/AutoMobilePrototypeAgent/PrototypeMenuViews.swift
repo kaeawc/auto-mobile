@@ -9,12 +9,15 @@
         @State private var frame: CGRect?
 
         private var needsBounds: Bool {
-            node.type == "select" || ((node.children ?? []) + [node.child].compactMap { $0 })
+            node.id != nil || node.type == "select" || ((node.children ?? []) + [node.child].compactMap { $0 })
                 .contains { $0.type == "menu" }
         }
 
         func body(content: Content) -> some View {
             content
+                .background {
+                    if node.id != nil { PrototypeOverlayFocusMarker(anchor: model.focusAnchor(for: node)) }
+                }
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { rect in
                     frame = rect
                     if needsBounds { model.menuBounds[ObjectIdentifier(node)] = rect }

@@ -1,0 +1,34 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "open": true
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "button",
+          "id": "target",
+          "label": "Help"
+        },
+        {
+          "type": "tooltip",
+          "text": " \t",
+          "openWhen": {
+            "key": "open",
+            "equals": true
+          },
+          "anchorTo": "target"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[1].text",
+  "expectedMessage": "Invalid string value"
+}

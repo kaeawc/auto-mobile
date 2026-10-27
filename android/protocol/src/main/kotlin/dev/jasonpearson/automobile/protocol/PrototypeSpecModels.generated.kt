@@ -34,6 +34,13 @@ data class PrototypeImageFilter(
   val tint: PrototypeModeValue? = null,
 )
 
+/** Tooltip spotlight hole: padding 0..64 dp (default 8), cornerRadius 0..64 dp (default 12). */
+@Serializable
+data class PrototypeTooltipSpotlight(
+  val padding: Int? = null,
+  val cornerRadius: Int? = null,
+)
+
 @Serializable
 data class PrototypeOffset(
   val x: Double,

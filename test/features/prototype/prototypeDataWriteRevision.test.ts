@@ -359,3 +359,63 @@ test("status snapshot replays extend and maxItems", () => {
   );
   expect(store.status(scope).prototypes[0]?.data).toEqual({ cart: [{ sku: "b" }] });
 });
+
+test("prepend event round trip mirrors trimming and records a conflicting write", () => {
+  const shown = tracked();
+  const wire = dataWrite(1, CART, {
+    op: "prepend",
+    value: [{ sku: "b" }, { sku: "c" }],
+    maxItems: 2,
+    revision: 4,
+  });
+  const decoded = decodePrototypeEvent(wire, "test");
+  expect<unknown>(decoded).toEqual(wire);
+  const write = prototypeDataWriteOf(decoded!);
+  expect(write).toEqual({
+    path: CART,
+    op: "prepend",
+    value: [{ sku: "b" }, { sku: "c" }],
+    maxItems: 2,
+    revision: 4,
+  });
+  expect(shown.recordDeviceDataWrite("d", "shop", write!)).toEqual({
+    kind: "mirrored",
+    data: { cart: [{ sku: "b" }, { sku: "c" }], note: "hi" },
+  });
+  expect(shown.dataPatchGuard("d", "shop", [DATA_ROOT], 3)).toMatchObject({
+    kind: "conflict",
+    paths: [CART],
+  });
+});
+
+test.each([
+  { op: "prepend", value: 1, revision: 1 },
+  ...[0, -1, 1.5, "2"].map((maxItems) => ({ op: "prepend", value: [], maxItems, revision: 1 })),
+])("malformed prepend event is dropped: %j", (payload) => {
+  expect(decodePrototypeEvent(dataWrite(1, CART, payload), "test")).toBeUndefined();
+});
+test("prepend event without its page abandons the mirror", () => {
+  const shown = tracked();
+  const write = prototypeDataWriteOf({
+    ...event(1, "shop", "change", CART),
+    payload: { op: "prepend", revision: 1 },
+  });
+  expect(write).toBeDefined();
+  expect(shown.recordDeviceDataWrite("d", "shop", write!)).toEqual({ kind: "dropped" });
+});
+
+test("status snapshot replays prepend and maxItems", () => {
+  const store = new InMemoryPrototypeStatusStore(new FakeTimer());
+  const scope = { deviceId: "d" };
+  store.record(scope, "show", { id: "shop" }, { success: true }, undefined, {
+    data: { cart: [{ sku: "a" }] },
+  });
+  store.recordEvent(
+    scope,
+    decodePrototypeEvent(
+      dataWrite(1, CART, { op: "prepend", value: [{ sku: "b" }], maxItems: 1, revision: 4 }),
+      "test",
+    )!,
+  );
+  expect(store.status(scope).prototypes[0]?.data).toEqual({ cart: [{ sku: "b" }] });
+});

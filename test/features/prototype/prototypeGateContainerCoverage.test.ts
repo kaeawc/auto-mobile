@@ -339,3 +339,16 @@ test("input checks on a textField do not trip any other capability gate", () => 
     "prototype_checks_v1",
   ]);
 });
+
+for (const container of containers) {
+  test(`prependData lazy-list gate covers ${container.name} ${container.field ?? ""}`, () => {
+    const gate = PROTOTYPE_SPEC_CAPABILITY_GATES.find(
+      (g) => g.capability === "prototype_lazy_list_v1",
+    )!;
+    const candidate = container.wrap({
+      ...label,
+      onTap: [{ type: "prependData", path: "/data/rows", value: { value: 1 } }],
+    });
+    expect(gate.fields(candidate)).toContain(`${container.prefix}.onTap[0]`);
+  });
+}

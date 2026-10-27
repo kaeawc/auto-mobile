@@ -92,12 +92,13 @@ enum PrototypeStrictCapabilities {
                     }
                 }
             }
-            if ["setData", "appendData", "removeData"].contains(type) { need("data_actions") }
+            if ["setData", "appendData", "prependData", "removeData"].contains(type) { need("data_actions") }
+            if type == "prependData" { need("lazy_list") }
             if type == "emit", fields["context"] != nil { need("emit_context") }
             if type == "platform" { need("platform") }
             for (key, child) in fields {
                 if key == "strings" { continue }
-                if key == "payload" || (key == "value" && !["setData", "appendData"].contains(type)) { continue }
+                if key == "payload" || (key == "value" && !["setData", "appendData", "prependData"].contains(type)) { continue }
                 if key == "repeat" {
                     if child.objectFields?["derive"] != nil { need("format") }
                     if let repeatSpec = child.objectFields,

@@ -150,7 +150,8 @@ final class PrototypeDataTests: XCTestCase {
         }
         assertViolation(["a": nested], "data.a.a.a.a.a.a.a.a: Data depth limit exceeded")
         assertViolation(["z": .null, "a b": .null], "data[\"a b\"]: Invalid data value")
-        try PrototypeLimits.guardData(["items": .array(Array(repeating: .number(0), count: PrototypeLimits.maxDataArrayItems))])
+        try PrototypeLimits
+            .guardData(["items": .array(Array(repeating: .number(0), count: PrototypeLimits.maxDataArrayItems))])
         assertViolation(["items": oversized], "data.items: Data array limit exceeded")
         var exact: JSONValue = .object(["leaf": .bool(true)])
         for _ in 0 ..< 6 {

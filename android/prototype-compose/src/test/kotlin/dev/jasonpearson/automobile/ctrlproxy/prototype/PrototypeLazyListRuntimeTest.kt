@@ -158,6 +158,62 @@ class PrototypeLazyListRuntimeTest {
   }
 
   @Test
+  fun oversizedPrependPageOmitsOnlyTheEventValue() = runTest {
+    val runtime = runtime(listSpec())
+    val page =
+      JsonArray(
+        (2..40).map { index ->
+          buildJsonObject {
+            put("id", index)
+            put("title", "x".repeat(500))
+          }
+        },
+      )
+    runtime.handle(
+      PrototypeInteraction.Tap(
+        listOf(PrototypePrependDataAction("/data/items", buildJsonObject { put("value", page) })),
+      ),
+    )
+    assertEquals(
+      listOf(2, 3),
+      runtime.data("items")!!.jsonArray.map {
+        it.jsonObject.getValue("id").jsonPrimitive.int
+      },
+    )
+    val payload = events.single().payload!!.jsonObject
+    assertEquals("prepend", payload.getValue("op").jsonPrimitive.content)
+    assertEquals(2, payload.getValue("maxItems").jsonPrimitive.int)
+    assertFalse(payload.containsKey("value"))
+    runtime.close()
+  }
+
+  @Test
+  fun `prependData trims in one revision and reports the replay limit`() = runTest {
+    val runtime = runtime(listSpec())
+    runtime.handle(
+      PrototypeInteraction.Tap(
+        listOf(
+          PrototypePrependDataAction(
+            "/data/items",
+            json("""{"value":[{"id":2,"title":"Third"}]}""").jsonObject,
+          ),
+        ),
+      ),
+    )
+    assertEquals(
+      listOf(2, 0),
+      runtime.data("items")!!.jsonArray.map { it.jsonObject.getValue("id").jsonPrimitive.int },
+    )
+    assertEquals(1, events.size)
+    assertEquals(PrototypeEventKind.CHANGE, events.single().kind)
+    assertEquals("/data/items", events.single().name)
+    val payload = events.single().payload!!.jsonObject
+    assertEquals("prepend", payload.getValue("op").jsonPrimitive.content)
+    assertEquals(2, payload.getValue("maxItems").jsonPrimitive.int)
+    assertEquals(runtime.current.revision, payload.getValue("revision").jsonPrimitive.long)
+  }
+
+  @Test
   fun `appendData trims in one revision and reports the replay limit`() = runTest {
     val runtime = runtime(listSpec())
     runtime.handle(
@@ -290,6 +346,25 @@ class PrototypeLazyListRuntimeTest {
         events.filter { it.kind == PrototypeEventKind.CHANGE }.map { it.name },
       )
     }
+
+  @Test
+  fun `prependData refuses duplicate keys without a change event`() = runTest {
+    val spec = listSpec()
+    val runtime = runtime(spec)
+    runtime.handle(
+      PrototypeInteraction.Tap(
+        listOf(
+          PrototypePrependDataAction(
+            "/data/items",
+            json("""{"value":[{"id":0,"title":"Duplicate"}]}""").jsonObject,
+          ),
+        ),
+      ),
+    )
+    assertEquals(spec.data, runtime.current.spec.data)
+    assertTrue(events.isEmpty())
+    assertTrue(warnings.single().contains("Duplicate repeat key"))
+  }
 
   @Test
   fun `appendData refuses duplicate keys without a change event`() = runTest {

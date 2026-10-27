@@ -65,6 +65,7 @@
     "list-header-footer.json",
     "list-horizontal.json",
     "list-paging.json",
+    "list-prepend-data.json",
     "loading-states.json",
     "material-app-bar-dialog-pickers.json",
     "material-controls.json",
@@ -83,6 +84,7 @@
     "platform-reads.json",
     "platform-repeat.json",
     "platform-requires.json",
+    "prepend-data.json",
     "platform-state-device.json",
     "press-scale.json",
     "repeat-component-labels.json",
@@ -692,6 +694,9 @@
     "platform-unknown-event.json",
     "platform-unknown-module.json",
     "platform-unknown-permission.json",
+    "prepend-data-outside-data.json",
+    "prepend-data-partial-index.json",
+    "prepend-data-target-not-array.json",
     "press-scale-high.json",
     "press-scale-low.json",
     "progress-max-not-positive.json",
@@ -887,6 +892,7 @@
     "strict-duplicate-envelope.json",
     "strict-duplicate-escaped-key.json",
     "strict-duplicate-opaque.json",
+    "strict-gate-prepend-prototype_lazy_list_v1.json",
     "strict-gate-on-appear-prototype_timers_v1.json",
     "strict-gate-prototype_carousel_v1.json",
     "strict-gate-prototype_chart_v1.json",
@@ -1363,7 +1369,9 @@
     "wrong-type.json",
     "zero-aspect-ratio.json",
     "zero-line-height.json",
-    "zero-weight.json"
+    "zero-weight.json",
+    "strict-unknown-094-action-prependData.json",
+    "strict-unknown-prependData-value.json"
   ],
   "validCapabilities": {
     "bounds-anchor-aligned.json": [],
@@ -1740,6 +1748,16 @@
     "tooltip-tour.json": ["prototype_tooltip_v1"],
     "transition-slide.json": [],
     "width-dp-at-max.json": [],
+    "list-prepend-data.json": [
+      "prototype_data_actions_v1",
+      "prototype_data_model_v1",
+      "prototype_lazy_list_v1"
+    ],
+    "prepend-data.json": [
+      "prototype_data_actions_v1",
+      "prototype_data_model_v1",
+      "prototype_lazy_list_v1"
+    ],
     "pager-state-key-indicator.json": ["prototype_pager_state_key_v1"],
     "string-conditions.json": ["prototype_checks_v1", "prototype_string_conditions_v1"],
     "text-field-error-when.json": [

@@ -157,6 +157,35 @@ test("list gate follows request callbacks and components while ignoring payloads
     "prototype_data_model_v1",
   );
   expect(prototypeLazyListUnsupportedMessage(["root", "other"], "ios")).toContain(
-    "lazy list at root (and 1 more)",
+    "lazy list feature at root (and 1 more)",
+  );
+});
+
+test("prepend gate follows request callbacks and components while ignoring payloads", () => {
+  const request = {
+    type: "prependData",
+    path: "/data/rows",
+    value: { value: { id: 3 } },
+  };
+  const candidate = {
+    ...spec(
+      list({
+        onEndReached: [{ type: "request", url: "http://localhost/feed", onError: [request] }],
+        onTap: [{ type: "emit", name: "opaque", payload: request }],
+      }),
+    ),
+    components: { Feed: { root: { type: "text", text: "Feed", onTap: [request] } } },
+  };
+  expect(prototypeLazyListFields(candidate)).toEqual([
+    "root",
+    "root.onEndReached[0].onError[0]",
+    "components.Feed.root.onTap[0]",
+  ]);
+  expect(prototypeGateCapabilities(candidate)).toContain("prototype_lazy_list_v1");
+  expect(prototypeGateCapabilities({ root: { type: "spacer", onTap: [request] } })).toContain(
+    "prototype_data_model_v1",
+  );
+  expect(prototypeLazyListUnsupportedMessage(["root", "other"], "ios")).toContain(
+    "lazy list feature at root (and 1 more)",
   );
 });

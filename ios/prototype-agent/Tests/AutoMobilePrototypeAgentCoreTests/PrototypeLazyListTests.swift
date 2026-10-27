@@ -2,6 +2,45 @@
 import XCTest
 
 final class PrototypeLazyListTests: XCTestCase {
+    func testAnchorSurvivesPrependIncludingAtTopAndReorder() {
+        XCTAssertEqual(PrototypeListAnchor.resolve(anchorKey: "a", newKeys: ["new", "a", "b"]), "a")
+        XCTAssertEqual(PrototypeListAnchor.resolve(anchorKey: "b", newKeys: ["b", "a"]), "b")
+        XCTAssertNil(PrototypeListAnchor.resolve(anchorKey: "gone", newKeys: ["a"]))
+        XCTAssertNil(PrototypeListAnchor.resolve(anchorKey: "a", newKeys: []))
+        XCTAssertNil(PrototypeListAnchor.resolve(anchorKey: nil, newKeys: ["a"]))
+    }
+
+    func testStackAnchorsAreIndependentRetainedWhileCoveredAndClearedOnPop() {
+        var store = PrototypeStackListAnchorStore()
+        store.retain(entryIDs: [1, 2])
+        store.save(entryID: 1, listPath: "root.a", key: "a")
+        store.save(entryID: 1, listPath: "root.b", key: "b")
+        store.save(entryID: 2, listPath: "root.a", key: "c")
+        XCTAssertEqual(store.read(entryID: 1, listPath: "root.a", newKeys: ["a", "c"]), "a")
+        XCTAssertEqual(store.read(entryID: 1, listPath: "root.b", newKeys: ["b"]), "b")
+        XCTAssertEqual(store.read(entryID: 2, listPath: "root.a", newKeys: ["a", "c"]), "c")
+        store.retain(entryIDs: [1])
+        // An exiting view cannot resurrect a popped entry's state.
+        store.save(entryID: 2, listPath: "root.a", key: "c")
+        store.retain(entryIDs: [1, 2])
+        XCTAssertNil(store.read(entryID: 2, listPath: "root.a", newKeys: ["c"]))
+        XCTAssertEqual(store.read(entryID: 1, listPath: "root.a", newKeys: ["a"]), "a")
+        store.retain(entryIDs: [])
+        store.retain(entryIDs: [1])
+        XCTAssertNil(store.read(entryID: 1, listPath: "root.a", newKeys: ["a"]))
+    }
+
+    func testMissingSavedRowFallsBackToTopAndDoesNotResurrect() {
+        var store = PrototypeStackListAnchorStore()
+        store.retain(entryIDs: [1])
+        store.save(entryID: 1, listPath: "list", key: "old")
+        XCTAssertNil(store.read(entryID: 1, listPath: "list", newKeys: ["new"]))
+        XCTAssertNil(store.read(entryID: 1, listPath: "list", newKeys: ["old", "new"]))
+        store.save(entryID: 1, listPath: "list", key: "new")
+        store.save(entryID: 1, listPath: "list", key: nil)
+        XCTAssertNil(store.read(entryID: 1, listPath: "list", newKeys: ["new"]))
+    }
+
     private var fixtures: URL {
         URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()

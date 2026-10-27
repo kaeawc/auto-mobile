@@ -116,7 +116,9 @@ enum PrototypeBundleCapabilities {
             names.insert("prototype_network_v1")
             if fields["via"]?.stringValue == "device" { names.insert("prototype_network_device_v1") }
         }
-        if ["setData", "appendData", "removeData"].contains(type ?? "") { names.insert("prototype_data_actions_v1") }
+        if ["setData", "appendData", "prependData", "removeData"]
+            .contains(type ?? "") { names.insert("prototype_data_actions_v1") }
+        if type == "prependData" { names.insert("prototype_lazy_list_v1") }
         if type == "emit", fields["context"] != nil { names.insert("prototype_emit_context_v1") }
         if type == "requireValid" { names.insert("prototype_checks_v1") }
         if type == "scrollTo" { names.insert("prototype_chat_scroll_v1") }

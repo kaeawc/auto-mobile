@@ -43,6 +43,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeMenuEntry
 import dev.jasonpearson.automobile.protocol.PrototypeMenuNode
 import dev.jasonpearson.automobile.protocol.PrototypeNode
 import dev.jasonpearson.automobile.protocol.PrototypePagerNode
+import dev.jasonpearson.automobile.protocol.PrototypePrependDataAction
 import dev.jasonpearson.automobile.protocol.PrototypeProgressNode
 import dev.jasonpearson.automobile.protocol.PrototypeRadioGroupNode
 import dev.jasonpearson.automobile.protocol.PrototypeRemoveDataAction
@@ -721,6 +722,8 @@ private fun PrototypeAction.bound(instance: RepeatInstance): PrototypeAction =
       )
     is PrototypeSetDataAction ->
       copy(path = instance.dataPath(path), value = instance.dataValue(value))
+    is PrototypePrependDataAction ->
+      copy(path = instance.dataPath(path), value = instance.dataValue(value))
     is PrototypeAppendDataAction ->
       copy(path = instance.dataPath(path), value = instance.dataValue(value))
     is PrototypeRemoveDataAction -> copy(path = instance.dataPath(path))
@@ -757,8 +760,8 @@ private fun PrototypeCondition.bound(instance: RepeatInstance): PrototypeConditi
     key = key?.let(instance::interpolate),
     equals = equals?.let(instance::interpolateScalar),
     notEquals = notEquals?.let(instance::interpolateScalar),
-    contains = contains?.let(instance::interpolate),
-    startsWith = startsWith?.let(instance::interpolate),
+    contains = contains?.let(instance::interpolateText),
+    startsWith = startsWith?.let(instance::interpolateText),
     all = all?.map { it.bound(instance) },
     any = any?.map { it.bound(instance) },
     not = not?.bound(instance),
@@ -772,6 +775,12 @@ private fun RepeatInstance.interpolateScalar(scalar: PrototypeScalar): Prototype
  * A string that is exactly one placeholder keeps the item's own type (so `equals: "{item.id}"` can
  * match a numeric state value); anything else renders to text.
  */
+/**
+ * A substring operand always binds as text, so `contains: "{item.n}"` matches the rendered number.
+ */
+private fun RepeatInstance.interpolateText(scalar: PrototypeScalar): PrototypeScalar =
+  if (scalar is PrototypeScalar.Text) PrototypeScalar.Text(interpolate(scalar.value)) else scalar
+
 private fun RepeatInstance.interpolateTyped(text: String): PrototypeScalar {
   val only = PrototypeRepeatTemplate.segments(text, alias).singleOrNull()
   val typed =

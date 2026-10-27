@@ -36,6 +36,15 @@ const payloadSchema = z.union([
       revision: revisionSchema,
     })
     .strict(),
+  z
+    .object({
+      op: z.literal("prepend"),
+      // Absent when the page did not fit the emit byte budget; the host then stops tracking.
+      value: z.array(prototypeJsonSchema).optional(),
+      maxItems: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
+      revision: revisionSchema,
+    })
+    .strict(),
   z.object({ op: z.literal("remove"), revision: revisionSchema }).strict(),
 ]);
 

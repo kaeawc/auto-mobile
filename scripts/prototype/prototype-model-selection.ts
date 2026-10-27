@@ -124,7 +124,11 @@ export const prototypeModelSelection = {
   // Swift Condition and Style use structurally different representations and stay hand-written.
   condition: {
     languages: ["kotlin"],
-    fieldTypes: { valid: { kotlin: "PrototypeValidityKeys" } },
+    fieldTypes: {
+      valid: { kotlin: "PrototypeValidityKeys" },
+      contains: { kotlin: "PrototypeScalar" },
+      startsWith: { kotlin: "PrototypeScalar" },
+    },
     fieldDocs: {
       platform: "A `/platform` pointer (#14294); platform state is device-owned and read-only.",
       empty: 'With [data]: holds when that value is missing, `[]`, `{}` or `""` (#14207).',

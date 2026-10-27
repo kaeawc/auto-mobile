@@ -590,11 +590,11 @@ struct PrototypeAction: Decodable, Sendable {
     let stack: String?
     let screen: String?
     let transition: PrototypeStackTransition?
-    /// `setData`/`appendData`/`removeData`: `/data/<pointer>`, a whole `{index}` segment bound per
+    /// `setData`/`appendData`/`prependData`/`removeData`: `/data/<pointer>`, a whole `{index}` segment bound per
     /// repeat row at expansion (#12519).
     let path: String?
     let key: String?
-    /// `setState`'s literal; for `setData`/`appendData` the binding object (`{value}`, `{state}`,
+    /// `setState`'s literal; for `setData`/`appendData`/`prependData` the binding object (`{value}`, `{state}`,
     /// `{data}`), with `item`/`index` already bound to `{value}` by repeat expansion.
     let value: JSONValue?
     /// `increment`/`decrement` step; 1 when omitted.

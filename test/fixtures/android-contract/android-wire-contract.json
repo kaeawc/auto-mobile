@@ -10467,6 +10467,20 @@
         "hasDefault": false
       }
     ],
+    "prependData": [
+      {
+        "name": "path",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "value",
+        "type": "json",
+        "nullable": false,
+        "hasDefault": false
+      }
+    ],
     "progress": [
       {
         "name": "id",

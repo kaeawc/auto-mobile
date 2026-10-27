@@ -197,7 +197,7 @@ export class PrototypeShownSpecs {
         ? applyPrototypeDataWrite(spec.data, { op: "remove", path: write.path })
         : write.value === undefined
           ? undefined
-          : write.op === "extend"
+          : write.op === "extend" || write.op === "prepend"
             ? applyPrototypeDataWrite(spec.data, { ...write, value: write.value })
             : applyPrototypeDataWrite(spec.data, { ...write, value: write.value });
     if (!applied?.success) {

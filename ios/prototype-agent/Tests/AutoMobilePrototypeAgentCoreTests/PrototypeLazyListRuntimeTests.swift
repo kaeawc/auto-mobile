@@ -27,6 +27,36 @@ final class PrototypeLazyListRuntimeTests: XCTestCase {
         .object(["id": .number(Double(id)), "title": .string("Row \(id)")])
     }
 
+    func testPrependUsesListWindowAndRefusesDuplicateKeysAtomically() throws {
+        var session = PrototypeSession()
+        let list = try JSONDecoder().decode(
+            PrototypeSpec.self,
+            from: Data(
+                #"{"id":"prepend-list","window":{"placement":{"type":"fullscreen"}},"data":{"feed":{"items":[{"id":1,"title":"One"},{"id":2,"title":"Two"}]}},"root":{"type":"list","maxItems":2,"repeat":{"items":{"path":"/feed/items"},"as":"post","key":"id"},"children":[{"type":"text","text":"{post.title}"}]}}"#
+                    .utf8
+            )
+        )
+        session.show(list)
+        let prepend = try action(
+            #"{"type":"prependData","path":"/data/feed/items","value":{"value":{"id":0,"title":"Zero"}}}"#
+        )
+        let events = session.run([prepend])
+        let event = try XCTUnwrap(events.first)
+        let write = try XCTUnwrap(PrototypeDataWriteEvent.decode(
+            kind: event.wireKind, name: event.name, payload: event.payload
+        ))
+        XCTAssertEqual(write.op, .prepend)
+        XCTAssertEqual(write.maxItems, 2)
+        XCTAssertEqual(write.value, .array([.object(["id": .number(0), "title": .string("Zero")])]))
+        let root = try XCTUnwrap(session.spec?.root)
+        XCTAssertEqual(PrototypeLazyList.keys(node: root, data: session.data), ["0", "1"])
+        let before = session.data
+        let revision = session.dataRevision
+        XCTAssertTrue(session.run([prepend]).isEmpty)
+        XCTAssertEqual(session.data, before)
+        XCTAssertEqual(session.dataRevision, revision)
+    }
+
     func testFixtureRowsAndHeaderFooterRemainSeparate() throws {
         for name in ["list-basic", "list-header-footer", "list-paging"] {
             let spec = try spec(name)

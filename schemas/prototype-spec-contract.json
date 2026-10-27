@@ -2406,6 +2406,102 @@
               "optional": true
             }
           }
+        },
+        "prependData": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["prependData"]
+              },
+              "optional": false
+            },
+            "path": {
+              "rule": {
+                "kind": "string",
+                "max": 261
+              },
+              "optional": false
+            },
+            "value": {
+              "rule": {
+                "kind": "choice",
+                "options": [
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "state": {
+                        "rule": {
+                          "kind": "boundKey"
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "item": {
+                        "rule": {
+                          "kind": "key"
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "index": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": [true]
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "data": {
+                        "rule": {
+                          "kind": "pointer"
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "value": {
+                        "rule": {
+                          "kind": "json",
+                          "maxDepth": 24
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "match": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": ["text", "kind"]
+                        },
+                        "optional": false
+                      }
+                    }
+                  }
+                ]
+              },
+              "optional": false
+            }
+          }
         }
       }
     },

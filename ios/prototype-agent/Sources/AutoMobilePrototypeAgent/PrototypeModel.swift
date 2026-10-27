@@ -12,6 +12,7 @@
         private(set) var spec: PrototypeSpec?
         /// Ends surviving text drafts even when a replacing show leaves their stored value unchanged.
         private(set) var showRevision = 0
+        @ObservationIgnored private var listAnchors = PrototypeStackListAnchorStore()
         /// Transient presentation only; never written to or reported as spec state.
         var expandedSelect: PrototypeNode?
         @ObservationIgnored private var nodeFocusAnchors: [ObjectIdentifier: PrototypeOverlayFocusAnchor] = [:]
@@ -60,6 +61,7 @@
             if replacingSpec || session.isShown != next.isShown || session.structureRevision != next.structureRevision {
                 spec = next.spec
             }
+            listAnchors.retain(entryIDs: next.isShown ? Set(next.stackEntries.values.flatMap { $0.map(\.id) }) : [])
             session = next
             if let selected = expandedSelect {
                 let root = next.spec?.root
@@ -298,6 +300,7 @@
             // A show that replaces another prototype cancels that one's requests.
             let requestCommands = next.takeRequestCommands()
             let timerCommands = next.takeTimerCommands()
+            listAnchors = PrototypeStackListAnchorStore()
             publish(next, replacingSpec: true)
             deviceState.reset()
             if let lastDeviceState { updateDeviceState(lastDeviceState) }
@@ -430,6 +433,16 @@
 
         func swipeClosed(_ node: PrototypeNode) {
             swipe.closed(ObjectIdentifier(node))
+        }
+
+        func savedListAnchor(entryID: Int?, node: PrototypeNode, keys: [String]) -> String? {
+            guard let entryID else { return nil }
+            return listAnchors.read(entryID: entryID, listPath: node.nodePath, newKeys: keys)
+        }
+
+        func saveListAnchor(entryID: Int?, node: PrototypeNode, key: String?) {
+            guard let entryID else { return }
+            listAnchors.save(entryID: entryID, listPath: node.nodePath, key: key)
         }
 
         func listVisible(_ node: PrototypeNode, appearedKey: String? = nil, disappearedKey: String? = nil) {

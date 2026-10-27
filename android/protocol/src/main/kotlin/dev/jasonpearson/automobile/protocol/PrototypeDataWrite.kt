@@ -23,6 +23,12 @@ sealed interface PrototypeDataWrite {
     val maxItems: Number? = null,
   ) : PrototypeDataWrite
 
+  data class Prepend(
+    override val path: String,
+    val value: JsonElement,
+    val maxItems: Number? = null,
+  ) : PrototypeDataWrite
+
   data class Remove(override val path: String) : PrototypeDataWrite
 
   /** The wire `op` of the `change` event that reports this write. */
@@ -32,6 +38,7 @@ sealed interface PrototypeDataWrite {
         is Set -> "set"
         is Append -> "append"
         is Extend -> "extend"
+        is Prepend -> "prepend"
         is Remove -> "remove"
       }
 }
@@ -90,17 +97,12 @@ object PrototypeDataWriter {
       when (write) {
         is PrototypeDataWrite.Set -> update(current, tokens) { _ -> write.value }
         is PrototypeDataWrite.Append,
+        is PrototypeDataWrite.Prepend,
         is PrototypeDataWrite.Extend ->
           update(current, tokens) { target ->
-            val incoming =
-              if (write is PrototypeDataWrite.Extend) write.value as JsonArray
-              else listOf((write as PrototypeDataWrite.Append).value)
-            val combined = (target as JsonArray) + incoming
-            val maximum = maximum(write)
-            trimmed =
-              if (maximum == null) 0
-              else (combined.size.toLong() - maximum).coerceAtLeast(0.0).toInt()
-            JsonArray(combined.drop(trimmed))
+            val window = arrayWindow(write, target as JsonArray)
+            trimmed = window.second
+            window.first
           }
         is PrototypeDataWrite.Remove -> remove(current, tokens)
       }
@@ -115,22 +117,50 @@ object PrototypeDataWriter {
     return PrototypeDataWriteResult.Success(next, trimmed)
   }
 
+  private fun arrayWindow(write: PrototypeDataWrite, target: JsonArray): Pair<JsonArray, Int> {
+    val incoming =
+      when (write) {
+        is PrototypeDataWrite.Extend -> write.value as JsonArray
+        is PrototypeDataWrite.Prepend -> write.value as JsonArray
+        else -> listOf((write as PrototypeDataWrite.Append).value)
+      }
+    val combined = if (write is PrototypeDataWrite.Prepend) incoming + target else target + incoming
+    val maximum = maximum(write)
+    val trimmed =
+      if (maximum == null) 0 else (combined.size.toLong() - maximum).coerceAtLeast(0.0).toInt()
+    val rows =
+      if (write is PrototypeDataWrite.Prepend) combined.dropLast(trimmed)
+      else combined.drop(trimmed)
+    return JsonArray(rows) to trimmed
+  }
+
   private fun maximum(write: PrototypeDataWrite): Double? =
     when (write) {
       is PrototypeDataWrite.Append -> write.maxItems?.toDouble()
       is PrototypeDataWrite.Extend -> write.maxItems?.toDouble()
+      is PrototypeDataWrite.Prepend -> write.maxItems?.toDouble()
       else -> null
     }
 
   private fun valueRefusal(write: PrototypeDataWrite): PrototypeDataWriteResult? {
-    if (write is PrototypeDataWrite.Extend && write.value !is JsonArray)
+    val invalidArray =
+      when (write) {
+        is PrototypeDataWrite.Extend -> write.value !is JsonArray
+        is PrototypeDataWrite.Prepend -> write.value !is JsonArray
+        else -> false
+      }
+    val name = if (write is PrototypeDataWrite.Prepend) "prependData" else write.op
+    if (invalidArray)
       return refused(
         PrototypeDataWriteErrorCode.INVALID_VALUE,
-        "An extend write needs an array value",
+        "$name needs an array value",
       )
     val maxItems = maximum(write) ?: return null
     return if (!positiveSafeInteger(maxItems))
-      refused(PrototypeDataWriteErrorCode.INVALID_VALUE, "maxItems must be a positive safe integer")
+      refused(
+        PrototypeDataWriteErrorCode.INVALID_VALUE,
+        "$name maxItems must be a positive safe integer",
+      )
     else null
   }
 
@@ -148,6 +178,7 @@ object PrototypeDataWriter {
     val existing = PrototypeDataPointer.resolve(data, pointer)
     return when (write) {
       is PrototypeDataWrite.Append,
+      is PrototypeDataWrite.Prepend,
       is PrototypeDataWrite.Extend -> arrayRefusal(existing, write)
       is PrototypeDataWrite.Remove ->
         if (existing == null)
@@ -176,7 +207,12 @@ object PrototypeDataWriter {
     existing: JsonElement?,
     write: PrototypeDataWrite,
   ): PrototypeDataWriteResult? {
-    val name = if (write is PrototypeDataWrite.Extend) "extend" else "appendData"
+    val name =
+      when (write) {
+        is PrototypeDataWrite.Extend -> "extend"
+        is PrototypeDataWrite.Prepend -> "prependData"
+        else -> "appendData"
+      }
     return when {
       existing == null ->
         refused(PrototypeDataWriteErrorCode.NOT_FOUND, "$name target ${write.path} does not exist")

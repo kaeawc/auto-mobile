@@ -35,7 +35,7 @@ enum PrototypeLimits {
     /// `MAX_PROTOTYPE_STORAGE_KEYS`: entries in the spec's `storage.keys`.
     static let maxStorageKeys = 64
     /// `MAX_PROTOTYPE_DATA_WRITE_BYTES`: the host validator's byte cost of `data` after a device
-    /// `setData`, `appendData` or `removeData` write.
+    /// `setData`, `appendData`, `prependData` or `removeData` write.
     static let maxDataWriteBytes = PrototypeContractValidator.limit("MAX_PROTOTYPE_DATA_WRITE_BYTES")
 
     /// Agent-side depth/array backstop, in the host's sorted UTF-16 member order. Data is depth 1.

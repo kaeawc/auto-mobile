@@ -109,6 +109,64 @@ CLI wrappers; the default CLI is `bun <repo>/src/index.ts --cli`.
 
 Baseline: not yet recorded on a device.
 
+### Feed benchmark
+
+The feed driver reuses the gfxinfo harness with a deterministic fullscreen `perf-feed`
+lazy list (1,000 rows by default, up to the contract cap of 2,000). It needs the same
+Android prerequisites and an existing daemon/session. Measure a release-like build
+on API 37; the target is **p95 < 16 ms** per scenario.
+
+```bash
+scripts/android/prototype-feed-benchmark.sh --device DEVICE_ID --rows 1000 --markdown
+scripts/android/prototype-feed-benchmark.sh --device DEVICE_ID --enforce
+scripts/android/prototype-feed-benchmark.sh --dry-run
+bun scripts/prototype/generate-feed-benchmark-spec.ts --rows 1000 --out /tmp/feed.json
+bun scripts/prototype/generate-feed-benchmark-spec.ts --rows 1000 --paging --page-url http://localhost:8080/page --out /tmp/paged-feed.json
+scripts/ios/prototype-feed-benchmark.sh --device SIMULATOR_UDID --rows 1000 --swipes 6
+```
+
+`feed-scenarios.json` defines `feed-idle` (three seconds without input),
+`feed-scroll-down` (two up/up/down/down repetitions), and `feed-fling-roundtrip`
+(three consecutive up swipes then three down). The latter uses ordinary `swipeOn`
+commands: the harness has no velocity setting and does not guarantee a physical fling.
+There are 14 swipe calls and 4.8 seconds of scenario waits, plus the initial two-second
+settle; the intended run budget is under three minutes with a responsive CLI/device.
+The `Benchmark feed` content description selects the list container.
+
+The Android wrapper prints the harness plain output, an optional Markdown verdict
+table, and a `verdict` line per scenario. A numeric p95 of 16 ms or higher fails;
+zero-frame or unavailable percentiles are `n/a`. The default reports timing failures;
+`--enforce` makes them exit nonzero. Harness capture/CLI errors always retain their
+nonzero status. `--package` selects the gfxinfo package, and
+`PROTOTYPE_FEED_BENCH_FRAME` overrides the harness executable for offline testing.
+
+Rows contain a local-asset avatar, author, caption, counters and a Like state action.
+The harness supplies the tiny `benchmark-image` PNG. This measures placeholder/local-asset
+rows, not remote-image loading or representative image decoding (remote images are
+unavailable, #14181). The default spec has no network actions. `--paging` requires
+an HTTP(S) `--page-url` reachable from the device; the fixture response is
+`{"items":[...]}` with the same row fields and globally unique IDs. `request.append`
+extends `/data/feed/items`; the bounded list trims oldest rows at the contract cap.
+Use fresh IDs and an empty final page to stop end-triggered loading. This optional
+fixture variant needs a separate show/scroll acceptance run; the wrapper measures
+the pure-scroll variant.
+
+The iOS driver shows the same spec, uses placeholder avatars, scrolls up for the first
+half of the calls and down for the rest, then dismisses it. It requires an already
+available compatible prototype host and daemon, accepts `PROTOTYPE_BENCH_CLI`, and
+forwards `AUTOMOBILE_SESSION_UUID`. It reports elapsed wall-clock milliseconds for
+each CLI swipe step and for the scroll loop, including CLI/transport overhead and
+excluding show/dismiss. These are **not frame times**; simulators expose no gfxinfo.
+`--swipes` accepts 1–100 (default 6); `--dry-run` prints commands without executing them.
+
+Feed baseline (2026-10-26, 1,000 rows, debug CtrlProxy on an API 37 arm64 emulator with
+software rendering, host load average above 140): `feed-scroll-down` p95 250 ms and
+`feed-fling-roundtrip` p95 300 ms (about 98% janky), `feed-idle` no frames. This is a
+smoke baseline, not a verdict: it misses the 16 ms target, but the debug build, software
+GL and a saturated host dominate it. Re-measure a release build on an idle host or device.
+iOS simulator (iPhone 17, iOS 26.5): six scripted swipes took 50.5 s wall time including
+CLI overhead, which is not a frame-time measure.
+
 ## Trace sections
 
 All nine trace sections below are in the renderer (#12128).

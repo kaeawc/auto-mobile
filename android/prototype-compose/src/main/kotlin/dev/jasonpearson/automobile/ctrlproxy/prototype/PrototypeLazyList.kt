@@ -3,13 +3,14 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.key
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
@@ -86,11 +87,16 @@ internal fun RenderPrototypeLazyList(
   val model = checkNotNull(node.list)
   val source = model.source
   val epoch = LocalPrototypeShowEpoch.current
-  val state = key(epoch, node.identity) { rememberLazyListState() }
   val trigger =
     checkNotNull(LocalPrototypeListEndTriggers.current).get(node.identity, source.endThreshold)
   val header = node.children.firstOrNull { it.identity == "${node.identity}.header" }
   val footer = node.children.firstOrNull { it.identity == "${node.identity}.footer" }
+  val keys = model.rows.indices.map(model::key)
+  val state =
+    key(epoch, node.identity) {
+      rememberStackListState(node.identity, keys, header != null)
+    }
+  key(epoch, node.identity) { PrototypeListAnchorEffect(state, keys, header != null) }
   PrototypeListEndEffect(model, state, trigger, header != null, interact)
   val content: @Composable (Modifier) -> Unit = { listModifier ->
     val items: androidx.compose.foundation.lazy.LazyListScope.() -> Unit = {
@@ -161,3 +167,31 @@ private fun PrototypeListEndEffect(
       }
   }
 }
+
+/** Capture the old measured rows during composition, before the new item provider is applied. */
+@Composable
+private fun PrototypeListAnchorEffect(
+  state: LazyListState,
+  keys: List<String>,
+  hasHeader: Boolean,
+) {
+  val previous = remember(state) { PrototypeListKeys(keys, hasHeader) }
+  val target =
+    remember(state, keys, hasHeader) {
+      val anchor = PrototypeListAnchor.capture(state, previous.keys, previous.hasHeader)
+      val oldIndex = anchor.index + if (previous.hasHeader) 1 else 0
+      val changed = previous.keys != keys || previous.hasHeader != hasHeader
+      previous.keys = keys
+      previous.hasHeader = hasHeader
+      if (changed) {
+        PrototypeListAnchor.resolve(anchor.key, anchor.offset, keys, hasHeader)?.takeIf {
+          it.index != oldIndex
+        }
+      } else null
+    }
+  LaunchedEffect(state, keys, hasHeader) {
+    target?.let { state.scrollToItem(it.index, it.offset) }
+  }
+}
+
+private class PrototypeListKeys(var keys: List<String>, var hasHeader: Boolean)

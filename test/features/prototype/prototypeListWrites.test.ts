@@ -151,3 +151,18 @@ test("metadata failure rolls back append even when no into body can be committed
     meta: { error: { code: "invalid_response" } },
   });
 });
+
+test("prepend trims discarded oversized rows before final byte limits", () => {
+  expect(
+    applyPrototypeDataWrite(
+      { items: ["x".repeat(contract.limits.MAX_PROTOTYPE_DATA_WRITE_BYTES + 1)] },
+      { op: "prepend", path: "/data/items", value: [1], maxItems: 1 },
+    ),
+  ).toEqual({ success: true, data: { items: [1] }, trimmed: 1 });
+  expect(
+    applyPrototypeDataWrite({ items: 1 }, { op: "prepend", path: "/data/items", value: [] }),
+  ).toMatchObject({
+    success: false,
+    error: { code: "not_array", message: "prependData target /data/items is not an array" },
+  });
+});

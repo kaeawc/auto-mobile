@@ -716,6 +716,7 @@ class PrototypeRuntime(
         PrototypeDismissAction -> dismiss()
         is PrototypeSetDataAction,
         is PrototypeAppendDataAction,
+        is PrototypePrependDataAction,
         is PrototypeRemoveDataAction -> writeData(action)
         is PrototypeRequestAction -> startRequest(action, touched)
         is PrototypePlatformAction -> startPlatformCall(action, touched)
@@ -1027,11 +1028,11 @@ class PrototypeRuntime(
     }
 
   /**
-   * A `setData`, `appendData` or `removeData` action (#12519). The write is the shared
-   * [PrototypeDataWriter] semantics, applied to an immutable copy of the data so Compose sees a new
-   * spec; a refused write (typed error, or a result the renderer cannot take) changes and emits
-   * nothing and the rest of the list still runs. An accepted write bumps the revision and reports
-   * itself as a `change` event named by the written path.
+   * A `setData`, `appendData`, `prependData` or `removeData` action (#12519). The write is the
+   * shared [PrototypeDataWriter] semantics, applied to an immutable copy of the data so Compose
+   * sees a new spec; a refused write (typed error, or a result the renderer cannot take) changes
+   * and emits nothing and the rest of the list still runs. An accepted write bumps the revision and
+   * reports itself as a `change` event named by the written path.
    */
   private suspend fun writeData(action: PrototypeAction) {
     val write = dataWrite(action) ?: return
@@ -1139,6 +1140,14 @@ class PrototypeRuntime(
             prototypeListMaxItemsFor(current.spec, action.path),
           )
         }
+      is PrototypePrependDataAction ->
+        value(action.value, action.path)?.let {
+          PrototypeDataWrite.Prepend(
+            action.path,
+            it,
+            prototypeListMaxItemsFor(current.spec, action.path),
+          )
+        }
       is PrototypeRemoveDataAction -> PrototypeDataWrite.Remove(action.path)
       else -> null
     }
@@ -1155,6 +1164,7 @@ class PrototypeRuntime(
       val maximum =
         when (write) {
           is PrototypeDataWrite.Append -> write.maxItems
+          is PrototypeDataWrite.Prepend -> write.maxItems
           is PrototypeDataWrite.Extend -> write.maxItems
           else -> null
         }
@@ -1165,6 +1175,7 @@ class PrototypeRuntime(
       when (write) {
         is PrototypeDataWrite.Set -> write.value
         is PrototypeDataWrite.Append -> write.value
+        is PrototypeDataWrite.Prepend -> write.value
         is PrototypeDataWrite.Extend -> write.value
         is PrototypeDataWrite.Remove -> null
       }

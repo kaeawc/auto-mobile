@@ -1087,9 +1087,10 @@ or sheet binding's scalar type at runtime (renderer-enforced, #9300).
 
 ### Data actions (#12519)
 
-`setData {path, value}`, `appendData {path, value}` and `removeData {path}` let a tap change `/data`
+`setData {path, value}`, `appendData {path, value}`, `prependData {path, value}` and `removeData {path}` let a tap change `/data`
 on the device, so "add to cart" or "delete row" needs no agent round trip. They require
-`prototype_data_actions_v1` (which a device advertises only with `prototype_data_model_v1`); the
+`prototype_data_actions_v1` with `prototype_data_model_v1`; prepend also requires
+`prototype_lazy_list_v1`. The
 host refuses a show, or a patch whose resulting spec contains one, on a device without it, through
 the same gate registry as every other capability (`PROTOTYPE_SPEC_CAPABILITY_GATES`, checked on
 the complete result of `show`, `patch` and `replaceNode`).
@@ -1104,18 +1105,19 @@ the complete result of `show`, `patch` and `replaceNode`).
 - Semantics are one pure function, `applyPrototypeDataWrite` (`src/features/prototype/prototypeDataWrite.ts`),
   shared by the host mirror and meant for the device runtimes, `request` responses (#12523) and
   storage restores (#12522). `set` creates or replaces an object member or replaces an existing array
-  element; `append` pushes onto an existing array; `remove` deletes an existing member or element and
+  element; `append` pushes one row onto an existing array; `prepend` inserts an ordered array at
+  the start and trims from the end under maxItems; `remove` deletes an existing member or element and
   shifts later elements down. Errors are typed (`invalid_path`, `invalid_value`, `not_found`,
   `not_array`, `limit_exceeded`) and change nothing. The data after a write must satisfy the data
   depth and array limits and `MAX_PROTOTYPE_DATA_WRITE_BYTES`.
 - The validator checks pointer syntax and `{index}` placement, rejects a literal value data cannot
   hold, and, when the target has no `{index}` and resolves in the spec's own `data`, rejects an
-  `appendData` whose target is not an array. A target created only by an earlier write is the device's
+  `appendData` or `prependData` whose target is not an array. A target created only by an earlier write is the device's
   to check.
 
 Each device write is reported on a `change` event, using existing wire fields so no event field is
 added: `name` is the written `/data/...` path (for an append, the array) and `payload` is
-`{op: "set"|"append"|"remove", value?, revision}`. `validity` may accompany it; a `change` whose name
+`{op: "set"|"append"|"extend"|"prepend"|"remove", value?, maxItems?, revision}`. `validity` may accompany it; a `change` whose name
 is a data path must carry a valid payload or the host drops it. `awaitEvent` returns it like any
 other event.
 
@@ -1187,7 +1189,7 @@ checks the rest, with the path of the first problem:
 | `MAX_PROTOTYPE_STORAGE_KEYS`  | 64     | Entries in `storage.keys`.                                                                |
 
 **What is stored.** After every write the device saves the listed keys under the spec `id`: a user
-write (a tap, a text edit), a device data action (`setData`, `appendData`, `removeData`) or a `request`
+write (a tap, a text edit), a device data action (`setData`, `appendData`, `prependData`, `removeData`) or a `request`
 response (#12523) that writes state or data. A write that would take the stored total over
 `MAX_PROTOTYPE_STORAGE_BYTES` still applies on screen, is not stored (the previous stored value of
 that key stays) and the key is listed in `skippedKeys` of the inspect report. Stored values are part
@@ -1840,7 +1842,7 @@ map.
 
 | Capability                    | Gates                                                     | Android CtrlProxy | iOS agent  |
 | ----------------------------- | --------------------------------------------------------- | ----------------- | ---------- |
-| `prototype_data_actions_v1`   | `setData`, `appendData`, `removeData`                     | Advertised        | Advertised |
+| `prototype_data_actions_v1`   | `setData`, `appendData`, `prependData`, `removeData`      | Advertised        | Advertised |
 | `prototype_storage_v1`        | root `storage` block, `inspect` `storage`, `clearStorage` | Advertised        | Advertised |
 | `prototype_network_v1`        | the `request` action with `via: "host"`                   | Advertised        | Advertised |
 | `prototype_network_device_v1` | `request` with `via: "device"`                            | Advertised        | Advertised |
@@ -2817,7 +2819,7 @@ A `list` is its own scrolling container. Its row template is composed lazily in 
 only composed rows appear in `observe`. Use `swipeOn` on the list to reach later rows. The
 container preserves authored `testTag` / `contentDescription` and exposes a scrollable collection
 to accessibility (Android LazyColumn/LazyRow collection info and scroll actions; iOS ScrollView).
-Both the list node and `request.append` require `prototype_lazy_list_v1` together with
+The list node, `request.append` and `prependData` require `prototype_lazy_list_v1` together with
 `prototype_data_model_v1`.
 
 | Field                          | Contract                                                                                                                                                                                                 |
@@ -2861,19 +2863,30 @@ inside repeats. Response validation, extend, `into` and metadata writes are atom
 non-array source/target, unsupported parent or data-limit failure rolls everything back and
 reports `invalid_response`. The result reports `appended`, the number of response rows added.
 
-Both `appendData` and request append use the smallest `maxItems` among lists whose exact data
-path matches the write target. The shared writer supports `append` (one value) and `extend`
-(array values), with optional `maxItems`; it trims from the start before checking final
+`appendData`, `prependData` and request append use the smallest `maxItems` among lists whose exact data
+path matches the write target. The shared writer supports `append` (one value), `extend` (array values) and `prepend` (array values), with optional `maxItems`; append/extend trim from the start and prepend trims from the end before checking final
 array/byte/depth limits, and reports `trimmed` (0 when none). Without a cap, the ordinary
 `MAX_PROTOTYPE_DATA_ARRAY_ITEMS` limit applies after concatenation. `extend` rejects a non-array value with
 `invalid_value`, a missing target with `not_found`, and a non-array target with `not_array`.
 
 A device change event names the target `/data/...` path and carries
-`{op:"append"|"extend",value,maxItems?,revision}`. The host replays it through the same writer;
-malformed extend values or noninteger/nonpositive `maxItems` are dropped. A page too large for the
+`{op:"append"|"extend"|"prepend",value,maxItems?,revision}`. The host replays it through the same writer;
+malformed extend/prepend values or noninteger/nonpositive `maxItems` are dropped. A page too large for the
 emit byte budget travels without `value`; the host then stops tracking the spec instead of mirroring
 it. Request success emits the extend event first, then `into`, `into__meta`, status key,
 `prototype_request` and `onSuccess`.
+
+`prependData {path,value}` resolves one binding value `v` and writes `{op:"prepend",path,value:[v],maxItems?}`.
+The writer preserves page order (`value ++ existing`) and keeps the first `maxItems` rows, even
+when the page alone exceeds the cap. Empty pages still trim existing rows. Its errors parallel
+`extend`, with messages naming `prependData`; trimming precedes final limits. It requires
+`prototype_lazy_list_v1`, `prototype_data_actions_v1` and `prototype_data_model_v1`.
+
+Renderers retain the first visible row's key and on-screen offset across row changes, including
+at the top; headers and footers are not anchors. Prepended rows stay above the viewport until the
+user scrolls up. If the key was trimmed, the renderer default applies. Each stack entry retains
+its list anchor (row key and offset) while covered by a push and restores it on pop; a missing row
+falls back to the nearest surviving index or top.
 
 A newer request cancels an in-flight one whose `into` or `append.to` equals, contains or sits inside
 the newer request's `into` or `append.to` (latest wins), so a refresh that replaces `/data/feed` and
@@ -2972,7 +2985,7 @@ write that would leave a list's array with a non-object row, a missing, non-scal
 }
 ```
 
-`prependData`, per-stack-entry scroll state (#14189), benchmark qualification and device acceptance are not yet supported.
+Prepend, anchoring and per-stack-entry list scroll restore are not device-verified until the acceptance run; benchmark qualification remains unverified.
 
 ### Timers
 

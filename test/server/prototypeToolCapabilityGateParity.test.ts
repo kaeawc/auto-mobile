@@ -303,7 +303,20 @@ function fixture(root: { type: string; id: string } & Record<string, unknown>) {
     ops: [{ op: "replaceNode", id: "label", node: root }],
   };
 }
-const cases = Object.entries(fixtures).flatMap(([capability, value]) =>
+const parityFixtures: [string, { minimalSpec: unknown; ops: unknown[]; with?: string[] }][] = [
+  ...Object.entries(fixtures),
+  [
+    "prototype_lazy_list_v1",
+    {
+      ...fixture({
+        ...label,
+        onTap: [{ type: "prependData", path: "/data/rows", value: { value: { id: 2 } } }],
+      }),
+      with: ["prototype_data_model_v1", "prototype_data_actions_v1"],
+    },
+  ],
+];
+const cases = parityFixtures.flatMap(([capability, value]) =>
   (["android", "ios"] as const).map((platform) => ({
     capability,
     ...value,

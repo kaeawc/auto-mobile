@@ -163,6 +163,7 @@ internal object PrototypeStrictPolicy {
       "cancelTimer" to "timers",
       "setData" to "data_actions",
       "appendData" to "data_actions",
+      "prependData" to "data_actions",
       "removeData" to "data_actions",
       "platform" to "platform",
     )
@@ -288,7 +289,7 @@ internal object PrototypeStrictPolicy {
     }
 
     private fun skipsScan(key: String, type: String): Boolean =
-      key == "payload" || (key == "value" && type !in listOf("setData", "appendData"))
+      key == "payload" || (key == "value" && type !in listOf("setData", "appendData", "prependData"))
 
     // An effect's own `animate`, colours and params are not spec features of their own.
     private fun descend(key: String, child: JsonElement) {
@@ -312,6 +313,7 @@ internal object PrototypeStrictPolicy {
       for ((feature, keys) in typeFieldFeatures[type].orEmpty()) {
         if (keys.any { fields[it] != null }) need(feature)
       }
+      if (type == "prependData") need("lazy_list")
       if (type == "list" || (type == "request" && fields.containsKey("append"))) {
         need("lazy_list")
         need("data_model")

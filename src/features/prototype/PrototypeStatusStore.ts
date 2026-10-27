@@ -397,7 +397,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
           ? applyPrototypeDataWrite(entry.data, { op: "remove", path: write.path })
           : write.value === undefined
             ? undefined
-            : write.op === "extend"
+            : write.op === "extend" || write.op === "prepend"
               ? applyPrototypeDataWrite(entry.data, { ...write, value: write.value })
               : applyPrototypeDataWrite(entry.data, { ...write, value: write.value });
       const written = { ...entry };

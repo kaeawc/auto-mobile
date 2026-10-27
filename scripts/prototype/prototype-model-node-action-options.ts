@@ -19,6 +19,9 @@ export const actionModelOptions = {
     "appendData.value": {
       kotlin: "EmitContextBinding",
     },
+    "prependData.value": {
+      kotlin: "EmitContextBinding",
+    },
     "request.headers": {
       kotlin: "Map<String, JsonElement>",
     },

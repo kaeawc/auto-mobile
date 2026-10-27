@@ -135,7 +135,9 @@ struct PrototypeStrictRepeats {
                 let keyField = ["stateKey", "activeKey", "hourKey", "minuteKey", "atEndKey", "statusKey", "state"]
                     .contains(key)
                     || (key == "key" && object["repeat"] == nil)
-                let appendTarget = key == "to" && object["from"] != nil
+                let dataActionPath = key == "path"
+                    && PrototypeDataWrite.actionTypes.contains(object["type"]?.stringValue ?? "")
+                let appendTarget = (key == "to" && object["from"] != nil) || dataActionPath
                 if appendTarget {
                     if let scope {
                         if PrototypeRepeat.segments(text, alias: scope.alias).contains(where: {
@@ -149,7 +151,7 @@ struct PrototypeStrictRepeats {
                         if text.split(separator: "/", omittingEmptySubsequences: false).contains(where: {
                             $0.contains("{index}") && $0 != "{index}"
                         }) { throw PrototypeContractValidator.invalid(at, "{index} must be a whole data path segment") }
-                    } else if text.split(separator: "/").contains("{index}") {
+                    } else if text.contains("{index}") {
                         throw PrototypeContractValidator.invalid(at, "{index} outside a repeat template")
                     }
                 }

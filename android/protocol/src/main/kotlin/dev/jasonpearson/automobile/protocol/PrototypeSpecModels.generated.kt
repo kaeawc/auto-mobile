@@ -215,6 +215,13 @@ data class PrototypeScrollToAction(
   val animated: Boolean? = null,
 ) : PrototypeAction()
 
+@SerialName("prependData")
+@Serializable
+data class PrototypePrependDataAction(
+  val path: String,
+  val value: EmitContextBinding,
+) : PrototypeAction()
+
 @Serializable
 sealed class PrototypeNode {
   abstract val id: String?
@@ -1559,8 +1566,8 @@ data class PrototypeCondition(
   val valid: PrototypeValidityKeys? = null,
   /** A `/platform` pointer (#14294); platform state is device-owned and read-only. */
   val platform: String? = null,
-  val contains: String? = null,
-  val startsWith: String? = null,
+  val contains: PrototypeScalar? = null,
+  val startsWith: PrototypeScalar? = null,
   val lengthGt: Int? = null,
   val lengthLt: Int? = null,
 )

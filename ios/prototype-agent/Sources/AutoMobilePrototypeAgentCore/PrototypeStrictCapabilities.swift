@@ -123,6 +123,11 @@ enum PrototypeStrictCapabilities {
             if type == "request" {
                 need("network")
                 if fields["append"] != nil { need("lazy_list") }
+                for part in PrototypeStrictBindings.array(fields["body"]?.objectFields?["multipart"]) {
+                    if let binding = part.objectFields?["value"] { scan(binding) }
+                }
+                if fields["progressKey"] != nil || fields["body"]?.objectFields?.keys
+                    .contains(where: { ["multipart", "form", "file"].contains($0) }) == true { need("network_upload") }
                 if fields["via"] == .string("device") { need("network_device") }
                 if let url = fields["url"]?.stringValue { textBinding(url) }
                 for key in ["headers", "query"] {
@@ -139,6 +144,12 @@ enum PrototypeStrictCapabilities {
             if type == "emit", fields["context"] != nil { need("emit_context") }
             if type == "platform" { need("platform") }
             for (key, child) in fields {
+                if key == "form", field == "body" {
+                    for binding in (child.objectFields ?? [:]).values {
+                        scan(binding)
+                    }
+                    continue
+                }
                 if key == "strings" { continue }
                 if key == "payload" ||
                     (key == "value" && !["setData", "appendData", "prependData", "upsertData"].contains(type))

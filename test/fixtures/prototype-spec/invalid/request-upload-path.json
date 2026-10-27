@@ -1,0 +1,32 @@
+{
+  "spec": {
+    "id": "request-upload",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "progress": 0,
+      "caption": "hello"
+    },
+    "root": {
+      "type": "button",
+      "label": "Upload",
+      "onTap": [
+        {
+          "type": "request",
+          "method": "POST",
+          "url": "https://example.com/upload",
+          "body": {
+            "file": {
+              "path": "/tmp/photo.png"
+            },
+            "contentType": "image/png"
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].body.file.asset"
+}

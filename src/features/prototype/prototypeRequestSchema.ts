@@ -1,6 +1,8 @@
 import { z } from "zod";
+import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import {
+  keySchema,
   prototypeDataActionValueSchema,
   pointerSchema,
   stateKeySchema,
@@ -28,6 +30,28 @@ export function bindPrototypeRequestFollowUps(actionSchema: () => z.ZodTypeAny):
 const followUpSchema = z.lazy((): z.ZodTypeAny => (followUps ? followUps() : z.never()));
 const followUpList = z.array(followUpSchema).min(1).max(32).optional();
 
+const uploadDispositionSchema = z
+  .string()
+  .min(1)
+  .max(256)
+  .regex(prototypeContractPatterns.uploadDisposition);
+const uploadContentTypeSchema = z
+  .string()
+  .min(1)
+  .max(256)
+  .regex(prototypeContractPatterns.uploadContentType);
+const prototypeUploadFileSchema = z.object({ asset: z.string().min(1).max(256) }).strict();
+const prototypeUploadPartSchema = z
+  .object({
+    name: uploadDispositionSchema,
+    value: prototypeDataActionValueSchema.optional(),
+    file: prototypeUploadFileSchema.optional(),
+    filename: uploadDispositionSchema.optional(),
+    contentType: uploadContentTypeSchema.optional(),
+  })
+  .strict()
+  .refine((part) => (part.value !== undefined) !== (part.file !== undefined));
+
 export const requestActionSchema = z
   .object({
     type: z.enum(["request"]),
@@ -35,7 +59,34 @@ export const requestActionSchema = z
     url: z.string().min(1).max(2048),
     headers: z.record(z.string().min(1), bindingValueSchema).optional(),
     query: z.record(z.string().min(1), bindingValueSchema).optional(),
-    body: prototypeDataActionValueSchema.optional(),
+    body: z
+      .union([
+        prototypeDataActionValueSchema,
+        z
+          .object({
+            multipart: z
+              .array(prototypeUploadPartSchema)
+              .min(1)
+              .max(contract.limits.MAX_PROTOTYPE_UPLOAD_PARTS),
+          })
+          .strict(),
+        z
+          .object({
+            form: z
+              .record(z.string().min(1), prototypeDataActionValueSchema)
+              .refine(
+                (entries) =>
+                  Object.keys(entries).length >= 1 &&
+                  Object.keys(entries).length <= contract.limits.MAX_PROTOTYPE_UPLOAD_PARTS,
+              ),
+          })
+          .strict(),
+        z
+          .object({ file: prototypeUploadFileSchema, contentType: uploadContentTypeSchema })
+          .strict(),
+      ])
+      .optional(),
+    progressKey: keySchema.optional(),
     into: z
       .string()
       .min(1)

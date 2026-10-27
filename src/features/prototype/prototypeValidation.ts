@@ -332,7 +332,7 @@ function formConstraint(
 ): PrototypeValidationError | undefined {
   if (rule.exactlyOne && rule.exactlyOne.filter((key) => Object.hasOwn(data, key)).length !== 1) {
     return fail(
-      keyPath(path, rule.exactlyOne[0]),
+      rule.exactlyOneAtObject ? path : keyPath(path, rule.exactlyOne[0]),
       `Exactly one of ${rule.exactlyOne.join(", ")} is required`,
     );
   }
@@ -432,6 +432,19 @@ function visitScreenMap(
   }
   return undefined;
 }
+function recordSizeError(
+  count: number,
+  rule: Rule,
+  path: string,
+): PrototypeValidationError | undefined {
+  if (count < (rule.minEntries ?? 0)) {
+    return fail(path, "Record entry minimum not met");
+  }
+  if (count > (rule.maxEntries ?? Infinity)) {
+    return fail(path, "Record entry limit exceeded");
+  }
+  return undefined;
+}
 function visitRecord(
   value: unknown,
   rule: Rule,
@@ -443,8 +456,9 @@ function visitRecord(
   if (!data) {
     return fail(path, "Expected object");
   }
-  if (Object.keys(data).length > (rule.maxEntries ?? Infinity)) {
-    return fail(path, "Record entry limit exceeded");
+  const sizeError = recordSizeError(Object.keys(data).length, rule, path);
+  if (sizeError) {
+    return sizeError;
   }
   for (const [key, child] of Object.entries(data)) {
     const at = keyPath(path, key);
@@ -601,6 +615,13 @@ function visitChoice(
     }
     return typeof value === "string";
   });
+  // Prefer diagnostics from the object alternative sharing the most authored fields.
+  const fields = object(value);
+  const matches = (option: Rule): number =>
+    Object.keys(option.fields ?? {}).filter((key) => fields && Object.hasOwn(fields, key)).length;
+  if (rule.preferMatchingFields) {
+    candidates.sort((left, right) => matches(right) - matches(left));
+  }
   // Several options can accept the same JSON type (a hex colour or a role name are both strings).
   let firstError: PrototypeValidationError | undefined;
   for (const option of candidates) {

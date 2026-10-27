@@ -12273,6 +12273,12 @@
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeRequestAppend",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "progressKey",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "row": [

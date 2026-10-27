@@ -45,7 +45,7 @@ dependencies {
   implementation(libs.compose.ui.foundation)
   implementation(libs.compose.material)
   implementation(libs.compose.material.icons.extended)
-  implementation(libs.kotlinx.coroutines)
+  api(libs.kotlinx.coroutines)
 
   testImplementation(libs.bundles.unit.test)
   testImplementation(libs.robolectric)

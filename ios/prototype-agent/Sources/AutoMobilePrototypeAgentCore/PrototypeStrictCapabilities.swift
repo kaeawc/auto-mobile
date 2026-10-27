@@ -25,6 +25,8 @@ enum PrototypeStrictCapabilities {
             }
             var own = fields
             PrototypeRepeat.bindTextFields(&own) { text in textBinding(text); return text }
+            if PrototypeStylePolishV2.themedBorder(fields) { need("theme_modes") }
+            if PrototypeStylePolishV2.required(fields) { result.insert(PrototypeStylePolishV2.capability) }
             let type = fields["type"]?.stringValue ?? ""
             let types = [
                 "startTimer": "timers",
@@ -36,6 +38,8 @@ enum PrototypeStrictCapabilities {
                 "searchBar": "search_bar",
                 "chart": "chart",
                 "menu": "menus",
+                "tooltip": "tooltip",
+                "drawer": "drawer",
                 "select": "menus",
                 "scrollTo": "chat_scroll",
             ]
@@ -95,6 +99,7 @@ enum PrototypeStrictCapabilities {
                 if key == "refresh" { need("refresh") }
                 if key == "linkify" { need("linkify") }
                 if key == "empty" || key == "shimmer" { need("loading_states") }
+                if key == "effects" { need("effects") }
                 let transitionType = child.objectFields?["type"]?.stringValue ?? child.stringValue ?? ""
                 if ["animate", "scale", "rotation", "zoomable"]
                     .contains(key) ||
@@ -112,7 +117,10 @@ enum PrototypeStrictCapabilities {
                 }
                 if key == "data", child.stringValue != nil { need("data_model") }
                 if key == "light" || key == "dark", !field.isEmpty { need("theme_modes") }
-                if key != "linkify" && key != "series" { scan(child, field: key) }
+                // An effect's own `animate`, colours and params are not spec features of their own.
+                if key == "linkify" {
+                    if let actions = child.objectFields?["onTap"] { scan(actions, field: "onTap") }
+                } else if key != "series", key != "effects" { scan(child, field: key) }
             }
         }
         if let root = spec["root"] { scan(root) }

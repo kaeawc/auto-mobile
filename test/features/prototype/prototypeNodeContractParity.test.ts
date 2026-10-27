@@ -105,7 +105,11 @@ describe("prototype node contract parity", () => {
   test("style has the same fields in Zod and the contract", () => {
     const box = zodNodeOptions()[0];
     const style = expectSchema(
-      expectSchema(box.shape.style, z.ZodOptional, "the style field").unwrap(),
+      expectSchema(
+        expectSchema(box.shape.style, z.ZodOptional, "the style field").unwrap(),
+        z.ZodEffects,
+        "the refined style schema",
+      ).innerType(),
       z.ZodObject,
       "the style schema",
     );

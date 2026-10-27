@@ -1,3 +1,4 @@
+import { effectUses } from "./prototypeEffects";
 import { PrototypeRepeatData } from "./prototypeData";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import {
@@ -440,6 +441,8 @@ function repeatKeyError(
 interface Budget {
   nodes: number;
   images: number;
+  effects: number;
+  animatedEffects: number;
 }
 
 /**
@@ -484,6 +487,15 @@ function expandedErrors(
   if (budget.images > contract.limits.MAX_PROTOTYPE_IMAGES) {
     return fail(at, "Expanded image limit exceeded");
   }
+  const effects = effectUses(node);
+  budget.effects += effects.total;
+  budget.animatedEffects += effects.animated;
+  if (budget.effects > contract.limits.MAX_PROTOTYPE_EFFECTS) {
+    return fail(at, "Expanded effect limit exceeded");
+  }
+  if (budget.animatedEffects > contract.limits.MAX_PROTOTYPE_ANIMATED_EFFECTS) {
+    return fail(at, "Expanded animated effect limit exceeded");
+  }
   const scope = scopeOf(node, path, data);
   const instances = scope ? scope.items.length : 1;
   const nestedPath = scope ? `${path}.repeat` : repeatPath;
@@ -509,7 +521,13 @@ export function repeatErrors(
   }
   return (
     templateErrors(root, "root", { data, cells: 0, total: 0 }) ??
-    expandedErrors(root, "root", { nodes: 0, images: 0 }, data, undefined)
+    expandedErrors(
+      root,
+      "root",
+      { nodes: 0, images: 0, effects: 0, animatedEffects: 0 },
+      data,
+      undefined,
+    )
   );
 }
 

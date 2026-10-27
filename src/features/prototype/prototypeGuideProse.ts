@@ -174,6 +174,16 @@ animated highlight over its background and reads "Loading" to accessibility; it 
 
 The rows themselves repeat over \`{path: "/feed"}\`. The iOS agent draws shimmer too.
 
+## Style effects
+
+(needs \`prototype_effects_v1\`; no connected device advertises it yet, so the host refuses a spec
+with \`style.effects\` until a renderer ships) \`style.effects\` is 1 to 4 paint-only looks drawn in
+order inside the node's own bounds: \`noise\`, \`gradientMesh\`, \`shimmer\`, \`glow\`,
+\`vignette\`, \`blur\`, \`pixelate\`, \`chromaticAberration\`, \`wave\` and \`ripple\`, each with typed,
+bounded params. Shader source is never accepted. Any effect may loop with \`animate:
+{periodMs: 400-20000}\` and start at \`phase\` 0-1; a spec has at most 64 effects and 8 animated ones
+across its expanded \`repeat\` tree, counting every \`styleWhen\` style's list too.
+
 ## Motion v2
 
 (needs \`prototype_motion_v2\`) A node's \`animate: {durationMs?, easing?}\` (0-2000 ms, default
@@ -288,11 +298,19 @@ show and subsequent host-local status report the effective value as \`lastResult
 it is absent for sheet/floating windows, dismiss, failed show and adopted prototypes.
 
 
+## Tooltip and drawer
+
+\`tooltip\` requires \`prototype_tooltip_v1\`, boolean \`openWhen: {key, equals}\`, nonblank \`text\`, and exactly one of \`anchorTo\` (a unique node id in the same spec, other than itself) or \`anchor\` (the existing element selector or bounds anchor). Element anchors are resolved by the host to a target rect; native renderers hoist the tooltip as an overlay, not ordinary anchored content. IDs are literal: repeated targets with multiple instances and duplicate component-instance ids are ambiguous and rejected; a repeat with no items supplies no target.
+
+Optional \`caret\` is \`auto\` (default), \`top\`, \`bottom\`, \`start\` or \`end\`: it names the bubble edge pointing at the target, so \`top\` places the bubble below the target. Auto chooses a side with room; auto and explicit sides flip to the opposite side when needed to stay inside the window. Optional strict \`spotlight: {padding?, cornerRadius?}\` draws the scrim role with a rounded hole around the target: integer dp 0..64, defaults 8 and 12 respectively. Without spotlight there is no scrim. Tapping outside the bubble on the spotlight scrim, or tapping the bubble without \`onTap\`, writes \`!equals\` to the open key, then runs optional \`onDismiss\` (1..32 actions). Bubble and scrim tags are \`<testTag>\` and \`<testTag>.close\`. Use one boolean per step for a coach-mark tour; a step's \`onTap\` uses \`setState\` to close its key and open the next step's key. Numeric equality is not supported by \`openWhen\`.
+
+\`drawer\` requires \`prototype_drawer_v1\`, \`edge: "start"|"end"\`, boolean \`openWhen: {key, equals}\` and a \`child\` node. Start/end follow layout direction. The renderer fixes panel width; there is no width field. Optional \`scrim\` accepts the same color value (including mode pairs) as bottomSheet and defaults to the scrim role. Optional \`dismissOnSwipe\` defaults to true, as for bottomSheet. Both nodes accept the common node fields, including \`onTap\`, but no long-press or double-tap handlers.
+
 ## Menu and select
 
 \`menu\` and \`select\` require \`prototype_menus_v1\`; the host refuses them before showing or uploading assets when the connected renderer lacks it.
 
-A \`menu\` requires \`openWhen: {key, equals}\` with a boolean equality and 1–16 strict \`items\`. Each item is \`{label, icon?, trailingText?, enabled?, onTap?}\` or exactly \`{type:"divider"}\`. Labels and trailing text are nonempty, icons use the existing icon names, and \`onTap\` has 1–32 existing actions. A disabled item is dimmed, cannot be tapped and does not close the menu. Dividers are neither focusable nor tappable. The elevated surface is anchored to its parent’s bottom end and clamped inside the window. An enabled item or outside tap writes \`!equals\` to the open key; item actions run after closing.
+A \`menu\` requires \`openWhen: {key, equals}\` with a boolean equality and 1–16 strict \`items\`. Each item is \`{label, icon?, trailingText?, enabled?, onTap?}\` or exactly \`{type:"divider"}\`. Labels and trailing text are nonempty, icons use the existing icon names, and \`onTap\` has 1–32 existing actions. A disabled item is dimmed, cannot be tapped and does not close the menu. Dividers are neither focusable nor tappable. The elevated surface is anchored to its parent’s bottom end and clamped inside the window; it opens above its anchor when it does not fit below. An enabled item or outside tap writes \`!equals\` to the open key; item actions run after closing.
 
 A \`select\` requires a string \`stateKey\` and 2–32 \`{value,label}\` options with unique nonempty values and nonempty labels; its optional label is nonempty. It shows the current option’s label, or empty text when no option matches, and a trailing expand indicator. Expansion is local view state. Choosing an option writes the string key, emits the same \`change\` payload as \`radioGroup\`, and collapses the list. Tapping the field again or outside also collapses it. Both nodes support repeat templates and reusable \`use\` components: state keys, menu item labels/trailing text/actions and select labels/option labels bind placeholders.
 
@@ -676,7 +694,13 @@ every limit counts the expanded tree.
   \`root.children[2] (use postCard) → components.postCard.root.children[1].label\`.
 `;
 
-export const GUIDE_APPEARANCE = `## Light and dark mode
+export const GUIDE_APPEARANCE = `## Style polish
+
+Layered style.shadows (1-3 strict {color,radius,spread?,offset?,inner?}, radius 0-1000 dp, spread and offset axes -1000..1000; omitted spread/offset/inner mean 0/{x:0,y:0}/false), style.cornerStyle circular|continuous (default circular), style.border {width,color? ,gradient?} with exactly one of color or gradient, scroll.fadeEdges {top?,bottom?,start?,end?} (0-1000 dp, at least one), and image.filter {saturation?,tint?} (saturation 0-2, at least one) require prototype_style_polish_v2. shadows excludes elevation and shadowColor. Fades appear only where scrolling remains; start/end mirror in RTL. Colour pairs in shadows and tint, and pairs or role names in border gradient stops also require prototype_theme_modes_v1.
+
+Rendering order: transform, press scale, size, alpha, drop shadows (shadows/elevation before the clip), clip (cornerRadius + cornerStyle), background, gradient, shimmer, border (color or gradient), inner shadows.
+
+## Light and dark mode
 
 A shown prototype has exactly one resolved mode, light or dark. Roles, per-mode values and the
 scheme all read that one mode, on Android and on iOS.

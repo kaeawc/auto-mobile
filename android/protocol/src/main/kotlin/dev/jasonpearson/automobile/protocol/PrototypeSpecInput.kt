@@ -120,6 +120,7 @@ internal object PrototypeSpecInput {
       ?: chartErrors(value, context)
       ?: linkifyErrors(value, context)
       ?: chatScrollErrors(context)
+      ?: PrototypeTooltipRules.tooltipErrors(value, context)
 
   fun validateElement(value: JsonElement, context: Context): PrototypeSpecValidation {
     context.root = value

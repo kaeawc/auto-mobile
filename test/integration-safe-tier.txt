@@ -237,6 +237,7 @@ test/server/internalToolPayloads.integration.test.ts | safe | read-only scan of 
 test/server/liveAcceptanceDestructiveToolSelection.integration.test.ts | safe | hermetic fixture; tools are in-test stubs L1
 test/server/mcpSessionAutolockRouting.integration.test.ts | safe | FakeDeviceUtils pool, FakeDeviceSessionPersistence L170/L186
 test/server/observeAppResource.integration.test.ts | safe | hermetic fixture and in-memory McpTestFixture L129
+test/server/observeAppShellMinified.integration.test.ts | safe | Bun.build of one source file and a fake window, written under os.tmpdir()
 test/server/outputSchema.sdk.integration.test.ts | safe | hermetic server fixture; in-memory McpTestFixture; in-test stub tool L7
 test/server/performanceResources.integration.test.ts | safe | createTestDatabase in-memory L53
 test/server/plainReadToolSessionActivity.integration.test.ts | safe | hermetic fixture; FakeDeviceUtils pool L36

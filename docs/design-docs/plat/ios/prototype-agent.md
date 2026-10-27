@@ -52,6 +52,7 @@ the Viewer/file loader keeps its existing behavior.
 | Appearance override/inference/live re-theme (#11222)                   | `prototype_appearance_v1`; [Appearance](#appearance)                                                                                                               |
 | Bottom sheet above the keyboard                                        | [Bottom sheet and the keyboard](#bottom-sheet-and-the-keyboard)                                                                                                    |
 | Style `weight`, min/max sizes, `aspectRatio` (#11543)                  | `PrototypeSizing`, Android's order (bounds, `width`/`height`, aspect ratio); see below                                                                             |
+| Style `effects` (#15128)                                               | Contract only; not advertised (`prototype_effects_v1`), so the host refuses it                                                                                     |
 | Data model (#11673)                                                    | `prototype_data_model_v1`; [Data model capability](#data-model-capability)                                                                                         |
 | Data actions (#12519)                                                  | `prototype_data_actions_v1`; [Data actions capability](#data-actions-capability)                                                                                   |
 | Storage (#12522)                                                       | `prototype_storage_v1`; [Storage capability](#storage-capability)                                                                                                  |
@@ -238,7 +239,7 @@ Advertised as `prototype_theme_modes_v1` (#11220). Rules are Core's (`PrototypeM
 device-verified. One mode is resolved per shown prototype ([Appearance](#appearance)).
 
 - **Colours.** Every slot takes a hex, a role name, or `{light, dark}` (each side hex or role):
-  `style.background`, `style.color`, `style.shadowColor`, `style.border.color`, a `styleWhen` style,
+  `style.background`, `style.color`, `style.shadowColor`, `style.shadows[].color`, `style.border.color`, `style.border.gradient` stops, `image.filter.tint`, a `styleWhen` style,
   gradient stops, `window.placement.scrim`, bottomSheet `scrim`. A pair picks its side then resolves
   like a single value (a role comes from the resolved mode's scheme).
 - **Theme role maps.** Scheme order: baseline Material scheme for the mode, seed scheme, flat
@@ -356,6 +357,7 @@ transition as a real tap, including on part identifiers.
 | `divider`, `badge`, `progress`  | Hairline, dot/count capsule, determinate `ProgressView`/ring, indeterminate sweep                                        |
 | `timePicker`, `datePicker`      | Wheel `DatePicker` (one `change` per edit), graphical `DatePicker` in UTC days                                           |
 | `dialog`, `snackbar`            | Drawn above the author tree in the prototype window; `<testTag>.confirm`, `.dismiss`, `.action`                          |
+| `tooltip`, `drawer`             | Hoisted bubble/spotlight or modal side panel; see [Tooltip and drawer overlays](#tooltip-and-drawer-overlays)            |
 
 - **Dialog.** Its scrim covers the whole window (below the dismiss bar with `chrome: "bar"`) and takes
   every touch while open, even for floating/sheet placements; a snackbar takes touches only on itself.
@@ -419,6 +421,18 @@ cutout, follows the spec's theme) and the spec is laid out below it, so `safeAre
 inset.
 
 See the [`prototype` tool reference](../../../tools.md#prototype).
+
+Style contract fields `style.shadows`, `style.cornerStyle`, `style.border.gradient`,
+`scroll.fadeEdges` and `image.filter` require `prototype_style_polish_v2`. The strict
+validator accepts these fields and the agent advertises this capability. A shared corner
+path clips content and paints backgrounds, gradients, shimmer, borders and shadows;
+continuous full radii clamp to half the short side. Shadow layers paint in authored
+order within the outer and inner groups, with inner shadows above the border. The
+Canvas shadow-only filter avoids painting the spread source itself; its Gaussian
+radius is half the authored CSS-like blur. Positive spread expands outer sources
+and contracts inner holes. Scroll fades use iOS 17 geometry preferences to mask only
+edges with remaining content, mirroring horizontal start/end in RTL; opposing fades
+are capped at half the viewport. Image saturation precedes the palette-resolved tint.
 
 ## Data model capability
 
@@ -730,7 +744,7 @@ assets when the renderer lacks it.
   `{label, icon?, trailingText?, enabled?, onTap?}` or exactly `{type:"divider"}`. Labels/trailing text
   nonempty; `onTap` 1-32 actions. A disabled item is dimmed, untappable and does not close the menu;
   dividers are neither focusable nor tappable. The elevated surface anchors to its parent's bottom end,
-  clamped inside the window. An enabled item or outside tap writes `!equals` to the open key; item
+  flipping above the anchor when it cannot fit below but fits above, otherwise clamped inside the window. An enabled item or outside tap writes `!equals` to the open key; item
   actions run after closing.
 - `select`: string `stateKey` and 2-32 `{value,label}` options (unique nonempty values, nonempty
   labels; optional label nonempty). Shows the current option's label (empty if none match) and a trailing
@@ -745,6 +759,45 @@ Menu/Picker; iOS shows report the substitution in `platformNotes`). The select f
 carry the node `testTag`. Select option rows are `<testTag>.<value>`; menu item rows `<testTag>.<index>`
 (zero-based, dividers counted). Android adds row tags only when `testTag` is set; iOS falls back to
 `(testTag ?? id).<value|index>`.
+
+## Tooltip and drawer overlays
+
+`prototype_tooltip_v1` and `prototype_drawer_v1` gate `tooltip` and `drawer` respectively in both
+strict spec validation and bundle capability discovery. Both use boolean `openWhen: {key, equals}`;
+state writes must preserve that binding's type. The generated contract enforces their strict fields.
+Tooltip `anchorTo` must resolve to exactly one other node id after host component and repeat expansion.
+
+Tooltips are hoisted into the top hosting layer, outside the page's layout and anchor layer.
+`anchorTo` uses the rendered target's global bounds; `anchor` uses host-resolved bounds plus offsets.
+An unrendered target leaves state unchanged and draws nothing. `PrototypePlacement.place` resolves
+caret side, bubble origin and caret offset from target, bubble and window geometry. `top` means the
+bubble is below the target; logical start/end mirror in RTL. Placement flips to the opposite side
+when needed, chooses the larger space when neither fits, clamps to an eight-point window margin,
+and keeps the caret aimed at the target center within the bubble's corner inset. Menus use the same
+placement module while preserving their bottom-end alignment when they fit below.
+
+A tooltip's optional `spotlight` draws the themed sheet scrim at 40% alpha with an even-odd rounded
+cutout, inflated by `padding` (default 8 points; radius default 12). The bubble exposes its text and
+`testTag` with a tooltip hint, without a modal accessibility trait. Only a spotlight hides the page
+from accessibility and moves focus to the bubble; dismissal restores focus to the anchored node.
+Without a spotlight the page remains interactive. Tapping the bubble dismisses unless `onTap` is
+present, in which case only those actions run. Spotlight taps (`<testTag>.close`) dismiss. Dismissal
+writes `!equals` before running `onDismiss`.
+
+Drawers cover the page with an authored or themed 40% scrim and a surface panel inside the safe area.
+Panel width is `min(320, windowWidth - 56)` points; start/end mirror in RTL. The child retains its
+normal hierarchy; the panel carries `testTag`, and the scrim carries `<testTag>.close`. Scrim taps,
+Back/Escape and outward panel swipes dismiss by writing `!equals`; `dismissOnSwipe: false` disables
+swipes. Swipe settling reuses the sheet's half-extent rule. Back closes a drawer before stack navigation
+or window dismissal. The page is hidden from accessibility while open; focus enters the panel and
+returns to the previously focused element on close.
+
+Drawer entry and exit use a 300 ms linear-out-slow-in slide along the physical edge with a fading
+scrim. The modal layer retains closing drawers through animation completion, with a generation guard
+for interrupted closes. `motion: "none"` is instant; system Reduce Motion substitutes a crossfade.
+Overlay hit frames use the existing `modal.*` host routing, and text and child controls appear in the
+normal observe hierarchy. Geometry, dismissal, capability and motion decisions have device-free Core
+tests; the renderer uses the existing UIKit focus markers and frame scheduling.
 
 ## Saved prototype on-disk layout (#12254)
 

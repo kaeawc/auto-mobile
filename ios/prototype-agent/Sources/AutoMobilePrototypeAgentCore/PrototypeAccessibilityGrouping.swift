@@ -8,7 +8,7 @@ enum AccessibilityGrouping: Equatable, Sendable {
 func prototypeAccessibilityGrouping(type: String, tappable: Bool) -> AccessibilityGrouping {
     if [
         "radioGroup", "segmentedButton", "select", "menu", "topAppBar", "searchBar", "dialog", "snackbar",
-        "bottomSheet",
+        "bottomSheet", "drawer",
     ].contains(type) {
         return .contain
     }

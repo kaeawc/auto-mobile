@@ -992,12 +992,25 @@
         @Environment(\.accessibilityReduceMotion) private var reduceMotion
         private var colors: ComponentColors { ComponentColors(palette: palette) }
         let model: PrototypeModel
+        @State private var retainedDrawers: [PrototypeNode] = []
 
         var body: some View {
             let modals = model.spec?.root.openModals(state: model.state, pages: model.pages, stacks: model.stacks) ?? []
+            let displayed = modals + retainedDrawers.filter { old in !modals.contains { $0 === old } }
             ZStack {
-                ForEach(Array(modals.enumerated()), id: \.offset) { index, node in
-                    if node.type == "menu" {
+                ForEach(Array(displayed.enumerated()), id: \.element.identity) { index, node in
+                    if node.type == "tooltip" {
+                        PrototypeTooltipOverlay(node: node, model: model, hitKey: "modal.\(index)")
+                    } else if node.type == "drawer" {
+                        PrototypeDrawerOverlay(
+                            node: node,
+                            model: model,
+                            isOpen: modals.contains { $0 === node },
+                            hitKey: "modal.\(index)"
+                        ) {
+                            retainedDrawers.removeAll { $0 === node }
+                        }
+                    } else if node.type == "menu" {
                         PrototypeMenuOverlay(node: node, model: model)
                             .reportFrame(key: "modal.\(index)", model: model)
                     } else if node.type == "dialog" {
@@ -1036,6 +1049,13 @@
                 {
                     PrototypeSelectOverlay(node: selected, model: model)
                         .reportFrame(key: "modal.select", model: model)
+                }
+            }
+            .onChange(of: modals.map(\.identity), initial: true) { _, _ in
+                for drawer in modals
+                    where drawer.type == "drawer" && !retainedDrawers.contains(where: { $0 === drawer })
+                {
+                    retainedDrawers.append(drawer)
                 }
             }
             .onChange(of: modals.dialogIdentities) { before, _ in

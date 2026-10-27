@@ -95,6 +95,15 @@ text appears to start right under it.
   its egress checks. Pass `PrototypeNetworkConfiguration(hostHandler:)` to take over host-routed
   requests, or `deviceClient:` to replace the transport.
 
+## Platform modules
+
+On Android, supply app-owned modules through the renderer's `platform` parameter. The default
+registers no app modules; measured device state remains available. Keep this configuration stable
+across recompositions: replacing it reloads the prototype and cancels pending calls. Check the
+configuration's `capabilities` against the spec's requirements. An unregistered call reports
+`unsupported`; a module needing permission reports `permission_denied` without requesting it.
+The app closes its modules after all renderers using them detach.
+
 ## Shrinking (R8)
 
 Android icons named in a spec are looked up by reflection, which R8 cannot see. The library ships no

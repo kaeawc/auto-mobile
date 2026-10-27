@@ -13,6 +13,7 @@ struct PrototypeStrictRepeats {
     let data: [String: JSONValue]?
     var nodes = 0
     var images = 0
+    var effects = PrototypeEffectUses()
 
     static func children(_ node: [String: JSONValue], path: String) -> [PrototypeLocatedValue] {
         var result: [PrototypeLocatedValue] = []
@@ -98,7 +99,7 @@ struct PrototypeStrictRepeats {
         guard let object = value.objectFields else { return }
         if object.count == 1, object["value"] != nil { return }
         for key in PrototypeContractValidator.sorted(object.keys) {
-            guard !["payload", "style", "linkify"].contains(key), let child = object[key] else { continue }
+            guard !["payload", "style"].contains(key), let child = object[key] else { continue }
             let at = PrototypeContractValidator.keyPath(path, key)
             if let text = child.stringValue {
                 let keyField = ["stateKey", "activeKey", "hourKey", "minuteKey", "atEndKey", "statusKey", "state"]
@@ -165,6 +166,13 @@ struct PrototypeStrictRepeats {
             "Expanded node limit exceeded"
         ) }
         if images > 32 { throw PrototypeContractValidator.invalid(at, "Expanded image limit exceeded") }
+        effects.add(PrototypeEffectUses(node: node))
+        if effects.total > PrototypeContractValidator.limit("MAX_PROTOTYPE_EFFECTS") {
+            throw PrototypeContractValidator.invalid(at, "Expanded effect limit exceeded")
+        }
+        if effects.animated > PrototypeContractValidator.limit("MAX_PROTOTYPE_ANIMATED_EFFECTS") {
+            throw PrototypeContractValidator.invalid(at, "Expanded animated effect limit exceeded")
+        }
         let scope = scopes.first { $0.path == path }
         for _ in 0 ..< (scope?.items.count ?? 1) {
             for child in Self.children(node, path: path) {

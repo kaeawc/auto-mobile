@@ -186,6 +186,7 @@ struct PrototypeSpec: Decodable {
         try PrototypeCarousel.validate(expanded)
         try PrototypeRefresh.validate(expanded)
         try PrototypeMenus.validate(expanded, state: menuState)
+        try PrototypeTooltips.validate(expanded)
         let root = try JSONDecoder().decode(
             DecodedRoot.self,
             from: JSONEncoder().encode(JSONValue.object(["root": expanded]))
@@ -435,6 +436,8 @@ struct Style: Decodable {
     let fontFamily: FontFamily?
     let elevation: Double?
     let shadowColor: PrototypeModeValue?
+    var shadows: [Shadow]? = nil
+    var cornerStyle: String? = nil
     let offset: Offset?
     let lineHeight: Double?
     let letterSpacing: Double?
@@ -445,6 +448,9 @@ struct Style: Decodable {
     let textStyle: String?
     /// A box, row, column or card placeholder whose background a highlight sweeps (#14207).
     let shimmer: Bool?
+    /// Paint-only looks applied in order (#15128): objects the structural contract has already
+    /// validated, kept raw until a renderer draws them. Gated by `prototype_effects_v1`.
+    var effects: [JSONValue]?
 
     /// Android's `mergedOver`: properties set on `prototype` win, unset ones keep this style's value.
     /// A present property replaces the base value as a whole (`padding` and `border` included).
@@ -477,6 +483,8 @@ struct Style: Decodable {
             fontFamily: prototype.fontFamily ?? fontFamily,
             elevation: prototype.elevation ?? elevation,
             shadowColor: prototype.shadowColor ?? shadowColor,
+            shadows: prototype.shadows ?? shadows,
+            cornerStyle: prototype.cornerStyle ?? cornerStyle,
             offset: prototype.offset ?? offset,
             lineHeight: prototype.lineHeight ?? lineHeight,
             letterSpacing: prototype.letterSpacing ?? letterSpacing,
@@ -484,7 +492,8 @@ struct Style: Decodable {
             fontStyle: prototype.fontStyle ?? fontStyle,
             overflow: prototype.overflow ?? overflow,
             textStyle: prototype.textStyle ?? textStyle,
-            shimmer: prototype.shimmer ?? shimmer
+            shimmer: prototype.shimmer ?? shimmer,
+            effects: prototype.effects ?? effects
         )
     }
 
@@ -753,6 +762,8 @@ final class PrototypeNode: Decodable {
     let contentDescription: String?
     /// An uploaded image asset id, or a `{light, dark}` pair of ids (#11218).
     let asset: PrototypeModeValue?
+    let filter: ImageFilter?
+    let fadeEdges: FadeEdges?
     let contentScale: String?
     let name: String?
     /// `button`/`chip`/extended `fab` text, and the optional `switch`/`checkbox`/`slider` label.
@@ -778,6 +789,11 @@ final class PrototypeNode: Decodable {
     let itemWidth: Double?
     let itemSpacing: Double?
     let items: [NavItem]?
+    let anchorTo: String?
+    let caret: PrototypeCaret?
+    let spotlight: TooltipSpotlight?
+    let onDismiss: [PrototypeAction]?
+    let edge: String?
     /// Menu entries decoded from the same `items` JSON key, preserving navigation items.
     let menuItems: [PrototypeMenuItem]?
     let pager: String?
@@ -849,6 +865,7 @@ final class PrototypeNode: Decodable {
         case type, id, testTag, onTap, style, styleWhen, visibleWhen, transition
         case safeAreaPadding, anchor, children, child, text, contentDescription, asset, contentScale
         case name, label, variant, stateKey, placeholder, axis, items, pager
+        case anchorTo, caret, spotlight, onDismiss, edge
         case scrollable, openWhen, detents, scrim, dragHandle, options, icon, size
         case orientation, min, max, step, title, navigationIcon, actions, confirm
         case dismiss, action, durationMs, hourKey, minuteKey, is24Hour, headline, supporting
@@ -859,6 +876,7 @@ final class PrototypeNode: Decodable {
              activeKey, trailingActions, onSubmit, pageSpacing, peek, pageSize, indicator, itemWidth, itemSpacing,
              dismissOnSwipe, supportingText, keyboardType, secure, multiline, minLines, maxLength, trailingIcon,
              imeAction, yRange, xLabels, goal
+        case filter, fadeEdges
         case chartSeries = "series"
     }
 
@@ -880,6 +898,8 @@ final class PrototypeNode: Decodable {
         text = try container.decodeIfPresent(String.self, forKey: .text)
         contentDescription = try container.decodeIfPresent(String.self, forKey: .contentDescription)
         asset = try container.decodeIfPresent(PrototypeModeValue.self, forKey: .asset)
+        filter = try container.decodeIfPresent(ImageFilter.self, forKey: .filter)
+        fadeEdges = try container.decodeIfPresent(FadeEdges.self, forKey: .fadeEdges)
         contentScale = try container.decodeIfPresent(String.self, forKey: .contentScale)
         name = try container.decodeIfPresent(String.self, forKey: .name)
         label = try container.decodeIfPresent(String.self, forKey: .label)
@@ -896,6 +916,11 @@ final class PrototypeNode: Decodable {
         }
         pager = try container.decodeIfPresent(String.self, forKey: .pager)
         scrollable = try container.decodeIfPresent(Bool.self, forKey: .scrollable)
+        anchorTo = try container.decodeIfPresent(String.self, forKey: .anchorTo)
+        caret = try container.decodeIfPresent(PrototypeCaret.self, forKey: .caret)
+        spotlight = try container.decodeIfPresent(TooltipSpotlight.self, forKey: .spotlight)
+        onDismiss = try container.decodeIfPresent([PrototypeAction].self, forKey: .onDismiss)
+        edge = try container.decodeIfPresent(String.self, forKey: .edge)
         openWhen = try container.decodeIfPresent(Condition.self, forKey: .openWhen)
         refresh = try container.decodeIfPresent(PrototypeScrollRefresh.self, forKey: .refresh)
         detents = try container.decodeIfPresent([Detent].self, forKey: .detents)

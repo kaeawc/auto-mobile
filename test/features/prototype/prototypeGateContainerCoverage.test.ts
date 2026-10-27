@@ -22,6 +22,19 @@ const deviceRead = { ...label, visibleWhen: { platform: "/device/os", equals: "a
 // editing the server test outside this lane's permitted paths. No gate/container exceptions:
 // every current gate can be activated by a node, including theme and data via inline values.
 const fixtures: Record<string, Node> = {
+  prototype_style_polish_v2: { ...label, style: { cornerStyle: "continuous" } },
+  prototype_tooltip_v1: {
+    type: "tooltip",
+    text: "Tip",
+    anchorTo: "target",
+    openWhen: { key: "liked", equals: true },
+  },
+  prototype_drawer_v1: {
+    type: "drawer",
+    edge: "start",
+    openWhen: { key: "liked", equals: true },
+    child: { type: "spacer" },
+  },
   prototype_theme_modes_v1: {
     ...label,
     style: { background: { light: "#FFFFFF", dark: "#000000" } },
@@ -60,6 +73,7 @@ const fixtures: Record<string, Node> = {
     child: label,
   },
   prototype_loading_states_v1: { type: "box", style: { shimmer: true }, children: [label] },
+  prototype_effects_v1: { ...label, style: { effects: [{ type: "noise" }] } },
   prototype_motion_v2: { ...label, animate: { durationMs: 300 } },
   prototype_stack_transitions_v1: {
     ...label,
@@ -124,7 +138,7 @@ const containers: {
   wrap: (node: Node) => Node;
 }[] = [
   { name: "root", prefix: "root", wrap: (root) => ({ root }) },
-  ...["scroll", "dialog", "bottomSheet", "searchBar"].map((type) => ({
+  ...["scroll", "dialog", "bottomSheet", "searchBar", "drawer"].map((type) => ({
     name: type,
     field: "child",
     prefix: "root.child",

@@ -51,7 +51,9 @@
     "MAX_PROTOTYPE_PLATFORM_HANDLERS": 32,
     "MAX_PROTOTYPE_PLATFORM_ARGS": 16,
     "MAX_PROTOTYPE_CHECK_QUANTIFIER_BOUND": 100,
-    "MAX_PROTOTYPE_CHECK_VARIABLE_QUANTIFIERS": 2
+    "MAX_PROTOTYPE_CHECK_VARIABLE_QUANTIFIERS": 2,
+    "MAX_PROTOTYPE_EFFECTS": 64,
+    "MAX_PROTOTYPE_ANIMATED_EFFECTS": 8
   },
   "definitions": {
     "offset": {
@@ -412,9 +414,17 @@
             "kind": "ref",
             "name": "colorValue"
           },
-          "optional": false
+          "optional": true
+        },
+        "gradient": {
+          "rule": {
+            "kind": "ref",
+            "name": "gradient"
+          },
+          "optional": true
         }
-      }
+      },
+      "exactlyOne": ["color", "gradient"]
     },
     "gradientStop": {
       "kind": "object",
@@ -995,6 +1005,37 @@
             "integer": false,
             "min": -360,
             "max": 360
+          },
+          "optional": true
+        },
+        "shadows": {
+          "rule": {
+            "kind": "array",
+            "item": {
+              "kind": "ref",
+              "name": "shadow"
+            },
+            "min": 1,
+            "max": 3
+          },
+          "optional": true
+        },
+        "cornerStyle": {
+          "rule": {
+            "kind": "enum",
+            "values": ["circular", "continuous"]
+          },
+          "optional": true
+        },
+        "effects": {
+          "rule": {
+            "kind": "array",
+            "item": {
+              "kind": "ref",
+              "name": "effect"
+            },
+            "min": 1,
+            "max": 4
           },
           "optional": true
         }
@@ -3872,6 +3913,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "zoomable"
+              },
+              "optional": true
+            },
+            "filter": {
+              "rule": {
+                "kind": "ref",
+                "name": "imageFilter"
               },
               "optional": true
             }
@@ -8501,6 +8549,13 @@
                 "name": "node"
               },
               "optional": false
+            },
+            "fadeEdges": {
+              "rule": {
+                "kind": "ref",
+                "name": "fadeEdges"
+              },
+              "optional": true
             }
           }
         },
@@ -9796,6 +9851,388 @@
               "rule": {
                 "kind": "number",
                 "integer": false
+              },
+              "optional": true
+            }
+          }
+        },
+        "tooltip": {
+          "kind": "object",
+          "exactlyOne": ["anchorTo", "anchor"],
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["tooltip"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "contentDescription": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "style": {
+              "rule": {
+                "kind": "ref",
+                "name": "style"
+              },
+              "optional": true
+            },
+            "styleWhen": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "styleWhenEntry"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
+              },
+              "optional": true
+            },
+            "visibleWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "transition": {
+              "rule": {
+                "kind": "choice",
+                "options": [
+                  {
+                    "kind": "enum",
+                    "values": [
+                      "none",
+                      "fade",
+                      "expand",
+                      "slide",
+                      "slideStart",
+                      "slideEnd",
+                      "scale",
+                      "blurReplace"
+                    ]
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "type": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": [
+                            "none",
+                            "fade",
+                            "expand",
+                            "slide",
+                            "slideStart",
+                            "slideEnd",
+                            "scale",
+                            "blurReplace"
+                          ]
+                        },
+                        "optional": false
+                      },
+                      "delayMs": {
+                        "rule": {
+                          "kind": "number",
+                          "integer": true,
+                          "min": 0,
+                          "max": 600
+                        },
+                        "optional": true
+                      }
+                    }
+                  }
+                ]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
+              },
+              "optional": true
+            },
+            "anchor": {
+              "rule": {
+                "kind": "ref",
+                "name": "anchor"
+              },
+              "optional": true
+            },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
+            "safeAreaPadding": {
+              "rule": {
+                "kind": "ref",
+                "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "openWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "sheetCondition"
+              },
+              "optional": false
+            },
+            "text": {
+              "rule": {
+                "kind": "string",
+                "nonblank": true
+              },
+              "optional": false
+            },
+            "anchorTo": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "caret": {
+              "rule": {
+                "kind": "ref",
+                "name": "tooltipCaret"
+              },
+              "optional": true
+            },
+            "spotlight": {
+              "rule": {
+                "kind": "ref",
+                "name": "tooltipSpotlight"
+              },
+              "optional": true
+            },
+            "onDismiss": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            }
+          }
+        },
+        "drawer": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["drawer"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "contentDescription": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "style": {
+              "rule": {
+                "kind": "ref",
+                "name": "style"
+              },
+              "optional": true
+            },
+            "styleWhen": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "styleWhenEntry"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
+              },
+              "optional": true
+            },
+            "visibleWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "transition": {
+              "rule": {
+                "kind": "choice",
+                "options": [
+                  {
+                    "kind": "enum",
+                    "values": [
+                      "none",
+                      "fade",
+                      "expand",
+                      "slide",
+                      "slideStart",
+                      "slideEnd",
+                      "scale",
+                      "blurReplace"
+                    ]
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "type": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": [
+                            "none",
+                            "fade",
+                            "expand",
+                            "slide",
+                            "slideStart",
+                            "slideEnd",
+                            "scale",
+                            "blurReplace"
+                          ]
+                        },
+                        "optional": false
+                      },
+                      "delayMs": {
+                        "rule": {
+                          "kind": "number",
+                          "integer": true,
+                          "min": 0,
+                          "max": 600
+                        },
+                        "optional": true
+                      }
+                    }
+                  }
+                ]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
+              },
+              "optional": true
+            },
+            "anchor": {
+              "rule": {
+                "kind": "ref",
+                "name": "anchor"
+              },
+              "optional": true
+            },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
+            "safeAreaPadding": {
+              "rule": {
+                "kind": "ref",
+                "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "child": {
+              "rule": {
+                "kind": "ref",
+                "name": "node"
+              },
+              "optional": false
+            },
+            "edge": {
+              "rule": {
+                "kind": "ref",
+                "name": "drawerEdge"
+              },
+              "optional": false
+            },
+            "openWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "sheetCondition"
+              },
+              "optional": false
+            },
+            "scrim": {
+              "rule": {
+                "kind": "ref",
+                "name": "colorValue"
+              },
+              "optional": true
+            },
+            "dismissOnSwipe": {
+              "rule": {
+                "kind": "boolean"
               },
               "optional": true
             }
@@ -13507,6 +13944,700 @@
     "stackTransition": {
       "kind": "enum",
       "values": ["platform", "slide", "fade", "none"]
+    },
+    "effectAnimate": {
+      "kind": "object",
+      "fields": {
+        "periodMs": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 400,
+            "max": 20000
+          },
+          "optional": false
+        }
+      }
+    },
+    "effectCenter": {
+      "kind": "object",
+      "fields": {
+        "x": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0,
+            "max": 1
+          },
+          "optional": false
+        },
+        "y": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0,
+            "max": 1
+          },
+          "optional": false
+        }
+      }
+    },
+    "effect": {
+      "kind": "tagged",
+      "variants": {
+        "noise": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["noise"]
+              },
+              "optional": false
+            },
+            "amount": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 1
+              },
+              "optional": true
+            },
+            "grain": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0.5,
+                "max": 8
+              },
+              "optional": true
+            },
+            "seed": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 0,
+                "max": 65535
+              },
+              "optional": true
+            },
+            "monochrome": {
+              "rule": {
+                "kind": "boolean"
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "effectAnimate"
+              },
+              "optional": true
+            },
+            "phase": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 1
+              },
+              "optional": true
+            }
+          }
+        },
+        "gradientMesh": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["gradientMesh"]
+              },
+              "optional": false
+            },
+            "colors": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "colorValue"
+                },
+                "min": 4,
+                "max": 4
+              },
+              "optional": false
+            },
+            "softness": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 1
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "effectAnimate"
+              },
+              "optional": true
+            },
+            "phase": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 1
+              },
+              "optional": true
+            }
+          }
+        },
+        "shimmer": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["shimmer"]
+              },
+              "optional": false
+            },
+            "color": {
+              "rule": {
+                "kind": "ref",
+                "name": "colorValue"
+              },
+              "optional": true
+            },
+            "angle": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": -360,
+                "max": 360
+              },
+              "optional": true
+            },
+            "width": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0.05,
+                "max": 1
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "effectAnimate"
+              },
+              "optional": true
+            },
+            "phase": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 1
+              },
+              "optional": true
+            }
+          }
+        },
+        "glow": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["glow"]
+              },
+              "optional": false
+            },
+            "color": {
+              "rule": {
+                "kind": "ref",
+                "name": "colorValue"
+              },
+              "optional": false
+            },
+            "radius": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 48
+              },
+              "optional": true
+            },
+            "intensity": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 1
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "effectAnimate"
+              },
+              "optional": true
+            },
+            "phase": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 1
+              },
+              "optional": true
+            }
+          }
+        },
+        "vignette": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["vignette"]
+              },
+              "optional": false
+            },
+            "color": {
+              "rule": {
+                "kind": "ref",
+                "name": "colorValue"
+              },
+              "optional": true
+            },
+            "intensity": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 1
+              },
+              "optional": true
+            },
+            "radius": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 1
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "effectAnimate"
+              },
+              "optional": true
+            },
+            "phase": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 1
+              },
+              "optional": true
+            }
+          }
+        },
+        "blur": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["blur"]
+              },
+              "optional": false
+            },
+            "radius": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 25
+              },
+              "optional": false
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "effectAnimate"
+              },
+              "optional": true
+            },
+            "phase": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 1
+              },
+              "optional": true
+            }
+          }
+        },
+        "pixelate": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["pixelate"]
+              },
+              "optional": false
+            },
+            "cell": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 1,
+                "max": 64
+              },
+              "optional": false
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "effectAnimate"
+              },
+              "optional": true
+            },
+            "phase": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 1
+              },
+              "optional": true
+            }
+          }
+        },
+        "chromaticAberration": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["chromaticAberration"]
+              },
+              "optional": false
+            },
+            "offset": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 8
+              },
+              "optional": true
+            },
+            "angle": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": -360,
+                "max": 360
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "effectAnimate"
+              },
+              "optional": true
+            },
+            "phase": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 1
+              },
+              "optional": true
+            }
+          }
+        },
+        "wave": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["wave"]
+              },
+              "optional": false
+            },
+            "amplitude": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 16
+              },
+              "optional": true
+            },
+            "wavelength": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 8,
+                "max": 400
+              },
+              "optional": true
+            },
+            "angle": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": -360,
+                "max": 360
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "effectAnimate"
+              },
+              "optional": true
+            },
+            "phase": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 1
+              },
+              "optional": true
+            }
+          }
+        },
+        "ripple": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["ripple"]
+              },
+              "optional": false
+            },
+            "amplitude": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 16
+              },
+              "optional": true
+            },
+            "wavelength": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 8,
+                "max": 400
+              },
+              "optional": true
+            },
+            "center": {
+              "rule": {
+                "kind": "ref",
+                "name": "effectCenter"
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "effectAnimate"
+              },
+              "optional": true
+            },
+            "phase": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 1
+              },
+              "optional": true
+            }
+          }
+        }
+      }
+    },
+    "shadow": {
+      "kind": "object",
+      "fields": {
+        "color": {
+          "rule": {
+            "kind": "ref",
+            "name": "colorValue"
+          },
+          "optional": false
+        },
+        "radius": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0,
+            "max": 1000
+          },
+          "optional": false
+        },
+        "spread": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": -1000,
+            "max": 1000
+          },
+          "optional": true
+        },
+        "offset": {
+          "rule": {
+            "kind": "object",
+            "fields": {
+              "x": {
+                "rule": {
+                  "kind": "number",
+                  "integer": false,
+                  "min": -1000,
+                  "max": 1000
+                },
+                "optional": false
+              },
+              "y": {
+                "rule": {
+                  "kind": "number",
+                  "integer": false,
+                  "min": -1000,
+                  "max": 1000
+                },
+                "optional": false
+              }
+            }
+          },
+          "optional": true
+        },
+        "inner": {
+          "rule": {
+            "kind": "boolean"
+          },
+          "optional": true
+        }
+      }
+    },
+    "fadeEdges": {
+      "kind": "object",
+      "fields": {
+        "top": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0,
+            "max": 1000
+          },
+          "optional": true
+        },
+        "bottom": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0,
+            "max": 1000
+          },
+          "optional": true
+        },
+        "start": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0,
+            "max": 1000
+          },
+          "optional": true
+        },
+        "end": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0,
+            "max": 1000
+          },
+          "optional": true
+        }
+      }
+    },
+    "imageFilter": {
+      "kind": "object",
+      "fields": {
+        "saturation": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0,
+            "max": 2
+          },
+          "optional": true
+        },
+        "tint": {
+          "rule": {
+            "kind": "ref",
+            "name": "colorValue"
+          },
+          "optional": true
+        }
+      }
+    },
+    "tooltipSpotlight": {
+      "kind": "object",
+      "fields": {
+        "padding": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 64
+          },
+          "optional": true
+        },
+        "cornerRadius": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 64
+          },
+          "optional": true
+        }
+      }
+    },
+    "tooltipCaret": {
+      "kind": "enum",
+      "values": ["auto", "top", "bottom", "start", "end"]
+    },
+    "drawerEdge": {
+      "kind": "enum",
+      "values": ["start", "end"]
     }
   },
   "eventKinds": [

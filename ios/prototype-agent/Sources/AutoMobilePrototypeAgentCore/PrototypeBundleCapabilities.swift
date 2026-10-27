@@ -27,6 +27,8 @@ enum PrototypeBundleCapabilities {
             if let root = component.objectFields?["root"] { pending.append(root) }
         }
         while let node = pending.popLast()?.objectFields {
+            if PrototypeStylePolishV2.themedColors(node) { need("theme_modes") }
+            if PrototypeStylePolishV2.required(node) { names.insert(PrototypeStylePolishV2.capability) }
             let type = node["type"]?.stringValue ?? ""
             let featureTypes = [
                 "flow": "flow_grid",
@@ -34,6 +36,8 @@ enum PrototypeBundleCapabilities {
                 "carousel": "carousel",
                 "searchBar": "search_bar",
                 "menu": "menus",
+                "tooltip": "tooltip",
+                "drawer": "drawer",
                 "select": "menus",
                 "stack": "stack",
                 "chart": "chart",
@@ -137,6 +141,7 @@ enum PrototypeBundleCapabilities {
             if key == "style", let style = child.objectFields, style["scale"] != nil || style["rotation"] != nil {
                 names.insert("prototype_motion_v2")
             }
+            if key == "style", child.objectFields?["effects"] != nil { names.insert("prototype_effects_v1") }
             if key == "style", child.objectFields?["runSpacing"] != nil { names.insert("prototype_flow_grid_v1") }
             let textKeys = [
                 "text",

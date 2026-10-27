@@ -105,7 +105,7 @@
   "placementSheet": {
     "type": "sheet",
     "edge": "bottom",
-    "height": 320.0
+    "height": 320
   },
   "placementFloating": {
     "type": "floating",
@@ -117,18 +117,18 @@
   },
   "gradientLinear": {
     "type": "linear",
-    "angle": 45.0,
+    "angle": 45,
     "stops": [
       {
         "color": "#112233",
-        "position": 0.0
+        "position": 0
       },
       {
         "color": {
           "light": "#112233",
           "dark": "#445566"
         },
-        "position": 1.0
+        "position": 1
       }
     ]
   },
@@ -137,14 +137,14 @@
     "stops": [
       {
         "color": "#112233",
-        "position": 0.0
+        "position": 0
       },
       {
         "color": {
           "light": "#112233",
           "dark": "#445566"
         },
-        "position": 1.0
+        "position": 1
       }
     ]
   },
@@ -198,5 +198,722 @@
       "dark": "#445566"
     },
     "position": 0.5
+  },
+  "item": {
+    "label": "Home",
+    "icon": "home",
+    "image": {
+      "light": "home-light",
+      "dark": "home-dark"
+    }
+  },
+  "itemString": {
+    "label": "Search",
+    "icon": "search",
+    "image": "search-image"
+  },
+  "condition": {
+    "all": [
+      {
+        "key": "enabled",
+        "equals": true
+      },
+      {
+        "any": [
+          {
+            "key": "count",
+            "gt": 1
+          },
+          {
+            "key": "count",
+            "lt": 10
+          }
+        ]
+      },
+      {
+        "not": {
+          "key": "name",
+          "notEquals": "hidden"
+        }
+      },
+      {
+        "data": "/items",
+        "empty": true
+      },
+      {
+        "valid": ["name", "email"]
+      },
+      {
+        "platform": "/os",
+        "equals": "android"
+      }
+    ]
+  },
+  "conditionFilled": {
+    "key": "enabled",
+    "equals": true,
+    "notEquals": false,
+    "gt": 1,
+    "lt": 10,
+    "empty": false,
+    "all": [
+      {
+        "key": "enabled",
+        "equals": true
+      }
+    ],
+    "any": [
+      {
+        "key": "enabled",
+        "equals": true
+      }
+    ],
+    "not": {
+      "key": "enabled",
+      "equals": false
+    },
+    "data": "/items",
+    "valid": ["name", "email"],
+    "platform": "/os",
+    "contains": "a",
+    "startsWith": "b",
+    "lengthGt": 1,
+    "lengthLt": 9
+  },
+  "style": {
+    "width": {
+      "dp": 240
+    },
+    "height": "wrap",
+    "weight": 1,
+    "minWidth": 10,
+    "maxWidth": 300,
+    "minHeight": 20,
+    "maxHeight": 400,
+    "padding": {
+      "top": 1.5,
+      "bottom": 2.5,
+      "start": 3.5,
+      "end": 4.5
+    },
+    "background": "#112233",
+    "cornerRadius": {
+      "topStart": 1,
+      "topEnd": 2,
+      "bottomStart": 3,
+      "bottomEnd": 4
+    },
+    "border": {
+      "width": 2.5,
+      "color": "#112233"
+    },
+    "elevation": 2,
+    "shadowColor": {
+      "light": "#112233",
+      "dark": "#445566"
+    },
+    "gradient": {
+      "type": "linear",
+      "angle": 45,
+      "stops": [
+        {
+          "color": "#112233",
+          "position": 0
+        },
+        {
+          "color": {
+            "light": "#112233",
+            "dark": "#445566"
+          },
+          "position": 1
+        }
+      ]
+    },
+    "aspectRatio": 1.5,
+    "offset": {
+      "x": -12.5,
+      "y": 24.25
+    },
+    "alpha": 0.8,
+    "pressScale": 0.9,
+    "shimmer": true,
+    "alignment": "center",
+    "arrangement": "spaceBetween",
+    "spacing": 4,
+    "runSpacing": 5,
+    "textSize": 16,
+    "fontWeight": 500,
+    "color": "#112233",
+    "textAlign": "start",
+    "maxLines": 2,
+    "lineHeight": 22,
+    "letterSpacing": 0.5,
+    "textDecoration": "underline",
+    "fontStyle": "italic",
+    "overflow": "ellipsis",
+    "fontFamily": {
+      "asset": "body-font"
+    },
+    "textStyle": "bodyLarge",
+    "scale": 1.2,
+    "rotation": 15,
+    "cornerStyle": "continuous",
+    "shadows": [
+      {
+        "color": "#000000",
+        "radius": 4
+      }
+    ],
+    "effects": [
+      {
+        "type": "noise"
+      }
+    ],
+    "shader": {
+      "asset": "effect",
+      "uniforms": {
+        "strength": 1
+      }
+    }
+  },
+  "nodeBox": {
+    "type": "box",
+    "children": []
+  },
+  "nodeRow": {
+    "type": "row",
+    "children": []
+  },
+  "nodeColumn": {
+    "type": "column",
+    "children": []
+  },
+  "nodeFlow": {
+    "type": "flow",
+    "children": []
+  },
+  "nodeGrid": {
+    "type": "grid",
+    "children": [],
+    "columns": 2
+  },
+  "nodeCarousel": {
+    "type": "carousel",
+    "children": [
+      {
+        "type": "spacer"
+      }
+    ],
+    "itemWidth": 120
+  },
+  "nodeText": {
+    "type": "text",
+    "text": "Text"
+  },
+  "nodeImage": {
+    "type": "image",
+    "asset": "image"
+  },
+  "nodeIcon": {
+    "type": "icon",
+    "name": "home"
+  },
+  "nodeSpacer": {
+    "type": "spacer"
+  },
+  "nodeTextField": {
+    "type": "textField",
+    "stateKey": "text"
+  },
+  "nodeSwitch": {
+    "type": "switch",
+    "stateKey": "enabled"
+  },
+  "nodeCheckbox": {
+    "type": "checkbox",
+    "stateKey": "enabled"
+  },
+  "nodeButton": {
+    "type": "button",
+    "label": "Go"
+  },
+  "nodeRadioGroup": {
+    "type": "radioGroup",
+    "stateKey": "choice",
+    "options": [
+      {
+        "value": "a",
+        "label": "A"
+      },
+      {
+        "value": "b",
+        "label": "B"
+      }
+    ]
+  },
+  "nodeSelect": {
+    "type": "select",
+    "stateKey": "choice",
+    "options": [
+      {
+        "value": "a",
+        "label": "A"
+      },
+      {
+        "value": "b",
+        "label": "B"
+      }
+    ]
+  },
+  "nodeListItem": {
+    "type": "listItem",
+    "headline": "Title"
+  },
+  "nodeSlider": {
+    "type": "slider",
+    "stateKey": "count",
+    "min": 0,
+    "max": 10
+  },
+  "nodeChip": {
+    "type": "chip",
+    "label": "Chip"
+  },
+  "nodeCard": {
+    "type": "card",
+    "children": []
+  },
+  "nodeIconButton": {
+    "type": "iconButton",
+    "icon": "home"
+  },
+  "nodeFab": {
+    "type": "fab",
+    "icon": "home"
+  },
+  "nodeSegmentedButton": {
+    "type": "segmentedButton",
+    "stateKey": "choice",
+    "options": [
+      {
+        "value": "a",
+        "label": "A"
+      },
+      {
+        "value": "b",
+        "label": "B"
+      }
+    ]
+  },
+  "nodeTopAppBar": {
+    "type": "topAppBar",
+    "title": "Title"
+  },
+  "nodeDivider": {
+    "type": "divider"
+  },
+  "nodeBadge": {
+    "type": "badge"
+  },
+  "nodeProgress": {
+    "type": "progress"
+  },
+  "nodeDialog": {
+    "type": "dialog",
+    "openWhen": {
+      "key": "enabled",
+      "equals": true
+    },
+    "confirm": {
+      "label": "OK",
+      "onTap": [
+        {
+          "type": "dismiss"
+        }
+      ]
+    }
+  },
+  "nodeMenu": {
+    "type": "menu",
+    "openWhen": {
+      "key": "enabled",
+      "equals": true
+    },
+    "items": [
+      {
+        "label": "Item",
+        "onTap": [
+          {
+            "type": "dismiss"
+          }
+        ]
+      }
+    ]
+  },
+  "nodeSnackbar": {
+    "type": "snackbar",
+    "openWhen": {
+      "key": "enabled",
+      "equals": true
+    },
+    "text": "Message"
+  },
+  "nodeTimePicker": {
+    "type": "timePicker",
+    "hourKey": "hour",
+    "minuteKey": "minute"
+  },
+  "nodeDatePicker": {
+    "type": "datePicker",
+    "stateKey": "date"
+  },
+  "nodeScroll": {
+    "type": "scroll",
+    "child": {
+      "type": "spacer"
+    }
+  },
+  "nodeList": {
+    "type": "list",
+    "repeat": {
+      "items": {
+        "path": "/feed/items"
+      },
+      "as": "post",
+      "key": "id"
+    },
+    "children": [
+      {
+        "type": "spacer"
+      }
+    ]
+  },
+  "nodeTooltip": {
+    "type": "tooltip",
+    "text": "Hint",
+    "openWhen": {
+      "key": "enabled",
+      "equals": true
+    },
+    "anchor": {
+      "type": "element",
+      "selector": {
+        "testTag": "buy"
+      },
+      "alignment": "cover"
+    },
+    "caret": "bottom",
+    "spotlight": {}
+  },
+  "nodeDrawer": {
+    "type": "drawer",
+    "edge": "end",
+    "openWhen": {
+      "key": "enabled",
+      "equals": true
+    },
+    "child": {
+      "type": "spacer"
+    },
+    "dismissOnSwipe": false
+  },
+  "nodePager": {
+    "type": "pager",
+    "id": "page",
+    "children": [
+      {
+        "type": "spacer"
+      }
+    ]
+  },
+  "nodeTabBar": {
+    "type": "tabBar",
+    "stateKey": "count",
+    "items": [
+      {
+        "label": "A"
+      }
+    ]
+  },
+  "nodeBottomNav": {
+    "type": "bottomNav",
+    "stateKey": "count",
+    "items": [
+      {
+        "label": "A"
+      },
+      {
+        "label": "B"
+      }
+    ]
+  },
+  "nodeBottomSheet": {
+    "type": "bottomSheet",
+    "child": {
+      "type": "spacer"
+    },
+    "openWhen": {
+      "key": "enabled",
+      "equals": true
+    },
+    "detents": ["half"]
+  },
+  "nodeSearchBar": {
+    "type": "searchBar",
+    "stateKey": "text"
+  },
+  "nodeStack": {
+    "type": "stack",
+    "id": "navigation",
+    "start": "home",
+    "screens": {
+      "home": {
+        "type": "spacer"
+      }
+    }
+  },
+  "nodeChart": {
+    "type": "chart",
+    "variant": "line",
+    "series": [
+      {
+        "path": "/points",
+        "y": "value",
+        "label": "Values"
+      }
+    ]
+  },
+  "actionEmit": {
+    "type": "emit",
+    "name": "go"
+  },
+  "actionSetPage": {
+    "type": "setPage",
+    "pager": "targetPager",
+    "page": "next"
+  },
+  "actionSetState": {
+    "type": "setState",
+    "key": "enabled",
+    "value": true
+  },
+  "actionToggle": {
+    "type": "toggle",
+    "key": "enabled"
+  },
+  "actionIncrement": {
+    "type": "increment",
+    "key": "count"
+  },
+  "actionDismiss": {
+    "type": "dismiss"
+  },
+  "actionDecrement": {
+    "type": "decrement",
+    "key": "count"
+  },
+  "actionPush": {
+    "type": "push",
+    "stack": "targetStack",
+    "screen": "home"
+  },
+  "actionPop": {
+    "type": "pop",
+    "stack": "targetStack"
+  },
+  "actionPopToRoot": {
+    "type": "popToRoot",
+    "stack": "targetStack"
+  },
+  "actionReplace": {
+    "type": "replace",
+    "stack": "targetStack",
+    "screen": "home"
+  },
+  "actionSetData": {
+    "type": "setData",
+    "path": "/data/value",
+    "value": {
+      "value": 1
+    }
+  },
+  "actionAppendData": {
+    "type": "appendData",
+    "path": "/data/items",
+    "value": {
+      "value": 1
+    }
+  },
+  "actionPrependData": {
+    "type": "prependData",
+    "path": "/data/items",
+    "value": {
+      "value": 1
+    }
+  },
+  "actionRemoveData": {
+    "type": "removeData",
+    "path": "/data/value"
+  },
+  "actionRequest": {
+    "type": "request",
+    "url": "https://example.com"
+  },
+  "actionPlatform": {
+    "type": "platform",
+    "call": "test.echo",
+    "args": {
+      "message": {
+        "value": "hello"
+      }
+    }
+  },
+  "actionScrollTo": {
+    "type": "scrollTo",
+    "scroll": "targetScroll",
+    "to": "end"
+  },
+  "nodeBoxFilled": {
+    "type": "box",
+    "id": "filled",
+    "testTag": "filledTag",
+    "contentDescription": "Filled box",
+    "onTap": [
+      {
+        "type": "emit",
+        "name": "tap"
+      }
+    ],
+    "onLongPress": [
+      {
+        "type": "emit",
+        "name": "hold"
+      }
+    ],
+    "onDoubleTap": [
+      {
+        "type": "emit",
+        "name": "double"
+      }
+    ],
+    "style": {
+      "spacing": 4
+    },
+    "styleWhen": [
+      {
+        "when": {
+          "key": "enabled",
+          "equals": true
+        },
+        "style": {
+          "alpha": 0.5
+        }
+      }
+    ],
+    "visibleWhen": {
+      "key": "enabled",
+      "equals": true
+    },
+    "transition": {
+      "type": "fade",
+      "delayMs": 10
+    },
+    "animate": {
+      "durationMs": 100,
+      "easing": "linear"
+    },
+    "anchor": {
+      "type": "bounds",
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 100
+      }
+    },
+    "safeAreaPadding": {
+      "edges": ["top"],
+      "types": ["systemBars"]
+    },
+    "span": 2,
+    "children": [
+      {
+        "type": "spacer"
+      }
+    ],
+    "repeat": {
+      "items": [
+        {
+          "name": "A"
+        }
+      ],
+      "as": "row"
+    },
+    "stagger": {
+      "ms": 20,
+      "order": "forward"
+    }
+  },
+  "actionRequestFilled": {
+    "type": "request",
+    "method": "POST",
+    "url": "https://example.com/items",
+    "headers": {
+      "Authorization": {
+        "value": "token"
+      }
+    },
+    "query": {
+      "q": "search"
+    },
+    "body": {
+      "value": {
+        "name": "A"
+      }
+    },
+    "into": "/data/response",
+    "statusKey": "status",
+    "via": "host",
+    "timeoutMs": 1000,
+    "onSuccess": [
+      {
+        "type": "emit",
+        "name": "success"
+      }
+    ],
+    "onError": [
+      {
+        "type": "emit",
+        "name": "error"
+      }
+    ]
+  },
+  "actionEmitFilled": {
+    "type": "emit",
+    "name": "submit",
+    "payload": {
+      "source": "button"
+    },
+    "context": {
+      "name": {
+        "state": "text"
+      }
+    },
+    "requireValid": ["text"]
+  },
+  "actionStartTimer": {
+    "type": "startTimer",
+    "id": "tick",
+    "afterMs": 100,
+    "actions": [
+      {
+        "type": "emit",
+        "name": "tick"
+      }
+    ]
+  },
+  "actionCancelTimer": {
+    "type": "cancelTimer",
+    "id": "tick"
   }
 }

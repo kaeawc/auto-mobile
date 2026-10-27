@@ -1,0 +1,23 @@
+{
+  "spec": {
+    "id": "strict",
+    "window": {
+      "placement": {
+        "type": "sheet",
+        "edge": "bottom",
+        "height": 320,
+        "zzzUnknown": true
+      },
+      "backdrop": {
+        "material": "glass",
+        "blur": 150,
+        "tint": "#FFFFFF"
+      },
+      "opacity": 100
+    },
+    "root": {
+      "type": "spacer"
+    }
+  },
+  "expectedPath": "window.placement.zzzUnknown"
+}

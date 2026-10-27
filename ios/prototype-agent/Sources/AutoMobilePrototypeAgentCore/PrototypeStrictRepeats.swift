@@ -7,6 +7,7 @@ struct PrototypeStrictRepeats {
         let alias: String
         let items: [[String: JSONValue]]
         let pathBound: Bool
+        var derived: Set<String> = []
     }
 
     var scopes: [Scope] = []
@@ -17,6 +18,9 @@ struct PrototypeStrictRepeats {
 
     static func children(_ node: [String: JSONValue], path: String) -> [PrototypeLocatedValue] {
         var result: [PrototypeLocatedValue] = []
+        for name in ["header", "footer"] {
+            if let child = node[name]?.objectFields { result.append(.init(value: child, path: "\(path).\(name)")) }
+        }
         if let child = node["child"]?.objectFields { result.append(.init(value: child, path: "\(path).child")) }
         for (index, value) in PrototypeStrictBindings.array(node["children"]).enumerated() {
             if let child = value.objectFields { result.append(.init(value: child, path: "\(path).children[\(index)]")) }
@@ -34,15 +38,20 @@ struct PrototypeStrictRepeats {
 
     mutating func templates(_ node: [String: JSONValue], path: String, scope: Scope? = nil) throws {
         if scope != nil {
-            if node["repeat"] != nil { throw PrototypeContractValidator.invalid("\(path).repeat", "Nested repeat") }
+            if node["repeat"] !=
+                nil { throw PrototypeContractValidator.invalid("\(path).repeat", "Nested repeat is not supported") }
             if ["pager", "stack"]
                 .contains(node["type"]?.stringValue ?? "")
             {
-                throw PrototypeContractValidator.invalid(path, "Container inside repeat")
+                throw PrototypeContractValidator.invalid(
+                    path,
+                    node["type"] == .string("pager") ? "Pager cannot appear inside a repeat template" :
+                        "Stack cannot appear inside a repeat template"
+                )
             }
         }
         try fields(
-            .object(node.filter { !["child", "children", "screens", "repeat"].contains($0.key) }),
+            .object(node.filter { !["child", "children", "screens", "repeat", "header", "footer"].contains($0.key) }),
             path: path,
             scope: scope
         )
@@ -54,7 +63,9 @@ struct PrototypeStrictRepeats {
             if let pointer = source?.objectFields?["path"]?.stringValue {
                 let at = "\(path).repeat.items.path"
                 guard case let .array(resolved)? = PrototypeDataPointer.resolve(data, pointer: pointer),
-                      resolved.count <= PrototypeLimits.maxRepeatItems,
+                      resolved
+                      .count <=
+                      (node["type"] == .string("list") ? PrototypeLimits.maxListItems : PrototypeLimits.maxRepeatItems),
                       resolved.allSatisfy({ $0.objectFields != nil })
                 else { throw PrototypeContractValidator.invalid(
                     at,
@@ -62,24 +73,43 @@ struct PrototypeStrictRepeats {
                 ) }
                 items = resolved.map { PrototypeDataValues.project($0.objectFields ?? [:]) }
             } else { items = PrototypeStrictBindings.array(source) }
-            let created = Scope(path: path, alias: alias, items: items.compactMap(\.objectFields), pathBound: pathBound)
+            let derived = Set(spec["derive"]?.objectFields?.keys ?? [:].keys)
+            let projected = items.compactMap(\.objectFields).map { item in
+                item
+                    .merging(Dictionary(uniqueKeysWithValues: derived.map { ($0, JSONValue.string("")) })) { old, _ in
+                        old
+                    }
+            }
+            let created = Scope(path: path, alias: alias, items: projected, pathBound: pathBound, derived: derived)
             own = created
             scopes.append(created)
         }
         for child in Self
             .children(node, path: path)
         {
-            try templates(child.value, path: child.path, scope: own ?? scope)
+            try templates(
+                child.value,
+                path: child.path,
+                scope: child.path.hasPrefix("\(path).children[") ? own ?? scope : scope
+            )
         }
-        if let own, let key = node["repeat"]?.objectFields?["key"]?.stringValue {
-            var seen = Set<[UInt16]>()
-            for item in own.items {
-                guard let value = item[key], seen.insert(Array(value.displayString.utf16)).inserted else {
+        if let own, let key = node["repeat"]?.objectFields?["key"]?.stringValue, !own.derived.contains(key) {
+            var seen: [[UInt16]: Int] = [:]
+            for (index, item) in own.items.enumerated() {
+                guard let value = item[key] else {
                     throw PrototypeContractValidator.invalid(
                         "\(path).repeat.key",
-                        "Unknown or duplicate repeat identity"
+                        "Unknown repeat field \(PrototypeContractValidator.quoted(key))"
                     )
                 }
+                let identity = Array(value.displayString.utf16)
+                if let previous = seen[identity] {
+                    throw PrototypeContractValidator.invalid(
+                        "\(path).repeat.key",
+                        "Duplicate repeat key \(PrototypeContractValidator.quoted(value.displayString)) (items \(previous) and \(index))"
+                    )
+                }
+                seen[identity] = index
             }
         }
     }
@@ -105,6 +135,26 @@ struct PrototypeStrictRepeats {
                 let keyField = ["stateKey", "activeKey", "hourKey", "minuteKey", "atEndKey", "statusKey", "state"]
                     .contains(key)
                     || (key == "key" && object["repeat"] == nil)
+                let dataActionPath = key == "path"
+                    && PrototypeDataWrite.actionTypes.contains(object["type"]?.stringValue ?? "")
+                let appendTarget = (key == "to" && object["from"] != nil) || dataActionPath
+                if appendTarget {
+                    if let scope {
+                        if PrototypeRepeat.segments(text, alias: scope.alias).contains(where: {
+                            if case .field = $0 { return true }; return false
+                        }) {
+                            throw PrototypeContractValidator.invalid(
+                                at,
+                                "Only a whole {index} segment may be a placeholder in a data path"
+                            )
+                        }
+                        if text.split(separator: "/", omittingEmptySubsequences: false).contains(where: {
+                            $0.contains("{index}") && $0 != "{index}"
+                        }) { throw PrototypeContractValidator.invalid(at, "{index} must be a whole data path segment") }
+                    } else if text.contains("{index}") {
+                        throw PrototypeContractValidator.invalid(at, "{index} outside a repeat template")
+                    }
+                }
                 if let scope {
                     let segments = PrototypeRepeat.segments(text, alias: scope.alias)
                     let templated = segments.contains { if case .literal = $0 { return false }; return true }
@@ -114,10 +164,18 @@ struct PrototypeStrictRepeats {
                     ) }
                     for segment in segments {
                         if case let .field(name) = segment, !scope.items.allSatisfy({ $0[name] != nil }) {
-                            throw PrototypeContractValidator.invalid(at, "Unknown repeat field")
+                            throw PrototypeContractValidator.invalid(
+                                at,
+                                "Unknown repeat field \(PrototypeContractValidator.quoted(name))"
+                            )
                         }
                     }
-                    if keyField {
+                    if keyField,
+                       !segments
+                       .contains(where: {
+                           if case let .field(name) = $0 { return scope.derived.contains(name) }; return false
+                       })
+                    {
                         for (index, item) in scope.items.enumerated() {
                             let bound = PrototypeRepeatInstance(alias: scope.alias, item: item, index: index)
                                 .interpolate(text)
@@ -174,7 +232,7 @@ struct PrototypeStrictRepeats {
             throw PrototypeContractValidator.invalid(at, "Expanded animated effect limit exceeded")
         }
         let scope = scopes.first { $0.path == path }
-        for _ in 0 ..< (scope?.items.count ?? 1) {
+        for _ in 0 ..< (node["type"] == .string("list") ? 1 : (scope?.items.count ?? 1)) {
             for child in Self.children(node, path: path) {
                 try expanded(
                     child.value,
@@ -197,6 +255,12 @@ struct PrototypeStrictRepeats {
             else { return [entry] }
             let keys = PrototypeStrictBindings.boundKeys(entry.value) + [entry.value["key"]?.stringValue]
                 .compactMap { $0 }
+            if keys.contains(where: { key in
+                PrototypeRepeat.segments(key, alias: scope.alias).contains {
+                    if case let .field(name) = $0 { return scope.derived.contains(name) }
+                    return false
+                }
+            }) { return [] }
             let operand = entry.value["value"]?.stringValue ?? ""
             let templated = PrototypeRepeat.segments(operand, alias: scope.alias)
                 .contains { if case .literal = $0 { return false }; return true }

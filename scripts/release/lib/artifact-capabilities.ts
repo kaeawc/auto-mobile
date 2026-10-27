@@ -69,6 +69,8 @@ export const UNIMPLEMENTED_BY_ARTIFACT: Record<ArtifactId, Record<string, string
       "iOS agent keeps the transition type only; the host refuses delays, stagger and blurReplace (#15247)",
     prototype_motion_v2:
       "iOS agent does not advertise it; the host refuses motion v2 features against it",
+    prototype_platform_namespace_v1:
+      "No renderer implements a platform-namespace field yet, so the host refuses own-platform blocks (#15257)",
     prototype_platform_v1:
       "iOS agent validates platform specs but has no module registry yet (#14296)",
   },

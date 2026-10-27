@@ -126,6 +126,7 @@ final class PrototypeSavedLayoutTests: XCTestCase {
         XCTAssertEqual(PrototypeSavedLayout.formatVersion, decoded.formatVersion)
         XCTAssertEqual(limits.maxImageBytes, caps["MAX_PROTOTYPE_ASSET_BYTES"])
         XCTAssertEqual(limits.maxFontBytes, caps["MAX_PROTOTYPE_FONT_ASSET_BYTES"])
+        XCTAssertEqual(limits.maxShaderBytes, caps["MAX_PROTOTYPE_SHADER_ASSET_BYTES"])
         XCTAssertEqual(limits.maxAssetCount, caps["MAX_PROTOTYPE_ASSET_COUNT"])
         XCTAssertEqual(limits.maxTotalBytes, caps["MAX_PROTOTYPE_ASSET_TOTAL_BYTES"])
         XCTAssertEqual(limits.maxIdLength, caps["MAX_PROTOTYPE_ASSET_ID_LENGTH"])

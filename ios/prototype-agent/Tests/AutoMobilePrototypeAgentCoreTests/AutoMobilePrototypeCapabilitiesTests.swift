@@ -13,14 +13,17 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
         let required = try Set(JSONDecoder().decode([String].self, from: data))
         let supported = Set(AutoMobilePrototypeCapabilities.supported)
         // #13722: Intentional gaps in the iOS advertisement, each with its reason; remove them
-        // when supported. The `test` module is a placeholder no production runtime advertises.
-        // Chat-list scrolls (#14232) are drawn on Android only so far (#14671);
+        // when supported. The platform vocabulary (#14294) runs on the module registry (#14296),
+        // and the `test` module is a placeholder no production runtime ever advertises.
         // motion v2 (#14208) is Android-only until the SwiftUI side lands (#14684), and so is
-        // transition choreography (#15247).
+        // transition choreography (#15247), and neither does any platform-namespace field (#15257).
         let exclusions: Set<String> = [
-            "prototype_platform_test_v1",
-            "prototype_chat_scroll_v1", "prototype_motion_v2", "prototype_choreography_v1",
+            "prototype_platform_test_v1", "prototype_platform_namespace_v1",
+            // #15131: custom AGSL shaders are Android-only by owner decision.
+            "prototype_custom_shaders_v1",
+            "prototype_motion_v2", "prototype_choreography_v1",
         ]
+        XCTAssertTrue(supported.contains("prototype_lazy_list_v1"))
         XCTAssertTrue(exclusions.isSubset(of: required), "Exclusions must name current spec gates")
         XCTAssertTrue(exclusions.isDisjoint(with: supported), "Remove exclusions once supported")
         XCTAssertEqual(required.subtracting(supported).subtracting(exclusions).sorted(), [])

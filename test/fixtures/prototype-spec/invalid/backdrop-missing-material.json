@@ -1,0 +1,17 @@
+{
+  "spec": {
+    "id": "strict",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "backdrop": {
+        "blur": 10
+      }
+    },
+    "root": {
+      "type": "spacer"
+    }
+  },
+  "expectedPath": "window.backdrop.material"
+}

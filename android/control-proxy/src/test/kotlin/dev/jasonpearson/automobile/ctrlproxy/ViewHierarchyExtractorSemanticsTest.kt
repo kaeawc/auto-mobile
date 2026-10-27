@@ -22,6 +22,34 @@ import org.robolectric.RobolectricTestRunner
 internal class ViewHierarchyExtractorSemanticsTest : ViewHierarchyExtractorFixtures() {
 
   @Test
+  @org.robolectric.annotation.Config(sdk = [28])
+  fun `observe emits heading as a string only when true`() {
+    for (heading in listOf(false, true)) {
+      val node = android.view.accessibility.AccessibilityNodeInfo.obtain()
+      node.className = "android.widget.TextView"
+      node.text = "Title"
+      node.isHeading = heading
+      node.isVisibleToUser = true
+      node.setBoundsInScreen(Rect(0, 0, 100, 100))
+      android.view.accessibility.AccessibilityNodeInfo::class
+        .java
+        .getMethod("setSealed", Boolean::class.javaPrimitiveType)
+        .invoke(node, true)
+      val result =
+        extractor.extractFromActiveWindow(
+          node,
+          options = HierarchyExtractionOptions(disableAllFiltering = true),
+        )
+      val raw = result!!.hierarchy!!.node as kotlinx.serialization.json.JsonObject
+      assertEquals(
+        if (heading) kotlinx.serialization.json.JsonPrimitive("true") else null,
+        raw["heading"],
+      )
+      node.recycle()
+    }
+  }
+
+  @Test
   fun `raw hierarchy reports both checkable states and omits checked for other nodes`() {
     for ((checkable, checked) in listOf(true to false, true to true, false to false)) {
       val node = android.view.accessibility.AccessibilityNodeInfo.obtain()

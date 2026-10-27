@@ -1,3 +1,4 @@
+import { parsePrototypeBackdrop } from "../../prototype/prototypeBackdrop";
 import { parsePrototypeStacks } from "./CtrlProxyPrototypes";
 import { prototypePatchReplyFields } from "../../prototype/prototypePatchWire";
 import { logger } from "../../../utils/logger";
@@ -386,6 +387,7 @@ export class AndroidInboundResponseHandlers {
         ...(typeof message.droppedEvents === "number"
           ? { droppedEvents: message.droppedEvents }
           : {}),
+        ...parsePrototypeBackdrop(message.backdrop),
         ...(Number.isSafeInteger(message.cleared) && message.cleared! >= 0
           ? { cleared: message.cleared }
           : {}),

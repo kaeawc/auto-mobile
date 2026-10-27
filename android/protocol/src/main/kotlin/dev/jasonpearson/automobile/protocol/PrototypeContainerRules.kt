@@ -53,6 +53,22 @@ internal object PrototypeContainerRules {
     return null
   }
 
+  fun pagerStateKeyErrors(context: Context): PrototypeSpecError? {
+    val keys = mutableSetOf<String>()
+    for ((value, path) in context.nodes) {
+      if (value.text("type") != "pager") continue
+      val key = value.text("stateKey") ?: continue
+      if (
+        context.nodes.any { (ancestor, parent) ->
+          "repeat" in ancestor && path.startsWith("$parent.")
+        }
+      )
+        return fail("$path.stateKey", "Pager stateKey cannot appear inside repeat")
+      if (!keys.add(key)) return fail("$path.stateKey", "Two pagers cannot bind the same state key")
+    }
+    return null
+  }
+
   fun pagerErrors(context: Context): PrototypeSpecError? {
     val pagers = mutableSetOf<String>()
     for ((value, path) in context.nodes) {

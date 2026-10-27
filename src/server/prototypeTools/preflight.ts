@@ -1,3 +1,5 @@
+import { PROTOTYPE_DEAD_TAP_CAPABILITY } from "../../features/observe/android/ctrlProxyProtocol";
+import { prototypeDeadTapsUnsupportedMessage } from "../../features/prototype/prototypeDeadTaps";
 import { z } from "zod/v4";
 import { createDeviceHierarchyCapture } from "../../features/observe/DeviceHierarchyCapture";
 import {
@@ -25,6 +27,11 @@ import {
   prototypeAppearanceOverride,
   prototypeAppearanceUnsupportedMessage,
 } from "../../features/prototype/prototypeAppearance";
+import {
+  prototypeShaderOptInProblem,
+  prototypeShaderFields,
+  PROTOTYPE_SHADERS_ANDROID_ONLY_ERROR,
+} from "../../features/prototype/prototypeShaders";
 import { prototypeRequiredCapabilities } from "../../features/prototype/prototypeCapabilityGates";
 import {
   PROTOTYPE_IOS_MINIMUM_OS,
@@ -100,6 +107,11 @@ async function windowOptionsRefusal(
   if (args.action !== "show" || args.spec === undefined) {
     return undefined;
   }
+  // Only a dead-taps show looks anything up: an extra await here shifts the show's tick timing.
+  const deadTaps = wantsDeadTaps(args) ? await deadTapsRefusal(target, args, signal) : undefined;
+  if (deadTaps) {
+    return deadTaps;
+  }
   const options = requestedPrototypeWindowOptions(args.spec as PrototypeSpec);
   if (!options.appLayer && !options.devicePersistence) {
     return undefined;
@@ -118,6 +130,35 @@ async function windowOptionsRefusal(
     };
   }
   return undefined;
+}
+
+function wantsDeadTaps(args: z.infer<typeof prototypeSchema>): boolean {
+  return (
+    args.action === "show" && (args.spec as PrototypeSpec | undefined)?.window.deadTaps === true
+  );
+}
+
+/** Dead taps must never silently disappear on an older connected agent. */
+async function deadTapsRefusal(
+  target: PrototypeTarget,
+  args: z.infer<typeof prototypeSchema>,
+  signal: AbortSignal | undefined,
+): Promise<PrototypeResult | undefined> {
+  if (!wantsDeadTaps(args)) {
+    return undefined;
+  }
+  const supported = target.android
+    ? await target.android.supportsCommand(PROTOTYPE_DEAD_TAP_CAPABILITY)
+    : target.ios?.supportsCapability(PROTOTYPE_DEAD_TAP_CAPABILITY) === true;
+  signal?.throwIfAborted();
+  return supported
+    ? undefined
+    : {
+        success: false,
+        error: new ActionableError(
+          prototypeDeadTapsUnsupportedMessage(target.android ? "android" : "ios"),
+        ).message,
+      };
 }
 
 /**
@@ -157,8 +198,16 @@ export async function specCapabilityRefusal(
   spec: unknown,
   signal: AbortSignal | undefined,
   iosMinimumOs: Readonly<Record<string, number>> = PROTOTYPE_IOS_MINIMUM_OS,
+  env?: NodeJS.ProcessEnv,
 ): Promise<PrototypeResult | undefined> {
-  for (const gate of prototypeRequiredCapabilities(spec)) {
+  if (!target.android && prototypeShaderFields(spec).length) {
+    return { success: false, error: PROTOTYPE_SHADERS_ANDROID_ONLY_ERROR };
+  }
+  const optIn = prototypeShaderOptInProblem(spec, env);
+  if (optIn) {
+    return { success: false, error: optIn };
+  }
+  for (const gate of prototypeRequiredCapabilities(spec, target.android ? "android" : "ios")) {
     const supported = target.android
       ? await target.android.supportsCommand(gate.capability)
       : target.ios?.supportsCapability(gate.capability) === true;
@@ -417,7 +466,7 @@ export async function preflightMutation(
   args: z.infer<typeof prototypeSchema>,
   dependencies: Pick<
     PrototypeToolDependencies,
-    "adbFactory" | "lastRenderedObservation" | "anchorHierarchyCaptureFactory"
+    "adbFactory" | "lastRenderedObservation" | "anchorHierarchyCaptureFactory" | "env"
   >,
   signal: AbortSignal | undefined,
 ): Promise<PreflightStage> {
@@ -443,7 +492,7 @@ export async function preflightMutation(
   const failure =
     iosResetRefusal(target, args) ??
     (args.action === "show" && args.spec !== undefined
-      ? await specCapabilityRefusal(target, args.spec, signal)
+      ? await specCapabilityRefusal(target, args.spec, signal, undefined, dependencies.env)
       : undefined) ??
     (await appearanceRefusal(target, args, signal)) ??
     (await windowOptionsRefusal(target, args, signal));

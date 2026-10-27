@@ -13,6 +13,7 @@ internal object PrototypeBundleNodeCapabilities {
         "carousel" to "carousel_v1",
         "searchBar" to "search_bar_v1",
         "chart" to "chart_v1",
+        "list" to "lazy_list_v1",
         "stack" to "stack_v1",
         "menu" to "menus_v1",
         "tooltip" to "tooltip_v1",
@@ -22,6 +23,7 @@ internal object PrototypeBundleNodeCapabilities {
         "grid" to "flow_grid_v1",
       )
     typed[type]?.let { caps.add("prototype_$it") }
+    if ("ios" in n || "android" in n) caps.add("prototype_platform_namespace_v1")
     general(n, type, caps)
     controls(n, type, caps)
     appearance(n, type, caps)
@@ -32,6 +34,8 @@ internal object PrototypeBundleNodeCapabilities {
     fun mark(name: String, used: Boolean) {
       if (used) caps.add("prototype_$name")
     }
+    mark("semantics_v1", "semantics" in n)
+    mark("platform_namespace_v1", "ios" in n || "android" in n)
     mark("shared_element_v1", "sharedKey" in n)
     mark("flow_grid_v1", "span" in n)
     mark("gestures_v1", n.keys.any { it in setOf("onLongPress", "onDoubleTap") })
@@ -68,12 +72,17 @@ internal object PrototypeBundleNodeCapabilities {
               ),
             "text_field_actions_v1" to setOf("trailingIcon", "imeAction", "onSubmit"),
             "text_field_leading_icon_v1" to setOf("leadingIcon"),
+            "string_conditions_v1" to setOf("errorWhen", "errorText"),
           )
+        "topAppBar",
+        "bottomNav",
+        "tabBar" -> mapOf("bar_scroll_v1" to setOf("onScroll", "scroll"))
         "pager" ->
           mapOf(
             "carousel_v1" to setOf("indicator"),
             "pager_options_v1" to setOf("axis", "pageSpacing", "peek", "pageSize"),
           )
+        "list" -> mapOf("refresh_v1" to setOf("refresh"))
         "scroll" ->
           mapOf(
             "refresh_v1" to setOf("refresh"),
@@ -99,6 +108,7 @@ internal object PrototypeBundleNodeCapabilities {
           (it as? JsonObject)?.get("style") as? JsonObject
         }
     for (style in styles) {
+      if ("shader" in style) caps.add("prototype_custom_shaders_v1")
       if ("runSpacing" in style) caps.add("prototype_flow_grid_v1")
       if ("scale" in style || "rotation" in style) caps.add("prototype_motion_v2")
       if ("effects" in style) caps.add("prototype_effects_v1")

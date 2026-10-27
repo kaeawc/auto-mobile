@@ -15,6 +15,7 @@ import {
   buildMcpRequestContext,
 } from "../../src/daemon/statelessMcpServerFactory";
 import { MCP_SESSION_KEY_HEADER } from "../../src/daemon/mcpSessionKey";
+import { ListChangedBroadcaster } from "../../src/daemon/listChangedBroadcast";
 import { installToolCallDispatcher } from "../../src/server/toolCallDispatch";
 import {
   TASKS_EXTENSION_ID,
@@ -42,6 +43,10 @@ class CapturedResponse extends EventEmitter {
   }
   write(chunk: string): void {
     this.body += chunk;
+    this.emit("chunk", chunk);
+  }
+  nextChunk(): Promise<string> {
+    return new Promise((resolve) => this.once("chunk", resolve));
   }
   end(body = ""): void {
     this.body += body;
@@ -125,38 +130,40 @@ function endpoint() {
 async function exchange(method: string, params: Record<string, unknown> = {}) {
   const server = endpoint();
   const res = new CapturedResponse();
-  await server.handle(
-    {
-      method: "POST",
-      headers: {
-        "mcp-protocol-version": "2026-07-28",
-        "mcp-method": method,
-        ...(typeof params.name === "string" && { "mcp-name": params.name }),
-        accept: "text/event-stream, application/json",
-        "content-type": "application/json",
-        [MCP_SESSION_KEY_HEADER]: "modern-client",
+  await server
+    .handle(
+      {
+        method: "POST",
+        headers: {
+          "mcp-protocol-version": "2026-07-28",
+          "mcp-method": method,
+          ...(typeof params.name === "string" && { "mcp-name": params.name }),
+          accept: "text/event-stream, application/json",
+          "content-type": "application/json",
+          [MCP_SESSION_KEY_HEADER]: "modern-client",
+        },
       },
-    },
-    res,
-    {
-      jsonrpc: "2.0",
-      id: 1,
-      method,
-      params: {
-        ...params,
-        _meta: {
-          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
-          "io.modelcontextprotocol/clientInfo": { name: "modern-test", version: "1" },
-          "io.modelcontextprotocol/clientCapabilities": {
-            extensions: { [TASKS_EXTENSION_ID]: {} },
+      res,
+      {
+        jsonrpc: "2.0",
+        id: 1,
+        method,
+        params: {
+          ...params,
+          _meta: {
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientInfo": { name: "modern-test", version: "1" },
+            "io.modelcontextprotocol/clientCapabilities": {
+              extensions: { [TASKS_EXTENSION_ID]: {} },
+            },
           },
         },
       },
-    },
-    (message, error) => {
-      throw new Error(message, { cause: error });
-    },
-  );
+      (message, error) => {
+        throw new Error(message, { cause: error });
+      },
+    )
+    .finally(() => server.clear());
   expect({ status: res.status, body: res.body }).toMatchObject({ status: 200 });
   expect(res.headers["content-type"]).toContain("text/event-stream");
   expect(server.inFlightCount).toBe(0);
@@ -170,6 +177,85 @@ test("real handler discovers Tasks from the shared modern server factory", async
   const frame = await exchange("server/discover");
   expect(frame.error).toBeUndefined();
   expect(frame.result.capabilities.extensions[TASKS_EXTENSION_ID]).toEqual({});
+  expect(frame.result.capabilities.tools).toEqual({ listChanged: true });
+  expect(frame.result.capabilities.resources).toEqual({ listChanged: true });
+});
+
+test("legacy server capabilities retain their original JSON bytes", async () => {
+  const server = createStatelessMcpServer({}, buildMcpRequestContext({ headers: {} }), {
+    era: "legacy",
+    requestScopeId: "legacy-capabilities",
+    requestMcpSessionId: "legacy-client",
+  });
+  try {
+    expect(JSON.stringify(server.server.getCapabilities())).toBe(
+      '{"resources":{"subscribe":true,"listChanged":true},"tools":{"listChanged":true},"prompts":{}}',
+    );
+  } finally {
+    await server.close();
+  }
+});
+
+test("real listen handler acknowledges a tools filter and receives a bridged list change", async () => {
+  const server = endpoint();
+  const res = new CapturedResponse();
+  const ackChunk = res.nextChunk();
+  const pending = server.handle(
+    {
+      method: "POST",
+      headers: {
+        "mcp-protocol-version": "2026-07-28",
+        "mcp-method": "subscriptions/listen",
+        accept: "text/event-stream, application/json",
+        "content-type": "application/json",
+      },
+    },
+    res,
+    {
+      jsonrpc: "2.0",
+      id: "listen-tools",
+      method: "subscriptions/listen",
+      params: {
+        notifications: { toolsListChanged: true },
+        _meta: {
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+          "io.modelcontextprotocol/clientInfo": { name: "listen-test", version: "1" },
+          "io.modelcontextprotocol/clientCapabilities": {},
+        },
+      },
+    },
+    (message, error) => {
+      throw new Error(message, { cause: error });
+    },
+  );
+  try {
+    const ack = JSON.parse((await ackChunk).split("data: ")[1]);
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toContain("text/event-stream");
+    expect(ack).toMatchObject({
+      method: "notifications/subscriptions/acknowledged",
+      params: {
+        notifications: { toolsListChanged: true },
+        _meta: { "io.modelcontextprotocol/subscriptionId": "listen-tools" },
+      },
+    });
+    expect(server.inFlightCount).toBe(1);
+    const changeChunk = res.nextChunk();
+    ListChangedBroadcaster.emit("resources");
+    ListChangedBroadcaster.emit("tools");
+    const change = JSON.parse((await changeChunk).split("data: ")[1]);
+    expect(change).toMatchObject({
+      method: "notifications/tools/list_changed",
+      params: { _meta: { "io.modelcontextprotocol/subscriptionId": "listen-tools" } },
+    });
+  } finally {
+    server.stopAccepting();
+    await Promise.all(server.inFlightRequests().map((request) => request.close()));
+    await pending;
+    server.clear();
+  }
+  expect(server.inFlightCount).toBe(0);
+  expect(res.writableEnded).toBe(true);
 });
 
 test("real handler serves the shared tools/list", async () => {

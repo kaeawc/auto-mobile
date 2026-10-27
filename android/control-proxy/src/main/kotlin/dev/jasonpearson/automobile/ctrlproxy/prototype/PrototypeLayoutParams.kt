@@ -50,6 +50,8 @@ fun prototypeLayoutParams(
   hasStackBack: Boolean = false,
   opaque: Boolean = false,
   surfaceId: String? = null,
+  /** `window.backdrop` real blur (#15126): the radius in px blurred behind the window, API 31+. */
+  blurBehindRadiusPx: Int = 0,
 ): WindowManager.LayoutParams {
   require(density.isFinite() && density > 0) { "Density must be positive and finite" }
   val match = WindowManager.LayoutParams.MATCH_PARENT
@@ -106,5 +108,9 @@ fun prototypeLayoutParams(
       OverlayManager.resolveCutoutMode(sdkInt)?.let { layoutInDisplayCutoutMode = it }
       // Explicitly opt out of system-bar fitting where supported, including focusable windows.
       if (sdkInt >= 30) setFitInsetsTypes(0)
+      if (sdkInt >= PrototypeBackdrops.MIN_BLUR_SDK && blurBehindRadiusPx > 0) {
+        flags = flags or WindowManager.LayoutParams.FLAG_BLUR_BEHIND
+        blurBehindRadius = blurBehindRadiusPx
+      }
     }
 }

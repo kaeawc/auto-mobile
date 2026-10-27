@@ -1,0 +1,33 @@
+{
+  "id": "string-conditions",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "value": "hello"
+  },
+  "root": {
+    "type": "column",
+    "repeat": {
+      "as": "item",
+      "items": [
+        {
+          "x": "he"
+        }
+      ]
+    },
+    "children": [
+      {
+        "type": "textField",
+        "stateKey": "value",
+        "errorWhen": {
+          "key": "value",
+          "contains": "{item.x}"
+        },
+        "errorText": "Bad {item.x}"
+      }
+    ]
+  }
+}

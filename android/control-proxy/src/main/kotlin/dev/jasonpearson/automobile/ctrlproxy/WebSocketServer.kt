@@ -54,6 +54,7 @@ class WebSocketServer(
         }
       }
     private const val MAX_START_ATTEMPTS = 5
+    private const val PROTOTYPE_SHADER_MIN_SDK = 33
     private const val START_RETRY_BASE_DELAY_MS = 250L
     private const val CONNECTOR_RESOLVE_TIMEOUT_MS = 2_000L
     // Allow large hierarchy frames over adb forward, but expire before ktor's 60-second timeout.
@@ -343,12 +344,15 @@ class WebSocketServer(
     // ORCHESTRATOR-CHOSEN: to be folded into the PROTOTYPE_SPEC_CAPABILITY_GATES registry.
     // show_prototype honours replaceOthers=false and addresses up to four independent surfaces.
     add("prototype_multi_surface_v1")
+    // AGSL needs RuntimeShader (API 33); the compiler's own helper gates the same flag (#15131).
+    if (options.sdkInt() >= PROTOTYPE_SHADER_MIN_SDK) add("prototype_custom_shaders_v1")
     // Prototype specs honour window.layer and window.persistence. The request decoder ignores
     // unknown
     // spec fields, so an older device would silently show a session-scoped system-layer prototype.
     add("prototype_window_options_v1")
     // Fullscreen specs honour window.chrome, with host-owned touch and accessibility escapes.
     add("prototype_window_chrome_v1")
+    add("prototype_dead_tap_v1")
     // Prototype specs honour {light, dark} colour and image pairs, role names in gradient stops and
     // scrims, and theme.colors.light / theme.colors.dark. An older APK cannot decode a pair where
     // it expects a string and fails the whole show, and draws a role-named stop transparent, so
@@ -358,11 +362,14 @@ class WebSocketServer(
     // Prototype specs honour pager axis, spacing, peek padding and fixed page sizes. Hosts refuse
     // these options on older APKs, which otherwise silently render a horizontal full-page pager.
     add("prototype_pager_options_v1")
+    add("prototype_bar_scroll_v1")
     // Prototype specs resolve read-only data, path repeat items, and data text/conditions. Older
     // APKs reject data, {path} items, repeat.key and data conditions as unknown, and draw
     // {data:/x} text literally, so hosts refuse such a spec for a device lacking this flag.
     add("prototype_data_model_v1")
-    // setData, appendData and removeData change /data on the device and report each write as a
+    add("prototype_design_platform_v1")
+    // setData, appendData, prependData and removeData change /data on the device and report each
+    // write as a
     // change event. Older APKs reject the actions as unknown, so hosts refuse a spec using one
     // for a device lacking this flag. Advertised only together with prototype_data_model_v1.
     add("prototype_data_actions_v1")
@@ -382,6 +389,7 @@ class WebSocketServer(
     add("prototype_text_field_options_v1")
     addAll(listOf("prototype_gestures_v1", "prototype_swipe_actions_v1"))
     addAll(listOf("prototype_text_field_actions_v1", "prototype_carousel_v1"))
+    add("prototype_scroll_motion_v1")
     add("prototype_text_field_leading_icon_v1")
     add("prototype_refresh_v1")
     // In-tree search fields support query edits, search actions and active-key result subtrees.
@@ -389,6 +397,9 @@ class WebSocketServer(
     add("prototype_rich_text_v1")
     // {data, empty} conditions and style shimmer for loading placeholders (#14207).
     addAll(listOf("prototype_loading_states_v1", "prototype_style_polish_v2"))
+    add("prototype_strings_v1")
+    add("prototype_semantics_v1")
+    add("prototype_string_conditions_v1")
     // Node animate, style scale/rotation, slideStart/slideEnd/scale transitions, zoomable images.
     add("prototype_motion_v2")
     // style.effects (#15129): noise, gradientMesh, shimmer, glow, vignette, blur, pixelate,
@@ -403,8 +414,10 @@ class WebSocketServer(
     add("prototype_shared_element_v1")
     // Line, area, bar and ring charts over /data arrays (#14209).
     add("prototype_chart_v1")
+    add("prototype_lazy_list_v1")
     // Text nodes linkify mentions, hashtags and URLs into links running linkify.onTap (#14233).
     add("prototype_linkify_v1")
+    add("prototype_format_v1")
     // Chat-list scrolls: reverse, stickToEnd, atEndKey, onStartReached and scrollTo (#14232).
     add("prototype_chat_scroll_v1")
   }
@@ -422,6 +435,9 @@ class WebSocketServer(
     // APK ignores the request field and follows the device silently, so a
     // host sends it, and expects the report, only when this flag is present.
     add("prototype_appearance_v1")
+    // show_prototype honours window.backdrop (#15126): API 31+ blur-behind, else a tonal fill; the
+    // show result reports backdrop blur or fallback.
+    add("prototype_backdrop_v1")
     // A device-persistent prototype buffers its events while no host is connected and replays them,
     // and inspect_prototypes reports what it is showing. Older hosts never send inspect_prototypes.
     add("prototype_persistence_replay_v1")
@@ -430,6 +446,7 @@ class WebSocketServer(
     // A spec's storage block is kept across shows, inspect reports the stored keys and
     // clear_prototype_storage wipes them (#12522). Hosts refuse storage without this flag.
     add("prototype_storage_v1")
+    add("prototype_pager_state_key_v1")
     add("prototype_timers_v1")
   }
 

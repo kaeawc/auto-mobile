@@ -47,7 +47,7 @@
           "visibleWhen": {
             "all": [
               {
-                "platform": "/device/sizeClass",
+                "platform": "/device/widthClass",
                 "equals": "regular"
               },
               {

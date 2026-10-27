@@ -1,0 +1,24 @@
+{
+  "spec": {
+    "id": "error-text",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "value": "hi"
+    },
+    "root": {
+      "type": "textField",
+      "stateKey": "value",
+      "errorWhen": {
+        "key": "value",
+        "contains": "h"
+      },
+      "errorText": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+    }
+  },
+  "expectedPath": "root.errorText",
+  "expectedMessage": "Invalid string value"
+}

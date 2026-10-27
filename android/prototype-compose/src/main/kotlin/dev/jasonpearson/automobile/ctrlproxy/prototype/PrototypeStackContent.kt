@@ -4,6 +4,8 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -11,6 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import dev.jasonpearson.automobile.protocol.PrototypeStackNode
+import dev.jasonpearson.automobile.protocol.stackTransition
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOf
@@ -59,6 +62,35 @@ internal fun rememberStackScrollState(identity: String): ScrollState {
       snapshotFlow { state.value }
         .collect { entry.store.save(entry.position, entry.screen, identity, it) }
     }
+  }
+  return state
+}
+
+@Composable
+internal fun rememberStackListState(
+  identity: String,
+  keys: List<String>,
+  hasHeader: Boolean,
+): LazyListState {
+  val entry = LocalStackScrollEntry.current
+  val initial =
+    remember(entry, identity) {
+      entry?.store?.readList(entry.position, entry.screen, identity)?.restore(keys, hasHeader)
+        ?: PrototypeListAnchorTarget(0, 0)
+    }
+  val state = rememberLazyListState(initial.index, initial.offset)
+  val currentKeys = rememberUpdatedState(keys)
+  val currentHeader = rememberUpdatedState(hasHeader)
+  if (entry != null) {
+    fun save() {
+      val anchor = PrototypeListAnchor.capture(state, currentKeys.value, currentHeader.value)
+      entry.store.saveList(entry.position, entry.screen, identity, anchor)
+    }
+    LaunchedEffect(state, entry, identity) {
+      snapshotFlow { PrototypeListAnchor.capture(state, currentKeys.value, currentHeader.value) }
+        .collect { entry.store.saveList(entry.position, entry.screen, identity, it) }
+    }
+    DisposableEffect(state, entry, identity) { onDispose { save() } }
   }
   return state
 }

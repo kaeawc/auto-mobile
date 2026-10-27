@@ -3,7 +3,10 @@ import { PROTOTYPE_PAGER_OPTIONS_CAPABILITY } from "../observe/android/ctrlProxy
 import { record } from "./prototypeTemplate";
 
 /** Authored field order, including descendants and reusable component roots. */
-export function prototypePagerOptionFields(spec: unknown): string[] {
+export function prototypePagerOptionFields(
+  spec: unknown,
+  names: readonly string[] = ["axis", "pageSpacing", "peek", "pageSize"],
+): string[] {
   const fields: string[] = [];
   const pending: ({ node: unknown; path: string } | { field: string })[] =
     prototypeSpecNodeRoots(spec).reverse();
@@ -21,7 +24,7 @@ export function prototypePagerOptionFields(spec: unknown): string[] {
     const children = prototypeNodeChildren(node);
     const next: typeof pending = [];
     for (const key of Object.keys(node)) {
-      if (node.type === "pager" && ["axis", "pageSpacing", "peek", "pageSize"].includes(key)) {
+      if (node.type === "pager" && names.includes(key)) {
         next.push({ field: `${path}.${key}` });
       } else {
         next.push(

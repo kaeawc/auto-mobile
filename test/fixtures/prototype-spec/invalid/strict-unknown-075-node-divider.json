@@ -1,0 +1,39 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "opacity": 100
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "divider",
+          "orientation": "horizontal",
+          "zzzUnknown": true
+        },
+        {
+          "type": "row",
+          "children": [
+            {
+              "type": "text",
+              "text": "A"
+            },
+            {
+              "type": "divider",
+              "orientation": "vertical"
+            },
+            {
+              "type": "text",
+              "text": "B"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].zzzUnknown"
+}

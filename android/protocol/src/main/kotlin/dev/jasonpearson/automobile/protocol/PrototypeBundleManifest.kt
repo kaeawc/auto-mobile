@@ -28,6 +28,7 @@ internal data class PrototypeBundleManifest(
 internal object PrototypeBundleManifestCodec {
   private val shaPattern = Regex("[0-9a-f]{64}")
   private val capabilityPattern = Regex("[a-z][a-z0-9_]*")
+  // AGSL is deliberately excluded; records rejects it explicitly before this allowlist.
   private val extensions =
     mapOf(
       "image/png" to "png",
@@ -97,6 +98,11 @@ internal object PrototypeBundleManifestCodec {
       val file = text(obj["file"])
       val sha = text(obj["sha256"])
       val type = text(obj["mediaType"])
+      bundleRequire(
+        type != "application/vnd.automobile.agsl",
+        custom_shaders_unsupported,
+        "bundle.json",
+      )
       bundleRequire(
         id != null &&
           validId(id) &&

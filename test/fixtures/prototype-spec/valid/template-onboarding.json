@@ -1,0 +1,248 @@
+{
+  "id": "template-onboarding",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "name": "",
+    "email": "",
+    "password": "",
+    "agreed": false
+  },
+  "root": {
+    "type": "stack",
+    "id": "flow",
+    "start": "welcome",
+    "style": {
+      "width": "fill",
+      "height": "fill"
+    },
+    "screens": {
+      "welcome": {
+        "type": "column",
+        "children": [
+          {
+            "type": "icon",
+            "name": "rocket_launch",
+            "contentDescription": "Logo"
+          },
+          {
+            "type": "text",
+            "text": "Welcome to Demo",
+            "style": {
+              "textStyle": "headlineMedium"
+            }
+          },
+          {
+            "type": "text",
+            "text": "Plan, share and ship in one place.",
+            "style": {
+              "textStyle": "bodyLarge"
+            }
+          },
+          {
+            "type": "button",
+            "label": "Get started",
+            "testTag": "welcome_start",
+            "onTap": [
+              {
+                "type": "push",
+                "stack": "flow",
+                "screen": "signup"
+              }
+            ]
+          },
+          {
+            "type": "button",
+            "label": "Skip for now",
+            "testTag": "welcome_skip",
+            "onTap": [
+              {
+                "type": "emit",
+                "name": "onboarding_skipped"
+              }
+            ],
+            "variant": "text"
+          }
+        ],
+        "style": {
+          "padding": {
+            "start": 16,
+            "end": 16,
+            "top": 16,
+            "bottom": 16
+          },
+          "spacing": 12
+        }
+      },
+      "signup": {
+        "type": "column",
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "app_bar",
+            "title": "Create account",
+            "navigationIcon": {
+              "icon": "arrow_back",
+              "label": "Back",
+              "onTap": [
+                {
+                  "type": "pop",
+                  "stack": "flow"
+                }
+              ]
+            }
+          },
+          {
+            "type": "column",
+            "children": [
+              {
+                "type": "textField",
+                "testTag": "name_field",
+                "stateKey": "name",
+                "label": "Name",
+                "variant": "outlined",
+                "checks": [
+                  {
+                    "message": "Enter your name",
+                    "required": true
+                  }
+                ],
+                "validateOn": "blur"
+              },
+              {
+                "type": "textField",
+                "testTag": "email_field",
+                "stateKey": "email",
+                "label": "Email",
+                "variant": "outlined",
+                "keyboardType": "email",
+                "checks": [
+                  {
+                    "message": "Enter your email",
+                    "required": true
+                  },
+                  {
+                    "message": "That is not an email address",
+                    "format": "email"
+                  }
+                ],
+                "validateOn": "blur"
+              },
+              {
+                "type": "textField",
+                "testTag": "password_field",
+                "stateKey": "password",
+                "label": "Password",
+                "variant": "outlined",
+                "secure": true,
+                "keyboardType": "password",
+                "supportingText": "At least 8 characters",
+                "checks": [
+                  {
+                    "message": "Use at least 8 characters",
+                    "minLength": 8
+                  }
+                ],
+                "validateOn": "change"
+              },
+              {
+                "type": "checkbox",
+                "testTag": "terms_checkbox",
+                "stateKey": "agreed",
+                "label": "I agree to the terms",
+                "checks": [
+                  {
+                    "message": "Accept the terms to continue",
+                    "required": true
+                  }
+                ],
+                "validateOn": "submit"
+              },
+              {
+                "type": "button",
+                "label": "Create account",
+                "testTag": "signup_submit",
+                "onTap": [
+                  {
+                    "type": "emit",
+                    "name": "signup_submit",
+                    "requireValid": ["name", "email", "password", "agreed"]
+                  },
+                  {
+                    "type": "push",
+                    "stack": "flow",
+                    "screen": "done"
+                  }
+                ],
+                "enabledWhen": {
+                  "valid": ["name", "email", "password"]
+                }
+              }
+            ],
+            "style": {
+              "padding": {
+                "start": 16,
+                "end": 16,
+                "top": 16,
+                "bottom": 16
+              },
+              "spacing": 12
+            }
+          }
+        ]
+      },
+      "done": {
+        "type": "column",
+        "children": [
+          {
+            "type": "icon",
+            "name": "check_circle",
+            "contentDescription": "Done"
+          },
+          {
+            "type": "text",
+            "text": "You are in, {name}",
+            "style": {
+              "textStyle": "headlineMedium"
+            },
+            "testTag": "done_title"
+          },
+          {
+            "type": "text",
+            "text": "We sent a confirmation to {email}.",
+            "style": {
+              "textStyle": "bodyMedium"
+            }
+          },
+          {
+            "type": "button",
+            "label": "Open the app",
+            "testTag": "done_open",
+            "onTap": [
+              {
+                "type": "emit",
+                "name": "onboarding_done"
+              },
+              {
+                "type": "popToRoot",
+                "stack": "flow"
+              }
+            ]
+          }
+        ],
+        "style": {
+          "padding": {
+            "start": 16,
+            "end": 16,
+            "top": 16,
+            "bottom": 16
+          },
+          "spacing": 12
+        }
+      }
+    }
+  }
+}

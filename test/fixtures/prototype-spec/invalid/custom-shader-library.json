@@ -1,0 +1,27 @@
+{
+  "spec": {
+    "id": "shader",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Custom effect",
+      "style": {
+        "shader": {
+          "asset": "effect",
+          "uniforms": {
+            "strength": 1
+          }
+        }
+      }
+    }
+  },
+  "options": {
+    "library": true
+  },
+  "expectedPath": "$",
+  "expectedMessage": "ProtoViewer bundles refuse custom AGSL shaders"
+}

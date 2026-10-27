@@ -314,6 +314,9 @@ export type ViewHierarchyNode = {
   enabled?: boolean | string;
   scrollable?: boolean | string;
   "pane-title"?: string;
+  /** Android extractor semantics: heading is the string "true"; live-region is polite/assertive. iOS snapshots expose neither. */
+  heading?: string;
+  "live-region"?: string;
   /**
    * Captured on real nodes: iOS `role` and `hint-text` (`test/fixtures/observe-output/ios-keyboard-tabbar/observe-keyboard-up.json`)
    * and the Android collection column index (`test/fixtures/identify-interactions/playground-text-fields.json`).

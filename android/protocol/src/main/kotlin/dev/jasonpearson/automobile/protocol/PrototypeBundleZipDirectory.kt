@@ -128,6 +128,7 @@ internal class PrototypeBundleZipDirectory(private val bytes: ByteArray) {
     }
     bundleRequire(at == end, header_mismatch)
     for (entry in entries) {
+      bundleRequire(!entry.name.endsWith(".agsl"), custom_shaders_unsupported, entry.name)
       bundleRequire(ENTRY_PATTERN.matches(entry.name), entry_not_allowed, entry.name)
       local(entry, directory)
     }

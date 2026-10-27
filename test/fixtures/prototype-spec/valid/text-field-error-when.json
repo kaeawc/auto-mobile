@@ -1,0 +1,69 @@
+{
+  "id": "string-conditions",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "value": "hello"
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "textField",
+        "stateKey": "value",
+        "errorWhen": {
+          "key": "value",
+          "contains": "h"
+        },
+        "errorText": "Server error"
+      },
+      {
+        "type": "textField",
+        "stateKey": "value",
+        "errorWhen": {
+          "not": {
+            "key": "value",
+            "startsWith": "z"
+          }
+        }
+      },
+      {
+        "type": "textField",
+        "stateKey": "value",
+        "checks": [
+          {
+            "required": true,
+            "message": "Required"
+          }
+        ],
+        "errorWhen": {
+          "key": "value",
+          "lengthGt": 2
+        },
+        "supportingText": "Help"
+      },
+      {
+        "type": "textField",
+        "stateKey": "value",
+        "errorWhen": {
+          "all": [
+            {
+              "data": "/serverError",
+              "equals": true
+            },
+            {
+              "valid": "value"
+            }
+          ]
+        },
+        "errorText": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+      }
+    ]
+  },
+  "data": {
+    "serverError": true
+  }
+}

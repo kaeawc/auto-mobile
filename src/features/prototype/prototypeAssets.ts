@@ -1,3 +1,4 @@
+import { PROTOTYPE_SHADER_MIME_TYPE, validatePrototypeShaderSource } from "./prototypeShaderSource";
 import contract from "../../../schemas/prototype-asset-contract.json";
 
 /**
@@ -8,6 +9,7 @@ import contract from "../../../schemas/prototype-asset-contract.json";
 export const {
   MAX_PROTOTYPE_ASSET_BYTES,
   MAX_PROTOTYPE_FONT_ASSET_BYTES,
+  MAX_PROTOTYPE_SHADER_ASSET_BYTES,
   MAX_PROTOTYPE_ASSET_COUNT,
   MAX_PROTOTYPE_ASSET_TOTAL_BYTES,
   MAX_PROTOTYPE_ASSET_ID_LENGTH,
@@ -19,7 +21,10 @@ export const DEFAULT_PROTOTYPE_ASSET_TIMEOUT_MS = 15000;
 export type PrototypeImageAssetMimeType = "image/png" | "image/jpeg" | "image/webp";
 /** Custom fonts referenced by `style.fontFamily: {asset}`; never decoded as images (#10443). */
 export type PrototypeFontAssetMimeType = "font/ttf" | "font/otf";
-export type PrototypeAssetMimeType = PrototypeImageAssetMimeType | PrototypeFontAssetMimeType;
+export type PrototypeAssetMimeType =
+  | PrototypeImageAssetMimeType
+  | PrototypeFontAssetMimeType
+  | typeof PROTOTYPE_SHADER_MIME_TYPE;
 
 export function isPrototypeFontMimeType(mimeType: string): mimeType is PrototypeFontAssetMimeType {
   return mimeType === "font/ttf" || mimeType === "font/otf";
@@ -48,6 +53,9 @@ export function detectFontMimeType(bytes: Uint8Array): PrototypeFontAssetMimeTyp
 
 /** Largest accepted asset for a MIME type: fonts have a tighter cap than images. */
 export function maxPrototypeAssetBytes(mimeType: string): number {
+  if (mimeType === PROTOTYPE_SHADER_MIME_TYPE) {
+    return MAX_PROTOTYPE_SHADER_ASSET_BYTES;
+  }
   return isPrototypeFontMimeType(mimeType)
     ? MAX_PROTOTYPE_FONT_ASSET_BYTES
     : MAX_PROTOTYPE_ASSET_BYTES;
@@ -80,6 +88,9 @@ export function prototypeAssetUploadProblem(asset: PrototypeAssetUpload): string
       : null) ??
     (isPrototypeFontMimeType(asset.mimeType) && detectFontMimeType(asset.bytes) === null
       ? "Prototype asset bytes are not a TrueType or OpenType font (checked the file signature)."
+      : null) ??
+    (asset.mimeType === PROTOTYPE_SHADER_MIME_TYPE
+      ? prototypeShaderSourceProblem(asset.bytes)
       : null)
   );
 }
@@ -89,4 +100,9 @@ export function prototypeAssetIdProblem(id: string): string | null {
   return id.length === 0 || id.length > MAX_PROTOTYPE_ASSET_ID_LENGTH
     ? `Prototype asset id must be 1 to ${MAX_PROTOTYPE_ASSET_ID_LENGTH} characters.`
     : null;
+}
+
+function prototypeShaderSourceProblem(bytes: Uint8Array): string | null {
+  const result = validatePrototypeShaderSource(bytes);
+  return result.success ? null : result.error;
 }

@@ -238,7 +238,11 @@ function walkNodes(value: unknown, path: string, visit: (node: Raw, path: string
       for (const name of Object.keys(record(object.screens)!).sort()) {
         walkNodes(record(object.screens)![name], `${path}.screens[${JSON.stringify(name)}]`, visit);
       }
-    } else if (key === "child" || key === "children") {
+    } else if (
+      key === "child" ||
+      key === "children" ||
+      (object.type === "list" && ["header", "footer"].includes(key))
+    ) {
       walkNodes(object[key], `${path}.${key}`, visit);
     }
   }

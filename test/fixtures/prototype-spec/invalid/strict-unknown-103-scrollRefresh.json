@@ -1,40 +1,91 @@
 {
   "spec": {
-    "id": "refresh",
+    "id": "feed",
     "window": {
       "placement": {
         "type": "fullscreen"
       },
       "opacity": 100
     },
+    "data": {
+      "feed": {
+        "items": [
+          {
+            "id": 1,
+            "title": "One"
+          },
+          {
+            "id": 2,
+            "title": "Two"
+          }
+        ]
+      },
+      "page": {
+        "next": "p2"
+      }
+    },
     "state": {
-      "refreshing": false
+      "refreshing": false,
+      "feedStatus": "idle"
     },
     "root": {
-      "type": "scroll",
+      "id": "feed-list",
+      "type": "list",
       "axis": "vertical",
+      "repeat": {
+        "items": {
+          "path": "/feed/items"
+        },
+        "as": "post",
+        "key": "id"
+      },
+      "spacing": 8,
+      "contentPadding": 12,
+      "onEndReached": [
+        {
+          "type": "request",
+          "url": "http://localhost:8080/feed?after={data:/page/next}",
+          "into": "/data/page",
+          "append": {
+            "from": "/items",
+            "to": "/data/feed/items"
+          },
+          "statusKey": "feedStatus"
+        }
+      ],
+      "endThreshold": 2,
       "refresh": {
         "stateKey": "refreshing",
         "onRefresh": [
           {
-            "type": "emit",
-            "name": "refresh"
+            "type": "request",
+            "url": "http://localhost:8080/feed",
+            "into": "/data/feed",
+            "onSuccess": [
+              {
+                "type": "setState",
+                "key": "refreshing",
+                "value": false
+              }
+            ]
           }
         ],
         "zzzUnknown": true
       },
-      "child": {
-        "type": "column",
-        "children": [
-          {
-            "type": "text",
-            "text": "Orders"
-          },
-          {
-            "type": "text",
-            "text": "Latte"
-          }
-        ]
+      "maxItems": 100,
+      "children": [
+        {
+          "type": "text",
+          "text": "{index}: {post.title}"
+        }
+      ],
+      "header": {
+        "type": "text",
+        "text": "Feed"
+      },
+      "footer": {
+        "type": "text",
+        "text": "End"
       }
     }
   },

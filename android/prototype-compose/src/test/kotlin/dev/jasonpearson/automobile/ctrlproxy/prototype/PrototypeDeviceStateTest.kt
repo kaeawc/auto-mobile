@@ -24,6 +24,18 @@ class PrototypeDeviceStateTest {
   ) = PrototypeDeviceInput(width, height, smallest, fold, false, "16", pc)
 
   @Test
+  fun `android snapshot retains Material classes without iOS aliases`() {
+    for (width in listOf(320f, 600f, 1200f)) {
+      val device = PrototypeDeviceState.snapshot(input(width = width)).getValue("device").jsonObject
+      assertFalse("sizeClass" in device)
+      assertTrue(
+        device.getValue("widthClass").jsonPrimitive.content in
+          listOf("compact", "medium", "expanded"),
+      )
+    }
+  }
+
+  @Test
   fun `device observation is not user activity`() {
     assertFalse(
       PrototypeInteraction.DeviceState(PrototypeDeviceState.snapshot(input()))

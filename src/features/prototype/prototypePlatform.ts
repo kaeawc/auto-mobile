@@ -224,6 +224,20 @@ function placeholderUses(spec: unknown, uses: PrototypePlatformUse[]) {
   });
 }
 
+/** A channel's routes and hooks run like handlers: `{event}` reads the frame (#14261). */
+function scanChannelUses(root: Raw, uses: PrototypePlatformUse[]): void {
+  const channels = record(root.channels);
+  for (const id of channels ? sortedKeys(channels) : []) {
+    const channel = record(channels![id]);
+    const at = memberPath("channels", id);
+    for (const key of ["routes", "onOpen", "onClose", "onError"]) {
+      if (channel && channel[key] !== undefined) {
+        scanValue(channel[key], `${at}.${key}`, true, uses);
+      }
+    }
+  }
+}
+
 /** Every platform construct in `spec`, at the paths of `spec` itself (no component expansion). */
 export function prototypePlatformUses(spec: unknown): PrototypePlatformUse[] {
   const root = record(spec);
@@ -250,17 +264,7 @@ export function prototypePlatformUses(spec: unknown): PrototypePlatformUse[] {
     uses.push({ kind: "handler", path: at, event });
     scanValue(handlers![event], at, true, uses);
   }
-  // A channel's routes and hooks run like handlers: `{event}` reads the frame (#14261).
-  const channels = record(root.channels);
-  for (const id of channels ? sortedKeys(channels) : []) {
-    const channel = record(channels![id]);
-    const at = memberPath("channels", id);
-    for (const key of ["routes", "onOpen", "onClose", "onError"]) {
-      if (channel && channel[key] !== undefined) {
-        scanValue(channel[key], `${at}.${key}`, true, uses);
-      }
-    }
-  }
+  scanChannelUses(root, uses);
   for (const { node, path } of prototypeSpecNodeRoots(root)) {
     scanValue(node, path, false, uses);
   }

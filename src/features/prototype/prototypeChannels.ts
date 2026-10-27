@@ -1,3 +1,4 @@
+import { logger } from "../../utils/logger";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import { prototypeFieldsOfKind } from "./prototypeEmitContext";
 import { prototypeHeaderEntriesError, prototypeRequestStatusKeyError } from "./prototypeRequest";
@@ -60,8 +61,9 @@ function urlError(kind: unknown, url: string): string | undefined {
     const protocol = new URL(url).protocol;
     const allowed = kind === "websocket" ? ["ws:", "wss:"] : ["http:", "https:"];
     return allowed.includes(protocol) ? undefined : message;
-  } catch {
+  } catch (error) {
     // The parse failure is the finding; the message is what the author sees.
+    logger.debug(`channel url ${url} did not parse: ${error}`);
     return message;
   }
 }
@@ -127,6 +129,14 @@ function refusedActionError(actions: unknown, at: string): PrototypeChannelError
   return undefined;
 }
 
+function protocolsError(channel: Raw, at: string): PrototypeChannelError | undefined {
+  const list = Array.isArray(channel.protocols) ? channel.protocols : [];
+  const bad = list.findIndex((protocol) => typeof protocol === "string" && !TOKEN.test(protocol));
+  return bad >= 0
+    ? { path: `${at}.protocols[${bad}]`, message: "Invalid websocket subprotocol" }
+    : undefined;
+}
+
 function channelError(id: string, channel: Raw, state: Raw): PrototypeChannelError | undefined {
   const at = memberPath("channels", id);
   if (!prototypeContractPatterns.pathKey.test(id)) {
@@ -139,13 +149,9 @@ function channelError(id: string, channel: Raw, state: Raw): PrototypeChannelErr
   if (channel.protocols !== undefined && channel.kind !== "websocket") {
     return { path: `${at}.protocols`, message: "protocols apply to websocket channels only" };
   }
-  for (const [index, protocol] of (Array.isArray(channel.protocols)
-    ? channel.protocols
-    : []
-  ).entries()) {
-    if (typeof protocol === "string" && !TOKEN.test(protocol)) {
-      return { path: `${at}.protocols[${index}]`, message: "Invalid websocket subprotocol" };
-    }
+  const protocols = protocolsError(channel, at);
+  if (protocols) {
+    return protocols;
   }
   const status = prototypeRequestStatusKeyError(
     { type: "request", statusKey: channel.statusKey },

@@ -2,7 +2,7 @@ import contract from "../../../schemas/prototype-spec-contract.json";
 import type { PrototypeData, PrototypeDataActionValue, PrototypeJson } from "./prototypeSpec";
 import { prototypeDataPathPointer, resolvePrototypeDataPointer } from "./prototypeData";
 import { applyPrototypePatch, type PrototypePatchOp } from "./prototypePatch";
-import { record } from "./prototypeTemplate";
+import { record, type Raw } from "./prototypeTemplate";
 import { prototypeDataError } from "./prototypeValidation";
 
 /**
@@ -125,12 +125,37 @@ function targetRefusal(
       ? refused("not_found", `removeData target ${write.path} does not exist`)
       : undefined;
   }
+  return setTargetRefusal(data, pointer, write);
+}
+
+function setTargetRefusal(
+  data: PrototypeData,
+  pointer: string,
+  write: PrototypeDataWrite,
+): PrototypeDataWriteResult | undefined {
+  const existing = resolvePrototypeDataPointer(data, pointer);
   const parent = resolvePrototypeDataPointer(data, pointer.slice(0, pointer.lastIndexOf("/")));
   const parentIsContainer =
     pointer.lastIndexOf("/") === 0 ? true : Array.isArray(parent) || record(parent) !== undefined;
   // An array element is replaced, never created: appending is appendData's job.
   return !parentIsContainer || (existing === undefined && Array.isArray(parent))
     ? refused("not_found", `setData target ${write.path} has no existing parent or element`)
+    : undefined;
+}
+
+/** An `upsert` value must carry its key, and `maxItems` must be a sane array bound. */
+function writeOptionsRefusal(write: PrototypeDataWrite): PrototypeDataWriteResult | undefined {
+  if (write.op === "upsert" && resolvePrototypeDataPointer(write.value, write.key) === undefined) {
+    return refused("invalid_value", `upsertData value has no member at ${write.key}`);
+  }
+  if (write.op === "set" || write.op === "remove" || write.maxItems === undefined) {
+    return undefined;
+  }
+  const { maxItems } = write;
+  return !Number.isInteger(maxItems) ||
+    maxItems < 1 ||
+    maxItems > contract.limits.MAX_PROTOTYPE_DATA_ARRAY_ITEMS
+    ? refused("invalid_value", "maxItems must be an integer from 1 to the data array limit")
     : undefined;
 }
 
@@ -157,24 +182,19 @@ export function applyPrototypeDataWrite(
   if (target) {
     return target;
   }
-  if (write.op === "upsert" && resolvePrototypeDataPointer(write.value, write.key) === undefined) {
-    return refused("invalid_value", `upsertData value has no member at ${write.key}`);
-  }
-  if (write.op !== "remove" && write.op !== "set" && write.maxItems !== undefined) {
-    const { maxItems } = write;
-    if (
-      !Number.isInteger(maxItems) ||
-      maxItems < 1 ||
-      maxItems > contract.limits.MAX_PROTOTYPE_DATA_ARRAY_ITEMS
-    ) {
-      return refused("invalid_value", "maxItems must be an integer from 1 to the data array limit");
-    }
+  const invalidWrite = writeOptionsRefusal(write);
+  if (invalidWrite) {
+    return invalidWrite;
   }
   const applied = applyPrototypePatch({ data: current }, patchOps(write, pointer, current));
   if (!applied.success) {
     return refused("not_found", `${write.path}: ${applied.error.message}`);
   }
-  const next = record(applied.spec.data);
+  return checkedWrite(record(applied.spec.data));
+}
+
+/** The written data when it still satisfies the data limits. */
+function checkedWrite(next: Raw | undefined): PrototypeDataWriteResult {
   const invalid = prototypeDataError(next, contract.limits.MAX_PROTOTYPE_DATA_WRITE_BYTES);
   if (!next || invalid) {
     const message = invalid?.message ?? "Data must stay an object";

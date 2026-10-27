@@ -268,19 +268,32 @@ function mapTimerAction(action: Raw, path: string, visit: FieldVisitor): void {
   }
 }
 
+function mapStateAction(action: Raw, path: string, visit: FieldVisitor): void {
+  mapField(action, "key", path, "key", visit);
+  if (action.type === "setState") {
+    mapField(action, "value", path, "operand", visit);
+  }
+}
+
+function mapOtherAction(action: Raw, path: string, visit: FieldVisitor): void {
+  mapTimerAction(action, path, visit);
+  mapNavigationTransition(action, path, visit);
+  if (action.type === "scrollTo") {
+    // Marks the whole action so the chat scroll gate can locate it (#14232).
+    visit(action, path, "scrollTo");
+  }
+}
+
 function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
   switch (action.type) {
     case "setState":
-      mapField(action, "key", path, "key", visit);
-      mapField(action, "value", path, "operand", visit);
-      break;
-    case "emit":
-      mapEmitAction(action, path, visit);
-      break;
     case "toggle":
     case "increment":
     case "decrement":
-      mapField(action, "key", path, "key", visit);
+      mapStateAction(action, path, visit);
+      break;
+    case "emit":
+      mapEmitAction(action, path, visit);
       break;
     case "setData":
     case "appendData":
@@ -294,13 +307,8 @@ function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
     case "platform":
       mapPlatformAction(action, path, visit);
       break;
-    case "scrollTo":
-      // Marks the whole action so the chat scroll gate can locate it (#14232).
-      visit(action, path, "scrollTo");
-      break;
     default:
-      mapTimerAction(action, path, visit);
-      mapNavigationTransition(action, path, visit);
+      mapOtherAction(action, path, visit);
       break;
   }
   return action;

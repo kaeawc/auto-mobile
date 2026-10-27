@@ -109,16 +109,24 @@ export function prototypeDataActionError(
       message: "A data write value must be a string, boolean, finite number, array or object",
     };
   }
-  if (
-    (action.type === "appendData" || action.type === "upsertData") &&
-    !prototypeDataPathHasIndex(path)
-  ) {
-    const target = resolvePrototypeDataPointer(data, pointer);
-    if (target !== undefined && !Array.isArray(target)) {
-      return { path: `${at}.path`, message: `${action.type} target is not an array` };
-    }
+  return arrayTargetError(action.type, path, pointer, at, data);
+}
+
+/** `appendData` and `upsertData` need an array where the spec's data already defines the target. */
+function arrayTargetError(
+  type: string,
+  path: string,
+  pointer: string,
+  at: string,
+  data: unknown,
+): PrototypeDataActionError | undefined {
+  if ((type !== "appendData" && type !== "upsertData") || prototypeDataPathHasIndex(path)) {
+    return undefined;
   }
-  return undefined;
+  const target = resolvePrototypeDataPointer(data, pointer);
+  return target !== undefined && !Array.isArray(target)
+    ? { path: `${at}.path`, message: `${type} target is not an array` }
+    : undefined;
 }
 
 /** The first data action in `actions` (located, authored form) that breaks a static rule. */

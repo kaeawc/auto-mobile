@@ -19,6 +19,30 @@ struct PrototypeBundleReferences {
         // while visiting the validated authored tree, never opaque data or unused components.
         guard let root = json.value.objectFields?["root"] else { return }
         collect(root, path: "$.root", keys: json.objectKeys)
+        func shareAssets(_ value: JSONValue) -> [PrototypeBundleID] {
+            switch value {
+            case let .array(array): return array.flatMap(shareAssets)
+            case let .object(fields):
+                if fields.count == 1, fields["value"] != nil { return [] }
+                var found: [PrototypeBundleID] = []
+                if fields["type"] == .string("platform"), fields["call"] == .string("share.open") {
+                    for name in ["images", "files"] {
+                        if case let .array(entries)? = fields["args"]?.objectFields?[name]?.objectFields?["value"] {
+                            found += entries
+                                .compactMap { entry in
+                                    (entry.stringValue ?? entry.objectFields?["asset"]?.stringValue)
+                                        .map(PrototypeBundleID.init)
+                                }
+                        }
+                    }
+                }
+                for (key, child) in fields
+                    where !["payload", "repeat", "data", "state"].contains(key) { found += shareAssets(child) }
+                return found
+            default: return []
+            }
+        }
+        images += shareAssets(json.value)
         var imageIDs = Set<PrototypeBundleID>()
         var fontIDs = Set<PrototypeBundleID>()
         images = images.filter { imageIDs.insert($0).inserted }

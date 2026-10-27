@@ -95,7 +95,15 @@ class PrototypeSpecCorpusTest {
             supported,
             library,
           )
-        } else PrototypeSpecValidator.validate(invalidSpec.getValue(file), supported, library)
+        } else
+          PrototypeSpecValidator.validate(
+            invalidSpec.getValue(file),
+            supported,
+            library,
+            (options?.get("shareAssetIds") as? JsonArray)
+              ?.map { it.jsonPrimitive.content }
+              ?.toSet(),
+          )
       assertTrue(result is PrototypeSpecValidation.Failure, result.toString())
       assertEquals(
         fixture.getValue("expectedPath").jsonPrimitive.content,
@@ -111,7 +119,9 @@ class PrototypeSpecCorpusTest {
             "lazy_list",
           )
           .any(file.name::contains)
-      if (messageCase && fixture.containsKey("expectedMessage")) {
+      if (
+        (messageCase || file.name.startsWith("share-")) && fixture.containsKey("expectedMessage")
+      ) {
         assertEquals(
           fixture.getValue("expectedMessage").jsonPrimitive.content,
           result.error.message,

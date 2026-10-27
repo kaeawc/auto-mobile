@@ -1,3 +1,4 @@
+import { prototypePlatformUses } from "./prototypePlatform";
 import { prototypeShaderUses } from "./prototypeShaders";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
 import { record } from "./prototypeTemplate";
@@ -49,6 +50,18 @@ export function collectPrototypeAssetReferences(spec: unknown): {
       addFont(record(span)?.style, fonts);
     }
   });
+  for (const use of prototypePlatformUses(spec))
+    if (use.kind === "call" && use.action.call === "share.open") {
+      const args = record(use.action.args);
+      for (const name of ["images", "files"]) {
+        const entries = record(args?.[name])?.value;
+        if (Array.isArray(entries))
+          for (const entry of entries) {
+            const id = typeof entry === "string" ? entry : record(entry)?.asset;
+            if (typeof id === "string") images.add(id);
+          }
+      }
+    }
   return { images, fonts, shaders };
 }
 /** Saved-layout mirroring also preserves cached IDs found in opaque JSON for dynamic uses. */

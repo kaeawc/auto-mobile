@@ -63,7 +63,10 @@
     "MAX_PROTOTYPE_STRING_LOCALES": 16,
     "MAX_PROTOTYPE_STRING_KEYS": 512,
     "MAX_PROTOTYPE_STRING_LENGTH": 2048,
-    "MAX_PROTOTYPE_LIST_ITEMS": 2000
+    "MAX_PROTOTYPE_LIST_ITEMS": 2000,
+    "MAX_PROTOTYPE_SHARE_TEXT_BYTES": 65536,
+    "MAX_PROTOTYPE_SHARE_IMAGES": 10,
+    "MAX_PROTOTYPE_SHARE_FILES": 4
   },
   "definitions": {
     "offset": {
@@ -18226,6 +18229,62 @@
           }
         }
       }
+    },
+    "share": {
+      "capability": "prototype_platform_share_v1",
+      "calls": {
+        "open": {
+          "args": {
+            "text": {
+              "optional": true,
+              "value": {
+                "kind": "json",
+                "maxBytes": 786432
+              }
+            },
+            "url": {
+              "optional": true,
+              "value": {
+                "kind": "json",
+                "maxBytes": 786432
+              }
+            },
+            "subject": {
+              "optional": true,
+              "value": {
+                "kind": "json",
+                "maxBytes": 786432
+              }
+            },
+            "images": {
+              "optional": true,
+              "value": {
+                "kind": "json",
+                "maxBytes": 786432
+              }
+            },
+            "files": {
+              "optional": true,
+              "value": {
+                "kind": "json",
+                "maxBytes": 786432
+              }
+            },
+            "contact": {
+              "optional": true,
+              "value": {
+                "kind": "json",
+                "maxBytes": 786432
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": true
+        }
+      },
+      "events": {},
+      "state": {}
     }
   },
   "platformNamespaces": {

@@ -56,6 +56,17 @@ internal object PrototypeBundleSpec {
         fonts,
       )
     }
+    for (use in PrototypePlatformUses.uses(spec, context)) if (
+      use is PrototypePlatformUses.Use.Call && text(use.action["call"]) == "share.open"
+    ) {
+      val args = use.action["args"] as? JsonObject ?: continue
+      for (name in listOf("images", "files")) {
+        val entries = (args[name] as? JsonObject)?.get("value") as? JsonArray ?: continue
+        for (entry in entries) (text(entry) ?: text((entry as? JsonObject)?.get("asset")))?.let(
+          images::add,
+        )
+      }
+    }
     return PrototypeBundleReferences(images, fonts, spec, context)
   }
 

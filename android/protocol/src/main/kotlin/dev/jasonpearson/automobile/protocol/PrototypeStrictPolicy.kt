@@ -10,6 +10,7 @@ internal object PrototypeStrictPolicy {
     supported: Set<String>?,
     library: Boolean,
     context: PrototypeStateChecks.Context,
+    shareAssetIds: Set<String>? = null,
   ): PrototypeSpecError? {
     if (supported != null && !supported.containsAll(required(spec))) {
       return PrototypeSpecError(
@@ -17,6 +18,19 @@ internal object PrototypeStrictPolicy {
         "Unsupported capabilities: " + (required(spec) - supported).sorted().joinToString(", "),
       )
     }
+    if (shareAssetIds != null)
+      for (use in PrototypePlatformUses.uses(spec, context)) {
+        if (use is PrototypePlatformUses.Use.Call && use.action.text("call") == "share.open") {
+          PrototypeShare.argumentsError(
+              use.action["args"] as? JsonObject ?: JsonObject(emptyMap()),
+              "${use.path}.args",
+              shareAssetIds,
+            )
+            ?.let {
+              return it
+            }
+        }
+      }
     if (library && "prototype_custom_shaders_v1" in required(spec))
       return PrototypeSpecError(
         "$",
@@ -49,11 +63,12 @@ internal object PrototypeStrictPolicy {
     val secure = secureStateKeys(scopes, context)
     if (secure.isEmpty()) return null
     val requests = context.actions.filter { it.value.text("type") == "request" }.map { it.path }
+    val shares = shareFields(context)
     val leaked =
-      requestFields(context)
+      (requestFields(context) + shares)
         .sortedBy { it.path }
         .firstOrNull { field ->
-          isSinkBinding(field, requests) && bindsSecure(field, scopes, secure)
+          (isSinkBinding(field, requests) || field in shares) && bindsSecure(field, scopes, secure)
         }
     if (leaked != null)
       return PrototypeSpecError(
@@ -94,6 +109,29 @@ internal object PrototypeStrictPolicy {
         )
           fields.add(Field(text, at, kind == PrototypeBindableKind.KEY))
         null
+      }
+    }
+    return fields
+  }
+
+  private fun shareFields(context: PrototypeStateChecks.Context): List<Field> {
+    val fields = mutableListOf<Field>()
+    fun collect(value: JsonElement, path: String) {
+      when (value) {
+        is JsonObject ->
+          for ((key, child) in value) collect(child, PrototypeValidationPaths.keyPath(path, key))
+        is JsonArray -> value.forEachIndexed { index, child -> collect(child, "$path[$index]") }
+        is JsonPrimitive -> if (value.isString) fields.add(Field(value.content, path, false))
+      }
+    }
+    for (action in context.actions) if (
+      action.value.text("call") == "share.open" && action.value.text("type") == "platform"
+    ) {
+      for ((name, raw) in (action.value["args"] as? JsonObject).orEmpty()) {
+        val form = raw as? JsonObject ?: continue
+        val at = PrototypeValidationPaths.keyPath("${action.path}.args", name)
+        form["value"]?.let { collect(it, "$at.value") }
+        form.text("state")?.let { fields.add(Field(it, "$at.state", true)) }
       }
     }
     return fields
@@ -276,6 +314,7 @@ internal object PrototypeStrictPolicy {
 
     private fun scanFields(fields: JsonObject, field: String) {
       val type = fields.text("type") ?: ""
+      if (type == "platform" && fields.text("call") == "share.open") need("platform_share")
       for ((key, child) in fields) {
         if (skipsScan(key, type)) continue
         if (key == "repeat") {
@@ -292,14 +331,14 @@ internal object PrototypeStrictPolicy {
     }
 
     private fun skipsScan(key: String, type: String): Boolean =
-      key == "payload" || (key == "value" && type !in listOf("setData", "appendData", "prependData"))
+      key == "payload" ||
+        (key == "value" && type !in listOf("setData", "appendData", "prependData"))
 
     // An effect's own `animate`, colours and params are not spec features of their own.
     private fun descend(key: String, child: JsonElement) {
       when {
         key == "linkify" -> (child as? JsonObject)?.get("onTap")?.let { scan(it, "onTap") }
-        key !in listOf("series", "effects", "scrollLinked", "scrollTransition") ->
-          scan(child, key)
+        key !in listOf("series", "effects", "scrollLinked", "scrollTransition") -> scan(child, key)
       }
     }
 
@@ -377,7 +416,9 @@ private object PrototypeMotionFeatures {
     ((child as? JsonObject)?.get("type") ?: child).let { (it as? JsonPrimitive)?.content }
 }
 
-/** The feature names a spec envelope (not its nodes) asks for, in the strict policy's vocabulary. */
+/**
+ * The feature names a spec envelope (not its nodes) asks for, in the strict policy's vocabulary.
+ */
 internal object PrototypeEnvelopeFeatures {
   fun collect(spec: JsonObject): List<String> = buildList {
     content(spec)

@@ -37,6 +37,7 @@ class AutoMobilePrototypeCapabilitiesTest {
   private val exclusions =
     setOf(
       "prototype_platform_test_v1",
+      "prototype_platform_share_v1", // Contract only; system share sheet runtime is owed.
       "prototype_backdrop_v1",
       "prototype_platform_namespace_v1",
     )

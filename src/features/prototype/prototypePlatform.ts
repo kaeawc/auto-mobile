@@ -1,3 +1,4 @@
+import { prototypeShareArgumentsError } from "./prototypeShare";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { PROTOTYPE_PLATFORM_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
@@ -343,6 +344,10 @@ function callError(
   const args = argumentsError(action, path, call.definition, check);
   if (args) {
     return args;
+  }
+  if (action.call === "share.open") {
+    const error = prototypeShareArgumentsError(record(action.args) ?? {}, `${path}.args`);
+    if (error) return error;
   }
   const into = typeof action.into === "string" ? intoError(action.into) : undefined;
   return into ? { path: `${path}.into`, message: into } : undefined;

@@ -1,3 +1,5 @@
+import { prototypeShareArgumentsError } from "./prototypeShare";
+import { prototypePlatformUses } from "./prototypePlatform";
 import { prototypeShaderFields } from "./prototypeShaders";
 import { object, type Located, type PrototypeValidationError } from "./prototypeBindingValidation";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
@@ -12,6 +14,8 @@ export interface PrototypeStrictOptions {
    */
   requiredCapabilities?: (spec: unknown) => readonly string[];
   library?: boolean;
+  /** Complete uploaded asset inventory, when statically known. */
+  shareAssetIds?: readonly string[];
 }
 
 /** Host/device capability negotiation and the additional unprivileged import boundary. */
@@ -28,6 +32,17 @@ export function prototypeStrictPolicyError(
       return { path: "$", message: `Unsupported capabilities: ${missing.join(", ")}` };
     }
   }
+  if (options.shareAssetIds !== undefined)
+    for (const use of prototypePlatformUses(spec)) {
+      if (use.kind === "call" && use.action.call === "share.open") {
+        const error = prototypeShareArgumentsError(
+          object(use.action.args) ?? {},
+          `${use.path}.args`,
+          new Set(options.shareAssetIds),
+        );
+        if (error) return error;
+      }
+    }
   const window = object(object(spec)?.window);
   if (options.library) {
     const shader = prototypeShaderFields(spec)[0];
@@ -83,6 +98,32 @@ function secureLibraryError(spec: unknown): PrototypeValidationError | undefined
       return raw;
     });
   }
+  const sharePaths = new Set<string>();
+  const shareStrings = (value: unknown, path: string): void => {
+    if (typeof value === "string") {
+      fields.push({ text: value, path, key: false });
+      sharePaths.add(path);
+    } else if (Array.isArray(value))
+      value.forEach((entry, index) => shareStrings(entry, `${path}[${index}]`));
+    else if (object(value))
+      for (const [key, entry] of Object.entries(object(value)!)) {
+        const at = /^[A-Za-z_][A-Za-z0-9_]*$/.test(key)
+          ? `${path}.${key}`
+          : `${path}[${JSON.stringify(key)}]`;
+        shareStrings(entry, at);
+      }
+  };
+  for (const use of prototypePlatformUses(spec))
+    if (use.kind === "call" && use.action.call === "share.open") {
+      for (const [name, binding] of Object.entries(object(use.action.args) ?? {})) {
+        const form = object(binding);
+        if (form && Object.hasOwn(form, "value"))
+          shareStrings(form.value, `${use.path}.args.${name}.value`);
+        if (typeof form?.state === "string") {
+          fields.push({ text: form.state, path: `${use.path}.args.${name}.state`, key: true });
+        }
+      }
+    }
   fields.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   const inRequest = (path: string) =>
     requests.some(
@@ -96,7 +137,9 @@ function secureLibraryError(spec: unknown): PrototypeValidationError | undefined
   const sinkFields = fields.filter(
     (field) =>
       // mapBinding visits only the state key of request/data/emit/platform value bindings.
-      (field.key && field.path.endsWith(".state")) || inRequest(field.path),
+      (field.key && field.path.endsWith(".state")) ||
+      inRequest(field.path) ||
+      sharePaths.has(field.path),
   );
   // Reuse the key binder for text too: repeat substitution has the same string grammar.
   const instances = repeatKeyInstances(

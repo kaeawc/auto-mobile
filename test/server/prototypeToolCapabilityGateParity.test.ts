@@ -315,6 +315,23 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     ios: { hover: "lift" },
     android: { indication: "none" },
   }),
+  prototype_platform_share_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["share"] },
+      root: {
+        ...base.root,
+        children: [
+          {
+            ...label,
+            onTap: [{ type: "platform", call: "share.open", args: { text: { value: "Hi" } } }],
+          },
+        ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
   prototype_platform_test_v1: {
     minimalSpec: {
       ...base,

@@ -12,7 +12,11 @@ import type {
 } from "./DeviceConditionController";
 import type { DeviceConditionKey } from "./DeviceConditionTypes";
 import { OwedResetError } from "./OwedResetError";
-import { rejectValue, shell, unsupported } from "./injectorSupport";
+import { createSerializer, rejectValue, shell, unsupported } from "./injectorSupport";
+import {
+  defaultDeviceTraits,
+  type DeviceTraits,
+} from "../../utils/android-cmdline-tools/deviceTraits";
 
 /**
  * Vehicle-state injectors for `deviceCondition.vehicle` (#14919): motion and night mode on an
@@ -69,12 +73,20 @@ function sameValue(a: string, b: string): boolean {
   return Number.parseFloat(a) === Number.parseFloat(b);
 }
 
-/** Why this device cannot take vehicle state, or undefined when it can. */
-function unsupportedReason(device: BootedDevice): string | undefined {
-  if (device.formFactor !== "automotive") {
+/**
+ * Why this device cannot take vehicle state, or undefined when it can. The build characteristics
+ * come from the device itself: a booted Android device carries no form factor of its own.
+ */
+async function unsupportedReason(
+  adb: AdbExecutor,
+  device: BootedDevice,
+  traits: DeviceTraits,
+): Promise<string | undefined> {
+  const read = await traits.read(adb, device.deviceId);
+  if (read.formFactor !== "automotive") {
     return "vehicle state needs an Android Automotive emulator, and this device is not one";
   }
-  if (!device.deviceId.startsWith("emulator-")) {
+  if (read.isEmulator !== true) {
     return "vehicle state is injected on emulators only; a physical head unit has no VHAL injection";
   }
   return undefined;
@@ -130,14 +142,18 @@ export function createVehicleStateInjector(
   key: VehicleStateKey,
   adb: AdbExecutor,
   device: BootedDevice,
+  traits: DeviceTraits = defaultDeviceTraits,
 ): DeviceConditionInjector {
   const access: VehiclePropertyAccess = createVehiclePropertyAccess(adb);
   const allowed = Object.keys(TARGETS[key]);
   let baseline: PropertyValues | undefined;
   /** What `isClean` compares against after a reset. */
   let expected: PropertyValues | undefined;
+  /** Apply and reset never interleave, so a lease-expiry restore cannot race a new apply. */
+  const serial = createSerializer();
 
-  const restore = async (signal?: AbortSignal): Promise<void> => {
+  const restore = (signal?: AbortSignal): Promise<void> => serial(() => restoreNow(signal));
+  const restoreNow = async (signal?: AbortSignal): Promise<void> => {
     const prior = baseline;
     if (prior === undefined) {
       return;
@@ -156,39 +172,59 @@ export function createVehicleStateInjector(
     return values;
   };
 
-  return {
-    key,
-    async apply(value, signal): Promise<DeviceConditionApplyOutcome> {
-      const target = TARGETS[key][value];
-      if (target === undefined) {
-        rejectValue(key, value, allowed);
+  const applyNow = async (
+    value: string,
+    signal?: AbortSignal,
+  ): Promise<DeviceConditionApplyOutcome> => {
+    const target = TARGETS[key][value];
+    if (target === undefined) {
+      rejectValue(key, value, allowed);
+    }
+    const reason = await unsupportedReason(adb, device, traits);
+    if (reason !== undefined) {
+      unsupported(reason);
+    }
+    const properties = Object.keys(target);
+    const current = await readAll(properties, signal);
+    const name = key.split(".")[1];
+    if (properties.every((property) => sameValue(current[property], target[property]))) {
+      // Already there: a reset is owed only if an earlier change still holds the baseline.
+      return {
+        status: "unchanged",
+        detail: `vehicle ${name} already ${value}`,
+        ...(baseline === undefined ? {} : { reset: restore }),
+      };
+    }
+    const priorBaseline = baseline;
+    baseline ??= current;
+    expected = baseline;
+    let wrote = false;
+    try {
+      for (const property of properties) {
+        await access.write(property, target[property], signal);
+        wrote = true;
       }
-      const reason = unsupportedReason(device);
-      if (reason !== undefined) {
-        unsupported(reason);
-      }
-      const properties = Object.keys(target);
-      const current = await readAll(properties, signal);
-      if (properties.every((property) => sameValue(current[property], target[property]))) {
-        return { status: "unchanged", detail: `vehicle ${key.split(".")[1]} already ${value}` };
-      }
-      const firstChange = baseline === undefined;
-      baseline ??= current;
-      expected = baseline;
-      try {
-        for (const property of properties) {
-          await access.write(property, target[property], signal);
-        }
-      } catch (error) {
+    } catch (error) {
+      if (wrote) {
         throw new OwedResetError(errorMessage(error), restore, { cause: error });
       }
-      const driving = await readDrivingState(adb, signal);
-      return {
-        status: "applied",
-        detail: `vehicle ${key.split(".")[1]} ${value}${driving ? ` (${driving})` : ""}`,
-        ...(firstChange ? { reset: restore } : {}),
-      };
-    },
+      // Nothing landed, so there is nothing to undo; do not owe a restore the device would also refuse.
+      baseline = priorBaseline;
+      throw error;
+    }
+    const driving = await readDrivingState(adb, signal);
+    return {
+      status: "applied",
+      detail: `vehicle ${name} ${value}${driving ? ` (${driving})` : ""}`,
+      // Every applied change hands back the same idempotent restore, so a controller that did
+      // not make the first change (another session, a sessionless call) still owes it.
+      reset: restore,
+    };
+  };
+
+  return {
+    key,
+    apply: (value, signal) => serial(() => applyNow(value, signal)),
     async isClean(signal): Promise<boolean> {
       if (expected === undefined) {
         return true;
@@ -205,6 +241,7 @@ export function createVehicleStateInjector(
 export interface VehicleStateInjectorDeps {
   adbFactory?: AdbClientFactory;
   cache?: Map<string, DeviceConditionInjector>;
+  traits?: DeviceTraits;
 }
 
 /** One injector per device and key, so every apply shares its baseline and registers a single reset. */
@@ -227,6 +264,7 @@ export function resolveVehicleStateInjector(
       key as VehicleStateKey,
       (deps.adbFactory ?? defaultAdbClientFactory).create(device),
       device,
+      deps.traits,
     );
     cache.set(cacheKey, injector);
   }

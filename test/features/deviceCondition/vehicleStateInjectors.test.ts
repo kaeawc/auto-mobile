@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import type { BootedDevice, ExecResult } from "../../../src/models";
+import type { DeviceTraits } from "../../../src/utils/android-cmdline-tools/deviceTraits";
 import { DeviceConditionController } from "../../../src/features/deviceCondition/DeviceConditionController";
 import {
   parsePropertyValue,
@@ -61,17 +62,35 @@ const automotive: BootedDevice = {
   name: "AAOS",
   platform: "android",
   deviceId: "emulator-5554",
-  formFactor: "automotive",
 };
+
+/** What `ro.build.characteristics` and `ro.kernel.qemu` say; a booted device carries no form factor. */
+function traitsOf(formFactor: "automotive" | null, isEmulator = true): DeviceTraits {
+  return {
+    read: () =>
+      Promise.resolve({
+        isEmulator,
+        model: null,
+        sdk: 34,
+        abi: null,
+        manufacturer: null,
+        brand: null,
+        skin: null,
+        formFactor,
+      }),
+  };
+}
 
 function injectorFor(
   device: BootedDevice,
   key: "vehicle.motion" | "vehicle.nightMode",
   adb: FakeAdbExecutor,
+  traits: DeviceTraits = traitsOf("automotive"),
 ) {
   const injector = resolveVehicleStateInjector(device, key, {
     adbFactory: { create: () => adb },
     cache: new Map(),
+    traits,
   });
   if (!injector) {
     throw new Error("no injector");
@@ -133,25 +152,29 @@ describe("vehicle state injectors (#14919)", () => {
 
   test("a phone is unsupported and issues no car service command", async () => {
     const car = vehicleAdb({ ...PARKED });
-    const phone: BootedDevice = { ...automotive, formFactor: "phone" };
-    await expect(injectorFor(phone, "vehicle.motion", car.adb).apply("driving")).rejects.toThrow(
-      /unsupported.*not one/,
-    );
+    await expect(
+      injectorFor(automotive, "vehicle.motion", car.adb, traitsOf(null)).apply("driving"),
+    ).rejects.toThrow(/unsupported.*not one/);
     expect(car.log).toEqual([]);
   });
 
   test("a physical head unit is unsupported", async () => {
     const car = vehicleAdb({ ...PARKED });
     const physical: BootedDevice = { ...automotive, deviceId: "R58M123ABC" };
-    await expect(injectorFor(physical, "vehicle.motion", car.adb).apply("parked")).rejects.toThrow(
-      /emulators only/,
-    );
+    const traits = traitsOf("automotive", false);
+    await expect(
+      injectorFor(physical, "vehicle.motion", car.adb, traits).apply("parked"),
+    ).rejects.toThrow(/emulators only/);
+    expect(car.log).toEqual([]);
   });
 
   test("an unreadable property fails closed before any write", async () => {
     const car = vehicleAdb({ ...PARKED });
-    car.props[GEAR] = "";
-    car.adb.execute = () => Promise.resolve(execResult("no value"));
+    const log: string[] = [];
+    car.adb.execute = (args) => {
+      log.push(args.join(" "));
+      return Promise.resolve(execResult("no value"));
+    };
     await expect(
       injectorFor(automotive, "vehicle.motion", car.adb).apply("driving"),
     ).rejects.toThrow(/could not read vehicle property/);
@@ -164,7 +187,43 @@ describe("vehicle state injectors (#14919)", () => {
     );
     const result = await controller.apply({ vehicle: { motion: "driving" } });
     expect(result.changes[0].status).toBe("unsupported");
+    // Nothing was written, so no restore is owed and release reads clean.
+    expect(controller.hasActiveConditions()).toBe(false);
+    expect((await controller.restore()).verifiedClean).toBe(true);
+  });
+
+  test("a failure after a write owes the restore, which puts the baseline back", async () => {
+    const car = vehicleAdb({ ...PARKED });
+    const real = car.adb.execute.bind(car.adb);
+    let injects = 0;
+    car.adb.execute = (args) => {
+      const command = args.join(" ");
+      if (command.includes("inject-vhal-event") && ++injects === 2) {
+        return Promise.resolve(execResult("Exception: boom"));
+      }
+      return real(args);
+    };
+    const controller = new DeviceConditionController(() =>
+      injectorFor(automotive, "vehicle.motion", car.adb),
+    );
+    const result = await controller.apply({ vehicle: { motion: "driving" } });
+    expect(result.changes[0].status).toBe("unsupported");
     expect(controller.hasActiveConditions()).toBe(true);
+    car.adb.execute = real;
+    expect((await controller.restore()).verifiedClean).toBe(true);
+    expect(car.props).toMatchObject({ [GEAR]: "4", [SPEED]: "0.0", [BRAKE]: "1" });
+  });
+
+  test("a second controller on the same injector owes the restore too", async () => {
+    const car = vehicleAdb({ ...PARKED });
+    const injector = injectorFor(automotive, "vehicle.motion", car.adb);
+    const sessionless = new DeviceConditionController(() => injector);
+    const session = new DeviceConditionController(() => injector);
+    await sessionless.apply({ vehicle: { motion: "driving" } });
+    await session.apply({ vehicle: { motion: "driving" } });
+    expect(session.hasActiveConditions()).toBe(true);
+    expect((await session.restore()).verifiedClean).toBe(true);
+    expect(car.props[GEAR]).toBe("4");
   });
 
   test("an invalid value is rejected", async () => {

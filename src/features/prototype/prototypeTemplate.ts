@@ -445,6 +445,10 @@ function mapNodeKeys(node: Raw, path: string, visit: FieldVisitor): void {
  */
 export function mapBindableFields(node: Raw, path: string, visit: FieldVisitor): Raw {
   const copy = { ...node };
+  mapObject(copy, "shared", path, (entry, entryPath) => {
+    mapField(entry, "key", entryPath, "operand", visit);
+    return entry;
+  });
   if (copy.type === "text") {
     mapField(copy, "text", path, "text", visit);
     mapObject(copy, "linkify", path, (options, optionsPath) => {

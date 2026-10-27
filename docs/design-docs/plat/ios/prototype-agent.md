@@ -404,14 +404,19 @@ transition as a real tap, including on part identifiers.
   `reduced`, never `off` (#15244; read through `PrototypeAccessibilityProviding`, faked in tests): `visibleWhen` transitions other than `none` become crossfades, container size, press
   scale and swipe-row settles snap, and progress indicators and shimmer rest, while alpha and color
   animations continue (`prototype_reduced_motion_v1`).
-- **Shared elements** (`prototype_shared_element_v1`, #15115): the two `visibleWhen` nodes sharing a
-  `sharedKey` use `matchedGeometryEffect(id:in:isSource:)` with one `@Namespace` per hosting root,
-  under `full` only; `PrototypeSharedElementPlan` decides per node. `reduced` crossfades the pair
-  and `off` swaps it. A pair split across hosting roots (for example a node anchored to another
-  window layer) does not match geometry.
-  The row-to-card spec in `prototype-ux.md` (Shared element morphs) is the worked example for both
-  platforms. Turning Reduce Motion on in the simulator (the `reduceMotion` display setting) gives
-  its crossfade; Android animation scales of 0 give the instant swap.
+- **Shared elements** (`prototype_shared_element_v1` and `prototype_shared_element_v2`):
+  `sharedKey` aliases `shared: {key, as: "bounds"}`; the object form and repeat templates require v2.
+  Two `visibleWhen` nodes use `matchedGeometryEffect(properties: .frame, isSource:)` in one
+  `@Namespace` per hosting root, under `full` only. `PrototypeSharedElementPlan` selects frame
+  matching for `element` and frame matching plus a crossfade for `bounds`. Both kinds crossfade
+  under `reduced` and swap under `off`. Repeat children bind `story-{item.id}` only with
+  `repeat.key: "id"`; resolved keys must be unique per side. Unmatched feed items render normally.
+  Pairs cannot nest or cross dialog/bottomSheet boundaries; a pair split across hosting roots
+  (for example an anchored window layer) does not match geometry.
+  The feed-card-to-detail-column spec in [Shared element morphs](../android/prototype-ux.md#shared-element-morphs-15115-prototype_shared_element_v1)
+  is the worked example for both platforms: the repeated card's `story-{item.id}` resolves to
+  the detail's `story-one`. Set both to `element` for identical hero content, or `bounds` for
+  changing container content. Reduce Motion gives a crossfade; `motion: "none"` gives an instant swap.
 
 ### Dismiss control
 

@@ -6,6 +6,12 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
+data class PrototypeShared(
+  val key: String,
+  val `as`: String,
+)
+
+@Serializable
 data class PrototypeShadowOffset(
   val x: Double,
   val y: Double,

@@ -33,6 +33,7 @@ internal object PrototypeBundleNodeCapabilities {
       if (used) caps.add("prototype_$name")
     }
     mark("shared_element_v1", "sharedKey" in n)
+    mark("shared_element_v2", "shared" in n)
     mark("flow_grid_v1", "span" in n)
     mark("gestures_v1", n.keys.any { it in setOf("onLongPress", "onDoubleTap") })
     mark("swipe_actions_v1", type in setOf("row", "listItem") && "swipeActions" in n)

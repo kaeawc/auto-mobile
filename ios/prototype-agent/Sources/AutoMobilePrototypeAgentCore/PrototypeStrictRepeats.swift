@@ -99,7 +99,7 @@ struct PrototypeStrictRepeats {
         guard let object = value.objectFields else { return }
         if object.count == 1, object["value"] != nil { return }
         for key in PrototypeContractValidator.sorted(object.keys) {
-            guard !["payload", "style"].contains(key), let child = object[key] else { continue }
+            guard !["payload", "style", "shared"].contains(key), let child = object[key] else { continue }
             let at = PrototypeContractValidator.keyPath(path, key)
             if let text = child.stringValue {
                 let keyField = ["stateKey", "activeKey", "hourKey", "minuteKey", "atEndKey", "statusKey", "state"]

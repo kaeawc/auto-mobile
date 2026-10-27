@@ -31,6 +31,7 @@ enum PrototypeBundleCapabilities {
             if PrototypeStylePolishV2.themedColors(node) { need("theme_modes") }
             if PrototypeStylePolishV2.required(node) { names.insert(PrototypeStylePolishV2.capability) }
             if node["sharedKey"] != nil { need("shared_element") }
+            if node["shared"] != nil { names.insert("prototype_shared_element_v2") }
             let type = node["type"]?.stringValue ?? ""
             let featureTypes = [
                 "flow": "flow_grid",

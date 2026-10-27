@@ -72,6 +72,7 @@ class CommandAdvertisementTest {
       "prototype_stack_transitions_v1",
       "prototype_reduced_motion_v1",
       "prototype_shared_element_v1",
+      "prototype_shared_element_v2",
       "prototype_chart_v1",
       "prototype_linkify_v1",
       "prototype_chat_scroll_v1",

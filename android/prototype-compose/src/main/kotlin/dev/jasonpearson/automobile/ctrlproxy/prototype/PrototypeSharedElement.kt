@@ -28,7 +28,7 @@ internal fun prototypeSharedConflicts(root: PrototypeRenderNode): Set<String> {
   val shown = HashMap<String, Int>()
   fun visit(node: PrototypeRenderNode) {
     if (!node.visible) return
-    node.source?.sharedKey?.let { shown.merge(it, 1, Int::plus) }
+    node.source?.resolvedSharedKey?.let { shown.merge(it, 1, Int::plus) }
     node.children.forEach(::visit)
   }
   visit(root)
@@ -59,7 +59,7 @@ internal fun PrototypeSharedRoot(root: PrototypeRenderNode, content: @Composable
 }
 
 private fun prototypeHasSharedKey(node: PrototypeNode): Boolean =
-  node.sharedKey != null || prototypeDescendants(node).any(::prototypeHasSharedKey)
+  node.resolvedSharedKey != null || prototypeDescendants(node).any(::prototypeHasSharedKey)
 
 /** sharedBounds crossfades differing content (row/card), while sharing its position and size. */
 @Composable
@@ -67,11 +67,15 @@ internal fun Modifier.prototypeSharedBounds(
   node: PrototypeRenderNode,
   visibility: AnimatedVisibilityScope,
 ): Modifier {
-  val key = node.source?.sharedKey ?: return this
+  val key = node.source?.resolvedSharedKey ?: return this
   val scope = LocalPrototypeSharedTransition.current ?: return this
   if (LocalPrototypeMotionProfile.current != PrototypeMotionProfile.FULL) return this
   if (key in LocalPrototypeSharedConflicts.current) return this
   return with(scope) {
-    sharedBounds(rememberSharedContentState(key), animatedVisibilityScope = visibility)
+    if (node.source.shared?.`as` == "element") {
+      sharedElement(rememberSharedContentState(key), animatedVisibilityScope = visibility)
+    } else {
+      sharedBounds(rememberSharedContentState(key), animatedVisibilityScope = visibility)
+    }
   }
 }

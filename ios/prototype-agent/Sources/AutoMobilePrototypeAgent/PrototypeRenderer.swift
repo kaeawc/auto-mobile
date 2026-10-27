@@ -211,17 +211,20 @@
         }
 
         @ViewBuilder private var sharedContent: some View {
-            let motion = PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
-            let plan = PrototypeSharedElementPlan(
-                node: node,
-                profile: motion.profile,
-                conflictingKeys: node.sharedKey == nil || !motion.spatial ? [] : sharedConflicts
-            )
+            let plan = sharedPlan
             if plan.apply, let key = plan.key, let sharedNamespace {
-                validatedContent.matchedGeometryEffect(id: key, in: sharedNamespace, isSource: isVisible)
+                validatedContent.matchedGeometryEffect(id: key, in: sharedNamespace, properties: .frame, isSource: isVisible)
             } else {
                 validatedContent
             }
+        }
+
+        private var sharedPlan: PrototypeSharedElementPlan {
+            let motion = PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
+            return PrototypeSharedElementPlan(
+                node: node, profile: motion.profile,
+                conflictingKeys: node.resolvedSharedKey == nil || !motion.spatial ? [] : sharedConflicts
+            )
         }
 
         private var sharedConflicts: Set<String> {
@@ -232,6 +235,8 @@
         private var visibilityTransition: AnyTransition {
             let motion = PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
             // Explicit transition animation fades filtered children even when parent layout snaps.
+            let plan = sharedPlan
+            if plan.apply { return plan.crossfade ? .opacity : .identity }
             return motion.fadeOnly && transition != .instant
                 ? transition.swiftUITransition.animation(.easeInOut(duration: 0.25))
                 : transition.swiftUITransition
@@ -278,7 +283,7 @@
             return node.visibleWhen == nil ? .instant : motion.visibility(
                 transition: node.transition,
                 nodeType: node.type,
-                shared: node.sharedKey != nil
+                shared: node.resolvedSharedKey != nil
             )
         }
 

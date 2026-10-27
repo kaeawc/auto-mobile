@@ -151,6 +151,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
   val onDoubleTap = onDoubleTap?.map { it.bound(instance) }
   val styleWhen = styleWhen?.map { PrototypeStyleWhen(it.`when`.bound(instance), it.style) }
   val visibleWhen = visibleWhen?.bound(instance)
+  val shared = shared?.let { it.copy(key = instance.interpolate(it.key)) }
   fun List<PrototypeNode>.bound() = map { it.bound(instance) }
   return when (this) {
     is PrototypeBoxNode ->
@@ -159,6 +160,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         onLongPress = onLongPress,
         onDoubleTap = onDoubleTap,
         styleWhen = styleWhen,
+        shared = shared,
         visibleWhen = visibleWhen,
         children = children.bound(),
       )
@@ -168,6 +170,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         onLongPress = onLongPress,
         onDoubleTap = onDoubleTap,
         styleWhen = styleWhen,
+        shared = shared,
         visibleWhen = visibleWhen,
         swipeActions = swipeActions?.bound(instance),
         children = children.bound(),
@@ -178,6 +181,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         onLongPress = onLongPress,
         onDoubleTap = onDoubleTap,
         styleWhen = styleWhen,
+        shared = shared,
         visibleWhen = visibleWhen,
         children = children.bound(),
       )
@@ -185,6 +189,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
+        shared = shared,
         visibleWhen = visibleWhen,
         children = children.bound(),
       )
@@ -192,6 +197,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
+        shared = shared,
         visibleWhen = visibleWhen,
         children = children.bound(),
       )
@@ -199,6 +205,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
+        shared = shared,
         visibleWhen = visibleWhen,
         children = children.bound(),
       )
@@ -206,6 +213,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
+        shared = shared,
         visibleWhen = visibleWhen,
         screens = screens.mapValues { (_, child) -> child.bound(instance) },
       )
@@ -213,6 +221,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
+        shared = shared,
         visibleWhen = visibleWhen,
         children = children.bound(),
       )
@@ -222,6 +231,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         onLongPress = onLongPress,
         onDoubleTap = onDoubleTap,
         styleWhen = styleWhen,
+        shared = shared,
         visibleWhen = visibleWhen,
         children = children.bound(),
       )
@@ -231,6 +241,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         onLongPress = onLongPress,
         onDoubleTap = onDoubleTap,
         styleWhen = styleWhen,
+        shared = shared,
         visibleWhen = visibleWhen,
         text = text?.let(instance::interpolate),
         linkify =
@@ -265,6 +276,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
+        shared = shared,
         visibleWhen = visibleWhen,
         refresh =
           refresh?.let {
@@ -279,6 +291,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
+        shared = shared,
         visibleWhen = visibleWhen,
         text = instance.interpolate(text),
         openWhen = openWhen.copy(key = instance.interpolate(openWhen.key)),
@@ -288,6 +301,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
+        shared = shared,
         visibleWhen = visibleWhen,
         openWhen = openWhen.copy(key = instance.interpolate(openWhen.key)),
         child = child.bound(instance),
@@ -296,6 +310,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
+        shared = shared,
         visibleWhen = visibleWhen,
         openWhen = openWhen.copy(key = instance.interpolate(openWhen.key)),
         child = child.bound(instance),
@@ -306,6 +321,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         onLongPress = onLongPress,
         onDoubleTap = onDoubleTap,
         styleWhen = styleWhen,
+        shared = shared,
         visibleWhen = visibleWhen,
       )
     is PrototypeIconNode ->
@@ -314,13 +330,16 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         onLongPress = onLongPress,
         onDoubleTap = onDoubleTap,
         styleWhen = styleWhen,
+        shared = shared,
         visibleWhen = visibleWhen,
       )
-    is PrototypeSpacerNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
+    is PrototypeSpacerNode ->
+      copy(onTap = onTap, styleWhen = styleWhen, shared = shared, visibleWhen = visibleWhen)
     is PrototypeSearchBarNode ->
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
+        shared = shared,
         visibleWhen = visibleWhen,
         stateKey = instance.interpolate(stateKey),
         activeKey = activeKey?.let(instance::interpolate),
@@ -337,6 +356,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,
         styleWhen = styleWhen,
+        shared = shared,
         visibleWhen = visibleWhen,
         stateKey = instance.interpolate(stateKey),
       )
@@ -344,6 +364,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
+        shared = shared,
         visibleWhen = visibleWhen,
         stateKey = stateKey?.let(instance::interpolate),
       )
@@ -351,6 +372,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
+        shared = shared,
         visibleWhen = visibleWhen,
         stateKey = stateKey?.let(instance::interpolate),
       )
@@ -360,6 +382,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,
         styleWhen = styleWhen,
+        shared = shared,
         visibleWhen = visibleWhen,
         stateKey = instance.interpolate(stateKey),
       )
@@ -369,6 +392,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,
         styleWhen = styleWhen,
+        shared = shared,
         visibleWhen = visibleWhen,
         stateKey = instance.interpolate(stateKey),
       )
@@ -377,6 +401,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,
         styleWhen = styleWhen,
+        shared = shared,
         visibleWhen = visibleWhen,
         label = instance.interpolate(label),
       )
@@ -386,6 +411,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,
         styleWhen = styleWhen,
+        shared = shared,
         visibleWhen = visibleWhen,
         stateKey = instance.interpolate(stateKey),
       )
@@ -394,6 +420,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,
         styleWhen = styleWhen,
+        shared = shared,
         visibleWhen = visibleWhen,
         stateKey = stateKey?.let(instance::interpolate),
       )
@@ -403,6 +430,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,
         styleWhen = styleWhen,
+        shared = shared,
         visibleWhen = visibleWhen,
         stateKey = instance.interpolate(stateKey),
       )
@@ -410,6 +438,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
+        shared = shared,
         visibleWhen = visibleWhen,
         stateKey = instance.interpolate(stateKey),
         label = label?.let(instance::interpolate),
@@ -419,6 +448,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
+        shared = shared,
         visibleWhen = visibleWhen,
         openWhen = openWhen.copy(key = instance.interpolate(openWhen.key)),
         items =
@@ -439,6 +469,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,
         styleWhen = styleWhen,
+        shared = shared,
         visibleWhen = visibleWhen,
         trailing = trailing?.bound(instance),
         swipeActions = swipeActions?.bound(instance),
@@ -447,6 +478,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
+        shared = shared,
         visibleWhen = visibleWhen,
         openWhen = openWhen.copy(key = instance.interpolate(openWhen.key)),
         title = title?.let(instance::interpolate),
@@ -460,6 +492,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,
         styleWhen = styleWhen,
+        shared = shared,
         visibleWhen = visibleWhen,
       )
     is PrototypeFabNode ->
@@ -467,6 +500,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,
         styleWhen = styleWhen,
+        shared = shared,
         visibleWhen = visibleWhen,
         label = label?.let(instance::interpolate),
       )
@@ -474,6 +508,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
+        shared = shared,
         visibleWhen = visibleWhen,
         options = options.map { it.copy(label = instance.interpolate(it.label)) },
         stateKey = instance.interpolate(stateKey),
@@ -482,17 +517,21 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
+        shared = shared,
         visibleWhen = visibleWhen,
         title = instance.interpolate(title),
         navigationIcon = navigationIcon?.bound(instance),
         actions = actions?.map { it.bound(instance) },
       )
-    is PrototypeDividerNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
-    is PrototypeBadgeNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
+    is PrototypeDividerNode ->
+      copy(onTap = onTap, styleWhen = styleWhen, shared = shared, visibleWhen = visibleWhen)
+    is PrototypeBadgeNode ->
+      copy(onTap = onTap, styleWhen = styleWhen, shared = shared, visibleWhen = visibleWhen)
     is PrototypeProgressNode ->
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
+        shared = shared,
         visibleWhen = visibleWhen,
         stateKey = stateKey?.let(instance::interpolate),
       )
@@ -500,6 +539,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
+        shared = shared,
         visibleWhen = visibleWhen,
         series = series.map { it.copy(path = instance.interpolate(it.path)) },
       )
@@ -507,6 +547,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
+        shared = shared,
         visibleWhen = visibleWhen,
         openWhen = openWhen.copy(key = instance.interpolate(openWhen.key)),
         text = instance.interpolate(text),
@@ -518,6 +559,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,
         styleWhen = styleWhen,
+        shared = shared,
         visibleWhen = visibleWhen,
         hourKey = instance.interpolate(hourKey),
         minuteKey = instance.interpolate(minuteKey),
@@ -528,6 +570,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,
         styleWhen = styleWhen,
+        shared = shared,
         visibleWhen = visibleWhen,
         stateKey = instance.interpolate(stateKey),
       )

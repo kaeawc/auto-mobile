@@ -540,6 +540,11 @@ internal object PrototypeBindableFields {
         ?: objects(node, "checks", path).firstNotNullOfOrNull { (entry, entryPath) ->
           visitor.field(entry, "message", entryPath, PrototypeBindableKind.TEXT)
         }
+        ?: visitor.visit(
+          (node["shared"] as? JsonObject)?.get("key"),
+          "$path.shared.key",
+          PrototypeBindableKind.OPERAND,
+        )
         ?: visitor.condition(node["visibleWhen"], "$path.visibleWhen")
         ?: objects(node, "styleWhen", path).firstNotNullOfOrNull { (entry, entryPath) ->
           visitor.condition(entry["when"], "$entryPath.when")

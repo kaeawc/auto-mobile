@@ -468,7 +468,7 @@ internal fun RenderPrototypeNode(
       prototypeVisibilityTransition(
         node.source.transition?.type.takeUnless { node.role == "stack" },
         LocalPrototypeMotionProfile.current,
-        shared = node.source.sharedKey != null,
+        shared = node.source.resolvedSharedKey != null,
       )
     // The row/column weight rides on the animated container: it is the Row/Column's direct child.
     AnimatedVisibility(
@@ -510,7 +510,7 @@ private fun nodeVisibilityTransition(node: PrototypeRenderNode): String? =
   prototypeVisibilityTransition(
     node.source?.transition?.type,
     LocalPrototypeMotionProfile.current,
-    shared = node.source?.sharedKey != null,
+    shared = node.source?.resolvedSharedKey != null,
   )
 
 @Composable

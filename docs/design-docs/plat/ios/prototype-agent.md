@@ -1161,4 +1161,25 @@ namespace objects on nodes, window and theme for native semantics. Each field ha
 Own-platform blocks require `prototype_platform_namespace_v1`; current renderers
 ignore both blocks and do not advertise it.
 
+## Icon effects
+
+`prototype_icon_effects_v1` is advertised on iOS 17 and later. Icon `effect`
+selects native SF Symbol effects through a pure type/version decision table:
+bounce, pulse, scale.up, variableColor and replace need 17; wiggle, rotate and
+breathe need 18 and fall back to bounce, none and pulse on 17; drawOn needs 26
+and otherwise uses replace. `trigger: {key}` or `{data}` replays on value changes;
+`repeat` is "infinite" or 1–20 and cannot coexist with trigger. Replace follows
+name changes. Reduced/off profiles rest; reduced replace uses a plain crossfade.
+The host reports fallback notes with node paths, using the discovered OS version
+when available. The shared validator charges repeated effects against the eight
+animated-effect budget, including expanded list instances.
+
+The iOS `hide_for_capture` hold removes repeated symbol modifiers, returning icons to
+rest until the last capture token releases or expires. Restoring restarts native
+repeats. Local `PrototypeIconMotionActivity` tracks mounted repeated effects and
+masks activity during capture; finite native repeats remain conservatively active
+until unmounted because SF Symbols provides no completion callback. iOS has no
+shared motion-active wire signal or shimmer reporter yet; this local signal is
+not exposed to the host, and captures that bypass `hide_for_capture` do not rest effects.
+
 Expressive motion, node `press`, and layout `animate` are Android only until #14684; the host refuses them against the iOS agent, which does not advertise `prototype_motion_v3`.

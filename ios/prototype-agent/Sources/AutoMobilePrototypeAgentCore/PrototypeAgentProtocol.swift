@@ -65,6 +65,7 @@ enum PrototypeAgentProtocol {
         stackCapability,
         stackTransitionsCapability,
         designPlatformCapability,
+        iconEffectsCapability,
         stackPatternsCapability,
         reducedMotionCapability,
         sharedElementCapability,
@@ -100,6 +101,8 @@ enum PrototypeAgentProtocol {
     static let designPlatformCapability = "prototype_design_platform_v1"
     static let stackPatternsCapability = "prototype_stack_patterns_v1"
     static let stackTransitionsCapability = "prototype_stack_transitions_v1"
+    /// Native SF Symbol effects on iOS 17 and later.
+    static let iconEffectsCapability = "prototype_icon_effects_v1"
     /// Reduced-motion profile: crossfades, loops at rest, no springs (#15115).
     static let reducedMotionCapability = "prototype_reduced_motion_v1"
     /// `sharedKey` morphs between `visibleWhen` swaps via matchedGeometryEffect (#15115).

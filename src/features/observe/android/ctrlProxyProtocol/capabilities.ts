@@ -123,6 +123,8 @@ export const PROTOTYPE_MEDIA_ITEMS_CAPABILITY = "prototype_platform_media_items_
 export const PROTOTYPE_MOTION_V3_CAPABILITY = "prototype_motion_v3";
 export const PROTOTYPE_WINDOW_MOTION_CAPABILITY = "prototype_window_motion_v1";
 export const PROTOTYPE_MOTION_V2_CAPABILITY = "prototype_motion_v2";
+/** Icon symbol effects with triggers and bounded or infinite repeats. */
+export const PROTOTYPE_ICON_EFFECTS_CAPABILITY = "prototype_icon_effects_v1";
 /** Transition `delayMs`, container `stagger` and the `blurReplace` transition (#15247). */
 export const PROTOTYPE_CHOREOGRAPHY_CAPABILITY = "prototype_choreography_v1";
 /** Draws `style.effects`: closed, paint-only looks such as noise, glow and blur (#15128). */

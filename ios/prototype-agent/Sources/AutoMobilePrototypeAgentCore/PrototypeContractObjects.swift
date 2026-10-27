@@ -44,6 +44,10 @@ extension PrototypeContractValidator {
         if let first = exclusive.first, exclusive.filter({ data[$0] != nil }).count != 1 {
             throw invalid(keyPath(path, first), "Exactly one container selector is required")
         }
+        let atMostOne = strings(rule["atMostOne"])
+        if let first = atMostOne.first, atMostOne.filter({ data[$0] != nil }).count > 1 {
+            throw invalid(keyPath(path, first), "At most one of \(atMostOne.joined(separator: ", ")) is allowed")
+        }
         let exactlyOne = strings(rule["exactlyOne"])
         if let first = exactlyOne.first, exactlyOne.filter({ data[$0] != nil }).count != 1 {
             throw invalid(

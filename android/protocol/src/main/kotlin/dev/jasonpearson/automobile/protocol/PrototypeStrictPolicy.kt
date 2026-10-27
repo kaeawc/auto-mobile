@@ -340,6 +340,7 @@ internal object PrototypeStrictPolicy {
           .getValue("variants")
           .jsonObject
       if (type in nodeTypes && ("ios" in fields || "android" in fields)) need("platform_namespace")
+      iconEffectNeeds(type, fields).forEach(::need)
       typeFeatures[type]?.let(::need)
       for ((feature, keys) in typeFieldFeatures[type].orEmpty()) {
         if (keys.any { fields[it] != null }) need(feature)
@@ -435,4 +436,16 @@ internal object PrototypeEnvelopeFeatures {
     val colors = (spec["theme"] as? JsonObject)?.get("colors") as? JsonObject
     if (colors?.get("light") != null || colors?.get("dark") != null) add("theme_modes")
   }
+}
+
+/**
+ * The capabilities an icon's `effect` asks for: the effect itself and `data_model` for a data
+ * trigger.
+ */
+private fun iconEffectNeeds(type: String, fields: JsonObject): List<String> {
+  val effect = fields["effect"] as? JsonObject
+  if (type != "icon" || effect == null) return emptyList()
+  val trigger = effect["trigger"] as? JsonObject
+  return if (trigger?.containsKey("data") == true) listOf("icon_effects", "data_model")
+  else listOf("icon_effects")
 }

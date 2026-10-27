@@ -115,6 +115,13 @@ internal object PrototypeObjectRules {
     rule: JsonObject,
     path: String,
   ): PrototypeSpecError? {
+    val atMostOne = (rule["atMostOne"] as? JsonArray)?.map { it.jsonPrimitive.content }
+    if (atMostOne != null && atMostOne.count { data.containsKey(it) } > 1) {
+      return fail(
+        keyPath(path, atMostOne.first()),
+        "At most one of ${atMostOne.joinToString(", ")} is allowed",
+      )
+    }
     val exactlyOne = (rule["exactlyOne"] as? JsonArray)?.map { it.jsonPrimitive.content }
     if (exactlyOne != null && exactlyOne.count { data.containsKey(it) } != 1) {
       return fail(

@@ -22,6 +22,19 @@ data class PrototypeRequestUploadPart(
 )
 
 @Serializable
+data class PrototypeIconEffectTrigger(
+  val key: String? = null,
+  val data: String? = null,
+)
+
+@Serializable
+data class PrototypeIconEffect(
+  val type: String,
+  val trigger: PrototypeIconEffectTrigger? = null,
+  val repeat: PrototypeIconEffectRepeat? = null,
+)
+
+@Serializable
 data class PrototypePress(
   val scale: Double? = null,
   val alpha: Double? = null,
@@ -574,6 +587,7 @@ data class PrototypeIconNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  val effect: PrototypeIconEffect? = null,
   val name: String,
   /** One of filled (default), outlined, rounded, sharp, twoTone; closed by the contract. */
   val variant: String? = null,

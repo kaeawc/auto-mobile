@@ -13,6 +13,17 @@ struct RequestUploadPart: Codable, Equatable, Sendable {
     let contentType: String?
 }
 
+struct IconEffectTrigger: Codable, Equatable, Sendable {
+    let key: String?
+    let data: String?
+}
+
+struct IconEffect: Codable, Equatable, Sendable {
+    let type: String
+    let trigger: IconEffectTrigger?
+    let `repeat`: PrototypeIconEffectRepeat?
+}
+
 struct PrototypePress: Decodable, Equatable, Sendable {
     let scale: Double?
     let alpha: Double?

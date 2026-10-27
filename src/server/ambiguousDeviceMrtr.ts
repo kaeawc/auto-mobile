@@ -6,13 +6,25 @@ import {
 import { createHash } from "node:crypto";
 import { stableStringify } from "../utils/stableStringify";
 import { deviceChoiceRequestStateSchema } from "./deviceChoiceRequestState";
-import { declaresFormElicitation } from "./ambiguousDeviceElicitation";
+import { ambiguousDeviceCandidates, declaresFormElicitation } from "./ambiguousDeviceElicitation";
+import {
+  classifyElicitationDeclaration,
+  defaultElicitationRecorder,
+  type ElicitationRecorder,
+} from "./elicitationOutcome";
 import { executeWithDeviceChoice } from "./ambiguousDeviceChoice";
-import type { McpToolCallExtra, ToolCallBackend, ToolCallRequest } from "./toolCallDispatch";
+import { defaultTimer } from "../utils/SystemTimer";
+import type {
+  McpToolCallExtra,
+  ToolCall,
+  ToolCallBackend,
+  ToolCallRequest,
+} from "./toolCallDispatch";
 
 /** Modern requests ask in-band; only the signing key survives the HTTP exchange. */
 export function withAmbiguousDeviceMrtr<Req extends ToolCallRequest, Result>(
   backend: ToolCallBackend<Req, McpToolCallExtra, Result>,
+  recorder: ElicitationRecorder = defaultElicitationRecorder,
 ): ToolCallBackend<Req, McpToolCallExtra, Result | InputRequiredResult> {
   return {
     ...backend,
@@ -21,7 +33,12 @@ export function withAmbiguousDeviceMrtr<Req extends ToolCallRequest, Result>(
         call.args.deviceId !== undefined ||
         !declaresFormElicitation(call.extra.envelope?.[CLIENT_CAPABILITIES_META_KEY])
       ) {
-        return backend.execute(call);
+        const result = await backend.execute(call);
+        const candidates = call.args.deviceId === undefined && ambiguousDeviceCandidates(result);
+        if (candidates) {
+          recordNotOffered(recorder, call, candidates.length);
+        }
+        return result;
       }
       const argumentsWithoutDevice = { ...call.args };
       delete argumentsWithoutDevice.deviceId;
@@ -61,7 +78,28 @@ export function withAmbiguousDeviceMrtr<Req extends ToolCallRequest, Result>(
             }),
           };
         },
+        {
+          recorder,
+          declared: classifyElicitationDeclaration(
+            call.extra.envelope?.[CLIENT_CAPABILITIES_META_KEY],
+          ),
+        },
       );
     },
   };
+}
+
+function recordNotOffered(
+  recorder: ElicitationRecorder,
+  call: ToolCall<McpToolCallExtra>,
+  candidateCount: number,
+): void {
+  recorder.record({
+    toolName: call.name,
+    era: "modern",
+    declared: classifyElicitationDeclaration(call.extra.envelope?.[CLIENT_CAPABILITIES_META_KEY]),
+    outcome: "not_offered",
+    candidateCount,
+    atMs: defaultTimer.now(),
+  });
 }

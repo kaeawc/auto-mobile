@@ -256,6 +256,12 @@ function conditionFields(value: unknown, path: string, fields: Set<string>): voi
   }
 }
 
+function addIconEffectTriggerField(node: Raw, path: string, fields: Set<string>): void {
+  if (node.type === "icon" && record(record(node.effect)?.trigger)?.data !== undefined) {
+    fields.add(`${path}.effect.trigger.data`);
+  }
+}
+
 function usesAtNode(node: Raw, path: string): Set<string> {
   const fields = new Set<string>();
   const repeat = record(node.repeat);
@@ -274,6 +280,7 @@ function usesAtNode(node: Raw, path: string): Set<string> {
     }
     return value;
   });
+  addIconEffectTriggerField(node, path, fields);
   // A `{data: "/pointer"}` image binding reads /data like any other pointer (#14192).
   if (node.type === "image" && typeof record(node.asset)?.data === "string") {
     fields.add(`${path}.asset`);

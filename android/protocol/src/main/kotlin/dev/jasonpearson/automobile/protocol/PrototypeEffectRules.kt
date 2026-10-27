@@ -36,8 +36,11 @@ internal object PrototypeEffectRules {
     val styles =
       listOf(node["style"]) +
         (node["styleWhen"] as? JsonArray).orEmpty().map { (it as? JsonObject)?.get("style") }
+    val repeatedIcon =
+      node["type"]?.jsonPrimitive?.content == "icon" &&
+        (node["effect"] as? JsonObject)?.containsKey("repeat") == true
     var total = 0
-    var animated = 0
+    var animated = if (repeatedIcon) 1 else 0
     for (style in styles) {
       val effects =
         ((style as? JsonObject)?.get("effects") as? JsonArray).orEmpty().take(maxPerList)

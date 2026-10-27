@@ -12,6 +12,7 @@ export interface Rule {
   exactlyOne?: string[];
   exactlyOneAtObject?: boolean;
   preferMatchingFields?: boolean;
+  atMostOne?: string[];
   dependents?: Record<string, string[]>;
   integer?: boolean;
   min?: number;

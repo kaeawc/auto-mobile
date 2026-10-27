@@ -279,6 +279,18 @@ accessibility zoom actions; it cannot also have \`onDoubleTap\`. Everything snap
 \`motion: "none"\` or Android animator/transition scale 0. In the reduced profile spatial changes
 snap or crossfade; color and alpha still animate. The iOS agent does not support Motion v2 yet (#14684).
 
+## Icon effects
+
+(needs \`prototype_icon_effects_v1\`, iOS 17+) An icon accepts \`effect: {type, trigger?, repeat?}\`.
+Types: bounce, pulse, scale, variableColor, wiggle, rotate, breathe, replace, drawOn.
+Use \`trigger: {key: "flag"}\` or \`{data: "/revision"}\` for one play per value change;
+omit both controls for one play on appearance. \`repeat\` is \`"infinite"\` or 1–20 and
+cannot coexist with trigger. Repeats count as loops and share the eight animated-effect budget.
+Scale holds while its trigger is truthy; replace follows icon name changes. Reduced/off rest,
+except reduced replace crossfades. Android approximates effects with scale/alpha/rotation and
+crossfades. iOS 17 uses bounce for wiggle, none for rotate and pulse for breathe; drawOn needs
+26 and otherwise uses replace. \`platformNotes\` reports approximations/fallbacks with node paths.
+
 ${GUIDE_MOTION_V3}
 
 ## Choreography

@@ -192,6 +192,12 @@ import {
 } from "./prototypePlatformNamespace";
 
 import {
+  prototypeIconEffectFields,
+  prototypeIconEffectsUnsupportedMessage,
+} from "./prototypeIconEffects";
+import { PROTOTYPE_ICON_EFFECTS_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+
+import {
   prototypeMediaItemFields,
   prototypeMediaItemsUnsupportedMessage,
 } from "./prototypeMediaItems";
@@ -220,6 +226,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     fields: (spec) => (record(record(spec)?.theme)?.design === "platform" ? ["theme.design"] : []),
     unsupportedMessage: (_fields, platform) =>
       `The connected ${platform} renderer does not advertise ${PROTOTYPE_DESIGN_PLATFORM_CAPABILITY}. Update the renderer or use theme.design: "material". Nothing was shown.`,
+  },
+  {
+    capability: PROTOTYPE_ICON_EFFECTS_CAPABILITY,
+    fields: prototypeIconEffectFields,
+    unsupportedMessage: prototypeIconEffectsUnsupportedMessage,
   },
   {
     capability: PROTOTYPE_MOTION_V3_CAPABILITY,

@@ -9,6 +9,13 @@ import { AMBIGUOUS_DEVICE_TARGET_CODE } from "../daemon/ambiguousDeviceTargetRef
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import {
+  classifyElicitationDeclaration,
+  defaultElicitationRecorder,
+  type ElicitationDeclared,
+  type ElicitationOutcome,
+  type ElicitationRecorder,
+} from "./elicitationOutcome";
 import type { ToolCall, ToolCallBackend, ToolCallExtra, ToolCallRequest } from "./toolCallDispatch";
 
 /**
@@ -21,6 +28,8 @@ export const AMBIGUOUS_DEVICE_ELICITATION_TIMEOUT_MS = 20_000;
 export interface AmbiguousDeviceElicitationOptions {
   readonly timer?: Timer;
   readonly timeoutMs?: number;
+  /** Where each ambiguous-device refusal and its outcome is recorded (#15588). */
+  readonly recorder?: ElicitationRecorder;
 }
 
 interface DeviceCandidate {
@@ -31,6 +40,8 @@ interface DeviceCandidate {
 /** What one connection offers: whether it can be asked, and the ask itself. */
 export interface DeviceChoicePeer {
   declaresElicitation(): boolean;
+  /** What the client declared; derived from {@link declaresElicitation} when a peer omits it. */
+  declaration?(): ElicitationDeclared;
   elicit(params: ElicitRequestFormParams, signal: AbortSignal): Promise<ElicitResult>;
 }
 
@@ -60,6 +71,10 @@ export function deviceChoicePeerFor(server: McpServer, ctx: ServerContext): Devi
     declaresElicitation: () =>
       ctx.mcpReq.envelope === undefined &&
       declaresFormElicitation(server.server.getClientCapabilities()),
+    declaration: () =>
+      ctx.mcpReq.envelope === undefined
+        ? classifyElicitationDeclaration(server.server.getClientCapabilities())
+        : "none",
     elicit: (params, signal) =>
       server.server.request({ method: "elicitation/create", params }, { signal }),
   };
@@ -143,39 +158,70 @@ function acceptedDeviceId(
     : undefined;
 }
 
+export interface DeviceChoiceAnswer {
+  /** Present only for an accepted choice that names an offered device. */
+  readonly deviceId?: string;
+  readonly outcome: Extract<
+    ElicitationOutcome,
+    "accept" | "decline" | "cancel" | "timeout" | "invalid" | "error"
+  >;
+}
+
+function answerOutcome(
+  result: ElicitResult,
+  candidates: readonly DeviceCandidate[],
+): DeviceChoiceAnswer {
+  if (result.action !== "accept") {
+    return { outcome: result.action };
+  }
+  const deviceId = acceptedDeviceId(result, candidates);
+  return deviceId === undefined ? { outcome: "invalid" } : { outcome: "accept", deviceId };
+}
+
 /**
- * Asks the client which device to use, bounded by `timeoutMs` on the injected timer. Returns the
- * chosen deviceId, or undefined for decline, cancel, timeout, a refused ask or a cancelled call:
- * the caller then returns the original typed refusal unchanged.
+ * Asks the client which device to use, bounded by `timeoutMs` on the injected timer. The answer
+ * carries the chosen deviceId only for an accepted, offered choice; for decline, cancel, timeout,
+ * a refused ask or a cancelled call the caller returns the original typed refusal unchanged.
  */
+export async function askDeviceChoice(
+  peer: DeviceChoicePeer,
+  toolName: string,
+  candidates: readonly DeviceCandidate[],
+  options: { timer: Timer; timeoutMs: number; callSignal: AbortSignal },
+): Promise<DeviceChoiceAnswer> {
+  const asking = new AbortController();
+  let timedOut = false;
+  const stopAsking = () => asking.abort();
+  options.callSignal.addEventListener("abort", stopAsking, { once: true });
+  const deadline = options.timer.setTimeout(() => {
+    timedOut = true;
+    stopAsking();
+  }, options.timeoutMs);
+  try {
+    const result = await peer.elicit(deviceChoiceRequest(toolName, candidates), asking.signal);
+    return answerOutcome(result, candidates);
+  } catch (error) {
+    if (asking.signal.aborted) {
+      // Timeout or a cancelled call is the expected unattended outcome, not a failure.
+      logger.debug(`device choice for ${toolName} not answered: ${errorMessage(error)}`);
+      return { outcome: timedOut ? "timeout" : "cancel" };
+    }
+    logger.warn(`device choice elicitation for ${toolName} failed: ${errorMessage(error)}`, error);
+    return { outcome: "error" };
+  } finally {
+    options.timer.clearTimeout(deadline);
+    options.callSignal.removeEventListener("abort", stopAsking);
+  }
+}
+
+/** {@link askDeviceChoice} reduced to the chosen deviceId, or undefined for any other outcome. */
 export async function elicitDeviceChoice(
   peer: DeviceChoicePeer,
   toolName: string,
   candidates: readonly DeviceCandidate[],
   options: { timer: Timer; timeoutMs: number; callSignal: AbortSignal },
 ): Promise<string | undefined> {
-  const asking = new AbortController();
-  const stopAsking = () => asking.abort();
-  options.callSignal.addEventListener("abort", stopAsking, { once: true });
-  const deadline = options.timer.setTimeout(stopAsking, options.timeoutMs);
-  try {
-    const result = await peer.elicit(deviceChoiceRequest(toolName, candidates), asking.signal);
-    return acceptedDeviceId(result, candidates);
-  } catch (error) {
-    if (asking.signal.aborted) {
-      // Timeout or a cancelled call is the expected unattended outcome, not a failure.
-      logger.debug(`device choice for ${toolName} not answered: ${errorMessage(error)}`);
-    } else {
-      logger.warn(
-        `device choice elicitation for ${toolName} failed: ${errorMessage(error)}`,
-        error,
-      );
-    }
-    return undefined;
-  } finally {
-    options.timer.clearTimeout(deadline);
-    options.callSignal.removeEventListener("abort", stopAsking);
-  }
+  return (await askDeviceChoice(peer, toolName, candidates, options)).deviceId;
 }
 
 /**
@@ -194,25 +240,46 @@ export function withAmbiguousDeviceElicitation<
 ): ToolCallBackend<Req, Extra, Result> {
   const timer = options.timer ?? defaultTimer;
   const timeoutMs = options.timeoutMs ?? AMBIGUOUS_DEVICE_ELICITATION_TIMEOUT_MS;
+  const recorder = options.recorder ?? defaultElicitationRecorder;
+  const declarationOf = (): ElicitationDeclared =>
+    peer.declaration?.() ?? (peer.declaresElicitation() ? "form" : "none");
   return {
     ...backend,
     execute: async (call: ToolCall<Extra>) => {
       const result = await backend.execute(call);
-      if (call.args.deviceId !== undefined || !peer.declaresElicitation()) {
+      if (call.args.deviceId !== undefined) {
         return result;
       }
       const candidates = ambiguousDeviceCandidates(result);
       if (!candidates) {
         return result;
       }
-      const deviceId = await elicitDeviceChoice(peer, call.name, candidates, {
+      const base = {
+        toolName: call.name,
+        era: "legacy",
+        declared: declarationOf(),
+        candidateCount: candidates.length,
+      } as const;
+      if (!peer.declaresElicitation()) {
+        recorder.record({ ...base, outcome: "not_offered", atMs: timer.now() });
+        return result;
+      }
+      const started = timer.now();
+      const answer = await askDeviceChoice(peer, call.name, candidates, {
         timer,
         timeoutMs,
         callSignal: call.extra.signal,
       });
-      return deviceId === undefined
+      const finished = timer.now();
+      recorder.record({
+        ...base,
+        outcome: answer.outcome,
+        atMs: finished,
+        latencyMs: finished - started,
+      });
+      return answer.deviceId === undefined
         ? result
-        : backend.execute({ ...call, args: { ...call.args, deviceId } });
+        : backend.execute({ ...call, args: { ...call.args, deviceId: answer.deviceId } });
     },
   };
 }

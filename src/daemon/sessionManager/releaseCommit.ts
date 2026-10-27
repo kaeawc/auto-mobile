@@ -58,6 +58,7 @@ export interface SessionReleaseCommitHost {
     snapshot: SessionReleaseSnapshot,
     reason: ReleaseReasonState,
     session: Session,
+    afterCommit?: boolean,
   ): Promise<{ snapshot: SessionReleaseSnapshot; persisted: boolean }>;
   scheduleTerminalReleaseRetry(snapshot: SessionReleaseSnapshot): void;
   abandonReleaseSupersededAfterPersist(
@@ -116,6 +117,7 @@ export interface SessionReleaseCommitHost {
     snapshot: SessionReleaseSnapshot,
     reason: ReleaseReasonState,
     session: Session,
+    afterCommit?: boolean,
   ): Promise<SessionReleaseSnapshot>;
   readonly volatileTerminalReleaseIntents: Map<string, string>;
   liftTerminalFence(
@@ -196,6 +198,7 @@ export class SessionReleaseCommit {
       this.host.judgeOwnerLeaseForRelease(session, reason, "commit", operation);
       const releaseReason = reason.value;
       const terminalFenceHeldBefore = this.host.sessionSlots.hasTerminalSnapshot(sessionId);
+      const priorFence = this.host.sessionSlots.getTerminalSnapshot(sessionId);
       let releaseSnapshot: SessionReleaseSnapshot = {
         sessionId,
         deviceId,
@@ -256,6 +259,9 @@ export class SessionReleaseCommit {
       // session keeps routing; nothing was written for it.
       if (releaseSuperseded(shouldCommit)) {
         operation!.commitDeclined = true;
+        if (terminalIntent === "durable") {
+          this.restorePriorFence(releaseSnapshot, priorFence);
+        }
         return await this.host.abandonReleaseSupersededAfterPersist(
           session,
           releaseSnapshot,
@@ -266,8 +272,15 @@ export class SessionReleaseCommit {
       }
       const owedReasons = this.host.superseded.reasonsOwedTo(session);
       if (!this.host.commitReleaseRemoval(sessionId, session, deviceId, pendingCleanup)) {
-        if (releaseSnapshot.terminal && !terminalFenceHeldBefore) {
-          this.host.liftTerminalFence(sessionId);
+        if (terminalIntent === "durable") {
+          // Ownership changed: lift only the fence this release raised, never a newer session's.
+          if (!terminalFenceHeldBefore) {
+            if (this.host.sessionSlots.getTerminalSnapshot(sessionId) === releaseSnapshot) {
+              this.host.liftTerminalFence(sessionId, releaseSnapshot);
+            }
+          } else {
+            this.restorePriorFence(releaseSnapshot, priorFence);
+          }
         }
         return null;
       }
@@ -437,9 +450,18 @@ export class SessionReleaseCommit {
     snapshot: SessionReleaseSnapshot,
     reason: ReleaseReasonState,
     session: Session,
+    afterCommit = false,
   ): Promise<SessionReleaseSnapshot> {
     await this.host.persistTerminalReleaseIfNeeded(snapshot);
     if (reason.value === snapshot.releaseReason) {
+      return snapshot;
+    }
+    // The session is gone: a mint or re-creation may have lifted the fence while the first row was
+    // in flight, and the upgraded write must not raise it again over the next incarnation.
+    if (
+      afterCommit &&
+      this.host.sessionSlots.getTerminalSnapshot(snapshot.sessionId) !== snapshot
+    ) {
       return snapshot;
     }
     const upgradedSnapshot = this.host.withReleaseReason(snapshot, reason.value, session);
@@ -458,10 +480,16 @@ export class SessionReleaseCommit {
     snapshot: SessionReleaseSnapshot,
     reason: ReleaseReasonState,
     session: Session,
+    afterCommit = false,
   ): Promise<{ snapshot: SessionReleaseSnapshot; persisted: boolean }> {
     try {
       return {
-        snapshot: await this.host.persistTerminalReleaseWithUpgrade(snapshot, reason, session),
+        snapshot: await this.host.persistTerminalReleaseWithUpgrade(
+          snapshot,
+          reason,
+          session,
+          afterCommit,
+        ),
         persisted: true,
       };
     } catch (error) {
@@ -497,7 +525,7 @@ export class SessionReleaseCommit {
     session: Session,
   ): Promise<{ snapshot: SessionReleaseSnapshot; persisted: boolean; error?: unknown }> {
     try {
-      return await this.host.persistTerminalReleaseWithinDeadline(snapshot, reason, session);
+      return await this.host.persistTerminalReleaseWithinDeadline(snapshot, reason, session, true);
     } catch (error) {
       const fenced = this.host.sessionSlots.getTerminalSnapshot(snapshot.sessionId) ?? snapshot;
       logger.warn(
@@ -508,6 +536,24 @@ export class SessionReleaseCommit {
       this.host.scheduleTerminalReleaseRetry(fenced);
       return { snapshot: fenced, persisted: false, error };
     }
+  }
+
+  /**
+   * A release that raised a fence over an earlier one and then did not commit gives the earlier
+   * fence back: the earlier release's row is the one still owed, and this release wrote none.
+   * Its own journal intent is resolved unless it names the same reason as the earlier one.
+   */
+  private restorePriorFence(
+    ours: SessionReleaseSnapshot,
+    prior: SessionReleaseSnapshot | undefined,
+  ): void {
+    if (!prior || this.host.sessionSlots.getTerminalSnapshot(ours.sessionId) !== ours) {
+      return;
+    }
+    if (prior.releaseReason !== ours.releaseReason) {
+      this.host.liftTerminalFence(ours.sessionId, ours, true);
+    }
+    this.host.sessionSlots.setTerminalSnapshot(ours.sessionId, prior);
   }
 
   abandonSupersededRelease(

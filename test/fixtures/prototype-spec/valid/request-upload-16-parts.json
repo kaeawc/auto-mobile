@@ -1,0 +1,123 @@
+{
+  "id": "request-upload",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "progress": 0,
+    "caption": "hello"
+  },
+  "root": {
+    "type": "button",
+    "label": "Upload",
+    "onTap": [
+      {
+        "type": "request",
+        "method": "POST",
+        "url": "https://example.com/upload",
+        "body": {
+          "multipart": [
+            {
+              "name": "part0",
+              "value": {
+                "value": "a"
+              }
+            },
+            {
+              "name": "part1",
+              "value": {
+                "value": "a"
+              }
+            },
+            {
+              "name": "part2",
+              "value": {
+                "value": "a"
+              }
+            },
+            {
+              "name": "part3",
+              "value": {
+                "value": "a"
+              }
+            },
+            {
+              "name": "part4",
+              "value": {
+                "value": "a"
+              }
+            },
+            {
+              "name": "part5",
+              "value": {
+                "value": "a"
+              }
+            },
+            {
+              "name": "part6",
+              "value": {
+                "value": "a"
+              }
+            },
+            {
+              "name": "part7",
+              "value": {
+                "value": "a"
+              }
+            },
+            {
+              "name": "part8",
+              "value": {
+                "value": "a"
+              }
+            },
+            {
+              "name": "part9",
+              "value": {
+                "value": "a"
+              }
+            },
+            {
+              "name": "part10",
+              "value": {
+                "value": "a"
+              }
+            },
+            {
+              "name": "part11",
+              "value": {
+                "value": "a"
+              }
+            },
+            {
+              "name": "part12",
+              "value": {
+                "value": "a"
+              }
+            },
+            {
+              "name": "part13",
+              "value": {
+                "value": "a"
+              }
+            },
+            {
+              "name": "part14",
+              "value": {
+                "value": "a"
+              }
+            },
+            {
+              "name": "part15",
+              "value": {
+                "value": "a"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

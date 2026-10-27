@@ -20446,7 +20446,92 @@
                               }
                             },
                             "body": {
-                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/14/properties/headers/additionalProperties/anyOf/1"
+                              "anyOf": [
+                                {
+                                  "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/14/properties/headers/additionalProperties/anyOf/1"
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "multipart": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "name": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 256,
+                                            "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F\"]+$(?![\\s\\S])"
+                                          },
+                                          "value": {
+                                            "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/14/properties/headers/additionalProperties/anyOf/1"
+                                          },
+                                          "file": {
+                                            "type": "object",
+                                            "properties": {
+                                              "asset": {
+                                                "type": "string",
+                                                "minLength": 1,
+                                                "maxLength": 256
+                                              }
+                                            },
+                                            "required": ["asset"],
+                                            "additionalProperties": false
+                                          },
+                                          "filename": {
+                                            "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/14/properties/body/anyOf/1/properties/multipart/items/properties/name"
+                                          },
+                                          "contentType": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 256,
+                                            "pattern": "^[!#$%&'*+.^_`|~0-9A-Za-z-]+\\/[!#$%&'*+.^_`|~0-9A-Za-z-]+$(?![\\s\\S])"
+                                          }
+                                        },
+                                        "required": ["name"],
+                                        "additionalProperties": false
+                                      },
+                                      "minItems": 1,
+                                      "maxItems": 16
+                                    }
+                                  },
+                                  "required": ["multipart"],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "form": {
+                                      "type": "object",
+                                      "additionalProperties": {
+                                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/14/properties/headers/additionalProperties/anyOf/1"
+                                      },
+                                      "propertyNames": {
+                                        "minLength": 1
+                                      }
+                                    }
+                                  },
+                                  "required": ["form"],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "file": {
+                                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/14/properties/body/anyOf/1/properties/multipart/items/properties/file"
+                                    },
+                                    "contentType": {
+                                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/14/properties/body/anyOf/1/properties/multipart/items/properties/contentType"
+                                    }
+                                  },
+                                  "required": ["file", "contentType"],
+                                  "additionalProperties": false
+                                }
+                              ]
+                            },
+                            "progressKey": {
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
                             },
                             "into": {
                               "type": "string",

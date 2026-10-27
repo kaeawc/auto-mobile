@@ -32,6 +32,8 @@ final class PrototypeContractPatternsTests: XCTestCase {
     func testBlankTextPattern() throws { try assertPattern("blankText") }
     func testNumberTokenPattern() throws { try assertPattern("numberToken") }
     func testPointerPattern() throws { try assertPattern("pointer") }
+    func testUploadDispositionPattern() throws { try assertPattern("uploadDisposition") }
+    func testUploadContentTypePattern() throws { try assertPattern("uploadContentType") }
 
     private func assertPattern(_ name: String, file: StaticString = #filePath, line: UInt = #line) throws {
         let cases = try XCTUnwrap(fixtures()[name], file: file, line: line)

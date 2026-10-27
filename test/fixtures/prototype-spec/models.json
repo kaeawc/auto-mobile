@@ -886,8 +886,10 @@
       "q": "search"
     },
     "body": {
-      "value": {
-        "name": "A"
+      "form": {
+        "name": {
+          "value": "A"
+        }
       }
     },
     "into": "/data/response",
@@ -909,7 +911,8 @@
     "append": {
       "from": "/items",
       "to": "/data/items"
-    }
+    },
+    "progressKey": "count"
   },
   "actionEmitFilled": {
     "type": "emit",
@@ -962,5 +965,16 @@
         "screen": "home"
       }
     ]
+  },
+  "requestUploadFile": {
+    "asset": "hero"
+  },
+  "requestUploadPart": {
+    "name": "photo",
+    "file": {
+      "asset": "hero"
+    },
+    "filename": "photo.png",
+    "contentType": "image/png"
   }
 }

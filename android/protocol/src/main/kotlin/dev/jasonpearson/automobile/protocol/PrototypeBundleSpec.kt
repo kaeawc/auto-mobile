@@ -56,6 +56,9 @@ internal object PrototypeBundleSpec {
         fonts,
       )
     }
+    for (action in context.actions) {
+      if (text(action.value["type"]) == "request") addUploadAssets(action.value["body"], images)
+    }
     return PrototypeBundleReferences(images, fonts, spec, context)
   }
 
@@ -64,6 +67,14 @@ internal object PrototypeBundleSpec {
     (spec["root"] as? JsonObject)
       ?.let { PrototypePatchNodes.tree(it, emptyList(), "root").map { entry -> entry.node } }
       .orEmpty()
+
+  private fun addUploadAssets(value: JsonElement?, images: MutableSet<String>) {
+    val body = value as? JsonObject ?: return
+    val files =
+      listOf(body["file"]) +
+        (body["multipart"] as? JsonArray).orEmpty().map { (it as? JsonObject)?.get("file") }
+    for (file in files) text((file as? JsonObject)?.get("asset"))?.let { images.add(it) }
+  }
 
   private val REPEAT_PLACEHOLDER = Regex("""\{[^{}]+\}""")
 

@@ -8,6 +8,20 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 
 @Serializable
+data class PrototypeRequestUploadFile(
+  val asset: String,
+)
+
+@Serializable
+data class PrototypeRequestUploadPart(
+  val name: String,
+  val value: kotlinx.serialization.json.JsonObject? = null,
+  val file: PrototypeRequestUploadFile? = null,
+  val filename: String? = null,
+  val contentType: String? = null,
+)
+
+@Serializable
 data class PrototypeChannel(
   val kind: String,
   val url: String,
@@ -238,6 +252,7 @@ data class PrototypeRequestAction(
   val onSuccess: List<PrototypeAction>? = null,
   val onError: List<PrototypeAction>? = null,
   val append: PrototypeRequestAppend? = null,
+  val progressKey: String? = null,
 ) : PrototypeAction()
 
 /**

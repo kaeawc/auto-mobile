@@ -257,6 +257,10 @@ export function prototypeRequestStatusKeyError(
   at: string,
   state: Record<string, unknown>,
 ): PrototypeRequestActionError | undefined {
+  const progress = prototypeRequestProgressKeyError(action, at, state);
+  if (progress) {
+    return progress;
+  }
   const key =
     action.type === "request" || action.type === "platform" ? action.statusKey : undefined;
   if (typeof key !== "string") {
@@ -268,6 +272,31 @@ export function prototypeRequestStatusKeyError(
   return typeof state[key] === "string"
     ? undefined
     : { path: `${at}.statusKey`, message: "statusKey requires a string state key" };
+}
+
+function prototypeRequestProgressKeyError(
+  action: Record<string, unknown>,
+  at: string,
+  state: Record<string, unknown>,
+): PrototypeRequestActionError | undefined {
+  if (action.type !== "request" || typeof action.progressKey !== "string") {
+    return undefined;
+  }
+  const body = typeof action.body === "object" && action.body !== null ? action.body : undefined;
+  if (!body || !["multipart", "form", "file"].some((key) => Object.hasOwn(body, key))) {
+    return { path: `${at}.progressKey`, message: "progressKey requires an upload body" };
+  }
+  const value = state[action.progressKey];
+  return Object.hasOwn(state, action.progressKey) &&
+    typeof value === "number" &&
+    Number.isFinite(value) &&
+    value >= 0 &&
+    value <= 100
+    ? undefined
+    : {
+        path: `${at}.progressKey`,
+        message: "progressKey requires a declared number state key from 0 to 100",
+      };
 }
 
 export interface ResolvedPrototypeRequest {

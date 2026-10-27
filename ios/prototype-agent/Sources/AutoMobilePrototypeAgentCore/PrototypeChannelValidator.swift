@@ -46,7 +46,13 @@ enum PrototypeChannelValidator {
         }
     }
 
-    private static func validateChannel(_ id: String, _ channel: [String: JSONValue], state: [String: JSONValue]) throws {
+    private static func validateChannel(
+        _ id: String,
+        _ channel: [String: JSONValue],
+        state: [String: JSONValue]
+    )
+        throws
+    {
         let at = PrototypeLimits.dataMemberPath("channels", key: id)
         guard id.range(of: "^[A-Za-z0-9_]+$", options: .regularExpression) != nil else {
             throw fail(at, "A channel id is letters, digits and underscores")
@@ -54,7 +60,8 @@ enum PrototypeChannelValidator {
         let kind = channel["kind"]?.stringValue
         if let url = channel["url"]?.stringValue, let message = urlError(kind, url) { throw fail("\(at).url", message) }
         if let protocols = channel["protocols"] {
-            guard kind == "websocket" else { throw fail("\(at).protocols", "protocols apply to websocket channels only") }
+            guard kind == "websocket"
+            else { throw fail("\(at).protocols", "protocols apply to websocket channels only") }
             if case let .array(items) = protocols {
                 for (index, item) in items.enumerated() {
                     guard let text = item.stringValue,
@@ -118,7 +125,9 @@ enum PrototypeChannelValidator {
                 try refused(route["actions"], at: "\(routeAt).actions")
             }
         }
-        for hook in hooks { try refused(channel[hook], at: "\(at).\(hook)") }
+        for hook in hooks {
+            try refused(channel[hook], at: "\(at).\(hook)")
+        }
     }
 
     /// The first refused action in `actions` or the follow-up lists nested in them.

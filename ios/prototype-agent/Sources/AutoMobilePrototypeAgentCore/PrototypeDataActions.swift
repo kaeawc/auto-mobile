@@ -125,7 +125,13 @@ enum PrototypeDataWrite {
         if let refusal = targetRefusal(current, tokens: tokens, existing: existing, op: operation, path: path) {
             return .failure(refusal)
         }
-        guard case let .object(next)? = mutate(.object(current), tokens: tokens[...], op: operation, value: value, options: options)
+        guard case let .object(next)? = mutate(
+            .object(current),
+            tokens: tokens[...],
+            op: operation,
+            value: value,
+            options: options
+        )
         else {
             return fail(.notFound, "\(path): the target cannot be written")
         }
@@ -194,7 +200,13 @@ enum PrototypeDataWrite {
         var fields = original
         let key = PrototypeDataPointer.exactKey(token, in: fields).map { fields[$0].key }
         if last {
-            guard let written = leaf(fields[key ?? token], present: key != nil, op: operation, value: value, options: options) else {
+            guard let written = leaf(
+                fields[key ?? token],
+                present: key != nil,
+                op: operation,
+                value: value,
+                options: options
+            ) else {
                 return nil
             }
             fields.removeValue(forKey: key ?? token)
@@ -229,7 +241,8 @@ enum PrototypeDataWrite {
         case var .array(items):
             guard let index = PrototypeDataPointer.arrayIndex(token), items.indices.contains(index) else { return nil }
             if last {
-                guard let written = leaf(items[index], present: true, op: operation, value: value, options: options) else { return nil }
+                guard let written = leaf(items[index], present: true, op: operation, value: value, options: options)
+                else { return nil }
                 if let written { items[index] = written } else { items.remove(at: index) }
             } else {
                 guard let next = mutate(

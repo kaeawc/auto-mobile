@@ -572,7 +572,8 @@ struct PrototypeAction: Decodable, Sendable {
     let maxItems: Int?
 
     private enum CodingKeys: String, CodingKey {
-        case type, name, payload, context, pager, page, stack, screen, transition, path, key, value, call, args, maxItems
+        case type, name, payload, context, pager, page, stack, screen, transition, path, key, value, call, args,
+             maxItems
         case id, afterMs, everyMs, maxRuns, actions
         case incrementAmount = "by"
         case requireValid, method, url, headers, query, body, into, statusKey, via, timeoutMs, onSuccess, onError

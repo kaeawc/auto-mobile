@@ -95,8 +95,10 @@ test("channel selectors require own declarations and preserve an authored __prot
 
 // Shared fixtures assert the same acceptance boundary and exact errors in all three validators.
 const reviewFixtures = new URL("../../fixtures/prototype-spec/", import.meta.url);
-for (const name of readdirSync(new URL("invalid/", reviewFixtures)).filter((name) =>
-  name.startsWith("realtime-review-"),
+for (const name of readdirSync(new URL("invalid/", reviewFixtures)).filter(
+  (name) =>
+    name.startsWith("realtime-review-") ||
+    (name.startsWith("strict-library-") && name.includes("channel")),
 )) {
   const fixture = JSON.parse(readFileSync(new URL(`invalid/${name}`, reviewFixtures), "utf8"));
   test(`review parity ${name}`, () => {

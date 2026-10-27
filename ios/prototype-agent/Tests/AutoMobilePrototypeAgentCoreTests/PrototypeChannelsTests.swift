@@ -53,7 +53,8 @@ final class PrototypeChannelsTests: XCTestCase {
         let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
             .filter {
                 $0.lastPathComponent.hasPrefix("realtime-") || $0.lastPathComponent
-                    .hasPrefix("strict-gate-prototype_platform_realtime")
+                    .hasPrefix("strict-gate-prototype_platform_realtime") ||
+                    ($0.lastPathComponent.hasPrefix("strict-library-") && $0.lastPathComponent.contains("channel"))
             }
         XCTAssertFalse(files.isEmpty)
         for (index, file) in files.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }).enumerated()

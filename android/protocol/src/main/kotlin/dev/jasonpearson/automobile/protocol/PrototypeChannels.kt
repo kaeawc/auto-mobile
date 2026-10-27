@@ -36,6 +36,17 @@ internal object PrototypeChannels {
       val websocket = channel.text("kind") == "websocket"
       if (websocket && !raw.startsWith("ws:", true) && !raw.startsWith("wss:", true))
         return fail("$at.url", "A websocket channel url must use ws or wss")
+      // Check the authored scheme before the request parser normalizes control
+      // characters/backslashes.
+      val schemes = if (websocket) listOf("ws", "wss") else listOf("http", "https")
+      if (schemes.none { raw.startsWith("$it://", ignoreCase = true) }) {
+        val name = if (websocket) "websocket channel" else "request"
+        val message =
+          if ('{' in raw)
+            "A templated $name url must start with a literal ${schemes.joinToString(" or ") { "$it://" }}"
+          else "A $name url must be an absolute ${schemes.joinToString(" or ")} URL"
+        return fail("$at.url", message)
+      }
       val url =
         if (websocket) raw.replaceFirst(Regex("^ws(s?):", RegexOption.IGNORE_CASE), "http$1:")
         else raw

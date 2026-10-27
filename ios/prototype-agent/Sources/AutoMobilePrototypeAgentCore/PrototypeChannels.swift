@@ -34,6 +34,16 @@ enum PrototypeChannels {
             if websocket, !lower.hasPrefix("ws:"), !lower.hasPrefix("wss:") {
                 throw fail("\(at).url", "A websocket channel url must use ws or wss")
             }
+            // Check the authored scheme before the request parser normalizes control characters/backslashes.
+            let schemes = websocket ? ["ws", "wss"] : ["http", "https"]
+            guard schemes.contains(where: { lower.hasPrefix("\($0)://") }) else {
+                let name = websocket ? "websocket channel" : "request"
+                let message = raw.contains("{")
+                    ?
+                    "A templated \(name) url must start with a literal \(schemes.map { "\($0)://" }.joined(separator: " or "))"
+                    : "A \(name) url must be an absolute \(schemes.joined(separator: " or ")) URL"
+                throw fail("\(at).url", message)
+            }
             let url = websocket ? (lower.hasPrefix("wss:") ? "https:" + raw.dropFirst(4) : "http:" + raw.dropFirst(3)) :
                 raw
             if websocket {

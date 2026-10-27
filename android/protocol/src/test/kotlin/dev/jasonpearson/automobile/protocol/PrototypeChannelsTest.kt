@@ -63,7 +63,8 @@ class PrototypeChannelsTest {
       .listFiles()!!
       .filter {
         it.name.startsWith("realtime-") ||
-          it.name.startsWith("strict-gate-prototype_platform_realtime")
+          it.name.startsWith("strict-gate-prototype_platform_realtime") ||
+          (it.name.startsWith("strict-library-") && it.name.contains("channel"))
       }
       .map { file ->
         val fixture = Json.parseToJsonElement(file.readText()).jsonObject

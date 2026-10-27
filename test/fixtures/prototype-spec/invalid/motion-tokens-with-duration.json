@@ -1,0 +1,20 @@
+{
+  "spec": {
+    "id": "tokens",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Hello",
+      "animate": {
+        "tempo": "fast",
+        "durationMs": 300
+      }
+    }
+  },
+  "expectedPath": "root.animate.tempo",
+  "expectedMessage": "tempo cannot be combined with durationMs or easing"
+}

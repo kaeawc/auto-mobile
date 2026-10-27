@@ -174,6 +174,7 @@ enum PrototypeStrictCapabilities {
                 if key == "empty" || key == "shimmer" { need("loading_states") }
                 if key == "effects" { need("effects") }
                 if key == "keyframes" { need("keyframes") }
+                if key == "animate", child.objectFields?["tempo"] != nil { need("motion_tokens") }
                 let transitionType = child.objectFields?["type"]?.stringValue ?? child.stringValue ?? ""
                 if ["animate", "scale", "rotation", "zoomable"]
                     .contains(key) ||

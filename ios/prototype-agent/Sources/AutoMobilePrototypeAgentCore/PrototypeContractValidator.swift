@@ -4,6 +4,7 @@ import Foundation
 /// Cross-node and host environment checks remain the host's responsibility.
 struct PrototypeContractValidator {
     private struct Contract: Decodable {
+        let motionTokens: [String: [String: [String: PrototypeMotionToken]]]
         let patterns: [String: String]
         let stringFields: [String]
         let stringOpaqueFields: [String]
@@ -16,6 +17,13 @@ struct PrototypeContractValidator {
     private static let contract = try? JSONDecoder().decode(
         Contract.self, from: Data(prototypeSpecContractData.utf8)
     )
+    static func motionToken(scheme: String, role: String, tempo: String) -> PrototypeMotionToken {
+        guard let token = contract?.motionTokens[scheme]?[role]?[tempo] else {
+            preconditionFailure("Embedded motion token is unavailable")
+        }
+        return token
+    }
+
     static var platformModules: [String: JSONValue] {
         guard let contract else { preconditionFailure("Embedded structural contract is unavailable") }
         return contract.platformModules

@@ -55,6 +55,7 @@ final class PrototypeThemeModesTests: XCTestCase {
             "prototype_search_bar_v1",
             "prototype_rich_text_v1",
             "prototype_linkify_v1",
+            "prototype_content_transition_v1",
             "prototype_menus_v1",
             "prototype_tooltip_v1",
             "prototype_drawer_v1",

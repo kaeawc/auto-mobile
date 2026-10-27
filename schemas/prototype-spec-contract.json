@@ -14862,7 +14862,7 @@
         "ios": {
           "rule": {
             "kind": "ref",
-            "name": "iosNamespace"
+            "name": "iosPresentationNamespace"
           },
           "optional": true
         },
@@ -17656,7 +17656,7 @@
         "ios": {
           "rule": {
             "kind": "ref",
-            "name": "iosNamespace"
+            "name": "iosPresentationNamespace"
           },
           "optional": true
         },
@@ -19885,6 +19885,91 @@
       "kind": "enum",
       "values": ["start", "end"]
     },
+    "iosPresentationNamespace": {
+      "kind": "object",
+      "fields": {
+        "buttonStyle": {
+          "rule": {
+            "kind": "enum",
+            "values": ["glass", "glassProminent"]
+          },
+          "optional": true
+        },
+        "tab": {
+          "rule": {
+            "kind": "object",
+            "fields": {
+              "role": {
+                "rule": {
+                  "kind": "enum",
+                  "values": ["search"]
+                },
+                "optional": false
+              }
+            }
+          },
+          "optional": true
+        },
+        "sheet": {
+          "rule": {
+            "kind": "object",
+            "fields": {
+              "sizing": {
+                "rule": {
+                  "kind": "enum",
+                  "values": ["form", "page", "fitted"]
+                },
+                "optional": false
+              }
+            }
+          },
+          "optional": true
+        },
+        "hover": {
+          "rule": {
+            "kind": "enum",
+            "values": ["lift", "highlight"]
+          },
+          "optional": true
+        },
+        "navigationTitle": {
+          "rule": {
+            "kind": "enum",
+            "values": ["large", "inline"]
+          },
+          "optional": true
+        },
+        "glassGroup": {
+          "rule": {
+            "kind": "ref",
+            "name": "glassGroup"
+          },
+          "optional": true
+        },
+        "glassUnion": {
+          "rule": {
+            "kind": "string",
+            "max": 64,
+            "pattern": "stateKey"
+          },
+          "optional": true
+        },
+        "glassTransition": {
+          "rule": {
+            "kind": "enum",
+            "values": ["matchedGeometry", "materialize", "identity"]
+          },
+          "optional": true
+        },
+        "backgroundExtension": {
+          "rule": {
+            "kind": "enum",
+            "values": [true]
+          },
+          "optional": true
+        }
+      }
+    },
     "iosNamespace": {
       "kind": "object",
       "fields": {
@@ -19893,6 +19978,10 @@
             "kind": "enum",
             "values": ["glass", "glassProminent"]
           },
+          "optional": true
+        },
+        "bottomAccessory": {
+          "rule": { "kind": "ref", "name": "node" },
           "optional": true
         },
         "tab": {
@@ -21209,6 +21298,10 @@
     "ios": {
       "buttonStyle": {
         "why": "Native iOS glass button treatments have no portable renderer equivalent.",
+        "requires": "prototype_platform_namespace_v1"
+      },
+      "bottomAccessory": {
+        "why": "The iOS tab bar bottom accessory has no Android navigation equivalent.",
         "requires": "prototype_platform_namespace_v1"
       },
       "tab.role": {

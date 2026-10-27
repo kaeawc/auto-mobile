@@ -4885,6 +4885,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "keyframes",
         "type": "json",
         "nullable": true,
@@ -5015,6 +5021,12 @@
       {
         "name": "ios",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       },
@@ -5173,6 +5185,12 @@
       {
         "name": "ios",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       },
@@ -5373,6 +5391,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "keyframes",
         "type": "json",
         "nullable": true,
@@ -5515,6 +5539,12 @@
       {
         "name": "ios",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       },
@@ -5691,6 +5721,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "keyframes",
         "type": "json",
         "nullable": true,
@@ -5827,6 +5863,12 @@
       {
         "name": "ios",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       },
@@ -5989,6 +6031,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "keyframes",
         "type": "json",
         "nullable": true,
@@ -6147,6 +6195,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "keyframes",
         "type": "json",
         "nullable": true,
@@ -6301,6 +6355,12 @@
       {
         "name": "ios",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       },
@@ -6469,6 +6529,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "keyframes",
         "type": "json",
         "nullable": true,
@@ -6611,6 +6677,12 @@
       {
         "name": "ios",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       },
@@ -7493,6 +7565,28 @@
         "hasDefault": true
       }
     ],
+    "dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace": [
+      {
+        "name": "predictiveBack",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespacePredictiveBack",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "indication",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespacePredictiveBack": [
+      {
+        "name": "style",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      }
+    ],
     "dev.jasonpearson.automobile.protocol.PrototypeAnimate": [
       {
         "name": "durationMs",
@@ -8121,6 +8215,12 @@
       {
         "name": "buttonStyle",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "bottomAccessory",
+        "type": "polymorphic",
         "nullable": true,
         "hasDefault": true
       },
@@ -10047,6 +10147,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "keyframes",
         "type": "json",
         "nullable": true,
@@ -10217,6 +10323,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "keyframes",
         "type": "json",
         "nullable": true,
@@ -10347,6 +10459,12 @@
       {
         "name": "ios",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       },
@@ -10555,6 +10673,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "keyframes",
         "type": "json",
         "nullable": true,
@@ -10721,6 +10845,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "keyframes",
         "type": "json",
         "nullable": true,
@@ -10871,6 +11001,12 @@
       {
         "name": "ios",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       },
@@ -11033,6 +11169,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "keyframes",
         "type": "json",
         "nullable": true,
@@ -11175,6 +11317,12 @@
       {
         "name": "ios",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       },
@@ -11333,6 +11481,12 @@
       {
         "name": "ios",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       },
@@ -11513,6 +11667,12 @@
       {
         "name": "ios",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       },
@@ -11711,6 +11871,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "keyframes",
         "type": "json",
         "nullable": true,
@@ -11875,6 +12041,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "keyframes",
         "type": "json",
         "nullable": true,
@@ -12011,6 +12183,12 @@
       {
         "name": "ios",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       },
@@ -12187,6 +12365,12 @@
       {
         "name": "ios",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       }
@@ -12393,6 +12577,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "keyframes",
         "type": "json",
         "nullable": true,
@@ -12575,6 +12765,12 @@
       {
         "name": "ios",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       },
@@ -12869,6 +13065,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "keyframes",
         "type": "json",
         "nullable": true,
@@ -13017,6 +13219,12 @@
       {
         "name": "ios",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       },
@@ -13223,6 +13431,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "keyframes",
         "type": "json",
         "nullable": true,
@@ -13399,6 +13613,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "keyframes",
         "type": "json",
         "nullable": true,
@@ -13535,6 +13755,12 @@
       {
         "name": "ios",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       },
@@ -13755,6 +13981,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "keyframes",
         "type": "json",
         "nullable": true,
@@ -13931,6 +14163,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "keyframes",
         "type": "json",
         "nullable": true,
@@ -14083,6 +14321,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "keyframes",
         "type": "json",
         "nullable": true,
@@ -14207,6 +14451,12 @@
       {
         "name": "ios",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       },
@@ -14397,6 +14647,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "keyframes",
         "type": "json",
         "nullable": true,
@@ -14573,6 +14829,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "keyframes",
         "type": "json",
         "nullable": true,
@@ -14721,6 +14983,12 @@
       {
         "name": "ios",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       },
@@ -14973,6 +15241,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "keyframes",
         "type": "json",
         "nullable": true,
@@ -15145,6 +15419,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "keyframes",
         "type": "json",
         "nullable": true,
@@ -15305,6 +15585,12 @@
       {
         "name": "ios",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       },

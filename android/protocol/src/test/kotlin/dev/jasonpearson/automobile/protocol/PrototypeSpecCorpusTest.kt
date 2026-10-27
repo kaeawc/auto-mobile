@@ -218,9 +218,8 @@ class PrototypeSpecCorpusTest {
       assertEquals(type in gestureTypes, "onLongPress" in fields, type)
       assertEquals(type in gestureTypes, "onDoubleTap" in fields, type)
     }
-    // Android fields remain contract-only. Foreign iOS glass metadata is retained so
-    // group-scoped shared IDs survive typed round trips, without being rendered.
-    val stripped = setOf("android")
+    // Android namespaces render; foreign glass metadata survives typed round trips.
+    val stripped = emptySet<String>()
     for ((type, variant) in variants) {
       assertEquals(
         variant.jsonObject.getValue("fields").jsonObject.keys - stripped,

@@ -80,7 +80,16 @@ export const prototypeModelSelection = {
   scrollEdge: {},
   scrollTransition: {},
   scrollLinked: {},
-  iosNamespace: { fieldTypes: { backgroundExtension: { kotlin: "Boolean", swift: "Bool" } } },
+  iosPresentationNamespace: {
+    fieldTypes: { backgroundExtension: { kotlin: "Boolean", swift: "Bool" } },
+  },
+  iosNamespace: {
+    swiftConformances: ["Decodable"],
+    fieldTypes: {
+      bottomAccessory: { swift: "PrototypeNode" },
+      backgroundExtension: { kotlin: "Boolean", swift: "Bool" },
+    },
+  },
   androidNamespace: {},
   offset: {},
   padding: {},

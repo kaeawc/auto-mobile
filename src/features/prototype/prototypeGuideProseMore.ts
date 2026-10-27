@@ -207,3 +207,29 @@ Frame/send budgets are 65536/16384 bytes, with eight open channels per device an
 Transport, lifecycle and routing execution remain unavailable. Flush-window coalescing is an open
 decision; no coalescing behavior is implemented.
 `;
+
+export const GUIDE_PLATFORM_NAMESPACES = `## Platform namespaces
+
+Choose styling in this order:
+1. Portable node/window fields express behavior on both platforms: use \`button.variant: "outlined"\`
+   for an outlined button, or \`style.cornerRadius\` for an authored corner.
+2. Portable theme tokens express a shared visual system: set \`theme.colors.primary\` once rather
+   than repeating a color on each button; use theme typography and corner tokens for shared styles.
+3. \`theme.design: "platform"\` chooses native platform treatment for covered controls (the default);
+   \`"material"\` keeps the shared Material appearance. Check design fallback notes for custom controls.
+4. Use \`ios\`/\`android\` only for semantics with no portable meaning, such as
+   \`ios: {buttonStyle: "glass"}\` or \`android: {predictiveBack: {style: "none"}}\` on a stack.
+
+Namespaces are closed objects on nodes, window and theme; each field has a contract \`why\`.
+Own-platform blocks require \`prototype_platform_namespace_v1\`, except the four node glass fields,
+which require only \`prototype_glass_v1\` on iOS; mixing another iOS key requires both.
+Foreign blocks are accepted and
+ignored with paths in \`platformNotes\`; unknown fields are rejected even in foreign blocks.
+iOS glass buttons need 26 and otherwise use bordered buttons; hover needs 17 and is render-only
+(no pointer input). Custom tab bars, app bars and sheets cannot apply \`tab.role\`,
+\`bottomAccessory\` (node-only), \`navigationTitle\` or \`sheet.sizing\`; these are reported as ignored.
+Window/theme namespace fields likewise have no applicable node and are reported as ignored.
+Android \`indication: "ripple"|"none"\` controls the node's clickable feedback; motion-off still wins.
+Stack \`predictiveBack.style\` uses the existing pop for \`default\`, horizontal movement with fade
+for \`crossActivity\` within the prototype activity, or snaps without predictive scrubbing for \`none\`.
+Use notes to confirm what the current renderer can apply before relying on a namespace field.`;

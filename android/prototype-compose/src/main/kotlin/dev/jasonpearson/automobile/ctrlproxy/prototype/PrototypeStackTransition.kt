@@ -2,7 +2,6 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import dev.jasonpearson.automobile.protocol.PrototypeStackNode
 import dev.jasonpearson.automobile.protocol.PrototypeStackTransition
-import dev.jasonpearson.automobile.protocol.stackTransition
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 
@@ -140,8 +139,8 @@ internal fun resolveStackSnapshotAnimation(
   motion: Boolean,
   reduced: Boolean,
 ): StackTransitionKind =
-  resolveStackAnimation(
-      source.stackTransition,
+  namespaceStackAnimation(
+      source,
       snapshot?.stackChange?.takeIf { it.id == source.id },
       motion,
       reduced,

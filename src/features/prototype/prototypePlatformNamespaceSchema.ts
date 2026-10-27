@@ -1,6 +1,20 @@
 import { z } from "zod";
+import { prototypeNodeSchema, type PrototypeNode } from "./prototypeSpec";
 
-export const iosNamespaceSchema = z
+export type PrototypeIosNamespace = {
+  buttonStyle?: "glass" | "glassProminent";
+  bottomAccessory?: PrototypeNode;
+  glassGroup?: { spacing: number };
+  glassUnion?: string;
+  glassTransition?: "matchedGeometry" | "materialize" | "identity";
+  backgroundExtension?: true;
+  tab?: { role: "search" };
+  sheet?: { sizing: "form" | "page" | "fitted" };
+  hover?: "lift" | "highlight";
+  navigationTitle?: "large" | "inline";
+};
+
+export const iosPresentationNamespaceSchema = z
   .object({
     glassGroup: z
       .object({ spacing: z.number().finite().min(0).max(200) })
@@ -36,6 +50,19 @@ export const androidNamespaceSchema = z
     indication: z.enum(["ripple", "none"]).optional(),
   })
   .strict();
+
+export const iosNamespaceSchema: z.ZodType<PrototypeIosNamespace, z.ZodTypeDef, unknown> = z
+  .object({
+    buttonStyle: iosPresentationNamespaceSchema.shape.buttonStyle,
+    bottomAccessory: z.lazy(() => prototypeNodeSchema).optional(),
+    ...iosPresentationNamespaceSchema.omit({ buttonStyle: true }).shape,
+  })
+  .strict();
+
+export const prototypePresentationNamespaceShape = {
+  ios: iosPresentationNamespaceSchema.optional(),
+  android: androidNamespaceSchema.optional(),
+};
 
 export const prototypePlatformNamespaceShape = {
   ios: iosNamespaceSchema.optional(),

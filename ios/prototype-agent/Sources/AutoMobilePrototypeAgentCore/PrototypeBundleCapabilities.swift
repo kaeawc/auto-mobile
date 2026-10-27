@@ -196,6 +196,8 @@ enum PrototypeBundleCapabilities {
                .capability { names.insert(capability) }
         }
         for (key, child) in fields where ![
+            "ios",
+            "android",
             "child",
             "children",
             "screens",

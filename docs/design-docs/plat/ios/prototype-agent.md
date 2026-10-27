@@ -1217,12 +1217,26 @@ The contract has no system-sheet dispatcher or fake-mode behavior. `platformMode
 
 ## Platform namespaces (#15257)
 
-Prefer portable fields, then `theme.design` when available, and reserve `ios`/`android`
-namespace objects on nodes, window and theme for native semantics. Each field has a
-`why` in the contract. Foreign blocks are ignored and reported in `platformNotes`.
-Own-platform blocks require `prototype_platform_namespace_v1`, which current renderers
-do not advertise. The four node glass fields below require only `prototype_glass_v1`;
-mixing any other iOS key requires both capabilities.
+Prefer portable fields, portable theme tokens, then `theme.design`; reserve `ios`/`android`
+for native semantics. Each closed contract field has a `why`. Both renderers advertise
+`prototype_platform_namespace_v1` (iOS 17+). Foreign blocks are accepted and ignored with
+paths in `platformNotes`; unknown fields are rejected on either platform. Window/theme
+namespace blocks have no applicable node and are reported as ignored. The four node glass fields
+require only `prototype_glass_v1` on iOS; mixing any other iOS key requires
+`prototype_platform_namespace_v1` as well. Android ignores foreign glass fields
+with their individual paths in `platformNotes`.
+
+Android `indication` controls node clickable feedback (`ripple` or `none`); motion-off
+still disables feedback. Stack `predictiveBack.style` preserves the normal pop for
+`default`, uses horizontal movement and fade for `crossActivity` within the prototype
+activity, and snaps without predictive scrubbing for `none`. Reduced motion still wins.
+
+iOS `buttonStyle` applies `.glass`/`.glassProminent` on iOS 26+, using bordered buttons
+below 26 with a substituted note. `hover` applies lift/highlight on iOS 17+ and is render-only.
+The renderer's tab bars, app bars and sheets are custom drawn to retain per-item identifiers;
+`tab.role`, `bottomAccessory`, `navigationTitle` and `sheet.sizing` are reported as ignored.
+`bottomAccessory` is node-only and structurally validated; its descendants provide no targets,
+references or capabilities on either renderer. iOS ignores all Android fields.
 
 ## Icon effects
 
@@ -1275,8 +1289,8 @@ are available.
 
 The agent advertises `prototype_glass_v1` only on iOS 26+, and
 `prototype_scroll_edge_effect_v1` on every supported OS. Glass namespace fields
-require only `prototype_glass_v1`; the namespace capability stays unadvertised
-because other iOS fields are unimplemented. Specs and library bundles are
+require only `prototype_glass_v1`; mixing them with other iOS namespace fields
+also requires `prototype_platform_namespace_v1`. Specs and library bundles are
 validated before rendering and must satisfy these gates, including conditional
 styles and hidden templates. iOS 17–25 refuse glass; no material substitute is
 used.

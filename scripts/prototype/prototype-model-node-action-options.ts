@@ -162,7 +162,7 @@ export const nodeModelOptions = {
     chart:
       "A `chart` (#14209): a [variant] line, area, bar or ring over 1–4 [series], each the objects of a\n`/data` array read through its `y` (and optional `x`) member. A ring draws its one series' latest\nvalue against [goal]; other variants draw [goal] as a reference line.",
   },
-  omitKotlinFields: ["android"],
+  omitKotlinFields: [],
   kotlinBase: {
     fields: [
       "id",
@@ -187,6 +187,7 @@ export const nodeModelOptions = {
       "onAppear",
       "semantics",
       "ios",
+      "android",
     ],
     docs: {
       contentDescription:

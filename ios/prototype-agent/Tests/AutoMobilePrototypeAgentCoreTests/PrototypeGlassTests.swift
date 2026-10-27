@@ -6,7 +6,7 @@ final class PrototypeGlassTests: XCTestCase {
         struct OS: OSVersionProvider { let majorVersion: Int }
         for version in [17, 18, 25, 26, 27] {
             let expected = version >= 26
-            XCTAssertFalse(
+            XCTAssertTrue(
                 PrototypeAgentProtocol.advertisedCapabilities(os: OS(majorVersion: version))
                     .contains("prototype_platform_namespace_v1")
             )

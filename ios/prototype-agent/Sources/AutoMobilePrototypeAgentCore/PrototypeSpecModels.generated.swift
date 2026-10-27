@@ -96,6 +96,26 @@ struct ScrollLinked: Codable, Equatable, Sendable {
     let blur: [Double]?
 }
 
+struct IosPresentationNamespaceTab: Codable, Equatable, Sendable {
+    let role: String
+}
+
+struct IosPresentationNamespaceSheet: Codable, Equatable, Sendable {
+    let sizing: String
+}
+
+struct IosPresentationNamespace: Codable, Equatable, Sendable {
+    let buttonStyle: String?
+    let tab: IosPresentationNamespaceTab?
+    let sheet: IosPresentationNamespaceSheet?
+    let hover: String?
+    let navigationTitle: String?
+    let glassGroup: GlassGroup?
+    let glassUnion: String?
+    let glassTransition: String?
+    let backgroundExtension: Bool?
+}
+
 struct IosNamespaceTab: Codable, Equatable, Sendable {
     let role: String
 }
@@ -104,8 +124,9 @@ struct IosNamespaceSheet: Codable, Equatable, Sendable {
     let sizing: String
 }
 
-struct IosNamespace: Codable, Equatable, Sendable {
+struct IosNamespace: Decodable {
     let buttonStyle: String?
+    let bottomAccessory: PrototypeNode?
     let tab: IosNamespaceTab?
     let sheet: IosNamespaceSheet?
     let hover: String?

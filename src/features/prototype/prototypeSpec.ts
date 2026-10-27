@@ -6,7 +6,10 @@ import { themeSchema } from "./prototypeThemeSchema";
 import { buildTooltipDrawerSchemas, tooltipAnchorIssue } from "./prototypeTooltipDrawerSchema";
 import { prototypeDeriveSchema, prototypeRepeatDeriveSchema } from "./prototypeFormatSchema";
 import { prototypeScrollMotionShape } from "./prototypeScrollMotionSchema";
-import { prototypePlatformNamespaceShape } from "./prototypePlatformNamespaceSchema";
+import {
+  prototypePlatformNamespaceShape,
+  prototypePresentationNamespaceShape,
+} from "./prototypePlatformNamespaceSchema";
 import * as timers from "./prototypeTimerSchema";
 import { prototypeStringsSchema } from "./prototypeStrings";
 import { prototypeSemanticsSchema } from "./prototypeSemanticsSchema";
@@ -847,7 +850,7 @@ export const prototypeNodeSchema: z.ZodType<PrototypeNode, z.ZodTypeDef, unknown
   });
 const windowSchema = z
   .object({
-    ...prototypePlatformNamespaceShape,
+    ...prototypePresentationNamespaceShape,
     placement: placementSchema,
     backdrop: prototypeBackdropSchema.optional(),
     transition: z.enum(["auto", "none", "fade", "slide", "scale"]).optional(),

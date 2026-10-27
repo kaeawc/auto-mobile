@@ -1117,7 +1117,6 @@ test/features/observe/android/ctrlProxyHierarchySemanticLinks.test.ts
 test/features/observe/android/ctrlProxyHierarchySingleFlight.test.ts
 test/features/observe/android/ctrlProxyHierarchyWindows.test.ts
 test/features/observe/android/ctrlProxyRecompositionAbort.test.ts
-test/features/observe/android/foreignCtrlProxyForwardEvidence.test.ts
 test/features/observe/android/hierarchyFreshness.test.ts
 test/features/observe/android/imeCommitContract.test.ts
 test/features/observe/android/imeInsertedTextMatches.table.test.ts

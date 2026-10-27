@@ -1,3 +1,4 @@
+import { GUIDE_PLATFORM_NAMESPACES } from "./prototypeGuideProseMore";
 import { GUIDE_MOTION_V3 } from "./prototypeGuideMotionV3";
 import { MAX_PROTOTYPE_PATCH_OPS } from "./prototypePatch";
 import {
@@ -5,14 +6,7 @@ import {
   MAX_PROTOTYPE_LIST_ITEMS,
   MAX_PROTOTYPE_SPEC_BYTES,
 } from "./prototypeSpec";
-export const GUIDE_GESTURES = `## Platform namespaces
-
-Prefer portable node/window fields, then portable theme tokens, then \`theme.design\` when
-available, and finally a platform namespace as the last resort. Every namespace field has a
-\`why\` explaining its lack of portable meaning.
-Optional \`ios\` and \`android\` objects may appear on any node, \`window\` or \`theme\`.
-The other platform’s block is ignored with a \`platformNotes\` entry. Own-platform blocks
-require \`prototype_platform_namespace_v1\`, which current renderers do not advertise. The four node glass fields require only \`prototype_glass_v1\`; mixing another ios key requires both capabilities.
+export const GUIDE_GESTURES = `${GUIDE_PLATFORM_NAMESPACES}
 
 ## Gestures
 

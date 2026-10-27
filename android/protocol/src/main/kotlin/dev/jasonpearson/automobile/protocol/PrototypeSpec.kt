@@ -461,6 +461,7 @@ data class PrototypePasteButtonNode(
   override val keyframes: JsonObject? = null,
   val into: String,
   override val ios: PrototypeIosNamespace? = null,
+  override val android: PrototypeAndroidNamespace? = null,
 ) : PrototypeNode() {
   override val onTap: List<PrototypeAction>
     get() = listOf(PrototypePlatformAction(call = "clipboard.paste", into = into))

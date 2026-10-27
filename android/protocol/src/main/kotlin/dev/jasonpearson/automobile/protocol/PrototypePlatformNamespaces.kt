@@ -4,7 +4,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 
-/** Validated namespace blocks are currently ignored by the renderer, never by the validator. */
+/** Strip foreign node namespaces and window/theme blocks after strict contract validation. */
 internal fun stripPlatformNamespaces(element: JsonElement): JsonElement {
   val spec = element as? JsonObject ?: return element
   return JsonObject(
@@ -29,29 +29,42 @@ private fun stripNamespaceKeys(value: JsonElement): JsonElement =
   } ?: value
 
 private fun stripNodeNamespaces(value: JsonElement): JsonElement {
-  val source = value as? JsonObject ?: return value
-  val ios = source["ios"] as? JsonObject
-  val glass = setOf("glassGroup", "glassUnion", "glassTransition", "backgroundExtension")
-  // Preserve foreign glass metadata so a typed round-trip retains group-scoped shared IDs.
-  // Android still ignores it for rendering and does not advertise glass.
-  val node =
-    JsonObject(
-      source.filterKeys {
-        it != "android" && (it != "ios" || ios?.keys?.any { key -> key in glass } == true)
-      },
-    )
-  return JsonObject(
-    node.mapValues { (key, child) ->
-      when (key) {
-        "child" -> stripNodeNamespaces(child)
-        "children" ->
-          (child as? JsonArray)?.let { JsonArray(it.map(::stripNodeNamespaces)) } ?: child
-        "screens" ->
-          (child as? JsonObject)?.let {
-            JsonObject(it.mapValues { (_, screen) -> stripNodeNamespaces(screen) })
-          } ?: child
-        else -> child
+  val node = value as? JsonObject ?: return value
+  var stripped: JsonElement = node
+  // The shared node walker owns the contract's node-bearing fields, including list slots.
+  for (entry in PrototypePatchNodes.tree(node, emptyList(), "root").toList().asReversed()) {
+    val replacement =
+      JsonObject(
+        mapOf(
+          "op" to kotlinx.serialization.json.JsonPrimitive("replace"),
+          "value" to stripNamespaceKeysAtNode(stripped, entry.tokens),
+        ),
+      )
+    stripped =
+      if (entry.tokens.isEmpty()) replacement.getValue("value")
+      else PrototypePatchValues.change(stripped, entry.tokens, replacement, entry.path)
+  }
+  return stripped
+}
+
+private fun stripNamespaceKeysAtNode(value: JsonElement, tokens: List<String>): JsonElement {
+  var current = value
+  for (token in tokens) {
+    current =
+      when (val parent = current) {
+        is JsonArray -> parent[token.toInt()]
+        is JsonObject -> parent.getValue(token)
+        else -> return current
       }
-    },
+  }
+  val node = current as? JsonObject ?: return current
+  val glass = setOf("glassGroup", "glassUnion", "glassTransition", "backgroundExtension")
+  val ios = node["ios"] as? JsonObject
+  // Keep only foreign glass metadata for group-scoped shared IDs during typed round trips.
+  // Android's own namespace reaches the renderer; other iOS fields remain ignored.
+  val glassMetadata = ios?.filterKeys { it in glass }?.takeIf { it.isNotEmpty() }
+  return JsonObject(
+    node.filterKeys { it != "ios" } +
+      (glassMetadata?.let { mapOf("ios" to JsonObject(it)) } ?: emptyMap()),
   )
 }

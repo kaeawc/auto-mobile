@@ -1,0 +1,21 @@
+{
+  "spec": {
+    "id": "namespace",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "ios": {
+        "bottomAccessory": {
+          "type": "text",
+          "text": "Hidden"
+        }
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Hi"
+    }
+  },
+  "expectedPath": "window.ios.bottomAccessory"
+}

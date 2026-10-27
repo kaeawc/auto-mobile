@@ -15,7 +15,6 @@ import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.protocol.PrototypeStackNode
-import dev.jasonpearson.automobile.protocol.stackTransition
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOf
@@ -132,7 +131,7 @@ internal fun PrototypeStackContent(
   val preview = seek?.preview?.takeIf { it.stackChange?.id == source.id }
   val motion = LocalPrototypeMotion.current
   val reducedMotion = LocalPrototypeMotionProfile.current == PrototypeMotionProfile.REDUCED
-  val animation = resolveStackAnimation(source.stackTransition, change, motion, reducedMotion)
+  val animation = namespaceStackAnimation(source, change, motion, reducedMotion)
   val rtl = prototypeRtl()
   PrototypeStackSharedRoot(
     animation.kind == StackTransitionKind.Zoom && change?.source != null,
@@ -215,7 +214,9 @@ private fun AnimatedStackContent(
     stackGestureFlow(runtime, seek, source.id).collectLatest { (snapshot, gesture) ->
       val (backPreview, progress, result) = gesture
       val current = snapshot?.let { stackFrame(runtime, it, source.id) } ?: frame
-      val target = backPreview?.let { stackFrame(runtime, it, source.id) } ?: current
+      val target =
+        namespaceBackPreview(source, backPreview)?.let { stackFrame(runtime, it, source.id) }
+          ?: current
       val kind =
         resolveStackSnapshotAnimation(source, backPreview ?: snapshot, motion, reducedMotion)
       inFlight = true

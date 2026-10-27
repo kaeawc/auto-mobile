@@ -6,6 +6,7 @@ import {
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
 import { prototypePlatformNotes } from "../../../src/features/prototype/prototypePlatformNotes";
 import { prototypeGateCapabilities } from "../../../src/features/prototype/prototypeCapabilityGates";
+import { specCapabilityRefusal } from "../../../src/server/prototypeTools/preflight";
 
 const spec = (root: unknown) => ({
   id: "glass",
@@ -120,7 +121,6 @@ test("glass namespace keys have an independent gate and mixed blocks require bot
 });
 
 test("iOS 26 refuses unimplemented hover and glass refusal names its OS requirement once", async () => {
-  const { specCapabilityRefusal } = await import("../../../src/server/prototypeTools/preflight");
   const capabilities = new Set(["prototype_glass_v1", "prototype_scroll_edge_effect_v1"]);
   const target = {
     ios: { supportsCapability: (capability: string) => capabilities.has(capability) },
@@ -137,4 +137,31 @@ test("iOS 26 refuses unimplemented hover and glass refusal names its OS requirem
     undefined,
   );
   expect(glassRefusal?.error?.match(/needs iOS 26 or later/g)).toHaveLength(1);
+});
+
+test("iOS namespace notes preserve implemented glass alongside native hover", () => {
+  const parsed = validatePrototypeSpec(
+    spec({
+      type: "box",
+      ios: { glassGroup: { spacing: 12 }, hover: "lift" },
+      children: [
+        {
+          type: "text",
+          text: "Hi",
+          style: { surface: "glass" },
+          ios: { glassUnion: "group", glassTransition: "identity" },
+        },
+      ],
+    }),
+  );
+  expect(parsed.success).toBe(true);
+  if (!parsed.success) {
+    throw new Error(parsed.error.message);
+  }
+  expect(
+    prototypePlatformNotes(parsed.data, "ios", () => true, 26).filter(
+      (note) => note.construct === "platformNamespace",
+    ),
+  ).toEqual([]);
+  expect(parsed.data.root.ios?.glassGroup).toEqual({ spacing: 12 });
 });

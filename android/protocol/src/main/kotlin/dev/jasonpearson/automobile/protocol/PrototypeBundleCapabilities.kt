@@ -8,6 +8,7 @@ internal object PrototypeBundleCapabilities {
   fun required(refs: PrototypeBundleReferences): List<String> {
     val spec = refs.spec
     val caps = linkedSetOf<String>()
+    if (PrototypeRouteRules.uses(spec, refs.context)) caps.add("prototype_routes_v1")
     specContent(spec, caps)
     specPresentation(spec, caps)
     for (node in PrototypeBundleSpec.nodes(spec)) {

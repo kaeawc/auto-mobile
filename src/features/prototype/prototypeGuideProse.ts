@@ -72,27 +72,7 @@ row with a \`textField\` (\`imeAction: "send"\`, \`onSubmit\`) and a send \`icon
 \`observe\`; \`swipeOn lookFor\` still finds them.
 `;
 
-export const GUIDE_TEMPLATES = `## Starter templates
-
-The repository ships eight validated multi-screen specs, each a \`stack\` with a \`testTag\` on every
-interactive node. In a checkout, show one with \`specPath\` (an absolute path) from
-\`test/fixtures/prototype-spec/valid/\`, or copy its shape when writing a spec:
-
-- \`template-onboarding.json\`: welcome, sign-up form with \`checks\`, a button gated by
-  \`enabledWhen {valid}\`, \`emit\` with \`requireValid\`, done.
-- \`template-feed-detail.json\`: a \`repeat\` over \`{path: "/posts"}\` inside a refreshable \`scroll\`; a
-  tap stores the row in state and \`push\`es the detail screen.
-- \`template-tabbed-home.json\`: a \`pager\` driven by a \`bottomNav {pager}\`, plus a pushed screen.
-- \`template-checkout.json\`: quantity stepper, form with \`select\` and \`datePicker\`, and a
-  \`bottomSheet\` confirmation.
-- \`template-settings.json\`: \`listItem\` switches, \`radioGroup\`, \`slider\`, \`dialog\`, \`snackbar\` and
-  a \`storage\` block.
-- \`template-search.json\`: docked \`searchBar\` whose child lists \`/results\` and shows an empty
-  state with \`{data, empty: true}\`.
-- \`template-chat.json\`: reversed \`scroll\` with \`stickToEnd\`, quick-reply chips that
-  \`appendData\`, and a composer that \`emit\`s \`message_sent\` with the draft as context (Android only).
-- \`template-dashboard.json\`: \`chart\` line, bar and ring over \`/data\`, and a \`startTimer\` clock.
-`;
+export { GUIDE_TEMPLATES } from "./prototypeGuideTemplates";
 
 /**
  * Hand-written authoring prose for the `automobile:prototype` resource. Everything that names a
@@ -116,6 +96,18 @@ existing screen. Actions \`push {stack, screen}\`, \`pop {stack}\`, \`popToRoot 
 Push is ignored at depth 32; pop at depth 1 does nothing. \`screen_changed\` has name = stack id
 and payload \`{screen, depth}\`, emitted only when the top screen or depth changes. Requires
 \`prototype_stack_v1\`; every screen counts toward node limits, including hidden screens.
+Route contract (requires \`prototype_routes_v1\`, currently unadvertised by Android and iOS):
+keep \`screens\` as bare nodes and optionally add \`routes:{screen:{params?,onEnter?,onBack?}}\`.
+Declare up to 16 params per screen as string|number|boolean; names match [A-Za-z_][A-Za-z0-9_]*.
+Push/replace accept a flat \`params\` map of scalars or {state}/{data}/{item}/{index:true} bindings;
+all declared params are required, literals must match their types, and extra names are refused.
+\`setStack {stack,path:[{screen,params?}]}\` takes 1-32 entries. In a screen and its lifecycle actions,
+\`{route.name}\` binds in the same fields as repeat placeholders, condition operands and whole
+/data pointer segments. onEnter/onBack each take 1-32 actions with normal nesting limits;
+a direct same-stack pop in onBack needs \`force:true\` (dialog actions are independent).
+Storage keys may name \`stack:<id>\`. Runtime navigation, lifecycle execution and path restore
+are deferred; the reserved reports keep \`path:string[]\` and add parallel \`params:object[]\`,
+with optional params beside screen/depth in screen_changed payloads.
 Android Back and the iOS edge swipe pop a stack above depth 1. A stack's optional
 \`transition: "platform" | "slide" | "fade" | "none"\` selects screen navigation animation
 (default \`platform\`); \`push\` and \`replace\` can override it with their own \`transition\`.

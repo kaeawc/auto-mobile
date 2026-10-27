@@ -73,6 +73,8 @@ export const UNIMPLEMENTED_BY_ARTIFACT: Record<ArtifactId, Record<string, string
       "No renderer implements a platform-namespace field yet, so the host refuses own-platform blocks (#15257)",
     prototype_platform_v1:
       "iOS agent validates platform specs but has no module registry yet (#14296)",
+    prototype_routes_v1:
+      "Navigation routes are contract-only: no runtime applies params, onEnter, onBack or setStack yet (#14188)",
   },
 };
 

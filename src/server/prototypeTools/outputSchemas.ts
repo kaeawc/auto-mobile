@@ -158,6 +158,13 @@ const prototypeEventOutputSchema = z.object({
       z.object({
         path: z.array(z.string().min(1)).min(1).max(32),
         depth: z.number().int().min(1).max(32),
+        params: z
+          .array(
+            z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).and(z.unknown()),
+          )
+          .min(1)
+          .max(32)
+          .optional(),
       }),
     )
     .optional(),
@@ -302,6 +309,15 @@ export const prototypeOutputSchema = z.object({
             z.object({
               path: z.array(z.string().min(1)).min(1).max(32),
               depth: z.number().int().min(1).max(32),
+              params: z
+                .array(
+                  z
+                    .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
+                    .and(z.unknown()),
+                )
+                .min(1)
+                .max(32)
+                .optional(),
             }),
           )
           .optional()

@@ -146,7 +146,8 @@ enum PrototypeLazyList {
                 }
                 if let refresh = node["refresh"]?.objectFields {
                     if axis == "horizontal" { try reject("Pull-to-refresh needs a vertical list", field: ".refresh") }
-                    if state[refresh["stateKey"]?.stringValue ?? ""]?.boolValue == nil {
+                    let key = refresh["stateKey"]?.stringValue ?? ""
+                    if PrototypeRoutes.fields(key).isEmpty, state[key]?.boolValue == nil {
                         try reject("Refresh requires a boolean state key", field: ".refresh.stateKey")
                     }
                 }

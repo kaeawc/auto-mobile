@@ -1,0 +1,109 @@
+{
+  "spec": {
+    "id": "routes",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "stack",
+      "id": "nav",
+      "start": "home",
+      "screens": {
+        "home": {
+          "type": "button",
+          "label": "Open",
+          "onTap": [
+            {
+              "type": "push",
+              "stack": "nav",
+              "screen": "detail",
+              "params": {
+                "p0": 0,
+                "p1": 1,
+                "p2": 2,
+                "p3": 3,
+                "p4": 4,
+                "p5": 5,
+                "p6": 6,
+                "p7": 7,
+                "p8": 8,
+                "p9": 9,
+                "p10": 10,
+                "p11": 11,
+                "p12": 12,
+                "p13": 13,
+                "p14": 14,
+                "p15": 15,
+                "p16": 16
+              }
+            },
+            {
+              "type": "replace",
+              "stack": "nav",
+              "screen": "home"
+            },
+            {
+              "type": "setStack",
+              "stack": "nav",
+              "path": [
+                {
+                  "screen": "home"
+                },
+                {
+                  "screen": "detail",
+                  "params": {
+                    "postId": "p1",
+                    "count": 2,
+                    "flag": false
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "detail": {
+          "type": "text",
+          "text": "Post {route.postId} ({route.count})"
+        }
+      },
+      "routes": {
+        "home": {
+          "onEnter": [
+            {
+              "type": "emit",
+              "name": "home"
+            }
+          ]
+        },
+        "detail": {
+          "params": {
+            "postId": "string",
+            "count": "number",
+            "flag": "boolean"
+          },
+          "onEnter": [
+            {
+              "type": "emit",
+              "name": "entered"
+            }
+          ],
+          "onBack": [
+            {
+              "type": "pop",
+              "stack": "nav",
+              "force": true
+            }
+          ]
+        }
+      }
+    },
+    "storage": {
+      "version": 1,
+      "keys": ["stack:nav"]
+    }
+  },
+  "expectedPath": "root.screens[\"home\"].onTap[0].params",
+  "expectedMessage": "Record entry limit exceeded"
+}

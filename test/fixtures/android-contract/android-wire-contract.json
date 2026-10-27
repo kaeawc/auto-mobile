@@ -7891,6 +7891,40 @@
         "hasDefault": true
       }
     ],
+    "dev.jasonpearson.automobile.protocol.PrototypeRoute": [
+      {
+        "name": "params",
+        "type": "map",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onEnter",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onBack",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeRouteEntry": [
+      {
+        "name": "screen",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "params",
+        "type": "map",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
     "dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding": [
       {
         "name": "edges",
@@ -11331,6 +11365,12 @@
         "type": "string",
         "nullable": false,
         "hasDefault": false
+      },
+      {
+        "name": "force",
+        "type": "boolean",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "popToRoot": [
@@ -11505,6 +11545,12 @@
       {
         "name": "source",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "params",
+        "type": "map",
         "nullable": true,
         "hasDefault": true
       }
@@ -11687,6 +11733,12 @@
       {
         "name": "source",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "params",
+        "type": "map",
         "nullable": true,
         "hasDefault": true
       }
@@ -12525,6 +12577,20 @@
         "hasDefault": false
       }
     ],
+    "setStack": [
+      {
+        "name": "stack",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "path",
+        "type": "list",
+        "nullable": false,
+        "hasDefault": false
+      }
+    ],
     "setState": [
       {
         "name": "key",
@@ -13075,6 +13141,12 @@
         "type": "map",
         "nullable": false,
         "hasDefault": false
+      },
+      {
+        "name": "routes",
+        "type": "map",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "startTimer": [

@@ -36,8 +36,10 @@ class AutoMobilePrototypeCapabilitiesTest {
    * and sound platform modules (#14329); the embedded renderer leaves them to the app.
    * `imageAsset.data` (#14192) has a validated contract and no media store yet.
    */
+  // Routes are contract-only until navigation and restore semantics ship.
   private val exclusions =
     setOf(
+      "prototype_routes_v1",
       "prototype_platform_test_v1",
       "prototype_backdrop_v1",
       "prototype_platform_namespace_v1",

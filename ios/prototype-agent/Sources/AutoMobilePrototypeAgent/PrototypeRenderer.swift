@@ -828,15 +828,16 @@
 
         /// A card draws the authored uniform radius (a theme token resolves to one); without it,
         /// Material's 12 pt (#15445).
+        private var cardCornerRadius: Double {
+            if case let .uniform(radius)? = style?.cornerRadius.map(shapes.resolve) { return radius }
+            return 12
+        }
+
         private var cornerShape: PrototypeStyleShape {
-            var radius = style?.cornerRadius.map(shapes.resolve)
-            if node.type == "card" {
-                switch radius {
-                case .uniform?: break
-                default: radius = .uniform(12)
-                }
-            }
-            return PrototypeStyleShape(radius: radius, continuous: style?.cornerStyle == "continuous")
+            PrototypeStyleShape(
+                radius: node.type == "card" ? .uniform(cardCornerRadius) : style?.cornerRadius.map(shapes.resolve),
+                continuous: style?.cornerStyle == "continuous"
+            )
         }
 
         private func styled(_ view: some View) -> some View {

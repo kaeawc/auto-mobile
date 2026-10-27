@@ -2,6 +2,7 @@ import { Kysely, type Generated, type Selectable, type Transaction } from "kysel
 import { ActionableError } from "../../../models/ActionableError";
 import type { BrokerReceiptTables } from "../store";
 import type { DeviceMutationTables } from "../mutations/sqliteJournal";
+import type { DeviceClaimTables } from "./sqliteDeviceClaims";
 import {
   isBindingJournalPhaseOpen,
   type AdvanceBindingJournalInput,
@@ -77,7 +78,8 @@ export interface BindingJournalTable {
   updated_at_ms: number;
 }
 
-export interface BindingRegistryDatabase extends BrokerReceiptTables, DeviceMutationTables {
+export interface BindingRegistryDatabase
+  extends BrokerReceiptTables, DeviceMutationTables, DeviceClaimTables {
   slot_scopes: BindingScopesTable;
   slot_assignments: BindingAssignmentsTable;
   slot_journal: BindingJournalTable;

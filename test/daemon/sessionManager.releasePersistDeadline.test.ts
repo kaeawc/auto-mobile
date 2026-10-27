@@ -699,8 +699,8 @@ describe("a superseded device-loss release leaves the live session's row active 
     await expectRehydratedAfterRestart(h);
   });
 
-  // #11799 W5: the final supersede fence is dropped for every intent. A release whose commit
-  // point has passed has won; the identity confirmation arrives too late to undo it.
+  // #11799 W5: no fence is evaluated once the row statement is issued (volatile) or the commit
+  // has passed (durable). Such a release has won; the identity confirmation arrives too late to undo it.
   test.each(["durable", "volatile"] as const)(
     "a slow %s terminal write overtaken by a newer identity confirmation has already won",
     async (intent) => {

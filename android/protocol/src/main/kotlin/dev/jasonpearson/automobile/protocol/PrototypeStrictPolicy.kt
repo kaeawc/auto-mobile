@@ -329,15 +329,7 @@ internal object PrototypeStrictPolicy {
         result.add(PrototypeStylePolishV2Rules.CAPABILITY)
       if (PrototypeMotionV3.required(fields)) result.add(PrototypeMotionV3.CAPABILITY)
       val type = fields.text("type") ?: ""
-      if (type == "text" && fields.text("contentTransition")?.let { it != "none" } == true)
-        need("content_transition")
-      val nodeTypes =
-        PrototypeSpecContract.definitions
-          .getValue("node")
-          .jsonObject
-          .getValue("variants")
-          .jsonObject
-      if (type in nodeTypes && ("ios" in fields || "android" in fields)) need("platform_namespace")
+      typeNamespaceFeatures(type, fields, ::need)
       iconEffectNeeds(type, fields).forEach(::need)
       typeFeatures[type]?.let(::need)
       for ((feature, keys) in typeFieldFeatures[type].orEmpty()) {
@@ -438,4 +430,12 @@ private fun iconEffectNeeds(type: String, fields: JsonObject): List<String> {
   val trigger = effect["trigger"] as? JsonObject
   return if (trigger?.containsKey("data") == true) listOf("icon_effects", "data_model")
   else listOf("icon_effects")
+}
+
+private fun typeNamespaceFeatures(type: String, fields: JsonObject, need: (String) -> Unit) {
+  if (type == "text" && fields.text("contentTransition")?.let { it != "none" } == true)
+    need("content_transition")
+  val nodeTypes =
+    PrototypeSpecContract.definitions.getValue("node").jsonObject.getValue("variants").jsonObject
+  if (type in nodeTypes && ("ios" in fields || "android" in fields)) need("platform_namespace")
 }

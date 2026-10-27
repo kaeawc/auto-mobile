@@ -75,6 +75,14 @@ public enum PrototypeSpecStrictValidator {
                     "Host requests are unavailable in a library"
                 )
             }
+            // An explicit host channel is refused like an explicit host request (#14261).
+            if library, let id = (fields["channels"]?.objectFields ?? [:]).keys.sorted(by: {
+                $0.utf16.lexicographicallyPrecedes($1.utf16)
+            }).first(where: { fields["channels"]?.objectFields?[$0]?.objectFields?["via"] == .string("host") }) {
+                throw PrototypeContractValidator.invalid(
+                    "channels.\(id).via", "Host channels are unavailable in a library"
+                )
+            }
             if library { try secureLibrary(
                 fields,
                 nodes: context.locatedNodes,
@@ -111,6 +119,13 @@ public enum PrototypeSpecStrictValidator {
             if let text = raw?.stringValue { bindings.append((text, path, false, request)) }
             if let key = raw?.objectFields?["state"]?.stringValue {
                 bindings.append((key, "\(path).state", true, request))
+            }
+        }
+        for (id, channel) in fields["channels"]?.objectFields ?? [:] {
+            let channel = channel.objectFields ?? [:]
+            append(channel["url"], path: "channels.\(id).url", request: true)
+            for (name, value) in channel["headers"]?.objectFields ?? [:] {
+                append(value, path: PrototypeLimits.dataMemberPath("channels.\(id).headers", key: name), request: true)
             }
         }
         for action in actions {

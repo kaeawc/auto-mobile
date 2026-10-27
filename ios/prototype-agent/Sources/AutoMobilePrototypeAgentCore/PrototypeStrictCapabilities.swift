@@ -89,6 +89,9 @@ enum PrototypeStrictCapabilities {
             if type == "upsertData" || (type == "appendData" && fields["maxItems"] != nil) {
                 need("platform_realtime")
             }
+            // A `{event}` value in `setState`, and the whole-frame `{event: ""}`, are new here.
+            if let event = fields["value"]?.objectFields?["event"],
+               type == "setState" || event == .string("") { need("platform_realtime") }
             if type == "emit", fields["context"] != nil { need("emit_context") }
             if type == "platform" { need("platform") }
             for (key, child) in fields {

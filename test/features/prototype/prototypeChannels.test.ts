@@ -14,6 +14,7 @@ import {
 import * as limits from "../../../src/features/prototype/prototypeChannelLimits";
 import { applyPrototypeDataWrite } from "../../../src/features/prototype/prototypeDataWrite";
 import { prototypeSpecSchema } from "../../../src/features/prototype/prototypeSpec";
+import { prototypeRequiredCapabilities } from "../../../src/features/prototype/prototypeCapabilityGates";
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
 import type { Random } from "../../../src/utils/Random";
 
@@ -301,6 +302,90 @@ describe("channels in the spec schema and validator", () => {
     expect(result.success).toBe(false);
     expect(!result.success && result.error.path).toBe(
       "channels.driver.routes[0].actions[0].actions[0]",
+    );
+  });
+});
+
+describe("library bundles (#14261)", () => {
+  const spec = (channel: Record<string, unknown>): Record<string, unknown> => ({
+    id: "p",
+    window: { placement: { type: "fullscreen" } },
+    state: { pw: "" },
+    requires: { platform: ["realtime"] },
+    channels: { c: channel },
+    root: {
+      type: "column",
+      children: [{ type: "textField", stateKey: "pw", secure: true }],
+    },
+  });
+  const library = (channel: Record<string, unknown>) =>
+    validatePrototypeSpec(spec(channel), { library: true });
+
+  test("a host channel is refused like a host request", () => {
+    const host = library({ kind: "sse", url: "https://a.example.com/", via: "host" });
+    expect(!host.success && host.error.path).toBe("channels.c.via");
+    for (const via of [undefined, "device"]) {
+      const result = library({
+        kind: "sse",
+        url: "https://a.example.com/",
+        ...(via ? { via } : {}),
+      });
+      expect(result.success).toBe(true);
+    }
+  });
+
+  test("a secure value cannot reach a channel url or header", () => {
+    const url = library({ kind: "websocket", url: "wss://a.example.com/{pw}", via: "device" });
+    expect(!url.success && url.error.path).toBe("channels.c.url");
+    const header = library({
+      kind: "websocket",
+      url: "wss://a.example.com/",
+      via: "device",
+      headers: { Authorization: { state: "pw" } },
+    });
+    expect(!header.success && header.error.path).toBe("channels.c.headers.Authorization.state");
+  });
+});
+
+describe("url scheme (#14261)", () => {
+  test("the literal scheme must be present before the url is parsed", () => {
+    for (const url of ["ws:ftp://x", "ws:chat.example.com", "wss:/a.example.com/x"]) {
+      const result = validatePrototypeSpec({
+        id: "p",
+        window: { placement: { type: "fullscreen" } },
+        requires: { platform: ["realtime"] },
+        channels: { c: { kind: "websocket", url } },
+        root: { type: "text", text: "x" },
+      });
+      expect(!result.success && result.error.path).toBe("channels.c.url");
+    }
+  });
+});
+
+describe("event value gate (#14261)", () => {
+  const gated = (handler: Record<string, unknown>): string[] =>
+    prototypeRequiredCapabilities({
+      id: "p",
+      window: { placement: { type: "fullscreen" } },
+      state: { s: "" },
+      data: { d: "" },
+      requires: { platform: ["device"] },
+      platform: { on: { "device.changed": [handler] } },
+      root: { type: "text", text: "x" },
+    }).map((gate) => gate.capability);
+
+  test("setState with an event value and the whole-frame pointer need the realtime gate", () => {
+    expect(gated({ type: "setState", key: "s", value: { event: "/x" } })).toContain(
+      "prototype_platform_realtime_v1",
+    );
+    expect(gated({ type: "setData", path: "/data/d", value: { event: "" } })).toContain(
+      "prototype_platform_realtime_v1",
+    );
+  });
+
+  test("a data action reading an event member keeps its older gates", () => {
+    expect(gated({ type: "setData", path: "/data/d", value: { event: "/x" } })).not.toContain(
+      "prototype_platform_realtime_v1",
     );
   });
 });

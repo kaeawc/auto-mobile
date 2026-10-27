@@ -40,7 +40,47 @@ export function prototypeStrictPolicyError(
     if (host) {
       return { path: `${host.path}.via`, message: "Host requests are unavailable in a library" };
     }
+    // An explicit host channel is refused like an explicit host request (#14261).
+    const hostChannel = Object.entries(object(object(spec)?.channels) ?? {})
+      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+      .find(([, channel]) => object(channel)?.via === "host");
+    if (hostChannel) {
+      return {
+        path: `channels.${hostChannel[0]}.via`,
+        message: "Host channels are unavailable in a library",
+      };
+    }
     return secureLibraryError(spec);
+  }
+  return undefined;
+}
+
+/** A secure value bound into a channel's url or headers would reach the server like a request's. */
+function channelSecureError(
+  spec: unknown,
+  secure: ReadonlySet<string>,
+): PrototypeValidationError | undefined {
+  const channels = object(object(spec)?.channels) ?? {};
+  const binds = (raw: unknown): boolean =>
+    typeof raw === "string"
+      ? [...secure].some((key) => raw.includes(`{${key}}`))
+      : typeof object(raw)?.state === "string" && secure.has(object(raw)!.state as string);
+  for (const id of Object.keys(channels).sort()) {
+    const channel = object(channels[id]) ?? {};
+    const at = `channels.${id}`;
+    if (binds(channel.url)) {
+      return { path: `${at}.url`, message: "Secure value cannot be bound into a request" };
+    }
+    const headers = object(channel.headers) ?? {};
+    const name = Object.keys(headers)
+      .sort()
+      .find((header) => binds(headers[header]));
+    if (name !== undefined) {
+      return {
+        path: `${at}.headers.${name}${typeof headers[name] === "string" ? "" : ".state"}`,
+        message: "Secure value cannot be bound into a request",
+      };
+    }
   }
   return undefined;
 }
@@ -64,6 +104,10 @@ function secureLibraryError(spec: unknown): PrototypeValidationError | undefined
   );
   if (!secure.size) {
     return undefined;
+  }
+  const leaked = channelSecureError(spec, secure);
+  if (leaked) {
+    return leaked;
   }
   const requests: string[] = [];
   const fields: { text: string; path: string; key: boolean }[] = [];

@@ -112,6 +112,8 @@ enum PrototypeBundleCapabilities {
         if ["setData", "appendData", "upsertData", "removeData"].contains(type ?? "") {
             names.insert("prototype_data_actions_v1")
         }
+        if let event = fields["value"]?.objectFields?["event"],
+           type == "setState" || event == .string("") { names.insert("prototype_platform_realtime_v1") }
         if type == "upsertData" || (type == "appendData" && fields["maxItems"] != nil) {
             names.insert("prototype_platform_realtime_v1")
         }

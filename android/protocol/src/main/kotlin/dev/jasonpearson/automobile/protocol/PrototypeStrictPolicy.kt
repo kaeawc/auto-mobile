@@ -27,6 +27,17 @@ internal object PrototypeStrictPolicy {
         }
       if (host != null)
         return PrototypeSpecError("${host.path}.via", "Host requests are unavailable in a library")
+      // An explicit host channel is refused like an explicit host request (#14261).
+      val channels = spec["channels"] as? JsonObject
+      val hostChannel =
+        channels?.keys?.sorted()?.firstOrNull {
+          (channels[it] as? JsonObject)?.text("via") == "host"
+        }
+      if (hostChannel != null)
+        return PrototypeSpecError(
+          "channels.$hostChannel.via",
+          "Host channels are unavailable in a library",
+        )
     }
     return if (library) secureLibraryError(spec, context) else null
   }
@@ -40,6 +51,9 @@ internal object PrototypeStrictPolicy {
     val scopes = PrototypeRepeatValidator.scopes(spec)
     val secure = secureStateKeys(scopes, context)
     if (secure.isEmpty()) return null
+    channelSecureError(spec, secure)?.let {
+      return it
+    }
     val requests = context.actions.filter { it.value.text("type") == "request" }.map { it.path }
     val leaked =
       requestFields(context)
@@ -54,6 +68,34 @@ internal object PrototypeStrictPolicy {
         else "Secure value cannot be bound into an action payload",
       )
     return persistedSecureError(spec, secure)
+  }
+
+  /**
+   * A secure value bound into a channel's url or headers would reach the server like a request's.
+   */
+  private fun channelSecureError(spec: JsonObject, secure: Set<String>): PrototypeSpecError? {
+    fun binds(raw: JsonElement?): Boolean {
+      val text = (raw as? JsonPrimitive)?.takeIf { it.isString }?.content
+      if (text != null) return secure.any { text.contains("{$it}") }
+      val state = ((raw as? JsonObject)?.get("state") as? JsonPrimitive)?.takeIf { it.isString }
+      return state != null && state.content in secure
+    }
+    val channels = spec["channels"] as? JsonObject ?: return null
+    for (id in channels.keys.sorted()) {
+      val channel = channels[id] as? JsonObject ?: continue
+      if (binds(channel["url"]))
+        return PrototypeSpecError(
+          "channels.$id.url",
+          "Secure value cannot be bound into a request",
+        )
+      val headers = channel["headers"] as? JsonObject ?: continue
+      val name = headers.keys.sorted().firstOrNull { binds(headers[it]) } ?: continue
+      return PrototypeSpecError(
+        "channels.$id.headers.$name${if (headers[name] is JsonObject) ".state" else ""}",
+        "Secure value cannot be bound into a request",
+      )
+    }
+    return null
   }
 
   private fun secureStateKeys(
@@ -323,6 +365,14 @@ internal object PrototypeStrictPolicy {
       }
       if (type == "request" && fields.text("via") == "device") need("network_device")
       if (type == "upsertData" || (type == "appendData" && fields["maxItems"] != null)) {
+        need("platform_realtime")
+      }
+      // A `{event}` value in `setState`, and the whole-frame `{event: ""}`, are new here.
+      val eventValue = (fields["value"] as? JsonObject)?.get("event")
+      if (
+        (type == "setState" && eventValue != null) ||
+          (eventValue as? JsonPrimitive)?.takeIf { it.isString }?.content == ""
+      ) {
         need("platform_realtime")
       }
     }

@@ -31,6 +31,14 @@ internal object PrototypeBundleCapabilities {
   }
 
   private fun actions(action: JsonObject, caps: MutableSet<String>) {
+    // A `{event}` value in `setState`, and the whole-frame `{event: ""}`, are new here.
+    val eventValue = (action["value"] as? JsonObject)?.get("event")
+    if (
+      (text(action["type"]) == "setState" && eventValue != null) ||
+        (eventValue as? JsonPrimitive)?.takeIf { it.isString }?.content == ""
+    ) {
+      caps.add("prototype_platform_realtime_v1")
+    }
     when (text(action["type"])) {
       "request" -> {
         caps.add("prototype_network_v1")

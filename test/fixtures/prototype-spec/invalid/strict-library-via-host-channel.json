@@ -1,0 +1,38 @@
+{
+  "spec": {
+    "id": "library-channel",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "pw": ""
+    },
+    "requires": {
+      "platform": ["realtime"]
+    },
+    "channels": {
+      "c": {
+        "kind": "sse",
+        "url": "https://a.example.com/",
+        "via": "host"
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "textField",
+          "stateKey": "pw",
+          "secure": true
+        }
+      ]
+    }
+  },
+  "options": {
+    "library": true
+  },
+  "expectedPath": "channels.c.via",
+  "expectedMessage": "Host channels are unavailable in a library"
+}

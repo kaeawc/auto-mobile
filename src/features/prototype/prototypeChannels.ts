@@ -54,8 +54,12 @@ function urlError(kind: unknown, url: string): string | undefined {
     kind === "websocket"
       ? "A websocket channel url must be an absolute ws or wss URL"
       : "An sse channel url must be an absolute http or https URL";
+  // The literal `scheme://` must be there before any parse, so `ws:ftp://x` and `ws:host` fail.
+  if (!scheme.test(url)) {
+    return message;
+  }
   if (url.includes("{")) {
-    return scheme.test(url) ? undefined : message;
+    return undefined;
   }
   try {
     const protocol = new URL(url).protocol;

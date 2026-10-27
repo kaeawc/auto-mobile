@@ -249,7 +249,9 @@ function mapDataAction(action: Raw, path: string, visit: FieldVisitor): void {
   // so the realtime gate can locate them.
   if (
     action.type === "upsertData" ||
-    (action.type === "appendData" && action.maxItems !== undefined)
+    (action.type === "appendData" && action.maxItems !== undefined) ||
+    // The whole-frame pointer `{event: ""}` is new too (#14261).
+    record(action.value)?.event === ""
   ) {
     visit(action, path, "realtimeData");
   }
@@ -272,6 +274,10 @@ function mapStateAction(action: Raw, path: string, visit: FieldVisitor): void {
   mapField(action, "key", path, "key", visit);
   if (action.type === "setState") {
     mapField(action, "value", path, "operand", visit);
+    // A `{event}` value in `setState` is new with realtime channels (#14261).
+    if (record(action.value) && Object.hasOwn(action.value as Raw, "event")) {
+      visit(action, path, "realtimeData");
+    }
   }
 }
 

@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.*
@@ -44,7 +45,10 @@ class PrototypeContentTransitionRenderTest {
     }
     compose.waitForIdle()
     compose.mainClock.autoAdvance = false
-    compose.runOnUiThread { value = "149" }
+    compose.runOnUiThread {
+      value = "149"
+      Snapshot.sendApplyNotifications()
+    }
     compose.mainClock.advanceTimeByFrame()
     compose.onNodeWithTag("text").assertTextEquals("149")
     compose.mainClock.advanceTimeBy(64)
@@ -81,7 +85,10 @@ class PrototypeContentTransitionRenderTest {
       }
     }
     compose.mainClock.autoAdvance = false
-    compose.runOnUiThread { value = "10" }
+    compose.runOnUiThread {
+      value = "10"
+      Snapshot.sendApplyNotifications()
+    }
     compose.mainClock.advanceTimeByFrame()
     compose.onNodeWithTag("text").assertTextEquals("10")
     compose.onNodeWithText("9").assertDoesNotExist()

@@ -13,7 +13,7 @@ const text = (contentTransition?: string) => ({
   ...(contentTransition ? { contentTransition } : {}),
 });
 test("numeric parsing and direction are deterministic", () => {
-  for (const [previous, next, direction] of [
+  const cases: [string, string, ReturnType<typeof contentTransitionDirection>][] = [
     ["9", "10", "up"],
     ["$1,200", "$980", "down"],
     ["abc", "abd", "crossfade"],
@@ -22,8 +22,9 @@ test("numeric parsing and direction are deterministic", () => {
     ["9", "9", "crossfade"],
     ["09", "9", "crossfade"],
     ["0", "-1", "down"],
-  ]) {
-    expect(contentTransitionDirection(previous!, next!)).toBe(direction);
+  ];
+  for (const [previous, next, direction] of cases) {
+    expect(contentTransitionDirection(previous, next)).toBe(direction);
   }
   expect(parseContentTransitionNumber("$1,200")).toBe(1200);
   expect(parseContentTransitionNumber("-3.5")).toBe(-3.5);
@@ -34,8 +35,9 @@ test("only non-none text fields gate, including nested templates and components"
   expect(prototypeContentTransitionFields(spec(text("numeric")))).toEqual([
     "root.contentTransition",
   ]);
-  for (const mode of [undefined, "none"])
+  for (const mode of [undefined, "none"]) {
     expect(prototypeGateCapabilities(spec(text(mode)))).toEqual([]);
+  }
   expect(
     prototypeGateCapabilities(
       spec({
@@ -57,8 +59,9 @@ test("component definitions gate without scanning opaque data", () => {
   ]);
 });
 test("text-only enum is strict", () => {
-  for (const mode of ["numeric", "crossfade", "none"])
+  for (const mode of ["numeric", "crossfade", "none"]) {
     expect(validatePrototypeSpec(spec(text(mode))).success).toBe(true);
+  }
   expect(validatePrototypeSpec(spec(text("slide"))).success).toBe(false);
   expect(
     validatePrototypeSpec(spec({ type: "button", text: "Go", contentTransition: "numeric" }))

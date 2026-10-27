@@ -8,13 +8,15 @@ import {
   guardDirectoryEntries,
   readGuardFile,
   GuardVisitor as Visitor,
+  typeScriptFiles,
+  guardTextMayMatch,
 } from "./astGuard";
 
 /**
  * Leak guard for the process-wide `DaemonState` singleton (issue #11614).
  *
- * `new Daemon(...)` and `DaemonState.getInstance().initialize(...)` publish a session manager and
- * device pool on the singleton. `bun test` runs shared-process files in ONE process, so a file
+ * `new Daemon(...)` (including test subclasses) and `DaemonState.getInstance().initialize(...)`
+ * publish a session manager and device pool on the singleton. `bun test` runs shared-process files in ONE process, so a file
  * that never resets it leaves every later file reading its fakes: `observationRequestHeldElsewhere`
  * left a fake-laden manager behind and `TapOnElement.toolDispatch` then failed with
  * "undefined is not an object (evaluating ... cacheData ...)" only when the seed ordered it after.
@@ -23,6 +25,26 @@ import {
  */
 const ROOT = join(import.meta.dir, "..", "..");
 const TEST = join(ROOT, "test");
+
+/** Discover test subclass constructors without executing helpers or matching comments/strings. */
+function daemonSubclassNames(sources: Iterable<readonly [string, string]>): Set<string> {
+  const names = new Set(["Daemon"]);
+  for (const [file, source] of sources) {
+    const program = parseGuardSource(file, source, guardTextMayMatch(source, "Daemon"));
+    if (!program) {
+      continue;
+    }
+    new Visitor({
+      ClassDeclaration(node) {
+        const base = node.superClass && unwrapCallee(node.superClass);
+        if (node.id && base?.type === "Identifier" && base.name === "Daemon") {
+          names.add(node.id.name);
+        }
+      },
+    }).visit(program);
+  }
+  return names;
+}
 
 function isDaemonStateInstance(expression: Expression): boolean {
   const call = unwrapCallee(expression);
@@ -40,16 +62,20 @@ function isDaemonStateInstance(expression: Expression): boolean {
 export function daemonStateUsage(
   file: string,
   source: string,
+  constructors: ReadonlySet<string> = new Set(["Daemon"]),
 ): { initializes: boolean; resets: boolean } {
   const usage = { initializes: false, resets: false };
-  // Cheap prefilter: only files that mention the singleton or the Daemon class are parsed.
-  if (!/Daemon/.test(source)) {
+  // Include subclass names even when their names do not contain "Daemon".
+  if (
+    !guardTextMayMatch(source, "DaemonState") &&
+    ![...constructors].some((name) => guardTextMayMatch(source, name))
+  ) {
     return usage;
   }
   new Visitor({
     NewExpression(node) {
       const callee = unwrapCallee(node.callee);
-      if (callee.type === "Identifier" && callee.name === "Daemon") {
+      if (callee.type === "Identifier" && constructors.has(callee.name)) {
         usage.initializes = true;
       }
     },
@@ -107,10 +133,13 @@ describe("test files that initialize DaemonState reset it (issue #11614)", () =>
   // Parsing is captured once, outside the per-test budget; each bucket test asserts its slice.
   let offendersByBucket: string[][];
   beforeAll(() => {
+    const constructors = daemonSubclassNames(
+      typeScriptFiles(TEST).map((file) => [file, readGuardFile(file)] as const),
+    );
     offendersByBucket = buckets.map((bucket) =>
       bucket
         .filter((file) => {
-          const usage = daemonStateUsage(file, readGuardFile(file));
+          const usage = daemonStateUsage(file, readGuardFile(file), constructors);
           return usage.initializes && !usage.resets;
         })
         .map((file) => relative(ROOT, file).split(sep).join("/")),
@@ -125,7 +154,14 @@ describe("test files that initialize DaemonState reset it (issue #11614)", () =>
   );
 
   test("the scan recognises the initializing and resetting spellings", () => {
-    const usage = (source: string) => daemonStateUsage("fixture.test.ts", source);
+    const constructors = daemonSubclassNames([
+      ["helper.ts", "export class DaemonDisconnectHarness extends Daemon {}"],
+      ["other.ts", "class Harness extends (Daemon) {}"],
+      ["unrelated.ts", "class Unrelated extends Other {}"],
+      ["mentions.ts", '// class Comment extends Daemon {}\n"class Text extends Daemon {}";'],
+    ]);
+    expect([...constructors].sort()).toEqual(["Daemon", "DaemonDisconnectHarness", "Harness"]);
+    const usage = (source: string) => daemonStateUsage("fixture.test.ts", source, constructors);
     expect(usage("const d = new Daemon({}, undefined);")).toEqual({
       initializes: true,
       resets: false,
@@ -133,6 +169,18 @@ describe("test files that initialize DaemonState reset it (issue #11614)", () =>
     expect(usage("DaemonState.getInstance().initialize(sm, pool);").initializes).toBe(true);
     expect(usage("afterEach(() => DaemonState.getInstance().reset());").resets).toBe(true);
     expect(usage("manager.reset();").resets).toBe(false);
+    expect(usage("new DaemonDisconnectHarness(timer);")).toEqual({
+      initializes: true,
+      resets: false,
+    });
+    expect(usage("new Harness();").initializes).toBe(true);
+    expect(usage("new Unrelated();").initializes).toBe(false);
+    expect(usage('const note = "new DaemonDisconnectHarness(timer)";').initializes).toBe(false);
+    expect(usage("// new DaemonDisconnectHarness(timer)").initializes).toBe(false);
+    expect(usage("new Harness(); afterEach(() => DaemonState.getInstance().reset());")).toEqual({
+      initializes: true,
+      resets: true,
+    });
   });
 
   test("a violating file is flagged: initialized but only mentions the reset", () => {

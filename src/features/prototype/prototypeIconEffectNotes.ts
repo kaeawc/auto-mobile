@@ -29,10 +29,16 @@ export function prototypeIconEffectNotes(
   const notes = new Map<string, PrototypePlatformNote>();
   walkPrototypeNodes(spec, (node, path) => {
     const type = record(node.effect)?.type;
-    if (node.type !== "icon" || typeof type !== "string") return;
-    const fallback = fallbacks[type];
-    if (platform === "ios" && (!fallback || (osMajor !== undefined && osMajor >= fallback.minimum)))
+    if (node.type !== "icon" || typeof type !== "string") {
       return;
+    }
+    const fallback = fallbacks[type];
+    if (
+      platform === "ios" &&
+      (!fallback || (osMajor !== undefined && osMajor >= fallback.minimum))
+    ) {
+      return;
+    }
     const detail =
       platform === "android"
         ? `Android approximates ${type} with ${approximations[type]}.`
@@ -42,8 +48,11 @@ export function prototypeIconEffectNotes(
     const existing = notes.get(detail);
     if (existing) {
       const count = (existing.total ?? existing.paths.length) + 1;
-      if (existing.paths.length < 20) existing.paths.push(`${path}.effect`);
-      else existing.total = count;
+      if (existing.paths.length < 20) {
+        existing.paths.push(`${path}.effect`);
+      } else {
+        existing.total = count;
+      }
       return;
     }
     notes.set(detail, {

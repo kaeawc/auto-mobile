@@ -35,7 +35,9 @@ export const prototypeIconEffectSchema = z
 export function prototypeIconEffectFields(spec: unknown): string[] {
   const paths: string[] = [];
   walkPrototypeNodes(spec, (node, path) => {
-    if (node.type === "icon" && node.effect !== undefined) paths.push(`${path}.effect`);
+    if (node.type === "icon" && node.effect !== undefined) {
+      paths.push(`${path}.effect`);
+    }
   });
   return paths;
 }

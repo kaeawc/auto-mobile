@@ -62,6 +62,8 @@ export const UNIMPLEMENTED_BY_ARTIFACT: Record<ArtifactId, Record<string, string
       "iOS agent only derives the bundle requirement; it does not implement chat scroll options or scrollTo",
     prototype_choreography_v1:
       "iOS agent keeps the transition type only; the host refuses delays, stagger and blurReplace (#15247)",
+    prototype_custom_shaders_v1:
+      "AGSL shaders are Android-only by owner decision; the iOS agent and ProtoViewer refuse them (#15131)",
     prototype_effects_v1:
       "style.effects has a validated contract only; no renderer yet, so the host refuses it (#15128)",
     prototype_motion_v3: "Expressive, press and layout animate are Android only until #14684",

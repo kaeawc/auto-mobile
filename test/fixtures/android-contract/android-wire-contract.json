@@ -4859,6 +4859,12 @@
         "hasDefault": true
       },
       {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "keyframes",
         "type": "json",
         "nullable": true,

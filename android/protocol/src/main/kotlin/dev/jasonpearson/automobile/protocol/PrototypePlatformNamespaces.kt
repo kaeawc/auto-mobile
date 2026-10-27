@@ -29,21 +29,34 @@ private fun stripNamespaceKeys(value: JsonElement): JsonElement =
   } ?: value
 
 private fun stripNodeNamespaces(value: JsonElement): JsonElement {
-  val node =
-    (value as? JsonObject)?.let { JsonObject(it.filterKeys { key -> key != "ios" }) }
-      ?: return value
-  return JsonObject(
-    node.mapValues { (key, child) ->
-      when (key) {
-        "child" -> stripNodeNamespaces(child)
-        "children" ->
-          (child as? JsonArray)?.let { JsonArray(it.map(::stripNodeNamespaces)) } ?: child
-        "screens" ->
-          (child as? JsonObject)?.let {
-            JsonObject(it.mapValues { (_, screen) -> stripNodeNamespaces(screen) })
-          } ?: child
-        else -> child
+  val node = value as? JsonObject ?: return value
+  var stripped: JsonElement = node
+  // The shared node walker owns the contract's node-bearing fields, including list slots.
+  for (entry in PrototypePatchNodes.tree(node, emptyList(), "root").toList().asReversed()) {
+    val replacement =
+      JsonObject(
+        mapOf(
+          "op" to kotlinx.serialization.json.JsonPrimitive("replace"),
+          "value" to stripNamespaceKeysAtNode(stripped, entry.tokens),
+        ),
+      )
+    stripped =
+      if (entry.tokens.isEmpty()) replacement.getValue("value")
+      else PrototypePatchValues.change(stripped, entry.tokens, replacement, entry.path)
+  }
+  return stripped
+}
+
+private fun stripNamespaceKeysAtNode(value: JsonElement, tokens: List<String>): JsonElement {
+  var current = value
+  for (token in tokens) {
+    current =
+      when (val parent = current) {
+        is JsonArray -> parent[token.toInt()]
+        is JsonObject -> parent.getValue(token)
+        else -> return current
       }
-    },
-  )
+  }
+  return (current as? JsonObject)?.let { JsonObject(it.filterKeys { key -> key != "ios" }) }
+    ?: current
 }

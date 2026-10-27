@@ -1,0 +1,32 @@
+{
+  "spec": {
+    "id": "namespace",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "button",
+      "label": "Go",
+      "onTap": [
+        {
+          "type": "scrollTo",
+          "scroll": "hidden",
+          "to": "end"
+        }
+      ],
+      "ios": {
+        "bottomAccessory": {
+          "type": "scroll",
+          "id": "hidden",
+          "child": {
+            "type": "text",
+            "text": "Hidden"
+          }
+        }
+      }
+    }
+  },
+  "expectedPath": "root.onTap[0].scroll"
+}

@@ -14529,7 +14529,7 @@
         "ios": {
           "rule": {
             "kind": "ref",
-            "name": "iosNamespace"
+            "name": "iosPresentationNamespace"
           },
           "optional": true
         },
@@ -17323,7 +17323,7 @@
         "ios": {
           "rule": {
             "kind": "ref",
-            "name": "iosNamespace"
+            "name": "iosPresentationNamespace"
           },
           "optional": true
         },
@@ -19544,6 +19544,62 @@
     "drawerEdge": {
       "kind": "enum",
       "values": ["start", "end"]
+    },
+    "iosPresentationNamespace": {
+      "kind": "object",
+      "fields": {
+        "buttonStyle": {
+          "rule": {
+            "kind": "enum",
+            "values": ["glass", "glassProminent"]
+          },
+          "optional": true
+        },
+        "tab": {
+          "rule": {
+            "kind": "object",
+            "fields": {
+              "role": {
+                "rule": {
+                  "kind": "enum",
+                  "values": ["search"]
+                },
+                "optional": false
+              }
+            }
+          },
+          "optional": true
+        },
+        "sheet": {
+          "rule": {
+            "kind": "object",
+            "fields": {
+              "sizing": {
+                "rule": {
+                  "kind": "enum",
+                  "values": ["form", "page", "fitted"]
+                },
+                "optional": false
+              }
+            }
+          },
+          "optional": true
+        },
+        "hover": {
+          "rule": {
+            "kind": "enum",
+            "values": ["lift", "highlight"]
+          },
+          "optional": true
+        },
+        "navigationTitle": {
+          "rule": {
+            "kind": "enum",
+            "values": ["large", "inline"]
+          },
+          "optional": true
+        }
+      }
     },
     "iosNamespace": {
       "kind": "object",

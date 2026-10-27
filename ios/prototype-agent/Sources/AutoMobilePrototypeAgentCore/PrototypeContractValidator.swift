@@ -87,6 +87,15 @@ struct PrototypeContractValidator {
             try PrototypeLazyList.validateLimits(root: root, data: fields["data"]?.objectFields)
         }
         try validator.walk(value, rule: spec, path: "", depth: 0)
+        // Accessory nodes are structurally checked but neither renderer draws them.
+        let ignored = validator.locatedNodes.filter {
+            $0.value["ios"]?.objectFields?["bottomAccessory"]?.objectFields != nil
+        }.map { "\($0.path).ios.bottomAccessory" }
+        func ignoredEntry(_ entry: PrototypeLocatedValue) -> Bool {
+            ignored.contains { entry.path == $0 || entry.path.hasPrefix($0 + ".") || entry.path.hasPrefix($0 + "[") }
+        }
+        validator.locatedNodes.removeAll(where: ignoredEntry)
+        validator.actions.removeAll(where: ignoredEntry)
         return validator
     }
 

@@ -17,4 +17,17 @@ final class PrototypePlatformNamespaceTests: XCTestCase {
         XCTAssertEqual(spec.root.children?.first?.text, "Hi")
         XCTAssertNotNil(spec.data?["ios"])
     }
+
+    func testAccessoryCapabilitiesAndReferencesAreIgnored() throws {
+        let input =
+            #"{"id":"ns","window":{"placement":{"type":"fullscreen"}},"root":{"type":"text","text":"Shown","ios":{"bottomAccessory":{"type":"text","text":"Hidden","android":{"indication":"none"},"onTap":[{"type":"emit","name":"hidden","context":{"hidden":{"data":"/hidden"}}}]}}}}"#
+        let data = Data(input.utf8)
+        let (value, context) = try PrototypeContractValidator.inspect(data: data)
+        XCTAssertEqual(context.locatedNodes.count, 1)
+        XCTAssertTrue(context.actions.isEmpty)
+        XCTAssertEqual(
+            try PrototypeStrictCapabilities.required(XCTUnwrap(value.objectFields)),
+            ["prototype_platform_namespace_v1"]
+        )
+    }
 }

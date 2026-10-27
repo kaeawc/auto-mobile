@@ -1,3 +1,4 @@
+import { hasPrototypeAnchors } from "../../../src/features/prototype/prototypeAnchors";
 import { expect, test } from "bun:test";
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
 
@@ -237,4 +238,69 @@ test("Android reports own fields without an applicable interaction and ignores i
     "theme.android",
   ]);
   expect(notes.find((note) => note.paths.includes("window.ios"))?.effect).toBe("ignored");
+});
+
+test("accessory subtrees neither gate nor produce nested platform notes", async () => {
+  const raw = {
+    ...spec,
+    theme: undefined,
+    window: { placement: { type: "fullscreen" } },
+    root: {
+      type: "text",
+      text: "Shown",
+      ios: {
+        bottomAccessory: {
+          type: "chart",
+          android: { indication: "ripple" },
+          ios: { hover: "lift" },
+        },
+      },
+    },
+  };
+  expect(prototypePlatformNamespaceFields(raw, "android")).toEqual([]);
+  expect(
+    await specCapabilityRefusal(
+      { android: { supportsCommand: async () => false } },
+      raw,
+      undefined,
+    ),
+  ).toBeUndefined();
+  const notes = prototypePlatformNotes(raw as PrototypeSpec, "android", () => true);
+  expect(
+    notes.filter((note) => note.construct === "platformNamespace").map((note) => note.paths),
+  ).toEqual([["root.ios"]]);
+});
+
+for (const site of ["window", "theme"] as const) {
+  test(`bottomAccessory is forbidden in ${site}.ios in both schemas`, () => {
+    const raw = {
+      ...spec,
+      [site]: { ...spec[site], ios: { bottomAccessory: { type: "text", text: "Hidden" } } },
+    };
+    expect(prototypeSpecSchema.safeParse(raw).success).toBe(false);
+    expect(validatePrototypeSpec(raw)).toMatchObject({
+      success: false,
+      error: { path: `${site}.ios.bottomAccessory` },
+    });
+  });
+}
+
+test("ignored accessory anchors do not request app target resolution", () => {
+  const root = {
+    type: "text",
+    text: "Shown",
+    ios: {
+      bottomAccessory: {
+        type: "text",
+        text: "Hidden",
+        anchor: {
+          type: "element",
+          selector: { text: "Hidden app target" },
+          alignment: "cover",
+        },
+      },
+    },
+  };
+  expect(hasPrototypeAnchors({ root })).toBe(false);
+  expect(validatePrototypeSpec({ ...spec, root }).success).toBe(true);
 });

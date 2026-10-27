@@ -21,4 +21,26 @@ class PrototypePlatformNamespacesTest {
     // A theme that held only a namespace is dropped: an empty theme is invalid.
     assertNull(stripPlatformNamespaces(input).jsonObject["theme"])
   }
+
+  @Test
+  fun `accessory capabilities are ignored and list slots decode`() {
+    val spec =
+      """{"id":"ns","window":{"placement":{"type":"fullscreen"}},"root":{"type":"text","text":"Hi","ios":{"bottomAccessory":{"type":"text","text":"Hidden","android":{"indication":"none"},"onTap":[{"type":"emit","name":"hidden","context":{"hidden":{"data":"/hidden"}}}]}}}}"""
+    val refs = PrototypeBundleSpec.references(spec.toByteArray())
+    assertEquals(
+      listOf("prototype_platform_namespace_v1"),
+      PrototypeBundleCapabilities.required(refs),
+    )
+    assertEquals(
+      setOf("prototype_platform_namespace_v1"),
+      PrototypeStrictPolicy.required(refs.spec),
+    )
+    val slots =
+      """{"id":"slots","data":{"rows":[]},"window":{"placement":{"type":"fullscreen"}},"root":{"type":"list","repeat":{"items":{"path":"/rows"},"as":"row","key":"id"},"children":[{"type":"text","text":"Row"}],"header":{"type":"text","text":"Hi","ios":{"hover":"lift"}},"footer":{"type":"text","text":"Bye","ios":{}}}}"""
+    val result = PrototypeSpecValidator.validate(slots)
+    org.junit.jupiter.api.Assertions.assertTrue(
+      result is PrototypeSpecValidation.Success,
+      result.toString(),
+    )
+  }
 }

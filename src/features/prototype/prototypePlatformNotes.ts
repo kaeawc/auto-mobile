@@ -306,7 +306,12 @@ function occurrences(
   found: Occurrence[],
   nodeType?: string,
 ): void {
-  if (value === undefined || value === null) {
+  if (
+    value === undefined ||
+    value === null ||
+    rule.name === "iosNamespace" ||
+    rule.name === "androidNamespace"
+  ) {
     return;
   }
   switch (rule.kind) {

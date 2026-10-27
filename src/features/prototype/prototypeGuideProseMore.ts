@@ -225,7 +225,7 @@ Own-platform blocks require \`prototype_platform_namespace_v1\`. Foreign blocks 
 ignored with paths in \`platformNotes\`; unknown fields are rejected even in foreign blocks.
 iOS glass buttons need 26 and otherwise use bordered buttons; hover needs 17 and is render-only
 (no pointer input). Custom tab bars, app bars and sheets cannot apply \`tab.role\`,
-\`bottomAccessory\` (a node), \`navigationTitle\` or \`sheet.sizing\`; these are reported as ignored.
+\`bottomAccessory\` (node-only), \`navigationTitle\` or \`sheet.sizing\`; these are reported as ignored.
 Window/theme namespace fields likewise have no applicable node and are reported as ignored.
 Android \`indication: "ripple"|"none"\` controls the node's clickable feedback; motion-off still wins.
 Stack \`predictiveBack.style\` uses the existing pop for \`default\`, horizontal movement with fade

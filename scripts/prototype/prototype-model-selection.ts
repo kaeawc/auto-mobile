@@ -69,6 +69,7 @@ export const prototypeModelSelection = {
   scrollEdge: {},
   scrollTransition: {},
   scrollLinked: {},
+  iosPresentationNamespace: {},
   iosNamespace: {
     swiftConformances: ["Decodable"],
     fieldTypes: { bottomAccessory: { swift: "PrototypeNode" } },

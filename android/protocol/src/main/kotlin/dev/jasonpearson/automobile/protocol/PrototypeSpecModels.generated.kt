@@ -1739,6 +1739,25 @@ data class PrototypeScrollLinked(
 )
 
 @Serializable
+data class PrototypeIosPresentationNamespaceTab(
+  val role: String,
+)
+
+@Serializable
+data class PrototypeIosPresentationNamespaceSheet(
+  val sizing: String,
+)
+
+@Serializable
+data class PrototypeIosPresentationNamespace(
+  val buttonStyle: String? = null,
+  val tab: PrototypeIosPresentationNamespaceTab? = null,
+  val sheet: PrototypeIosPresentationNamespaceSheet? = null,
+  val hover: String? = null,
+  val navigationTitle: String? = null,
+)
+
+@Serializable
 data class PrototypeIosNamespaceTab(
   val role: String,
 )

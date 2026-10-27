@@ -157,12 +157,28 @@ internal object PrototypeSpecInput {
   private fun structuralError(value: JsonElement, context: Context): PrototypeSpecError? =
     PrototypeLazyListRules.limitError(value)
       ?: walk(value, definitions.getValue("spec").jsonObject, "", context, 0)
+      ?: excludeAccessoryReferences(context)
       ?: PrototypeRouteRules.error(value.jsonObject, context)
       ?: PrototypeSharedElementRules.error(context)
       ?: gridSpanErrors(context)
       ?: PrototypeDerivedRules.error(value, context)
       ?: PrototypeContainerRules.pagerStateKeyErrors(context)
       ?: PrototypeLazyListRules.error(context)
+
+  private fun excludeAccessoryReferences(context: Context): PrototypeSpecError? {
+    val ignored =
+      context.nodes
+        .filter {
+          (it.value["ios"] as? JsonObject)?.get("bottomAccessory") is JsonObject
+        }
+        .map { "${it.path}.ios.bottomAccessory" }
+    fun ignoredPath(path: String): Boolean = ignored.any {
+      path == it || path.startsWith("$it.") || path.startsWith("$it[")
+    }
+    context.nodes.removeAll { ignoredPath(it.path) }
+    context.actions.removeAll { ignoredPath(it.path) }
+    return null
+  }
 
   // JSON integers include exponent/decimal spellings (1e2, 100.0). Kotlin's Int decoder
   // accepts only integer lexical tokens, so normalize validated integer fields structurally.

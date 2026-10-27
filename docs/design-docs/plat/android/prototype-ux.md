@@ -3877,6 +3877,6 @@ activity, and snaps without predictive scrubbing for `none`. Reduced motion stil
 iOS `buttonStyle` applies `.glass`/`.glassProminent` on iOS 26+, using bordered buttons
 below 26 with a substituted note. `hover` applies lift/highlight on iOS 17+ and is render-only.
 The renderer's tab bars, app bars and sheets are custom drawn to retain per-item identifiers;
-`tab.role`, `bottomAccessory` (a validated node), `navigationTitle` and `sheet.sizing` are
-reported as ignored at their field paths. They require native Tab, navigation-title and
-sheet presentation hosts before their native APIs can apply. iOS ignores all Android fields.
+`tab.role`, `bottomAccessory`, `navigationTitle` and `sheet.sizing` are reported as ignored.
+`bottomAccessory` is node-only and structurally validated; its descendants provide no targets,
+references or capabilities on either renderer. iOS ignores all Android fields.

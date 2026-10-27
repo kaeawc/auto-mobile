@@ -26777,7 +26777,25 @@
               "type": "object",
               "properties": {
                 "ios": {
-                  "$ref": "#/properties/spec/properties/root/anyOf/0/properties/ios"
+                  "type": "object",
+                  "properties": {
+                    "buttonStyle": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/ios/properties/buttonStyle"
+                    },
+                    "tab": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/ios/properties/tab"
+                    },
+                    "sheet": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/ios/properties/sheet"
+                    },
+                    "hover": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/ios/properties/hover"
+                    },
+                    "navigationTitle": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/ios/properties/navigationTitle"
+                    }
+                  },
+                  "additionalProperties": false
                 },
                 "android": {
                   "$ref": "#/properties/spec/properties/root/anyOf/0/properties/android"
@@ -26907,10 +26925,10 @@
               "type": "object",
               "properties": {
                 "ios": {
-                  "$ref": "#/properties/spec/properties/root/anyOf/0/properties/ios"
+                  "$ref": "#/properties/spec/properties/window/properties/ios"
                 },
                 "android": {
-                  "$ref": "#/properties/spec/properties/root/anyOf/0/properties/android"
+                  "$ref": "#/properties/spec/properties/window/properties/android"
                 },
                 "design": {
                   "type": "string",

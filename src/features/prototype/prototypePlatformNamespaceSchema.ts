@@ -10,10 +10,9 @@ export type PrototypeIosNamespace = {
   navigationTitle?: "large" | "inline";
 };
 
-export const iosNamespaceSchema: z.ZodType<PrototypeIosNamespace, z.ZodTypeDef, unknown> = z
+export const iosPresentationNamespaceSchema = z
   .object({
     buttonStyle: z.enum(["glass", "glassProminent"]).optional(),
-    bottomAccessory: z.lazy(() => prototypeNodeSchema).optional(),
     tab: z
       .object({ role: z.enum(["search"]) })
       .strict()
@@ -36,6 +35,19 @@ export const androidNamespaceSchema = z
     indication: z.enum(["ripple", "none"]).optional(),
   })
   .strict();
+
+export const iosNamespaceSchema: z.ZodType<PrototypeIosNamespace, z.ZodTypeDef, unknown> = z
+  .object({
+    buttonStyle: iosPresentationNamespaceSchema.shape.buttonStyle,
+    bottomAccessory: z.lazy(() => prototypeNodeSchema).optional(),
+    ...iosPresentationNamespaceSchema.omit({ buttonStyle: true }).shape,
+  })
+  .strict();
+
+export const prototypePresentationNamespaceShape = {
+  ios: iosPresentationNamespaceSchema.optional(),
+  android: androidNamespaceSchema.optional(),
+};
 
 export const prototypePlatformNamespaceShape = {
   ios: iosNamespaceSchema.optional(),

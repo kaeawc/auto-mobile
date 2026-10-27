@@ -375,7 +375,7 @@ describe("agent benchmark harness", () => {
       "ENABLE_PROMPT_CACHING_1H_BEDROCK",
       "FORCE_PROMPT_CACHING_5M",
     ]) {
-      expect({ name, value: env[name] }).toEqual({ name, value: undefined });
+      expect(env[name], name).toBeUndefined();
     }
     expect(env.ANTHROPIC_API_KEY).toBe("sk-test");
     expect(env.ANTHROPIC_MODEL).toBe("provider-model-id");

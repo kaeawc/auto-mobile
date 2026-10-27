@@ -310,8 +310,8 @@ export function createLauncher(timer: Timer): ClaudeLauncher {
       process.on("SIGTERM", forward);
       // Claude can exit before reading stdin (bad flag, auth failure); the resulting
       // EPIPE must not crash the CLI. The child close/error handlers settle the run.
-      child.stdin.on("error", () => undefined);
-      child.stdin.end(spec.stdin);
+      child.stdin?.on("error", () => undefined);
+      child.stdin?.end(spec.stdin);
       let timedOut = false;
       let killHandle: NodeJS.Timeout | undefined;
       const timeoutHandle = timer.setTimeout(() => {

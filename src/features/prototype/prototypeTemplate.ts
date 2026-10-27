@@ -462,13 +462,13 @@ function mapNodeKeys(node: Raw, path: string, visit: FieldVisitor): void {
  */
 export function mapBindableFields(node: Raw, path: string, visit: FieldVisitor): Raw {
   const copy = { ...node };
-  mapObject(copy, "shared", path, (entry, entryPath) => {
-    mapField(entry, "key", entryPath, "operand", visit);
-    return entry;
-  });
   mapObject(copy, "semantics", path, (entry, entryPath) => {
     mapField(entry, "label", entryPath, "text", visit);
     mapField(entry, "hint", entryPath, "text", visit);
+    return entry;
+  });
+  mapObject(copy, "shared", path, (entry, entryPath) => {
+    mapField(entry, "key", entryPath, "operand", visit);
     return entry;
   });
   if (copy.type === "text") {

@@ -1,79 +1,26 @@
 {
   "spec": {
-    "id": "string-conditions",
+    "id": "string-gate",
     "window": {
       "placement": {
         "type": "fullscreen"
-      },
-      "opacity": 100
+      }
     },
     "state": {
       "value": "hello"
     },
     "root": {
-      "repeat": {
-        "items": [
-          {
-            "x": "he"
-          },
-          {
-            "x": ""
-          }
-        ],
-        "as": "item"
-      },
-      "type": "column",
-      "children": [
-        {
-          "styleWhen": [
-            {
-              "when": {
-                "key": "value",
-                "startsWith": "he"
-              },
-              "style": {
-                "color": "primary"
-              }
-            }
-          ],
-          "visibleWhen": {
-            "all": [
-              {
-                "key": "value",
-                "contains": "{item.x}"
-              },
-              {
-                "any": [
-                  {
-                    "key": "value",
-                    "lengthGt": 100000
-                  },
-                  {
-                    "not": {
-                      "key": "value",
-                      "lengthLt": 0
-                    }
-                  }
-                ]
-              }
-            ]
-          },
-          "type": "text",
-          "text": "Hello"
-        },
-        {
-          "enabledWhen": {
-            "key": "value",
-            "lengthLt": 100
-          },
-          "type": "button",
-          "label": "OK"
-        }
-      ]
+      "type": "text",
+      "text": "x",
+      "visibleWhen": {
+        "key": "value",
+        "contains": "h"
+      }
     }
   },
   "options": {
-    "supportedCapabilities": ["prototype_checks_v1"]
+    "supportedCapabilities": []
   },
-  "expectedPath": "$"
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities"
 }

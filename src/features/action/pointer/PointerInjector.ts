@@ -22,6 +22,10 @@ export interface PointerFeatures {
   toolType: PointerToolType;
   /** A pressure other than the default 1.0. */
   variablePressure?: boolean;
+  /** Tilt, orientation or barrel buttons: more than `adb input stylus` can express. */
+  extendedAxes?: boolean;
+  /** A polyline of more than two points; `adb input stylus` only draws a tap or a straight swipe. */
+  path?: boolean;
   /** Hover enter, move and exit with no contact. */
   hover?: boolean;
 }
@@ -49,13 +53,21 @@ export interface PointerPoint {
   y: number;
   /** Milliseconds spent moving here from the previous point. */
   durationMs?: number;
-  /** Hover distance from the surface, when the route can express it. */
+  /** Hover distance from the surface, 0 (touching) to 1 (far); a stylus hover only. */
   distance?: number;
+  /** Stylus pressure 0..1 for a stroke point. */
+  pressure?: number;
+  /** Radians from the surface normal, 0..PI/2. */
+  tilt?: number;
+  /** Radians, -PI..PI. */
+  orientation?: number;
 }
 
 export interface PointerRequest {
   features: PointerFeatures;
   points: readonly PointerPoint[];
+  /** `MotionEvent` button state held for a stroke (`BUTTON_STYLUS_PRIMARY` is 32). */
+  buttons?: number;
   displayId?: number;
 }
 
@@ -68,7 +80,11 @@ export interface PointerInjector {
 /** True for the plain finger touch every device already supports. */
 export function isFingerOnly(features: PointerFeatures): boolean {
   return (
-    features.toolType === "finger" && features.hover !== true && features.variablePressure !== true
+    features.toolType === "finger" &&
+    features.hover !== true &&
+    features.variablePressure !== true &&
+    features.extendedAxes !== true &&
+    features.path !== true
   );
 }
 
@@ -80,6 +96,12 @@ export function describePointerFeatures(features: PointerFeatures): string {
   if (features.variablePressure) {
     parts.push("variable pressure");
   }
+  if (features.extendedAxes) {
+    parts.push("tilt, orientation or buttons");
+  }
+  if (features.path) {
+    parts.push("path");
+  }
   return parts.join(" ");
 }
 
@@ -90,17 +112,29 @@ export function describePointerFeatures(features: PointerFeatures): string {
  * and a mouse is only supported hovering.
  */
 export function invalidPointerFeatures(features: PointerFeatures): string | undefined {
-  if (features.hover && features.toolType === "finger") {
+  if (features.hover) {
+    return invalidHover(features);
+  }
+  const stylusOnly = features.variablePressure || features.extendedAxes || features.path;
+  if (stylusOnly && features.toolType !== "stylus") {
+    return `${features.toolType} input has no variable pressure, tilt, buttons or stroke; only a stylus does`;
+  }
+  if (features.toolType === "mouse") {
+    return "mouse input is supported for hover only";
+  }
+  return undefined;
+}
+
+/** A hover has no contact: no pressure, no held buttons, no stroke, and only a stylus or mouse does it. */
+function invalidHover(features: PointerFeatures): string | undefined {
+  if (features.toolType === "finger") {
     return "a finger does not hover; hover comes from a stylus or a mouse";
   }
-  if (features.hover && features.variablePressure) {
+  if (features.variablePressure) {
     return "hover has no contact, so it has no pressure";
   }
-  if (features.variablePressure && features.toolType !== "stylus") {
-    return `${features.toolType} input has no variable pressure; only a stylus does`;
-  }
-  if (features.toolType === "mouse" && !features.hover) {
-    return "mouse input is supported for hover only";
+  if (features.extendedAxes || features.path) {
+    return "tilt, orientation, buttons and strokes describe a stylus in contact; a hover carries only a position and distance";
   }
   return undefined;
 }

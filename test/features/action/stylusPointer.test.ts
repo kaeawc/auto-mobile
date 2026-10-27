@@ -1,3 +1,4 @@
+import { pointerNeedsInstrumentation } from "../../../src/models/PointerOption";
 import { describe, expect, test } from "bun:test";
 import {
   STYLUS_INPUT_MIN_SDK,
@@ -6,6 +7,7 @@ import {
   classifyStylusFailure,
   dispatchStylusTap,
   stylusInputCommand,
+  stylusRefusal,
 } from "../../../src/features/action/stylusPointer";
 import { StaleDisplayError } from "../../../src/features/observe/StaleDisplayError";
 import { InputCommandRejectedError } from "../../../src/features/action/touchscreenInput";
@@ -46,18 +48,22 @@ describe("stylus pointer capability (#13081)", () => {
     expect(refusal).toBeUndefined();
   });
 
-  test.each([0, 0.5, 0.99])("pressure %p is refused, never rounded to 1.0", async (pressure) => {
-    const adb = adbWithSdk(34);
-    const refusal = await checkStylusPointer(adb, {
-      pointer: { ...stylus, pressure },
-      platform: "android",
-      gesture: "tap",
-    });
-    expect(refusal).toContain("pressure 1.0");
-    expect(refusal).toContain(String(pressure));
-    // Refused before any device read.
-    expect(adb.getExecutedCommands()).toEqual([]);
-  });
+  test.each([0, 0.5, 0.99])(
+    "pressure %p is not a static refusal; it takes the instrumentation route (#13099)",
+    async (pressure) => {
+      const adb = adbWithSdk(34);
+      const request = {
+        pointer: { ...stylus, pressure },
+        platform: "android",
+        gesture: "tap" as const,
+      };
+      expect(stylusRefusal(request)).toBeUndefined();
+      expect(pointerNeedsInstrumentation(request.pointer)).toBe(true);
+      // The shell route's API check does not apply to the instrumentation route.
+      expect(await checkStylusPointer(adb, request)).toBeUndefined();
+      expect(adb.getExecutedCommands()).toEqual([]);
+    },
+  );
 
   test("iOS is refused as Android-only", async () => {
     const refusal = await checkStylusPointer(adbWithSdk(34), {

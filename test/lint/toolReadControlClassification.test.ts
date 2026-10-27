@@ -136,6 +136,7 @@ const CLASSIFICATION: Classification = {
     "displayProfile",
     "dragAndDrop",
     "dragPath",
+    "hoverAt",
     "executePlan",
     "explore",
     "focusNavigate",

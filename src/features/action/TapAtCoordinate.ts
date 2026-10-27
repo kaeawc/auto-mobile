@@ -59,7 +59,20 @@ import { dispatchAndroidDoubleTap } from "./androidDoubleTap";
 import { tapDurationMs, LONG_PRESS_MIN_MS } from "./tapAtGesture";
 import { resolveTapAtCall, type TapAtCall } from "./ActionCall";
 import { collectWarnings, partialDoubleTapNote } from "./tapSharedHelpers";
-import { dispatchStylusTap, refusedTap, stylusTapRefusal } from "./stylusPointer";
+import {
+  StylusOutcomeIndeterminateError,
+  dispatchStylusTap,
+  refusedTap,
+  stylusTapRefusal,
+} from "./stylusPointer";
+import { LONG_PRESS_DEFAULT_MS } from "./tapAtGesture";
+import {
+  dispatchRichStylus,
+  pointerNeedsInstrumentation,
+  strokeRequest,
+  tapStrokePoints,
+  type RichStylusOptions,
+} from "./pointer/richStylus";
 import { TapAtGeometryError } from "./TapAtGeometryError";
 import {
   failurePoint,
@@ -87,6 +100,8 @@ export interface TapAtCoordinateDependencies extends DisplayFenceDependencies {
   invalidateIosCache?: () => void;
   lastRenderedObservation?: RenderedObservationReader;
   snapshotReferences?: SnapshotReferenceStore;
+  /** Stylus routes and device facts; the defaults use the instrumentation route and the live device. */
+  stylus?: Pick<RichStylusOptions, "injectors" | "readEnvironment">;
 }
 
 function resolveTalkBackDependencies(
@@ -116,6 +131,7 @@ export class TapAtCoordinate extends BaseVisualChange {
   private readonly iosCoordinateTap: IosCoordinateTapDispatch;
   private readonly invalidateIosCache: () => void;
   private readonly lastRenderedObservation?: RenderedObservationReader;
+  private readonly stylusRoutes: Pick<RichStylusOptions, "injectors" | "readEnvironment">;
   private readonly snapshotReferences: SnapshotReferenceStore;
   private readonly androidTalkBack: AndroidCoordinateTalkBack;
   private readonly androidDispatcher: AndroidCoordinateTapDispatcher;
@@ -135,6 +151,7 @@ export class TapAtCoordinate extends BaseVisualChange {
       dependencies.invalidateIosCache ??
       (() => IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache());
     this.lastRenderedObservation = dependencies.lastRenderedObservation;
+    this.stylusRoutes = dependencies.stylus ?? {};
     this.snapshotReferences = dependencies.snapshotReferences ?? snapshotReferences;
     const talkBack = resolveTalkBackDependencies(
       dependencies,
@@ -274,6 +291,39 @@ export class TapAtCoordinate extends BaseVisualChange {
     return this.executeTap(options, progress, signal, planContext);
   }
 
+  /** A stylus tap or long press: `adb input stylus` for the plain case, the instrumentation route for more. */
+  private async dispatchStylusTapAt(
+    options: TapAtOptions,
+    resolved: { x: number; y: number },
+    transitionRevision: ReturnType<TapAtCoordinate["captureTransitionRevision"]>,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const fence = {
+      signal,
+      assertCurrent: () => this.assertDisplayRevisionCurrent(transitionRevision),
+    };
+    if (!pointerNeedsInstrumentation(options.pointer)) {
+      await dispatchStylusTap(this.adb, resolved, options, fence);
+      return;
+    }
+    // Pressure, tilt, orientation or buttons: refused before input when the device lacks the route (#13099).
+    const durationMs =
+      options.action === "longPress" ? (options.durationMs ?? LONG_PRESS_DEFAULT_MS) : undefined;
+    try {
+      await dispatchRichStylus(
+        this.device,
+        this.adb,
+        strokeRequest(options.pointer!, tapStrokePoints(resolved, durationMs)),
+        { ...fence, ...this.stylusRoutes },
+      );
+    } catch (error) {
+      // Once the stroke was sent, an unconfirmed result may have been applied.
+      throw error instanceof StylusOutcomeIndeterminateError
+        ? indeterminateTapError(error.message)
+        : error;
+    }
+  }
+
   private async executeTap(
     options: TapAtOptions,
     progress?: ProgressCallback,
@@ -362,11 +412,9 @@ export class TapAtCoordinate extends BaseVisualChange {
           switch (this.device.platform) {
             case "android": {
               if (options.pointer) {
-                // Stylus goes straight through `input stylus`: no TalkBack routing and no finger fallback.
-                await dispatchStylusTap(this.adb, resolved, options, {
-                  signal,
-                  assertCurrent: () => this.assertDisplayRevisionCurrent(transitionRevision),
-                });
+                // Stylus goes straight through `input stylus` or the instrumentation route: no
+                // TalkBack routing and no finger fallback.
+                await this.dispatchStylusTapAt(options, resolved, transitionRevision, signal);
                 onTapDelivered();
                 break;
               }

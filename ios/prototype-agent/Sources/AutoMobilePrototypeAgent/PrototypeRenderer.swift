@@ -234,7 +234,7 @@
             model.barScroll(node).collapse(
                 node.onScroll,
                 extent: PrototypeBarScrollState.extent(variant: node.variant, behavior: node.onScroll),
-                reduced: reduceMotion || model.spec?.motion == "none"
+                reduced: !PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion).spatial
             )
         }
 

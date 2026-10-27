@@ -139,11 +139,29 @@ describe("SessionManager", () => {
       expect(manager.getSessionForDevice("emulator-5554")).toBe("s1");
     });
 
-    test("a fence that declines during terminal persistence leaves the session live", async () => {
+    test("a fence that declines before the commit leaves the session live", async () => {
       const persistence = new DeferredReleaseDeviceSessionPersistence();
       const manager = makeSessionManager({ timer: fakeTimer, persistence });
 
       const session = await manager.createSession("s1", "emulator-5554", "android");
+      const release = manager.releaseSessionUnlessSuperseded(
+        "s1",
+        "device-disconnected:emulator-5554",
+        { commitFence: () => false },
+      );
+
+      await expect(release).resolves.toEqual({ superseded: true });
+      expect(manager.getSession("s1")).toBe(session);
+      expect(manager.getSessionForDevice("emulator-5554")).toBe("s1");
+    });
+
+    // #11799 W5: no fence is evaluated after the terminal write started, so a confirmation that
+    // arrives during it is too late and the release has won.
+    test("a fence that declines during terminal persistence is too late to undo the release", async () => {
+      const persistence = new DeferredReleaseDeviceSessionPersistence();
+      const manager = makeSessionManager({ timer: fakeTimer, persistence });
+
+      await manager.createSession("s1", "emulator-5554", "android");
       let superseded = false;
       const release = manager.releaseSessionUnlessSuperseded(
         "s1",
@@ -154,9 +172,9 @@ describe("SessionManager", () => {
 
       superseded = true;
       persistence.finishRelease.resolve();
-      await expect(release).resolves.toEqual({ superseded: true });
-      expect(manager.getSession("s1")).toBe(session);
-      expect(manager.getSessionForDevice("emulator-5554")).toBe("s1");
+      await expect(release).resolves.toEqual({ superseded: false, deviceId: "emulator-5554" });
+      expect(manager.getSession("s1")).toBeNull();
+      expect(manager.getSessionForDevice("emulator-5554")).toBeNull();
     });
 
     test("a fence that stays open commits the release and reports the device", async () => {

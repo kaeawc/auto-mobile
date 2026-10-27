@@ -1,3 +1,4 @@
+import type { DeviceClaimMirror } from "./deviceClaims";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { closeSync, linkSync, openSync, readFileSync, unlinkSync, writeSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -79,6 +80,11 @@ export interface ForeignDeviceOwnership {
    * claim another daemon took over is left alone.
    */
   release(deviceId: string): void;
+  /**
+   * Mirror this daemon's claims into the host-wide `device_claims` table (#11811 step b). The claim
+   * files stay authoritative; the mirror never changes a claim's outcome.
+   */
+  attachClaimMirror?(mirror: DeviceClaimMirror): void;
 }
 
 /** The owner a lock file names: its PID and token, as written. */
@@ -348,6 +354,7 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
   /** Owner PID -> its current run of unanswered status requests, cleared by any answer. */
   private readonly unanswered = new Map<number, UnansweredRun>();
   private readonly ownerToken = defaultIdGenerator.next();
+  private claimMirror: DeviceClaimMirror | undefined;
 
   constructor(
     private readonly selfPid: number = process.pid,
@@ -434,6 +441,10 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
     return this.unreadable.has(deviceId);
   }
 
+  attachClaimMirror(mirror: DeviceClaimMirror): void {
+    this.claimMirror = mirror;
+  }
+
   async relinquishIdleLease(deviceId: string): Promise<void> {
     const socketPath = this.idleLeaseHolders.get(deviceId);
     if (socketPath === undefined || !this.probe.requestRelinquish) {
@@ -464,16 +475,38 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
   }
 
   async claim(deviceId: string): Promise<boolean> {
+    const owner = this.claimOwner();
+    const outcome = await this.claimFile(deviceId, owner);
+    if (outcome === "claimed") {
+      this.claimMirror?.claimed(deviceId, owner, () => this.claimFileIsOurs(deviceId, owner));
+    }
+    return outcome !== "refused";
+  }
+
+  /** Whether the claim file for `deviceId` still names this owner. */
+  private claimFileIsOurs(deviceId: string, owner: { pid: number; ownerToken: string }): boolean {
+    const path = this.resolvePath(() => this.source.claimPath(deviceId), deviceId);
+    if (path === undefined) {
+      return false;
+    }
+    const held = this.source.read(path);
+    return held?.pid === owner.pid && held.token === owner.ownerToken;
+  }
+
+  /** Take the claim file: "unpublished" when no claim could be written and allocation proceeds. */
+  private async claimFile(
+    deviceId: string,
+    owner: { pid: number; ownerToken: string; metadata?: string },
+  ): Promise<"claimed" | "unpublished" | "refused"> {
     const path = this.resolvePath(() => this.source.claimPath(deviceId), deviceId);
     if (path === undefined) {
       // No claim can be published; allocation proceeds as it did before claims existed.
-      return true;
+      return "unpublished";
     }
     if ((await this.legacyClaimOwner(deviceId)) !== undefined) {
       // A 0.0.84 daemon claimed the device in its coordination directory and still uses it.
-      return false;
+      return "refused";
     }
-    const owner = this.claimOwner();
     let acquired: boolean;
     try {
       acquired = this.source.tryAcquire(path, owner);
@@ -483,22 +516,48 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
         error,
       );
       // Without a writable claim directory, allocation proceeds as it did before claims existed.
-      return true;
+      return "unpublished";
     }
     if (acquired) {
-      return true;
+      return this.unlessHeldInTable(deviceId, path, owner);
     }
     const observed = this.source.read(path);
     if (!observed || Number.isNaN(observed.pid) || observed.pid === this.selfPid) {
       // Ours already. Anything else (a claim being taken over, or an unreadable claim file) is
       // refused here, and refresh reports the same device as not free, so the two agree.
-      return observed?.pid === this.selfPid;
+      return observed?.pid === this.selfPid ? "claimed" : "refused";
     }
     if ((await this.evaluateOwner(path, deviceId, "claim")) !== undefined) {
-      return false;
+      return "refused";
     }
     // The previous claimant is gone or no longer uses the device.
-    return this.source.takeOver(path, observed, owner);
+    return this.source.takeOver(path, observed, owner)
+      ? this.unlessHeldInTable(deviceId, path, owner)
+      : "refused";
+  }
+
+  /**
+   * A claim file just taken is given back when another live daemon holds the device in the
+   * host-wide table, whatever claim directory it used (#11811 step c). A claim that was already
+   * ours is never questioned: the table row is then merely behind.
+   */
+  private async unlessHeldInTable(
+    deviceId: string,
+    path: string,
+    owner: { pid: number; ownerToken: string },
+  ): Promise<"claimed" | "refused"> {
+    if ((await this.tableClaimOwner(deviceId)) === undefined) {
+      return "claimed";
+    }
+    try {
+      this.source.release(path, owner);
+    } catch (error) {
+      logger.warn(
+        `Cannot give back the claim on ${deviceId} another daemon holds in the host-wide table: ${errorMessage(error)}`,
+        error,
+      );
+    }
+    return "refused";
   }
 
   release(deviceId: string): void {
@@ -508,6 +567,7 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
     }
     try {
       this.source.release(path, { pid: this.selfPid, ownerToken: this.ownerToken });
+      this.claimMirror?.released(deviceId, { pid: this.selfPid, ownerToken: this.ownerToken });
     } catch (error) {
       // The claim lapses anyway once this daemon reports no session on the device.
       logger.warn(
@@ -538,12 +598,71 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
       claimPath === undefined ? undefined : this.evaluateOwner(claimPath, deviceId, "claim"),
       this.legacyClaimOwner(deviceId),
     ]);
-    if (lease?.idleSocketPath !== undefined && (claimOwner ?? legacyOwner) === undefined) {
-      this.idleLeaseHolders.set(deviceId, lease.idleSocketPath);
+    const tableOwner = await this.tableOwnerUnlessAFileDecides(
+      deviceId,
+      lease,
+      claimOwner ?? legacyOwner,
+    );
+    this.noteIdleLeaseHolder(
+      deviceId,
+      lease?.idleSocketPath,
+      claimOwner ?? legacyOwner ?? tableOwner,
+    );
+    return lease?.pid ?? claimOwner ?? legacyOwner ?? tableOwner;
+  }
+
+  /** An idle lease holder is asked to give the lease up only when nothing else owns the device. */
+  private noteIdleLeaseHolder(
+    deviceId: string,
+    idleSocketPath: string | undefined,
+    otherOwner: number | undefined,
+  ): void {
+    if (idleSocketPath !== undefined && otherOwner === undefined) {
+      this.idleLeaseHolders.set(deviceId, idleSocketPath);
     } else {
       this.idleLeaseHolders.delete(deviceId);
     }
-    return lease?.pid ?? claimOwner ?? legacyOwner;
+  }
+
+  /**
+   * An owner a file names decides, so the table is not read (nor its owner asked) for it. A lease
+   * whose holder is idle does not: the table may still name a busy owner of the device.
+   */
+  private async tableOwnerUnlessAFileDecides(
+    deviceId: string,
+    lease: { pid: number; idleSocketPath?: string } | undefined,
+    claimOrLegacyOwner: number | undefined,
+  ): Promise<number | undefined> {
+    const busyLeasePid = lease?.idleSocketPath === undefined ? lease?.pid : undefined;
+    return (claimOrLegacyOwner ?? busyLeasePid) === undefined
+      ? this.tableClaimOwner(deviceId)
+      : undefined;
+  }
+
+  /**
+   * The live foreign owner the host-wide claims table names, judged like a claim file's owner
+   * (#11811 step c). Any owner a file names wins, and a table that cannot be read changes nothing:
+   * the files decide alone, as before the table existed.
+   */
+  private async tableClaimOwner(deviceId: string): Promise<number | undefined> {
+    if (!this.claimMirror?.read) {
+      return undefined;
+    }
+    try {
+      const row = await this.claimMirror.read(deviceId);
+      if (!row) {
+        return undefined;
+      }
+      return (
+        await this.evaluateContent({ pid: row.pid, metadata: row.metadata }, deviceId, "claim")
+      )?.pid;
+    } catch (error) {
+      logger.warn(
+        `Cannot read the host-wide claim on ${deviceId}; the claim files decide: ${errorMessage(error)}`,
+        error,
+      );
+      return undefined;
+    }
   }
 
   /** The live foreign owner of a 0.0.84-format claim in the coordination directory, if any. */
@@ -582,7 +701,16 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
     deviceId: string,
     kind: "lease" | "claim",
   ): Promise<{ pid: number; idleSocketPath?: string } | undefined> {
-    const lock = this.liveForeignLock(path);
+    return this.evaluateContent(this.source.read(path), deviceId, kind);
+  }
+
+  /** {@link evaluateLock} for an owner record already read, from a claim file or the table. */
+  private async evaluateContent(
+    content: Pick<LockContent, "pid" | "metadata"> | undefined,
+    deviceId: string,
+    kind: "lease" | "claim",
+  ): Promise<{ pid: number; idleSocketPath?: string } | undefined> {
+    const lock = this.liveForeignLock(content);
     if (!lock) {
       return undefined;
     }
@@ -606,9 +734,8 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
 
   /** The lock at `path` when a live process other than this one holds it. */
   private liveForeignLock(
-    path: string,
+    content: Pick<LockContent, "pid" | "metadata"> | undefined,
   ): { pid: number; metadata: ForwardLeaseOwnerMetadata | undefined } | undefined {
-    const content = this.source.read(path);
     const pid = content?.pid;
     if (pid === undefined || Number.isNaN(pid) || pid === this.selfPid) {
       return undefined;

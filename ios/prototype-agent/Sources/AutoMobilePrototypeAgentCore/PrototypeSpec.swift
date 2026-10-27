@@ -293,7 +293,9 @@ struct PrototypeSpec: Decodable {
             data: data,
             menuState: state ?? [:],
             strings: strings,
-            locales: locales
+            locales: locales,
+            platform: platformState,
+            derive: derive
         )
         var result = PrototypeSpec(replacing: self, data: data, root: root)
         result.locales = locales

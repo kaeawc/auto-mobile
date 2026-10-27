@@ -33,6 +33,7 @@ import { inferIosFormFactor, isIosDuoDeviceType } from "./iosDeviceType";
 import { getAbortSignal, runWithAbortSignal } from "../AbortContext";
 
 import { iosSimulatorCapabilityInventory } from "../virtualDeviceCapabilities";
+import { hostAudioSnapshot } from "../audio/defaultHostAudioProbe";
 
 import { compareStrictNumericVersions } from "../deviceMatcher";
 
@@ -530,6 +531,7 @@ export class SimCtlInventory {
                 isAvailable: device.isAvailable,
                 availabilityError: device.availabilityError,
                 runtime: runtimeId,
+                hostAudio: hostAudioSnapshot(),
               }),
             } as DeviceInfo;
           }),

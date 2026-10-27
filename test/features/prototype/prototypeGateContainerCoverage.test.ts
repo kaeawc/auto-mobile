@@ -201,8 +201,8 @@ const ROOT_LEVEL_GATES = [
   "prototype_storage_v1",
   "prototype_backdrop_v1",
   "prototype_design_platform_v1",
+  "prototype_reduced_motion_v1",
 ];
-const ROOT_LEVEL_GATES = ["prototype_storage_v1", "prototype_reduced_motion_v1"];
 
 test("every capability gate has a container fixture or is a root-level gate", () => {
   expect([...Object.keys(fixtures), ...ROOT_LEVEL_GATES].sort()).toEqual(

@@ -50,5 +50,6 @@
       ]
     }
   },
-  "expectedPath": "root.children"
+  "expectedPath": "root.children",
+  "expectedMessage": "Array length out of range"
 }

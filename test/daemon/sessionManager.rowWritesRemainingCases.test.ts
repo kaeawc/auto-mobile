@@ -176,17 +176,14 @@ describe("remaining session row writes (#11557)", () => {
   });
   const reissue = () => manager.getOrCreateSession(SESSION, pool(), "android", undefined, true);
 
-  test("a refused superseded release repairs an earlier superseded release's late terminal row", async () => {
+  // #11799 W5: a release past its commit point has won; its late terminal row is the row the
+  // session ends with, and no live row is rewritten over it.
+  test("a release whose confirmation arrives after its commit ends the session once, with no live rewrite", async () => {
     timer.setCurrentTime(41_000);
-    const session = await create();
+    await create();
     const reason = `device-disconnected:${DEVICE}`;
-    manager.setSupersededRowReassertBackoff(fixedBackoff(200));
     const firstWrite = Promise.withResolvers<void>();
-    const secondWrite = Promise.withResolvers<void>();
-    const restoreWrite = Promise.withResolvers<void>();
-    const retryUpsert = Promise.withResolvers<void>();
-    store.releaseGates = [firstWrite.promise, secondWrite.promise, restoreWrite.promise];
-    store.failRewrites = 1;
+    store.releaseGates = [firstWrite.promise];
     let firstSuperseded = false;
     const first = manager.releaseSessionUnlessSuperseded(SESSION, reason, {
       commitFence: () => !firstSuperseded,
@@ -195,65 +192,16 @@ describe("remaining session row writes (#11557)", () => {
     expect(store.releases).toEqual([reason]);
     firstSuperseded = true;
     await timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
-    expect(await first).toEqual({ superseded: true });
-    expect(store.liveRowRewrites).toBe(1);
-    expect(timer.getPendingTimeouts()).toEqual([200]);
-
-    store.rewriteGate = retryUpsert.promise;
-    await timer.advanceTimeAsync(200);
-    await settle();
-    expect(store.liveRowRewrites).toBe(2);
-    let secondSuperseded = false;
-    const second = manager.releaseSessionUnlessSuperseded(SESSION, reason, {
-      commitFence: () => !secondSuperseded,
-    });
-    await settle();
-    expect(store.releases).toEqual([reason, reason]);
-    await timer.advanceTimeAsync(40);
-    const restoring = Promise.withResolvers<void>();
-    store.releaseEntered = (count) => {
-      if (count === 3) {
-        restoring.resolve();
-      }
-    };
-    store.rewriteGate = undefined;
-    retryUpsert.resolve();
-    await restoring.promise;
-    expect(await row()).toMatchObject({ status: "active", stable_identity_generation: 1 });
-    expect(store.releases).toEqual([reason, reason, reason]);
-
-    await timer.advanceTimeAsync(60);
+    expect(await first).toEqual({ superseded: false, deviceId: DEVICE });
+    expect(manager.getSession(SESSION)).toBeNull();
+    expect(store.liveRowRewrites).toBe(0);
     firstWrite.resolve();
-    // Generation resolution re-reads the row before issuing its conditioned retry.
-    await settle(120);
-    expect(await row()).toMatchObject({ status: "released", release_reason: reason });
-    await timer.advanceTimeAsync(840);
-    restoreWrite.resolve();
-    await settle();
-    // R2's restore is refused over R1's terminal row; R2 still waits on its original statement.
-    expect(await row()).toMatchObject({ status: "released", release_reason: reason });
-    secondSuperseded = true;
-    await timer.advanceTimeAsync(9_060);
-    expect(await second).toEqual({ superseded: true });
-    secondWrite.resolve();
     await settle();
     expect(await manager.drainReleasePromises(1_000)).toBe(true);
-    const settledRow = await row();
-    timer.advanceTime(1);
-    expect(await manager.getOrCreateSession(SESSION)).toBe(session);
-    expect(manager.getSession(SESSION)).toBe(session);
-    expect(settledRow).toMatchObject({
-      status: "active",
-      release_reason: null,
-      device_id: DEVICE,
-    });
-    expect(await row()).toMatchObject({
-      status: "active",
-      release_reason: null,
-      device_id: DEVICE,
-    });
-    expect(announced).toEqual([]);
-    expect(manager.getTerminalReleaseSnapshot(SESSION)).toBeUndefined();
+    expect(await row()).toMatchObject({ status: "released", release_reason: reason });
+    expect(store.liveRowRewrites).toBe(0);
+    expect(announced).toEqual([reason]);
+    expect(manager.getSession(SESSION)).toBeNull();
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 

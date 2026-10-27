@@ -53,6 +53,7 @@ A read never writes settings on a device another session holds. A sessionless re
 | ↔️ <code>swipeAt</code>       | Swipe between two screen points                                                              |
 | 🫳 <code>dragAndDrop</code>   | Drag and drop element                                                                        |
 | 〰️ <code>dragPath</code>      | Drag a finger along a timed path                                                             |
+| 🖱️ <code>hoverAt</code>       | Hover a stylus or mouse over a path with no contact (Android)                                |
 | 🤌 <code>pinchOn</code>       | Pinch to zoom                                                                                |
 | 🖐️ <code>multiTouch</code>    | Simultaneous 2-5 finger tap, long press, or swipe at a screen point                          |
 | ⌨️ <code>sendKeys</code>      | Execute ordered typing, clear, raw-key, and semantic IME commands                            |
@@ -186,6 +187,42 @@ separate `select` key exists. Android only; not yet verified on a TV image
 - ⌨️ Compact observations fold soft-keyboard keys into one `keyboard: { visible: true, package: "…" }` summary plus at most one skeleton row (`<ime> | Keyboard (…) | input`). The row appears only with at least one bounded accessible descendant.
 - 📸 Screenshot paths are kept for **at least 10 minutes after return** unless evicted early under capacity pressure; each path has a `screenshotExpiresAt`/`expiresAt` (host epoch ms, not a promise). Retention starts at **128 MiB** and scales by 64 MiB per active device up to 1 GiB, within a limit of **4096 files**. Each device’s newest 3 screenshots (counting its incoming frame) are evicted only as a last resort, and a capture is admitted even if nothing fits. The byte limits and per-device allowance are [configurable](using/environment-variables.md#screenshot-retention). After a restart, existing files get a process-start grace of ten minutes.
 - 🧹 `holdSessionOnFailure` keeps plan sessions instead of auto-releasing them.
+
+### Stylus pointer on `tapAt`, `swipeAt` and `dragPath`
+
+`pointer: { toolType: "stylus" }` injects a stylus instead of a finger (Android only; never falls back to a finger).
+
+| `pointer` shape                                                                                                      | Route                     | Needs                           |
+| -------------------------------------------------------------------------------------------------------------------- | ------------------------- | ------------------------------- |
+| `{ toolType: "stylus" }`, `pressure` omitted or `1` (`tapAt`, `swipeAt`)                                             | `adb shell input stylus`  | Android 12+ (API 31)            |
+| `pressure` other than 1, `tilt` (radians, 0 to PI/2), `orientation` (radians), or `buttons` (`primary`, `secondary`) | CtrlProxy instrumentation | `stylus_input_v1` (Android 13+) |
+| `dragPath` with any `pointer`                                                                                        | CtrlProxy instrumentation | `stylus_input_v1` (Android 13+) |
+
+`dragPath` points also take `pressure` and `tilt` (they need `pointer`), interpolated between points; `holdMs` and
+`releaseHoldMs` become holds at the first and last point. A device or runner that cannot honour the request is refused before
+anything is sent, naming the missing capability. `tilt`, `orientation` and `buttons` are Android only; `doubleTap` and a panel
+`display` are not supported with a stylus yet. Details and the unverified parts are in the
+[stylus design note](design-docs/mcp/stylus-pressure-hover-injection.md).
+
+### hoverAt
+
+Hover enter, move and exit over `points` with no contact (Android only; the reasons iOS is refused are in the
+[stylus design note](design-docs/mcp/stylus-pressure-hover-injection.md)). It takes the `dragPath` point shape
+(`x`, `y`, per-point `durationMs`) plus an optional per-point `distance` (stylus only), and the same
+`coordinateSpace`, `display`, `snapshotId` and `layer`.
+
+`toolType` chooses who hovers, and apps see the difference:
+
+| `toolType`         | What the app receives                                                                     |
+| ------------------ | ----------------------------------------------------------------------------------------- |
+| `stylus` (default) | `ACTION_HOVER_*` with `TOOL_TYPE_STYLUS`, `SOURCE_STYLUS` and an `AXIS_DISTANCE` value    |
+| `mouse`            | `ACTION_HOVER_*` with `TOOL_TYPE_MOUSE` and `SOURCE_MOUSE`; no distance; desktop-style UI |
+
+It needs the `hover_input_v1` runner capability. A device or runner without it, and iOS, are refused before
+anything is sent with the missing capability named, and a hover is never turned into a touch. CtrlProxy
+advertises the capability and injects the hover through its `UiAutomation` instrumentation (see the
+[stylus design note](design-docs/mcp/stylus-pressure-hover-injection.md#instrumentation-route-13097)); the semantics above
+are the documented intent and still need on-device confirmation (#13082).
 
 ### prototype
 

@@ -57,61 +57,8 @@ object PrototypeStrings {
 
   /** Million-multiple Romance `many` forms are intentionally outside the v1 integer rules. */
   fun pluralCategory(language: String, count: Double): String {
-    if (!count.isFinite() || count < 0 || count > 9007199254740991.0 || count % 1 != 0.0)
-      return "other"
-    val n = count.toLong()
-    val lang = normalize(language).substringBefore('-')
-    return when (lang) {
-      "ja",
-      "zh",
-      "ko",
-      "vi",
-      "th",
-      "id",
-      "ms",
-      "lo",
-      "km",
-      "my" -> "other"
-      "fr",
-      "pt",
-      "hi",
-      "bn",
-      "fa",
-      "gu",
-      "kn",
-      "am" -> if (n <= 1) "one" else "other"
-      "ru",
-      "uk",
-      "be",
-      "pl" -> slavic(lang, n)
-      "cs",
-      "sk" ->
-        when (n) {
-          1L -> "one"
-          in 2L..4L -> "few"
-          else -> "other"
-        }
-      "ar" -> arabic(n)
-      else -> if (n == 1L) "one" else "other"
-    }
+    return PrototypePluralRules.category(normalize(language).substringBefore('-'), count)
   }
-
-  private fun slavic(lang: String, n: Long): String =
-    when {
-      if (lang == "pl") n == 1L else n % 10 == 1L && n % 100 != 11L -> "one"
-      n % 10 in 2L..4L && n % 100 !in 12L..14L -> "few"
-      else -> "many"
-    }
-
-  private fun arabic(n: Long): String =
-    when {
-      n == 0L -> "zero"
-      n == 1L -> "one"
-      n == 2L -> "two"
-      n % 100 in 3L..10L -> "few"
-      n % 100 in 11L..99L -> "many"
-      else -> "other"
-    }
 
   private fun count(value: String?, data: JsonObject?): Long? {
     if (value?.startsWith("{data:") != true) {

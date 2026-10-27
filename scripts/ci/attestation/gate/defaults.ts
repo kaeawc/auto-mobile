@@ -6,7 +6,8 @@ import { defaultTimer } from "../../../../src/utils/SystemTimer";
 import type { Clock } from "../attestationSchema";
 import { parseEnvelope } from "../attestationSchema";
 import { GitTreeProbe } from "../gitTreeProbe";
-import { TreeEntriesInputHasher } from "../produceAttestations";
+import { arch, platform } from "node:os";
+import { LaneInputHasher } from "../produceAttestations";
 import { GitHubAppTokenProvider, type AppAuthOptions } from "../transport/appAuth";
 import { loadTransportConfigFromEnv } from "../transport/config";
 import { AttestationServiceClient } from "../transport/serviceClient";
@@ -165,7 +166,10 @@ export function gitTreeInputHasher(exec: Exec = execFileAsync): InputHasher {
         repoRoot,
       );
       const lane = ({ 1: "node", 2: "android", 3: "ios" } as const)[tier];
-      const input = await new TreeEntriesInputHasher().hash(lane, probe);
+      const input = await new LaneInputHasher(
+        { os: platform(), arch: arch(), bunVersion: process.versions.bun ?? null },
+        process.env,
+      ).hash(lane, probe);
       return { treeHash, inputHash: input.hash };
     },
   };

@@ -95,7 +95,8 @@ internal fun checkedPrototypeNodes(
         }
       }
       node.footer?.let { visit(it, "$path.footer") }
-    } else prototypeChildEntries(node, path, formatter = formatter).forEach { visit(it.node, it.path) }
+    } else
+      prototypeChildEntries(node, path, formatter = formatter).forEach { visit(it.node, it.path) }
   }
   visit(root, "root")
 }
@@ -138,6 +139,7 @@ internal fun prototypeIsError(
 ): Boolean =
   (node is PrototypeTextFieldNode && node.errorWhen?.holds(state, validity) == true) ||
     prototypeShownError(node, state, shown, validity) != null
+
 /** Skip binding rows entirely for the usual display-only list. */
 private fun hasPrototypeChecks(node: PrototypeNode): Boolean =
   node.checks().isNotEmpty() || prototypeDescendants(node).any(::hasPrototypeChecks)

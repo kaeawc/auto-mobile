@@ -4,10 +4,10 @@ AutoMobile can drive an Android Automotive OS (AAOS) emulator: a full Android bu
 car SystemUI and an accessibility tree like any other Android image. This guide covers setting one up,
 what to expect, and what is out of scope.
 
-!!! warning "Not yet verified on a device"
-The host and CtrlProxy code described here is built and unit tested against fakes. The baseline run
-on a real AAOS emulator (#14916) has not happened, so every behaviour below that depends on the
-emulator is marked **unverified**. This page is updated as the matrix lands.
+> [!WARNING]
+> **Not yet verified on a device.** The host and CtrlProxy code described here is built and unit tested
+> against fakes. The baseline run on a real AAOS emulator (#14916) has not happened, so every behaviour
+> below that depends on the emulator is marked **unverified**. This page is updated as the matrix lands.
 
 ## Create the emulator by hand
 

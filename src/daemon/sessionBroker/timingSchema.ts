@@ -23,12 +23,13 @@ const timing: z.ZodType<SessionBrokerTiming> = z.object({
     .optional(),
   reset: z
     .object({
-      mode: z.enum(["keep-booted", "erase", "snapshot", "wipe-data", "none"]),
+      mode: z.enum(["keep-booted", "minimal", "erase", "snapshot", "wipe-data", "none"]),
       outcome: z.enum([
         "clean",
         "pending",
         "destroyed",
         "fallback:keep-booted",
+        "fallback:minimal",
         "fallback:erase",
         "fallback:snapshot",
         "fallback:wipe-data",

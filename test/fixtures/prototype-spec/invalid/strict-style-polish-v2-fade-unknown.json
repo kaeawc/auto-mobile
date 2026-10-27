@@ -1,0 +1,25 @@
+{
+  "spec": {
+    "id": "style-polish",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "active": true
+    },
+    "root": {
+      "type": "scroll",
+      "fadeEdges": {
+        "sideways": 1
+      },
+      "child": {
+        "type": "text",
+        "text": "x"
+      }
+    }
+  },
+  "expectedPath": "root.fadeEdges.sideways",
+  "expectedMessage": "Unknown property"
+}

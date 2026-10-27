@@ -8,6 +8,7 @@ import type {
 import { formFactorFrom } from "../models/formFactor";
 import { parseAndroidSystemImageRuntime } from "./android-cmdline-tools/AndroidSystemImageRuntime";
 import { iosSimulatorCapabilityInventory } from "./virtualDeviceCapabilities";
+import { hostAudioSnapshot } from "./audio/defaultHostAudioProbe";
 import type { StableConfiguredDeviceImage } from "./configuredDeviceInventory";
 
 interface AndroidProvenance {
@@ -174,6 +175,7 @@ export function capabilityInventory(
           isAvailable: device.isAvailable,
           availabilityError: device.availabilityError,
           runtime: device.runtime,
+          hostAudio: hostAudioSnapshot(),
         })
       : undefined);
   if (!inventory) {

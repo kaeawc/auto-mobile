@@ -25,6 +25,8 @@ export interface ShowPrototypeMessage {
    * ignores the field and follows the device silently, so it is never sent to one.
    */
   appearance?: PrototypeAppearanceOverride;
+  /** Locale override for a spec with strings. */
+  locale?: string;
 }
 /** A fixed mode a show takes as the system setting; following the device is the absent field. */
 export type PrototypeAppearanceOverride = "light" | "dark";
@@ -198,8 +200,23 @@ export interface PrototypeResult {
   droppedEvents?: number;
   /** Only a successful `show_prototype` reply from a device advertising prototype_appearance_v1. */
   appearance?: PrototypeAppearance;
+  /** Only a successful `show_prototype` reply for a spec with `window.backdrop` (prototype_backdrop_v1). */
+  backdrop?: "blur" | "fallback";
   /** Only the reply to `clear_prototype_storage`: how many stored keys were removed. */
   cleared?: number;
+  /**
+   * Warning, not a failure (prototype_effects_v1): `style.effects` entries the device did not draw,
+   * with `reason` "api" (below the effect's API floor) or "budget" (froze over the frame budget).
+   * Absent when every effect renders and on devices that predate it.
+   */
+  degradedEffects?: PrototypeDegradedEffect[];
+}
+
+/** One `style.effects` entry the device omitted or froze (#15129). */
+export interface PrototypeDegradedEffect {
+  path: string;
+  type: string;
+  reason: string;
 }
 
 /** One prototype the device reported to `inspect_prototypes`. `id` is the prototype id (its spec id). */
@@ -222,6 +239,9 @@ export interface PrototypeStatusEntry {
   /** Device-reported `storage` block state (prototype_storage_v1, #12522); parsePrototypeStorageReport validates it. */
   storage?: unknown;
   timers?: unknown;
+  /** Last haptic and sound calls (prototype_platform_haptics_v1, _sound_v1); parsePrototypeFeedbackLog validates it. */
+  feedbackLog?: unknown;
+  shaderFailures?: Record<string, string>;
 }
 
 /**

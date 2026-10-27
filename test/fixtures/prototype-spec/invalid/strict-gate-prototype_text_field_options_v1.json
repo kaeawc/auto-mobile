@@ -1,55 +1,73 @@
 {
   "spec": {
-    "id": "text-fields",
+    "id": "secure",
     "window": {
       "placement": {
         "type": "fullscreen"
-      },
-      "opacity": 100
+      }
     },
     "state": {
-      "name": "Ada",
-      "quantity": "12",
-      "password": "secret",
-      "notes": "Hello"
+      "secret": "",
+      "password": "",
+      "public": "ok"
     },
     "root": {
       "type": "column",
       "children": [
         {
           "type": "textField",
-          "stateKey": "name",
-          "placeholder": "Name",
-          "label": "Name",
-          "variant": "outlined",
-          "supportingText": "Your full name",
-          "keyboardType": "text"
-        },
-        {
-          "type": "textField",
-          "stateKey": "quantity",
-          "variant": "filled",
-          "keyboardType": "number",
-          "maxLength": 10000
-        },
-        {
-          "type": "textField",
-          "stateKey": "password",
-          "keyboardType": "password",
+          "stateKey": "secret",
           "secure": true
         },
         {
           "type": "textField",
-          "stateKey": "notes",
-          "multiline": true,
-          "minLines": 2,
-          "maxLines": 5
+          "stateKey": "password",
+          "keyboardType": "password"
+        },
+        {
+          "type": "button",
+          "label": "Send",
+          "onTap": [
+            {
+              "type": "request",
+              "url": "https://example.com/{public}",
+              "via": "device",
+              "method": "POST",
+              "headers": {
+                "X-Public": {
+                  "state": "public"
+                },
+                "X-Literal": {
+                  "value": "{secret}"
+                }
+              },
+              "query": {
+                "q": "{public}"
+              },
+              "body": {
+                "value": {
+                  "state": "secret",
+                  "text": "{password}",
+                  "type": "request",
+                  "url": "https://example.com/{secret}"
+                }
+              }
+            }
+          ]
         }
       ]
+    },
+    "storage": {
+      "version": 1,
+      "keys": ["state:public"]
     }
   },
   "options": {
-    "supportedCapabilities": []
+    "supportedCapabilities": [
+      "prototype_network_device_v1",
+      "prototype_network_v1",
+      "prototype_storage_v1"
+    ]
   },
   "expectedPath": "$"
 }

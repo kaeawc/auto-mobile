@@ -1,0 +1,29 @@
+{
+  "id": "prototype",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "open": true
+  },
+  "root": {
+    "type": "tooltip",
+    "text": "Bounds hint",
+    "openWhen": {
+      "key": "open",
+      "equals": true
+    },
+    "anchor": {
+      "type": "bounds",
+      "bounds": {
+        "x": 20,
+        "y": 40,
+        "width": 80,
+        "height": 48
+      }
+    },
+    "caret": "auto"
+  }
+}

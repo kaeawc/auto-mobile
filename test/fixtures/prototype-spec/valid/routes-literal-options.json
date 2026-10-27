@@ -1,0 +1,25 @@
+{
+  "id": "routes-review",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "select",
+    "stateKey": "choice",
+    "options": [
+      {
+        "label": "Option",
+        "value": "{route.x}"
+      },
+      {
+        "label": "Other",
+        "value": "other"
+      }
+    ]
+  },
+  "state": {
+    "choice": "{route.x}"
+  }
+}

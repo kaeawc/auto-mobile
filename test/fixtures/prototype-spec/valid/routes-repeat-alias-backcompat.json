@@ -1,0 +1,32 @@
+{
+  "id": "old-alias",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "column",
+    "repeat": {
+      "as": "route",
+      "items": [
+        {
+          "id": "one"
+        }
+      ]
+    },
+    "children": [
+      {
+        "type": "text",
+        "text": "{route.id}"
+      },
+      {
+        "type": "switch",
+        "stateKey": "liked_{route.id}"
+      }
+    ]
+  },
+  "state": {
+    "liked_one": true
+  }
+}

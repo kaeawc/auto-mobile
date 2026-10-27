@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { load } from "js-yaml";
 import {
   loadAllJobSteps,
@@ -28,8 +29,25 @@ function collectCachePaths(steps: JobStep[]): { cacheStepCount: number; entries:
   };
 }
 
+// A job whose body is a shared composite action (#11872) caches inside that action, so its steps
+// count as the workflow's.
+function withCompositeSteps(steps: JobStep[]): JobStep[] {
+  return steps.flatMap(({ jobId, step }) => {
+    if (typeof step.uses !== "string" || !step.uses.startsWith("./.github/actions/ci-")) {
+      return [{ jobId, step }];
+    }
+    const action = load(readFileSync(`${step.uses.slice(2)}/action.yml`, "utf8")) as {
+      runs?: { steps?: WorkflowStep[] };
+    };
+    return [
+      { jobId, step },
+      ...(action.runs?.steps ?? []).map((inner) => ({ jobId, step: inner })),
+    ];
+  });
+}
+
 function loadWorkflowCachePaths(workflowRelativePath: string) {
-  return collectCachePaths(loadAllJobSteps(workflowRelativePath));
+  return collectCachePaths(withCompositeSteps(loadAllJobSteps(workflowRelativePath)));
 }
 
 function globMatchesLiteral(segment: string, literal: string): boolean {

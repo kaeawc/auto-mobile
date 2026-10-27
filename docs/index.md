@@ -74,6 +74,7 @@ Open your configured agent and ask it to explore your mobile app. If you have a 
 Some common workflows:
 
 - [Agent examples](using/agent-examples.md)
+- [Hackathon demo kit](using/hackathon.md)
 
 ## Uninstall
 

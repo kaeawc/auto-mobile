@@ -1,0 +1,50 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "open": true
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "column",
+          "repeat": {
+            "as": "item",
+            "items": [
+              {
+                "name": "one"
+              },
+              {
+                "name": "two"
+              }
+            ]
+          },
+          "children": [
+            {
+              "type": "button",
+              "id": "target",
+              "label": "Help"
+            }
+          ]
+        },
+        {
+          "type": "tooltip",
+          "text": "Helpful hint",
+          "openWhen": {
+            "key": "open",
+            "equals": true
+          },
+          "anchorTo": "target"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[1].anchorTo",
+  "expectedMessage": "Duplicate anchorTo id \"target\""
+}

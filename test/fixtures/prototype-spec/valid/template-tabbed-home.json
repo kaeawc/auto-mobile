@@ -1,0 +1,265 @@
+{
+  "id": "template-tabbed-home",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "topic": "all",
+    "notifications": true
+  },
+  "root": {
+    "type": "stack",
+    "id": "nav",
+    "start": "main",
+    "style": {
+      "width": "fill",
+      "height": "fill"
+    },
+    "screens": {
+      "main": {
+        "type": "column",
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "home_bar",
+            "title": "Home",
+            "actions": [
+              {
+                "icon": "settings",
+                "label": "Settings",
+                "onTap": [
+                  {
+                    "type": "push",
+                    "stack": "nav",
+                    "screen": "prefs"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "pager",
+            "id": "pages",
+            "style": {
+              "weight": 1
+            },
+            "children": [
+              {
+                "type": "column",
+                "children": [
+                  {
+                    "type": "text",
+                    "text": "For you",
+                    "style": {
+                      "textStyle": "titleLarge"
+                    }
+                  },
+                  {
+                    "type": "column",
+                    "repeat": {
+                      "items": [
+                        {
+                          "title": "Trail run at sunrise",
+                          "meta": "5 km"
+                        },
+                        {
+                          "title": "Sourdough, take two",
+                          "meta": "40 min"
+                        },
+                        {
+                          "title": "Podcast backlog",
+                          "meta": "3 episodes"
+                        }
+                      ],
+                      "as": "item"
+                    },
+                    "children": [
+                      {
+                        "type": "listItem",
+                        "testTag": "home_item",
+                        "headline": "{item.title}",
+                        "supporting": "{item.meta}",
+                        "leadingIcon": "star",
+                        "onTap": [
+                          {
+                            "type": "emit",
+                            "name": "home_item_opened",
+                            "context": {
+                              "index": {
+                                "index": true
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ],
+                "style": {
+                  "padding": {
+                    "start": 16,
+                    "end": 16,
+                    "top": 16,
+                    "bottom": 16
+                  },
+                  "spacing": 12
+                }
+              },
+              {
+                "type": "column",
+                "children": [
+                  {
+                    "type": "text",
+                    "text": "Explore",
+                    "style": {
+                      "textStyle": "titleLarge"
+                    }
+                  },
+                  {
+                    "type": "segmentedButton",
+                    "testTag": "topic_picker",
+                    "stateKey": "topic",
+                    "options": [
+                      {
+                        "value": "all",
+                        "label": "All"
+                      },
+                      {
+                        "value": "food",
+                        "label": "Food"
+                      },
+                      {
+                        "value": "sport",
+                        "label": "Sport"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "text": "Showing {topic}",
+                    "style": {
+                      "textStyle": "bodyLarge"
+                    },
+                    "testTag": "topic_label"
+                  }
+                ],
+                "style": {
+                  "padding": {
+                    "start": 16,
+                    "end": 16,
+                    "top": 16,
+                    "bottom": 16
+                  },
+                  "spacing": 12
+                }
+              },
+              {
+                "type": "column",
+                "children": [
+                  {
+                    "type": "text",
+                    "text": "Profile",
+                    "style": {
+                      "textStyle": "titleLarge"
+                    }
+                  },
+                  {
+                    "type": "listItem",
+                    "testTag": "profile_notifications",
+                    "headline": "Notifications",
+                    "trailing": {
+                      "type": "switch",
+                      "stateKey": "notifications"
+                    }
+                  }
+                ],
+                "style": {
+                  "padding": {
+                    "start": 16,
+                    "end": 16,
+                    "top": 16,
+                    "bottom": 16
+                  },
+                  "spacing": 12
+                }
+              }
+            ]
+          },
+          {
+            "type": "bottomNav",
+            "testTag": "bottom_nav",
+            "pager": "pages",
+            "items": [
+              {
+                "label": "Home",
+                "icon": "home"
+              },
+              {
+                "label": "Explore",
+                "icon": "search"
+              },
+              {
+                "label": "Profile",
+                "icon": "person"
+              }
+            ]
+          }
+        ]
+      },
+      "prefs": {
+        "type": "column",
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "prefs_bar",
+            "title": "Settings",
+            "navigationIcon": {
+              "icon": "arrow_back",
+              "label": "Back",
+              "onTap": [
+                {
+                  "type": "pop",
+                  "stack": "nav"
+                }
+              ]
+            }
+          },
+          {
+            "type": "column",
+            "children": [
+              {
+                "type": "text",
+                "text": "Preferences live here.",
+                "style": {
+                  "textStyle": "bodyLarge"
+                }
+              },
+              {
+                "type": "button",
+                "label": "Back to home",
+                "testTag": "prefs_done",
+                "onTap": [
+                  {
+                    "type": "pop",
+                    "stack": "nav"
+                  }
+                ]
+              }
+            ],
+            "style": {
+              "padding": {
+                "start": 16,
+                "end": 16,
+                "top": 16,
+                "bottom": 16
+              },
+              "spacing": 12
+            }
+          }
+        ]
+      }
+    }
+  }
+}

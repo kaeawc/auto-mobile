@@ -512,6 +512,11 @@ export class AccessibilityDisplayPreferences {
     return Object.keys(this.baselines.get(this.device.deviceId) ?? {}).length > 0;
   }
 
+  /** Forget the recorded baseline, so a later reset does not restore a pre-factory value. */
+  clearBaseline(): void {
+    this.baselines.delete(this.device.deviceId);
+  }
+
   /** Current values, with per-field support. Never throws: an unreadable field is unsupported. */
   async read(): Promise<AccessibilityDisplayRead> {
     const settings = await this.settings();

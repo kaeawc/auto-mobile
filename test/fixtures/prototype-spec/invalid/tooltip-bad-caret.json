@@ -1,0 +1,35 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "open": true
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "button",
+          "id": "target",
+          "label": "Help"
+        },
+        {
+          "type": "tooltip",
+          "text": "Helpful hint",
+          "openWhen": {
+            "key": "open",
+            "equals": true
+          },
+          "anchorTo": "target",
+          "caret": "left"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[1].caret",
+  "expectedMessage": "Invalid enum value"
+}

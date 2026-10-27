@@ -2,11 +2,16 @@
   "patterns": {
     "pathKey": "^[A-Za-z_][A-Za-z0-9_]*$(?![\\s\\S])",
     "stateKey": "^[A-Za-z_][A-Za-z0-9_]{0,63}$(?![\\s\\S])",
-    "boundKey": "^(?:[A-Za-z_][A-Za-z0-9_]{0,63}|(?=[^{]*\\{)(?:[A-Za-z0-9_]|\\{(?:index|[A-Za-z_][A-Za-z0-9_]{0,63}\\.[A-Za-z_][A-Za-z0-9_]{0,63})\\})+)$(?![\\s\\S])",
+    "boundKey": "^(?:[A-Za-z_][A-Za-z0-9_]{0,63}|(?=[^{]*\\{)(?:[A-Za-z0-9_]|\\{(?:route\\.[A-Za-z_][A-Za-z0-9_]*|index|(?!route\\.)[A-Za-z_][A-Za-z0-9_]{0,63}\\.[A-Za-z_][A-Za-z0-9_]{0,63})\\})+)$(?![\\s\\S])",
     "color": "^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$(?![\\s\\S])",
     "blankText": "^[\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]*$(?![\\s\\S])",
     "numberToken": "^-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$(?![\\s\\S])",
-    "pointer": "^(?:/(?:[^~/]|~[01])*)+$(?![\\s\\S])"
+    "pointer": "^(?:/(?:[^~/]|~[01])*)+$(?![\\s\\S])",
+    "currencyCode": "^[A-Z]{3}$(?![\\s\\S])",
+    "formatLocale": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$(?![\\s\\S])",
+    "formatTimeZone": "^[A-Za-z_]+([/+-][A-Za-z0-9_+-]+)*$(?![\\s\\S])",
+    "stringKey": "^[A-Za-z_][A-Za-z0-9_.-]{0,63}$",
+    "localeTag": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$"
   },
   "limits": {
     "MIN_PROTOTYPE_TIMER_MS": 100,
@@ -17,14 +22,19 @@
     "MAX_PROTOTYPE_NODES": 2000,
     "MAX_PROTOTYPE_DEPTH": 24,
     "MAX_PROTOTYPE_IMAGES": 32,
+    "MAX_PROTOTYPE_MEDIA_ITEMS": 64,
+    "MAX_PROTOTYPE_MEDIA_TOTAL_BYTES": 536870912,
+    "MAX_PROTOTYPE_MEDIA_IMAGE_BYTES": 33554432,
+    "MAX_PROTOTYPE_MEDIA_VIDEO_BYTES": 268435456,
+    "MAX_PROTOTYPE_MEDIA_AUDIO_BYTES": 33554432,
     "MAX_PROTOTYPE_SPEC_BYTES": 1048576,
     "MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES": 4096,
     "MAX_PROTOTYPE_EMIT_PAYLOAD_DEPTH": 24,
     "MAX_PROTOTYPE_SELECTOR_DEPTH": 8,
     "MAX_PROTOTYPE_CONDITION_DEPTH": 8,
-    "MAX_PROTOTYPE_DATA_BYTES": 262144,
+    "MAX_PROTOTYPE_DATA_BYTES": 786432,
     "MAX_PROTOTYPE_DATA_DEPTH": 8,
-    "MAX_PROTOTYPE_DATA_ARRAY_ITEMS": 500,
+    "MAX_PROTOTYPE_DATA_ARRAY_ITEMS": 2000,
     "MAX_PROTOTYPE_DATA_POINTER_LENGTH": 256,
     "MAX_PROTOTYPE_REPEAT_PATH_CELLS": 65536,
     "MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH": 16384,
@@ -36,7 +46,7 @@
     "MAX_PROTOTYPE_STACK_DEPTH": 32,
     "MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES": 16,
     "MAX_PROTOTYPE_CHECK_VALUE_LENGTH": 4096,
-    "MAX_PROTOTYPE_DATA_WRITE_BYTES": 262144,
+    "MAX_PROTOTYPE_DATA_WRITE_BYTES": 786432,
     "MAX_PROTOTYPE_STORAGE_BYTES": 262144,
     "MAX_PROTOTYPE_STORAGE_KEYS": 64,
     "DEFAULT_PROTOTYPE_REQUEST_TIMEOUT_MS": 10000,
@@ -51,7 +61,14 @@
     "MAX_PROTOTYPE_PLATFORM_HANDLERS": 32,
     "MAX_PROTOTYPE_PLATFORM_ARGS": 16,
     "MAX_PROTOTYPE_CHECK_QUANTIFIER_BOUND": 100,
-    "MAX_PROTOTYPE_CHECK_VARIABLE_QUANTIFIERS": 2
+    "MAX_PROTOTYPE_CHECK_VARIABLE_QUANTIFIERS": 2,
+    "MAX_PROTOTYPE_SCROLL_BINDINGS": 16,
+    "MAX_PROTOTYPE_EFFECTS": 64,
+    "MAX_PROTOTYPE_ANIMATED_EFFECTS": 8,
+    "MAX_PROTOTYPE_STRING_LOCALES": 16,
+    "MAX_PROTOTYPE_STRING_KEYS": 512,
+    "MAX_PROTOTYPE_STRING_LENGTH": 2048,
+    "MAX_PROTOTYPE_LIST_ITEMS": 2000
   },
   "definitions": {
     "offset": {
@@ -153,7 +170,18 @@
       "kind": "object",
       "exactlyOne": ["key", "data", "platform", "all", "any", "not", "valid"],
       "dependents": {
-        "key|data|platform": ["equals", "notEquals", "gt", "lt", "empty"]
+        "key|data|platform": [
+          "equals",
+          "notEquals",
+          "gt",
+          "lt",
+          "empty",
+          "contains",
+          "startsWith",
+          "lengthGt",
+          "lengthLt"
+        ],
+        "key": ["contains", "startsWith", "lengthGt", "lengthLt"]
       },
       "fields": {
         "key": {
@@ -255,6 +283,38 @@
         "platform": {
           "rule": {
             "kind": "pointer"
+          },
+          "optional": true
+        },
+        "contains": {
+          "rule": {
+            "kind": "string",
+            "max": 256
+          },
+          "optional": true
+        },
+        "startsWith": {
+          "rule": {
+            "kind": "string",
+            "max": 256
+          },
+          "optional": true
+        },
+        "lengthGt": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 100000
+          },
+          "optional": true
+        },
+        "lengthLt": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 100000
           },
           "optional": true
         }
@@ -412,9 +472,17 @@
             "kind": "ref",
             "name": "colorValue"
           },
-          "optional": false
+          "optional": true
+        },
+        "gradient": {
+          "rule": {
+            "kind": "ref",
+            "name": "gradient"
+          },
+          "optional": true
         }
-      }
+      },
+      "exactlyOne": ["color", "gradient"]
     },
     "gradientStop": {
       "kind": "object",
@@ -596,6 +664,17 @@
             "dark": {
               "rule": {
                 "kind": "string"
+              },
+              "optional": false
+            }
+          }
+        },
+        {
+          "kind": "object",
+          "fields": {
+            "data": {
+              "rule": {
+                "kind": "pointer"
               },
               "optional": false
             }
@@ -995,6 +1074,44 @@
             "integer": false,
             "min": -360,
             "max": 360
+          },
+          "optional": true
+        },
+        "shader": {
+          "rule": {
+            "kind": "ref",
+            "name": "shader"
+          },
+          "optional": true
+        },
+        "shadows": {
+          "rule": {
+            "kind": "array",
+            "item": {
+              "kind": "ref",
+              "name": "shadow"
+            },
+            "min": 1,
+            "max": 3
+          },
+          "optional": true
+        },
+        "cornerStyle": {
+          "rule": {
+            "kind": "enum",
+            "values": ["circular", "continuous"]
+          },
+          "optional": true
+        },
+        "effects": {
+          "rule": {
+            "kind": "array",
+            "item": {
+              "kind": "ref",
+              "name": "effect"
+            },
+            "min": 1,
+            "max": 4
           },
           "optional": true
         }
@@ -1520,6 +1637,17 @@
                 "name": "stackTransition"
               },
               "optional": true
+            },
+            "source": {
+              "rule": { "kind": "string", "min": 1 },
+              "optional": true
+            },
+            "params": {
+              "rule": {
+                "kind": "ref",
+                "name": "routeParams"
+              },
+              "optional": true
             }
           }
         },
@@ -1538,6 +1666,12 @@
                 "kind": "string"
               },
               "optional": false
+            },
+            "force": {
+              "rule": {
+                "kind": "boolean"
+              },
+              "optional": true
             }
           }
         },
@@ -1585,6 +1719,17 @@
               "rule": {
                 "kind": "ref",
                 "name": "stackTransition"
+              },
+              "optional": true
+            },
+            "source": {
+              "rule": { "kind": "string", "min": 1 },
+              "optional": true
+            },
+            "params": {
+              "rule": {
+                "kind": "ref",
+                "name": "routeParams"
               },
               "optional": true
             }
@@ -2090,6 +2235,27 @@
                 }
               },
               "optional": true
+            },
+            "append": {
+              "rule": {
+                "kind": "object",
+                "fields": {
+                  "from": {
+                    "rule": {
+                      "kind": "pointer"
+                    },
+                    "optional": false
+                  },
+                  "to": {
+                    "rule": {
+                      "kind": "string",
+                      "max": 261
+                    },
+                    "optional": false
+                  }
+                }
+              },
+              "optional": true
             }
           }
         },
@@ -2292,6 +2458,132 @@
               "optional": true
             }
           }
+        },
+        "prependData": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["prependData"]
+              },
+              "optional": false
+            },
+            "path": {
+              "rule": {
+                "kind": "string",
+                "max": 261
+              },
+              "optional": false
+            },
+            "value": {
+              "rule": {
+                "kind": "choice",
+                "options": [
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "state": {
+                        "rule": {
+                          "kind": "boundKey"
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "item": {
+                        "rule": {
+                          "kind": "key"
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "index": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": [true]
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "data": {
+                        "rule": {
+                          "kind": "pointer"
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "value": {
+                        "rule": {
+                          "kind": "json",
+                          "maxDepth": 24
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "match": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": ["text", "kind"]
+                        },
+                        "optional": false
+                      }
+                    }
+                  }
+                ]
+              },
+              "optional": false
+            }
+          }
+        },
+        "setStack": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["setStack"]
+              },
+              "optional": false
+            },
+            "stack": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": false
+            },
+            "path": {
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "routeEntry"
+                }
+              },
+              "optional": false
+            }
+          }
         }
       }
     },
@@ -2392,6 +2684,19 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -2472,6 +2777,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "children": {
               "rule": {
                 "kind": "array",
@@ -2495,6 +2833,27 @@
               "rule": {
                 "kind": "ref",
                 "name": "stagger"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -2567,13 +2926,6 @@
               },
               "optional": true
             },
-            "swipeActions": {
-              "rule": {
-                "kind": "ref",
-                "name": "swipeActions"
-              },
-              "optional": true
-            },
             "style": {
               "rule": {
                 "kind": "ref",
@@ -2598,6 +2950,19 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -2681,6 +3046,46 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
+            "swipeActions": {
+              "rule": {
+                "kind": "ref",
+                "name": "swipeActions"
+              },
+              "optional": true
+            },
             "children": {
               "rule": {
                 "kind": "array",
@@ -2704,6 +3109,27 @@
               "rule": {
                 "kind": "ref",
                 "name": "stagger"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -2803,6 +3229,19 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -2883,6 +3322,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "children": {
               "rule": {
                 "kind": "array",
@@ -2906,6 +3378,27 @@
               "rule": {
                 "kind": "ref",
                 "name": "stagger"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -2979,6 +3472,19 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -3059,6 +3565,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "children": {
               "rule": {
                 "kind": "array",
@@ -3083,6 +3622,27 @@
                 "kind": "number",
                 "integer": true,
                 "min": 1
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -3156,6 +3716,19 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -3236,6 +3809,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "children": {
               "rule": {
                 "kind": "array",
@@ -3281,6 +3887,27 @@
                 ]
               },
               "optional": false
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -3352,6 +3979,19 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -3432,6 +4072,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "children": {
               "rule": {
                 "kind": "array",
@@ -3471,6 +4144,27 @@
               "rule": {
                 "kind": "ref",
                 "name": "pagerDp"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -3570,6 +4264,19 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -3650,6 +4357,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "text": {
               "rule": {
                 "kind": "string",
@@ -3674,6 +4414,27 @@
               "rule": {
                 "kind": "ref",
                 "name": "linkify"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -3774,6 +4535,19 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -3854,6 +4628,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "asset": {
               "rule": {
                 "kind": "ref",
@@ -3872,6 +4679,34 @@
               "rule": {
                 "kind": "ref",
                 "name": "zoomable"
+              },
+              "optional": true
+            },
+            "filter": {
+              "rule": {
+                "kind": "ref",
+                "name": "imageFilter"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -3971,6 +4806,19 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -4051,6 +4899,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "name": {
               "rule": {
                 "kind": "ref",
@@ -4062,6 +4943,27 @@
               "rule": {
                 "kind": "ref",
                 "name": "iconVariant"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -4135,6 +5037,19 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -4212,6 +5127,60 @@
               "rule": {
                 "kind": "ref",
                 "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -4285,6 +5254,19 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -4362,6 +5344,39 @@
               "rule": {
                 "kind": "ref",
                 "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
               },
               "optional": true
             },
@@ -4502,7 +5517,45 @@
                 "name": "condition"
               },
               "optional": true
+            },
+            "errorWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "errorText": {
+              "rule": {
+                "kind": "string",
+                "max": 256
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
+          },
+          "dependents": {
+            "errorWhen": ["errorText"]
           }
         },
         "switch": {
@@ -4570,6 +5623,19 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -4653,6 +5719,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "stateKey": {
               "rule": {
                 "kind": "boundKey"
@@ -4688,6 +5787,27 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -4761,6 +5881,19 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -4841,6 +5974,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "stateKey": {
               "rule": {
                 "kind": "boundKey"
@@ -4876,6 +6042,27 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -4949,6 +6136,19 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -5029,6 +6229,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "label": {
               "rule": {
                 "kind": "string"
@@ -5053,6 +6286,27 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -5126,6 +6380,19 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -5206,6 +6473,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "stateKey": {
               "rule": {
                 "kind": "boundKey"
@@ -5248,6 +6548,27 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -5321,6 +6642,19 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -5386,10 +6720,51 @@
               },
               "optional": true
             },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
             "safeAreaPadding": {
               "rule": {
                 "kind": "ref",
                 "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
               },
               "optional": true
             },
@@ -5418,11 +6793,24 @@
               },
               "optional": true
             },
-            "span": {
+            "ios": {
               "rule": {
-                "kind": "number",
-                "integer": true,
-                "min": 1
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -5496,6 +6884,19 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -5576,6 +6977,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "headline": {
               "rule": {
                 "kind": "string"
@@ -5613,6 +7047,27 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -5686,6 +7141,19 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -5766,6 +7234,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "stateKey": {
               "rule": {
                 "kind": "boundKey"
@@ -5822,6 +7323,27 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -5895,6 +7417,19 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -5975,6 +7510,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "label": {
               "rule": {
                 "kind": "string"
@@ -5998,6 +7566,27 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -6097,6 +7686,19 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -6177,6 +7779,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "variant": {
               "rule": {
                 "kind": "enum",
@@ -6195,6 +7830,27 @@
                 "unique": false
               },
               "optional": false
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -6266,6 +7922,19 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -6346,6 +8015,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "icon": {
               "rule": {
                 "kind": "ref",
@@ -6364,6 +8066,27 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -6437,6 +8160,19 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -6517,6 +8253,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "icon": {
               "rule": {
                 "kind": "ref",
@@ -6541,6 +8310,27 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -6614,6 +8404,19 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -6694,6 +8497,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "stateKey": {
               "rule": {
                 "kind": "boundKey"
@@ -6712,6 +8548,27 @@
                 "unique": false
               },
               "optional": false
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -6783,6 +8640,19 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -6863,6 +8733,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "title": {
               "rule": {
                 "kind": "string"
@@ -6893,6 +8796,40 @@
                 "min": 1,
                 "max": 3,
                 "unique": false
+              },
+              "optional": true
+            },
+            "onScroll": {
+              "rule": {
+                "kind": "enum",
+                "values": ["pinned", "enterAlways", "exitUntilCollapsed"]
+              },
+              "optional": true
+            },
+            "scroll": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -6966,6 +8903,19 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -7046,10 +8996,64 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "orientation": {
               "rule": {
                 "kind": "enum",
                 "values": ["horizontal", "vertical"]
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -7123,6 +9127,19 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -7203,9 +9220,63 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "text": {
               "rule": {
                 "kind": "string"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -7279,6 +9350,19 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -7359,6 +9443,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "variant": {
               "rule": {
                 "kind": "enum",
@@ -7376,6 +9493,27 @@
               "rule": {
                 "kind": "number",
                 "integer": false
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -7449,6 +9587,19 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -7529,6 +9680,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "openWhen": {
               "rule": {
                 "kind": "ref",
@@ -7573,6 +9757,27 @@
               "rule": {
                 "kind": "ref",
                 "name": "node"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -7646,6 +9851,19 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -7711,10 +9929,51 @@
               },
               "optional": true
             },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
             "safeAreaPadding": {
               "rule": {
                 "kind": "ref",
                 "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
               },
               "optional": true
             },
@@ -7738,11 +9997,24 @@
               },
               "optional": false
             },
-            "span": {
+            "ios": {
               "rule": {
-                "kind": "number",
-                "integer": true,
-                "min": 1
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -7816,6 +10088,19 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -7896,6 +10181,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "openWhen": {
               "rule": {
                 "kind": "ref",
@@ -7922,6 +10240,27 @@
                 "integer": true,
                 "min": 1,
                 "max": 600000
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -7995,6 +10334,19 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -8075,6 +10427,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "hourKey": {
               "rule": {
                 "kind": "boundKey"
@@ -8116,6 +10501,27 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -8189,6 +10595,19 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -8269,6 +10688,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "stateKey": {
               "rule": {
                 "kind": "boundKey"
@@ -8298,6 +10750,27 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -8371,6 +10844,19 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -8451,6 +10937,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "axis": {
               "rule": {
                 "kind": "enum",
@@ -8501,6 +11020,34 @@
                 "name": "node"
               },
               "optional": false
+            },
+            "fadeEdges": {
+              "rule": {
+                "kind": "ref",
+                "name": "fadeEdges"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -8572,6 +11119,19 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -8652,6 +11212,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "children": {
               "rule": {
                 "kind": "array",
@@ -8711,6 +11304,33 @@
               "rule": {
                 "kind": "enum",
                 "values": ["none", "dots"]
+              },
+              "optional": true
+            },
+            "stateKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -8784,6 +11404,19 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -8864,6 +11497,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "items": {
               "rule": {
                 "kind": "array",
@@ -8892,6 +11558,40 @@
             "scrollable": {
               "rule": {
                 "kind": "boolean"
+              },
+              "optional": true
+            },
+            "onScroll": {
+              "rule": {
+                "kind": "enum",
+                "values": ["none", "hide", "minimize"]
+              },
+              "optional": true
+            },
+            "scroll": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -8966,6 +11666,19 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -9046,6 +11759,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "items": {
               "rule": {
                 "kind": "array",
@@ -9068,6 +11814,40 @@
             "stateKey": {
               "rule": {
                 "kind": "boundKey"
+              },
+              "optional": true
+            },
+            "onScroll": {
+              "rule": {
+                "kind": "enum",
+                "values": ["none", "hide", "minimize"]
+              },
+              "optional": true
+            },
+            "scroll": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -9142,6 +11922,19 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -9222,6 +12015,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "child": {
               "rule": {
                 "kind": "ref",
@@ -9265,6 +12091,27 @@
             "dismissOnSwipe": {
               "rule": {
                 "kind": "boolean"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -9338,6 +12185,19 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -9403,10 +12263,51 @@
               },
               "optional": true
             },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
             "safeAreaPadding": {
               "rule": {
                 "kind": "ref",
                 "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
               },
               "optional": true
             },
@@ -9476,11 +12377,24 @@
               },
               "optional": true
             },
-            "span": {
+            "ios": {
               "rule": {
-                "kind": "number",
-                "integer": true,
-                "min": 1
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -9554,6 +12468,19 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "ref",
@@ -9575,10 +12502,51 @@
               },
               "optional": true
             },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
             "safeAreaPadding": {
               "rule": {
                 "kind": "ref",
                 "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
               },
               "optional": true
             },
@@ -9600,11 +12568,35 @@
               },
               "optional": false
             },
-            "span": {
+            "ios": {
               "rule": {
-                "kind": "number",
-                "integer": true,
-                "min": 1
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "routes": {
+              "rule": {
+                "kind": "record",
+                "maxEntries": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "route"
+                }
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -9675,6 +12667,19 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -9758,6 +12763,39 @@
               },
               "optional": true
             },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
             "variant": {
               "rule": {
                 "kind": "enum",
@@ -9798,8 +12836,876 @@
                 "integer": false
               },
               "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
+        },
+        "tooltip": {
+          "kind": "object",
+          "exactlyOne": ["anchorTo", "anchor"],
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["tooltip"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "contentDescription": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "style": {
+              "rule": {
+                "kind": "ref",
+                "name": "style"
+              },
+              "optional": true
+            },
+            "styleWhen": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "styleWhenEntry"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
+              },
+              "optional": true
+            },
+            "visibleWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
+            "transition": {
+              "rule": {
+                "kind": "choice",
+                "options": [
+                  {
+                    "kind": "enum",
+                    "values": [
+                      "none",
+                      "fade",
+                      "expand",
+                      "slide",
+                      "slideStart",
+                      "slideEnd",
+                      "scale",
+                      "blurReplace"
+                    ]
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "type": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": [
+                            "none",
+                            "fade",
+                            "expand",
+                            "slide",
+                            "slideStart",
+                            "slideEnd",
+                            "scale",
+                            "blurReplace"
+                          ]
+                        },
+                        "optional": false
+                      },
+                      "delayMs": {
+                        "rule": {
+                          "kind": "number",
+                          "integer": true,
+                          "min": 0,
+                          "max": 600
+                        },
+                        "optional": true
+                      }
+                    }
+                  }
+                ]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
+              },
+              "optional": true
+            },
+            "anchor": {
+              "rule": {
+                "kind": "ref",
+                "name": "anchor"
+              },
+              "optional": true
+            },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
+            "safeAreaPadding": {
+              "rule": {
+                "kind": "ref",
+                "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
+            "openWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "sheetCondition"
+              },
+              "optional": false
+            },
+            "text": {
+              "rule": {
+                "kind": "string",
+                "nonblank": true
+              },
+              "optional": false
+            },
+            "anchorTo": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "caret": {
+              "rule": {
+                "kind": "ref",
+                "name": "tooltipCaret"
+              },
+              "optional": true
+            },
+            "spotlight": {
+              "rule": {
+                "kind": "ref",
+                "name": "tooltipSpotlight"
+              },
+              "optional": true
+            },
+            "onDismiss": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
+            }
+          }
+        },
+        "drawer": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["drawer"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "contentDescription": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "style": {
+              "rule": {
+                "kind": "ref",
+                "name": "style"
+              },
+              "optional": true
+            },
+            "styleWhen": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "styleWhenEntry"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
+              },
+              "optional": true
+            },
+            "visibleWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
+            "transition": {
+              "rule": {
+                "kind": "choice",
+                "options": [
+                  {
+                    "kind": "enum",
+                    "values": [
+                      "none",
+                      "fade",
+                      "expand",
+                      "slide",
+                      "slideStart",
+                      "slideEnd",
+                      "scale",
+                      "blurReplace"
+                    ]
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "type": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": [
+                            "none",
+                            "fade",
+                            "expand",
+                            "slide",
+                            "slideStart",
+                            "slideEnd",
+                            "scale",
+                            "blurReplace"
+                          ]
+                        },
+                        "optional": false
+                      },
+                      "delayMs": {
+                        "rule": {
+                          "kind": "number",
+                          "integer": true,
+                          "min": 0,
+                          "max": 600
+                        },
+                        "optional": true
+                      }
+                    }
+                  }
+                ]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
+              },
+              "optional": true
+            },
+            "anchor": {
+              "rule": {
+                "kind": "ref",
+                "name": "anchor"
+              },
+              "optional": true
+            },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
+            "safeAreaPadding": {
+              "rule": {
+                "kind": "ref",
+                "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
+            "child": {
+              "rule": {
+                "kind": "ref",
+                "name": "node"
+              },
+              "optional": false
+            },
+            "edge": {
+              "rule": {
+                "kind": "ref",
+                "name": "drawerEdge"
+              },
+              "optional": false
+            },
+            "openWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "sheetCondition"
+              },
+              "optional": false
+            },
+            "scrim": {
+              "rule": {
+                "kind": "ref",
+                "name": "colorValue"
+              },
+              "optional": true
+            },
+            "dismissOnSwipe": {
+              "rule": {
+                "kind": "boolean"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
+            }
+          }
+        },
+        "list": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["list"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "contentDescription": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "style": {
+              "rule": {
+                "kind": "ref",
+                "name": "style"
+              },
+              "optional": true
+            },
+            "styleWhen": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "styleWhenEntry"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
+              },
+              "optional": true
+            },
+            "visibleWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
+            "transition": {
+              "rule": {
+                "kind": "choice",
+                "options": [
+                  {
+                    "kind": "enum",
+                    "values": [
+                      "none",
+                      "fade",
+                      "expand",
+                      "slide",
+                      "slideStart",
+                      "slideEnd",
+                      "scale",
+                      "blurReplace"
+                    ]
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "type": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": [
+                            "none",
+                            "fade",
+                            "expand",
+                            "slide",
+                            "slideStart",
+                            "slideEnd",
+                            "scale",
+                            "blurReplace"
+                          ]
+                        },
+                        "optional": false
+                      },
+                      "delayMs": {
+                        "rule": {
+                          "kind": "number",
+                          "integer": true,
+                          "min": 0,
+                          "max": 600
+                        },
+                        "optional": true
+                      }
+                    }
+                  }
+                ]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
+              },
+              "optional": true
+            },
+            "anchor": {
+              "rule": {
+                "kind": "ref",
+                "name": "anchor"
+              },
+              "optional": true
+            },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
+            "safeAreaPadding": {
+              "rule": {
+                "kind": "ref",
+                "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
+            "axis": {
+              "rule": {
+                "kind": "enum",
+                "values": ["vertical", "horizontal"]
+              },
+              "optional": true
+            },
+            "refresh": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollRefresh"
+              },
+              "optional": true
+            },
+            "repeat": {
+              "rule": {
+                "kind": "ref",
+                "name": "listRepeat"
+              },
+              "optional": false
+            },
+            "children": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "node"
+                },
+                "min": 1,
+                "max": 1,
+                "unique": false
+              },
+              "optional": false
+            },
+            "header": {
+              "rule": {
+                "kind": "ref",
+                "name": "node"
+              },
+              "optional": true
+            },
+            "footer": {
+              "rule": {
+                "kind": "ref",
+                "name": "node"
+              },
+              "optional": true
+            },
+            "spacing": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0
+              },
+              "optional": true
+            },
+            "contentPadding": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0
+              },
+              "optional": true
+            },
+            "onEndReached": {
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              },
+              "optional": true
+            },
+            "endThreshold": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1,
+                "max": 50
+              },
+              "optional": true
+            },
+            "maxItems": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1,
+                "max": 2000
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
+            }
+          }
+        }
+      }
+    },
+    "shared": {
+      "kind": "object",
+      "fields": {
+        "key": {
+          "rule": {
+            "kind": "string",
+            "min": 1,
+            "max": 256
+          },
+          "optional": false
+        },
+        "as": {
+          "rule": {
+            "kind": "enum",
+            "values": ["element", "bounds"]
+          },
+          "optional": false
         }
       }
     },
@@ -9842,6 +13748,40 @@
             "values": ["bar", "none"]
           },
           "optional": true
+        },
+        "ios": {
+          "rule": {
+            "kind": "ref",
+            "name": "iosNamespace"
+          },
+          "optional": true
+        },
+        "android": {
+          "rule": {
+            "kind": "ref",
+            "name": "androidNamespace"
+          },
+          "optional": true
+        },
+        "backdrop": {
+          "rule": {
+            "kind": "ref",
+            "name": "backdrop"
+          },
+          "optional": true
+        },
+        "deadTaps": {
+          "rule": {
+            "kind": "boolean"
+          },
+          "optional": true
+        },
+        "transition": {
+          "rule": {
+            "kind": "enum",
+            "values": ["auto", "none", "fade", "slide", "scale"]
+          },
+          "optional": true
         }
       }
     },
@@ -9880,7 +13820,7 @@
         "motion": {
           "rule": {
             "kind": "enum",
-            "values": ["none", "standard"]
+            "values": ["none", "standard", "reduced", "expressive"]
           },
           "optional": true
         },
@@ -9915,6 +13855,23 @@
           "rule": {
             "kind": "ref",
             "name": "platformHandlers"
+          },
+          "optional": true
+        },
+        "derive": {
+          "rule": {
+            "kind": "map",
+            "maxEntries": 32,
+            "item": {
+              "kind": "ref",
+              "name": "derivedEntry"
+            }
+          },
+          "optional": true
+        },
+        "strings": {
+          "rule": {
+            "kind": "strings"
           },
           "optional": true
         }
@@ -12574,6 +16531,27 @@
             "name": "themeShapes"
           },
           "optional": true
+        },
+        "ios": {
+          "rule": {
+            "kind": "ref",
+            "name": "iosNamespace"
+          },
+          "optional": true
+        },
+        "android": {
+          "rule": {
+            "kind": "ref",
+            "name": "androidNamespace"
+          },
+          "optional": true
+        },
+        "design": {
+          "rule": {
+            "kind": "enum",
+            "values": ["material", "platform"]
+          },
+          "optional": true
         }
       },
       "atLeastOne": true
@@ -12733,6 +16711,26 @@
         "key": {
           "rule": {
             "kind": "key"
+          },
+          "optional": true
+        },
+        "derive": {
+          "rule": {
+            "kind": "map",
+            "maxEntries": 8,
+            "item": {
+              "kind": "ref",
+              "name": "repeatDerivedEntry"
+            }
+          },
+          "optional": true
+        },
+        "stagger": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 100
           },
           "optional": true
         }
@@ -13066,6 +17064,15 @@
           "rule": {
             "kind": "ref",
             "name": "colorValue"
+          },
+          "optional": true
+        },
+        "stagger": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 100
           },
           "optional": true
         }
@@ -13504,9 +17511,1464 @@
         }
       }
     },
+    "valueFormat": {
+      "kind": "object",
+      "fields": {
+        "number": {
+          "rule": {
+            "kind": "object",
+            "fields": {
+              "minFraction": {
+                "rule": {
+                  "kind": "number",
+                  "integer": true,
+                  "min": 0,
+                  "max": 20
+                },
+                "optional": true
+              },
+              "maxFraction": {
+                "rule": {
+                  "kind": "number",
+                  "integer": true,
+                  "min": 0,
+                  "max": 20
+                },
+                "optional": true
+              },
+              "grouping": {
+                "rule": {
+                  "kind": "boolean"
+                },
+                "optional": true
+              }
+            }
+          },
+          "optional": true
+        },
+        "compact": {
+          "rule": {
+            "kind": "object",
+            "fields": {
+              "style": {
+                "rule": {
+                  "kind": "enum",
+                  "values": ["short", "long"]
+                },
+                "optional": true
+              }
+            }
+          },
+          "optional": true
+        },
+        "currency": {
+          "rule": {
+            "kind": "object",
+            "fields": {
+              "code": {
+                "rule": {
+                  "kind": "string",
+                  "pattern": "currencyCode"
+                },
+                "optional": false
+              }
+            }
+          },
+          "optional": true
+        },
+        "percent": {
+          "rule": {
+            "kind": "object",
+            "fields": {
+              "minFraction": {
+                "rule": {
+                  "kind": "number",
+                  "integer": true,
+                  "min": 0,
+                  "max": 20
+                },
+                "optional": true
+              },
+              "maxFraction": {
+                "rule": {
+                  "kind": "number",
+                  "integer": true,
+                  "min": 0,
+                  "max": 20
+                },
+                "optional": true
+              }
+            }
+          },
+          "optional": true
+        },
+        "date": {
+          "rule": {
+            "kind": "object",
+            "fields": {
+              "style": {
+                "rule": {
+                  "kind": "enum",
+                  "values": ["short", "medium", "long"]
+                },
+                "optional": true
+              }
+            }
+          },
+          "optional": true
+        },
+        "time": {
+          "rule": {
+            "kind": "object",
+            "fields": {
+              "style": {
+                "rule": {
+                  "kind": "enum",
+                  "values": ["short", "medium", "long"]
+                },
+                "optional": true
+              }
+            }
+          },
+          "optional": true
+        },
+        "relative": {
+          "rule": {
+            "kind": "object",
+            "fields": {
+              "style": {
+                "rule": {
+                  "kind": "enum",
+                  "values": ["narrow", "short", "long"]
+                },
+                "optional": true
+              }
+            }
+          },
+          "optional": true
+        }
+      },
+      "exactlyOne": ["number", "compact", "currency", "percent", "date", "time", "relative"]
+    },
+    "derivedEntry": {
+      "kind": "object",
+      "fields": {
+        "of": {
+          "rule": {
+            "kind": "object",
+            "fields": {
+              "data": {
+                "rule": {
+                  "kind": "pointer"
+                },
+                "optional": true
+              },
+              "state": {
+                "rule": {
+                  "kind": "key"
+                },
+                "optional": true
+              },
+              "value": {
+                "rule": {
+                  "kind": "choice",
+                  "options": [
+                    {
+                      "kind": "number"
+                    },
+                    {
+                      "kind": "string",
+                      "empty": true
+                    }
+                  ]
+                },
+                "optional": true
+              }
+            },
+            "exactlyOne": ["data", "state", "value"]
+          },
+          "optional": false
+        },
+        "format": {
+          "rule": {
+            "kind": "ref",
+            "name": "valueFormat"
+          },
+          "optional": false
+        },
+        "locale": {
+          "rule": {
+            "kind": "string",
+            "max": 35,
+            "pattern": "formatLocale"
+          },
+          "optional": true
+        },
+        "timeZone": {
+          "rule": {
+            "kind": "string",
+            "max": 128,
+            "pattern": "formatTimeZone"
+          },
+          "optional": true
+        }
+      }
+    },
+    "repeatDerivedEntry": {
+      "kind": "object",
+      "fields": {
+        "of": {
+          "rule": {
+            "kind": "object",
+            "fields": {
+              "item": {
+                "rule": {
+                  "kind": "key"
+                },
+                "optional": true
+              },
+              "value": {
+                "rule": {
+                  "kind": "choice",
+                  "options": [
+                    {
+                      "kind": "number"
+                    },
+                    {
+                      "kind": "string",
+                      "empty": true
+                    }
+                  ]
+                },
+                "optional": true
+              }
+            },
+            "exactlyOne": ["item", "value"]
+          },
+          "optional": false
+        },
+        "format": {
+          "rule": {
+            "kind": "ref",
+            "name": "valueFormat"
+          },
+          "optional": false
+        },
+        "locale": {
+          "rule": {
+            "kind": "string",
+            "max": 35,
+            "pattern": "formatLocale"
+          },
+          "optional": true
+        },
+        "timeZone": {
+          "rule": {
+            "kind": "string",
+            "max": 128,
+            "pattern": "formatTimeZone"
+          },
+          "optional": true
+        }
+      }
+    },
+    "semantics": {
+      "kind": "object",
+      "atLeastOne": true,
+      "fields": {
+        "heading": {
+          "rule": {
+            "kind": "boolean"
+          },
+          "optional": true
+        },
+        "group": {
+          "rule": {
+            "kind": "boolean"
+          },
+          "optional": true
+        },
+        "liveRegion": {
+          "rule": {
+            "kind": "enum",
+            "values": ["polite", "assertive"]
+          },
+          "optional": true
+        },
+        "label": {
+          "rule": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        "hint": {
+          "rule": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        "traits": {
+          "rule": {
+            "kind": "array",
+            "min": 1,
+            "max": 3,
+            "unique": true,
+            "item": {
+              "kind": "enum",
+              "values": ["button", "image", "selected"]
+            }
+          },
+          "optional": true
+        }
+      }
+    },
+    "listRepeat": {
+      "kind": "object",
+      "fields": {
+        "items": {
+          "rule": {
+            "kind": "object",
+            "fields": {
+              "path": {
+                "rule": {
+                  "kind": "pointer"
+                },
+                "optional": false
+              }
+            }
+          },
+          "optional": false
+        },
+        "as": {
+          "rule": {
+            "kind": "key"
+          },
+          "optional": false
+        },
+        "key": {
+          "rule": {
+            "kind": "key"
+          },
+          "optional": false
+        }
+      }
+    },
     "stackTransition": {
       "kind": "enum",
-      "values": ["platform", "slide", "fade", "none"]
+      "values": [
+        "platform",
+        "slide",
+        "fade",
+        "none",
+        "sharedAxisX",
+        "sharedAxisY",
+        "fadeThrough",
+        "zoom"
+      ]
+    },
+    "shader": {
+      "kind": "object",
+      "fields": {
+        "asset": {
+          "rule": {
+            "kind": "string",
+            "max": 256
+          },
+          "optional": false
+        },
+        "uniforms": {
+          "rule": {
+            "kind": "record",
+            "maxEntries": 16,
+            "keyPattern": "pathKey",
+            "item": {
+              "kind": "number",
+              "integer": false,
+              "min": -1000000,
+              "max": 1000000
+            }
+          },
+          "optional": true
+        }
+      }
+    },
+    "scrollEdge": {
+      "kind": "object",
+      "fields": {
+        "scale": {
+          "rule": {
+            "kind": "number",
+            "integer": false
+          },
+          "optional": true
+        },
+        "alpha": {
+          "rule": {
+            "kind": "number",
+            "integer": false
+          },
+          "optional": true
+        },
+        "rotation": {
+          "rule": {
+            "kind": "number",
+            "integer": false
+          },
+          "optional": true
+        }
+      }
+    },
+    "scrollTransition": {
+      "kind": "object",
+      "fields": {
+        "axis": {
+          "rule": {
+            "kind": "enum",
+            "values": ["horizontal", "vertical"]
+          },
+          "optional": false
+        },
+        "edge": {
+          "rule": {
+            "kind": "ref",
+            "name": "scrollEdge"
+          },
+          "optional": false
+        }
+      }
+    },
+    "scrollLinked": {
+      "kind": "object",
+      "fields": {
+        "source": {
+          "rule": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        "range": {
+          "rule": {
+            "kind": "array",
+            "item": {
+              "kind": "number",
+              "integer": false
+            },
+            "min": 2,
+            "max": 2,
+            "unique": false
+          },
+          "optional": false
+        },
+        "alpha": {
+          "rule": {
+            "kind": "array",
+            "item": {
+              "kind": "number",
+              "integer": false
+            },
+            "min": 2,
+            "max": 2,
+            "unique": false
+          },
+          "optional": true
+        },
+        "scale": {
+          "rule": {
+            "kind": "array",
+            "item": {
+              "kind": "number",
+              "integer": false
+            },
+            "min": 2,
+            "max": 2,
+            "unique": false
+          },
+          "optional": true
+        },
+        "offsetY": {
+          "rule": {
+            "kind": "array",
+            "item": {
+              "kind": "number",
+              "integer": false
+            },
+            "min": 2,
+            "max": 2,
+            "unique": false
+          },
+          "optional": true
+        },
+        "offsetX": {
+          "rule": {
+            "kind": "array",
+            "item": {
+              "kind": "number",
+              "integer": false
+            },
+            "min": 2,
+            "max": 2,
+            "unique": false
+          },
+          "optional": true
+        },
+        "blur": {
+          "rule": {
+            "kind": "array",
+            "item": {
+              "kind": "number",
+              "integer": false
+            },
+            "min": 2,
+            "max": 2,
+            "unique": false
+          },
+          "optional": true
+        }
+      }
+    },
+    "effectAnimate": {
+      "kind": "object",
+      "fields": {
+        "periodMs": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 400,
+            "max": 20000
+          },
+          "optional": false
+        }
+      }
+    },
+    "effectCenter": {
+      "kind": "object",
+      "fields": {
+        "x": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0,
+            "max": 1
+          },
+          "optional": false
+        },
+        "y": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0,
+            "max": 1
+          },
+          "optional": false
+        }
+      }
+    },
+    "effect": {
+      "kind": "tagged",
+      "variants": {
+        "noise": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["noise"]
+              },
+              "optional": false
+            },
+            "amount": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 1
+              },
+              "optional": true
+            },
+            "grain": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0.5,
+                "max": 8
+              },
+              "optional": true
+            },
+            "seed": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 0,
+                "max": 65535
+              },
+              "optional": true
+            },
+            "monochrome": {
+              "rule": {
+                "kind": "boolean"
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "effectAnimate"
+              },
+              "optional": true
+            },
+            "phase": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 1
+              },
+              "optional": true
+            }
+          }
+        },
+        "gradientMesh": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["gradientMesh"]
+              },
+              "optional": false
+            },
+            "colors": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "colorValue"
+                },
+                "min": 4,
+                "max": 4
+              },
+              "optional": false
+            },
+            "softness": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 1
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "effectAnimate"
+              },
+              "optional": true
+            },
+            "phase": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 1
+              },
+              "optional": true
+            }
+          }
+        },
+        "shimmer": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["shimmer"]
+              },
+              "optional": false
+            },
+            "color": {
+              "rule": {
+                "kind": "ref",
+                "name": "colorValue"
+              },
+              "optional": true
+            },
+            "angle": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": -360,
+                "max": 360
+              },
+              "optional": true
+            },
+            "width": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0.05,
+                "max": 1
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "effectAnimate"
+              },
+              "optional": true
+            },
+            "phase": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 1
+              },
+              "optional": true
+            }
+          }
+        },
+        "glow": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["glow"]
+              },
+              "optional": false
+            },
+            "color": {
+              "rule": {
+                "kind": "ref",
+                "name": "colorValue"
+              },
+              "optional": false
+            },
+            "radius": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 48
+              },
+              "optional": true
+            },
+            "intensity": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 1
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "effectAnimate"
+              },
+              "optional": true
+            },
+            "phase": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 1
+              },
+              "optional": true
+            }
+          }
+        },
+        "vignette": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["vignette"]
+              },
+              "optional": false
+            },
+            "color": {
+              "rule": {
+                "kind": "ref",
+                "name": "colorValue"
+              },
+              "optional": true
+            },
+            "intensity": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 1
+              },
+              "optional": true
+            },
+            "radius": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 1
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "effectAnimate"
+              },
+              "optional": true
+            },
+            "phase": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 1
+              },
+              "optional": true
+            }
+          }
+        },
+        "blur": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["blur"]
+              },
+              "optional": false
+            },
+            "radius": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 25
+              },
+              "optional": false
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "effectAnimate"
+              },
+              "optional": true
+            },
+            "phase": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 1
+              },
+              "optional": true
+            }
+          }
+        },
+        "pixelate": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["pixelate"]
+              },
+              "optional": false
+            },
+            "cell": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 1,
+                "max": 64
+              },
+              "optional": false
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "effectAnimate"
+              },
+              "optional": true
+            },
+            "phase": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 1
+              },
+              "optional": true
+            }
+          }
+        },
+        "chromaticAberration": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["chromaticAberration"]
+              },
+              "optional": false
+            },
+            "offset": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 8
+              },
+              "optional": true
+            },
+            "angle": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": -360,
+                "max": 360
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "effectAnimate"
+              },
+              "optional": true
+            },
+            "phase": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 1
+              },
+              "optional": true
+            }
+          }
+        },
+        "wave": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["wave"]
+              },
+              "optional": false
+            },
+            "amplitude": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 16
+              },
+              "optional": true
+            },
+            "wavelength": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 8,
+                "max": 400
+              },
+              "optional": true
+            },
+            "angle": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": -360,
+                "max": 360
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "effectAnimate"
+              },
+              "optional": true
+            },
+            "phase": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 1
+              },
+              "optional": true
+            }
+          }
+        },
+        "ripple": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["ripple"]
+              },
+              "optional": false
+            },
+            "amplitude": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 16
+              },
+              "optional": true
+            },
+            "wavelength": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 8,
+                "max": 400
+              },
+              "optional": true
+            },
+            "center": {
+              "rule": {
+                "kind": "ref",
+                "name": "effectCenter"
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "effectAnimate"
+              },
+              "optional": true
+            },
+            "phase": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 1
+              },
+              "optional": true
+            }
+          }
+        }
+      }
+    },
+    "shadow": {
+      "kind": "object",
+      "fields": {
+        "color": {
+          "rule": {
+            "kind": "ref",
+            "name": "colorValue"
+          },
+          "optional": false
+        },
+        "radius": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0,
+            "max": 1000
+          },
+          "optional": false
+        },
+        "spread": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": -1000,
+            "max": 1000
+          },
+          "optional": true
+        },
+        "offset": {
+          "rule": {
+            "kind": "object",
+            "fields": {
+              "x": {
+                "rule": {
+                  "kind": "number",
+                  "integer": false,
+                  "min": -1000,
+                  "max": 1000
+                },
+                "optional": false
+              },
+              "y": {
+                "rule": {
+                  "kind": "number",
+                  "integer": false,
+                  "min": -1000,
+                  "max": 1000
+                },
+                "optional": false
+              }
+            }
+          },
+          "optional": true
+        },
+        "inner": {
+          "rule": {
+            "kind": "boolean"
+          },
+          "optional": true
+        }
+      }
+    },
+    "fadeEdges": {
+      "kind": "object",
+      "fields": {
+        "top": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0,
+            "max": 1000
+          },
+          "optional": true
+        },
+        "bottom": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0,
+            "max": 1000
+          },
+          "optional": true
+        },
+        "start": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0,
+            "max": 1000
+          },
+          "optional": true
+        },
+        "end": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0,
+            "max": 1000
+          },
+          "optional": true
+        }
+      }
+    },
+    "imageFilter": {
+      "kind": "object",
+      "fields": {
+        "saturation": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0,
+            "max": 2
+          },
+          "optional": true
+        },
+        "tint": {
+          "rule": {
+            "kind": "ref",
+            "name": "colorValue"
+          },
+          "optional": true
+        }
+      }
+    },
+    "backdrop": {
+      "kind": "object",
+      "fields": {
+        "material": {
+          "rule": {
+            "kind": "enum",
+            "values": ["ultraThin", "thin", "regular", "thick", "glass"]
+          },
+          "optional": false
+        },
+        "blur": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 150
+          },
+          "optional": true
+        },
+        "tint": {
+          "rule": {
+            "kind": "ref",
+            "name": "colorToken"
+          },
+          "optional": true
+        }
+      }
+    },
+    "tooltipSpotlight": {
+      "kind": "object",
+      "fields": {
+        "padding": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 64
+          },
+          "optional": true
+        },
+        "cornerRadius": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 64
+          },
+          "optional": true
+        }
+      }
+    },
+    "tooltipCaret": {
+      "kind": "enum",
+      "values": ["auto", "top", "bottom", "start", "end"]
+    },
+    "drawerEdge": {
+      "kind": "enum",
+      "values": ["start", "end"]
+    },
+    "iosNamespace": {
+      "kind": "object",
+      "fields": {
+        "buttonStyle": {
+          "rule": {
+            "kind": "enum",
+            "values": ["glass", "glassProminent"]
+          },
+          "optional": true
+        },
+        "tab": {
+          "rule": {
+            "kind": "object",
+            "fields": {
+              "role": {
+                "rule": {
+                  "kind": "enum",
+                  "values": ["search"]
+                },
+                "optional": false
+              }
+            }
+          },
+          "optional": true
+        },
+        "sheet": {
+          "rule": {
+            "kind": "object",
+            "fields": {
+              "sizing": {
+                "rule": {
+                  "kind": "enum",
+                  "values": ["form", "page", "fitted"]
+                },
+                "optional": false
+              }
+            }
+          },
+          "optional": true
+        },
+        "hover": {
+          "rule": {
+            "kind": "enum",
+            "values": ["lift", "highlight"]
+          },
+          "optional": true
+        },
+        "navigationTitle": {
+          "rule": {
+            "kind": "enum",
+            "values": ["large", "inline"]
+          },
+          "optional": true
+        }
+      }
+    },
+    "androidNamespace": {
+      "kind": "object",
+      "fields": {
+        "predictiveBack": {
+          "rule": {
+            "kind": "object",
+            "fields": {
+              "style": {
+                "rule": {
+                  "kind": "enum",
+                  "values": ["default", "crossActivity", "none"]
+                },
+                "optional": false
+              }
+            }
+          },
+          "optional": true
+        },
+        "indication": {
+          "rule": {
+            "kind": "enum",
+            "values": ["ripple", "none"]
+          },
+          "optional": true
+        }
+      }
+    },
+    "routeParams": {
+      "kind": "record",
+      "maxEntries": 16,
+      "item": {
+        "kind": "choice",
+        "options": [
+          {
+            "kind": "scalar"
+          },
+          {
+            "kind": "object",
+            "fields": {
+              "state": {
+                "rule": {
+                  "kind": "boundKey"
+                },
+                "optional": false
+              }
+            }
+          },
+          {
+            "kind": "object",
+            "fields": {
+              "item": {
+                "rule": {
+                  "kind": "key"
+                },
+                "optional": false
+              }
+            }
+          },
+          {
+            "kind": "object",
+            "fields": {
+              "index": {
+                "rule": {
+                  "kind": "enum",
+                  "values": [true]
+                },
+                "optional": false
+              }
+            }
+          },
+          {
+            "kind": "object",
+            "fields": {
+              "data": {
+                "rule": {
+                  "kind": "pointer"
+                },
+                "optional": false
+              }
+            }
+          }
+        ]
+      }
+    },
+    "routeEntry": {
+      "kind": "object",
+      "fields": {
+        "screen": {
+          "rule": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        "params": {
+          "rule": {
+            "kind": "ref",
+            "name": "routeParams"
+          },
+          "optional": true
+        }
+      }
+    },
+    "route": {
+      "kind": "object",
+      "fields": {
+        "params": {
+          "rule": {
+            "kind": "record",
+            "maxEntries": 16,
+            "item": {
+              "kind": "enum",
+              "values": ["string", "number", "boolean"]
+            }
+          },
+          "optional": true
+        },
+        "onEnter": {
+          "rule": {
+            "kind": "array",
+            "min": 1,
+            "max": 32,
+            "item": {
+              "kind": "ref",
+              "name": "action"
+            }
+          },
+          "optional": true
+        },
+        "onBack": {
+          "rule": {
+            "kind": "array",
+            "min": 1,
+            "max": 32,
+            "item": {
+              "kind": "ref",
+              "name": "action"
+            }
+          },
+          "optional": true
+        }
+      }
+    },
+    "press": {
+      "kind": "object",
+      "atLeastOne": true,
+      "fields": {
+        "scale": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0.85,
+            "max": 1
+          },
+          "optional": true
+        },
+        "alpha": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0.5,
+            "max": 1
+          },
+          "optional": true
+        }
+      }
     }
   },
   "eventKinds": [
@@ -13558,6 +19020,190 @@
           "sensitive": false
         }
       }
+    },
+    "device": {
+      "capability": "prototype_platform_device_v1",
+      "calls": {},
+      "events": {
+        "changed": {
+          "sensitive": false,
+          "debounceMs": 250
+        }
+      },
+      "state": {
+        "os": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": ["android", "ios"]
+          }
+        },
+        "osVersion": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "string",
+            "max": 64
+          }
+        },
+        "idiom": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": ["phone", "tablet", "foldable", "desktop"]
+          }
+        },
+        "widthClass": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": ["compact", "medium", "expanded"]
+          },
+          "breakpoints": [600, 840],
+          "valueByPlatform": {
+            "ios": {
+              "kind": "enum",
+              "values": ["compact", "regular"]
+            }
+          }
+        },
+        "heightClass": {
+          "platforms": ["android"],
+          "value": {
+            "kind": "enum",
+            "values": ["compact", "medium", "expanded"]
+          },
+          "breakpoints": [480, 900]
+        },
+        "windowWidth": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 65535
+          }
+        },
+        "windowHeight": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 65535
+          }
+        },
+        "posture": {
+          "platforms": ["android"],
+          "value": {
+            "kind": "enum",
+            "values": ["flat", "tabletop", "book"]
+          }
+        },
+        "pointer": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "boolean"
+          }
+        }
+      }
+    },
+    "haptics": {
+      "capability": "prototype_platform_haptics_v1",
+      "calls": {
+        "perform": {
+          "args": {
+            "effect": {
+              "optional": false,
+              "value": {
+                "kind": "enum",
+                "values": [
+                  "click",
+                  "tick",
+                  "heavyClick",
+                  "doubleClick",
+                  "selection",
+                  "success",
+                  "warning",
+                  "error",
+                  "impactLight",
+                  "impactMedium",
+                  "impactHeavy",
+                  "longPress"
+                ]
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false
+        }
+      },
+      "events": {},
+      "state": {}
+    },
+    "sound": {
+      "capability": "prototype_platform_sound_v1",
+      "calls": {
+        "play": {
+          "args": {
+            "sound": {
+              "optional": false,
+              "value": {
+                "kind": "enum",
+                "values": ["click", "send", "receive", "shutter"]
+              }
+            },
+            "volume": {
+              "optional": true,
+              "value": {
+                "kind": "number",
+                "integer": true,
+                "min": 0,
+                "max": 100
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false
+        }
+      },
+      "events": {},
+      "state": {}
+    }
+  },
+  "platformNamespaces": {
+    "ios": {
+      "buttonStyle": {
+        "why": "Native iOS glass button treatments have no portable renderer equivalent.",
+        "requires": "prototype_platform_namespace_v1"
+      },
+      "tab.role": {
+        "why": "The search tab role is an iOS tab navigation convention.",
+        "requires": "prototype_platform_namespace_v1"
+      },
+      "sheet.sizing": {
+        "why": "Native iOS sheet sizing modes have no matching Android presentation contract.",
+        "requires": "prototype_platform_namespace_v1"
+      },
+      "hover": {
+        "why": "Native iOS lift and highlight hover effects have no portable equivalent.",
+        "requires": "prototype_platform_namespace_v1"
+      },
+      "navigationTitle": {
+        "why": "Large and inline navigation titles are iOS navigation chrome conventions.",
+        "requires": "prototype_platform_namespace_v1"
+      }
+    },
+    "android": {
+      "predictiveBack.style": {
+        "why": "Android predictive back previews depend on the Android activity navigation model.",
+        "requires": "prototype_platform_namespace_v1"
+      },
+      "indication": {
+        "why": "Android ripple indication is a native interaction feedback treatment.",
+        "requires": "prototype_platform_namespace_v1"
+      }
     }
   },
   "checkControls": {
@@ -13567,5 +19213,240 @@
     "pattern": ["textField"],
     "min": ["slider", "datePicker", "timePicker"],
     "max": ["slider", "datePicker", "timePicker"]
+  },
+  "designCoverage": {
+    "box": {
+      "ios": "neutral",
+      "android": "neutral"
+    },
+    "row": {
+      "ios": "neutral",
+      "android": "neutral"
+    },
+    "column": {
+      "ios": "neutral",
+      "android": "neutral"
+    },
+    "flow": {
+      "ios": "neutral",
+      "android": "neutral"
+    },
+    "grid": {
+      "ios": "neutral",
+      "android": "neutral"
+    },
+    "carousel": {
+      "ios": "neutral",
+      "android": "neutral"
+    },
+    "text": {
+      "ios": "neutral",
+      "android": "neutral"
+    },
+    "image": {
+      "ios": "neutral",
+      "android": "neutral"
+    },
+    "icon": {
+      "ios": "neutral",
+      "android": "neutral"
+    },
+    "spacer": {
+      "ios": "neutral",
+      "android": "neutral"
+    },
+    "textField": {
+      "ios": "material",
+      "android": "material"
+    },
+    "switch": {
+      "ios": "material",
+      "android": "material"
+    },
+    "checkbox": {
+      "ios": "material",
+      "android": "material"
+    },
+    "button": {
+      "ios": "native",
+      "android": "material"
+    },
+    "radioGroup": {
+      "ios": "material",
+      "android": "material"
+    },
+    "select": {
+      "ios": "material",
+      "android": "material"
+    },
+    "listItem": {
+      "ios": "material",
+      "android": "material"
+    },
+    "slider": {
+      "ios": "native",
+      "android": "material"
+    },
+    "chip": {
+      "ios": "material",
+      "android": "material"
+    },
+    "card": {
+      "ios": "material",
+      "android": "material"
+    },
+    "iconButton": {
+      "ios": "material",
+      "android": "material"
+    },
+    "fab": {
+      "ios": "material",
+      "android": "material"
+    },
+    "segmentedButton": {
+      "ios": "material",
+      "android": "material"
+    },
+    "topAppBar": {
+      "ios": "material",
+      "android": "material"
+    },
+    "divider": {
+      "ios": "neutral",
+      "android": "neutral"
+    },
+    "badge": {
+      "ios": "material",
+      "android": "material"
+    },
+    "progress": {
+      "ios": "material",
+      "android": "material"
+    },
+    "dialog": {
+      "ios": "material",
+      "android": "material"
+    },
+    "menu": {
+      "ios": "material",
+      "android": "material"
+    },
+    "snackbar": {
+      "ios": "material",
+      "android": "material"
+    },
+    "timePicker": {
+      "ios": "native",
+      "android": "material"
+    },
+    "datePicker": {
+      "ios": "native",
+      "android": "material"
+    },
+    "scroll": {
+      "ios": "neutral",
+      "android": "neutral"
+    },
+    "pager": {
+      "ios": "neutral",
+      "android": "neutral"
+    },
+    "tabBar": {
+      "ios": "material",
+      "android": "material"
+    },
+    "bottomNav": {
+      "ios": "material",
+      "android": "material"
+    },
+    "bottomSheet": {
+      "ios": "material",
+      "android": "material"
+    },
+    "searchBar": {
+      "ios": "material",
+      "android": "material"
+    },
+    "stack": {
+      "ios": "neutral",
+      "android": "neutral"
+    },
+    "chart": {
+      "ios": "material",
+      "android": "material"
+    },
+    "tooltip": {
+      "ios": "material",
+      "android": "material"
+    },
+    "drawer": {
+      "ios": "material",
+      "android": "material"
+    },
+    "list": {
+      "ios": "material",
+      "android": "material"
+    }
+  },
+  "stringFields": [
+    "text",
+    "label",
+    "placeholder",
+    "headline",
+    "title",
+    "supportingText",
+    "errorText",
+    "supporting",
+    "trailingText",
+    "message",
+    "semantics.label",
+    "semantics.hint"
+  ],
+  "stringOpaqueFields": [
+    "context",
+    "data",
+    "state",
+    "assets",
+    "theme",
+    "storage",
+    "value",
+    "repeat",
+    "payload",
+    "body",
+    "headers",
+    "query",
+    "strings"
+  ],
+  "eventPayloads": {
+    "screen_changed": {
+      "kind": "object",
+      "fields": {
+        "screen": {
+          "rule": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        "depth": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 1,
+            "max": 32
+          },
+          "optional": false
+        },
+        "params": {
+          "rule": {
+            "kind": "record",
+            "maxEntries": 16,
+            "item": {
+              "kind": "scalar"
+            }
+          },
+          "optional": true
+        }
+      }
+    }
   }
 }

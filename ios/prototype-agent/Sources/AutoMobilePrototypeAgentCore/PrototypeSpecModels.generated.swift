@@ -1,6 +1,93 @@
 // Generated from schemas/prototype-spec-contract.json; do not edit.
 // Regenerate: bun scripts/prototype/generate-prototype-spec-models.ts
 
+struct PrototypePress: Decodable, Equatable, Sendable {
+    let scale: Double?
+    let alpha: Double?
+}
+
+struct Shared: Decodable, Equatable, Sendable {
+    let key: String
+    let `as`: String
+}
+
+struct ShadowOffset: Codable, Equatable, Sendable {
+    let x: Double
+    let y: Double
+}
+
+struct Shadow: Decodable, Equatable, Sendable {
+    let color: PrototypeModeValue
+    let radius: Double
+    let spread: Double?
+    let offset: ShadowOffset?
+    let inner: Bool?
+}
+
+struct FadeEdges: Codable, Equatable, Sendable {
+    let top: Double?
+    let bottom: Double?
+    let start: Double?
+    let end: Double?
+}
+
+struct ImageFilter: Decodable, Equatable, Sendable {
+    let saturation: Double?
+    let tint: PrototypeModeValue?
+}
+
+/// Tooltip spotlight hole: padding 0..64 dp (default 8), cornerRadius 0..64 dp (default 12).
+struct TooltipSpotlight: Codable, Equatable, Sendable {
+    let padding: Int?
+    let cornerRadius: Int?
+}
+
+struct ScrollEdge: Codable, Equatable, Sendable {
+    let scale: Double?
+    let alpha: Double?
+    let rotation: Double?
+}
+
+struct ScrollTransition: Codable, Equatable, Sendable {
+    let axis: String
+    let edge: ScrollEdge
+}
+
+struct ScrollLinked: Codable, Equatable, Sendable {
+    let source: String
+    let range: [Double]
+    let alpha: [Double]?
+    let scale: [Double]?
+    let offsetY: [Double]?
+    let offsetX: [Double]?
+    let blur: [Double]?
+}
+
+struct IosNamespaceTab: Codable, Equatable, Sendable {
+    let role: String
+}
+
+struct IosNamespaceSheet: Codable, Equatable, Sendable {
+    let sizing: String
+}
+
+struct IosNamespace: Codable, Equatable, Sendable {
+    let buttonStyle: String?
+    let tab: IosNamespaceTab?
+    let sheet: IosNamespaceSheet?
+    let hover: String?
+    let navigationTitle: String?
+}
+
+struct AndroidNamespacePredictiveBack: Codable, Equatable, Sendable {
+    let style: String
+}
+
+struct AndroidNamespace: Codable, Equatable, Sendable {
+    let predictiveBack: AndroidNamespacePredictiveBack?
+    let indication: String?
+}
+
 struct Offset: Codable, Equatable, Sendable {
     let x: Double
     let y: Double
@@ -22,6 +109,11 @@ struct SafeAreaPadding: Codable, Equatable, Sendable {
 struct PrototypeChartRange: Codable, Equatable, Sendable {
     let min: Double
     let max: Double
+}
+
+struct PrototypeShader: Codable, Equatable, Sendable {
+    let asset: String
+    let uniforms: [String: Double]?
 }
 
 /// An icon-only control in a `topAppBar`: the icon, its accessible label and its tap.
@@ -74,6 +166,44 @@ enum Placement: Decodable {
                 forKey: .type,
                 in: container,
                 debugDescription: "Unknown Placement type \(type)"
+            )
+        }
+    }
+}
+
+enum PrototypeGradient: Decodable, Equatable {
+    case linear(angle: Double, stops: [PrototypeGradientStop])
+    case radial(stops: [PrototypeGradientStop])
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case angle
+        case stops
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try container.decode(String.self, forKey: .type)
+        switch type {
+        case "linear":
+            let angle = try container.decode(Double.self, forKey: .angle)
+            let stops = try container.decode([PrototypeGradientStop].self, forKey: .stops)
+            try PrototypeGradient.validateStops(stops, forKey: .stops, in: container)
+            self = .linear(
+                angle: angle,
+                stops: stops
+            )
+        case "radial":
+            let stops = try container.decode([PrototypeGradientStop].self, forKey: .stops)
+            try PrototypeGradient.validateStops(stops, forKey: .stops, in: container)
+            self = .radial(
+                stops: stops
+            )
+        default:
+            throw DecodingError.dataCorruptedError(
+                forKey: .type,
+                in: container,
+                debugDescription: "Unknown PrototypeGradient type \(type)"
             )
         }
     }
@@ -140,5 +270,13 @@ struct PrototypeGradientStop: Decodable, Equatable {
 
 struct Border: Decodable {
     let width: Double
-    let color: PrototypeModeValue
+    let color: PrototypeModeValue?
+    let gradient: PrototypeGradient?
+}
+
+struct NavItem: Decodable {
+    let label: String
+    let icon: String?
+    /// An uploaded image asset id, or a `{light, dark}` pair of ids (#11218).
+    let image: PrototypeModeValue?
 }

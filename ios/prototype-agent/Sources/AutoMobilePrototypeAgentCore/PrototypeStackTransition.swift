@@ -2,11 +2,11 @@ import Foundation
 
 /// Screen navigation animation, shared by a stack and its push/replace overrides.
 enum PrototypeStackTransition: String, Codable, CaseIterable {
-    case platform, slide, fade, none
+    case platform, slide, fade, none, sharedAxisX, sharedAxisY, fadeThrough, zoom
 }
 
 enum PrototypeStackAnimation: Equatable {
-    case slide, fade, none
+    case slide, fade, none, sharedAxisX, sharedAxisY, fadeThrough
 }
 
 struct PrototypeStackEntry: Equatable, Identifiable {
@@ -30,9 +30,17 @@ enum PrototypeStackNavigation {
         -> PrototypeStackAnimation
     {
         let transition = perAction ?? declared
-        guard specMotion != "none", transition != .none, direction != .reset else { return .none }
-        if reduceMotion || transition == .fade || (transition == .platform && direction == .replace) { return .fade }
-        return .slide
+        let motion = PrototypeMotion(specMotion: specMotion, reduceMotion: reduceMotion)
+        guard motion.enabled, transition != .none, direction != .reset else { return .none }
+        if motion.fadeOnly || transition == .fade { return .fade }
+        if transition == .platform || transition == .zoom, direction == .replace { return .fade }
+        switch transition {
+        case .sharedAxisX: return .sharedAxisX
+        case .sharedAxisY: return .sharedAxisY
+        case .fadeThrough: return .fadeThrough
+        case .platform, .slide, .zoom: return .slide
+        case .fade, .none: return .fade
+        }
     }
 }
 
@@ -92,5 +100,37 @@ struct PrototypeStackSwipeState {
         defer { cancel() }
         guard let target, let revision else { return nil }
         return (target, revision)
+    }
+}
+
+/// Fixed timings until the motion-token contract is available.
+enum PrototypeStackTiming {
+    static let spatial = 0.3
+    static let effects = 0.15
+}
+
+enum PrototypeStackPatterns {
+    static func sources(_ nodes: [PrototypeLocatedValue], actions: [PrototypeLocatedValue]) throws -> Set<String> {
+        let zooms = actions.filter { action in
+            let declared = nodes
+                .first { $0.value["type"] == .string("stack") && $0.value["id"] == action.value["stack"] }
+            return ["push", "replace"]
+                .contains(action.value["type"]?.stringValue ?? "") &&
+                (action.value["transition"] ?? declared?.value["transition"]) == .string("zoom")
+        }
+        for action in zooms {
+            guard let source = action.value["source"]?.stringValue,
+                  !source.contains("{"),
+                  nodes
+                  .filter({ ($0.value["shared"]?.objectFields?["key"] ?? $0.value["sharedKey"]) == .string(source) })
+                  .count == 1
+            else {
+                throw PrototypeContractValidator.invalid(
+                    "\(action.path).source",
+                    "zoom requires source to resolve to exactly one sharedKey node"
+                )
+            }
+        }
+        return Set(zooms.compactMap { $0.value["source"]?.stringValue })
     }
 }

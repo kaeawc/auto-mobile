@@ -91,6 +91,24 @@ describe("prototype tool platform notes", () => {
       payload: prototypeOutputSchema.parse(readToolResponse(response).structuredContent),
     };
   }
+  test.each([android, ios])("$platform show reports foreign namespaces", async (device) => {
+    const foreign = device.platform === "android" ? "ios" : "android";
+    const authored = {
+      id: "foreign",
+      window: { placement: { type: "fullscreen" }, [foreign]: {} },
+      theme: { [foreign]: {} },
+      root: { type: "button", label: "Save", [foreign]: {} },
+    };
+    const { payload } = await call({ action: "show", spec: authored }, device);
+    expect(payload.success).toBe(true);
+    expect(payload.platformNotes).toContainEqual({
+      platform: device.platform,
+      construct: "platformNamespace",
+      effect: "ignored",
+      paths: [`root.${foreign}`, `window.${foreign}`, `theme.${foreign}`],
+      detail: `${foreign} namespace blocks are ignored on ${device.platform}.`,
+    });
+  });
   test("successful iOS show returns all five typed notes", async () => {
     const { payload } = await call({ action: "show", spec });
     expect(payload.success).toBe(true);

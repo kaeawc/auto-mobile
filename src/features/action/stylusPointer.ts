@@ -1,7 +1,7 @@
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { readAndroidDeviceApiLevel } from "../../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
 import type { TapAtResult } from "../../models";
-import type { PointerOption } from "../../models/PointerOption";
+import { pointerNeedsInstrumentation, type PointerOption } from "../../models/PointerOption";
 import { LONG_PRESS_DEFAULT_MS } from "./tapAtGesture";
 import { resolveGestureCtrlProxyTimeoutMs } from "./gestureTransportTimeout";
 import { indeterminateTapError } from "./coordinateTapDispatch";
@@ -58,9 +58,6 @@ export function stylusRefusal(request: StylusRequest): string | undefined {
   if (platform !== "android") {
     return 'pointer.toolType "stylus" is Android-only; omit pointer on iOS';
   }
-  if (pointer.pressure !== undefined && pointer.pressure !== 1) {
-    return `stylus input injects pressure 1.0 only; pressure ${pointer.pressure} is not supported (omit pressure or pass 1)`;
-  }
   if (gesture === "doubleTap") {
     return "stylus pointer does not support doubleTap yet; use tap or longPress";
   }
@@ -99,7 +96,12 @@ export async function checkStylusPointer(
   request: StylusRequest,
   signal?: AbortSignal,
 ): Promise<string | undefined> {
-  return stylusRefusal(request) ?? (request.pointer ? stylusSdkRefusal(adb, signal) : undefined);
+  const refusal = stylusRefusal(request);
+  if (refusal || !request.pointer || pointerNeedsInstrumentation(request.pointer)) {
+    // The instrumentation route checks the device itself, from its own capability flag.
+    return refusal;
+  }
+  return stylusSdkRefusal(adb, signal);
 }
 
 async function assertStylusSdkSupported(

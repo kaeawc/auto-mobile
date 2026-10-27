@@ -1,0 +1,16 @@
+{
+  "id": "literal-route-label",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "draft": ""
+  },
+  "root": {
+    "type": "textField",
+    "stateKey": "draft",
+    "label": "{route.literal}"
+  }
+}

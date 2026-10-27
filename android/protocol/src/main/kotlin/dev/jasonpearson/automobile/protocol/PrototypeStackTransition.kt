@@ -9,7 +9,11 @@ enum class PrototypeStackTransition(val value: String) {
   @SerialName("platform") PLATFORM("platform"),
   @SerialName("slide") SLIDE("slide"),
   @SerialName("fade") FADE("fade"),
-  @SerialName("none") NONE("none");
+  @SerialName("none") NONE("none"),
+  @SerialName("sharedAxisX") SHARED_AXIS_X("sharedAxisX"),
+  @SerialName("sharedAxisY") SHARED_AXIS_Y("sharedAxisY"),
+  @SerialName("fadeThrough") FADE_THROUGH("fadeThrough"),
+  @SerialName("zoom") ZOOM("zoom");
 
   companion object {
     fun fromValue(value: String): PrototypeStackTransition? = entries.firstOrNull {
@@ -17,3 +21,15 @@ enum class PrototypeStackTransition(val value: String) {
     }
   }
 }
+
+/** Typed navigation transition; [PrototypeStackNode.transition] remains the shared wire slot. */
+val PrototypeStackNode.stackTransition: PrototypeStackTransition?
+  get() = transition?.type?.let(PrototypeStackTransition::fromValue)
+
+/** Typed navigation transition of a `push` action. */
+val PrototypePushAction.stackTransition: PrototypeStackTransition?
+  get() = transition?.let(PrototypeStackTransition::fromValue)
+
+/** Typed navigation transition of a `replace` action. */
+val PrototypeReplaceAction.stackTransition: PrototypeStackTransition?
+  get() = transition?.let(PrototypeStackTransition::fromValue)

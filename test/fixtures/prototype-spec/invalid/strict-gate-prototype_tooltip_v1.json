@@ -1,0 +1,49 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "opacity": 100
+    },
+    "state": {
+      "open": true
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "id": "target",
+          "type": "button",
+          "label": "Help"
+        },
+        {
+          "testTag": "help",
+          "type": "tooltip",
+          "openWhen": {
+            "key": "open",
+            "equals": true
+          },
+          "text": "Helpful hint",
+          "anchorTo": "target",
+          "caret": "top",
+          "spotlight": {
+            "padding": 64,
+            "cornerRadius": 12
+          },
+          "onDismiss": [
+            {
+              "type": "emit",
+              "name": "closed"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "options": {
+    "supportedCapabilities": []
+  },
+  "expectedPath": "$"
+}

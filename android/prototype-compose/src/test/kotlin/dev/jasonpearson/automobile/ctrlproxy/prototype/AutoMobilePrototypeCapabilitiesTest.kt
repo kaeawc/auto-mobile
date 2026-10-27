@@ -30,11 +30,23 @@ class AutoMobilePrototypeCapabilitiesTest {
   }
 
   /**
-   * Gates the renderer deliberately does not advertise yet, with their reason; remove each once
-   * supported. The platform vocabulary (#14294) runs on the module registry (#14295), and the
-   * `test` module is a placeholder no production runtime ever advertises.
+   * The test module is a placeholder no production runtime advertises. No platform-namespace field
+   * (#15257) has a renderer yet. `window.backdrop` (#15126) is a window-level blur only CtrlProxy's
+   * overlay window can draw (the embedded renderer has no window). CtrlProxy registers the haptics
+   * and sound platform modules (#14329); the embedded renderer leaves them to the app.
+   * `imageAsset.data` (#14192) has a validated contract and no media store yet.
    */
-  private val exclusions = setOf("prototype_platform_v1", "prototype_platform_test_v1")
+  // Routes are contract-only until navigation and restore semantics ship.
+  private val exclusions =
+    setOf(
+      "prototype_routes_v1",
+      "prototype_platform_test_v1",
+      "prototype_backdrop_v1",
+      "prototype_platform_namespace_v1",
+      "prototype_platform_haptics_v1",
+      "prototype_platform_sound_v1",
+      "prototype_platform_media_items_v1",
+    )
 
   @Test
   fun `shared spec capabilities are supported`() {
@@ -46,8 +58,18 @@ class AutoMobilePrototypeCapabilitiesTest {
       "Remove exclusions once supported",
       exclusions.none { it in AutoMobilePrototype.capabilities },
     )
-    val missing = requiredCapabilities - AutoMobilePrototype.capabilities - exclusions
+    val missing = requiredCapabilities - AutoMobilePrototype.capabilitiesForSdk(33) - exclusions
     assertTrue("Renderer is missing spec capabilities: $missing", missing.isEmpty())
+  }
+
+  @Test
+  fun `production getter delegates to the sdk gated capabilities set`() {
+    assertEquals(
+      AutoMobilePrototype.capabilitiesForSdk(android.os.Build.VERSION.SDK_INT),
+      AutoMobilePrototype.capabilities,
+    )
+    assertTrue("prototype_custom_shaders_v1" !in AutoMobilePrototype.capabilitiesForSdk(32))
+    assertTrue("prototype_custom_shaders_v1" in AutoMobilePrototype.capabilitiesForSdk(33))
   }
 
   @Test

@@ -100,6 +100,6 @@ test("canonical keys use code unit order for case and punctuation", () => {
 });
 
 test("signature algorithms are disabled until explicitly specified", () => {
-  expect(SUPPORTED_SIGNATURE_ALGORITHMS).toEqual([]);
+  expect(SUPPORTED_SIGNATURE_ALGORITHMS).toEqual(["ed25519-v1"]);
   expect(Object.isFrozen(SUPPORTED_SIGNATURE_ALGORITHMS)).toBe(true);
 });

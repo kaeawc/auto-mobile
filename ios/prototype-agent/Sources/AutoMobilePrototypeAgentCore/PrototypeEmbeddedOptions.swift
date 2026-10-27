@@ -125,3 +125,9 @@ private struct EmbeddedHttpClient: PrototypeHttpClient {
         )
     }
 }
+
+/// Show-only options for an embedded presentation.
+public struct PrototypeEmbeddedOptions: Sendable, Hashable {
+    public let locale: String?
+    public init(locale: String? = nil) { self.locale = locale }
+}

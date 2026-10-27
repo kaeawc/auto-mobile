@@ -39,7 +39,7 @@ extension PrototypeChecks {
                     )
                 }
             }
-            for key in ["visibleWhen", "enabledWhen"] {
+            for key in ["visibleWhen", "enabledWhen", "errorWhen"] {
                 try condition(node.value[key], path: "\(node.path).\(key)", keys: keys)
             }
             for (index, style) in PrototypeStrictBindings.array(node.value["styleWhen"]).enumerated() {

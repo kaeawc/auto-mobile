@@ -1,3 +1,4 @@
+import { SqliteDeviceClaims } from "./sqliteDeviceClaims";
 import { Kysely } from "kysely";
 import { jsonArrayFrom } from "kysely/helpers/sqlite";
 import { existsSync } from "node:fs";
@@ -242,6 +243,11 @@ export class SqliteBindingRegistry implements BindingRegistry {
 
   deviceMutationJournal(): SqliteDeviceMutationJournal {
     return new SqliteDeviceMutationJournal(this.db, this.timer);
+  }
+
+  /** The host-wide device claims table (#11811), on this connection and transaction lock. */
+  deviceClaims(): SqliteDeviceClaims {
+    return new SqliteDeviceClaims(this.db);
   }
 
   async ensureScope(identity: BindingScopeIdentity): Promise<EnsureScopeResult> {

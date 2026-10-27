@@ -1,0 +1,50 @@
+{
+  "id": "stack-patterns",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "stack",
+    "id": "nav",
+    "start": "home",
+    "transition": "sharedAxisX",
+    "screens": {
+      "home": {
+        "type": "text",
+        "text": "Home",
+        "onTap": [
+          {
+            "type": "push",
+            "stack": "nav",
+            "screen": "detail",
+            "transition": "sharedAxisX"
+          },
+          {
+            "type": "push",
+            "stack": "nav",
+            "screen": "detail",
+            "transition": "sharedAxisY"
+          },
+          {
+            "type": "push",
+            "stack": "nav",
+            "screen": "detail",
+            "transition": "fadeThrough"
+          },
+          {
+            "type": "replace",
+            "stack": "nav",
+            "screen": "detail",
+            "transition": "fadeThrough"
+          }
+        ]
+      },
+      "detail": {
+        "type": "text",
+        "text": "Detail"
+      }
+    }
+  }
+}

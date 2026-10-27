@@ -11,7 +11,7 @@
       "type": "stack",
       "id": "nav",
       "start": "home",
-      "transition": "zoom",
+      "transition": "futurePattern",
       "screens": {
         "home": {
           "type": "button",

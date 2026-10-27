@@ -26,6 +26,10 @@ internal class PrototypeWindowOwner : LifecycleOwner, SavedStateRegistryOwner, V
     registry.currentState = Lifecycle.State.RESUMED
   }
 
+  fun pause() {
+    registry.currentState = Lifecycle.State.STARTED
+  }
+
   fun destroy() {
     registry.currentState = Lifecycle.State.DESTROYED
     viewModelStore.clear()

@@ -1,0 +1,26 @@
+{
+  "id": "prepend",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "data": {
+    "rows": []
+  },
+  "root": {
+    "type": "text",
+    "text": "Add",
+    "onTap": [
+      {
+        "type": "prependData",
+        "path": "/data/rows",
+        "value": {
+          "value": {
+            "id": 2
+          }
+        }
+      }
+    ]
+  }
+}

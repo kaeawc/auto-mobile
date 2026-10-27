@@ -48,13 +48,26 @@ internal object PrototypeStateChecks {
     repeats: PrototypeRepeatData,
   ): Context {
     val scopes = PrototypeRepeatValidator.scopes(value, repeats)
-    fun List<Located>.instances() = flatMap { located ->
-      val templated = PrototypeRepeatValidator.operandTemplated(scopes, located.value, located.path)
-      PrototypeRepeatValidator.keyInstances(scopes, located.value, located.path).map { (bound, item)
-        ->
-        Located(bound, located.path, item, templated)
-      }
+    fun List<Located>.instances() = filter { located ->
+      (PrototypeRepeatKeyBindings.checkedKeyFields.mapNotNull { located.value.text(it) } +
+          listOfNotNull(
+            (located.value["trailing"] as? JsonObject)?.text("stateKey"),
+            (located.value["openWhen"] as? JsonObject)?.text("key"),
+            (located.value["refresh"] as? JsonObject)?.text("stateKey"),
+          ))
+        .none {
+          PrototypeRouteRules.fields(it).isNotEmpty()
+        }
     }
+      .flatMap { located ->
+        val templated =
+          PrototypeRepeatValidator.operandTemplated(scopes, located.value, located.path) ||
+            located.value.text("value")?.let { PrototypeRouteRules.fields(it).isNotEmpty() } == true
+        PrototypeRepeatValidator.keyInstances(scopes, located.value, located.path).map {
+          (bound, item) ->
+          Located(bound, located.path, item, templated)
+        }
+      }
     val checked = Context()
     checked.nodes.addAll(context.nodes.instances())
     checked.actions.addAll(context.actions.instances())
@@ -86,6 +99,9 @@ internal object PrototypeStateChecks {
         .toSet()
     for ((value, path) in context.nodes) {
       nodeCheckError(value, path)?.let {
+        return it
+      }
+      conditionCheckError(value["errorWhen"], "$path.errorWhen", keys)?.let {
         return it
       }
       conditionCheckError(value["visibleWhen"], "$path.visibleWhen", keys)?.let {
@@ -188,6 +204,8 @@ internal object PrototypeStateChecks {
     }
 
     var images = 0
+    var effects = 0
+    var animatedEffects = 0
     var selectorDepth = 0
     var conditionDepth = 0
     var actionDepth = 0

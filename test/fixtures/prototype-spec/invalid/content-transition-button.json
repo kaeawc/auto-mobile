@@ -1,0 +1,16 @@
+{
+  "spec": {
+    "id": "content-transition",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "button",
+      "text": "Go",
+      "contentTransition": "numeric"
+    }
+  },
+  "expectedPath": "root.contentTransition"
+}

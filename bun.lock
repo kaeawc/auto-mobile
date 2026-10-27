@@ -725,7 +725,7 @@
 
     "walk-up-path": ["walk-up-path@4.0.0", "", {}, "sha512-3hu+tD8YzSLGuFYtPRb48vdhKMi0KQV5sn+uWr8+7dMEq/2G/dtLrdDinkLjqq5TIbIBjYJ4Ax/n3YiaW7QM8A=="],
 
-    "werift": ["werift@0.25.1", "", { "dependencies": { "@fidm/x509": "^1.2.1", "@noble/curves": "^1.8.1", "@peculiar/x509": "^1.12.3", "buffer": "^6.0.3", "debug": "4.4.0", "mediabunny": "^1.45.2", "multicast-dns": "^7.2.5", "tweetnacl": "^1.0.3" } }, "sha512-S46MVcqeSKKoOrQJI2mRkVB2oCmsYzTEs6S86BBgZ5YIZtAf7uAhO8XedBl/Jp6pYUt8aXfLuAYpcxSzMpxTMA=="],
+    "werift": ["werift@0.25.2", "", { "dependencies": { "@fidm/x509": "^1.2.1", "@noble/curves": "^1.8.1", "@peculiar/x509": "^1.12.3", "buffer": "^6.0.3", "debug": "4.4.0", "mediabunny": "^1.45.2", "multicast-dns": "^7.2.5", "tweetnacl": "^1.0.3" } }, "sha512-FIUkE/yKtB+on6lCCvFad0rG8VHLwQN4gtshlhvjXwQQ7qpwxlqZd9F/jccafFzzfDuY80CE2mCBYXftP2PB3A=="],
 
     "which": ["which@2.0.2", "", { "dependencies": { "isexe": "^2.0.0" }, "bin": { "node-which": "bin/node-which" } }, "sha512-BLI3Tl1TW3Pvl70l3yq3Y64i+awpwXqsGBYWkkqMtnbXgrMD+yj7rhW0kuEDxzJaYXGjEW5ogapKNMEKNMjibA=="],
 

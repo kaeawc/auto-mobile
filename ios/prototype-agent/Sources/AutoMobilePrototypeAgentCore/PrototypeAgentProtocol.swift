@@ -58,6 +58,7 @@ enum PrototypeAgentProtocol {
         searchBarCapability,
         richTextCapability,
         linkifyCapability,
+        contentTransitionCapability,
         formatCapability,
         menusCapability,
         tooltipCapability,
@@ -199,6 +200,7 @@ enum PrototypeAgentProtocol {
     static let richTextCapability = "prototype_rich_text_v1"
     /// Text nodes turn mentions, hashtags and URLs into links that run `linkify.onTap` (#14233).
     static let linkifyCapability = "prototype_linkify_v1"
+    static let contentTransitionCapability = "prototype_content_transition_v1"
     /// In-window menus and exposed select option lists.
     static let menusCapability = "prototype_menus_v1"
     static let tooltipCapability = "prototype_tooltip_v1"

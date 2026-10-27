@@ -16,10 +16,7 @@ export const PROTOTYPE_KEYFRAME_REST = {
   offsetY: 0,
   alpha: 1,
 } as const;
-const points = z
-  .array(z.tuple([z.number().finite(), z.number().finite()]))
-  .min(2)
-  .max(8);
+const points = z.array(z.array(z.number().finite()).length(2)).min(2).max(8);
 const track = z.union([
   points,
   z.object({ points, curve: z.enum(["linear", "standard", "spring"]).optional() }).strict(),
@@ -131,5 +128,5 @@ export function prototypeKeyframesUnsupportedMessage(
   fields: readonly string[],
   platform: "android" | "ios",
 ): string {
-  return `The connected ${platform === "ios" ? "iOS prototype agent (iOS 17+ required)" : "CtrlProxy"} does not advertise prototype_keyframes_v1, so it cannot play ${fields[0]}. Nothing was shown. Update the agent or remove keyframes.`;
+  return `The connected ${platform === "ios" ? "iOS prototype agent" : "CtrlProxy"} does not advertise prototype_keyframes_v1, so it cannot play ${fields[0]}. Nothing was shown. Update the agent or remove keyframes.`;
 }

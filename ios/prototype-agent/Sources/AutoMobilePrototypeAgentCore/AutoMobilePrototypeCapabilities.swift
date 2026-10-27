@@ -17,7 +17,7 @@ struct ProcessInfoOSVersion: OSVersionProvider {
 /// `src/features/prototype/prototypeIosMinimumOs.ts` must carry the same entries so its refusal can
 /// name the version; `test/features/prototype/prototypeIosMinimumOs.test.ts` fails when they drift.
 enum PrototypeCapabilityMinimumOS {
-    static let table = ["prototype_keyframes_v1": 17]
+    static let table: [String: Int] = ["prototype_keyframes_v1": 17]
 }
 
 extension PrototypeAgentProtocol {

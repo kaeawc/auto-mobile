@@ -62,8 +62,7 @@ blanket focusability proposal).
 | `window`  | Required window configuration below.                                                                                   |
 | `data`    | Optional agent-owned read-only nested JSON object; see Data model.                                                     |
 | `state`   | Optional flat object of string, finite number, or boolean values.                                                      |
-| `motion`  | Optional `none`, `standard` (default), or `reduced` for alpha-only scroll motion. See Motion below.                    |
-| `motion`  | Optional `none`, `reduced` or `standard` (default). See Motion below.                                                  |
+| `motion`  | Optional `none`, `standard` (default), `reduced` for alpha-only scroll motion, or `expressive`. See Motion below.      |
 | `storage` | Optional `{version, keys}` naming state keys and `/data` pointers the device keeps across shows. See Storage (#12522). |
 | `root`    | Required single node.                                                                                                  |
 
@@ -1095,6 +1094,32 @@ A style `pressScale` (0.5–1) shrinks a tappable node while it is pressed. With
 motion on it animates with a short spring; with `motion: "none"` or animator
 scale 0 it snaps, so a screenshot taken mid-press is still deterministic.
 
+### Expressive and layout motion (`prototype_motion_v3`)
+
+`motion: "expressive"` selects Material 3 expressive springs. Standard remains the default.
+
+| Change                                                      | Expressive spring |
+| ----------------------------------------------------------- | ----------------- |
+| Visibility size, offset, scale; container size; press scale | Default spatial   |
+| Visibility alpha; press alpha; animated color and alpha     | Default effects   |
+
+Node `animate` also tweens `border.color`, `border.width`, `cornerRadius`, `elevation`,
+`shadowColor`, `padding`, and dp `width`/`height`. Its duration and easing apply as before;
+`easing: "spring"` uses the expressive spring when expressive motion is selected. Text, font,
+gradient and fill/wrap/token swaps remain instant.
+
+Node `press: {scale?, alpha?}` requires at least one field: scale 0.85–1, alpha 0.5–1.
+It requires tap/long-press/double-tap actions or an inherently pressable control (button,
+iconButton, fab, chip, listItem, switch, checkbox, radioGroup, segmentedButton, select or menu).
+`press.scale` overrides `style.pressScale`. Feedback changes drawing only, keeping the 48dp
+minimum touch target and reported bounds. Component gestures remain owned by their controls.
+
+With `motion: "none"` or animator scale 0, style changes and control state visuals are instant,
+and clickable nodes and Material controls draw no ripple. Material boolean controls are keyed
+by their final state while off to avoid starting their internal animations; slider position is
+immediate and its thumb uses a resting interaction source. Reduced motion still snaps spatial
+changes and preserves fades and colors.
+
 ### Window and modal motion
 
 Android `prototype_window_motion_v1` gates authored `window.transition` and
@@ -1186,15 +1211,18 @@ the second (a list row into a detail card, a thumbnail into a viewer):
 }
 ```
 
+A literal key referenced as a zoom source labels exactly one node and is exempt from the
+`visibleWhen` requirement and visibility-pair counting.
+
 Rules, enforced by every validator with exact paths: `sharedKey` retains the state-key grammar
 and aliases `shared: {key, as: "bounds"}`. The object form requires
 `prototype_shared_element_v2`; plain `sharedKey` requires `prototype_shared_element_v1`.
-A node cannot set both and must have `visibleWhen`. Literal v2 keys allow hyphens in addition
-to the state-key characters, with a 64-character resolved limit. Literal keys pair exactly two
+A node cannot set both. Visibility morph nodes must have `visibleWhen`. Literal v2 keys allow hyphens in addition
+to the state-key characters, with a 64-character resolved limit. Literal visibility morph keys pair exactly two
 nodes. Inside repeat children, a key template must reference the field named by `repeat.key`,
 without index or other-field placeholders. Each instance must resolve a distinct key; at most
 two nodes can use each resolved key. Unmatched repeat items remain ordinary cards. A spec has
-at most 16 resolved keys, including unmatched feed items. Pairs cannot nest, disagree on `as`, or cross a `dialog` or `bottomSheet`
+at most 16 resolved keys for visibility morphs, including unmatched feed items. Pairs cannot nest, disagree on `as`, or cross a `dialog` or `bottomSheet`
 boundary (including two separate modals). Shared elements across pager pages and `stack` screens
 are not supported.
 
@@ -1305,17 +1333,36 @@ are emitted by the current runtimes.
 `transition` override. Omission means `platform`; pop/popToRoot have no override. The contract
 is validated by both agents, and both advertise the capability.
 
-| Value      | Platform behaviour                         |
-| ---------- | ------------------------------------------ |
-| `platform` | Native navigation animation (default).     |
-| `slide`    | Directional screen slide, reversed on pop. |
-| `fade`     | Screen crossfade.                          |
-| `none`     | Instant screen change.                     |
+| Value         | Platform behaviour                                                             |
+| ------------- | ------------------------------------------------------------------------------ |
+| `platform`    | Native navigation animation (default).                                         |
+| `slide`       | Directional screen slide, reversed on pop.                                     |
+| `fade`        | Screen crossfade.                                                              |
+| `none`        | Instant screen change.                                                         |
+| `sharedAxisX` | Sibling steps along a horizontal flow; 30dp travel plus fade.                  |
+| `sharedAxisY` | Sibling steps along a vertical flow; 30dp travel plus fade.                    |
+| `fadeThrough` | Unrelated destinations; outgoing fade, then incoming fade and scale from 0.92. |
+| `zoom`        | Item-to-detail intent with a source key; currently uses the fallbacks below.   |
+
+The four named patterns and push/replace `source` require `prototype_stack_patterns_v1`.
+Zoom requires `source` on each push/replace using it, naming exactly one node's `sharedKey` or literal `shared.key`
+in the spec. A key referenced as a zoom source is exempt from the two-node visibility-pair rule;
+repeat templates remain disallowed.
+Android currently substitutes fadeThrough and iOS substitutes platform push; container transforms
+are follow-up work. iOS reports the fallback and non-interactive pattern pops in `platformNotes`.
+Platform, slide and zoom support interactive iOS edge pop; only the composed sharedAxisX/Y and
+fadeThrough patterns pop non-interactively. Android `platformNotes` are not currently supported.
+Android predictive back scrubs every pattern, including zoom's fallback, and restores the current
+screen on cancellation.
+Shared-axis pop reverses travel; only X also mirrors for RTL. iOS composes axis movement with
+opacity and fadeThrough removes the outgoing screen visually before revealing the scaled incoming
+screen. Fixed named timings are 300 ms for movement and 150 ms for fade effects (two sequential
+phases for fadeThrough); the motion-token table is not available.
 
 Android slides enter from the end edge with 30% outgoing parallax, mirrored in RTL; pop and
 popToRoot reverse that direction. Platform replace crossfades. Animations finish within 300 ms.
 `motion: "none"` and animator duration scale 0 snap immediately. The reduced profile (see Motion
-profiles) changes slides to crossfades.
+profiles) changes every pattern to a crossfade.
 
 Activity hosts scrub the pop with predictive back on API 34+, settle on commit, and restore the
 current screen on cancellation. Earlier APIs pop with the ordinary animation. Overlay windows

@@ -855,7 +855,11 @@
         "type": "emit",
         "name": "appear"
       }
-    ]
+    ],
+    "press": {
+      "scale": 0.9,
+      "alpha": 0.8
+    }
   },
   "actionRequestFilled": {
     "type": "request",

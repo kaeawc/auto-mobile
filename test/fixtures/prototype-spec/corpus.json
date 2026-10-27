@@ -89,6 +89,10 @@
     "menu-overflow.json",
     "motion-none.json",
     "motion-v2.json",
+    "motion3-alpha.json",
+    "motion3-expressive.json",
+    "motion3-layout.json",
+    "motion3-press.json",
     "ns-block-both.json",
     "on-appear-repeat.json",
     "on-appear.json",
@@ -152,6 +156,11 @@
     "shared-v2-same-dialog.json",
     "sheet-bindings.json",
     "stack-navigation.json",
+    "stack-patterns-source-only.json",
+    "stack-patterns-zoom-idle.json",
+    "stack-patterns-zoom-shared-v2.json",
+    "stack-patterns-zoom.json",
+    "stack-patterns.json",
     "stack-transitions.json",
     "strict-action-depth-boundary.json",
     "strict-bom.json",
@@ -704,6 +713,7 @@
     "motion-style-scale-over-max.json",
     "motion-zoomable-double-tap.json",
     "motion-zoomable-max-scale-below-min.json",
+    "motion3-press-nonpressable.json",
     "multiple-sizes-over-max.json",
     "nav-both-bindings.json",
     "nav-image-limit.json",
@@ -1000,6 +1010,11 @@
     "span-letter-spacing-over-max.json",
     "span-text-size-over-max.json",
     "spec-version.json",
+    "stack-patterns-zoom-ambiguous.json",
+    "stack-patterns-zoom-missing.json",
+    "stack-patterns-zoom-shared-v2-ambiguous.json",
+    "stack-patterns-zoom-shared-v2-template.json",
+    "stack-patterns-zoom-unresolved.json",
     "stack-repeat-non-object-children.json",
     "stack-substituted-text-data-limit.json",
     "stack-transitions-bad-push.json",
@@ -1109,6 +1124,7 @@
     "strict-gate-prototype_loading_states_v1.json",
     "strict-gate-prototype_menus_v1.json",
     "strict-gate-prototype_motion_v2.json",
+    "strict-gate-prototype_motion_v3.json",
     "strict-gate-prototype_network_device_v1.json",
     "strict-gate-prototype_network_v1.json",
     "strict-gate-prototype_pager_options_v1.json",
@@ -1129,6 +1145,7 @@
     "strict-gate-prototype_semantics_v1.json",
     "strict-gate-prototype_shared_element_v1.json",
     "strict-gate-prototype_shared_element_v2.json",
+    "strict-gate-prototype_stack_patterns_v1.json",
     "strict-gate-prototype_stack_transitions_v1.json",
     "strict-gate-prototype_stack_v1.json",
     "strict-gate-prototype_storage_v1.json",
@@ -1713,6 +1730,10 @@
     "menu-overflow.json": ["prototype_menus_v1"],
     "motion-none.json": [],
     "motion-v2.json": ["prototype_motion_v2"],
+    "motion3-alpha.json": ["prototype_motion_v2"],
+    "motion3-expressive.json": ["prototype_motion_v3"],
+    "motion3-layout.json": ["prototype_motion_v2", "prototype_motion_v3"],
+    "motion3-press.json": ["prototype_motion_v3"],
     "ns-block-both.json": ["prototype_platform_namespace_v1"],
     "on-appear-repeat.json": ["prototype_timers_v1"],
     "on-appear.json": ["prototype_timers_v1"],
@@ -2074,6 +2095,29 @@
     "routes-repeat-alias-backcompat.json": [],
     "routes-repeat-key-mixed-valid.json": ["prototype_routes_v1", "prototype_stack_v1"],
     "routes.json": ["prototype_routes_v1", "prototype_stack_v1", "prototype_storage_v1"],
-    "window-motion.json": ["prototype_window_motion_v1"]
+    "window-motion.json": ["prototype_window_motion_v1"],
+    "stack-patterns-source-only.json": ["prototype_stack_patterns_v1", "prototype_stack_v1"],
+    "stack-patterns-zoom-idle.json": [
+      "prototype_stack_patterns_v1",
+      "prototype_stack_transitions_v1",
+      "prototype_stack_v1"
+    ],
+    "stack-patterns-zoom.json": [
+      "prototype_shared_element_v1",
+      "prototype_stack_patterns_v1",
+      "prototype_stack_transitions_v1",
+      "prototype_stack_v1"
+    ],
+    "stack-patterns.json": [
+      "prototype_stack_patterns_v1",
+      "prototype_stack_transitions_v1",
+      "prototype_stack_v1"
+    ],
+    "stack-patterns-zoom-shared-v2.json": [
+      "prototype_shared_element_v2",
+      "prototype_stack_patterns_v1",
+      "prototype_stack_transitions_v1",
+      "prototype_stack_v1"
+    ]
   }
 }

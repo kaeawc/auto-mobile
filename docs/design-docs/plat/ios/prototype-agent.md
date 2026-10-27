@@ -629,13 +629,19 @@ transition as a real tap, including on part identifiers.
   `platform`; push/replace overrides take precedence. Platform and slide pushes enter from trailing
   over a 30% parallax-shifted outgoing screen; pop and pop-to-root reverse this, mirrored for RTL.
   Platform replace crossfades; explicit fade crossfades and none is instant. Animations use a
-  deterministic 0.35-second ease-out. Spec `motion: "none"` is instant; the reduced profile (Reduce Motion
-  or `motion: "reduced"`) maps slide to crossfade. Session-only change direction, transition and stable entry identities leave
+  fixed named 300 ms spatial and 150 ms effects timings; the motion-token table is not available. Spec `motion: "none"` is instant; the reduced profile (Reduce Motion
+  or `motion: "reduced"`) maps every pattern to crossfade. Session-only change direction, transition and stable entry identities leave
   wire stack snapshots unchanged. Reload resets presentation without animation.
-  A simultaneous drag beginning within 20 points of the leading window edge scrubs eligible slides,
+  `prototype_stack_patterns_v1` gates sharedAxisX/Y, fadeThrough, zoom and push/replace source.
+  Shared axes compose 30-point directional travel with opacity (X mirrors in RTL; both reverse on
+  pop). FadeThrough fades out first, then fades/scales in from 0.92. Zoom requires an action source
+  naming exactly one authored sharedKey node, exempt from visibility pairing. Container zoom is
+  follow-up work: iOS currently uses platform push and Android uses fadeThrough. `platformNotes`
+  reports this fallback and that all explicit patterns pop non-interactively.
+  A simultaneous drag beginning within 20 points of the leading window edge scrubs platform only,
   including parallax and dimming. Release commits past half width or when predicted end translation
   passes half width; otherwise it animates back without mutating the session. Fade/none retain the
-  60-point release-to-pop policy. Pop targeting follows visible screens and modal precedence.
+  60-point release-to-pop policy; composed patterns and zoom do too. Pop targeting follows visible screens and modal precedence.
   Back-stack entries stay mounted, transparent, non-interactive and accessibility-hidden, preserving
   scroll positions on pop within the bounded stack depth; removed entries are released after motion.
   Navigation posts a screen-changed accessibility notification targeting the new native screen
@@ -1153,3 +1159,5 @@ namespace objects on nodes, window and theme for native semantics. Each field ha
 `why` in the contract. Foreign blocks are ignored and reported in `platformNotes`.
 Own-platform blocks require `prototype_platform_namespace_v1`; current renderers
 ignore both blocks and do not advertise it.
+
+Expressive motion, node `press`, and layout `animate` are Android only until #14684; the host refuses them against the iOS agent, which does not advertise `prototype_motion_v3`.

@@ -45,6 +45,7 @@ internal object PrototypeBundleNodeCapabilities {
     mark("swipe_actions_v1", type in setOf("row", "listItem") && "swipeActions" in n)
     mark("rich_text_v1", type == "text" && "spans" in n)
     mark("linkify_v1", type == "text" && "linkify" in n)
+    mark("stack_patterns_v1", PrototypeStackPatternRules.required(n))
     mark("stack_transitions_v1", type == "stack" && "transition" in n)
     motion(n, type, caps)
   }

@@ -131,9 +131,15 @@ class PrototypeStackTransitionsTest {
     )
   }
 
+  @Test fun `shared X decodes`() = assertTransition(PrototypeStackTransition.SHARED_AXIS_X)
+
+  @Test fun `shared Y decodes`() = assertTransition(PrototypeStackTransition.SHARED_AXIS_Y)
+
+  @Test fun `fade through decodes`() = assertTransition(PrototypeStackTransition.FADE_THROUGH)
+
   @Test fun `scale is not a stack transition`() = assertInvalidTransition("\"scale\"")
 
-  @Test fun `future patterns are not enabled`() = assertInvalidTransition("\"sharedAxisX\"")
+  @Test fun `unknown patterns are not enabled`() = assertInvalidTransition("\"futurePattern\"")
 
   @Test
   fun `visibility objects are not stack transitions`() =

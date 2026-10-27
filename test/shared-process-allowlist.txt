@@ -1611,7 +1611,6 @@ test/scripts/androidVideoBaselineGate.test.ts
 test/scripts/attestation/attestationCli.test.ts
 test/scripts/attestation/attestationCliArgs.test.ts
 test/scripts/attestation/attestationSchema.test.ts
-test/scripts/attestation/gate/adapters.test.ts
 test/scripts/attestation/gate/attestationGate.test.ts
 test/scripts/attestation/gate/attestationGateWorkflow.test.ts
 test/scripts/attestation/gitTreeProbe.test.ts

@@ -277,6 +277,7 @@ const textBaseSchema = z
     text: z.string().optional(),
     spans: z.array(textSpanSchema).min(1).max(MAX_PROTOTYPE_TEXT_SPANS).optional(),
     linkify: linkifySchema.optional(),
+    contentTransition: z.enum(["numeric", "crossfade", "none"]).optional(),
   })
   .strict();
 const imageBaseSchema = z

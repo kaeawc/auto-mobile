@@ -1,3 +1,8 @@
+import { PROTOTYPE_CONTENT_TRANSITION_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+import {
+  prototypeContentTransitionFields,
+  prototypeContentTransitionUnsupportedMessage,
+} from "./prototypeContentTransition";
 import { prototypeEffectFields, prototypeEffectsUnsupportedMessage } from "./prototypeEffects";
 import {
   prototypeStylePolishV2Fields,
@@ -139,6 +144,11 @@ interface PrototypeSpecCapabilityGate {
 
 /** Spec-introduced features must be checked on both show and the complete patch result. */
 export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGate[] = [
+  {
+    capability: PROTOTYPE_CONTENT_TRANSITION_CAPABILITY,
+    fields: prototypeContentTransitionFields,
+    unsupportedMessage: prototypeContentTransitionUnsupportedMessage,
+  },
   {
     capability: PROTOTYPE_STYLE_POLISH_V2_CAPABILITY,
     fields: prototypeStylePolishV2Fields,

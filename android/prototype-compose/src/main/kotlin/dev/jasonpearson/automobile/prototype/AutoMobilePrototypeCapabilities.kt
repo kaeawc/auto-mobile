@@ -16,6 +16,7 @@ object AutoMobilePrototype {
       "prototype_chat_scroll_v1",
       "prototype_checks_v1",
       "prototype_choreography_v1",
+      "prototype_content_transition_v1",
       "prototype_data_actions_v1",
       "prototype_data_model_v1",
       "prototype_drawer_v1",

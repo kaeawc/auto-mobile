@@ -66,6 +66,7 @@ class CommandAdvertisementTest {
       "prototype_motion_v2",
       "prototype_effects_v1",
       "prototype_choreography_v1",
+      "prototype_content_transition_v1",
       "prototype_stack_transitions_v1",
       "prototype_reduced_motion_v1",
       "prototype_shared_element_v1",

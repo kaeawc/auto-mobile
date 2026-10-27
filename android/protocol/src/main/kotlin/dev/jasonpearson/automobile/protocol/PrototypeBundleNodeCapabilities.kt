@@ -37,6 +37,10 @@ internal object PrototypeBundleNodeCapabilities {
     mark("gestures_v1", n.keys.any { it in setOf("onLongPress", "onDoubleTap") })
     mark("swipe_actions_v1", type in setOf("row", "listItem") && "swipeActions" in n)
     mark("rich_text_v1", type == "text" && "spans" in n)
+    mark(
+      "content_transition_v1",
+      type == "text" && text(n["contentTransition"])?.let { it != "none" } == true,
+    )
     mark("linkify_v1", type == "text" && "linkify" in n)
     mark("stack_transitions_v1", type == "stack" && "transition" in n)
     val transition = if (type == "stack") null else n["transition"]

@@ -768,6 +768,7 @@ final class PrototypeNode: Decodable {
     let text: String?
     let spans: [PrototypeTextSpan]?
     /// Mentions, hashtags and URLs in `text` as links (#14233).
+    let contentTransition: String?
     let linkify: PrototypeLinkifyOptions?
     /// Authored accessible label (#10446); wins over the label derived from text or icon.
     let contentDescription: String?
@@ -883,7 +884,7 @@ final class PrototypeNode: Decodable {
         case leadingIcon, trailing, swipeActions
         case refresh
         case onLongPress, onDoubleTap, enabledWhen, checks, validateOn, maxLines, columns, span, start, screens, spans,
-             linkify,
+             linkify, contentTransition,
              activeKey, trailingActions, onSubmit, pageSpacing, peek, pageSize, indicator, itemWidth, itemSpacing,
              dismissOnSwipe, supportingText, keyboardType, secure, multiline, minLines, maxLength, trailingIcon,
              imeAction, yRange, xLabels, goal
@@ -972,6 +973,7 @@ final class PrototypeNode: Decodable {
         screens = try container.decodeIfPresent([String: PrototypeNode].self, forKey: .screens)
         screenDefinitions = try container.decodeIfPresent(JSONValue.self, forKey: .screens)
         spans = try container.decodeIfPresent([PrototypeTextSpan].self, forKey: .spans)
+        contentTransition = try container.decodeIfPresent(String.self, forKey: .contentTransition)
         linkify = try container.decodeIfPresent(PrototypeLinkifyOptions.self, forKey: .linkify)
         activeKey = try container.decodeIfPresent(String.self, forKey: .activeKey)
         trailingActions = try container.decodeIfPresent([PrototypeAppBarAction].self, forKey: .trailingActions)

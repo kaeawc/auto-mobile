@@ -387,6 +387,7 @@ class WebSocketServer(
     add("prototype_effects_v1")
     // Transition delayMs, container stagger and the blurReplace transition (#15247).
     add("prototype_choreography_v1")
+    add("prototype_content_transition_v1")
     add("prototype_stack_transitions_v1")
     add("prototype_reduced_motion_v1")
     add("prototype_shared_element_v1")

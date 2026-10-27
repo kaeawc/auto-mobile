@@ -19,6 +19,7 @@ internal object PrototypeBundleCapabilities {
     )
       caps.add("prototype_theme_modes_v1")
     for (node in PrototypeBundleSpec.nodes(spec)) {
+      // Includes non-none text content transitions; explicit none adds no requirement.
       caps.addAll(PrototypeBundleNodeCapabilities.collect(node))
       fields(node, caps)
     }

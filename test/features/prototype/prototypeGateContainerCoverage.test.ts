@@ -80,6 +80,7 @@ const fixtures: Record<string, Node> = {
     ...label,
     onTap: [{ type: "push", stack: "nav", screen: "home", transition: "slide" }],
   },
+  prototype_content_transition_v1: { ...label, contentTransition: "numeric" },
   prototype_choreography_v1: { ...label, transition: { type: "fade", delayMs: 100 } },
   prototype_chart_v1: {
     type: "chart",

@@ -3759,6 +3759,13 @@
                 "name": "linkify"
               },
               "optional": true
+            },
+            "contentTransition": {
+              "rule": {
+                "kind": "enum",
+                "values": ["numeric", "crossfade", "none"]
+              },
+              "optional": true
             }
           },
           "exactlyOne": ["text", "spans"]
@@ -14954,40 +14961,79 @@
       "state": {
         "os": {
           "platforms": ["android", "ios"],
-          "value": { "kind": "enum", "values": ["android", "ios"] }
+          "value": {
+            "kind": "enum",
+            "values": ["android", "ios"]
+          }
         },
-        "osVersion": { "platforms": ["android", "ios"], "value": { "kind": "string", "max": 64 } },
+        "osVersion": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "string",
+            "max": 64
+          }
+        },
         "idiom": {
           "platforms": ["android", "ios"],
-          "value": { "kind": "enum", "values": ["phone", "tablet", "foldable", "desktop"] }
+          "value": {
+            "kind": "enum",
+            "values": ["phone", "tablet", "foldable", "desktop"]
+          }
         },
         "widthClass": {
           "platforms": ["android"],
-          "value": { "kind": "enum", "values": ["compact", "medium", "expanded"] },
+          "value": {
+            "kind": "enum",
+            "values": ["compact", "medium", "expanded"]
+          },
           "breakpoints": [600, 840]
         },
         "heightClass": {
           "platforms": ["android"],
-          "value": { "kind": "enum", "values": ["compact", "medium", "expanded"] },
+          "value": {
+            "kind": "enum",
+            "values": ["compact", "medium", "expanded"]
+          },
           "breakpoints": [480, 900]
         },
         "sizeClass": {
           "platforms": ["ios"],
-          "value": { "kind": "enum", "values": ["compact", "regular"] }
+          "value": {
+            "kind": "enum",
+            "values": ["compact", "regular"]
+          }
         },
         "windowWidth": {
           "platforms": ["android", "ios"],
-          "value": { "kind": "number", "integer": true, "min": 0, "max": 65535 }
+          "value": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 65535
+          }
         },
         "windowHeight": {
           "platforms": ["android", "ios"],
-          "value": { "kind": "number", "integer": true, "min": 0, "max": 65535 }
+          "value": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 65535
+          }
         },
         "posture": {
           "platforms": ["android"],
-          "value": { "kind": "enum", "values": ["flat", "tabletop", "book"] }
+          "value": {
+            "kind": "enum",
+            "values": ["flat", "tabletop", "book"]
+          }
         },
-        "pointer": { "platforms": ["android", "ios"], "value": { "kind": "boolean" } }
+        "pointer": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "boolean"
+          }
+        }
       }
     }
   },

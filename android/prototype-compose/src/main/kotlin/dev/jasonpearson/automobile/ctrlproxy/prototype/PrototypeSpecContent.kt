@@ -711,60 +711,71 @@ private fun RenderPrototypeNodeContent(
             node,
             prototypeThemedColor(node.style.color, source.color) ?: node.style.color,
           )
-      if (node.spans == null) {
-        Text(
-          node.text,
-          modifier,
-          color = textColor,
-          // sp, so prototype text follows the system font scale like the app it prototypes
-          // (#10436).
-          // A `textStyle` role supplies size, weight and family; explicit style fields still win.
-          fontSize =
-            source.textSize?.toFloat()?.sp ?: if (role == null) 14.sp else TextUnit.Unspecified,
-          fontWeight =
-            if (role == null || source.fontWeight != null) node.style.fontWeight else null,
-          // Only an authored family overrides; otherwise the text inherits the theme's family
-          // through
-          // its role or the themed body style, as plain text in the prototyped app would (#10561).
-          fontFamily =
-            if (source.fontFamily != null) rememberPrototypeFontFamily(node.style) else null,
-          // Authored-only, like fontWeight: an unset property keeps what the role or theme gives.
-          fontStyle = if (source.fontStyle != null) node.style.fontStyle else null,
-          letterSpacing = source.letterSpacing?.toFloat()?.sp ?: TextUnit.Unspecified,
-          textDecoration = if (source.textDecoration != null) node.style.textDecoration else null,
-          textAlign = node.style.textAlign,
-          lineHeight = source.lineHeight?.toFloat()?.sp ?: TextUnit.Unspecified,
-          overflow = node.style.overflow,
-          maxLines = source.maxLines ?: Int.MAX_VALUE,
-          style = role ?: LocalTextStyle.current,
-        )
-      } else {
-        Text(
-          prototypeAnnotatedText(node.spans, interact),
-          modifier,
-          color = textColor,
-          // sp, so prototype text follows the system font scale like the app it prototypes
-          // (#10436).
-          // A `textStyle` role supplies size, weight and family; explicit style fields still win.
-          fontSize =
-            source.textSize?.toFloat()?.sp ?: if (role == null) 14.sp else TextUnit.Unspecified,
-          fontWeight =
-            if (role == null || source.fontWeight != null) node.style.fontWeight else null,
-          // Only an authored family overrides; otherwise the text inherits the theme's family
-          // through
-          // its role or the themed body style, as plain text in the prototyped app would (#10561).
-          fontFamily =
-            if (source.fontFamily != null) rememberPrototypeFontFamily(node.style) else null,
-          // Authored-only, like fontWeight: an unset property keeps what the role or theme gives.
-          fontStyle = if (source.fontStyle != null) node.style.fontStyle else null,
-          letterSpacing = source.letterSpacing?.toFloat()?.sp ?: TextUnit.Unspecified,
-          textDecoration = if (source.textDecoration != null) node.style.textDecoration else null,
-          textAlign = node.style.textAlign,
-          lineHeight = source.lineHeight?.toFloat()?.sp ?: TextUnit.Unspecified,
-          overflow = node.style.overflow,
-          maxLines = source.maxLines ?: Int.MAX_VALUE,
-          style = role ?: LocalTextStyle.current,
-        )
+      PrototypeContentTransition(
+        value =
+          if (node.spans == null) AnnotatedString(node.text)
+          else prototypeAnnotatedText(node.spans, interact),
+        mode = (node.source as? PrototypeTextNode)?.contentTransition,
+        rich = node.spans != null,
+        modifier = modifier,
+      ) { shownText, textModifier ->
+        if (node.spans == null) {
+          Text(
+            shownText.text,
+            textModifier,
+            color = textColor,
+            // sp, so prototype text follows the system font scale like the app it prototypes
+            // (#10436).
+            // A `textStyle` role supplies size, weight and family; explicit style fields still win.
+            fontSize =
+              source.textSize?.toFloat()?.sp ?: if (role == null) 14.sp else TextUnit.Unspecified,
+            fontWeight =
+              if (role == null || source.fontWeight != null) node.style.fontWeight else null,
+            // Only an authored family overrides; otherwise the text inherits the theme's family
+            // through
+            // its role or the themed body style, as plain text in the prototyped app would
+            // (#10561).
+            fontFamily =
+              if (source.fontFamily != null) rememberPrototypeFontFamily(node.style) else null,
+            // Authored-only, like fontWeight: an unset property keeps what the role or theme gives.
+            fontStyle = if (source.fontStyle != null) node.style.fontStyle else null,
+            letterSpacing = source.letterSpacing?.toFloat()?.sp ?: TextUnit.Unspecified,
+            textDecoration = if (source.textDecoration != null) node.style.textDecoration else null,
+            textAlign = node.style.textAlign,
+            lineHeight = source.lineHeight?.toFloat()?.sp ?: TextUnit.Unspecified,
+            overflow = node.style.overflow,
+            maxLines = source.maxLines ?: Int.MAX_VALUE,
+            style = role ?: LocalTextStyle.current,
+          )
+        } else {
+          Text(
+            shownText,
+            textModifier,
+            color = textColor,
+            // sp, so prototype text follows the system font scale like the app it prototypes
+            // (#10436).
+            // A `textStyle` role supplies size, weight and family; explicit style fields still win.
+            fontSize =
+              source.textSize?.toFloat()?.sp ?: if (role == null) 14.sp else TextUnit.Unspecified,
+            fontWeight =
+              if (role == null || source.fontWeight != null) node.style.fontWeight else null,
+            // Only an authored family overrides; otherwise the text inherits the theme's family
+            // through
+            // its role or the themed body style, as plain text in the prototyped app would
+            // (#10561).
+            fontFamily =
+              if (source.fontFamily != null) rememberPrototypeFontFamily(node.style) else null,
+            // Authored-only, like fontWeight: an unset property keeps what the role or theme gives.
+            fontStyle = if (source.fontStyle != null) node.style.fontStyle else null,
+            letterSpacing = source.letterSpacing?.toFloat()?.sp ?: TextUnit.Unspecified,
+            textDecoration = if (source.textDecoration != null) node.style.textDecoration else null,
+            textAlign = node.style.textAlign,
+            lineHeight = source.lineHeight?.toFloat()?.sp ?: TextUnit.Unspecified,
+            overflow = node.style.overflow,
+            maxLines = source.maxLines ?: Int.MAX_VALUE,
+            style = role ?: LocalTextStyle.current,
+          )
+        }
       }
     }
     "icon" -> {

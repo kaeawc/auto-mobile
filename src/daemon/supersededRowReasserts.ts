@@ -31,8 +31,6 @@ export interface OwedSupersededRowReassertCallbacks<S extends SupersededRowIncar
 export interface OwedSupersededRowReassert<S extends SupersededRowIncarnation = Session> {
   /** The incarnation the rewrite is owed to; a session revived under the UUID owes nothing. */
   session: S;
-  /** Reasons of the superseded releases whose terminal row the rewrite may replace. */
-  reasons: Set<string>;
   /** Failed attempts so far, the first write included. */
   attempt: number;
   /** The armed retry; absent while a retry runs and once the retries are exhausted. */
@@ -59,8 +57,6 @@ export interface SupersededRowReassertsCollaborators {
  * precondition stays with the caller, which keeps its original await sequence.
  */
 export class SupersededRowReasserts<S extends SupersededRowIncarnation = Session> {
-  /** Own superseded releases can land late for this incarnation's entire lifetime (#11557). */
-  private readonly rememberedReasons = new WeakMap<S, Set<string>>();
   /** Only the exact earlier reasons of this release may be replaced by its committed upgrade. */
   private readonly reasonPredecessors = new WeakMap<SessionReleaseSnapshot, readonly string[]>();
   /** A refused release wrote nothing, so superseding it owes no live-row rewrite. */
@@ -71,12 +67,6 @@ export class SupersededRowReasserts<S extends SupersededRowIncarnation = Session
    * a terminal row under the live session is that release's, not the end of the UUID (#11498).
    */
   private readonly pendingReasserts = new Map<string, number>();
-  /**
-   * The superseded releases' reasons whose terminal row a rewrite or a replacement under way is
-   * replacing, one entry per write. Not the parked write's whole window: the row a peer or a
-   * committed release wrote meanwhile is the UUID's end.
-   */
-  private readonly reasonsBeingRewritten = new Map<string, string[]>();
   /**
    * Rewrites that failed and are still owed (#11557): retried with the backoff, then by the
    * session's activity writes. While one is owed, its release's terminal row under the live
@@ -89,21 +79,6 @@ export class SupersededRowReasserts<S extends SupersededRowIncarnation = Session
 
   setBackoff(backoff: BackoffPolicy): void {
     this.backoff = backoff;
-  }
-
-  /** Keep reasons beyond an owed entry's lifetime, without lending them to a same-UUID session. */
-  remember(session: S, reasons: readonly string[]): readonly string[] {
-    const remembered = this.rememberedReasons.get(session) ?? new Set<string>();
-    for (const reason of reasons) {
-      remembered.add(reason);
-    }
-    this.rememberedReasons.set(session, remembered);
-    return [...remembered];
-  }
-
-  /** The superseded reasons remembered for this incarnation, without recording any. */
-  remembered(session: S): ReadonlySet<string> | undefined {
-    return this.rememberedReasons.get(session);
   }
 
   notePredecessors(upgraded: SessionReleaseSnapshot, from: SessionReleaseSnapshot): void {
@@ -125,17 +100,10 @@ export class SupersededRowReasserts<S extends SupersededRowIncarnation = Session
     return this.refusedWrites.has(snapshot);
   }
 
-  /**
-   * Count a pending rewrite of `sessionId`'s row over the terminal row of the superseded releases
-   * named by `supersededReasons`; the returned function ends it, once.
-   */
-  expectReassert(sessionId: string, supersededReasons: readonly string[] = []): () => void {
+  /** Count a pending rewrite of `sessionId`'s live row; the returned function ends it, once. */
+  expectReassert(sessionId: string): () => void {
     const pending = this.pendingReasserts;
     pending.set(sessionId, (pending.get(sessionId) ?? 0) + 1);
-    const reasons = this.reasonsBeingRewritten;
-    if (supersededReasons.length > 0) {
-      reasons.set(sessionId, [...(reasons.get(sessionId) ?? []), ...supersededReasons]);
-    }
     let settled = false;
     return () => {
       if (settled) {
@@ -148,16 +116,6 @@ export class SupersededRowReasserts<S extends SupersededRowIncarnation = Session
       } else {
         pending.delete(sessionId);
       }
-      const left = reasons.get(sessionId) ?? [];
-      for (const reason of supersededReasons) {
-        const index = left.indexOf(reason);
-        if (index >= 0) {
-          left.splice(index, 1);
-        }
-      }
-      if (left.length === 0) {
-        reasons.delete(sessionId);
-      }
     };
   }
 
@@ -165,30 +123,12 @@ export class SupersededRowReasserts<S extends SupersededRowIncarnation = Session
     return this.pendingReasserts.has(sessionId);
   }
 
-  isBeingRewritten(sessionId: string, releaseReason: string): boolean {
-    return this.reasonsBeingRewritten.get(sessionId)?.includes(releaseReason) ?? false;
-  }
-
   owed(sessionId: string): OwedSupersededRowReassert<S> | undefined {
     return this.owedReasserts.get(sessionId);
   }
 
-  /**
-   * Whether `releaseReason`, found under the live `session`, is its own superseded release's
-   * terminal row with the rewrite still owed (#11557), rather than the end of the UUID.
-   */
-  isOwedFor(session: S, releaseReason: string): boolean {
-    const owed = this.owedReasserts.get(session.sessionId);
-    return owed?.session === session && owed.reasons.has(releaseReason);
-  }
-
   /** Record a failed rewrite as owed and arm its next retry, while any are left (#11557). */
-  owe(
-    session: S,
-    supersededReasons: readonly string[],
-    callbacks: OwedSupersededRowReassertCallbacks<S>,
-  ): void {
-    supersededReasons = this.remember(session, supersededReasons);
+  owe(session: S, callbacks: OwedSupersededRowReassertCallbacks<S>): void {
     const sessionId = session.sessionId;
     const owed = this.owedReasserts.get(sessionId);
     const previous = owed?.session === session ? owed : undefined;
@@ -197,7 +137,6 @@ export class SupersededRowReasserts<S extends SupersededRowIncarnation = Session
     }
     const entry: OwedSupersededRowReassert<S> = {
       session,
-      reasons: new Set([...(previous?.reasons ?? []), ...supersededReasons]),
       attempt: (previous?.attempt ?? 0) + 1,
       drainAttempted: previous?.drainAttempted,
       callbacks,

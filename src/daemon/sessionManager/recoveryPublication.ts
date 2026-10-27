@@ -111,10 +111,7 @@ export interface SessionRecoveryPublicationHost {
     stableDeviceId: string | undefined,
     recovery?: boolean,
   ): Session;
-  guardedRowRewriteOptions(
-    supersededReasons: readonly string[],
-    expectedRowGeneration?: number,
-  ): UpsertActiveSessionOptions;
+  guardedRowRewriteOptions(expectedRowGeneration?: number): UpsertActiveSessionOptions;
   readonly superseded: SupersededRowReasserts<Session>;
   readonly sessions: Map<string, Session>;
   restoreReleasedRowAfterReassert(session: Session): Promise<void>;
@@ -402,7 +399,7 @@ export class SessionRecoveryPublication {
           recovery,
         ),
         existing,
-        this.host.guardedRowRewriteOptions([...(this.host.superseded.remembered(existing) ?? [])]),
+        this.host.guardedRowRewriteOptions(),
       );
       // The rebind's row is live: a rewrite still owed from before it is settled (#11557), so a
       // terminal row found under the session later is the UUID's end, not that rewrite's.

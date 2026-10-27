@@ -26,7 +26,6 @@ import {
   type SessionReleaseSnapshot,
 } from "../sessionManager";
 import { RecoveredTerminalReleaseIntents } from "../sessionManager/recoveredTerminalReleaseIntents";
-import type { SupersededRowReasserts } from "../supersededRowReasserts";
 import {
   type SessionLifecycleSlots,
   hasLapsedRestartRecoveryWindow,
@@ -66,7 +65,6 @@ export interface PersistedSessionAdmissionHost {
     statementConditions?: MarkReleasedOptions,
   ): Promise<boolean>;
   notifySessionRelease(snapshot: SessionReleaseSnapshot, options?: SessionReleaseOptions): void;
-  readonly superseded: Pick<SupersededRowReasserts, "isBeingRewritten">;
 }
 
 export class PersistedSessionAdmission {
@@ -431,21 +429,6 @@ export class PersistedSessionAdmission {
       this.restartRecoveryActivityAt.delete(persisted.session_uuid);
       this.host.notifySessionRelease(snapshot, { upgradeOnly: true });
     }
-  }
-
-  /**
-   * `release`, read from the row by an issue of the name that would fence the UUID on it, unless
-   * it is this daemon's own superseded release's row with its replacement under way (#11557):
-   * that row ended nothing. The issue is then refused or goes on as for any row that is not
-   * terminal, and raises no fence.
-   */
-  unlessBeingReplaced(
-    release: SessionReleaseSnapshot | undefined,
-  ): SessionReleaseSnapshot | undefined {
-    return release &&
-      this.host.superseded.isBeingRewritten(release.sessionId, release.releaseReason)
-      ? undefined
-      : release;
   }
 
   terminalReleaseFromPersisted(

@@ -53,6 +53,7 @@ import {
   PROTOTYPE_BACKDROP_CAPABILITY,
   PROTOTYPE_LOADING_STATES_CAPABILITY,
   PROTOTYPE_STRING_CONDITIONS_CAPABILITY,
+  PROTOTYPE_MEDIA_ITEMS_CAPABILITY,
   PROTOTYPE_MOTION_V2_CAPABILITY,
   PROTOTYPE_CHOREOGRAPHY_CAPABILITY,
   PROTOTYPE_CHART_CAPABILITY,
@@ -179,6 +180,11 @@ import {
   prototypePlatformNamespaceFields,
   prototypePlatformNamespaceUnsupportedMessage,
 } from "./prototypePlatformNamespace";
+
+import {
+  prototypeMediaItemFields,
+  prototypeMediaItemsUnsupportedMessage,
+} from "./prototypeMediaItems";
 
 interface PrototypeSpecCapabilityGate {
   readonly capability: string;
@@ -328,6 +334,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_BACKDROP_CAPABILITY,
     fields: prototypeBackdropFields,
     unsupportedMessage: prototypeBackdropUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_MEDIA_ITEMS_CAPABILITY,
+    fields: prototypeMediaItemFields,
+    unsupportedMessage: prototypeMediaItemsUnsupportedMessage,
   },
   {
     capability: PROTOTYPE_LOADING_STATES_CAPABILITY,

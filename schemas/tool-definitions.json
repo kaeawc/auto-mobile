@@ -23086,6 +23086,17 @@
                           },
                           "required": ["light", "dark"],
                           "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "data": {
+                              "type": "string",
+                              "pattern": "^(?:\\/(?:[^~/]|~[01])*)+$(?![\\s\\S])"
+                            }
+                          },
+                          "required": ["data"],
+                          "additionalProperties": false
                         }
                       ]
                     },

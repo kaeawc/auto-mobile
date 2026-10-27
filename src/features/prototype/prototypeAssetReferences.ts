@@ -1,10 +1,14 @@
 import { prototypeShaderUses } from "./prototypeShaders";
+import { isPrototypeMediaId } from "./prototypeMediaItems";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
 import { record } from "./prototypeTemplate";
 
 function addImage(value: unknown, ids: Set<string>): void {
   if (typeof value === "string") {
-    ids.add(value);
+    // A `media:` id is minted on the device: never a host upload, never reported missing (#14192).
+    if (!isPrototypeMediaId(value)) {
+      ids.add(value);
+    }
   } else {
     const pair = record(value);
     if (pair) {

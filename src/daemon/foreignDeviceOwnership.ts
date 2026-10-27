@@ -603,15 +603,25 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
       lease,
       claimOwner ?? legacyOwner,
     );
-    if (
-      lease?.idleSocketPath !== undefined &&
-      (claimOwner ?? legacyOwner ?? tableOwner) === undefined
-    ) {
-      this.idleLeaseHolders.set(deviceId, lease.idleSocketPath);
+    this.noteIdleLeaseHolder(
+      deviceId,
+      lease?.idleSocketPath,
+      claimOwner ?? legacyOwner ?? tableOwner,
+    );
+    return lease?.pid ?? claimOwner ?? legacyOwner ?? tableOwner;
+  }
+
+  /** An idle lease holder is asked to give the lease up only when nothing else owns the device. */
+  private noteIdleLeaseHolder(
+    deviceId: string,
+    idleSocketPath: string | undefined,
+    otherOwner: number | undefined,
+  ): void {
+    if (idleSocketPath !== undefined && otherOwner === undefined) {
+      this.idleLeaseHolders.set(deviceId, idleSocketPath);
     } else {
       this.idleLeaseHolders.delete(deviceId);
     }
-    return lease?.pid ?? claimOwner ?? legacyOwner ?? tableOwner;
   }
 
   /**

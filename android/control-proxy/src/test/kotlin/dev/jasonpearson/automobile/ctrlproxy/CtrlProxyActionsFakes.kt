@@ -151,6 +151,7 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
     reset: Boolean,
     appearance: PrototypeAppearanceOverride?,
     replaceOthers: Boolean,
+    locale: String?,
   ) = Unit
 
   override suspend fun dismissPrototype(requestId: String?, id: String?, all: Boolean?) = Unit
@@ -463,7 +464,8 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
     reset: Boolean,
     appearance: PrototypeAppearanceOverride?,
     replaceOthers: Boolean,
-  ) = record("showPrototype", requestId, spec, displayId, reset, appearance, replaceOthers)
+    locale: String?,
+  ) = record("showPrototype", requestId, spec, displayId, reset, appearance, replaceOthers, locale)
 
   override suspend fun dismissPrototype(requestId: String?, id: String?, all: Boolean?) =
     record("dismissPrototype", requestId, id, all)

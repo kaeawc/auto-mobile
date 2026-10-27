@@ -12,8 +12,16 @@ internal object PrototypeStrictPolicy {
     context: PrototypeStateChecks.Context,
   ): PrototypeSpecError? {
     if (supported != null && !supported.containsAll(required(spec))) {
-      return PrototypeSpecError("$", "Unsupported capabilities")
+      return PrototypeSpecError(
+        "$",
+        "Unsupported capabilities: " + (required(spec) - supported).sorted().joinToString(", "),
+      )
     }
+    if (library && "prototype_custom_shaders_v1" in required(spec))
+      return PrototypeSpecError(
+        "$",
+        "ProtoViewer bundles refuse custom AGSL shaders",
+      )
     val window = spec["window"] as? JsonObject
     if (library && window?.text("layer") == "system")
       return PrototypeSpecError("window.layer", "Privileged window")
@@ -149,6 +157,7 @@ internal object PrototypeStrictPolicy {
       "carousel" to "carousel",
       "searchBar" to "search_bar",
       "chart" to "chart",
+      "list" to "lazy_list",
       "menu" to "menus",
       "tooltip" to "tooltip",
       "drawer" to "drawer",
@@ -159,6 +168,7 @@ internal object PrototypeStrictPolicy {
       "cancelTimer" to "timers",
       "setData" to "data_actions",
       "appendData" to "data_actions",
+      "prependData" to "data_actions",
       "removeData" to "data_actions",
       "platform" to "platform",
     )
@@ -183,10 +193,15 @@ internal object PrototypeStrictPolicy {
             ),
           "text_field_actions" to listOf("trailingIcon", "imeAction", "onSubmit"),
           "text_field_leading_icon" to listOf("leadingIcon"),
+          "string_conditions" to listOf("errorWhen", "errorText"),
         ),
+      "topAppBar" to mapOf("bar_scroll" to listOf("onScroll", "scroll")),
+      "bottomNav" to mapOf("bar_scroll" to listOf("onScroll", "scroll")),
+      "tabBar" to mapOf("bar_scroll" to listOf("onScroll", "scroll")),
       "pager" to
         mapOf(
           "pager_options" to listOf("axis", "pageSpacing", "peek", "pageSize"),
+          "pager_state_key" to listOf("stateKey"),
           "carousel" to listOf("indicator"),
         ),
       "scroll" to
@@ -196,11 +211,13 @@ internal object PrototypeStrictPolicy {
 
   private val fieldFeatures =
     mapOf(
+      "semantics" to "semantics",
       "checks" to "checks",
       "validateOn" to "checks",
       "enabledWhen" to "checks",
       "valid" to "checks",
       "requireValid" to "checks",
+      "onAppear" to "timers",
       "onLongPress" to "gestures",
       "onDoubleTap" to "gestures",
       "swipeActions" to "swipe_actions",
@@ -231,11 +248,7 @@ internal object PrototypeStrictPolicy {
     }
 
     fun envelope(spec: JsonObject) {
-      if (spec.text("motion") == "reduced") need("reduced_motion")
-      if (spec["data"] != null) need("data_model")
-      if (spec["storage"] != null) need("storage")
-      val colors = (spec["theme"] as? JsonObject)?.get("colors") as? JsonObject
-      if (colors?.get("light") != null || colors?.get("dark") != null) need("theme_modes")
+      PrototypeEnvelopeFeatures.collect(spec).forEach(::need)
     }
 
     fun platform(spec: JsonObject) {
@@ -256,6 +269,7 @@ internal object PrototypeStrictPolicy {
       }
       val fields = value as? JsonObject ?: return
       if (fields.size == 1 && fields.containsKey("value")) return
+      if (PrototypeStringConditions.uses(fields)) need("string_conditions")
       nodeFeatures(fields)
       scanFields(fields, field)
     }
@@ -278,13 +292,14 @@ internal object PrototypeStrictPolicy {
     }
 
     private fun skipsScan(key: String, type: String): Boolean =
-      key == "payload" || (key == "value" && type !in listOf("setData", "appendData"))
+      key == "payload" ||
+        (key == "value" && type !in listOf("setData", "appendData", "prependData"))
 
     // An effect's own `animate`, colours and params are not spec features of their own.
     private fun descend(key: String, child: JsonElement) {
       when {
         key == "linkify" -> (child as? JsonObject)?.get("onTap")?.let { scan(it, "onTap") }
-        key != "series" && key != "effects" -> scan(child, key)
+        key !in listOf("series", "effects", "scrollLinked", "scrollTransition") -> scan(child, key)
       }
     }
 
@@ -300,22 +315,42 @@ internal object PrototypeStrictPolicy {
       val type = fields.text("type") ?: ""
       if (type == "text" && fields.text("contentTransition")?.let { it != "none" } == true)
         need("content_transition")
+      val nodeTypes =
+        PrototypeSpecContract.definitions
+          .getValue("node")
+          .jsonObject
+          .getValue("variants")
+          .jsonObject
+      if (type in nodeTypes && ("ios" in fields || "android" in fields)) need("platform_namespace")
       typeFeatures[type]?.let(::need)
       for ((feature, keys) in typeFieldFeatures[type].orEmpty()) {
         if (keys.any { fields[it] != null }) need(feature)
+      }
+      listAndRequestFeatures(type, fields)
+    }
+
+    private fun listAndRequestFeatures(type: String, fields: JsonObject) {
+      if (type == "prependData") need("lazy_list")
+      if (type == "list" || (type == "request" && fields.containsKey("append"))) {
+        need("lazy_list")
+        need("data_model")
       }
       if (type == "request" && fields.text("via") == "device") need("network_device")
     }
 
     private fun repeatFeatures(child: JsonElement) {
       val repeatSpec = child as? JsonObject
+      if (repeatSpec?.containsKey("derive") == true) need("format")
       if (repeatSpec?.get("items") is JsonObject || repeatSpec?.get("key") != null)
         need("data_model")
     }
 
     private fun fieldFeatures(key: String, child: JsonElement, field: String) {
       fieldFeatures[key]?.let(::need)
+      if (key == "style" && (child as? JsonObject)?.containsKey("shader") == true)
+        need("custom_shaders")
       if (PrototypeMotionFeatures.usesMotion(key, child)) result.add("prototype_motion_v2")
+      if (key == "scrollLinked" || key == "scrollTransition") need("scroll_motion")
       if (PrototypeMotionFeatures.usesChoreography(key, child)) need("choreography")
       if (key == "data" && child is JsonPrimitive && child.isString) need("data_model")
       if (key in listOf("light", "dark") && field.isNotEmpty()) need("theme_modes")
@@ -342,4 +377,33 @@ private object PrototypeMotionFeatures {
 
   fun transitionType(child: JsonElement): String? =
     ((child as? JsonObject)?.get("type") ?: child).let { (it as? JsonPrimitive)?.content }
+}
+
+/**
+ * The feature names a spec envelope (not its nodes) asks for, in the strict policy's vocabulary.
+ */
+internal object PrototypeEnvelopeFeatures {
+  fun collect(spec: JsonObject): List<String> = buildList {
+    content(spec)
+    presentation(spec)
+  }
+
+  private fun MutableList<String>.content(spec: JsonObject) {
+    if ("strings" in spec || PrototypeStrings.fields(spec).any { "{t:" in it.text }) add("strings")
+    if (spec["data"] != null) add("data_model")
+    if (spec["storage"] != null) add("storage")
+    if ("derive" in spec) add("format")
+  }
+
+  private fun MutableList<String>.presentation(spec: JsonObject) {
+    for (key in listOf("window", "theme")) {
+      val block = spec[key] as? JsonObject ?: continue
+      if ("ios" in block || "android" in block) add("platform_namespace")
+    }
+    if (spec.text("motion") == "reduced") add("reduced_motion")
+    if ((spec["window"] as? JsonObject)?.get("backdrop") != null) add("backdrop")
+    if ((spec["theme"] as? JsonObject)?.text("design") == "platform") add("design_platform")
+    val colors = (spec["theme"] as? JsonObject)?.get("colors") as? JsonObject
+    if (colors?.get("light") != null || colors?.get("dark") != null) add("theme_modes")
+  }
 }

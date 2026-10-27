@@ -81,6 +81,11 @@ object PrototypeBundleExport {
       val asset = lookup(id) ?: throw PrototypeBundleFailure(asset_missing, id)
       bundleRequire(validId(id), manifest_invalid, id)
       bundleRequire(
+        asset.mediaType != "application/vnd.automobile.agsl",
+        custom_shaders_unsupported,
+        id,
+      )
+      bundleRequire(
         asset.mediaType.startsWith("font/") == font && matchesType(asset.mediaType, asset.bytes),
         asset_type_mismatch,
         id,

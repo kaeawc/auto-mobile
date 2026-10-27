@@ -58,6 +58,7 @@ const otherFields = [
   ["tooltip-text", "Your given name"],
   ["pane-title", "Contact editor"],
   ["live-region", "polite"],
+  ["heading", "true"],
   ["collection-info", "rows:2,cols:1"],
   ["collection-item-info", "row:0,col:0"],
   ["range-info", "current:1.0,min:0.0,max:2.0"],
@@ -141,6 +142,7 @@ describe("CtrlProxyHierarchy accessibility fields", () => {
     (key, value) => {
       const converted = convert({ ...filledField, [key]: value });
       expect(converted.hierarchy.node).toHaveProperty(key, value);
+      expect(converted["accessibility-focused-element"]).toHaveProperty(key, value);
       // cleanNodeProperties is a pure projection; no ViewHierarchy transport/DB is constructed.
       const projection = Object.create(ViewHierarchy.prototype) as ViewHierarchy;
       if (!converted.hierarchy.node) {

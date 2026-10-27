@@ -24,6 +24,8 @@ export const PROTOTYPE_PLATFORM_EVENT_NAME = "prototype_platform";
 export const PROTOTYPE_PLATFORM_DELIVERED_EVENT_NAME = "prototype_platform_event";
 /** Authored emit names cannot start with this; the runtime reports its own events under it. */
 export const PROTOTYPE_RESERVED_EMIT_PREFIX = "prototype_";
+/** Authored `testTag`s cannot start with this; host controls own the namespace (#15120). */
+export const PROTOTYPE_RESERVED_TEST_TAG_PREFIX = "automobile-";
 /** Typed outcomes a call writes to `<into>__meta.error` and reports in `prototype_platform`. */
 export const PROTOTYPE_PLATFORM_ERROR_CODES = [
   "unsupported",
@@ -53,9 +55,11 @@ export interface PrototypePlatformCall {
 export interface PrototypePlatformStateEntry {
   /** The platforms that report the key; elsewhere it is absent and compares as missing. */
   platforms: string[];
-  /** The contract rule the reported value satisfies. */
+  /** The default contract rule; valueByPlatform overrides it on a named platform. */
   value: Rule;
-  /** Ascending lower bounds of the second and later size classes, in dp (Android) or points. */
+  /** Platform overrides; portable spec comparisons accept the union with value. */
+  valueByPlatform?: Record<string, Rule>;
+  /** Android-only ascending lower bounds of the second and later Material classes, in dp. */
   breakpoints?: number[];
 }
 export interface PrototypePlatformModule {
@@ -151,7 +155,7 @@ export type PrototypePlatformUse =
   | { kind: "handlers"; path: string }
   | { kind: "handler"; path: string; event: string }
   | { kind: "call"; path: string; action: Raw }
-  | { kind: "read"; path: string; pointer: string }
+  | { kind: "read"; path: string; pointer: string; condition?: Raw }
   | { kind: "event"; path: string; inHandler: boolean };
 
 // Opaque JSON: an emit payload, literal repeat items and a literal binding's value are data.
@@ -166,7 +170,12 @@ function ownUses(object: Raw, path: string, inHandler: boolean, uses: PrototypeP
     return;
   }
   if (typeof object.platform === "string") {
-    uses.push({ kind: "read", path: `${path}.platform`, pointer: object.platform });
+    uses.push({
+      kind: "read",
+      path: `${path}.platform`,
+      pointer: object.platform,
+      condition: object,
+    });
   }
   if (typeof object.event === "string") {
     uses.push({ kind: "event", path: `${path}.event`, inHandler });
@@ -367,6 +376,33 @@ function readError(
     : undefined;
 }
 
+/** Check portable comparisons against the union of platform-native state rules. */
+function comparisonError(
+  use: Extract<PrototypePlatformUse, { kind: "read" }>,
+  check: PrototypePlatformValueCheck,
+): PrototypePlatformError | undefined {
+  const entry = module(prototypePlatformPointerModule(use.pointer))?.state?.[
+    prototypePlatformPointerKey(use.pointer) ?? ""
+  ];
+  // Specs have no target platform and can branch on device.os: accept every native rule.
+  if (!entry?.valueByPlatform || !use.condition) {
+    return undefined;
+  }
+  const rule: Rule = {
+    kind: "choice",
+    options: [entry.value, ...Object.values(entry.valueByPlatform)],
+  };
+  for (const op of ["equals", "notEquals"]) {
+    if (Object.hasOwn(use.condition, op)) {
+      const found = check(use.condition[op], rule, use.path.replace(/\.platform$/, `.${op}`));
+      if (found) {
+        return found;
+      }
+    }
+  }
+  return undefined;
+}
+
 function useError(
   use: PrototypePlatformUse,
   context: { declared: Set<string>; permissions: Set<string>; background: Set<string> },
@@ -383,7 +419,7 @@ function useError(
     case "call":
       return callError(use.action, use.path, context, check);
     case "read":
-      return readError(use, context.declared);
+      return readError(use, context.declared) ?? comparisonError(use, check);
     case "event":
       return use.inHandler
         ? undefined
@@ -404,6 +440,23 @@ function emitNameError(action: Raw, path: string): PrototypePlatformError | unde
         message: `Emit names starting with ${PROTOTYPE_RESERVED_EMIT_PREFIX} are reserved for runtime events`,
       }
     : undefined;
+}
+
+/** The first authored node whose `testTag` takes the host-reserved `automobile-` namespace. */
+export function prototypeReservedTestTagError(
+  nodes: readonly { value: Raw; path: string }[],
+): PrototypePlatformError | undefined {
+  const node = nodes.find(
+    ({ value }) =>
+      typeof value.testTag === "string" &&
+      value.testTag.startsWith(PROTOTYPE_RESERVED_TEST_TAG_PREFIX),
+  );
+  return node === undefined
+    ? undefined
+    : {
+        path: `${node.path}.testTag`,
+        message: `testTag values starting with ${PROTOTYPE_RESERVED_TEST_TAG_PREFIX} are reserved for host controls`,
+      };
 }
 
 /**

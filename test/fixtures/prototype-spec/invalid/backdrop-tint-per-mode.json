@@ -1,0 +1,21 @@
+{
+  "spec": {
+    "id": "strict",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "backdrop": {
+        "material": "thin",
+        "tint": {
+          "light": "#FFFFFF",
+          "dark": "#000000"
+        }
+      }
+    },
+    "root": {
+      "type": "spacer"
+    }
+  },
+  "expectedPath": "window.backdrop.tint"
+}

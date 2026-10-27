@@ -24,7 +24,7 @@
         "type": "column",
         "visibleWhen": {
           "all": [
-            { "platform": "/device/sizeClass", "equals": "regular" },
+            { "platform": "/device/widthClass", "equals": "regular" },
             { "platform": "/device/windowWidth", "gt": 599 }
           ]
         },

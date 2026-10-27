@@ -1,0 +1,150 @@
+{
+  "spec": {
+    "id": "formats",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "price": 1234.5
+    },
+    "state": {
+      "ratio": 0.256
+    },
+    "derive": {
+      "price": {
+        "of": {
+          "data": "/price"
+        },
+        "format": {
+          "currency": {
+            "code": "USD"
+          }
+        }
+      },
+      "percent": {
+        "of": {
+          "state": "ratio"
+        },
+        "format": {
+          "percent": {
+            "maxFraction": 1
+          }
+        }
+      },
+      "date": {
+        "of": {
+          "value": "2026-01-05"
+        },
+        "format": {
+          "date": {}
+        },
+        "locale": "en-GB",
+        "timeZone": "UTC"
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "{derived:price} {derived:percent} {derived:date}"
+        },
+        {
+          "type": "column",
+          "repeat": {
+            "items": [
+              {
+                "createdAt": "2026-01-05"
+              }
+            ],
+            "as": "item",
+            "derive": {
+              "n0": {
+                "of": {
+                  "value": 0
+                },
+                "format": {
+                  "number": {}
+                }
+              },
+              "n1": {
+                "of": {
+                  "value": 1
+                },
+                "format": {
+                  "number": {}
+                }
+              },
+              "n2": {
+                "of": {
+                  "value": 2
+                },
+                "format": {
+                  "number": {}
+                }
+              },
+              "n3": {
+                "of": {
+                  "value": 3
+                },
+                "format": {
+                  "number": {}
+                }
+              },
+              "n4": {
+                "of": {
+                  "value": 4
+                },
+                "format": {
+                  "number": {}
+                }
+              },
+              "n5": {
+                "of": {
+                  "value": 5
+                },
+                "format": {
+                  "number": {}
+                }
+              },
+              "n6": {
+                "of": {
+                  "value": 6
+                },
+                "format": {
+                  "number": {}
+                }
+              },
+              "n7": {
+                "of": {
+                  "value": 7
+                },
+                "format": {
+                  "number": {}
+                }
+              },
+              "n8": {
+                "of": {
+                  "value": 8
+                },
+                "format": {
+                  "number": {}
+                }
+              }
+            }
+          },
+          "children": [
+            {
+              "type": "text",
+              "text": "{item.createdAtText}"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[1].repeat.derive",
+  "expectedMessage": "Map entry limit exceeded"
+}

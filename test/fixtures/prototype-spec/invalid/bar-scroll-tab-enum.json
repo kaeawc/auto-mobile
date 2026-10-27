@@ -1,0 +1,43 @@
+{
+  "spec": {
+    "id": "bars",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "tab": 0
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "tabBar",
+          "items": [
+            {
+              "label": "Home",
+              "icon": "home"
+            },
+            {
+              "label": "Search",
+              "icon": "search"
+            }
+          ],
+          "stateKey": "tab",
+          "onScroll": "enterAlways",
+          "scroll": "feed"
+        },
+        {
+          "type": "scroll",
+          "id": "feed",
+          "child": {
+            "type": "text",
+            "text": "Feed"
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].onScroll"
+}

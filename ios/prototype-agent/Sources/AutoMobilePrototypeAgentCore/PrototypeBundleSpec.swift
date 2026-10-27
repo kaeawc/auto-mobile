@@ -6,6 +6,9 @@ struct PrototypeBundleReferences {
 
     init(_ bytes: Data) throws {
         let json = try PrototypeBundleJSON(bytes, code: .specInvalidJSON, path: "spec.json", valueFailure: .specInvalid)
+        if PrototypeCustomShaders.uses(json.value.objectFields ?? [:]) {
+            throw PrototypeBundleFailure(.customShadersUnsupported, "spec.json")
+        }
         do {
             try PrototypeContractValidator.validate(data: json.data)
             _ = try JSONDecoder().decode(PrototypeSpec.self, from: json.data)

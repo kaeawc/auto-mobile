@@ -132,6 +132,7 @@ nav:
       - "SDK capabilities": using/sdk-capabilities.md
       - "Embedding prototypes in an app": using/prototype-embedding.md
       - "Dynamic Tools": using/dynamic-tools.md
+      - "Android Automotive OS": using/android-automotive.md
       - "Environment variables": using/environment-variables.md
       - "iOS Simulator fleet cost": using/ios-simulator-fleet-cost.md
       - "Screen control": using/screen-control.md

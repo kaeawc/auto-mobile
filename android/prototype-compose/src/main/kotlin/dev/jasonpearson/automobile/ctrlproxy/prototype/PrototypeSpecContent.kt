@@ -2,7 +2,6 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -189,6 +188,7 @@ fun PrototypeRuntimeContent(
         LocalPrototypeImageVersion provides imageVersion,
         LocalPrototypeFontCache provides fonts,
         LocalPrototypeShaderSession provides runtime.shaderSession,
+        LocalPrototypeExpressive provides (snapshot.spec.motion == "expressive"),
         LocalPrototypeMotion provides motion,
         LocalPrototypeScrollReduced provides (snapshot.spec.motion == "reduced"),
         LocalPrototypeMotionProfile provides profile,
@@ -225,74 +225,80 @@ fun PrototypeSpecContent(
   interact: (PrototypeInteraction) -> Unit = {},
 ) {
   PrototypeTheme(root, theme) {
-    PrototypeSharedRoot(root) {
-    val gestureTaps = remember { PrototypeGestureTaps() }
-    val density = LocalDensity.current.density
-    val currentInteract = rememberUpdatedState(interact)
-    val scrollOffsets = remember { PrototypeScrollOffsets() }
-    scrollOffsets.targets = remember(root) { prototypeScrollTargets(root) }
-    val anchorLocals = remember { PrototypeAnchorLocals() }
-    val menuLayers = remember { PrototypeMenuLayers() }
-    val menuParents = remember(root) { prototypeMenuParents(root) }
-    CompositionLocalProvider(
-      LocalPrototypeListEndTriggers provides
-        (LocalPrototypeListEndTriggers.current
-          ?: remember(LocalPrototypeShowEpoch.current) { PrototypeListEndTriggers() }),
-      LocalPrototypeScrollOffsets provides scrollOffsets,
-      LocalPrototypeBarScroll provides rememberPrototypeBarScroll(root),
-      LocalPrototypeAnchorLocals provides anchorLocals,
-      LocalPrototypeShaderSession provides
-        (LocalPrototypeShaderSession.current ?: remember { PrototypeShaderSession() }),
-      LocalPrototypeGestureTaps provides gestureTaps,
-      LocalPrototypeMenuLayers provides menuLayers,
-      LocalPrototypeDrawerLayers provides remember { PrototypeDrawerLayers() },
-      LocalPrototypeTooltipTargets provides remember(root) { prototypeTooltipTargets(root) },
-      LocalPrototypeTargetFocus provides remember { mutableMapOf() },
-      LocalPrototypeRetainedSubtrees provides remember(root) { prototypeRetainedSubtrees(root) },
-      LocalPrototypeHandleVisuals provides remember(root) { prototypeHandleVisuals(root) },
-    ) {
-      PrototypeShaderFrameSampling(checkNotNull(LocalPrototypeShaderSession.current))
-      Box(
-        Modifier.then(
-            if (deadTaps)
-              Modifier.prototypeDeadTapObserver(gestureTaps, density) {
-                currentInteract.value(it)
-              }
-            else Modifier,
-          )
-          .onGloballyPositioned { menuLayers.windowBounds = it.boundsInRoot() }
-          .semantics { testTagsAsResourceId = true },
-      ) {
-        val modals = prototypeModalLayers(root)
-        PrototypeModalPage(modals) {
-          RenderPrototypeNode(root, interact, windowRoot = true)
-          PrototypeAnchorLayer(remember(root) { layeredPrototypeAnchors(root) }, interact)
-        }
-        modals.forEach { node ->
-          key(node.identity) {
-            if (node.role == "menu") {
-              val parent = menuParents[node.identity]
-              RenderPrototypeMenu(
-                node,
-                Modifier.prototypeShader(node).then(prototypeNodeModifier(node, interact)),
-                parent?.let { menuLayers.bounds[it] } ?: menuLayers.windowBounds,
-                interact,
+    PrototypeMotionTheme {
+      PrototypeSharedRoot(root) {
+        val gestureTaps = remember { PrototypeGestureTaps() }
+        val density = LocalDensity.current.density
+        val currentInteract = rememberUpdatedState(interact)
+        val scrollOffsets = remember { PrototypeScrollOffsets() }
+        scrollOffsets.targets = remember(root) { prototypeScrollTargets(root) }
+        val anchorLocals = remember { PrototypeAnchorLocals() }
+        val menuLayers = remember { PrototypeMenuLayers() }
+        val menuParents = remember(root) { prototypeMenuParents(root) }
+        CompositionLocalProvider(
+          LocalPrototypeListEndTriggers provides
+            (LocalPrototypeListEndTriggers.current
+              ?: remember(LocalPrototypeShowEpoch.current) { PrototypeListEndTriggers() }),
+          LocalPrototypeScrollOffsets provides scrollOffsets,
+          LocalPrototypeBarScroll provides rememberPrototypeBarScroll(root),
+          LocalPrototypeAnchorLocals provides anchorLocals,
+          LocalPrototypeShaderSession provides
+            (LocalPrototypeShaderSession.current ?: remember { PrototypeShaderSession() }),
+          LocalPrototypeGestureTaps provides gestureTaps,
+          LocalPrototypeMenuLayers provides menuLayers,
+          LocalPrototypeDrawerLayers provides remember { PrototypeDrawerLayers() },
+          LocalPrototypeTooltipTargets provides remember(root) { prototypeTooltipTargets(root) },
+          LocalPrototypeTargetFocus provides remember { mutableMapOf() },
+          LocalPrototypeRetainedSubtrees provides remember(root) { prototypeRetainedSubtrees(root) },
+          LocalPrototypeHandleVisuals provides remember(root) { prototypeHandleVisuals(root) },
+        ) {
+          PrototypeShaderFrameSampling(checkNotNull(LocalPrototypeShaderSession.current))
+          Box(
+            Modifier.then(
+                if (deadTaps)
+                  Modifier.prototypeDeadTapObserver(gestureTaps, density) {
+                    currentInteract.value(it)
+                  }
+                else Modifier,
               )
+              .onGloballyPositioned { menuLayers.windowBounds = it.boundsInRoot() }
+              .semantics { testTagsAsResourceId = true },
+          ) {
+            val modals = prototypeModalLayers(root)
+            PrototypeModalPage(modals) {
+              RenderPrototypeNode(root, interact, windowRoot = true)
+              PrototypeAnchorLayer(remember(root) { layeredPrototypeAnchors(root) }, interact)
             }
-          }
-          val expanded = menuLayers.expandedSelect
-          val select = expanded?.let { identity ->
-            visiblePrototypeSelect(root, identity)?.takeIf {
-              // A newly opened modal closes a dropdown on the page behind it.
-              modals.none { modal -> modal.role == "dialog" || modal.role == "menu" } ||
-                modals.any { modal -> visiblePrototypeSelect(modal, identity) != null }
+            modals.forEach { node ->
+              key(node.identity) {
+                if (node.role == "menu") {
+                  val parent = menuParents[node.identity]
+                  RenderPrototypeMenu(
+                    node,
+                    Modifier.prototypeShader(node).then(prototypeNodeModifier(node, interact)),
+                    parent?.let { menuLayers.bounds[it] } ?: menuLayers.windowBounds,
+                    interact,
+                  )
+                } else RenderPrototypeModal(node, interact)
+                PrototypeAnchorLayer(
+                  remember(node) { layeredPrototypeAnchorsIn(node.children) },
+                  interact,
+                )
+              }
             }
+            val expanded = menuLayers.expandedSelect
+            val select = expanded?.let { identity ->
+              visiblePrototypeSelect(root, identity)?.takeIf {
+                // A newly opened modal closes a dropdown on the page behind it.
+                modals.none { modal -> modal.role == "dialog" || modal.role == "menu" } ||
+                  modals.any { modal -> visiblePrototypeSelect(modal, identity) != null }
+              }
+            }
+            if (select != null) RenderPrototypeSelectOptions(select, interact)
+            else if (expanded != null) SideEffect { menuLayers.expandedSelect = null }
           }
-          if (select != null) RenderPrototypeSelectOptions(select, interact)
-          else if (expanded != null) SideEffect { menuLayers.expandedSelect = null }
         }
       }
-    }
     }
   }
 }
@@ -506,8 +512,14 @@ internal fun RenderPrototypeNode(
     AnimatedVisibility(
       visible = node.visible,
       modifier = parentModifier,
-      enter = prototypeEnterTransition(visibilityTransition, prototypeRtl(), node.enterDelayMs),
-      exit = prototypeExitTransition(visibilityTransition, prototypeRtl()),
+      enter =
+        if (LocalPrototypeExpressive.current)
+          prototypeExpressiveEnter(visibilityTransition, prototypeRtl(), node.enterDelayMs)
+        else prototypeEnterTransition(visibilityTransition, prototypeRtl(), node.enterDelayMs),
+      exit =
+        if (LocalPrototypeExpressive.current)
+          prototypeExpressiveExit(visibilityTransition, prototypeRtl())
+        else prototypeExitTransition(visibilityTransition, prototypeRtl()),
     ) {
       ReportPrototypeMotion { transition.isRunning }
       ProvideAnchorFade(
@@ -586,12 +598,13 @@ private fun RenderPrototypeVisibility(
         visible = node.visible,
         modifier = parentModifier,
         enter =
-          prototypeEnterTransition(
-            visibilityTransition,
-            prototypeRtl(),
-            node.enterDelayMs,
-          ),
-        exit = prototypeExitTransition(visibilityTransition, prototypeRtl()),
+          if (LocalPrototypeExpressive.current)
+            prototypeExpressiveEnter(visibilityTransition, prototypeRtl(), node.enterDelayMs)
+          else prototypeEnterTransition(visibilityTransition, prototypeRtl(), node.enterDelayMs),
+        exit =
+          if (LocalPrototypeExpressive.current)
+            prototypeExpressiveExit(visibilityTransition, prototypeRtl())
+          else prototypeExitTransition(visibilityTransition, prototypeRtl()),
       ) {
         ReportPrototypeMotion { transition.isRunning }
         ProvideAnchorFade(
@@ -1480,7 +1493,7 @@ private fun prototypeNodeModifier(
   weightAxis: PrototypeWeightAxis? = null,
   windowRoot: Boolean = false,
 ): Modifier {
-  val style = node.style.source
+  val style = prototypeAnimatedLayout(node)
   val actions = node.source?.onTap.orEmpty()
   val tappable = prototypeNodeTappable(node)
   val handleVisual =
@@ -1498,9 +1511,17 @@ private fun prototypeNodeModifier(
   // Draw-time offset, scale and rotation, animated with the node's `animate` (#14208).
   modifier = modifier.prototypeStyleTransform(node).prototypeScrollMotion(node)
   // Outside the touch target and drawing, so the whole node (shadow included) shrinks as one.
-  val pressScale = style.pressScale
-  if (tappable && pressScale != null) {
-    modifier = modifier.prototypePressScale(presses, pressScale.toFloat())
+  val pressScale = node.source?.press?.scale ?: style.pressScale
+  val pressAlpha = node.source?.press?.alpha
+  if ((tappable || node.source?.press != null) && (pressScale != null || pressAlpha != null)) {
+    if (!tappable && node.enabled) modifier = modifier.prototypeComponentPress(presses)
+    modifier =
+      modifier.prototypePressScale(
+        presses,
+        (pressScale ?: 1.0).toFloat(),
+        (pressAlpha ?: 1.0).toFloat(),
+        drawOnly = node.source?.press != null,
+      )
   }
   // Outermost, as in Material components: reserves a 48 dp touch target around a smaller node
   // without changing the size it draws at (#10435).
@@ -1518,7 +1539,10 @@ private fun prototypeNodeModifier(
     ?.takeIf { style.shadows == null }
     ?.let {
       val shadowColor =
-        prototypeThemedColor(node.style.shadowColor, style.shadowColor) ?: DefaultShadowColor
+        prototypeAnimatedColor(
+          node,
+          prototypeThemedColor(node.style.shadowColor, style.shadowColor) ?: DefaultShadowColor,
+        )
       modifier =
         modifier.shadow(it.toFloat().dp, shape, ambientColor = shadowColor, spotColor = shadowColor)
     }
@@ -1552,7 +1576,11 @@ private fun prototypeNodeModifier(
         )
       } else {
         val borderColor = prototypeThemedColor(node.style.borderColor, it.color)
-        modifier.border(it.width.toFloat().dp, checkNotNull(borderColor), shape)
+        modifier.border(
+          it.width.toFloat().dp,
+          prototypeAnimatedColor(node, checkNotNull(borderColor)),
+          shape,
+        )
       }
   }
   modifier = modifier.prototypeShimmer(style.shimmer == true)
@@ -1589,7 +1617,7 @@ private fun prototypeNodeModifier(
             onClickLabel = node.semantics?.hint,
             enabled = node.enabled,
             interactionSource = presses,
-            indication = LocalIndication.current,
+            indication = prototypeIndication(LocalPrototypeMotion.current),
             onClick = { gestureTaps.tap { interact(PrototypeInteraction.Tap(actions)) } },
             onLongClickLabel = longPress?.let { PROTOTYPE_LONG_PRESS_ACTION_LABEL },
             onLongClick = longPress?.let { { interact(PrototypeInteraction.Tap(it)) } },
@@ -1608,7 +1636,7 @@ private fun prototypeNodeModifier(
           onClickLabel = node.semantics?.hint,
           enabled = node.enabled,
           interactionSource = presses,
-          indication = LocalIndication.current,
+          indication = prototypeIndication(LocalPrototypeMotion.current),
         ) {
           gestureTaps.tap { interact(PrototypeInteraction.Tap(actions)) }
         }

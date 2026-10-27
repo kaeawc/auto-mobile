@@ -254,6 +254,7 @@ internal object PrototypeStrictPolicy {
         val block = spec[key] as? JsonObject ?: continue
         if ("ios" in block || "android" in block) need("platform_namespace")
       }
+      if (spec.text("motion") == "expressive") result.add(PrototypeMotionV3.CAPABILITY)
       if (spec.text("motion") == "reduced") need("reduced_motion")
       if (spec["data"] != null) need("data_model")
       if (spec["storage"] != null) need("storage")
@@ -311,7 +312,7 @@ internal object PrototypeStrictPolicy {
     private fun descend(key: String, child: JsonElement) {
       when {
         key == "linkify" -> (child as? JsonObject)?.get("onTap")?.let { scan(it, "onTap") }
-        key !in listOf("series", "effects", "scrollLinked", "scrollTransition") ->
+        key !in listOf("series", "effects", "scrollLinked", "scrollTransition", "press") ->
           scan(child, key)
       }
     }
@@ -325,6 +326,7 @@ internal object PrototypeStrictPolicy {
       if (PrototypeStylePolishV2Rules.themedBorder(fields)) need("theme_modes")
       if (PrototypeStylePolishV2Rules.required(fields))
         result.add(PrototypeStylePolishV2Rules.CAPABILITY)
+      if (PrototypeMotionV3.required(fields)) result.add(PrototypeMotionV3.CAPABILITY)
       val type = fields.text("type") ?: ""
       val nodeTypes =
         PrototypeSpecContract.definitions

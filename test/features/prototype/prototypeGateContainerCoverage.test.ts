@@ -94,6 +94,7 @@ const fixtures: Record<string, Node> = {
   prototype_string_conditions_v1: { ...label, visibleWhen: { key: "name", contains: "A" } },
   prototype_loading_states_v1: { type: "box", style: { shimmer: true }, children: [label] },
   prototype_effects_v1: { ...label, style: { effects: [{ type: "noise" }] } },
+  prototype_motion_v3: { ...label, animate: {}, style: { cornerRadius: 8 } },
   prototype_motion_v2: { ...label, animate: { durationMs: 300 } },
   prototype_shared_element_v1: { ...label, sharedKey: "hero" },
   prototype_stack_transitions_v1: {
@@ -201,8 +202,8 @@ const ROOT_LEVEL_GATES = [
   "prototype_storage_v1",
   "prototype_backdrop_v1",
   "prototype_design_platform_v1",
+  "prototype_reduced_motion_v1",
 ];
-const ROOT_LEVEL_GATES = ["prototype_storage_v1", "prototype_reduced_motion_v1"];
 
 test("every capability gate has a container fixture or is a root-level gate", () => {
   expect([...Object.keys(fixtures), ...ROOT_LEVEL_GATES].sort()).toEqual(

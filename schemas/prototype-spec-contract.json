@@ -2768,6 +2768,13 @@
                 "name": "semantics"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -3030,6 +3037,13 @@
                 "name": "semantics"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -3285,6 +3299,13 @@
                 "name": "semantics"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -3513,6 +3534,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "semantics"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -3764,6 +3792,13 @@
                 "name": "semantics"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -4007,6 +4042,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "semantics"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -4263,6 +4305,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "semantics"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -4523,6 +4572,13 @@
                 "name": "semantics"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -4766,6 +4822,13 @@
                 "name": "semantics"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -4967,6 +5030,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "semantics"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -5324,6 +5394,13 @@
                 "name": "semantics"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           },
           "dependents": {
@@ -5568,6 +5645,13 @@
                 "name": "semantics"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -5809,6 +5893,13 @@
                 "name": "semantics"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -6037,6 +6128,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "semantics"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -6287,6 +6385,13 @@
                 "name": "semantics"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -6513,6 +6618,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "semantics"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -6756,6 +6868,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "semantics"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -7020,6 +7139,13 @@
                 "name": "semantics"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -7247,6 +7373,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "semantics"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -7497,6 +7630,13 @@
                 "name": "semantics"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -7719,6 +7859,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "semantics"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -7951,6 +8098,13 @@
                 "name": "semantics"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -8171,6 +8325,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "semantics"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -8422,6 +8583,13 @@
                 "name": "semantics"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -8632,6 +8800,13 @@
                 "name": "semantics"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -8839,6 +9014,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "semantics"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -9062,6 +9244,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "semantics"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -9314,6 +9503,13 @@
                 "name": "semantics"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -9535,6 +9731,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "semantics"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -9767,6 +9970,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "semantics"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -10016,6 +10226,13 @@
                 "name": "semantics"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -10249,6 +10466,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "semantics"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -10510,6 +10734,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "semantics"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -10783,6 +11014,13 @@
                 "name": "semantics"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -11030,6 +11268,13 @@
                 "name": "semantics"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           },
           "binding": true
@@ -11270,6 +11515,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "semantics"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -11520,6 +11772,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "semantics"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -11791,6 +12050,13 @@
                 "name": "semantics"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -11966,6 +12232,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "semantics"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -12210,6 +12483,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "semantics"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -12463,6 +12743,13 @@
                 "name": "scrollLinked"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -12698,6 +12985,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -12997,6 +13291,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         }
@@ -13106,7 +13407,7 @@
         "motion": {
           "rule": {
             "kind": "enum",
-            "values": ["none", "standard", "reduced"]
+            "values": ["none", "standard", "reduced", "expressive"]
           },
           "optional": true
         },
@@ -18085,6 +18386,30 @@
           "rule": {
             "kind": "enum",
             "values": ["ripple", "none"]
+          },
+          "optional": true
+        }
+      }
+    },
+    "press": {
+      "kind": "object",
+      "atLeastOne": true,
+      "fields": {
+        "scale": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0.85,
+            "max": 1
+          },
+          "optional": true
+        },
+        "alpha": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0.5,
+            "max": 1
           },
           "optional": true
         }

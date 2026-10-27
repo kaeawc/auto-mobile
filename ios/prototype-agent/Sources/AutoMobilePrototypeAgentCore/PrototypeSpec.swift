@@ -91,6 +91,7 @@ struct PrototypeSpec: Decodable {
     let theme: PrototypeTheme?
     /// `none` keeps every visibility and page change instant; `standard` (the default) animates them
     /// with spatial effects reduced by the spec or system setting (#10442). See `PrototypeMotion`.
+    // Expressive decodes tolerantly; the agent does not advertise motion v3 until #14684.
     let motion: String?
     /// The keys the device keeps across shows of this id (#12522); nil without a usable block.
     let storage: PrototypeStorageBlock?
@@ -846,6 +847,7 @@ final class PrototypeNode: Decodable {
     let onLongPress: [PrototypeAction]?
     let onDoubleTap: [PrototypeAction]?
     let style: Style?
+    let press: PrototypePress?
     let styleWhen: [StyleWhen]?
     let visibleWhen: Condition?
     let sharedKey: String?
@@ -1000,7 +1002,7 @@ final class PrototypeNode: Decodable {
 
     private enum CodingKeys: String, CodingKey {
         case scrollTransition, scrollLinked
-        case type, id, testTag, onAppear, onTap, style, styleWhen, visibleWhen, sharedKey, transition
+        case type, id, testTag, onAppear, onTap, style, styleWhen, press, visibleWhen, sharedKey, transition
         case safeAreaPadding, anchor, children, child, text, contentDescription, asset, contentScale, semantics
         case name, label, variant, stateKey, placeholder, axis, items, pager
         case anchorTo, caret, spotlight, onDismiss, edge
@@ -1011,7 +1013,7 @@ final class PrototypeNode: Decodable {
         case leadingIcon, trailing, swipeActions
         case refresh, header, footer, spacing, contentPadding, onEndReached, endThreshold, maxItems
         case listRepeat = "repeat"
-        case refresh, reverse, stickToEnd, atEndKey, onStartReached
+        case reverse, stickToEnd, atEndKey, onStartReached
         case repeatKey = "_repeatKey"
         case onLongPress, onDoubleTap, enabledWhen, checks, validateOn, maxLines, columns, span, start, screens, spans,
              linkify,
@@ -1036,6 +1038,7 @@ final class PrototypeNode: Decodable {
         onAppear = try container.decodeIfPresent([PrototypeAction].self, forKey: .onAppear)
         onTap = try container.decodeIfPresent([PrototypeAction].self, forKey: .onTap)
         style = try container.decodeIfPresent(Style.self, forKey: .style)
+        press = try container.decodeIfPresent(PrototypePress.self, forKey: .press)
         styleWhen = try container.decodeIfPresent([StyleWhen].self, forKey: .styleWhen)
         visibleWhen = try container.decodeIfPresent(Condition.self, forKey: .visibleWhen)
         sharedKey = try container.decodeIfPresent(String.self, forKey: .sharedKey)

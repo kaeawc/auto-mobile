@@ -167,6 +167,10 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     style: { shimmer: true },
     children: [{ type: "spacer" }],
   }),
+  prototype_motion_v3: {
+    ...fixture({ ...label, animate: {}, style: { cornerRadius: 8 } }),
+    with: ["prototype_motion_v2"],
+  },
   prototype_motion_v2: fixture({ ...label, animate: { durationMs: 300 } }),
   prototype_effects_v1: fixture({ ...label, style: { effects: [{ type: "noise" }] } }),
   prototype_reduced_motion_v1: { minimalSpec: { ...base, motion: "reduced" }, ops: [] },

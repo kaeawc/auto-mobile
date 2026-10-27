@@ -301,8 +301,8 @@ data class PrototypeSpec(
   val root: PrototypeNode,
   val theme: PrototypeSpecTheme? = null,
   /**
-   * `none` is instant; `reduced` keeps fades/colors and snaps spatial motion; standard follows
-   * system scales.
+   * `none` is instant; `reduced` keeps fades/colors and snaps spatial motion; `expressive` uses
+   * Material expressive springs. Standard follows system scales.
    */
   val motion: String? = null,
   val data: JsonObject? = null,

@@ -195,6 +195,17 @@ export const commonNodeShape = {
   styleWhen: z.array(styleWhenEntrySchema).min(1).max(8).optional(),
   visibleWhen: conditionSchema.optional(),
   sharedKey: keySchema.optional(),
+  press: z
+    .object({
+      scale: z.number().finite().min(0.85).max(1).optional(),
+      alpha: z.number().finite().min(0.5).max(1).optional(),
+    })
+    .strict()
+    .refine(
+      (value) => value.scale !== undefined || value.alpha !== undefined,
+      "press needs scale or alpha",
+    )
+    .optional(),
   ...prototypeMotionNodeShape,
   anchor: anchorSchema.optional(),
   safeAreaPadding: safeAreaPaddingSchema.optional(),
@@ -880,7 +891,7 @@ const specSchema = z
             .safeParse(value).success,
       )
       .optional(),
-    motion: z.enum(["none", "standard", "reduced"]).optional(),
+    motion: z.enum(["none", "standard", "reduced", "expressive"]).optional(),
     storage: prototypeStorageSchema.optional(),
     requires: prototypeRequiresSchema.optional(),
     platform: prototypePlatformHandlersSchema.optional(),

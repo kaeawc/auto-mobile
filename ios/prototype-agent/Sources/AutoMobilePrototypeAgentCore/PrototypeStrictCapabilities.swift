@@ -17,6 +17,7 @@ enum PrototypeStrictCapabilities {
             }
         }
         if spec["theme"]?.objectFields?["design"]?.stringValue == "platform" { need("design_platform") }
+        if spec["motion"] == .string("expressive") { result.insert(PrototypeMotionV3.capability) }
         if spec["motion"] == .string("reduced") { need("reduced_motion") }
         if spec["data"] != nil { need("data_model") }
         if spec["derive"] != nil { need("format") }
@@ -41,6 +42,7 @@ enum PrototypeStrictCapabilities {
             if fields["semantics"] != nil { need("semantics") }
             if fields["onAppear"] != nil { need("timers") }
             if fields["scrollLinked"] != nil || fields["scrollTransition"] != nil { need("scroll_motion") }
+            if PrototypeMotionV3.required(fields) { result.insert(PrototypeMotionV3.capability) }
             let type = fields["type"]?.stringValue ?? ""
             if PrototypeStringConditions.uses(fields) { need("string_conditions") }
             let types = [
@@ -146,7 +148,7 @@ enum PrototypeStrictCapabilities {
                 // An effect's own `animate`, colours and params are not spec features of their own.
                 if key == "linkify" {
                     if let actions = child.objectFields?["onTap"] { scan(actions, field: "onTap") }
-                } else if !["series", "effects", "scrollLinked", "scrollTransition"].contains(key) { scan(child, field: key) }
+                } else if !["series", "effects", "scrollLinked", "scrollTransition", "press"].contains(key) { scan(child, field: key) }
             }
         }
         if let root = spec["root"] { scan(root) }

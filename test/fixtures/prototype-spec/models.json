@@ -577,7 +577,7 @@
     "type": "list",
     "repeat": {
       "items": {
-        "path": "/feed/items"
+        "path": "/items"
       },
       "as": "post",
       "key": "id"
@@ -852,7 +852,38 @@
     "stagger": {
       "ms": 20,
       "order": "forward"
-    }
+    },
+    "ios": {
+      "hover": "lift"
+    },
+    "android": {
+      "indication": "none"
+    },
+    "onAppear": [
+      {
+        "type": "emit",
+        "name": "appear"
+      }
+    ],
+    "semantics": {
+      "heading": true
+    },
+    "press": {
+      "scale": 0.9,
+      "alpha": 0.8
+    },
+    "scrollTransition": {
+      "axis": "vertical",
+      "edge": {
+        "alpha": 0.5
+      }
+    },
+    "scrollLinked": {
+      "source": "targetScroll",
+      "range": [0, 100],
+      "alpha": [1, 0]
+    },
+    "sharedKey": "modelHero"
   },
   "actionRequestFilled": {
     "type": "request",
@@ -886,7 +917,11 @@
         "type": "emit",
         "name": "error"
       }
-    ]
+    ],
+    "append": {
+      "from": "/items",
+      "to": "/data/items"
+    }
   },
   "actionEmitFilled": {
     "type": "emit",

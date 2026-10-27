@@ -1,6 +1,11 @@
 // Generated from schemas/prototype-spec-contract.json; do not edit.
 // Regenerate: bun scripts/prototype/generate-prototype-spec-models.ts
 
+struct PrototypePress: Decodable, Equatable, Sendable {
+    let scale: Double?
+    let alpha: Double?
+}
+
 struct ShadowOffset: Codable, Equatable, Sendable {
     let x: Double
     let y: Double

@@ -89,6 +89,25 @@ enum PrototypeStrictSemantics {
     static func vocabulary(_ context: PrototypeContractValidator, data: [String: JSONValue]?) throws {
         for node in context.locatedNodes {
             let fields = node.value, path = node.path, type = fields["type"]?.stringValue
+            if fields["press"] != nil,
+               ![
+                   "button",
+                   "iconButton",
+                   "fab",
+                   "chip",
+                   "listItem",
+                   "switch",
+                   "checkbox",
+                   "radioGroup",
+                   "segmentedButton",
+                   "select",
+                   "menu"
+               ].contains(type ?? ""),
+               !["onTap", "onLongPress", "onDoubleTap"]
+               .contains(where: { !PrototypeStrictBindings.array(fields[$0]).isEmpty })
+            {
+                throw PrototypeContractValidator.invalid("\(path).press", "press requires a pressable node")
+            }
             if !["box", "row", "column", "card"].contains(type ?? "") {
                 if fields["style"]?
                     .objectFields?["shimmer"] !=
@@ -186,6 +205,25 @@ enum PrototypeStrictSemantics {
         var pagers = Set<String>(), stacks: [String: [String: JSONValue]] = [:]
         for node in context.locatedNodes {
             let fields = node.value, path = node.path, type = fields["type"]?.stringValue
+            if fields["press"] != nil,
+               ![
+                   "button",
+                   "iconButton",
+                   "fab",
+                   "chip",
+                   "listItem",
+                   "switch",
+                   "checkbox",
+                   "radioGroup",
+                   "segmentedButton",
+                   "select",
+                   "menu"
+               ].contains(type ?? ""),
+               !["onTap", "onLongPress", "onDoubleTap"]
+               .contains(where: { !PrototypeStrictBindings.array(fields[$0]).isEmpty })
+            {
+                throw PrototypeContractValidator.invalid("\(path).press", "press requires a pressable node")
+            }
             if type == "pager", let id = fields["id"]?.stringValue,
                !pagers.insert(id).inserted { throw PrototypeContractValidator.invalid("\(path).id", "Duplicate pager") }
             if type == "stack", let id = fields["id"]?.stringValue {

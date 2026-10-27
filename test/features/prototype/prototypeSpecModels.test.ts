@@ -540,9 +540,13 @@ struct Mixed: Codable, Equatable, Sendable {
   });
 
   test("every migrated fixture satisfies the existing contract interpreters", () => {
+    // Filled wire models cover mutually exclusive shadow forms; validate each legal form.
+    const { shadows: _shadows, ...elevationStyle } = fixture.style;
+    const { elevation: _elevation, shadowColor: _shadowColor, ...layeredStyle } = fixture.style;
     const leaves = [
       [presentation.conditionSchema, fixture.condition],
-      [presentation.styleSchema, fixture.style],
+      [presentation.styleSchema, elevationStyle],
+      [presentation.styleSchema, layeredStyle],
       [presentation.itemSchema, fixture.item],
       [presentation.itemSchema, fixture.itemString],
       [presentation.containerSchema, fixture.container],

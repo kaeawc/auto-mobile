@@ -14,6 +14,7 @@ internal object PrototypeBundleCapabilities {
       val block = spec[key] as? JsonObject ?: continue
       if ("ios" in block || "android" in block) caps.add("prototype_platform_namespace_v1")
     }
+    if (text(spec["motion"]) == "expressive") caps.add(PrototypeMotionV3.CAPABILITY)
     if (text(spec["motion"]) == "reduced") caps.add("prototype_reduced_motion_v1")
     if ("data" in spec) caps.add("prototype_data_model_v1")
     if ("storage" in spec) caps.add("prototype_storage_v1")
@@ -33,6 +34,7 @@ internal object PrototypeBundleCapabilities {
     for (node in PrototypeBundleSpec.nodes(spec)) {
       if (node["type"] == JsonPrimitive("pager") && "stateKey" in node)
         caps.add("prototype_pager_state_key_v1")
+      if (PrototypeMotionV3.required(node)) caps.add(PrototypeMotionV3.CAPABILITY)
       caps.addAll(PrototypeBundleNodeCapabilities.collect(node))
       if (PrototypeStringConditions.uses(node)) caps.add("prototype_string_conditions_v1")
       fields(node, caps)

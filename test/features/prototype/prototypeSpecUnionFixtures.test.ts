@@ -6,6 +6,8 @@ import fixtures from "../../fixtures/prototype-spec/models.json";
 const unionFixtures = Object.entries(fixtures).filter(([name]) => /^(node|action)/.test(name));
 for (const [name, value] of unionFixtures) {
   test(`migrated ${name} satisfies the existing contract interpreter`, () => {
+    // A shared pair cannot be repeated; other box fixtures exercise repeat semantically.
+    const { repeat: _repeat, ...sharedBox } = fixtures.nodeBoxFilled;
     const spec = {
       id: "models",
       requires: { platform: ["test"] },
@@ -25,10 +27,22 @@ for (const [name, value] of unionFixtures) {
         type: "column",
         children: [
           name === "nodeBoxFilled"
-            ? { type: "grid", columns: 2, children: [value] }
+            ? {
+                type: "scroll",
+                child: { type: "grid", columns: 2, children: [sharedBox] },
+              }
             : name.startsWith("node")
               ? value
               : { type: "button", label: "Go", onTap: [value] },
+          ...(name === "nodeBoxFilled"
+            ? [
+                {
+                  type: "spacer",
+                  sharedKey: "modelHero",
+                  visibleWhen: { key: "enabled", equals: false },
+                },
+              ]
+            : []),
           { type: "pager", id: "targetPager", children: [{ type: "spacer" }] },
           {
             type: "stack",

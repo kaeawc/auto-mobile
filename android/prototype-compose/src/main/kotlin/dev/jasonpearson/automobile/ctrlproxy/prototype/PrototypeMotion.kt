@@ -10,7 +10,12 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkOut
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.interaction.InteractionSource
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -18,7 +23,12 @@ import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.rememberGraphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.IntSize
@@ -94,7 +104,12 @@ private val SIZE_TRANSPARENT_ROLES = setOf("card", "scroll", "pager")
 @Composable
 internal fun Modifier.prototypeAnimateSize(enabled: Boolean): Modifier {
   if (!enabled) return this
-  val activity = LocalPrototypeMotionActivity.current ?: return animateContentSize()
+  // Standard motion keeps animateContentSize's own default spring; only expressive overrides it.
+  val expressive =
+    if (LocalPrototypeExpressive.current) prototypeExpressiveSpec<IntSize>() else null
+  fun Modifier.contentSize(): Modifier =
+    if (expressive == null) animateContentSize() else animateContentSize(expressive)
+  val activity = LocalPrototypeMotionActivity.current ?: return contentSize()
   val owner = remember { Any() }
   DisposableEffect(activity, owner) { onDispose { activity.release(owner) } }
   // The outer modifier sees the animated size and the inner one the target, so the container is
@@ -110,7 +125,7 @@ internal fun Modifier.prototypeAnimateSize(enabled: Boolean): Modifier {
     sizes[0] = it
     report()
   }
-    .animateContentSize()
+    .contentSize()
     .onSizeChanged {
       sizes[1] = it
       report()
@@ -123,20 +138,67 @@ internal fun Modifier.prototypeAnimateSize(enabled: Boolean): Modifier {
  * for a screenshot is deterministic.
  */
 @Composable
-internal fun Modifier.prototypePressScale(source: InteractionSource, scale: Float): Modifier {
+internal fun Modifier.prototypePressScale(
+  source: InteractionSource,
+  scale: Float,
+  pressAlpha: Float = 1f,
+  drawOnly: Boolean = false,
+): Modifier {
   val pressed by source.collectIsPressedAsState()
   val spec =
     if (
       LocalPrototypeMotion.current &&
         LocalPrototypeMotionProfile.current == PrototypeMotionProfile.FULL
     )
-      spring<Float>()
+      if (LocalPrototypeExpressive.current) prototypeExpressiveSpec<Float>() else spring<Float>()
     else snap()
   val target = if (pressed) scale else 1f
   val current by animateFloatAsState(target, spec, label = "prototypePressScale")
-  ReportPrototypeMotion { current != target }
+  val alphaTarget = if (pressed) pressAlpha else 1f
+  val alphaSpec =
+    if (LocalPrototypeMotion.current) {
+      if (LocalPrototypeExpressive.current) prototypeExpressiveSpec<Float>(effects = true)
+      else spring<Float>()
+    } else snap()
+  val currentAlpha by animateFloatAsState(alphaTarget, alphaSpec, label = "prototypePressAlpha")
+  val instant =
+    !LocalPrototypeMotion.current ||
+      LocalPrototypeMotionProfile.current != PrototypeMotionProfile.FULL
+  val motion = LocalPrototypeMotion.current
+  ReportPrototypeMotion {
+    (!instant && current != target) || (motion && currentAlpha != alphaTarget)
+  }
+  if (drawOnly) {
+    val layer = rememberGraphicsLayer()
+    return drawWithContent {
+      layer.record { this@drawWithContent.drawContent() }
+      layer.scaleX = if (instant) target else current
+      layer.scaleY = if (instant) target else current
+      layer.alpha = if (!motion) alphaTarget else currentAlpha
+      drawLayer(layer)
+    }
+  }
   return graphicsLayer {
-    scaleX = current
-    scaleY = current
+    alpha = if (!motion) alphaTarget else currentAlpha
+    scaleX = if (instant) target else current
+    scaleY = if (instant) target else current
   }
 }
+
+/** Observe a component's own gesture without consuming or changing its semantics or bounds. */
+internal fun Modifier.prototypeComponentPress(source: MutableInteractionSource): Modifier =
+  pointerInput(source) {
+    awaitEachGesture {
+      val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+      val press = PressInteraction.Press(down.position)
+      source.tryEmit(press)
+      try {
+        val up = waitForUpOrCancellation(pass = PointerEventPass.Initial)
+        source.tryEmit(
+          if (up == null) PressInteraction.Cancel(press) else PressInteraction.Release(press),
+        )
+      } finally {
+        source.tryEmit(PressInteraction.Cancel(press))
+      }
+    }
+  }

@@ -86,6 +86,8 @@ class AndroidPrototypeClipboard(
   }
 
   override suspend fun paste(): String {
+    // A null primary clip is reported as empty: a focused foreground app cannot tell "empty" from
+    // "read refused", and the issue requires an empty clipboard to succeed with text "".
     val get = {
       manager.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.text?.toString() ?: ""
     }
@@ -93,6 +95,7 @@ class AndroidPrototypeClipboard(
   }
 
   override suspend fun hasText(): Boolean {
+    // "A text clip exists" (mime type), without reading the text; a clip of "" still counts.
     val query = { manager.primaryClipDescription?.hasMimeType("text/*") == true }
     return focus?.read(query) ?: query()
   }

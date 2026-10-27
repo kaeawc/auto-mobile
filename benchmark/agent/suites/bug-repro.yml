@@ -1,0 +1,31 @@
+# Toggle the Playground's intentional UI bug and report the diverged counts.
+# Exercises tapOn, switch toggling, and reading state back from observe.
+name: bug-repro
+platform: android
+prompt: ../prompts/bug-repro.txt
+app:
+  packageName: dev.jasonpearson.automobile.playground
+preflight:
+  clearAppData: true
+  sharedPreferences:
+    onboarding_prefs:
+      onboarding_completed: true
+    auth_prefs:
+      is_authenticated: true
+      user_id: agent-benchmark
+      display_name: Agent Benchmark
+  launchUri: automobile://playground/demos/bugs/repro
+  # BugReproScreen's top bar; a redirect to onboarding or login stops the run before Claude.
+  startScreenIncludes: ["Bug Reproduction Demo"]
+claude:
+  maxBudgetUsd: 2
+  timeoutSeconds: 600
+verify:
+  answerIncludes:
+    - "EXPECTED_COUNT: 3"
+    - "DISPLAYED_COUNT: 2"
+    - "STATUS: Bug triggered: UI did not update"
+  screenIncludes:
+    - "Expected count: 3"
+    - "Displayed count: 2"
+    - "Status: Bug triggered: UI did not update"

@@ -13,6 +13,7 @@ import {
 import { ENV, readEnvBool } from "../config/env";
 import { ActionableError } from "../models/ActionableError";
 import { rootAsyncScope } from "./inProcessMcpDispatcher";
+import { parseMcpTrace, withMcpTrace } from "./mcpTraceContext";
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from "node:http";
 import { readMcpSessionKey } from "./mcpSessionKey";
 import { ListChangedBroadcaster } from "./listChangedBroadcast";
@@ -448,10 +449,15 @@ export class StatelessMcpHttpEndpoint<
     res.once("finish", close);
     socket?.once("close", close);
     const clearKeepalive = this.startKeepalive(res);
+    const meta = jsonRpcMessages(parsedBody)
+      .map((message) => recordField(message.params, "_meta"))
+      .find((value) => value !== undefined);
     try {
       const response = await this.root.run(() =>
         this.modernScope.run({ req, scope }, () =>
-          handler.fetch(modernWebRequest(req, controller.signal), { parsedBody }),
+          withMcpTrace(parseMcpTrace(meta), () =>
+            handler.fetch(modernWebRequest(req, controller.signal), { parsedBody }),
+          ),
         ),
       );
       await writeModernResponse(response, res);

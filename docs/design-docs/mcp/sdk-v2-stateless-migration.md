@@ -79,6 +79,16 @@ The SDK factory reuses `createStatelessMcpServer`, carrying the era and request 
 an isolated async context. Modern discovery advertises the Tasks extension; legacy initialize
 advertisement remains conditional on the client's declaration. Both paths share cancellation
 indexing, request-scope execution cancellation, keyless binding cleanup, and shutdown tracking.
+
+Modern HTTP requests validate W3C version `00` trace context from `params._meta` using the
+SDK's trace keys. For batches, the first message carrying `_meta` selects the request context.
+`mcpTraceContext` installs it inside the detached async root around SDK dispatch, so concurrent
+requests stay isolated and work started by a request inherits its context. Invalid traceparents
+give no context; malformed tracestate or baggage is dropped independently, with limits of 512
+and 8192 characters respectively. Daemon logger wiring reads only the active trace id and adds
+`trace=<traceId>` to messages. Private tracestate and baggage values are never added to logs;
+requests without a trace and the 2025 path retain their existing log format.
+
 Modern discovery advertises `tools.listChanged` and `resources.listChanged`. Each endpoint
 lazily creates one in-memory event bus on its first modern request and bridges the process-wide
 list-change broadcaster onto it. All per-request SDK handlers share that bus, so

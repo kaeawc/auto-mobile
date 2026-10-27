@@ -58,6 +58,14 @@ export function isStructuredLoggingEnabled(): boolean {
   return logFormat === "json";
 }
 
+/** Only the trace id is loggable; callers may retain private metadata in their own scope. */
+export type LogContextProvider = () => { readonly traceId: string } | undefined;
+let logContextProvider: LogContextProvider | undefined;
+
+export function setLogContextProvider(provider: LogContextProvider | undefined): void {
+  logContextProvider = provider;
+}
+
 // Seed the level from AUTOMOBILE_LOG_LEVEL at process start (issue #3845) so a
 // user who exports the env var actually changes what the running process emits,
 // rather than silently staying at INFO. Applied here at module load — the single
@@ -893,10 +901,15 @@ const writeToLogFile = async (level: string, message: string, args: any[]) => {
     return;
   }
   try {
-    const safeLogMessage = formatLogRecord(logFormat, ownLogPrefix, level, message, args).replace(
-      /[\r\n\t]/g,
-      " ",
-    );
+    const context = logContextProvider?.();
+    const contextualMessage = context ? `trace=${context.traceId} ${message}` : message;
+    const safeLogMessage = formatLogRecord(
+      logFormat,
+      ownLogPrefix,
+      level,
+      contextualMessage,
+      args,
+    ).replace(/[\r\n\t]/g, " ");
     // Start both configured writes before awaiting either one. A failed file
     // sink must not suppress the process-stream record in `both` mode.
     mirrorToLegacyStdout(safeLogMessage);

@@ -10,7 +10,8 @@ export {
   type CtrlProxyManager,
   type CtrlProxySetupResult,
 } from "./CtrlProxyManagerContracts";
-import { resolveSetupUser } from "./setupUser";
+import { foreignForwardError } from "./foreignForwardError";
+import { createSetupUserResolver } from "./setupUser";
 import * as fs from "fs/promises";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { ENV, readEnvBool, readEnvRaw } from "../config/env";
@@ -77,37 +78,21 @@ import { ctrlProxyManagerHost, type SavedPrototypeService } from "./ctrlProxyMan
 import { MapDeviceClientRegistry, type DeviceClientRegistry } from "./deviceClientRegistry";
 import { AndroidDeviceTraitsReader } from "../utils/android-cmdline-tools/deviceTraits";
 
-/** How long the resolved setup user is reused before `am get-current-user` is asked again. */
-const SETUP_USER_TTL_MS = 5_000;
-
 export class AndroidCtrlProxyManager implements CtrlProxyManager {
   // Kept on the manager for the observe availability-invalidation test seam.
   private cachedAvailability: { isAvailable: boolean; timestamp: number } | null = null;
-  private cachedSetupUser: { user: number | undefined; at: number } | null = null;
   private readonly accessibility: AndroidCtrlProxyAccessibility;
   private readonly deviceTraits: AndroidDeviceTraitsReader;
   private readonly rebind: AndroidCtrlProxyRebind;
   private readonly compatibility: AndroidCtrlProxyCompatibility;
   private readonly apkInstaller: AndroidCtrlProxyApkInstaller;
-  /**
-   * The user CtrlProxy is set up for: the foreground user on a headless-system-user automotive
-   * device, otherwise undefined and every command stays exactly as it was (#14918).
-   */
-  private async setupUser(): Promise<number | undefined> {
-    // Memoised briefly: a headless device would otherwise pay an adb round trip per status call, and a
-    // user switch is picked up within the window.
-    const now = this.timer.now();
-    if (this.cachedSetupUser && now - this.cachedSetupUser.at < SETUP_USER_TTL_MS) {
-      return this.cachedSetupUser.user;
-    }
-    const user = await resolveSetupUser(this.adb, this.device);
-    if (this.cachedSetupUser && this.cachedSetupUser.user !== user) {
-      // Installed and enabled answers belong to the previous user.
-      this.clearAvailabilityCache();
-    }
-    this.cachedSetupUser = { user, at: now };
-    return user;
-  }
+  /** The foreground user on an automotive device, otherwise undefined (#14918). */
+  private readonly setupUser = createSetupUserResolver({
+    adb: () => this.adb,
+    device: () => this.device,
+    timer: () => this.timer,
+    onUserChanged: () => this.clearAvailabilityCache(),
+  });
 
   private createAndroidCtrlProxyAccessibility(): AndroidCtrlProxyAccessibility {
     const manager = this;
@@ -413,29 +398,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     if (finding.kind === "none") {
       return;
     }
-    const ports = finding.ports.join(", ");
-    if (finding.kind === "foreign") {
-      throw new DeviceOwnedByOtherDaemonError(
-        this.device.deviceId,
-        finding.clientPids[0],
-        `CtrlProxy adb forward on port${finding.ports.length === 1 ? "" : "s"} ${ports} ` +
-          `is owned by another process. ${finding.message} Stop the owning daemon or use ` +
-          "another device.",
-      );
-    }
-    if (finding.ports.length === 0) {
-      throw new CtrlProxyForwardOwnershipUnreadableError(this.device.deviceId, finding.reason);
-    }
-    const remedy = finding.ports
-      .map((port) => `\`adb -s ${this.device.deviceId} forward --remove tcp:${port}\``)
-      .join(", ");
-    throw new DeviceOwnedByOtherDaemonError(
-      this.device.deviceId,
-      undefined,
-      `CtrlProxy forward ownership could not be established (${finding.reason}); ` +
-        `${finding.message} If no other daemon uses this device, remove the stale forward with ` +
-        `${remedy} and retry.`,
-    );
+    throw foreignForwardError(this.device.deviceId, finding);
   }
 
   /**

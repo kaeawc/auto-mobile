@@ -5,7 +5,12 @@ import { AndroidCtrlProxyRebind } from "../../src/ctrlProxy/AndroidCtrlProxyRebi
 import { ActionableError } from "../../src/models/ActionableError";
 import { AndroidCtrlProxyAccessibility } from "../../src/ctrlProxy/AndroidCtrlProxyAccessibility";
 import { grantLocalNetworkPermission } from "../../src/ctrlProxy/grantLocalNetworkPermission";
-import { resolveSetupUser, settingsCommand, userFlag } from "../../src/ctrlProxy/setupUser";
+import {
+  createSetupUserResolver,
+  resolveSetupUser,
+  settingsCommand,
+  userFlag,
+} from "../../src/ctrlProxy/setupUser";
 import { CTRL_PROXY_PACKAGE } from "../../src/ctrlProxy/constants";
 import { createExecResult } from "../../src/utils/execResult";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
@@ -193,5 +198,48 @@ describe("userStateBlock", () => {
 
   test("a dump with no block for the user is returned whole", () => {
     expect(AndroidCtrlProxyRebind.userStateBlock(dump, 99)).toBe(dump);
+  });
+});
+
+describe("createSetupUserResolver", () => {
+  function resolver(adb: FakeAdbExecutor, formFactor: "automotive" | "phone") {
+    const timer = new FakeTimer();
+    let changes = 0;
+    const resolve = createSetupUserResolver({
+      adb: () => adb,
+      device: () => ({ formFactor }),
+      timer: () => timer,
+      onUserChanged: () => void changes++,
+    });
+    return { resolve, timer, changes: () => changes };
+  }
+
+  test("asks once within the window and again after it", async () => {
+    const adb = automotiveWithForegroundUser("10");
+    const { resolve, timer } = resolver(adb, "automotive");
+    expect(await resolve()).toBe(10);
+    expect(await resolve()).toBe(10);
+    expect(adb.getExecutedCommands()).toHaveLength(1);
+    timer.advanceTime(5_001);
+    await resolve();
+    expect(adb.getExecutedCommands()).toHaveLength(2);
+  });
+
+  test("a user switch is picked up after the window and clears the status caches", async () => {
+    const adb = automotiveWithForegroundUser("10");
+    const { resolve, timer, changes } = resolver(adb, "automotive");
+    await resolve();
+    respond(adb, "am get-current-user", "11\n");
+    timer.advanceTime(5_001);
+    expect(await resolve()).toBe(11);
+    expect(changes()).toBe(1);
+  });
+
+  test("a phone never asks and never reports a change", async () => {
+    const adb = new FakeAdbExecutor();
+    const { resolve, changes } = resolver(adb, "phone");
+    expect(await resolve()).toBeUndefined();
+    expect(adb.getExecutedCommands()).toEqual([]);
+    expect(changes()).toBe(0);
   });
 });

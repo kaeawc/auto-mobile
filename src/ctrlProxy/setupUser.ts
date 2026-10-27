@@ -2,6 +2,7 @@ import { ActionableError } from "../models/ActionableError";
 import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { BootedDevice } from "../models";
 import { logger } from "../utils/logger";
+import type { Timer } from "../utils/SystemTimer";
 
 /**
  * The user CtrlProxy must be set up for, or undefined when the unmodified commands are right (#14918).
@@ -43,4 +44,33 @@ export function userFlag(user: number | undefined): string {
 /** `shell settings [--user <id>] <rest>`, exactly `shell settings <rest>` without a user. */
 export function settingsCommand(user: number | undefined, rest: string): string {
   return `shell settings${userFlag(user)} ${rest}`;
+}
+
+/** How long the resolved setup user is reused before `am get-current-user` is asked again. */
+const SETUP_USER_TTL_MS = 5_000;
+
+/**
+ * A memoised {@link resolveSetupUser}: a headless device would otherwise pay an adb round trip per
+ * status call, and a user switch is picked up within the window. When the resolved user changes,
+ * `onUserChanged` clears the installed and enabled answers, which belong to the previous user.
+ */
+export function createSetupUserResolver(source: {
+  adb: () => Pick<AdbExecutor, "executeCommand">;
+  device: () => Pick<BootedDevice, "formFactor">;
+  timer: () => Pick<Timer, "now">;
+  onUserChanged: () => void;
+}): () => Promise<number | undefined> {
+  let cached: { user: number | undefined; at: number } | null = null;
+  return async () => {
+    const now = source.timer().now();
+    if (cached && now - cached.at < SETUP_USER_TTL_MS) {
+      return cached.user;
+    }
+    const user = await resolveSetupUser(source.adb(), source.device());
+    if (cached && cached.user !== user) {
+      source.onUserChanged();
+    }
+    cached = { user, at: now };
+    return user;
+  };
 }

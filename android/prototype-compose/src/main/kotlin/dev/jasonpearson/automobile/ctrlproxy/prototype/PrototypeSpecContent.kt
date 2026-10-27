@@ -1532,16 +1532,17 @@ private fun prototypeNodeModifier(
   // Draw-time offset, scale and rotation, animated with the node's `animate` (#14208).
   modifier = modifier.prototypeStyleTransform(node).prototypeScrollMotion(node)
   // Outside the touch target and drawing, so the whole node (shadow included) shrinks as one.
-  val pressScale = node.source?.press?.scale ?: style.pressScale
-  val pressAlpha = node.source?.press?.alpha
-  if ((tappable || node.source?.press != null) && (pressScale != null || pressAlpha != null)) {
+  val press = node.source?.press
+  val pressScale = press?.scale ?: style.pressScale
+  val pressAlpha = press?.alpha
+  if (prototypePressApplies(tappable, press != null, pressScale, pressAlpha)) {
     if (!tappable && node.enabled) modifier = modifier.prototypeComponentPress(presses)
     modifier =
       modifier.prototypePressScale(
         presses,
         (pressScale ?: 1.0).toFloat(),
         (pressAlpha ?: 1.0).toFloat(),
-        drawOnly = node.source?.press != null,
+        drawOnly = press != null,
       )
   }
   // Outermost, as in Material components: reserves a 48 dp touch target around a smaller node
@@ -2063,3 +2064,11 @@ internal fun SemanticsPropertyReceiver.applyPrototypeAuthoredSemantics(
     }
   }
 }
+
+/** Press feedback draws for tappable nodes, and for any node that authors `press`. */
+private fun prototypePressApplies(
+  tappable: Boolean,
+  hasPress: Boolean,
+  scale: Double?,
+  alpha: Double?,
+): Boolean = (tappable || hasPress) && (scale != null || alpha != null)

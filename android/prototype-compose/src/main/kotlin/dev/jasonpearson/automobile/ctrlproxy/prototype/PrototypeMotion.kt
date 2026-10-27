@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
@@ -145,22 +146,20 @@ internal fun Modifier.prototypePressScale(
   drawOnly: Boolean = false,
 ): Modifier {
   val pressed by source.collectIsPressedAsState()
-  val spec =
-    if (
-      LocalPrototypeMotion.current &&
-        LocalPrototypeMotionProfile.current == PrototypeMotionProfile.FULL
-    )
-      if (LocalPrototypeExpressive.current) prototypeExpressiveSpec<Float>() else spring<Float>()
-    else snap()
   val target = if (pressed) scale else 1f
-  val current by animateFloatAsState(target, spec, label = "prototypePressScale")
+  val current by
+    animateFloatAsState(
+      target,
+      pressSpec(effects = false, fullOnly = true),
+      label = "prototypePressScale",
+    )
   val alphaTarget = if (pressed) pressAlpha else 1f
-  val alphaSpec =
-    if (LocalPrototypeMotion.current) {
-      if (LocalPrototypeExpressive.current) prototypeExpressiveSpec<Float>(effects = true)
-      else spring<Float>()
-    } else snap()
-  val currentAlpha by animateFloatAsState(alphaTarget, alphaSpec, label = "prototypePressAlpha")
+  val currentAlpha by
+    animateFloatAsState(
+      alphaTarget,
+      pressSpec(effects = true, fullOnly = false),
+      label = "prototypePressAlpha",
+    )
   val instant =
     !LocalPrototypeMotion.current ||
       LocalPrototypeMotionProfile.current != PrototypeMotionProfile.FULL
@@ -168,20 +167,40 @@ internal fun Modifier.prototypePressScale(
   ReportPrototypeMotion {
     (!instant && current != target) || (motion && currentAlpha != alphaTarget)
   }
-  if (drawOnly) {
-    val layer = rememberGraphicsLayer()
-    return drawWithContent {
-      layer.record { this@drawWithContent.drawContent() }
-      layer.scaleX = if (instant) target else current
-      layer.scaleY = if (instant) target else current
-      layer.alpha = if (!motion) alphaTarget else currentAlpha
-      drawLayer(layer)
+  val shownScale = { if (instant) target else current }
+  val shownAlpha = { if (!motion) alphaTarget else currentAlpha }
+  return if (drawOnly) prototypeDrawOnlyPress(shownScale, shownAlpha)
+  else
+    graphicsLayer {
+      alpha = shownAlpha()
+      scaleX = shownScale()
+      scaleY = shownScale()
     }
+}
+
+/** Spring (expressive springs when selected) while motion is on, snap otherwise. */
+@Composable
+private fun pressSpec(effects: Boolean, fullOnly: Boolean): FiniteAnimationSpec<Float> {
+  val enabled =
+    LocalPrototypeMotion.current &&
+      (!fullOnly || LocalPrototypeMotionProfile.current == PrototypeMotionProfile.FULL)
+  return when {
+    !enabled -> snap()
+    LocalPrototypeExpressive.current -> prototypeExpressiveSpec(effects)
+    else -> spring()
   }
-  return graphicsLayer {
-    alpha = if (!motion) alphaTarget else currentAlpha
-    scaleX = if (instant) target else current
-    scaleY = if (instant) target else current
+}
+
+/** Records the content into a layer so scale and alpha never change layout or hit bounds. */
+@Composable
+private fun Modifier.prototypeDrawOnlyPress(scale: () -> Float, alpha: () -> Float): Modifier {
+  val layer = rememberGraphicsLayer()
+  return drawWithContent {
+    layer.record { this@drawWithContent.drawContent() }
+    layer.scaleX = scale()
+    layer.scaleY = scale()
+    layer.alpha = alpha()
+    drawLayer(layer)
   }
 }
 

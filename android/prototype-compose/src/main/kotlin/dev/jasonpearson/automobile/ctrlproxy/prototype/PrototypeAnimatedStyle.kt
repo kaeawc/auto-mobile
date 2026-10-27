@@ -134,6 +134,60 @@ private fun Modifier.animatedTransform(
     }
 }
 
+/** One animated layout number; static when motion is off or the profile is not full. */
+@Composable
+private fun animatedLayoutNumber(target: Double, animate: PrototypeAnimate): Double {
+  if (LocalPrototypeMotionProfile.current != PrototypeMotionProfile.FULL) return target
+  val state =
+    animateFloatAsState(
+      target.toFloat(),
+      prototypeStyleAnimation(animate),
+      label = "prototypeLayout",
+    )
+  ReportPrototypeMotion { state.value != target.toFloat() }
+  return state.value.toDouble().coerceAtLeast(0.0)
+}
+
+@Composable
+private fun animatedLayoutCorner(
+  style: PrototypeStyle,
+  authored: List<PrototypeStyle>,
+  animate: PrototypeAnimate,
+): PrototypeCornerRadius? {
+  val animated =
+    authored.any { it.cornerRadius != null } && style.cornerRadius !is PrototypeCornerRadius.Token
+  if (!animated) return style.cornerRadius
+  val value = style.cornerRadius
+  val all = (value as? PrototypeCornerRadius.Dp)?.dp ?: 0.0
+  val corners = value as? PrototypeCornerRadius.Corners
+  return PrototypeCornerRadius.Corners(
+    topStart = animatedLayoutNumber(corners?.topStart ?: all, animate),
+    topEnd = animatedLayoutNumber(corners?.topEnd ?: all, animate),
+    bottomStart = animatedLayoutNumber(corners?.bottomStart ?: all, animate),
+    bottomEnd = animatedLayoutNumber(corners?.bottomEnd ?: all, animate),
+  )
+}
+
+@Composable
+private fun animatedLayoutPadding(
+  style: PrototypeStyle,
+  authored: List<PrototypeStyle>,
+  animate: PrototypeAnimate,
+): PrototypePadding? {
+  if (authored.none { it.padding != null }) return style.padding
+  return PrototypePadding(
+    top = animatedLayoutNumber(style.padding?.top ?: 0.0, animate),
+    bottom = animatedLayoutNumber(style.padding?.bottom ?: 0.0, animate),
+    start = animatedLayoutNumber(style.padding?.start ?: 0.0, animate),
+    end = animatedLayoutNumber(style.padding?.end ?: 0.0, animate),
+  )
+}
+
+@Composable
+private fun animatedLayoutDimension(value: PrototypeDimension?, animate: PrototypeAnimate) =
+  if (value is PrototypeDimension.Dp) PrototypeDimension.Dp(animatedLayoutNumber(value.dp, animate))
+  else value
+
 /** Layout styles keep stable animation slots when styleWhen adds or removes numeric fields. */
 @Composable
 internal fun prototypeAnimatedLayout(node: PrototypeRenderNode): PrototypeStyle {
@@ -141,55 +195,23 @@ internal fun prototypeAnimatedLayout(node: PrototypeRenderNode): PrototypeStyle 
   val animate = node.source?.animate ?: return style
   if (!LocalPrototypeMotion.current) return style
   val authored = listOfNotNull(node.source.style) + node.source.styleWhen.orEmpty().map { it.style }
-  @Composable
-  fun number(target: Double): Double {
-    if (LocalPrototypeMotionProfile.current != PrototypeMotionProfile.FULL) return target
-    val state =
-      animateFloatAsState(
-        target.toFloat(),
-        prototypeStyleAnimation(animate),
-        label = "prototypeLayout",
-      )
-    ReportPrototypeMotion { state.value != target.toFloat() }
-    return state.value.toDouble().coerceAtLeast(0.0)
-  }
-  @Composable
-  fun dimension(value: PrototypeDimension?): PrototypeDimension? =
-    if (value is PrototypeDimension.Dp) PrototypeDimension.Dp(number(value.dp)) else value
-  val corner =
-    if (
-      authored.any { it.cornerRadius != null } && style.cornerRadius !is PrototypeCornerRadius.Token
-    ) {
-      val value = style.cornerRadius
-      val all = (value as? PrototypeCornerRadius.Dp)?.dp ?: 0.0
-      val corners = value as? PrototypeCornerRadius.Corners
-      PrototypeCornerRadius.Corners(
-        topStart = number(corners?.topStart ?: all),
-        topEnd = number(corners?.topEnd ?: all),
-        bottomStart = number(corners?.bottomStart ?: all),
-        bottomEnd = number(corners?.bottomEnd ?: all),
-      )
-    } else style.cornerRadius
+  val corner = animatedLayoutCorner(style, authored, animate)
   val borderWidth =
-    if (authored.any { it.border != null }) number(style.border?.width ?: 0.0) else 0.0
+    if (authored.any { it.border != null }) {
+      animatedLayoutNumber(style.border?.width ?: 0.0, animate)
+    } else 0.0
   // Retain the authored border while its width returns to zero on removal.
   val border = style.border ?: authored.firstNotNullOfOrNull { it.border }
-  val padding =
-    if (authored.any { it.padding != null })
-      PrototypePadding(
-        top = number(style.padding?.top ?: 0.0),
-        bottom = number(style.padding?.bottom ?: 0.0),
-        start = number(style.padding?.start ?: 0.0),
-        end = number(style.padding?.end ?: 0.0),
-      )
-    else style.padding
+  val padding = animatedLayoutPadding(style, authored, animate)
+  val elevation =
+    if (authored.any { it.elevation != null }) {
+      animatedLayoutNumber(style.elevation ?: 0.0, animate)
+    } else style.elevation
   return style.copy(
-    width = dimension(style.width),
-    height = dimension(style.height),
+    width = animatedLayoutDimension(style.width, animate),
+    height = animatedLayoutDimension(style.height, animate),
     cornerRadius = corner,
-    elevation =
-      if (authored.any { it.elevation != null }) number(style.elevation ?: 0.0)
-      else style.elevation,
+    elevation = elevation,
     border = border?.copy(width = borderWidth),
     padding = padding,
   )

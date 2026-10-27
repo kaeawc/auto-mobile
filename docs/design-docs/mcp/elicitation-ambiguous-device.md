@@ -48,6 +48,17 @@ measurement below says otherwise.
   binding; callers must supply a stable key for caller isolation. The state is signed, not
   encrypted, and contains no secret or raw session key. Legacy elicitation is unchanged.
 
+## Switch and decline memory
+
+- `AUTOMOBILE_ELICITATION=off` (`src/server/elicitationPolicy.ts`, read per call) disables the
+  question in every era: the legacy wrapper, the MRTR wrapper and the task path return the refusal
+  without asking. The refusal is recorded with outcome `disabled`.
+- A legacy connection remembers a `decline` or `cancel` per candidate set (sorted, de-duplicated
+  device ids) in a `DeclineMemory` created once per `installToolCallDispatcher`, i.e. per stateful
+  client connection; the next identical ambiguity is recorded as `remembered` and not asked. `accept`,
+  `timeout`, `invalid` and `error` are not remembered, and a different set asks again. Modern requests
+  are stateless and remember nothing.
+
 ## Why it cannot stall an unattended call
 
 Headless agents are most traffic and rarely declare elicitation, so they take the unchanged path. A
@@ -77,6 +88,18 @@ Every process logs one `[elicitation] ...` info line per record. The server comp
 the stdio proxy has no telemetry sink and logs only. The `ElicitationRecorder` is injectable
 (`ambiguousDeviceElicitation.recorder` for the legacy path, an argument to `withAmbiguousDeviceMrtr`),
 so tests assert records with a fake.
+
+### Real-client conformance
+
+`test/server/claudeCodeElicitation.integration.test.ts` drives a real Claude Code (at least 2.1.311, named by
+`AUTOMOBILE_CLAUDE_BIN`; skipped without one, and a `claude` on PATH is never spawned) with a loopback stand-in for the
+Anthropic API against a stdio stub built on the production dispatcher. It runs in the advisory nightly
+job `claude-code-elicitation-conformance` against a pinned binary and never touches a device. Measured
+against 2.1.311: headless `-p` declares `elicitation: {form, url}` on `initialize` and answers the
+legacy question with `cancel`, so the call ends with the typed refusal. A stub that serves the
+modern era over stdio but does not answer `server/discover` is treated as a legacy peer: capabilities
+arrive on `initialize`, no request envelope is sent, and the modern wrapper records `not_offered`. The test
+branches on the envelope so it also covers Claude Code taking the 2026-07-28 path when it does.
 
 ### MRTR limits (modern era)
 

@@ -5,6 +5,7 @@ import {
   DefaultTaskManager,
   TASK_INTERRUPTED_MESSAGE,
 } from "../../../src/daemon/tasks/TaskManager";
+import { SKILLS_EXTENSION_ID } from "@modelcontextprotocol/server/ext/skills";
 import { TASKS_EXTENSION_ID } from "../../../src/daemon/tasks/mcpTasksExtension";
 import type { TaskLeaseHoldRequest } from "../../../src/daemon/tasks/taskLeaseKeepalive";
 import { currentTaskContext } from "../../../src/server/tasks/runAsTask";
@@ -102,9 +103,13 @@ describe("Tasks extension over the wire (#4668)", () => {
         resources: { subscribe: true, listChanged: true },
         tools: { listChanged: true },
         prompts: {},
+        extensions: { [SKILLS_EXTENSION_ID]: {} },
       }),
     );
-    expect(declaring.result.capabilities.extensions).toEqual({ [TASKS_EXTENSION_ID]: {} });
+    expect(declaring.result.capabilities.extensions).toEqual({
+      [SKILLS_EXTENSION_ID]: {},
+      [TASKS_EXTENSION_ID]: {},
+    });
   });
 
   test("a non-declaring call gets the synchronous result and no task is created", async () => {

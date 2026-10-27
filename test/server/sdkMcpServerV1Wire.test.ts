@@ -93,7 +93,7 @@ describe("direct server raw wire frames match the v1 SDK", () => {
     restoreHermeticServer?.();
   });
 
-  test("initialize advertises exactly the v1 capabilities, in v1 key order", async () => {
+  test("initialize advertises the v1 capabilities, in v1 key order, plus the skills extension", async () => {
     const response = JSON.parse(await wire.request(INITIALIZE));
     await wire.notify({ method: "notifications/initialized" });
 
@@ -102,6 +102,7 @@ describe("direct server raw wire frames match the v1 SDK", () => {
         resources: { subscribe: true, listChanged: true },
         tools: { listChanged: true },
         prompts: {},
+        extensions: { "io.modelcontextprotocol/skills": {} },
       }),
     );
   });

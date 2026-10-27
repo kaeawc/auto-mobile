@@ -11,10 +11,10 @@ shows reuse beats creating a fresh device.
 The broker is opt-in via `AUTOMOBILE_SESSION_BROKER_CONFIG`; every reuse mode
 defaults off.
 
-- **iOS**: `reuse.ios.mode` is `off`, `erase`, or `keep-booted`. Legacy
+- **iOS**: `reuse.ios.mode` is `off`, `erase`, `keep-booted`, or `minimal`. Legacy
   `reuseCleanDevices: true` still selects `erase` and cannot combine with a
-  `reuse.ios` block choosing another mode. `minimal` (#14682) is not accepted yet;
-  see [Planned: iOS minimal mode](#planned-ios-minimal-mode).
+  `reuse.ios` block choosing another mode. See
+  [iOS minimal mode](#ios-minimal-mode) for `minimal`.
 - **Android**: `reuseAndroidCleanDevices: true` plus `androidResetMode`
   (`snapshot` or `keep-booted`). The flag without a mode gives no reuse (release
   cannot prove unobservable state was restored, so the device is destroyed). iOS
@@ -33,12 +33,12 @@ erase (the absent-key `defaults delete` wording is not recognized), so the measu
 
 ## Choose an iOS reuse mode
 
-| Mode                        | What it does                                                           | Boundary                                                                  |
-| --------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| `off`                       | Destroys the device on release; next request creates one               | No idle device retained                                                   |
-| `erase`                     | Stops, erases, then boots the same device before reuse                 | Erase and boot checks must succeed, else destroyed/unavailable            |
-| `keep-booted`               | Runs platform cleaning, then a health check, leaving the device booted | Not a claim all state was cleaned (see "What keep-booted does not clean") |
-| `minimal` (planned, #14682) | Not accepted by the schema                                             | No erase fallback; trusts its steps without a diff                        |
+| Mode               | What it does                                                                                                                    | Boundary                                                                  |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `off`              | Destroys the device on release; next request creates one                                                                        | No idle device retained                                                   |
+| `erase`            | Stops, erases, then boots the same device before reuse                                                                          | Erase and boot checks must succeed, else destroyed/unavailable            |
+| `keep-booted`      | Runs platform cleaning, then a health check, leaving the device booted                                                          | Not a claim all state was cleaned (see "What keep-booted does not clean") |
+| `minimal` (#14682) | Keeps the device booted; uninstalls session apps, resets keychain and privacy, restores appearance, content size and pasteboard | No erase fallback; no baseline diff (see "iOS minimal mode")              |
 
 In `keep-booted`, `maxUses` (default 10; 20 in `erase` mode, where it has no effect) forces every Nth release to erase instead;
 on success the same device returns to idle and later releases can use keep-booted
@@ -63,15 +63,41 @@ requires `defaults.ios`. `iosClassifications` is optional (default `[]`). The
 schema rejects `reuseCleanDevices: true` alongside a `reuse.ios` block that does
 not select `erase`.
 
-### Planned: iOS minimal mode
+### iOS minimal mode
 
-#14682 plans `reuse.ios.mode: "minimal"`; not implemented. A minimal release would
-keep the simulator booted and only (1) terminate and uninstall the session's apps,
-(2) reset keychain and all privacy grants, (3) restore appearance, content size and
-pasteboard to the pool-entry baseline. No baseline diff, never falls back to erase,
-so it can miss changed locale, simulated location, or edits to a preinstalled app.
-`maxUses` retirement would still apply; handling of a failed minimal step (leave
-`cleanup_pending` vs destroy) is undesigned.
+`reuse.ios.mode: "minimal"` (#14682) keeps the simulator booted and runs only these
+steps on release, in order, each with its own time budget (`AUTOMOBILE_IOS_RESET_STEP_BUDGET_MS`):
+
+1. terminate and uninstall each app the session installed (from the mutation journal),
+2. `simctl keychain reset`,
+3. `simctl privacy reset all`,
+4. `simctl ui appearance light` and `content_size large` (the defaults a broker-created
+   simulator enters the pool with),
+5. empty the pasteboard.
+
+It runs no baseline diff and no health probe, and it never falls back to erase or a
+reboot. Any failed or timed-out step, an incomplete mutation recording, or the
+`maxUses`-th release (default 5; keep-booted uses 10) returns a `pending` reset
+outcome, so the broker destroys the simulator and the next acquisition creates a
+fresh one. A failure is recorded per session: a redrive repeats the destroy outcome
+instead of cleaning a half-cleaned simulator again. Lost ownership still aborts the
+release rather than destroying.
+
+```json
+{ "reuse": { "ios": { "mode": "minimal", "maxUses": 5 } } }
+```
+
+The only tunable is `maxUses`; `fallback` is rejected for this mode.
+
+**Not reverted** (the trade-off for speed): locale, language and calendar, simulated
+location, status-bar overrides, increase-contrast, reduce-motion and bold text,
+notifications, contacts, calendar and photo stores, trusted certificates and
+profiles, edits to preinstalled apps, app-group and shared-container contents of
+apps the session did not install, and anything the journal did not record.
+Choose `keep-booted` when those matter; choose `minimal` when sessions only install
+and use their own apps and the cheaper release is worth the weaker isolation.
+Device verification is pending (#14786, #14787 describe the keep-booted siblings of
+the same simctl behaviours).
 
 ## Choose an Android reset mode
 

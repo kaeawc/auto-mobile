@@ -134,6 +134,31 @@ describe("session broker host configuration", () => {
     ).toEqual({ mode: "erase", maxUses: 20, fallback: "erase" });
   });
 
+  test("iOS minimal defaults to retiring every 5th release and takes no fallback (#14682)", () => {
+    expect(
+      iosReusePolicy(parseSessionBrokerHostConfig(config({ reuse: { ios: { mode: "minimal" } } }))),
+    ).toEqual({ mode: "minimal", maxUses: 5 });
+    expect(
+      iosReusePolicy(
+        parseSessionBrokerHostConfig(config({ reuse: { ios: { mode: "minimal", maxUses: 2 } } })),
+      ),
+    ).toEqual({ mode: "minimal", maxUses: 2 });
+    for (const ios of [
+      { mode: "minimal", fallback: "erase" },
+      { mode: "minimal", fallback: "destroy" },
+      { mode: "minimal", maxUses: 0 },
+    ]) {
+      expect(() => parseSessionBrokerHostConfig(config({ reuse: { ios } }))).toThrow(
+        "Invalid session broker host configuration",
+      );
+    }
+    expect(() =>
+      parseSessionBrokerHostConfig(
+        config({ reuseCleanDevices: true, reuse: { ios: { mode: "minimal" } } }),
+      ),
+    ).toThrow("remove it to select minimal");
+  });
+
   test("iOS keep-booted accepts a destroy fallback; erase mode keeps erase only (#15232)", () => {
     expect(
       iosReusePolicy(

@@ -346,7 +346,8 @@ internal object PrototypeStrictPolicy {
       when {
         key == "linkify" ->
           (child as? JsonObject)?.get("onTap")?.let { scan(it, "onTap", routeAlias) }
-        key !in listOf("series", "effects", "keyframes", "scrollLinked", "scrollTransition", "press") ->
+        key !in
+          listOf("series", "effects", "keyframes", "scrollLinked", "scrollTransition", "press") ->
           scan(child, key, routeAlias)
       }
     }

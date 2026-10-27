@@ -17,6 +17,8 @@ enum PrototypeBundleCapabilities {
         if spec["derive"] != nil { need("format") }
         if spec["theme"] != nil { need("theme_modes") }
         if spec["storage"] != nil { need("storage") }
+        if PrototypeContractValidator.strings(spec["storage"]?.objectFields?["keys"])
+            .contains(where: { $0.hasPrefix("stack:") }) { need("routes") }
         if spec["window"]?.objectFields?["backdrop"] != nil { need("backdrop") }
         if spec["platform"] != nil || spec["requires"] != nil { need("platform") }
         if case let .array(modules) = spec["requires"]?.objectFields?["platform"] {
@@ -123,6 +125,9 @@ enum PrototypeBundleCapabilities {
         guard let fields = value.objectFields else { return }
         if fields["onAppear"] != nil { names.insert("prototype_timers_v1") }
         let type = fields["type"]?.stringValue
+        if (type == "stack" && fields["routes"] != nil) ||
+            (["push", "replace"].contains(type ?? "") && fields["params"] != nil) ||
+            (type == "pop" && fields["force"] != nil) || type == "setStack" { names.insert("prototype_routes_v1") }
         if type == "startTimer" || type == "cancelTimer" { names.insert("prototype_timers_v1") }
         if type == "request" {
             names.insert("prototype_network_v1")

@@ -49,6 +49,7 @@ function capture(name: string, spec: unknown, options?: PrototypeStrictOptions):
       spec,
       ...(options ? { options } : {}),
       expectedPath: result.error.path,
+      ...(name.startsWith("strict-gate-") ? { expectedMessage: result.error.message } : {}),
     });
   }
 }

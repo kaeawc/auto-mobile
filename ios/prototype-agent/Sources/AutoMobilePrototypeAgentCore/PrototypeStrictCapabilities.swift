@@ -23,12 +23,14 @@ enum PrototypeStrictCapabilities {
         if spec["data"] != nil { need("data_model") }
         if spec["derive"] != nil { need("format") }
         if spec["storage"] != nil { need("storage") }
+        if PrototypeContractValidator.strings(spec["storage"]?.objectFields?["keys"])
+            .contains(where: { $0.hasPrefix("stack:") }) { need("routes") }
         if spec["window"]?.objectFields?["backdrop"] != nil { need("backdrop") }
         if let colors = spec["theme"]?.objectFields?["colors"]?.objectFields,
            colors["light"] != nil || colors["dark"] != nil { need("theme_modes") }
-        func scan(_ value: JSONValue, field: String = "") {
+        func scan(_ value: JSONValue, field: String = "", routeAlias: Bool = false) {
             if case let .array(items) = value { for item in items {
-                scan(item)
+                scan(item, routeAlias: routeAlias)
             }; return }
             guard let fields = value.objectFields else { return }
             if fields.count == 1, fields["value"] != nil { return }
@@ -36,6 +38,9 @@ enum PrototypeStrictCapabilities {
                 if text.contains("{t:") { need("strings") }
                 if PrototypeDataText.substitutionLength(text, data: nil).recognized { need("data_model") }
             }
+            let routeAlias = routeAlias || fields["repeat"]?.objectFields?["as"] == .string("route")
+            if !routeAlias, (PrototypeRouteFields.own(fields, path: "") + PrototypeRouteFields.action(fields, path: ""))
+                .contains(where: { !PrototypeRoutes.fields($0.text).isEmpty }) { need("routes") }
             var own = fields
             PrototypeRepeat.bindTextFields(&own) { text in textBinding(text); return text }
             if PrototypeStylePolishV2.themedBorder(fields) { need("theme_modes") }
@@ -65,6 +70,9 @@ enum PrototypeStrictCapabilities {
             if ["topAppBar", "bottomNav", "tabBar"].contains(type),
                fields["onScroll"] != nil || fields["scroll"] != nil { need("bar_scroll") }
             if let feature = types[type] { need(feature) }
+            if (type == "stack" && fields["routes"] != nil) ||
+                (["push", "replace"].contains(type) && fields["params"] != nil) ||
+                (type == "pop" && fields["force"] != nil) || type == "setStack" { need("routes") }
             if fields["ios"] != nil || fields["android"] != nil { need("platform_namespace") }
             if fields["sharedKey"] != nil { need("shared_element") }
             if PrototypeMediaItems.usedBy(fields) { result.insert(PrototypeMediaItems.capability) }
@@ -152,9 +160,10 @@ enum PrototypeStrictCapabilities {
                 if key == "light" || key == "dark", !field.isEmpty { need("theme_modes") }
                 // An effect's own `animate`, colours and params are not spec features of their own.
                 if key == "linkify" {
-                    if let actions = child.objectFields?["onTap"] { scan(actions, field: "onTap") }
+                    if let actions = child
+                        .objectFields?["onTap"] { scan(actions, field: "onTap", routeAlias: routeAlias) }
                 } else if !["series", "effects", "scrollLinked", "scrollTransition", "press"]
-                    .contains(key) { scan(child, field: key) }
+                    .contains(key) { scan(child, field: key, routeAlias: routeAlias) }
             }
         }
         if let root = spec["root"] { scan(root) }

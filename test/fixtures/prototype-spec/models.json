@@ -926,5 +926,14 @@
   "actionCancelTimer": {
     "type": "cancelTimer",
     "id": "tick"
+  },
+  "actionSetStack": {
+    "type": "setStack",
+    "stack": "targetStack",
+    "path": [
+      {
+        "screen": "home"
+      }
+    ]
   }
 }

@@ -267,7 +267,10 @@ final class PrototypePlatformRegistryTests: XCTestCase {
         let id = try job(session.takePlatformCommands()).call.callId
         let events = session.completePlatformCall(
             id,
-            .success(.string(String(repeating: "x", count: 900_000))),
+            .success(.string(String(
+                repeating: "x",
+                count: PrototypeContractValidator.limit("MAX_PROTOTYPE_DATA_WRITE_BYTES") + 1
+            ))),
             durationMs: 1
         )
         XCTAssertNil(session.data?["result"])

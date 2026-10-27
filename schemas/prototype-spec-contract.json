@@ -2,7 +2,7 @@
   "patterns": {
     "pathKey": "^[A-Za-z_][A-Za-z0-9_]*$(?![\\s\\S])",
     "stateKey": "^[A-Za-z_][A-Za-z0-9_]{0,63}$(?![\\s\\S])",
-    "boundKey": "^(?:[A-Za-z_][A-Za-z0-9_]{0,63}|(?=[^{]*\\{)(?:[A-Za-z0-9_]|\\{(?:index|[A-Za-z_][A-Za-z0-9_]{0,63}\\.[A-Za-z_][A-Za-z0-9_]{0,63})\\})+)$(?![\\s\\S])",
+    "boundKey": "^(?:[A-Za-z_][A-Za-z0-9_]{0,63}|(?=[^{]*\\{)(?:[A-Za-z0-9_]|\\{(?:route\\.[A-Za-z_][A-Za-z0-9_]*|index|(?!route\\.)[A-Za-z_][A-Za-z0-9_]{0,63}\\.[A-Za-z_][A-Za-z0-9_]{0,63})\\})+)$(?![\\s\\S])",
     "color": "^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$(?![\\s\\S])",
     "blankText": "^[\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]*$(?![\\s\\S])",
     "numberToken": "^-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$(?![\\s\\S])",
@@ -1637,6 +1637,13 @@
                 "name": "stackTransition"
               },
               "optional": true
+            },
+            "params": {
+              "rule": {
+                "kind": "ref",
+                "name": "routeParams"
+              },
+              "optional": true
             }
           }
         },
@@ -1655,6 +1662,12 @@
                 "kind": "string"
               },
               "optional": false
+            },
+            "force": {
+              "rule": {
+                "kind": "boolean"
+              },
+              "optional": true
             }
           }
         },
@@ -1702,6 +1715,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "stackTransition"
+              },
+              "optional": true
+            },
+            "params": {
+              "rule": {
+                "kind": "ref",
+                "name": "routeParams"
               },
               "optional": true
             }
@@ -2522,6 +2542,36 @@
                     }
                   }
                 ]
+              },
+              "optional": false
+            }
+          }
+        },
+        "setStack": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["setStack"]
+              },
+              "optional": false
+            },
+            "stack": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": false
+            },
+            "path": {
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "routeEntry"
+                }
               },
               "optional": false
             }
@@ -12524,6 +12574,17 @@
               },
               "optional": true
             },
+            "routes": {
+              "rule": {
+                "kind": "record",
+                "maxEntries": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "route"
+                }
+              },
+              "optional": true
+            },
             "press": {
               "rule": {
                 "kind": "ref",
@@ -18753,6 +18814,121 @@
         }
       }
     },
+    "routeParams": {
+      "kind": "record",
+      "maxEntries": 16,
+      "item": {
+        "kind": "choice",
+        "options": [
+          {
+            "kind": "scalar"
+          },
+          {
+            "kind": "object",
+            "fields": {
+              "state": {
+                "rule": {
+                  "kind": "boundKey"
+                },
+                "optional": false
+              }
+            }
+          },
+          {
+            "kind": "object",
+            "fields": {
+              "item": {
+                "rule": {
+                  "kind": "key"
+                },
+                "optional": false
+              }
+            }
+          },
+          {
+            "kind": "object",
+            "fields": {
+              "index": {
+                "rule": {
+                  "kind": "enum",
+                  "values": [true]
+                },
+                "optional": false
+              }
+            }
+          },
+          {
+            "kind": "object",
+            "fields": {
+              "data": {
+                "rule": {
+                  "kind": "pointer"
+                },
+                "optional": false
+              }
+            }
+          }
+        ]
+      }
+    },
+    "routeEntry": {
+      "kind": "object",
+      "fields": {
+        "screen": {
+          "rule": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        "params": {
+          "rule": {
+            "kind": "ref",
+            "name": "routeParams"
+          },
+          "optional": true
+        }
+      }
+    },
+    "route": {
+      "kind": "object",
+      "fields": {
+        "params": {
+          "rule": {
+            "kind": "record",
+            "maxEntries": 16,
+            "item": {
+              "kind": "enum",
+              "values": ["string", "number", "boolean"]
+            }
+          },
+          "optional": true
+        },
+        "onEnter": {
+          "rule": {
+            "kind": "array",
+            "min": 1,
+            "max": 32,
+            "item": {
+              "kind": "ref",
+              "name": "action"
+            }
+          },
+          "optional": true
+        },
+        "onBack": {
+          "rule": {
+            "kind": "array",
+            "min": 1,
+            "max": 32,
+            "item": {
+              "kind": "ref",
+              "name": "action"
+            }
+          },
+          "optional": true
+        }
+      }
+    },
     "press": {
       "kind": "object",
       "atLeastOne": true,
@@ -19223,5 +19399,37 @@
     "headers",
     "query",
     "strings"
-  ]
+  ],
+  "eventPayloads": {
+    "screen_changed": {
+      "kind": "object",
+      "fields": {
+        "screen": {
+          "rule": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        "depth": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 1,
+            "max": 32
+          },
+          "optional": false
+        },
+        "params": {
+          "rule": {
+            "kind": "record",
+            "maxEntries": 16,
+            "item": {
+              "kind": "scalar"
+            }
+          },
+          "optional": true
+        }
+      }
+    }
+  }
 }

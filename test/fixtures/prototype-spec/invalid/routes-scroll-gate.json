@@ -1,0 +1,43 @@
+{
+  "spec": {
+    "id": "routes-review",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "stack",
+      "id": "nav",
+      "start": "home",
+      "screens": {
+        "home": {
+          "type": "scroll",
+          "onStartReached": [
+            {
+              "type": "pop",
+              "stack": "nav",
+              "force": true
+            }
+          ],
+          "child": {
+            "type": "text",
+            "text": "x"
+          }
+        },
+        "detail": {
+          "type": "text",
+          "text": "Detail"
+        }
+      },
+      "routes": {
+        "detail": {}
+      }
+    }
+  },
+  "options": {
+    "supportedCapabilities": ["prototype_chat_scroll_v1", "prototype_stack_v1"]
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_routes_v1"
+}

@@ -21,7 +21,9 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
         // modules (#14329) are advertised through the platform registry the agent builds at launch,
         // not through the static list this test reads.
         // no renderer yet, and so do device media items (#14192).
+        // Routes are contract-only until navigation and restore semantics ship.
         let exclusions: Set<String> = [
+            "prototype_routes_v1",
             "prototype_platform_test_v1", "prototype_platform_namespace_v1",
             // #15131: custom AGSL shaders are Android-only by owner decision.
             "prototype_custom_shaders_v1",

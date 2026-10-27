@@ -454,13 +454,25 @@ class SavedPrototypeActivityTest {
     SavedPrototypeActivityDependencies.storageStore = { storage }
     savedStoragePrototype()
     val activity = launch()
+    compose.waitUntil(timeoutMillis = 1_000) {
+      root(activity).find("saved-prototype-state-ready") != null
+    }
     compose.onNodeWithTag("saved-node").assertIsOn()
     assertEquals(0, SavedPrototypeEvents.buffer.size)
     click(activity, "saved-node")
+    // Compose idleness does not guarantee that the interaction queue has published the change.
+    // Await it before reloading, so replacement cannot discard the queued toggle.
+    compose.waitUntil(timeoutMillis = 1_000) { SavedPrototypeEvents.buffer.size == 1 }
     compose.onNodeWithTag("saved-node").assertIsOff()
 
     controllers.single().newIntent(SavedPrototypeLaunch.intent(context, "panel"))
     compose.waitForIdle()
+    compose.waitUntil(timeoutMillis = 1_000) {
+      store.loadCalls.size == 2 &&
+        root(activity).find("saved-prototype-state-ready") != null &&
+        storage.stored("panel")?.values?.get("state:dark") == JsonPrimitive(false) &&
+        SavedPrototypeEvents.buffer.size == 1
+    }
     compose.onNodeWithTag("saved-node").assertIsOff()
     assertEquals(JsonPrimitive(false), storage.stored("panel")?.values?.get("state:dark"))
     assertEquals(1, SavedPrototypeEvents.buffer.size)

@@ -64,6 +64,9 @@ describe("logger trace context provider", () => {
         return true;
       }) as typeof process.stderr.write);
       try {
+        // The provider is process-wide; a file earlier in a shared process (daemon startup) may have
+        // installed it.
+        setLogContextProvider(undefined);
         const component = mod.resolveProcessLogPrefix(process.argv, process.pid);
         const expected = `${formatLogRecord(format, component, "INFO", "same message", [{ safe: 1 }])}\n`;
         withMcpTrace(ctx, () => mod.logger.info("same message", { safe: 1 }));

@@ -82,12 +82,19 @@ internal class EmbeddedPrototypeAssets(private val assets: PrototypeAssets) : Pr
     }
   }
 
-  override fun lookup(id: String): PrototypeAssetInfo? =
-    assets.shaderBytes(id)?.let {
-      PrototypeAssetInfo(id, "application/vnd.automobile.agsl", it.size)
-    } ?: assets.imageBytes(id)?.let { PrototypeAssetInfo(id, "application/octet-stream", it.size) }
+  override fun lookup(id: String): PrototypeAssetInfo? = lookup(id, shader = false)
 
-  override fun read(id: String): ByteArray? = assets.shaderBytes(id) ?: assets.imageBytes(id)
+  override fun read(id: String): ByteArray? = read(id, shader = false)
+
+  override fun lookup(id: String, shader: Boolean): PrototypeAssetInfo? =
+    if (shader)
+      assets.shaderBytes(id)?.let {
+        PrototypeAssetInfo(id, "application/vnd.automobile.agsl", it.size)
+      }
+    else assets.imageBytes(id)?.let { PrototypeAssetInfo(id, "application/octet-stream", it.size) }
+
+  override fun read(id: String, shader: Boolean): ByteArray? =
+    if (shader) assets.shaderBytes(id) else assets.imageBytes(id)
 
   override fun file(id: String): File? = fontFiles[id]
 

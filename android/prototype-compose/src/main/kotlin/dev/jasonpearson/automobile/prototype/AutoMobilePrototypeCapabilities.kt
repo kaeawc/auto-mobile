@@ -10,7 +10,10 @@ object AutoMobilePrototype {
    * capabilities against this set.
    */
   val capabilities: Set<String>
-    get() = (baseCapabilities + prototypeShaderCapabilities(Build.VERSION.SDK_INT)).sorted().toSet()
+    get() = capabilitiesForSdk(Build.VERSION.SDK_INT)
+
+  internal fun capabilitiesForSdk(sdkInt: Int): Set<String> =
+    (baseCapabilities + prototypeShaderCapabilities(sdkInt)).sorted().toSet()
 
   private val baseCapabilities: Set<String> =
     setOf(

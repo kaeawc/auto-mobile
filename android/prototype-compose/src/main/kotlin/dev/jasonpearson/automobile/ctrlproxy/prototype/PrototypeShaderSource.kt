@@ -102,3 +102,12 @@ private val RESERVED_NAMES =
     .trim()
     .split(Regex("\\s+"))
     .toSet()
+
+/** Android/SkSL diagnostics use `error: N:` or `line N:` for source locations. */
+internal fun prototypeShaderSourceError(message: String): String =
+  SHADER_ERROR_LINE.replace(message) { match ->
+    val line = match.groupValues[2].toIntOrNull() ?: return@replace match.value
+    "${match.groupValues[1]}${(line - 1).coerceAtLeast(1)}:"
+  }
+
+private val SHADER_ERROR_LINE = Regex("((?:error: |line ))([0-9]+):")

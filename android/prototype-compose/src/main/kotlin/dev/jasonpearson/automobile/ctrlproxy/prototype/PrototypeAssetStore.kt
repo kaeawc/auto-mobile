@@ -73,6 +73,11 @@ interface PrototypeAssetSource {
   /** Call off the main thread. Null when unknown, or when the OS evicted the file. */
   fun read(id: String): ByteArray?
 
+  /** Typed reads keep independently supplied embedded image and shader ids disjoint. */
+  fun lookup(id: String, shader: Boolean): PrototypeAssetInfo? = lookup(id)
+
+  fun read(id: String, shader: Boolean): ByteArray? = read(id)
+
   /** The stored file for [id] (fonts load from a path); null when unknown or not file-backed. */
   fun file(id: String): File? = null
 

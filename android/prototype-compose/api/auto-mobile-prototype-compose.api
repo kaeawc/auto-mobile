@@ -3,6 +3,7 @@ public final class dev.jasonpearson.automobile.prototype.AutoMobilePrototype {
   public static final dev.jasonpearson.automobile.prototype.AutoMobilePrototype INSTANCE;
   public static final int $stable;
   public final java.util.Set<java.lang.String> getCapabilities();
+  public final java.util.Set<java.lang.String> capabilitiesForSdk$prototype_compose(int);
 }
 Compiled from "AutoMobilePrototype.kt"
 public final class dev.jasonpearson.automobile.prototype.AutoMobilePrototypeKt {
@@ -17,6 +18,8 @@ public final class dev.jasonpearson.automobile.prototype.EmbeddedPrototypeAssets
   public final void prepareFonts(dev.jasonpearson.automobile.protocol.PrototypeSpec, java.io.File);
   public dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAssetInfo lookup(java.lang.String);
   public byte[] read(java.lang.String);
+  public dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAssetInfo lookup(java.lang.String, boolean);
+  public byte[] read(java.lang.String, boolean);
   public java.io.File file(java.lang.String);
   public void setChangeListener(dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAssetChangeListener);
   public final void close();

@@ -98,6 +98,23 @@ class PrototypeShaderCompilerTest {
   }
 
   @Test
+  fun `compiler diagnostics subtract only the injected source line`() {
+    val message = "error: 3: unknown name\nline 5: invalid expression\n2 errors"
+    val compiler =
+      AndroidPrototypeShaderCompiler({ 33 }) { _, _ ->
+        throw IllegalArgumentException(message)
+      }
+    assertEquals(
+      "error: 2: unknown name\nline 4: invalid expression\n2 errors",
+      compiler.compile("bad").exceptionOrNull()?.message,
+    )
+    assertEquals(
+      message,
+      compiler.compile("uniform shader content;\nbad").exceptionOrNull()?.message,
+    )
+  }
+
+  @Test
   fun `only declared finite float values are set and bounds are clamped`() {
     assertEquals(
       mapOf("strength" to 1_000_000f),
@@ -118,7 +135,7 @@ class PrototypeShaderCompilerTest {
         .isFailure,
     )
     assertEquals(
-      emptyMap<String, Float>(),
+      mapOf("strength" to 0f),
       prototypeShaderUniformValues(setOf("strength"), emptyMap()),
     )
   }
@@ -135,14 +152,22 @@ class PrototypeShaderCompilerTest {
 
         override fun setChangeListener(listener: PrototypeAssetChangeListener?) = Unit
       }
-    val result = runCatching {
-      prototypeShaderEffect(
-        source,
-        dev.jasonpearson.automobile.protocol.PrototypeShader("effect", mapOf("undeclared" to 1.0)),
+    val session = PrototypeShaderSession()
+    val state =
+      PrototypeShaderEffectState(
+        session,
+        session.register("node"),
         PrototypeShaderCompiler { Result.success(compiled) },
+        { shader, uniforms -> shader.effect(uniforms) },
       )
-    }
-    assertTrue(result.exceptionOrNull()?.message.orEmpty().contains("not declared"))
+    val program = checkNotNull(state.prepare(source, "effect", 0))
+    assertNull(
+      state.effect(
+        program,
+        dev.jasonpearson.automobile.protocol.PrototypeShader("effect", mapOf("undeclared" to 1.0)),
+      ),
+    )
+    assertTrue(session.failures().values.single().contains("not declared"))
     assertEquals(0, compiled.effectCalls)
   }
 

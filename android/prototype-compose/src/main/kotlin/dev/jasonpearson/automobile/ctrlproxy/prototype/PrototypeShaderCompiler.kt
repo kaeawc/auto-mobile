@@ -40,7 +40,12 @@ class AndroidPrototypeShaderCompiler(
     val declarations = prototypeShaderDeclarations(source)
     // RenderEffect requires the named content input even for a procedural shader that ignores it.
     val program = if (declarations.content) source else "uniform shader content;\n$source"
-    platformCompile(program, declarations.floats)
+    try {
+      platformCompile(program, declarations.floats)
+    } catch (error: IllegalArgumentException) {
+      if (declarations.content) throw error
+      throw IllegalArgumentException(prototypeShaderSourceError(error.message.orEmpty()), error)
+    }
   }
 }
 
@@ -49,13 +54,14 @@ internal fun prototypeShaderUniformValues(
   supplied: Map<String, Double>,
 ): Map<String, Float> {
   require(supplied.size <= 16) { "Custom AGSL shaders permit at most 16 float uniforms." }
-  return supplied.mapValues { (name, value) ->
+  val values = supplied.mapValues { (name, value) ->
     require(name in declared) {
       "AGSL uniform '$name' is not declared as a scalar float in the compiled source."
     }
     require(value.isFinite()) { "AGSL uniform '$name' must be finite." }
     value.coerceIn(-1_000_000.0, 1_000_000.0).toFloat()
   }
+  return declared.associateWith { values[it] ?: 0f }
 }
 
 /** Same whole-code-point, 2 KiB UTF-8 cap as the host's boundedPrototypeError. */

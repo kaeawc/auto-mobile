@@ -220,6 +220,7 @@ fun PrototypeSpecContent(
       LocalPrototypeRetainedSubtrees provides remember(root) { prototypeRetainedSubtrees(root) },
       LocalPrototypeHandleVisuals provides remember(root) { prototypeHandleVisuals(root) },
     ) {
+      PrototypeShaderFrameSampling(checkNotNull(LocalPrototypeShaderSession.current))
       val fillsWindow = LocalPrototypeFillsWindow.current
       Box(
         Modifier.onGloballyPositioned { menuLayers.windowBounds = it.boundsInRoot() }

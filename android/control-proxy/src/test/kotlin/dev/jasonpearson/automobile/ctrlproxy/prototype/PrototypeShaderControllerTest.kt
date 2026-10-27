@@ -80,10 +80,19 @@ class PrototypeShaderControllerTest {
 
   @Test
   fun `inspect reports shader fallback and in-place show preserves it until reset`() = runBlocking {
-    runtime.shaderSession.guard("root/node").disable("Shader draw failed: test failure")
+    val session = runtime.shaderSession
+    val first = session.register("root/node")
+    val second = session.register("root/node")
+    session.setActive(first, true)
+    session.setActive(second, true)
+    session.setVisible(true)
+    session.frame(0)
+    repeat(8) { session.frame((it + 1) * 25_000_000L) }
+    session.unregister(first)
+    session.unregister(second)
     controller.inspect("inspect")
     assertEquals(
-      mapOf("root/node" to "Shader draw failed: test failure"),
+      mapOf("prototype" to "frame budget exceeded while shaders were active"),
       statuses.last().single().shaderFailures,
     )
     controller.show("in-place", spec)

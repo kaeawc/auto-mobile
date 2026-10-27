@@ -24,7 +24,9 @@ internal object PrototypeShareValues {
 
   private fun templateToken(token: String): Boolean =
     when {
-      token.startsWith("item.") -> PrototypeSpecContract.stateKeyPattern.matches(token.substring(5))
+      token.split('.').let {
+        it.size == 2 && it.all(PrototypeSpecContract.stateKeyPattern::matches)
+      } -> true
       token.startsWith("data:") -> PrototypeDataPointer.isValid(token.substring(5))
       else -> PrototypeSpecContract.stateKeyPattern.matches(token)
     }

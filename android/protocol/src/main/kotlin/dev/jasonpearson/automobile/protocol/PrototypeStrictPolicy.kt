@@ -77,12 +77,24 @@ internal object PrototypeStrictPolicy {
       }
     }
     val shares = SharePolicy.fields(context)
-    val leaked =
+    val sinks =
       (requestFields(context) + channelFields + shares)
         .sortedBy { it.path }
-        .firstOrNull { field ->
-          (isSinkBinding(field, requests) || field in shares) && bindsSecure(field, scopes, secure)
-        }
+        .filter { isSinkBinding(it, requests) || it in shares }
+    var expandedBytes = 0L
+    for (field in sinks) {
+      val scope = scopes.firstOrNull { field.path.startsWith("${it.path}.children[") }
+      expandedBytes +=
+        field.text.toByteArray(Charsets.UTF_8).size.toLong() * maxOf(1, scope?.items?.size ?: 1)
+      if (expandedBytes > 4194304)
+        return PrototypeSpecError(
+          field.path,
+          "Secure binding scan exceeds 4194304 expanded UTF-8 bytes",
+        )
+    }
+    val leaked = sinks.firstOrNull { field ->
+      bindsSecure(field, scopes, secure)
+    }
     if (leaked != null)
       return PrototypeSpecError(
         leaked.path,

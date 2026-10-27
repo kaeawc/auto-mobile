@@ -38,13 +38,19 @@ enum PrototypeShare {
         keys.sorted { $0.utf16.lexicographicallyPrecedes($1.utf16) }
     }
 
+    private static func forbidden(_ scalar: Unicode.Scalar) -> Bool {
+        scalar.value <= 31 || (127 ... 160).contains(scalar.value) ||
+            (0x2028 ... 0x202E).contains(scalar.value) || (0x2066 ... 0x2069).contains(scalar.value)
+    }
+
     private static func validURL(_ value: String, dynamic: Bool = false) -> Bool {
-        let lower = value.lowercased()
+        // All delimiters are scalars: a combining mark cannot hide punctuation in a grapheme.
+        let lower = String(value.unicodeScalars.prefix(8)).lowercased()
         let start: Int
-        if lower.hasPrefix("https://") { start = 8 }
-        else if lower.hasPrefix("http://") { start = 7 }
+        if lower.utf8.starts(with: "https://".utf8) { start = 8 }
+        else if lower.utf8.starts(with: "http://".utf8) { start = 7 }
         else { return false }
-        if value.unicodeScalars.contains(where: { $0.value <= 32 || $0.value == 127 || $0 == "\\" }) { return false }
+        if value.unicodeScalars.contains(where: { forbidden($0) || $0 == " " || $0 == "\\" }) { return false }
         let candidate = dynamic ? bindText(value, [:], mask: true, maskValue: "1") : value
         let authority = String(
             String
@@ -54,27 +60,25 @@ enum PrototypeShare {
                 )
         )
         guard !authority.isEmpty,
-              !authority.unicodeScalars.contains(where: { "{}<>^|%@".unicodeScalars.contains($0) })
+              !authority.unicodeScalars.contains(where: { "@{}<>^|%".unicodeScalars.contains($0) })
         else { return false }
         let port: String?
         if authority.unicodeScalars.first == "[" {
-            guard let end = authority.unicodeScalars.firstIndex(of: "]") else { return false }
-            let address = String(
-                authority
-                    .unicodeScalars[authority.unicodeScalars.index(after: authority.unicodeScalars.startIndex) ..< end]
-            )
+            let scalars = authority.unicodeScalars
+            guard let end = scalars.firstIndex(of: "]") else { return false }
+            let address = String(scalars[scalars.index(after: scalars.startIndex) ..< end])
             let halves = address.components(separatedBy: "::")
             let groups = halves.flatMap { $0.isEmpty ? [] : $0.components(separatedBy: ":") }
             guard halves.count <= 2,
                   !groups
                   .contains(where: {
-                      $0.isEmpty || $0.utf8.count > 4 || $0.utf8
-                          .contains(where: { !"0123456789abcdefABCDEF".utf8.contains($0) })
+                      $0.isEmpty || $0.utf8.count > 4 || $0.unicodeScalars
+                          .contains(where: { !"0123456789abcdefABCDEF".unicodeScalars.contains($0) })
                   }),
                   halves.count == 1 ? groups.count == 8 : groups.count < 8 else { return false }
-            let tail = String(authority.unicodeScalars[authority.unicodeScalars.index(after: end)...])
-            guard tail.isEmpty || tail.hasPrefix(":") else { return false }
-            port = tail.isEmpty ? nil : String(tail.dropFirst())
+            let tail = scalars[scalars.index(after: end)...]
+            guard tail.isEmpty || tail.first == ":" else { return false }
+            port = tail.isEmpty ? nil : String(String.UnicodeScalarView(tail.dropFirst()))
         } else {
             let parts = authority.components(separatedBy: ":")
             guard parts.count <= 2, !parts[0].isEmpty,
@@ -127,7 +131,8 @@ enum PrototypeShare {
     {
         if ["text", "subject", "url"].contains(name) {
             if let error = textError(value, path) { return error }
-            return name == "url" && !validURL(value?.stringValue ?? "", dynamic: dynamic) ?
+            return name == "url" && value?.stringValue?
+                .isEmpty != true && !validURL(value?.stringValue ?? "", dynamic: dynamic) ?
                 .init(path: path, message: "Share URL must be absolute http(s) with a literal scheme") :
                 nil
         }
@@ -141,7 +146,12 @@ enum PrototypeShare {
                 guard contactNames.contains(key) else { return .init(path: at, message: "Unknown contact field") }
                 guard form[key] != nil else { return .init(path: at, message: "Required contact name") }
                 if let error = textError(form[key], at) { return error }
-                if key == "name", form[key] == .string("") { return .init(path: at, message: "Required contact name") }
+                if key == "name",
+                   PrototypeContractValidator
+                   .matches("blankText", form[key]?.stringValue ?? "")
+                {
+                    return .init(path: at, message: "Required contact name")
+                }
                 if key == "url",
                    !validURL(form[key]?.stringValue ?? "", dynamic: dynamic)
                 {
@@ -186,7 +196,7 @@ enum PrototypeShare {
                           text.utf8.count <= 128,
                           !text.unicodeScalars
                           .contains(where: {
-                              $0 == "/" || $0 == "\\" || $0.value <= 31 || (127 ... 159).contains($0.value)
+                              $0 == "/" || $0 == "\\" || forbidden($0)
                           })
                     else {
                         return .init(
@@ -208,11 +218,12 @@ enum PrototypeShare {
     )
         -> Violation?
     {
-        guard ["text", "url", "images", "files", "contact"].contains(where: { args[$0] != nil })
-        else { return .init(path: path, message: "Share requires text, url, images, files or contact") }
         for name in sorted(args.keys) {
             let at = PrototypeLimits.dataMemberPath(path, key: name)
-            guard names.contains(name) else { return .init(path: at, message: "Unknown argument") }
+            guard names.contains(name) else { return .init(
+                path: at,
+                message: name == "title" ? "Unknown argument: use subject" : "Unknown argument"
+            ) }
             let binding = args[name]?.objectFields
             if !resolved, binding?["value"] == nil { continue }
             if let error = valueError(
@@ -223,6 +234,13 @@ enum PrototypeShare {
                 assets
             ) { return error }
         }
+        guard ["text", "url", "images", "files", "contact"].contains(where: { name in
+            guard let raw = args[name] else { return false }
+            let binding = raw.objectFields
+            if !resolved, binding?["value"] == nil { return true }
+            let value = resolved ? raw : binding?["value"]
+            return value?.stringValue.map { !PrototypeContractValidator.matches("blankText", $0) } ?? true
+        }) else { return .init(path: path, message: "Share requires text, url, images, files or contact") }
         return nil
     }
 
@@ -255,7 +273,10 @@ enum PrototypeShare {
                     let token = String(String.UnicodeScalarView(chars[(index + 1) ..< end]))
                     var replacement: String?
                     if mask, PrototypeRepeat.isFieldName(token) ||
-                        (token.hasPrefix("item.") && PrototypeRepeat.isFieldName(String(token.dropFirst(5)))) ||
+                        (
+                            token.components(separatedBy: ".").count == 2 && token.components(separatedBy: ".")
+                                .allSatisfy(PrototypeRepeat.isFieldName)
+                        ) ||
                         (token.hasPrefix("data:") && PrototypeDataPointer.isValid(String(token.dropFirst(5))))
                     {
                         replacement = maskValue
@@ -300,7 +321,8 @@ enum PrototypeShare {
         let name = escape(contact["name"]?.stringValue ?? "")
         var lines = ["BEGIN:VCARD", "VERSION:3.0", "FN:\(name)", "N:\(name);;;;"]
         for (field, label) in [("phone", "TEL"), ("email", "EMAIL"), ("org", "ORG"), ("url", "URL"), ("note", "NOTE")] {
-            if let value = contact[field]?.stringValue { lines.append("\(label):\(escape(value))") }
+            if let value = contact[field]?
+                .stringValue { lines.append("\(label):\(field == "url" ? value : escape(value))") }
         }
         lines.append("END:VCARD")
         return lines.map { line in
@@ -357,6 +379,20 @@ enum PrototypeShare {
         let assets = inputs["assets"]?.objectFields ?? [:]
         if let error = argumentsError(resolved, path: "args", assets: Set(assets.keys), resolved: true) {
             return failure(error)
+        }
+        for name in ["images", "files"] {
+            let entries: [JSONValue] = if case let .array(array)? = resolved[name] { array } else { [] }
+            for (index, entry) in entries.enumerated() {
+                guard let id = assetID(name == "files" ? entry.objectFields?["asset"] : entry),
+                      case let .number(size)? = assets[id]?.objectFields?["bytes"], size.isFinite,
+                      size >= 0, size <= 9_007_199_254_740_991, size == size.rounded()
+                else {
+                    return failure(.init(
+                        path: "args.\(name)[\(index)]" + (name == "files" ? ".asset" : ""),
+                        message: "Share asset must have non-negative integer bytes"
+                    ))
+                }
+            }
         }
         let imageValues: [JSONValue] = if case let .array(array)? = resolved["images"] { array } else { [] }
         let images = imageValues.compactMap { assetID($0).map(JSONValue.string) }

@@ -40,7 +40,7 @@ function bindShareText(text: string, inputs: PrototypeShareInputs): string {
 }
 function bindToken(original: string, token: string, inputs: PrototypeShareInputs): string {
   if (token.startsWith("data:") && isPrototypeDataPointer(token.slice(5))) {
-    return scalar(resolvePrototypeDataPointer(inputs.data, token.slice(5))) ?? "";
+    return scalar(resolvePrototypeDataPointer(record(inputs.data), token.slice(5))) ?? "";
   }
   if (token === "index") {
     return inputs.index === undefined ? original : String(inputs.index);
@@ -97,7 +97,9 @@ function vCard(contact: Raw): string {
     ["note", "NOTE"],
   ]) {
     if (Object.hasOwn(contact, field!)) {
-      lines.push(`${label}:${escape(String(contact[field!]))}`);
+      lines.push(
+        `${label}:${field === "url" ? String(contact[field!]) : escape(String(contact[field!]))}`,
+      );
     }
   }
   lines.push("END:VCARD");
@@ -145,7 +147,7 @@ export function resolvePrototypeShare(
       value = value.map((entry) => {
         const form = record(entry);
         return typeof form?.data === "string"
-          ? resolvePrototypeDataPointer(inputs.data, form.data)
+          ? resolvePrototypeDataPointer(record(inputs.data), form.data)
           : entry;
       });
     }
@@ -160,7 +162,32 @@ export function resolvePrototypeShare(
   if (error) {
     return failure(error);
   }
+  const inventoryError = shareInventoryError(resolved, inputs.assets);
+  if (inventoryError) {
+    return failure(inventoryError);
+  }
   return shareResult(resolved, inputs);
+}
+
+function shareInventoryError(
+  resolved: Raw,
+  assets: PrototypeShareInputs["assets"],
+): PrototypePlatformError | undefined {
+  for (const name of ["images", "files"]) {
+    const entries = (resolved[name] as unknown[] | undefined) ?? [];
+    for (const [index, entry] of entries.entries()) {
+      const asset = name === "files" ? record(entry)!.asset : entry;
+      const assetId = typeof asset === "string" ? asset : (record(asset)!.asset as string);
+      const size = record(assets[assetId])?.bytes;
+      if (typeof size !== "number" || !Number.isSafeInteger(size) || size < 0) {
+        return issue(
+          `args.${name}[${index}]${name === "files" ? ".asset" : ""}`,
+          "Share asset must have non-negative integer bytes",
+        );
+      }
+    }
+  }
+  return undefined;
 }
 
 function resolveBinding(binding: Raw, inputs: PrototypeShareInputs): unknown {
@@ -173,7 +200,7 @@ function resolveBinding(binding: Raw, inputs: PrototypeShareInputs): unknown {
       : undefined;
   }
   if (typeof binding.data === "string") {
-    return resolvePrototypeDataPointer(inputs.data, binding.data);
+    return resolvePrototypeDataPointer(record(inputs.data), binding.data);
   }
   if (typeof binding.item === "string") {
     return Object.hasOwn(inputs.item ?? {}, binding.item) ? inputs.item?.[binding.item] : undefined;
@@ -186,7 +213,7 @@ function resolveBinding(binding: Raw, inputs: PrototypeShareInputs): unknown {
 function resolvePointerBinding(binding: Raw, inputs: PrototypeShareInputs): unknown {
   for (const name of ["platform", "event"] as const) {
     if (typeof binding[name] === "string") {
-      return resolvePrototypeDataPointer(inputs[name], binding[name]);
+      return resolvePrototypeDataPointer(record(inputs[name]), binding[name]);
     }
   }
   return undefined;

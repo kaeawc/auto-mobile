@@ -46,7 +46,11 @@ internal object PrototypeShareValidation {
     textError(value, path)?.let {
       return it
     }
-    return if (name == "url" && !PrototypeShareURL.validURL(text(value).orEmpty(), dynamic))
+    return if (
+      name == "url" &&
+        text(value) != "" &&
+        !PrototypeShareURL.validURL(text(value).orEmpty(), dynamic)
+    )
       error(path, "Share URL must be absolute http(s) with a literal scheme")
     else null
   }
@@ -60,11 +64,16 @@ internal object PrototypeShareValidation {
     for (key in (form.keys + "name").sorted()) {
       val at = member(path, key)
       if (key !in contactNames) return error(at, "Unknown contact field")
-      if (key !in form || (key == "name" && text(form[key]) == ""))
-        return error(at, "Required contact name")
-      stringError(key, form[key], at, dynamic)?.let {
+      if (key !in form) return error(at, "Required contact name")
+      textError(form[key], at)?.let {
         return it
       }
+      if (
+        key == "name" && PrototypeSpecContract.blankTextPattern.matches(text(form[key]).orEmpty())
+      )
+        return error(at, "Required contact name")
+      if (key == "url" && !PrototypeShareURL.validURL(text(form[key]).orEmpty(), dynamic))
+        return error(at, "Share URL must be absolute http(s) with a literal scheme")
     }
     return null
   }
@@ -154,7 +163,11 @@ internal object PrototypeShareValidation {
   }
 
   private fun fileControl(char: Char): Boolean =
-    char in "/\\" || char.code <= 31 || char.code in 127..159
+    char in "/\\" ||
+      char.code <= 31 ||
+      char.code in 127..160 ||
+      char.code in 0x2028..0x202e ||
+      char.code in 0x2066..0x2069
 
   fun argumentsError(
     args: JsonObject,
@@ -162,11 +175,13 @@ internal object PrototypeShareValidation {
     assets: Set<String>? = null,
     resolved: Boolean = false,
   ): PrototypeSpecError? {
-    if (setOf("text", "url", "images", "files", "contact").none { it in args })
-      return error(path, "Share requires text, url, images, files or contact")
     for (name in args.keys.sorted()) {
       val at = member(path, name)
-      if (name !in names) return error(at, "Unknown argument")
+      if (name !in names)
+        return error(
+          at,
+          if (name == "title") "Unknown argument: use subject" else "Unknown argument",
+        )
       val binding = args[name] as? JsonObject
       if (!resolved && binding?.containsKey("value") != true) continue
       valueError(
@@ -180,6 +195,14 @@ internal object PrototypeShareValidation {
           return it
         }
     }
+    val items = args.filterKeys { it in setOf("text", "url", "images", "files", "contact") }.values
+    if (
+      items.none { raw ->
+        val value = if (resolved) raw else (raw as? JsonObject)?.get("value")
+        text(value)?.let(PrototypeSpecContract.blankTextPattern::matches) != true
+      }
+    )
+      return error(path, "Share requires text, url, images, files or contact")
     return null
   }
 }

@@ -14,7 +14,9 @@ import { collectPrototypeAssetReferences } from "../../../src/features/prototype
 interface ShareFixture {
   name: string;
   args: Record<string, unknown>;
-  inputs: PrototypeShareInputs;
+  inputs: Omit<PrototypeShareInputs, "assets"> & {
+    assets: Readonly<Record<string, unknown>>;
+  };
   expected: PrototypeShareResolution;
 }
 const fixtures: ShareFixture[] = rawFixtures as ShareFixture[];
@@ -22,7 +24,10 @@ const fixtures: ShareFixture[] = rawFixtures as ShareFixture[];
 describe("shared share resolver expectations", () => {
   for (const fixture of fixtures) {
     test(fixture.name, () => {
-      expect(resolvePrototypeShare(fixture.args, fixture.inputs)).toEqual(fixture.expected);
+      // Refusal fixtures deliberately include malformed asset inventory metadata.
+      expect(resolvePrototypeShare(fixture.args, fixture.inputs as PrototypeShareInputs)).toEqual(
+        fixture.expected,
+      );
     });
   }
 });
@@ -110,6 +115,38 @@ describe("share contract corpus", () => {
     ).toEqual({
       success: false,
       error: { path: "$", message: "Unsupported capabilities: prototype_platform_share_v1" },
+    });
+  });
+});
+
+describe("share review regressions", () => {
+  const budgetFixture = JSON.parse(
+    readFileSync(
+      new URL(
+        "../../fixtures/prototype-spec/invalid/share-secure-scan-budget.json",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  );
+  test("library scan refuses repeat byte amplification before expanding strings", () => {
+    expect(validatePrototypeSpec(budgetFixture.spec, { library: true })).toEqual({
+      success: false,
+      error: { path: budgetFixture.expectedPath, message: budgetFixture.expectedMessage },
+    });
+  });
+  const hostSpec = JSON.parse(
+    readFileSync(
+      new URL("../../fixtures/prototype-spec/valid/share-templated-host.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  test("the templated host fixture resolves to a usable URL", () => {
+    expect(
+      resolvePrototypeShare(hostSpec.root.onTap[0].args, { assets: {}, state: hostSpec.state }),
+    ).toMatchObject({
+      ok: true,
+      payload: { url: "https://example.com/" },
     });
   });
 });

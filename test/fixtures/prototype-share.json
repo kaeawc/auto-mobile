@@ -842,7 +842,7 @@
       "error": {
         "code": "invalid_args",
         "path": "args.title",
-        "message": "Unknown argument"
+        "message": "Unknown argument: use subject"
       }
     }
   },
@@ -1441,6 +1441,1697 @@
         "code": "invalid_args",
         "path": "args.images.value[0]",
         "message": "Expected uploaded asset id or data binding"
+      }
+    }
+  },
+  {
+    "name": "url-rejected-httpſ://example.com",
+    "args": {
+      "url": {
+        "value": "httpſ://example.com"
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.url.value",
+        "message": "Share URL must be absolute http(s) with a literal scheme"
+      }
+    }
+  },
+  {
+    "name": "contact-url-rejected-httpſ://example.com",
+    "args": {
+      "contact": {
+        "value": {
+          "name": "Ada",
+          "url": "httpſ://example.com"
+        }
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.contact.value.url",
+        "message": "Share URL must be absolute http(s) with a literal scheme"
+      }
+    }
+  },
+  {
+    "name": "url-rejected-httpK://example.com",
+    "args": {
+      "url": {
+        "value": "httpK://example.com"
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.url.value",
+        "message": "Share URL must be absolute http(s) with a literal scheme"
+      }
+    }
+  },
+  {
+    "name": "contact-url-rejected-httpK://example.com",
+    "args": {
+      "contact": {
+        "value": {
+          "name": "Ada",
+          "url": "httpK://example.com"
+        }
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.contact.value.url",
+        "message": "Share URL must be absolute http(s) with a literal scheme"
+      }
+    }
+  },
+  {
+    "name": "url-rejected-https://user:pass@example.com",
+    "args": {
+      "url": {
+        "value": "https://user:pass@example.com"
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.url.value",
+        "message": "Share URL must be absolute http(s) with a literal scheme"
+      }
+    }
+  },
+  {
+    "name": "contact-url-rejected-https://user:pass@example.com",
+    "args": {
+      "contact": {
+        "value": {
+          "name": "Ada",
+          "url": "https://user:pass@example.com"
+        }
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.contact.value.url",
+        "message": "Share URL must be absolute http(s) with a literal scheme"
+      }
+    }
+  },
+  {
+    "name": "url-rejected-https://a%́b.com",
+    "args": {
+      "url": {
+        "value": "https://a%́b.com"
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.url.value",
+        "message": "Share URL must be absolute http(s) with a literal scheme"
+      }
+    }
+  },
+  {
+    "name": "contact-url-rejected-https://a%́b.com",
+    "args": {
+      "contact": {
+        "value": {
+          "name": "Ada",
+          "url": "https://a%́b.com"
+        }
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.contact.value.url",
+        "message": "Share URL must be absolute http(s) with a literal scheme"
+      }
+    }
+  },
+  {
+    "name": "url-scalars-https://a/́:99999",
+    "args": {
+      "url": {
+        "value": "https://a/́:99999"
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": true,
+      "payload": {
+        "images": [],
+        "files": [],
+        "url": "https://a/́:99999"
+      },
+      "summary": {
+        "outcome": "unknown",
+        "items": {
+          "images": 0,
+          "files": [],
+          "contact": false,
+          "url": "https://a/́:99999"
+        }
+      }
+    }
+  },
+  {
+    "name": "url-scalars-https://́example.com",
+    "args": {
+      "url": {
+        "value": "https://́example.com"
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": true,
+      "payload": {
+        "images": [],
+        "files": [],
+        "url": "https://́example.com"
+      },
+      "summary": {
+        "outcome": "unknown",
+        "items": {
+          "images": 0,
+          "files": [],
+          "contact": false,
+          "url": "https://́example.com"
+        }
+      }
+    }
+  },
+  {
+    "name": "url-scalars-HTTPS://example.com",
+    "args": {
+      "url": {
+        "value": "HTTPS://example.com"
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": true,
+      "payload": {
+        "images": [],
+        "files": [],
+        "url": "HTTPS://example.com"
+      },
+      "summary": {
+        "outcome": "unknown",
+        "items": {
+          "images": 0,
+          "files": [],
+          "contact": false,
+          "url": "HTTPS://example.com"
+        }
+      }
+    }
+  },
+  {
+    "name": "file-leading-dot-combining",
+    "args": {
+      "files": {
+        "value": [
+          {
+            "asset": "file",
+            "name": ".́x",
+            "mimeType": "text/plain"
+          }
+        ]
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.files.value[0].name",
+        "message": "Share file name must be 1 to 128 UTF-8 bytes, with no leading dot, separators or controls"
+      }
+    }
+  },
+  {
+    "name": "url-control-133",
+    "args": {
+      "url": {
+        "value": "https://a/"
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.url.value",
+        "message": "Share URL must be absolute http(s) with a literal scheme"
+      }
+    }
+  },
+  {
+    "name": "filename-control-133",
+    "args": {
+      "files": {
+        "value": [
+          {
+            "asset": "file",
+            "name": "a",
+            "mimeType": "text/plain"
+          }
+        ]
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.files.value[0].name",
+        "message": "Share file name must be 1 to 128 UTF-8 bytes, with no leading dot, separators or controls"
+      }
+    }
+  },
+  {
+    "name": "url-control-159",
+    "args": {
+      "url": {
+        "value": "https://a/"
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.url.value",
+        "message": "Share URL must be absolute http(s) with a literal scheme"
+      }
+    }
+  },
+  {
+    "name": "filename-control-159",
+    "args": {
+      "files": {
+        "value": [
+          {
+            "asset": "file",
+            "name": "a",
+            "mimeType": "text/plain"
+          }
+        ]
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.files.value[0].name",
+        "message": "Share file name must be 1 to 128 UTF-8 bytes, with no leading dot, separators or controls"
+      }
+    }
+  },
+  {
+    "name": "url-control-160",
+    "args": {
+      "url": {
+        "value": "https://a/ "
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.url.value",
+        "message": "Share URL must be absolute http(s) with a literal scheme"
+      }
+    }
+  },
+  {
+    "name": "filename-control-160",
+    "args": {
+      "files": {
+        "value": [
+          {
+            "asset": "file",
+            "name": "a ",
+            "mimeType": "text/plain"
+          }
+        ]
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.files.value[0].name",
+        "message": "Share file name must be 1 to 128 UTF-8 bytes, with no leading dot, separators or controls"
+      }
+    }
+  },
+  {
+    "name": "url-control-8232",
+    "args": {
+      "url": {
+        "value": "https://a/ "
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.url.value",
+        "message": "Share URL must be absolute http(s) with a literal scheme"
+      }
+    }
+  },
+  {
+    "name": "filename-control-8232",
+    "args": {
+      "files": {
+        "value": [
+          {
+            "asset": "file",
+            "name": "a ",
+            "mimeType": "text/plain"
+          }
+        ]
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.files.value[0].name",
+        "message": "Share file name must be 1 to 128 UTF-8 bytes, with no leading dot, separators or controls"
+      }
+    }
+  },
+  {
+    "name": "url-control-8233",
+    "args": {
+      "url": {
+        "value": "https://a/ "
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.url.value",
+        "message": "Share URL must be absolute http(s) with a literal scheme"
+      }
+    }
+  },
+  {
+    "name": "filename-control-8233",
+    "args": {
+      "files": {
+        "value": [
+          {
+            "asset": "file",
+            "name": "a ",
+            "mimeType": "text/plain"
+          }
+        ]
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.files.value[0].name",
+        "message": "Share file name must be 1 to 128 UTF-8 bytes, with no leading dot, separators or controls"
+      }
+    }
+  },
+  {
+    "name": "url-control-8234",
+    "args": {
+      "url": {
+        "value": "https://a/‪"
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.url.value",
+        "message": "Share URL must be absolute http(s) with a literal scheme"
+      }
+    }
+  },
+  {
+    "name": "filename-control-8234",
+    "args": {
+      "files": {
+        "value": [
+          {
+            "asset": "file",
+            "name": "a‪",
+            "mimeType": "text/plain"
+          }
+        ]
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.files.value[0].name",
+        "message": "Share file name must be 1 to 128 UTF-8 bytes, with no leading dot, separators or controls"
+      }
+    }
+  },
+  {
+    "name": "url-control-8235",
+    "args": {
+      "url": {
+        "value": "https://a/‫"
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.url.value",
+        "message": "Share URL must be absolute http(s) with a literal scheme"
+      }
+    }
+  },
+  {
+    "name": "filename-control-8235",
+    "args": {
+      "files": {
+        "value": [
+          {
+            "asset": "file",
+            "name": "a‫",
+            "mimeType": "text/plain"
+          }
+        ]
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.files.value[0].name",
+        "message": "Share file name must be 1 to 128 UTF-8 bytes, with no leading dot, separators or controls"
+      }
+    }
+  },
+  {
+    "name": "url-control-8236",
+    "args": {
+      "url": {
+        "value": "https://a/‬"
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.url.value",
+        "message": "Share URL must be absolute http(s) with a literal scheme"
+      }
+    }
+  },
+  {
+    "name": "filename-control-8236",
+    "args": {
+      "files": {
+        "value": [
+          {
+            "asset": "file",
+            "name": "a‬",
+            "mimeType": "text/plain"
+          }
+        ]
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.files.value[0].name",
+        "message": "Share file name must be 1 to 128 UTF-8 bytes, with no leading dot, separators or controls"
+      }
+    }
+  },
+  {
+    "name": "url-control-8237",
+    "args": {
+      "url": {
+        "value": "https://a/‭"
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.url.value",
+        "message": "Share URL must be absolute http(s) with a literal scheme"
+      }
+    }
+  },
+  {
+    "name": "filename-control-8237",
+    "args": {
+      "files": {
+        "value": [
+          {
+            "asset": "file",
+            "name": "a‭",
+            "mimeType": "text/plain"
+          }
+        ]
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.files.value[0].name",
+        "message": "Share file name must be 1 to 128 UTF-8 bytes, with no leading dot, separators or controls"
+      }
+    }
+  },
+  {
+    "name": "url-control-8238",
+    "args": {
+      "url": {
+        "value": "https://a/‮"
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.url.value",
+        "message": "Share URL must be absolute http(s) with a literal scheme"
+      }
+    }
+  },
+  {
+    "name": "filename-control-8238",
+    "args": {
+      "files": {
+        "value": [
+          {
+            "asset": "file",
+            "name": "a‮",
+            "mimeType": "text/plain"
+          }
+        ]
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.files.value[0].name",
+        "message": "Share file name must be 1 to 128 UTF-8 bytes, with no leading dot, separators or controls"
+      }
+    }
+  },
+  {
+    "name": "url-control-8294",
+    "args": {
+      "url": {
+        "value": "https://a/⁦"
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.url.value",
+        "message": "Share URL must be absolute http(s) with a literal scheme"
+      }
+    }
+  },
+  {
+    "name": "filename-control-8294",
+    "args": {
+      "files": {
+        "value": [
+          {
+            "asset": "file",
+            "name": "a⁦",
+            "mimeType": "text/plain"
+          }
+        ]
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.files.value[0].name",
+        "message": "Share file name must be 1 to 128 UTF-8 bytes, with no leading dot, separators or controls"
+      }
+    }
+  },
+  {
+    "name": "url-control-8295",
+    "args": {
+      "url": {
+        "value": "https://a/⁧"
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.url.value",
+        "message": "Share URL must be absolute http(s) with a literal scheme"
+      }
+    }
+  },
+  {
+    "name": "filename-control-8295",
+    "args": {
+      "files": {
+        "value": [
+          {
+            "asset": "file",
+            "name": "a⁧",
+            "mimeType": "text/plain"
+          }
+        ]
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.files.value[0].name",
+        "message": "Share file name must be 1 to 128 UTF-8 bytes, with no leading dot, separators or controls"
+      }
+    }
+  },
+  {
+    "name": "url-control-8296",
+    "args": {
+      "url": {
+        "value": "https://a/⁨"
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.url.value",
+        "message": "Share URL must be absolute http(s) with a literal scheme"
+      }
+    }
+  },
+  {
+    "name": "filename-control-8296",
+    "args": {
+      "files": {
+        "value": [
+          {
+            "asset": "file",
+            "name": "a⁨",
+            "mimeType": "text/plain"
+          }
+        ]
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.files.value[0].name",
+        "message": "Share file name must be 1 to 128 UTF-8 bytes, with no leading dot, separators or controls"
+      }
+    }
+  },
+  {
+    "name": "url-control-8297",
+    "args": {
+      "url": {
+        "value": "https://a/⁩"
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.url.value",
+        "message": "Share URL must be absolute http(s) with a literal scheme"
+      }
+    }
+  },
+  {
+    "name": "filename-control-8297",
+    "args": {
+      "files": {
+        "value": [
+          {
+            "asset": "file",
+            "name": "a⁩",
+            "mimeType": "text/plain"
+          }
+        ]
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.files.value[0].name",
+        "message": "Share file name must be 1 to 128 UTF-8 bytes, with no leading dot, separators or controls"
+      }
+    }
+  },
+  {
+    "name": "blank-text-\"\"",
+    "args": {
+      "text": {
+        "value": ""
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args",
+        "message": "Share requires text, url, images, files or contact"
+      }
+    }
+  },
+  {
+    "name": "blank-subject-\"\"",
+    "args": {
+      "subject": {
+        "value": ""
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args",
+        "message": "Share requires text, url, images, files or contact"
+      }
+    }
+  },
+  {
+    "name": "blank-contact-\"\"",
+    "args": {
+      "contact": {
+        "value": {
+          "name": ""
+        }
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.contact.value.name",
+        "message": "Required contact name"
+      }
+    }
+  },
+  {
+    "name": "blank-text-\" \\t\\n\"",
+    "args": {
+      "text": {
+        "value": " \t\n"
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args",
+        "message": "Share requires text, url, images, files or contact"
+      }
+    }
+  },
+  {
+    "name": "blank-subject-\" \\t\\n\"",
+    "args": {
+      "subject": {
+        "value": " \t\n"
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args",
+        "message": "Share requires text, url, images, files or contact"
+      }
+    }
+  },
+  {
+    "name": "blank-contact-\" \\t\\n\"",
+    "args": {
+      "contact": {
+        "value": {
+          "name": " \t\n"
+        }
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.contact.value.name",
+        "message": "Required contact name"
+      }
+    }
+  },
+  {
+    "name": "blank-text-\" ﻿\"",
+    "args": {
+      "text": {
+        "value": " ﻿"
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args",
+        "message": "Share requires text, url, images, files or contact"
+      }
+    }
+  },
+  {
+    "name": "blank-subject-\" ﻿\"",
+    "args": {
+      "subject": {
+        "value": " ﻿"
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args",
+        "message": "Share requires text, url, images, files or contact"
+      }
+    }
+  },
+  {
+    "name": "blank-contact-\" ﻿\"",
+    "args": {
+      "contact": {
+        "value": {
+          "name": " ﻿"
+        }
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.contact.value.name",
+        "message": "Required contact name"
+      }
+    }
+  },
+  {
+    "name": "blank-text-\" 　\"",
+    "args": {
+      "text": {
+        "value": " 　"
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args",
+        "message": "Share requires text, url, images, files or contact"
+      }
+    }
+  },
+  {
+    "name": "blank-subject-\" 　\"",
+    "args": {
+      "subject": {
+        "value": " 　"
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args",
+        "message": "Share requires text, url, images, files or contact"
+      }
+    }
+  },
+  {
+    "name": "blank-contact-\" 　\"",
+    "args": {
+      "contact": {
+        "value": {
+          "name": " 　"
+        }
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.contact.value.name",
+        "message": "Required contact name"
+      }
+    }
+  },
+  {
+    "name": "empty-url",
+    "args": {
+      "url": {
+        "value": ""
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args",
+        "message": "Share requires text, url, images, files or contact"
+      }
+    }
+  },
+  {
+    "name": "blank-resolved-text",
+    "args": {
+      "text": {
+        "data": "/value"
+      }
+    },
+    "inputs": {
+      "assets": {},
+      "data": {
+        "value": " "
+      }
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args",
+        "message": "Share requires text, url, images, files or contact"
+      }
+    }
+  },
+  {
+    "name": "file-name-128-bytes",
+    "args": {
+      "files": {
+        "value": [
+          {
+            "asset": "file",
+            "name": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+            "mimeType": "text/plain"
+          }
+        ]
+      }
+    },
+    "inputs": {
+      "assets": {
+        "file": {
+          "bytes": 0
+        }
+      }
+    },
+    "expected": {
+      "ok": true,
+      "payload": {
+        "images": [],
+        "files": [
+          {
+            "name": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+            "mimeType": "text/plain",
+            "asset": "file",
+            "bytes": 0
+          }
+        ]
+      },
+      "summary": {
+        "outcome": "unknown",
+        "items": {
+          "images": 0,
+          "files": [
+            {
+              "name": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+              "mimeType": "text/plain",
+              "bytes": 0
+            }
+          ],
+          "contact": false
+        }
+      }
+    }
+  },
+  {
+    "name": "file-name-129-bytes",
+    "args": {
+      "files": {
+        "value": [
+          {
+            "asset": "file",
+            "name": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééx",
+            "mimeType": "text/plain"
+          }
+        ]
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.files.value[0].name",
+        "message": "Share file name must be 1 to 128 UTF-8 bytes, with no leading dot, separators or controls"
+      }
+    }
+  },
+  {
+    "name": "asset-bytes-files-undefined",
+    "args": {
+      "files": {
+        "value": [
+          {
+            "asset": "file",
+            "name": "a.txt",
+            "mimeType": "text/plain"
+          }
+        ]
+      }
+    },
+    "inputs": {
+      "assets": {
+        "file": {}
+      }
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.files[0].asset",
+        "message": "Share asset must have non-negative integer bytes"
+      }
+    }
+  },
+  {
+    "name": "asset-bytes-images-undefined",
+    "args": {
+      "images": {
+        "value": ["file"]
+      }
+    },
+    "inputs": {
+      "assets": {
+        "file": {}
+      }
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.images[0]",
+        "message": "Share asset must have non-negative integer bytes"
+      }
+    }
+  },
+  {
+    "name": "asset-bytes-files-null",
+    "args": {
+      "files": {
+        "value": [
+          {
+            "asset": "file",
+            "name": "a.txt",
+            "mimeType": "text/plain"
+          }
+        ]
+      }
+    },
+    "inputs": {
+      "assets": {
+        "file": {
+          "bytes": null
+        }
+      }
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.files[0].asset",
+        "message": "Share asset must have non-negative integer bytes"
+      }
+    }
+  },
+  {
+    "name": "asset-bytes-images-null",
+    "args": {
+      "images": {
+        "value": ["file"]
+      }
+    },
+    "inputs": {
+      "assets": {
+        "file": {
+          "bytes": null
+        }
+      }
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.images[0]",
+        "message": "Share asset must have non-negative integer bytes"
+      }
+    }
+  },
+  {
+    "name": "asset-bytes-files--1",
+    "args": {
+      "files": {
+        "value": [
+          {
+            "asset": "file",
+            "name": "a.txt",
+            "mimeType": "text/plain"
+          }
+        ]
+      }
+    },
+    "inputs": {
+      "assets": {
+        "file": {
+          "bytes": -1
+        }
+      }
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.files[0].asset",
+        "message": "Share asset must have non-negative integer bytes"
+      }
+    }
+  },
+  {
+    "name": "asset-bytes-images--1",
+    "args": {
+      "images": {
+        "value": ["file"]
+      }
+    },
+    "inputs": {
+      "assets": {
+        "file": {
+          "bytes": -1
+        }
+      }
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.images[0]",
+        "message": "Share asset must have non-negative integer bytes"
+      }
+    }
+  },
+  {
+    "name": "asset-bytes-files-1.5",
+    "args": {
+      "files": {
+        "value": [
+          {
+            "asset": "file",
+            "name": "a.txt",
+            "mimeType": "text/plain"
+          }
+        ]
+      }
+    },
+    "inputs": {
+      "assets": {
+        "file": {
+          "bytes": 1.5
+        }
+      }
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.files[0].asset",
+        "message": "Share asset must have non-negative integer bytes"
+      }
+    }
+  },
+  {
+    "name": "asset-bytes-images-1.5",
+    "args": {
+      "images": {
+        "value": ["file"]
+      }
+    },
+    "inputs": {
+      "assets": {
+        "file": {
+          "bytes": 1.5
+        }
+      }
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.images[0]",
+        "message": "Share asset must have non-negative integer bytes"
+      }
+    }
+  },
+  {
+    "name": "asset-bytes-files-\"10\"",
+    "args": {
+      "files": {
+        "value": [
+          {
+            "asset": "file",
+            "name": "a.txt",
+            "mimeType": "text/plain"
+          }
+        ]
+      }
+    },
+    "inputs": {
+      "assets": {
+        "file": {
+          "bytes": "10"
+        }
+      }
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.files[0].asset",
+        "message": "Share asset must have non-negative integer bytes"
+      }
+    }
+  },
+  {
+    "name": "asset-bytes-images-\"10\"",
+    "args": {
+      "images": {
+        "value": ["file"]
+      }
+    },
+    "inputs": {
+      "assets": {
+        "file": {
+          "bytes": "10"
+        }
+      }
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.images[0]",
+        "message": "Share asset must have non-negative integer bytes"
+      }
+    }
+  },
+  {
+    "name": "asset-bytes-files-{}",
+    "args": {
+      "files": {
+        "value": [
+          {
+            "asset": "file",
+            "name": "a.txt",
+            "mimeType": "text/plain"
+          }
+        ]
+      }
+    },
+    "inputs": {
+      "assets": {
+        "file": {
+          "bytes": {}
+        }
+      }
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.files[0].asset",
+        "message": "Share asset must have non-negative integer bytes"
+      }
+    }
+  },
+  {
+    "name": "asset-bytes-images-{}",
+    "args": {
+      "images": {
+        "value": ["file"]
+      }
+    },
+    "inputs": {
+      "assets": {
+        "file": {
+          "bytes": {}
+        }
+      }
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.images[0]",
+        "message": "Share asset must have non-negative integer bytes"
+      }
+    }
+  },
+  {
+    "name": "asset-bytes-files-9007199254740992",
+    "args": {
+      "files": {
+        "value": [
+          {
+            "asset": "file",
+            "name": "a.txt",
+            "mimeType": "text/plain"
+          }
+        ]
+      }
+    },
+    "inputs": {
+      "assets": {
+        "file": {
+          "bytes": 9007199254740992
+        }
+      }
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.files[0].asset",
+        "message": "Share asset must have non-negative integer bytes"
+      }
+    }
+  },
+  {
+    "name": "asset-bytes-images-9007199254740992",
+    "args": {
+      "images": {
+        "value": ["file"]
+      }
+    },
+    "inputs": {
+      "assets": {
+        "file": {
+          "bytes": 9007199254740992
+        }
+      }
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.images[0]",
+        "message": "Share asset must have non-negative integer bytes"
+      }
+    }
+  },
+  {
+    "name": "array-root-data",
+    "args": {
+      "text": {
+        "data": "/0"
+      }
+    },
+    "inputs": {
+      "assets": {},
+      "data": ["a"]
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.text",
+        "message": "Share binding is missing"
+      }
+    }
+  },
+  {
+    "name": "array-root-event",
+    "args": {
+      "text": {
+        "event": "/0"
+      }
+    },
+    "inputs": {
+      "assets": {},
+      "event": ["a"]
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.text",
+        "message": "Share binding is missing"
+      }
+    }
+  },
+  {
+    "name": "array-root-platform",
+    "args": {
+      "text": {
+        "platform": "/0"
+      }
+    },
+    "inputs": {
+      "assets": {},
+      "platform": ["a"]
+    },
+    "expected": {
+      "ok": false,
+      "error": {
+        "code": "invalid_args",
+        "path": "args.text",
+        "message": "Share binding is missing"
+      }
+    }
+  },
+  {
+    "name": "vcard-uri-unescaped",
+    "args": {
+      "contact": {
+        "value": {
+          "name": "A,B;C",
+          "url": "https://example.com/a,b;c?q=x,y;z",
+          "note": "line\nnext"
+        }
+      }
+    },
+    "inputs": {
+      "assets": {}
+    },
+    "expected": {
+      "ok": true,
+      "payload": {
+        "images": [],
+        "files": [],
+        "vCard": "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:A\\,B\\;C\r\nN:A\\,B\\;C;;;;\r\nURL:https://example.com/a,b;c?q=x,y;z\r\nNOTE:line\\nnext\r\nEND:VCARD\r\n"
+      },
+      "summary": {
+        "outcome": "unknown",
+        "items": {
+          "images": 0,
+          "files": [],
+          "contact": true
+        }
       }
     }
   }

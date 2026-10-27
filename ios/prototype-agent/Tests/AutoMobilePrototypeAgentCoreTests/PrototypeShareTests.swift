@@ -37,6 +37,28 @@ final class PrototypeShareTests: XCTestCase {
         }
     }
 
+    func testRepeatedShareScanHasByteBudget() throws {
+        let fixture = try XCTUnwrap(JSONDecoder().decode(
+            JSONValue.self,
+            from: Data(
+                contentsOf: fixtures
+                    .appendingPathComponent("prototype-spec/invalid/share-secure-scan-budget.json")
+            )
+        ).objectFields)
+        let data = try JSONEncoder().encode(XCTUnwrap(fixture["spec"]))
+        let expectedPath = try XCTUnwrap(fixture["expectedPath"]?.stringValue)
+        let expectedMessage = try XCTUnwrap(fixture["expectedMessage"]?.stringValue)
+        XCTAssertThrowsError(try PrototypeSpecStrictValidator.validate(data: data, library: true)) { error in
+            XCTAssertEqual(
+                error as? PrototypeLoadError,
+                .invalidSpec(
+                    path: expectedPath,
+                    message: expectedMessage
+                )
+            )
+        }
+    }
+
     func testValidShareCorpus() throws {
         let folder = fixtures.appendingPathComponent("prototype-spec/valid")
         for file in try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)

@@ -316,7 +316,13 @@ function argumentsError(
     const at = memberPath(`${path}.args`, name);
     const declared = Object.hasOwn(definition.args, name) ? definition.args[name] : undefined;
     if (!declared) {
-      return { path: at, message: "Unknown argument" };
+      return {
+        path: at,
+        message:
+          action.call === "share.open" && name === "title"
+            ? "Unknown argument: use subject"
+            : "Unknown argument",
+      };
     }
     if (!Object.hasOwn(args, name)) {
       if (!declared.optional) {

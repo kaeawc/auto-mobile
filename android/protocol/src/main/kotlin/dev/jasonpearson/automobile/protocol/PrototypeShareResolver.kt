@@ -64,7 +64,7 @@ internal object PrototypeShareResolver {
         "url" to "URL",
         "note" to "NOTE",
       )) {
-      text(contact[field])?.let { lines.add("$label:${escape(it)}") }
+      text(contact[field])?.let { lines.add("$label:${if (field == "url") it else escape(it)}") }
     }
     lines.add("END:VCARD")
     return lines.joinToString("\r\n", postfix = "\r\n") { line ->
@@ -115,7 +115,33 @@ internal object PrototypeShareResolver {
     PrototypeShareValidation.argumentsError(JsonObject(resolved), "args", assets.keys, true)?.let {
       return failure(it)
     }
+    inventoryError(resolved, assets)?.let {
+      return failure(it)
+    }
     return result(resolved, assets, inputs)
+  }
+
+  private fun inventoryError(
+    resolved: Map<String, JsonElement>,
+    assets: JsonObject,
+  ): PrototypeSpecError? {
+    for (name in listOf("images", "files")) {
+      for ((index, entry) in (resolved[name] as? JsonArray).orEmpty().withIndex()) {
+        val id = assetId(if (name == "files") (entry as? JsonObject)?.get("asset") else entry)
+        if (!validAssetSize((assets[id] as? JsonObject)?.get("bytes")))
+          return error(
+            "args.$name[$index]" + if (name == "files") ".asset" else "",
+            "Share asset must have non-negative integer bytes",
+          )
+      }
+    }
+    return null
+  }
+
+  private fun validAssetSize(value: JsonElement?): Boolean {
+    val size = (value as? JsonPrimitive)?.takeUnless { it.isString }?.doubleOrNull ?: return false
+    if (size < 0 || size > 9007199254740991.0) return false
+    return size.isFinite() && size == Math.floor(size)
   }
 
   private fun result(

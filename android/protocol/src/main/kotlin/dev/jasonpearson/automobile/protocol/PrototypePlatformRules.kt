@@ -198,7 +198,14 @@ internal object PrototypePlatformRules {
     val args = action.member("args") ?: JsonObject(emptyMap())
     for (name in (declared.keys + args.keys).sorted()) {
       val at = keyPath("$path.args", name)
-      val argument = declared[name] as? JsonObject ?: return fail(at, "Unknown argument")
+      val argument =
+        declared[name] as? JsonObject
+          ?: return fail(
+            at,
+            if (action.text("call") == "share.open" && name == "title")
+              "Unknown argument: use subject"
+            else "Unknown argument",
+          )
       val binding = args[name]
       if (binding == null) {
         if (!argument.flag("optional")) return fail(at, "Required argument")

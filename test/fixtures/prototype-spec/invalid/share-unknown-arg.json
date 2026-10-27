@@ -29,5 +29,5 @@
     }
   },
   "expectedPath": "root.onTap[0].args.title",
-  "expectedMessage": "Unknown argument"
+  "expectedMessage": "Unknown argument: use subject"
 }

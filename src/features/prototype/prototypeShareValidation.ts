@@ -23,7 +23,7 @@ const mimeToken = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+\/[!#$%&'*+.^_`|~0-9A-Za-z-]+$(?!
  */
 function validURL(text: string, dynamic = false): boolean {
   const start = text.match(/^https?:\/\//i)?.[0].length;
-  if (!start || /[\u0000-\u0020\u007f\\]/.test(text)) {
+  if (!start || /[\u0000-\u0020\u007f-\u00a0\u2028-\u202e\u2066-\u2069\\]/.test(text)) {
     return false;
   }
   const candidate = dynamic ? maskTemplate(text, "1") : text;
@@ -101,7 +101,8 @@ function assetId(value: unknown): unknown {
 function maskTemplate(text: string, replacement = "x"): string {
   return text.replace(/\{([^{}]*)\}/g, (original, token: string) =>
     prototypeContractPatterns.stateKey.test(token) ||
-    (token.startsWith("item.") && prototypeContractPatterns.stateKey.test(token.slice(5))) ||
+    (token.split(".").length === 2 &&
+      token.split(".").every((part) => prototypeContractPatterns.stateKey.test(part))) ||
     (token.startsWith("data:") && isPrototypeDataPointer(token.slice(5)))
       ? replacement
       : original,
@@ -115,7 +116,7 @@ function stringError(
 ): PrototypePlatformError | undefined {
   return (
     textError(value, path) ??
-    (name === "url" && !validURL(String(value), dynamic)
+    (name === "url" && value !== "" && !validURL(String(value), dynamic)
       ? issue(path, "Share URL must be absolute http(s) with a literal scheme")
       : undefined)
   );
@@ -135,12 +136,18 @@ function contactError(
     if (!contactNames.includes(key)) {
       return issue(at, "Unknown contact field");
     }
-    if (!Object.hasOwn(form, key) || (key === "name" && form[key] === "")) {
+    if (!Object.hasOwn(form, key)) {
       return issue(at, "Required contact name");
     }
-    const error = stringError(key, form[key], at, dynamic);
+    const error = textError(form[key], at);
     if (error) {
       return error;
+    }
+    if (key === "name" && prototypeContractPatterns.blankText.test(String(form[key]))) {
+      return issue(at, "Required contact name");
+    }
+    if (key === "url" && !validURL(String(form[key]), dynamic)) {
+      return issue(at, "Share URL must be absolute http(s) with a literal scheme");
     }
   }
   return undefined;
@@ -155,7 +162,7 @@ function fileNameError(
   return typeof name !== "string" ||
     !name.length ||
     name.startsWith(".") ||
-    /[/\\\u0000-\u001f\u007f-\u009f]/.test(name) ||
+    /[/\\\u0000-\u001f\u007f-\u00a0\u2028-\u202e\u2066-\u2069]/.test(name) ||
     bytes(name) > 128
     ? issue(
         path,
@@ -256,13 +263,10 @@ export function prototypeShareArgumentsError(
   assets?: ReadonlySet<string>,
   resolved = false,
 ): PrototypePlatformError | undefined {
-  if (!["text", "url", "images", "files", "contact"].some((name) => Object.hasOwn(args, name))) {
-    return issue(path, "Share requires text, url, images, files or contact");
-  }
   for (const name of Object.keys(args).sort()) {
     const at = member(path, name);
     if (!names.includes(name)) {
-      return issue(at, "Unknown argument");
+      return issue(at, name === "title" ? "Unknown argument: use subject" : "Unknown argument");
     }
     const binding = record(args[name]);
     if (!resolved && (!binding || !Object.hasOwn(binding, "value"))) {
@@ -278,6 +282,21 @@ export function prototypeShareArgumentsError(
     if (error) {
       return error;
     }
+  }
+  if (
+    !["text", "url", "images", "files", "contact"].some((name) => {
+      if (!Object.hasOwn(args, name)) {
+        return false;
+      }
+      const binding = record(args[name]);
+      if (!resolved && (!binding || !Object.hasOwn(binding, "value"))) {
+        return true;
+      }
+      const value = resolved ? args[name] : binding!.value;
+      return typeof value !== "string" || !prototypeContractPatterns.blankText.test(value);
+    })
+  ) {
+    return issue(path, "Share requires text, url, images, files or contact");
   }
   return undefined;
 }

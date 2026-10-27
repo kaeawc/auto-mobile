@@ -3,6 +3,10 @@ import { DeviceReadiness } from "../daemon/readiness/DeviceReadiness";
 import type { ListToolsResult, McpServer, ServerCapabilities } from "@modelcontextprotocol/server";
 import { createSdkMcpServer } from "./sdkMcpServer";
 import { MODERN_CACHE_HINTS } from "./modernCacheHints";
+import {
+  daemonDeviceChoiceRequestState,
+  type DeviceChoiceRequestStateCodec,
+} from "./deviceChoiceRequestState";
 import { installDefaultProvisionedDeviceTransportFence } from "../db/createDefaultProvisionedDeviceTransportFence";
 
 import { installToolCallDispatcher, type ToolCallRequest } from "./toolCallDispatch";
@@ -104,6 +108,7 @@ import {
 
 export interface McpServerOptions {
   era?: "legacy" | "modern";
+  deviceChoiceRequestState?: DeviceChoiceRequestStateCodec;
   deviceReadiness?: DeviceReadiness;
   iosDependencies?: IosDoctorDependencies;
   debug?: boolean;
@@ -355,11 +360,21 @@ function sdkServerCapabilities(era: McpServerOptions["era"]): ServerCapabilities
 function deviceElicitationDispatch(
   daemonMode: boolean,
   options: McpServerOptions,
-): { era?: "modern"; ambiguousDeviceElicitation?: AmbiguousDeviceElicitationOptions } {
+): {
+  era?: "modern";
+  ambiguousDeviceElicitation?: AmbiguousDeviceElicitationOptions;
+  deviceChoiceRequestState?: DeviceChoiceRequestStateCodec;
+} {
   if (options.era === "modern") {
-    return { era: "modern" };
+    return { era: "modern", deviceChoiceRequestState: options.deviceChoiceRequestState };
   }
   return daemonMode ? {} : { ambiguousDeviceElicitation: options.ambiguousDeviceElicitation ?? {} };
+}
+
+function modernRequestState(options: McpServerOptions) {
+  return options.era === "modern"
+    ? { verify: (options.deviceChoiceRequestState ?? daemonDeviceChoiceRequestState).verify }
+    : undefined;
 }
 
 export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
@@ -416,6 +431,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     },
     sdkServerCapabilities(options.era),
     options.era === "modern" ? MODERN_CACHE_HINTS : undefined,
+    modernRequestState(options),
   );
   startupBenchmark.endPhase("sdkInitialization");
 

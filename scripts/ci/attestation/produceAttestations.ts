@@ -3,6 +3,8 @@ import { signEnvelopeEd25519 } from "./envelopeSigning";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { canonicalInputEntries } from "./inputCanonical";
+import { expectedInputHashAlgorithm, tier1InputHash, type HostDescriptor } from "./tier1InputHash";
+import { tier2InputHash, tier3InputHash } from "./tier23InputHash";
 import {
   TREE_INPUT_HASH_ALGORITHM,
   Clock,
@@ -50,6 +52,32 @@ export interface TreeProbe {
 }
 export interface InputHasher {
   hash(lane: AttestationLane, probe: TreeProbe): Promise<{ hash: string; algorithm: string }>;
+}
+/**
+ * The hash a lane's attestation carries: the lane's tracked inputs, the host and the variables its
+ * tasks read (#11976 to #11978).
+ */
+export class LaneInputHasher implements InputHasher {
+  constructor(
+    private readonly host: HostDescriptor,
+    private readonly env: Readonly<Record<string, string | undefined>>,
+  ) {}
+  async hash(
+    lane: AttestationLane,
+    probe: TreeProbe,
+  ): Promise<{ hash: string; algorithm: string }> {
+    const entries = await probe.inputEntries(LANE_INPUT_PATHS[lane]);
+    if (entries.length === 0) {
+      throw new Error("empty input entries");
+    }
+    const host = { os: this.host.os, arch: this.host.arch };
+    const hashes = {
+      node: () => tier1InputHash({ entries, host: this.host, env: this.env }),
+      android: () => tier2InputHash({ entries, host, env: this.env }),
+      ios: () => tier3InputHash({ entries, host, env: this.env }),
+    };
+    return { hash: hashes[lane](), algorithm: expectedInputHashAlgorithm(lane) };
+  }
 }
 export class TreeEntriesInputHasher implements InputHasher {
   async hash(

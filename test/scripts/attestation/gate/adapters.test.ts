@@ -1,5 +1,6 @@
+import { CI_TARGET_PLATFORM } from "../../../../scripts/ci/attestation/tier1InputHash";
+import { tier2InputHash, tier3InputHash } from "../../../../scripts/ci/attestation/tier23InputHash";
 import { beforeEach, afterEach, expect, mock, spyOn, test } from "bun:test";
-import { createHash } from "node:crypto";
 import { logger } from "../../../../src/utils/logger";
 import { FakeFileSystem } from "../../../fakes/FakeFileSystem";
 import { FakeTimer } from "../../../fakes/FakeTimer";
@@ -20,7 +21,7 @@ import { runAttestationGate } from "../../../../scripts/ci/attestation/gate/gate
 import type { AttestationRecord, ShadowEntry } from "../../../../scripts/ci/attestation/gate/ports";
 import {
   produceAttestations,
-  TreeEntriesInputHasher,
+  LaneInputHasher,
 } from "../../../../scripts/ci/attestation/produceAttestations";
 import { ShadowStore } from "../../../../scripts/ci/attestation/shadow/recorder";
 import { AttestationServiceClient } from "../../../../scripts/ci/attestation/transport/serviceClient";
@@ -273,8 +274,42 @@ test("gate hash matches producer's lane entries, not the repository tree ID", as
   })).recompute(3, "/repo");
   expect(gateHash).toEqual({
     treeHash: "tree",
-    inputHash: createHash("sha256").update('["ios/a.swift","123","100644"]\n').digest("hex"),
+    inputHash: tier3InputHash({
+      entries: [{ path: "ios/a.swift", id: "123", mode: "100644" }],
+      // The iOS jobs' platform, not the Linux runner the gate runs on, and none of their variables.
+      host: { os: "darwin", arch: "arm64" },
+      env: {},
+    }),
   });
+});
+
+test("the gate hashes for each lane's CI target, ignoring its own host and environment", async () => {
+  const exec = async (_cmd: string, args: string[]) => ({
+    stdout: args.includes("ls-tree")
+      ? "100644 blob 123\tandroid/a.kt\u0000100644 blob 456\tios/a.swift\u0000"
+      : "tree\n",
+  });
+  const before = process.env.AUTOMOBILE_TEST_MODE;
+  process.env.AUTOMOBILE_TEST_MODE = "set-on-the-gate-runner-only";
+  try {
+    const hasher = gitTreeInputHasher(exec);
+    const tier2 = await hasher.recompute(2, "/repo");
+    const expected = tier2InputHash({
+      entries: [
+        { path: "android/a.kt", id: "123", mode: "100644" },
+        { path: "ios/a.swift", id: "456", mode: "100644" },
+      ],
+      host: CI_TARGET_PLATFORM.android,
+      env: {},
+    });
+    expect(tier2.inputHash).toBe(expected);
+  } finally {
+    if (before === undefined) {
+      delete process.env.AUTOMOBILE_TEST_MODE;
+    } else {
+      process.env.AUTOMOBILE_TEST_MODE = before;
+    }
+  }
 });
 
 async function gateEntry(): Promise<ShadowEntry> {
@@ -382,7 +417,7 @@ test("produce -> parse -> transport -> validate -> gate -> store remains shadow-
     dirtyPaths: async () => [],
     inputEntries: async () => [{ path: "src/a.ts", id: "blob", mode: "100644" }],
   };
-  const hasher = new TreeEntriesInputHasher();
+  const hasher = new LaneInputHasher({ os: "test", arch: "x64", bunVersion: null }, {});
   const produced = await produceAttestations({
     lanes: [
       {

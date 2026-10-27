@@ -15,7 +15,7 @@ func keyframeValue(points: [(Double, Double)], curve: String, fraction: Double) 
     precondition(points.count >= 2)
     if fraction <= points[0].0 { return points[0].1 }
     if fraction >= points[points.count - 1].0 { return points[points.count - 1].1 }
-    let end = points.firstIndex { $0.0 >= fraction }!
+    guard let end = points.firstIndex(where: { $0.0 >= fraction }) else { return points[points.count - 1].1 }
     let (a, av) = points[end - 1]
     let (b, bv) = points[end]
     let t = min(1, max(0, (fraction - a) / (b - a)))
@@ -45,9 +45,12 @@ func keyframeValue(points: [(Double, Double)], curve: String, fraction: Double) 
 
 enum PrototypeKeyframes {
     static func points(_ track: JSONValue) -> [(Double, Double)] {
-        PrototypeStrictBindings.array(track.objectFields?["points"] ?? track).map {
+        PrototypeStrictBindings.array(track.objectFields?["points"] ?? track).compactMap {
             let pair = PrototypeStrictBindings.array($0)
-            return (pair[0].numberValue!, pair[1].numberValue!)
+            guard pair.count == 2, let fraction = pair[0].numberValue, let value = pair[1].numberValue else {
+                return nil
+            }
+            return (fraction, value)
         }
     }
 

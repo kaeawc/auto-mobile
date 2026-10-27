@@ -2,6 +2,7 @@ import { z } from "zod";
 import { PROTOTYPE_ICON_EFFECTS_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import { keySchema, pointerSchema } from "./prototypeActionValues";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
+import { iconNameSchema, iconVariantSchema } from "./prototypePresentationSchemas";
 
 export const PROTOTYPE_ICON_EFFECT_TYPES = [
   "bounce",
@@ -49,3 +50,11 @@ export function prototypeIconEffectsUnsupportedMessage(
   const device = platform === "ios" ? "connected iOS prototype agent" : "connected CtrlProxy";
   return `The ${device} does not advertise ${PROTOTYPE_ICON_EFFECTS_CAPABILITY}, so it cannot run the icon effect at ${paths[0]}. Nothing was shown. Update the agent or remove icon.effect.`;
 }
+
+/** The icon node's own fields, with the optional `effect` (#15251). */
+export const prototypeIconShape = {
+  type: z.enum(["icon"]),
+  name: iconNameSchema,
+  variant: iconVariantSchema.optional(),
+  effect: prototypeIconEffectSchema.optional(),
+};

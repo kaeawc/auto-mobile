@@ -1,6 +1,5 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
-import androidx.compose.runtime.compositionLocalOf
 import dev.jasonpearson.automobile.protocol.PrototypeStackTransition
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
@@ -18,9 +17,6 @@ data class PrototypeStackChange(
   val override: PrototypeStackTransition? = null,
   val sequence: Long = 0,
 )
-
-/** Reduced-motion hook; system preference integration belongs to #15115. */
-internal val LocalPrototypeReducedMotion = compositionLocalOf { false }
 
 internal fun resolveStackTransition(
   declared: PrototypeStackTransition?,

@@ -226,6 +226,7 @@ internal object PrototypeStrictPolicy {
       "empty" to "loading_states",
       "shimmer" to "loading_states",
       "effects" to "effects",
+      "sharedKey" to "shared_element",
     )
 
   private fun usesData(raw: JsonElement?, kind: PrototypeBindableKind): Boolean =
@@ -253,6 +254,7 @@ internal object PrototypeStrictPolicy {
         val block = spec[key] as? JsonObject ?: continue
         if ("ios" in block || "android" in block) need("platform_namespace")
       }
+      if (spec.text("motion") == "reduced") need("reduced_motion")
       if (spec["data"] != null) need("data_model")
       if (spec["storage"] != null) need("storage")
       if ("derive" in spec) need("format")

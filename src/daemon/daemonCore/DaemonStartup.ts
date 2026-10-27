@@ -8,6 +8,8 @@ import type {
 import { sweepStaleAppearanceConfigs } from "../appearanceConfigStartupSweep";
 import { createServer as createHttpServer } from "node:http";
 import { logger } from "../../utils/logger";
+import { setLogContextProvider } from "../../utils/logContext";
+import { currentMcpTrace } from "../mcpTraceContext";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { UnixSocketServer } from "../socketServer";
 import { type DaemonSocketServer } from "../daemonSocketServer";
@@ -387,6 +389,7 @@ export class DaemonStartup {
   }
 
   enterDaemonProcess(): void {
+    setLogContextProvider(currentMcpTrace);
     // Mirror structured daemon logs to stdout/stderr capture as well. The
     // primary stable log is `<configured log dir>/daemon.log` (defaulting to
     // `<auto-mobile data dir>/logs/daemon.log`); the daemon manager also

@@ -5,6 +5,7 @@ import android.view.Display
 import dev.jasonpearson.automobile.protocol.PrototypeAppearance
 import dev.jasonpearson.automobile.protocol.PrototypeAppearanceOverride
 import dev.jasonpearson.automobile.protocol.PrototypeDataResolver
+import dev.jasonpearson.automobile.protocol.PrototypeDegradedEffect
 import dev.jasonpearson.automobile.protocol.PrototypeHiddenReason
 import dev.jasonpearson.automobile.protocol.PrototypeNode
 import dev.jasonpearson.automobile.protocol.PrototypePatchConflict
@@ -111,6 +112,21 @@ fun interface PrototypeResultSink : PrototypeReplySink {
     stacks: Map<String, PrototypeStackSnapshot>,
     hiddenReason: PrototypeHiddenReason? = null,
   ) = sendShown(requestId, missingAssets, appearance, hiddenReason)
+
+  /**
+   * A successful show that also reports [degradedEffects] (`prototype_effects_v1`). The default
+   * drops them, so sinks that predate the field keep answering as before.
+   */
+  @Suppress("LongParameterList") // Mirrors sendShownNavigation plus the one new field.
+  suspend fun sendShownDegraded(
+    requestId: String?,
+    missingAssets: List<String>,
+    appearance: PrototypeAppearance,
+    pages: Map<String, Int>,
+    stacks: Map<String, PrototypeStackSnapshot>,
+    hiddenReason: PrototypeHiddenReason?,
+    degradedEffects: List<PrototypeDegradedEffect>,
+  ) = sendShownNavigation(requestId, missingAssets, appearance, pages, stacks, hiddenReason)
 
   /** The reply to `clear_prototype_storage`. Sinks that predate it answer a bare success. */
   /**
@@ -390,6 +406,11 @@ class PrototypeController(
           pages = shown.runtime.current.pages,
           stacks = shown.runtime.current.stacks,
           backdrop = shown.request.backdrop?.mode?.wire,
+          degradedEffects =
+            prototypeEffectReport(
+              shown.runtime.renderModel(shown.runtime.current).root,
+              shown.runtime.effectHealth,
+            ),
         )
     }
 
@@ -453,6 +474,7 @@ class PrototypeController(
     val pages: Map<String, Int>? = null,
     val stacks: Map<String, PrototypeStackSnapshot>? = null,
     val backdrop: String? = null,
+    val degradedEffects: List<PrototypeDegradedEffect> = emptyList(),
   )
 
   private fun validate(spec: JsonObject): PrototypeSpec =
@@ -912,6 +934,17 @@ class PrototypeController(
       sink.sendPatched(requestId, error == null, error, revision, outcome.conflict)
     } else if (error == null && appearance != null) {
       outcome.backdrop?.let { sink.noteShownBackdrop(requestId, it) }
+      if (outcome.degradedEffects.isNotEmpty())
+        sink.sendShownDegraded(
+          requestId,
+          missing,
+          appearance,
+          outcome.pages.orEmpty(),
+          outcome.stacks.orEmpty(),
+          outcome.hiddenReason,
+          outcome.degradedEffects,
+        )
+      else
       sink.sendShownNavigation(
         requestId,
         missing,
@@ -1051,6 +1084,8 @@ class PrototypeController(
       storage = runtime.storage?.report(),
       timers = runtime.timerReports(),
       shaderFailures = runtime.shaderSession.failures(),
+      degradedEffects =
+        prototypeEffectReport(runtime.renderModel(runtime.current).root, runtime.effectHealth),
     )
   }
 

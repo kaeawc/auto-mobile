@@ -172,6 +172,7 @@ export const nodeModelOptions = {
       "style",
       "styleWhen",
       "visibleWhen",
+      "sharedKey",
       "transition",
       "animate",
       "anchor",

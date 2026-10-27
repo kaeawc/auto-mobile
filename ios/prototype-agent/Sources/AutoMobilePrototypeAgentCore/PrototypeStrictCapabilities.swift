@@ -17,6 +17,7 @@ enum PrototypeStrictCapabilities {
             }
         }
         if spec["theme"]?.objectFields?["design"]?.stringValue == "platform" { need("design_platform") }
+        if spec["motion"] == .string("reduced") { need("reduced_motion") }
         if spec["data"] != nil { need("data_model") }
         if spec["derive"] != nil { need("format") }
         if spec["storage"] != nil { need("storage") }
@@ -62,6 +63,7 @@ enum PrototypeStrictCapabilities {
                fields["onScroll"] != nil || fields["scroll"] != nil { need("bar_scroll") }
             if let feature = types[type] { need(feature) }
             if fields["ios"] != nil || fields["android"] != nil { need("platform_namespace") }
+            if fields["sharedKey"] != nil { need("shared_element") }
             let navigation = ["stack", "push", "replace"].contains(type)
             if navigation, fields["transition"] != nil { need("stack_transitions") }
             if includeAgentGates, type == "icon",

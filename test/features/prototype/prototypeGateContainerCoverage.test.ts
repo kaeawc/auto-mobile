@@ -95,6 +95,7 @@ const fixtures: Record<string, Node> = {
   prototype_loading_states_v1: { type: "box", style: { shimmer: true }, children: [label] },
   prototype_effects_v1: { ...label, style: { effects: [{ type: "noise" }] } },
   prototype_motion_v2: { ...label, animate: { durationMs: 300 } },
+  prototype_shared_element_v1: { ...label, sharedKey: "hero" },
   prototype_stack_transitions_v1: {
     ...label,
     onTap: [{ type: "push", stack: "nav", screen: "home", transition: "slide" }],
@@ -201,6 +202,7 @@ const ROOT_LEVEL_GATES = [
   "prototype_backdrop_v1",
   "prototype_design_platform_v1",
 ];
+const ROOT_LEVEL_GATES = ["prototype_storage_v1", "prototype_reduced_motion_v1"];
 
 test("every capability gate has a container fixture or is a root-level gate", () => {
   expect([...Object.keys(fixtures), ...ROOT_LEVEL_GATES].sort()).toEqual(
@@ -381,3 +383,11 @@ for (const container of containers) {
     expect(gate.fields(candidate)).toContain(`${container.prefix}.onTap[0]`);
   });
 }
+
+test("reduced motion gate reports only spec.motion", () => {
+  const gate = PROTOTYPE_SPEC_CAPABILITY_GATES.find(
+    (entry) => entry.capability === "prototype_reduced_motion_v1",
+  )!;
+  expect(gate.fields({ motion: "reduced", root: label })).toEqual(["motion"]);
+  expect(gate.fields({ motion: "standard", root: { motion: "reduced" } })).toEqual([]);
+});

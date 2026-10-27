@@ -1,0 +1,25 @@
+{
+  "spec": {
+    "id": "shared",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "open": true
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "Hero",
+          "sharedKey": "hero"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].sharedKey",
+  "expectedMessage": "sharedKey requires visibleWhen on the same node"
+}

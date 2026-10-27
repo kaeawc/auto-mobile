@@ -14,6 +14,7 @@ internal object PrototypeBundleCapabilities {
       val block = spec[key] as? JsonObject ?: continue
       if ("ios" in block || "android" in block) caps.add("prototype_platform_namespace_v1")
     }
+    if (text(spec["motion"]) == "reduced") caps.add("prototype_reduced_motion_v1")
     if ("data" in spec) caps.add("prototype_data_model_v1")
     if ("storage" in spec) caps.add("prototype_storage_v1")
     if ("derive" in spec) caps.add("prototype_format_v1")

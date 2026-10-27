@@ -59,7 +59,7 @@ enum PrototypeRequestValidator {
         }
     }
 
-    private static func validateList(
+    static func validateList(
         _ actions: [JSONValue], path: String, depth: Int, state: [String: JSONValue]
     )
         throws
@@ -84,8 +84,8 @@ enum PrototypeRequestValidator {
             }
             try validateList(nested, path: "\(path).actions", depth: depth + 1, state: state)
         }
-        guard action["type"] == .string("request") else { return }
-        try validateUnrepeated(action, path: path, state: state)
+        guard action["type"] == .string("request") || action["type"] == .string("platform") else { return }
+        if action["type"] == .string("request") { try validateUnrepeated(action, path: path, state: state) }
         for list in ["onSuccess", "onError"] {
             guard let raw = action[list] else { continue }
             guard case let .array(followUps) = raw, (1 ... PrototypeLimits.maxFollowUpActions).contains(followUps.count)

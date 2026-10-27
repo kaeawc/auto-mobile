@@ -36,6 +36,7 @@ internal object PrototypeBundleNodeCapabilities {
     }
     mark("semantics_v1", "semantics" in n)
     mark("platform_namespace_v1", "ios" in n || "android" in n)
+    mark("shared_element_v1", "sharedKey" in n)
     mark("flow_grid_v1", "span" in n)
     mark("gestures_v1", n.keys.any { it in setOf("onLongPress", "onDoubleTap") })
     mark("swipe_actions_v1", type in setOf("row", "listItem") && "swipeActions" in n)

@@ -156,6 +156,7 @@ internal object PrototypeSpecInput {
   private fun structuralError(value: JsonElement, context: Context): PrototypeSpecError? =
     PrototypeLazyListRules.limitError(value)
       ?: walk(value, definitions.getValue("spec").jsonObject, "", context, 0)
+      ?: PrototypeSharedElementRules.error(context)
       ?: gridSpanErrors(context)
       ?: PrototypeDerivedRules.error(value, context)
       ?: PrototypeContainerRules.pagerStateKeyErrors(context)

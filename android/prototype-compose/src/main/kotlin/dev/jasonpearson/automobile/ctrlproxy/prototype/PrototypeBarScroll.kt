@@ -115,7 +115,7 @@ private fun rememberPrototypeBarBinding(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun rememberPrototypeBarScroll(root: PrototypeRenderNode): PrototypeBarScrollBindings {
-  val reduced = !LocalPrototypeMotion.current || LocalPrototypeReducedMotion.current
+  val reduced = LocalPrototypeMotionProfile.current != PrototypeMotionProfile.FULL
   val extent = with(LocalDensity.current) { 64.dp.toPx() }
   val nodes = remember(root) { barScrollNodes(root) }
   val bars = mutableMapOf<String, PrototypeBarScrollBinding>()

@@ -156,6 +156,9 @@ describe("CtrlProxy command support", () => {
         "network_mock_rules_report_v1",
         "sdk_capabilities_user_id_v1",
         "screenshot_hide_prototype_v1",
+        // Host-gated before any runner advertises them (#13098); the instrumentation route is #13097.
+        "stylus_input_v1",
+        "hover_input_v1",
         "ime_clear_field_v1",
         "ime_password_commit_v1",
         "ime_inserted_text_v1",

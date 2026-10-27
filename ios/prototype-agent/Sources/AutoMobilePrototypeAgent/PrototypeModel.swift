@@ -185,6 +185,33 @@
 
         @ObservationIgnored var onEvent: (([String: Any]) -> Void)?
         @ObservationIgnored var onEmbeddedEvent: (@MainActor (PrototypeEvent) -> Void)?
+        /// Modules registered by the owning runtime; the device seam remains built in.
+        @ObservationIgnored let platformRegistry: PrototypePlatformRegistry
+        @ObservationIgnored private lazy var platformDriver: PrototypePlatformDriver = {
+            let driver = PrototypePlatformDriver(registry: platformRegistry, clock: clock)
+            driver.onComplete = { [weak self] id, result, duration in
+                self?.apply(activity: false) { $0.completePlatformCall(id, result, durationMs: duration) }
+            }
+            driver.onState = { [weak self] snapshot in self?.updatePlatformState(snapshot) }
+            driver.onEvent = { [weak self] event in
+                self?.apply(activity: false) { session in
+                    do { return try session.deliverPlatformEvent(event.event, data: event.data) }
+                    catch { NSLog("Prototype platform event failed: %@", String(describing: error)); return [] }
+                }
+            }
+            return driver
+        }()
+
+        private func updatePlatformState(_ snapshot: [String: JSONValue]) {
+            var combined = snapshot
+            combined.merge(deviceState.snapshot) { _, device in device }
+            apply(activity: false) { session in
+                do { try session.setPlatformState(combined) }
+                catch { NSLog("Prototype platform state failed: %@", String(describing: error)) }
+                return []
+            }
+        }
+
         /// Runs the `request` actions the session starts and cancels (#12529).
         @ObservationIgnored var requestDriver: PrototypeRequestDriver?
         @ObservationIgnored var onVisibilityChange: ((Bool) -> Void)?
@@ -216,11 +243,7 @@
         func updateDeviceState(_ state: PrototypeDeviceState) {
             lastDeviceState = state
             guard deviceState.update(state) else { return }
-            apply(activity: false) { session in
-                do { try session.setPlatformState(deviceState.snapshot) }
-                catch { NSLog("Prototype platform state failed: %@", String(describing: error)) }
-                return []
-            }
+            updatePlatformState(platformRegistry.snapshot)
         }
 
         func pauseTimers() { timers.pause() }
@@ -265,8 +288,10 @@
         init(
             clock: PrototypeClock = SystemPrototypeClock(),
             mode: PrototypeLifecycleMode = .session,
-            storage: PrototypeStorageCoordinator? = nil
+            storage: PrototypeStorageCoordinator? = nil,
+            registry: PrototypePlatformRegistry = .empty
         ) {
+            platformRegistry = registry
             self.clock = clock
             self.mode = mode
             self.storage = storage
@@ -334,17 +359,30 @@
             // nothing (#12526); the session only receives the result.
             let prepared = storage?.prepare(spec)
             let seeded: PrototypeSpec
-            do { seeded = try (prepared?.spec ?? spec).replacingPlatform(deviceState.snapshot) }
-            catch { NSLog("Prototype platform seed failed: %@", String(describing: error)); return }
+            do { seeded = try (prepared?.spec ?? spec).replacingPlatform(
+                platformRegistry.snapshot.merging(deviceState.snapshot) { _, device in device }
+            ) } catch { NSLog("Prototype platform seed failed: %@", String(describing: error)); return }
             next.show(
                 seeded, reset: reset, appearance: appearance, locale: locale, specBytes: specBytes,
                 restoredState: prepared?.state
             )
             // A show that replaces another prototype cancels that one's requests.
+            let platformCommands = next.takePlatformCommands()
+            let lifecycleEvents = next.takePlatformLifecycleEvents()
             let requestCommands = next.takeRequestCommands()
             let timerCommands = next.takeTimerCommands()
             listAnchors = PrototypeStackListAnchorStore()
             publish(next, replacingSpec: true)
+            let timestamp = Int(Date().timeIntervalSince1970 * 1000)
+            for var event in lifecycleEvents {
+                event.wireTimestamp = timestamp
+                onEmbeddedEvent?(event)
+                onEvent?(event.wireObject(timestamp: timestamp))
+            }
+            platformDriver.perform(platformCommands)
+            // Keep consuming the module stream for the model lifetime: cancelling an AsyncStream
+            // iterator terminates it. Hidden sessions drop events; the next show seeds fresh state.
+            platformDriver.subscribe()
             deviceState.reset()
             if let lastDeviceState { updateDeviceState(lastDeviceState) }
             timers.perform(timerCommands)
@@ -591,6 +629,7 @@
             // `transition` adds the `appearance_changed` a state or page change caused.
             var next = session
             let events = next.transition(transition)
+            let platformCommands = next.takePlatformCommands()
             let requestCommands = next.takeRequestCommands()
             let timerCommands = next.takeTimerCommands()
             publish(next)
@@ -614,6 +653,7 @@
                 onVisibilityChange?(false)
             }
             timers.perform(timerCommands)
+            platformDriver.perform(platformCommands)
             requestDriver?.perform(requestCommands)
         }
 
@@ -637,6 +677,8 @@
             if !timerSnapshots.isEmpty { status["timers"] = timerSnapshots.map(\.wireObject) }
             if !fontFaces.isEmpty { status["fonts"] = fontFaces.keys.sorted() }
             if !assetProblems.isEmpty { status["assetProblems"] = assetProblems.map(\.wireObject) }
+            if let platform = session.spec?
+                .platformState { status["platform"] = JSONValue.object(platform).foundationObject }
             if let data = session.data { status["data"] = JSONValue.object(data).foundationObject }
             if let id = spec?.id, let storage {
                 storage.flush()

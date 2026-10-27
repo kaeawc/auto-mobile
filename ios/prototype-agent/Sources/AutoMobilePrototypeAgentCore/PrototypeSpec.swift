@@ -1,7 +1,7 @@
 import Foundation
 
 /// Arbitrary JSON, used for state values and emit payloads.
-enum JSONValue: Codable, Equatable, Sendable {
+public enum JSONValue: Codable, Equatable, Sendable {
     case null
     case bool(Bool)
     case number(Double)
@@ -9,7 +9,7 @@ enum JSONValue: Codable, Equatable, Sendable {
     case array([JSONValue])
     case object([String: JSONValue])
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         if container.decodeNil() {
             self = .null
@@ -26,7 +26,7 @@ enum JSONValue: Codable, Equatable, Sendable {
         }
     }
 
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         var container = encoder.singleValueContainer()
         switch self {
         case .null: try container.encodeNil()
@@ -90,7 +90,7 @@ struct PrototypeSpec: Decodable {
     let derive: [String: PrototypeDerivedEntry]?
     let theme: PrototypeTheme?
     /// `none` keeps every visibility and page change instant; `standard` (the default) animates them
-    /// unless the system reduces motion (#10442). See `PrototypeMotion`.
+    /// with spatial effects reduced by the spec or system setting (#10442). See `PrototypeMotion`.
     let motion: String?
     /// The keys the device keeps across shows of this id (#12522); nil without a usable block.
     let storage: PrototypeStorageBlock?
@@ -247,6 +247,11 @@ struct PrototypeSpec: Decodable {
     }
 
     func replacingPlatform(_ platform: [String: JSONValue]) throws -> PrototypeSpec {
+        guard try JSONEncoder().encode(platform).count <= PrototypeContractValidator
+            .limit("MAX_PROTOTYPE_PLATFORM_STATE_BYTES")
+        else {
+            throw PrototypeLimits.violation("platform", "Platform state exceeds limit")
+        }
         let rebuilt = try Self.buildRoot(authoredRoot, data: data, menuState: state ?? [:], platform: platform)
         var next = PrototypeSpec(replacing: self, data: data, root: rebuilt)
         next.platformState = platform
@@ -611,6 +616,8 @@ struct PrototypeAction: Decodable, Sendable {
     // `request` (#12529): method defaults to GET and `via` to host. `headers` and `query` entries
     // are a literal string or a binding object; `body` is a binding; `url`, `statusKey` and `into`
     // are bound per repeat row at expansion like the data actions' paths.
+    let call: String?
+    let args: [String: JSONValue]?
     let method: String?
     let url: String?
     let headers: [String: JSONValue]?
@@ -631,7 +638,7 @@ struct PrototypeAction: Decodable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case type, name, payload, context, pager, page, stack, screen, transition, path, key, value, scroll, to,
-             animated
+             animated, call, args
         case id, afterMs, everyMs, maxRuns, actions
         case incrementAmount = "by"
         case requireValid, method, url, headers, query, body, into, append, statusKey, via, timeoutMs, onSuccess,
@@ -648,11 +655,14 @@ struct PrototypeAction: Decodable, Sendable {
         onSuccess: [PrototypeAction]? = nil, onError: [PrototypeAction]? = nil,
         id: String? = nil, afterMs: Int? = nil, everyMs: Int? = nil, maxRuns: Int? = nil,
         actions: [PrototypeAction]? = nil, transition: PrototypeStackTransition? = nil,
-        scroll: String? = nil, to: JSONValue? = nil, animated: Bool? = nil
+        scroll: String? = nil, to: JSONValue? = nil, animated: Bool? = nil,
+        call: String? = nil, args: [String: JSONValue]? = nil
     ) {
         self.scroll = scroll
         self.to = to
         self.animated = animated
+        self.call = call
+        self.args = args
         self.id = id
         self.afterMs = afterMs
         self.everyMs = everyMs
@@ -838,6 +848,7 @@ final class PrototypeNode: Decodable {
     let style: Style?
     let styleWhen: [StyleWhen]?
     let visibleWhen: Condition?
+    let sharedKey: String?
     let enabledWhen: Condition?
     let checks: [PrototypeCheck]?
     let validateOn: PrototypeValidateOn?
@@ -989,7 +1000,7 @@ final class PrototypeNode: Decodable {
 
     private enum CodingKeys: String, CodingKey {
         case scrollTransition, scrollLinked
-        case type, id, testTag, onAppear, onTap, style, styleWhen, visibleWhen, transition
+        case type, id, testTag, onAppear, onTap, style, styleWhen, visibleWhen, sharedKey, transition
         case safeAreaPadding, anchor, children, child, text, contentDescription, asset, contentScale, semantics
         case name, label, variant, stateKey, placeholder, axis, items, pager
         case anchorTo, caret, spotlight, onDismiss, edge
@@ -1027,6 +1038,7 @@ final class PrototypeNode: Decodable {
         style = try container.decodeIfPresent(Style.self, forKey: .style)
         styleWhen = try container.decodeIfPresent([StyleWhen].self, forKey: .styleWhen)
         visibleWhen = try container.decodeIfPresent(Condition.self, forKey: .visibleWhen)
+        sharedKey = try container.decodeIfPresent(String.self, forKey: .sharedKey)
         transition = try container.decodeIfPresent(PrototypeTransitionForm.self, forKey: .transition)?.type
         scrollTransition = try container.decodeIfPresent(ScrollTransition.self, forKey: .scrollTransition)
         scrollLinked = try container.decodeIfPresent(ScrollLinked.self, forKey: .scrollLinked)

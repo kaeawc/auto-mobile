@@ -300,7 +300,10 @@ data class PrototypeSpec(
   val state: Map<String, PrototypeScalar>? = null,
   val root: PrototypeNode,
   val theme: PrototypeSpecTheme? = null,
-  /** `none` opts out of prototype animation; absent or `standard` follows the system scale. */
+  /**
+   * `none` is instant; `reduced` keeps fades/colors and snaps spatial motion; standard follows
+   * system scales.
+   */
   val motion: String? = null,
   val data: JsonObject? = null,
   val derive: Map<String, PrototypeDerivedEntry>? = null,

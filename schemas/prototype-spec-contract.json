@@ -2610,6 +2610,12 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -2866,6 +2872,12 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -3115,6 +3127,12 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -3335,6 +3353,12 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
               },
               "optional": true
             },
@@ -3559,6 +3583,12 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
               },
               "optional": true
             },
@@ -3802,6 +3832,12 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
               },
               "optional": true
             },
@@ -4070,6 +4106,12 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -4318,6 +4360,12 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
               },
               "optional": true
             },
@@ -4572,6 +4620,12 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -4783,6 +4837,12 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -4977,6 +5037,12 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
               },
               "optional": true
             },
@@ -5332,6 +5398,12 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -5564,6 +5636,12 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
               },
               "optional": true
             },
@@ -5802,6 +5880,12 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -6023,6 +6107,12 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
               },
               "optional": true
             },
@@ -6268,6 +6358,12 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -6487,6 +6583,12 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
               },
               "optional": true
             },
@@ -6724,6 +6826,12 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
               },
               "optional": true
             },
@@ -6983,6 +7091,12 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -7232,6 +7346,12 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -7445,6 +7565,12 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
               },
               "optional": true
             },
@@ -7663,6 +7789,12 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
               },
               "optional": true
             },
@@ -7890,6 +8022,12 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -8103,6 +8241,12 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
               },
               "optional": true
             },
@@ -8349,6 +8493,12 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -8553,6 +8703,12 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -8753,6 +8909,12 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
               },
               "optional": true
             },
@@ -8970,6 +9132,12 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
               },
               "optional": true
             },
@@ -9217,6 +9385,12 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -9431,6 +9605,12 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
               },
               "optional": true
             },
@@ -9657,6 +9837,12 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
               },
               "optional": true
             },
@@ -9901,6 +10087,12 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -10127,6 +10319,12 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
               },
               "optional": true
             },
@@ -10382,6 +10580,12 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
               },
               "optional": true
             },
@@ -10650,6 +10854,12 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -10892,6 +11102,12 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -11125,6 +11341,12 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
               },
               "optional": true
             },
@@ -11368,6 +11590,12 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
               },
               "optional": true
             },
@@ -11634,6 +11862,12 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "ref",
@@ -11802,6 +12036,12 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
               },
               "optional": true
             },
@@ -12044,6 +12284,12 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -12252,6 +12498,12 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
               },
               "optional": true
             },

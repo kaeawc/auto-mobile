@@ -589,6 +589,16 @@ class PrototypeSpecContentScreenshotTest {
       pending = true,
     )
 
+  // Pending: #15129 style.effects, all ten settled (no motion in screenshots); goldens need an API
+  // 33+ emulator run and an API 30 one for the omitted-effect fallback; none recorded yet.
+  @Test
+  fun effectsAllTypes() =
+    prototypeScreenshotTest(
+      "effects_all_types",
+      validPrototypeFixture("z-effects-all-types"),
+      pending = true,
+    )
+
   // Pending: #14209 line, area, bar and ring charts; no Linux baselines recorded yet.
   @Test
   fun chartVariants() =

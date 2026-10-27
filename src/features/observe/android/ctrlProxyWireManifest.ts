@@ -450,6 +450,7 @@ export const CTRL_PROXY_RESPONSE_FIELDS: {
     backdrop: "optional",
     cleared: "optional",
     fired: "optional",
+    degradedEffects: "optional",
   },
   remove_preference_result: {
     packageName: "optional",

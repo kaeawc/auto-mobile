@@ -311,7 +311,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
 
   ToolRegistry.registerDeviceAware(
     "dragPath",
-    "Drag a finger along a polyline with segment timing, an initial hold and a release hold (Android and iOS).",
+    "Drag a finger (or, with pointer, a stylus on Android 13+) along a polyline with segment timing, an initial hold and a release hold.",
     dragPathSchema,
     dragPathHandler,
     { defaultEnabled: false, supportsProgress: true, ...PLAN_SKELETON, ...ANSWERS_SYSTEM_ALERTS },

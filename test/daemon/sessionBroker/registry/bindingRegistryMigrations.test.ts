@@ -50,7 +50,7 @@ describe("binding registry migrations", () => {
         db,
         provider: bindingRegistryMigrationProvider,
       }).getMigrations();
-      expect(migrations).toHaveLength(15);
+      expect(migrations).toHaveLength(16);
       expect(migrations.every((migration) => migration.executedAt === undefined)).toBe(true);
       expect(await db.introspection.getTables({ withInternalKyselyTables: true })).toEqual([]);
       await migrateBindingRegistry(db, ":memory:");

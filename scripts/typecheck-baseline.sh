@@ -69,8 +69,10 @@ run_tsc() {
       # Sequential, so only one shard's memory is live at a time; the worst status wins.
       local tsconfig shard_rc=0 worst_rc=0
       for tsconfig in "${TSCONFIGS[@]}"; do
-        shard_rc=0
-        host_heavy_run host_heavy_tsgo "$tsconfig" 2>&1 || shard_rc=$?
+        set +e
+        host_heavy_run host_heavy_tsgo "$tsconfig" 2>&1
+        shard_rc=$?
+        set -e
         if [[ "$shard_rc" -gt "$worst_rc" ]]; then worst_rc="$shard_rc"; fi
       done
       exit "$worst_rc"

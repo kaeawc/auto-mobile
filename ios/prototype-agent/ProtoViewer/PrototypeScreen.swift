@@ -11,6 +11,7 @@ struct PrototypeScreen: View {
     let onLoadFailed: @MainActor () -> Void
     /// Closes the prototype: pops the phone stack, or empties the detail pane at regular width.
     let onClose: @MainActor () -> Void
+    @State private var chromeAppearance: PrototypeChromeAppearance?
     @State private var showsSettings = false
     @State private var revision = 0
     @State private var rendererActive = false
@@ -64,6 +65,7 @@ struct PrototypeScreen: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipped()
         }
+        .preferredColorScheme(chromeAppearance?.colorScheme)
         .navigationTitle(entry.label)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -107,6 +109,7 @@ struct PrototypeScreen: View {
                         onLoadFailed()
                     }
                 )
+                .onAppearanceChange { chromeAppearance = $0 }
                 .onFirstRender {
                     watchdog.cancel()
                     onLoaded()

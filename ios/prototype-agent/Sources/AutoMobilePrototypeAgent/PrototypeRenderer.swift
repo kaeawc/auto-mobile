@@ -1212,7 +1212,8 @@
                 )
                 .simultaneousGesture(
                     LongPressGesture(minimumDuration: 0, maximumDistance: 10)
-                        .updating($pressed) { _, state, _ in state = true }
+                        .updating($pressed) { _, state, _ in state = true },
+                    including: style?.hasPressScaleGesture == true ? .all : .subviews
                 )
                 .accessibilityAddTraits(.isButton)
                 .disabled(!model.isEnabled(node))
